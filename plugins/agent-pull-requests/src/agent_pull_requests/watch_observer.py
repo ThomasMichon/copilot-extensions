@@ -15,7 +15,7 @@ from .watch_replay_store import ReplayStore
 from .repository_contract import RepositoryIdentity
 from pathlib import Path
 from .repository_native import RepositoryNativeUnsupported, inventory as fetch_inventory
-from .repository_projection import RepositoryProjection
+from .repository_projection import RepositoryProjection, validate_identity
 
 _MAX_READS = 4
 _CHECK_INTERVAL = 0.1
@@ -207,7 +207,7 @@ class ReplayObserver:
             return None
         self.store.check_current(expires_at, checkpoint)
         try:
-            return fetch_snapshot(
+            snapshot = fetch_snapshot(
                 target.repo, target.number, binding.command,
                 prefix=list(binding.prefix) if binding.prefix is not None else None,
                 credential_command=(
@@ -216,5 +216,8 @@ class ReplayObserver:
                 ),
                 **({"config_file": binding.inventory_config} if binding.inventory_config else {}),
             )
+            if snapshot is not None and binding.repository_identity is not None:
+                validate_identity(snapshot, binding.repository_identity, target.number)
+            return snapshot
         except ValueError:
             return None

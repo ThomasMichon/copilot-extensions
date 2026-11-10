@@ -192,7 +192,8 @@ def test_repository_snapshot_budget_rotates_without_erasing_unread_members(tmp_p
     assert len(reads) == len(set(reads)) == 64
 
 
-def test_foreign_snapshot_cannot_replace_last_confirmed_facts(tmp_path, monkeypatch):
+@pytest.mark.parametrize("foreign", ["endpoint", "provider"])
+def test_foreign_snapshot_cannot_replace_last_confirmed_facts(tmp_path, monkeypatch, foreign):
     from dataclasses import replace
     store, identities, bindings = selected(tmp_path)
     identity = identities[0]
@@ -202,14 +203,24 @@ def test_foreign_snapshot_cannot_replace_last_confirmed_facts(tmp_path, monkeypa
     current = snapshot(identity)
     monkeypatch.setattr(observation, "fetch_snapshot", lambda *_a, **_kw: current)
     owner = ReplayObserver(store, bindings=(bindings[0],))
+    scope = ConsumerScope("overlapping", identity.key, identity.repo)
+    store.execute(scope, "register", {
+        "request_id": "wait", "issued_at": store.clock(), "number": 7, "until": ("merged",),
+    }, **authority(store))
     owner.cycle(**authority(store))
     before = len(document(store)["events"])
-    current = snapshot(replace(identity, endpoint="https://other.example"), head_sha="foreign")
+    current = snapshot(
+        replace(identity, **({foreign: "https://other.example"} if foreign == "endpoint"
+                             else {foreign: "gitea"})),
+        head_sha="foreign", pr_state="closed", merged=True,
+    )
     owner.cycle(**authority(store))
     result = owner.repositories.query(identity.key, **authority(store))
     assert result["pulls"][0]["facts"]["head_sha"] == "a"
     assert result["pulls"][0]["error"] == "snapshot_unavailable"
     assert len(document(store)["events"]) == before
+    assert store.execute(scope, "pending", {}, **authority(store))["events"] == []
+    assert len(store.observation_targets(**authority(store))) == 1
 
 
 def test_selected_prior_native_peer_is_explicitly_unsupported(tmp_path, monkeypatch):
@@ -317,3 +328,72 @@ def test_initial_empty_complete_differs_from_never_populated_outage(
     population = [event for event in document(store)["events"]
                   if event["number"] == 7 and event["facts"] is None]
     assert [event["kind"] for event in population] == [expected]
+
+
+@pytest.mark.parametrize("phase", ["contract", "inventory"])
+def test_settled_native_timeout_records_unavailability_and_keeps_legacy_waits_serviced(
+    tmp_path, monkeypatch, phase,
+):
+    import subprocess
+    from agent_pull_requests import repository_native
+    from agent_pull_requests.watch_contract import PRSnapshot
+    store, identities, bindings = selected(tmp_path)
+    identity = identities[0]
+    projection = RepositoryProjection(store, identities[:1])
+    scan = {"outcome": "complete", "numbers": [7], "pages": 2, "error": ""}
+    projection.apply({identity.key: scan}, {
+        (identity.key, identity.repo, 7): snapshot(identity),
+    }, **authority(store))
+    scope = ConsumerScope("legacy", "legacy", "other/repo")
+    store.execute(scope, "register", {
+        "request_id": "legacy", "issued_at": store.clock(), "number": 7, "until": ("merged",),
+    }, **authority(store))
+    legacy = NativeObservationBinding("legacy", "other/repo", sys.executable)
+    failed = True
+    def run(argv, **kwargs):
+        if failed and ("--contract" in argv) == (phase == "contract"):
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        if "--contract" in argv:
+            value = {"protocol": "agent-worktrees.pr-inventory/v1", "providers": ["github", "gitea"],
+                     "credential": "observe/per-request", "effects": "none",
+                     "snapshot_request_budget": 64, "snapshot_capture_bytes": 1_048_584}
+        else:
+            value = {"schema": "agent-worktrees.pr-inventory", "version": 1,
+                     "provider": identity.provider, "api_base": identity.endpoint,
+                     "repo": identity.repo, "max_pages": 4, "max_pulls": 200, **scan}
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+    reads = []
+    def fetch(repo, number, command, **kwargs):
+        reads.append(repo)
+        return snapshot(identity) if repo == identity.repo else PRSnapshot(
+            pr_state="open", head_sha="legacy",
+        )
+    monkeypatch.setattr(repository_native, "run_command", run)
+    monkeypatch.setattr(observation, "fetch_snapshot", fetch)
+    owner = ReplayObserver(store, bindings=(bindings[0], legacy))
+    assert owner.cycle(**authority(store))["status"] == "observed"
+    result = owner.repositories.query(identity.key, **authority(store))
+    assert result["inventory"]["outcome"] == "unavailable"
+    assert result["pulls"][0]["member"] and result["pulls"][0]["facts"]["head_sha"] == "a"
+    assert reads.count("other/repo") == 1
+    failed = False
+    owner.cycle(**authority(store))
+    assert owner.repositories.query(identity.key, **authority(store))["inventory"]["outcome"] == "complete"
+    assert reads.count("other/repo") == 2
+
+
+def test_native_cleanup_and_authority_failures_are_not_normalized_as_settled_timeouts(tmp_path, monkeypatch):
+    from agent_procutil.owned_process import OwnedCleanupError
+    from agent_pull_requests import repository_native
+    from agent_pull_requests.watch_replay_store import ReplayCallerExpired
+    _store, _identities, bindings = selected(tmp_path)
+    error = OwnedCleanupError(None)
+    monkeypatch.setattr(repository_native, "run_command",
+                        lambda *_a, **_kw: (_ for _ in ()).throw(error))
+    with pytest.raises(OwnedCleanupError) as failure:
+        repository_native.inventory(bindings[0], checkpoint=lambda: None)
+    assert failure.value is error
+    def expired():
+        raise ReplayCallerExpired("synthetic authority withdrawal")
+    with pytest.raises(ReplayCallerExpired):
+        repository_native.inventory(bindings[0], checkpoint=expired)

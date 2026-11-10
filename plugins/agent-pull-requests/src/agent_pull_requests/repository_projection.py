@@ -14,12 +14,19 @@ FACTS = (
 )
 
 
-def normalized(snapshot, identity, number):
+def validate_identity(snapshot, identity, number):
+    """Fence the selected backend before either replay or projection consumes evidence."""
     native = snapshot.native_snapshot
     if not isinstance(native, dict) or (
         native.get("provider"), native.get("api_base"), native.get("repo"), native.get("pr"),
     ) != (identity.provider, identity.endpoint, identity.repo, number):
         raise ValueError("snapshot differs from configured full repository identity")
+    return native
+
+
+def normalized(snapshot, identity, number):
+    """Keep bounded current facts without volatile timestamps or cursors."""
+    native = validate_identity(snapshot, identity, number)
     facts = {name: copy.deepcopy(native.get(name)) for name in FACTS}
     facts["reviews"] = sorted([{
         name: review.get(name) for name in ("id", "state", "user", "commit_id", "dismissed")
@@ -64,6 +71,8 @@ def _new_repository(identity):
 
 
 class RepositoryProjection:
+    """One selected namespace's current-state/event view over ReplayStore custody."""
+
     def __init__(self, store, identities):
         self.store = store
         self.identities = {identity.key: identity for identity in identities}
@@ -80,6 +89,7 @@ class RepositoryProjection:
         )
 
     def plans(self, inventories, **authority):
+        """Plan members and unresolved departures without acquiring forge evidence."""
         def plan(state):
             targets = {}
             for key, identity in self.identities.items():
@@ -99,6 +109,7 @@ class RepositoryProjection:
         return self._transaction(plan, **authority)
 
     def apply(self, inventories, snapshots, **authority):
+        """Commit current facts and their durable events in one owner replacement."""
         def apply(state):
             now = int(self.store.clock())
             for key, identity in self.identities.items():
@@ -161,6 +172,7 @@ class RepositoryProjection:
         return self._transaction(apply, persist=True, **authority)
 
     def query(self, key, *, after=0, limit=16, number=None, **authority):
+        """Read a bounded current-state page without triggering provider acquisition."""
         if key not in self.identities or type(after) is not int or after < 0 or (
             type(limit) is not int or not 1 <= limit <= 16
         ) or number is not None and (type(number) is not int or number < 1):

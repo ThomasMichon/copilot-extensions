@@ -11,7 +11,8 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .watch_contract import PRSnapshot
-from .native_command import run_command
+from .native_command import run_observation_command as run_command
+from agent_procutil.owned_process import OwnedCleanupError
 
 NATIVE_SNAPSHOTS = "native_snapshots/v1"
 CONTINUOUS_NOTIFICATIONS = "continuous_notifications/v1"
@@ -174,5 +175,7 @@ def fetch_snapshot(
         if result.returncode or len(result.stdout.encode("utf-8")) > _MAX_SNAPSHOT_BYTES:
             raise ValueError("native snapshot command failed or exceeded its budget")
         return decode_snapshot(json.loads(result.stdout), repo, number)
+    except OwnedCleanupError:
+        raise
     except (OSError, RuntimeError, subprocess.SubprocessError, UnicodeError, json.JSONDecodeError):
         raise ValueError("native snapshot command is unavailable or incompatible") from None

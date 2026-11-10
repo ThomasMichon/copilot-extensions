@@ -129,6 +129,12 @@ and last-complete timestamps. Failed/capped inventory retains known membership.
 A complete omission emits selection departure, never an inferred closure.
 Bounded native reads confirm terminal facts or preserve departed stale facts.
 Cross-provider/endpoint snapshot mismatches cannot replace last-confirmed facts.
+That identity fence runs before either the repository projection or an
+overlapping one-shot wait can consume the read. Settled native probe/inventory
+timeouts become unavailable coverage while existing waits continue. A native
+cleanup failure is not a settled timeout: the read-owner thread retains the exact
+cleanup object and joins its existing retry primitive before reporting loss.
+Authority withdrawal remains distinct and prevents later publication.
 
 Initial membership and unknown-to-known evidence use baseline events. Later
 members use entry events; semantic facts produce change or confirmed terminal

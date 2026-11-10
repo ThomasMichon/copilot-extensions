@@ -1,23 +1,41 @@
 """Configured inventory through the selected Worktrees native process boundary."""
 
 import json
+import subprocess
 
-from .native_command import run_command
-from .watch_replay_store import json_object
+from agent_procutil.owned_process import OwnedCleanupError
+
+from .native_command import NativeCommandUnavailable, run_observation_command as run_command
+from .watch_replay_store import ReplayCallerExpired, json_object
 
 
 class RepositoryNativeUnsupported(ValueError):
     """Selected executable does not implement the required observation contract."""
 
 
+def _invoke(argv, *, timeout, checkpoint):
+    checkpoint()
+    try:
+        result = run_command(argv, timeout=timeout)
+    except (OwnedCleanupError, ReplayCallerExpired):
+        raise
+    except (OSError, subprocess.SubprocessError, NativeCommandUnavailable):
+        checkpoint()
+        raise ValueError("native repository read unavailable") from None
+    checkpoint()
+    return result
+
+
 def inventory(binding, *, checkpoint):
+    """Qualify the executing peer and perform one selected bounded inventory."""
     checkpoint()
     identity = binding.repository_identity
     if identity is None or binding.inventory_config is None:
         raise ValueError("repository observation not selected")
     prefix = list(binding.prefix or (binding.command,))
-    declaration = run_command(
-        [*prefix, "pr-watch", "inventory", "--contract", "--json"], timeout=15,
+    declaration = _invoke(
+        [*prefix, "pr-watch", "inventory", "--contract", "--json"],
+        timeout=15, checkpoint=checkpoint,
     )
     try:
         support = json_object(declaration.stdout.encode())
@@ -35,12 +53,12 @@ def inventory(binding, *, checkpoint):
     ):
         raise RepositoryNativeUnsupported("selected native repository observation unsupported")
     checkpoint()
-    result = run_command([
+    result = _invoke([
         *prefix, "pr-watch", "inventory", identity.repo,
         "--config", binding.inventory_config,
         "--credential-command", json.dumps(binding.credential_command),
         "--max-pages", "4", "--max-pulls", "200", "--seconds", "60", "--json",
-    ], timeout=60)
+    ], timeout=60, checkpoint=checkpoint)
     if result.returncode:
         raise ValueError("native repository inventory unavailable")
     value = json_object(result.stdout.encode())
