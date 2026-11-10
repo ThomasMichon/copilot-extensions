@@ -128,6 +128,9 @@ class Client:
                 "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
                 "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
             ] if selected["name"] == "native-worktrees-embody" else [
+                "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
+                "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
+            ] if selected["name"] == "native-driver-auth-wait" else [
                 "tools/capture_bridge_http52.py", "tools/check-agent-bridge-contracts.py",
                 "tools/bridge_http52_artifact.py",
             ]
