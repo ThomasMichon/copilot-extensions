@@ -17,7 +17,7 @@ from pathlib import Path
 from .repository_native import (
     RepositoryNativeUnavailable, RepositoryNativeUnsupported, inventory as fetch_inventory,
 )
-from .repository_projection import RepositoryProjection, validate_identity
+from .repository_projection import RepositoryProjection, normalized, validate_identity
 
 _MAX_READS = 4
 _CHECK_INTERVAL = 0.1
@@ -104,12 +104,14 @@ class ReplayObserver:
         self, *, expires_at: int, checkpoint: Callable[[], None] | None,
     ) -> dict:
         authority = {"expires_at": expires_at, "checkpoint": checkpoint}
+        observed_at = int(self.store.clock())
         result = self.store.sweep_timeouts(**authority)
         if result["status"] == "uncertain":
             return result
         inventories = {}
         repository_targets = {}
         snapshots = {}
+        projected = False
         qualified = set()
         configured = {
             (binding.account, binding.repo) for binding in self.bindings.values()
@@ -140,16 +142,20 @@ class ReplayObserver:
             repository_targets = {
                 key: target for key, target in repository_targets.items() if key[:2] in qualified
             }
-            keys = sorted(repository_targets)
+        waiting = {}
+        for target in self.store.observation_targets(**authority):
+            scope = (target.account, target.repo)
+            if scope not in configured or scope in qualified:
+                waiting[(target.account, target.repo, target.number)] = target
+        selected_targets = {}
+        if self.repositories is not None:
+            keys = sorted(key for key in repository_targets if key not in waiting)
             if keys:
                 start = self._repository_cursor % len(keys)
                 selected = (keys[start:] + keys[:start])[:_MAX_REPOSITORY_READS]
-                repository_targets = {key: repository_targets[key] for key in selected}
+                selected_targets = {key: repository_targets[key] for key in selected}
                 self._repository_cursor = (start + len(selected)) % len(keys)
-        combined = dict(repository_targets)
-        for target in self.store.observation_targets(**authority):
-            if (target.account, target.repo) not in configured or (target.account, target.repo) in qualified:
-                combined[(target.account, target.repo, target.number)] = target
+        combined = {**selected_targets, **waiting}
         targets = iter(combined.values())
         observed = unbound = 0
         unavailable = sum(scan["outcome"] == "unavailable" for scan in inventories.values())
@@ -175,7 +181,7 @@ class ReplayObserver:
                     if binding is None:
                         unbound += 1
                         continue
-                    if (target.account, target.repo, target.number) not in repository_targets:
+                    if (target.account, target.repo, target.number) not in selected_targets:
                         target = self.store.waiting_target(target, **authority)
                     if target is not None:
                         future = readers.submit(
@@ -190,8 +196,6 @@ class ReplayObserver:
                     self.store.check_current(expires_at, checkpoint)
                     snapshot = future.result()
                     key = (target.account, target.repo, target.number)
-                    if key in repository_targets:
-                        snapshots[key] = snapshot
                     if snapshot is None:
                         unavailable += 1
                     else:
@@ -205,6 +209,19 @@ class ReplayObserver:
                             if result["status"] == "uncertain":
                                 return result
                             observed += 1
+                    if key in repository_targets:
+                        try:
+                            snapshots[key] = normalized(
+                                snapshot, self.repositories.identities[key[0]], target.number,
+                            ) if snapshot is not None else None
+                        except (ValueError, TypeError):
+                            snapshots[key] = None
+                        if len(snapshots) == _MAX_REPOSITORY_READS:
+                            self.repositories.apply_facts(
+                                inventories, snapshots, observed_at=observed_at, **authority,
+                            )
+                            snapshots.clear()
+                            projected = True
                     result = self.store.sweep_timeouts(**authority)
                     if result["status"] == "uncertain":
                         return result
@@ -212,8 +229,10 @@ class ReplayObserver:
             stopped.set()
             readers.shutdown(wait=True, cancel_futures=True)
         self.store.check_current(expires_at, checkpoint)
-        if self.repositories is not None:
-            self.repositories.apply(inventories, snapshots, **authority)
+        if self.repositories is not None and (snapshots or not projected):
+            self.repositories.apply_facts(
+                inventories, snapshots, observed_at=observed_at, **authority,
+            )
         return {
             "status": "observed", "observed": observed,
             "unavailable": unavailable, "unbound": unbound,

@@ -140,8 +140,13 @@ suppresses all reads through that configured binding, including overlapping
 waits, until bounds are confirmed. Unrelated legacy waits continue. A qualified
 inventory outage can still refresh retained members through its bounded native
 snapshot interface. Only the selected projection reads are retained for the
-cycle commit; legacy-only snapshots are released after their ordinary observation
-instead of accumulating with the entire waiting population.
+publication batch; legacy-only snapshots are released after ordinary observation.
+Already-acquired configured wait results are projected even outside the rotation
+window. Only configured-only acquisition consumes the 32-read allowance.
+Projection batches contain at most 32 normalized results, not full raw snapshots;
+each batch commits its current facts and corresponding events atomically.
+Recorded observation times conservatively identify the cycle start rather than
+overstating freshness after a delayed batch.
 
 Initial membership and unknown-to-known evidence use baseline events. Later
 members use entry events; semantic facts produce change or confirmed terminal

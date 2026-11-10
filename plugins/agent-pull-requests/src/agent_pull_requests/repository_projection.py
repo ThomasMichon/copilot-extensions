@@ -110,6 +110,22 @@ class RepositoryProjection:
 
     def apply(self, inventories, snapshots, **authority):
         """Commit current facts and their durable events in one owner replacement."""
+        prepared = {}
+        for key, snapshot in snapshots.items():
+            try:
+                prepared[key] = normalized(snapshot, self.identities[key[0]], key[2]) if (
+                    snapshot is not None
+                ) else None
+            except (ValueError, TypeError):
+                prepared[key] = None
+        return self.apply_facts(inventories, prepared, **authority)
+
+    def apply_facts(self, inventories, snapshots, *, observed_at=None, **authority):
+        """Publish a bounded prepared batch, retaining atomic state/event pairs."""
+        from .repository_state import facts as validate_facts
+        observed_at = int(self.store.clock()) if observed_at is None else observed_at
+        if type(observed_at) is not int or not 0 <= observed_at <= self.store.clock():
+            raise ValueError("invalid observation cycle timestamp")
         def apply(state):
             now = int(self.store.clock())
             for key, identity in self.identities.items():
@@ -121,9 +137,9 @@ class RepositoryProjection:
                 initial = row["inventory"]["last_complete_at"] is None and not row["pulls"]
                 scan = inventories[key]
                 coverage = {
-                    "outcome": scan["outcome"], "observed_at": now, "pages": scan["pages"],
+                    "outcome": scan["outcome"], "observed_at": observed_at, "pages": scan["pages"],
                     "error": scan["error"], "last_complete_at": (
-                        now if scan["outcome"] == "complete" else row["inventory"]["last_complete_at"]
+                        observed_at if scan["outcome"] == "complete" else row["inventory"]["last_complete_at"]
                     ),
                 }
                 if (coverage["outcome"], coverage["error"]) != (
@@ -153,9 +169,12 @@ class RepositoryProjection:
                     selected = (key, identity.repo, number)
                     if selected not in snapshots:
                         continue
-                    snapshot = snapshots[selected]
+                    facts = copy.deepcopy(snapshots[selected])
                     try:
-                        facts = normalized(snapshot, identity, number) if snapshot is not None else None
+                        if facts is not None:
+                            validate_facts(facts)
+                            if facts["provider"] != identity.provider:
+                                raise ValueError("normalized provider binding mismatch")
                     except (ValueError, TypeError):
                         facts = None
                     if facts is None:
@@ -167,7 +186,7 @@ class RepositoryProjection:
                             "terminal" if facts["pr_state"] == "closed" or facts["merged"] else "change"
                         )
                         _event(state, key, number, kind, facts, now)
-                    pull.update(facts=facts, observed_at=now, error="")
+                    pull.update(facts=facts, observed_at=observed_at, error="")
             return {"status": "projected", "cursor": state["next_sequence"] - 1}
         return self._transaction(apply, persist=True, **authority)
 

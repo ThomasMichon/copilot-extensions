@@ -404,3 +404,39 @@ def test_native_cleanup_and_authority_failures_are_not_normalized_as_settled_tim
         raise ReplayCallerExpired("synthetic authority withdrawal")
     with pytest.raises(ReplayCallerExpired):
         repository_native.inventory(bindings[0], checkpoint=expired)
+
+
+def test_shared_configured_wait_outside_rotation_updates_current_facts_and_events(tmp_path, monkeypatch):
+    import threading
+    import weakref
+    store, identities, bindings = selected(tmp_path)
+    identity = identities[0]
+    scan = {"outcome": "complete", "numbers": list(range(1, 34)), "pages": 2, "error": ""}
+    projection = RepositoryProjection(store, identities[:1])
+    projection.apply({identity.key: scan}, {
+        (identity.key, identity.repo, number): snapshot(identity, number)
+        for number in scan["numbers"]
+    }, **authority(store))
+    scope = ConsumerScope("shared", identity.key, identity.repo)
+    store.execute(scope, "register", {
+        "request_id": "member-33", "issued_at": store.clock(), "number": 33, "until": ("merged",),
+    }, **authority(store))
+    reads, references, peaks = [], [], []
+    lock = threading.Lock()
+    monkeypatch.setattr(observation, "fetch_inventory", lambda *_a, **_kw: dict(scan))
+    def fetch(repo, number, command, **kwargs):
+        result = snapshot(identity, number, head_sha="fresh" if number == 33 else "a")
+        with lock:
+            reads.append(number)
+            references.append(weakref.ref(result))
+            peaks.append(sum(reference() is not None for reference in references))
+        return result
+    monkeypatch.setattr(observation, "fetch_snapshot", fetch)
+    owner = ReplayObserver(store, bindings=(bindings[0],))
+    owner.cycle(**authority(store))
+    assert len(reads) == len(set(reads)) == 33
+    assert max(peaks) <= 12
+    result = owner.repositories.query(identity.key, number=33, **authority(store))
+    assert result["pulls"][0]["facts"]["head_sha"] == "fresh"
+    assert len([event for event in document(store)["events"]
+                if event["number"] == 33 and event["kind"] == "change"]) == 1
