@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Callable
 
 from .queue_records import SpawnReservation, SpawnState, Status, TaskError
 from .queue_spawn_cooling import SpawnCoolingMixin, require_no_cooling
@@ -60,12 +61,19 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
         authority_expected: tuple | None = None,
         ordinary_redrive: dict | None = None,
         pool_startup_retry: dict | None = None,
+        cold_admission: Callable[[sqlite3.Connection], None] | None = None,
+        cold_restarted: Callable[[sqlite3.Connection], None] | None = None,
     ) -> SpawnReservation:
         """Publish a body identity, optionally closing the launch caller.
 
         Only a successful launch return establishes ``startup_complete``;
         recovery promotion alone leaves the original caller unproven.
         A concurrent release retains its state and intent when that caller returns.
+        Restarting a cold pool-bound body rechecks its lane inside the write
+        transaction (``admit_cold_lane``); ``cold_admission`` validates the
+        restarting caller (e.g. a wake's token and incarnation) under that same lock,
+        and ``cold_restarted`` writes the caller's own bookkeeping in that same
+        transaction only when the body actually restarts from ``cold``.
         """
         if startup_complete is not None and type(startup_complete) is not bool:
             raise TaskError("startup_complete must be a boolean")
@@ -115,6 +123,12 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
                     task = self._fetch(probe, row["task_id"])
                     if authority_snapshot(probe, task) != authority_expected:
                         raise TaskError("CI repair authority changed before spawn publication")
+            if row["state"] == SpawnState.COLD:
+                from .queue_pool_recovery import admit_cold_lane
+                if cold_admission is not None:
+                    with self._connect() as probe:
+                        cold_admission(probe)
+                admit_cold_lane(self, row)
 
         return self._update_reservation(
             key,
@@ -132,4 +146,7 @@ class SpawnCompletionMixin(SpawnCoolingMixin):
             now=now,
             guard=authority_guard,
             pool_startup_retry=pool_startup_retry,
+            in_transaction=None if cold_restarted is None else (
+                lambda conn, row: cold_restarted(conn) if row["state"] == SpawnState.COLD else None
+            ),
         )

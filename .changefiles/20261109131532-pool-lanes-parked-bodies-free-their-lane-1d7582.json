@@ -1,0 +1,9 @@
+{
+  "comment": "Pool lanes: parked bodies free their lane, suspended reactivations wait in request order ahead of fresh placements, concluded task owners no longer protect fenced history, and add 'reservations adopt-legacy' to bind accountable unbound history to its only matching pool.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -23,6 +23,36 @@ from tests.test_supervisor import QueueBackedClient
 q = placement_controls.q
 
 
+@pytest.mark.parametrize("with_native", [False, True])
+def test_late_startup_completion_after_pool_removal_still_allows_retirement(q, with_native):
+    from tests.test_pool_suspended_recovery import _disable_pools
+
+    publish(q, pool())
+    t = task(q)
+    r, _ = place(q, t)
+    if with_native:
+        record_native(q, r)
+    else:
+        q.record_spawn_worktree(r.key, "worktree", execution_machine="host-a", driver="cli")
+    q.request_spawn_release(r.key)
+    _disable_pools(q)
+    with pytest.raises(TaskError):
+        q.record_spawn(
+            r.key, session_handle="native", worktree="different",
+            startup_complete=True, startup_revision=1,
+        )
+    late = q.record_spawn(
+        r.key, session_handle="native", worktree="worktree",
+        startup_complete=True, startup_revision=1,
+    )
+    assert late.state == SpawnState.RELEASING and late.startup_complete
+    assert late.session_handle == "native" and late.release_requested
+    with pytest.raises(TaskError):
+        q.record_spawn(r.key, session_handle="different", startup_complete=True, startup_revision=1)
+    retired = q.retire_spawn(r.key, exact_absence=True, conclusion_state="skipped")
+    assert retired.state == SpawnState.FAILED and not retired.native_release_pending
+
+
 def carried_retry(q, *, exclusive_key=None):
     publish(q, pool(capacity=2))
     t = task(q, exclusive_key=exclusive_key)
@@ -415,6 +445,7 @@ def test_successor_wake_accounts_its_native_without_recounting_retired_predecess
 ) -> None:
     t, old, retry = retired_predecessor_retry(q)
     record_native(q, retry, native="replacement")
+    q.record_spawn(retry.key, session_handle="replacement", startup_complete=True, startup_revision=1)
     q.start(t.id, "host-a/worktree", owner_session_id="replacement",
             expected_generation=q.get(t.id).generation)
     q.suspend(t.id, "host-a/worktree", reason="external wait")
