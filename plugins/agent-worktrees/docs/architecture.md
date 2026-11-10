@@ -3275,6 +3275,25 @@ contract tests also exercise each real guard's read decision, not just hashes.
 A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
+For prepared Windows membership, a single `create` or `edit` target can also
+return natively when current Git metadata proves it belongs to that same
+linked worktree. The shell reads the live stateless configuration and the
+original complete guarded-anchor inventory and posture view; it does not
+cache an allow decision or infer anchor protection from posture rows alone.
+Inventory identities are validated lexically without filesystem probes of
+unrelated repositories; current source and target paths retain live checks.
+Stateless checks retain the original guard's universal-newline, whitespace
+and leading-dot path normalization, including the normalized basename.
+Protected personal-state paths, anchors, foreign or nested repositories,
+batch/structured writes, unsupported paths and incomplete evidence retain
+the original raw-event policy path. Eligible installation cells retain the
+same complete native membership proof; unprepared cells retain validation.
+This exemption additionally fingerprints the original target-form and map
+readers in `hook-read-policy.json`. Regenerate that contract after either
+reader changes. Shell commands and Git/PR operations are not exempted.
+The entry discovers optional facts support from the loaded admission function;
+an older helper keeps its original call and policy path without that proof.
+
 The native read contract currently hashes four bounded source files per read
 (at most 128 KiB each); it is not a daemon-published worktree-policy cache and
 does not claim zero filesystem cost. Exact fingerprints deliberately prevent a
