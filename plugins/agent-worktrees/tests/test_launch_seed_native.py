@@ -251,10 +251,34 @@ def test_admission_only_python_owner_keeps_fence_and_does_not_claim_a_seed(recor
     assert saved["events"][-1]["details"]["process_exit_code"] == 17
 
 
-def _set_status(record, status):
+def _set_status(record, status, completed_at=None):
     current = tracking.load_record(record)
     current.status = status
+    current.completed_at = completed_at
     tracking.save_record(current, record)
+
+
+@pytest.mark.parametrize(("status", "completed_at", "admitted"), [
+    ("finalized", "2000-01-01T00:00:00", True),
+    ("complete", "2000-01-01T00:00:00", True),
+    ("finalized", None, False),
+    ("finalized", "2999-01-01T00:00:00", False),
+    ("finalized", "not-a-time", False),
+    ("finalizing", "2000-01-01T00:00:00", False),
+    ("archived", "2000-01-01T00:00:00", False),
+])
+def test_native_callback_admits_only_worktrees_concluded_before_the_request(
+    record, status, completed_at, admitted,
+):
+    # Native setup callbacks (POSIX execute_headed, Windows --phase admit) run in
+    # a separate process and cannot pass the prepare-time status snapshot.
+    reply = native.prepare(record, ["custom-backend"], seed_id=None, admission_only=True)
+    _set_status(record, status, completed_at)
+    if admitted:
+        native.admit(record, _identity(reply), reply["operation_id"], admission_only=True)
+    else:
+        with pytest.raises(ValueError, match=f"worktree status is '{status}'"):
+            native.admit(record, _identity(reply), reply["operation_id"], admission_only=True)
 
 
 @pytest.mark.parametrize(("before", "during", "admitted"), [

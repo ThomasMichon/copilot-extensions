@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
+from datetime import datetime, timedelta
 import json
 import os
 from pathlib import Path
@@ -207,10 +208,34 @@ _TERMINAL_STATUSES = frozenset({"finalizing", "complete", "completed", "finalize
 _RESUMABLE_STATUSES = frozenset({"complete", "completed", "finalized"})
 
 
-def _status_refused(status: str, planned_status: str | None) -> bool:
+def _concluded_before(completed_at: str | None, started_at: object) -> bool:
+    """Whether the record's conclusion provably predates this execution's durable request."""
+    try:
+        concluded = datetime.fromisoformat(str(completed_at)) if completed_at else None
+        started = datetime.fromisoformat(started_at) if isinstance(started_at, str) else None
+    except ValueError:
+        return False
+    if concluded is None or started is None or started.tzinfo is None:
+        return False
+    if concluded.tzinfo is None:
+        concluded = concluded.astimezone()
+    # completed_at has whole-second resolution; the entire second must precede the request.
+    return concluded + timedelta(seconds=1) <= started
+
+
+def _status_refused(
+    status: str, planned_status: str | None, *, completed_at: str | None = None,
+    started_at: object = None,
+) -> bool:
     if status not in _TERMINAL_STATUSES:
         return False
-    return not (planned_status == status and status in _RESUMABLE_STATUSES)
+    if status not in _RESUMABLE_STATUSES:
+        return True
+    if planned_status is not None:
+        return planned_status != status
+    # Separate native callback processes have no in-memory snapshot; rely on the
+    # durable conclusion time instead of re-reading the current status.
+    return not _concluded_before(completed_at, started_at)
 
 
 @contextmanager
@@ -244,7 +269,10 @@ def admission(
                 if isinstance(prepared, int):
                     raise ValueError("Original admission-only launch intent changed before creation")
             current = tracking.load_record(record_path)
-            if _status_refused(current.status, planned_status):
+            if _status_refused(
+                current.status, planned_status, completed_at=current.completed_at,
+                started_at=saved["events"][0]["at"],
+            ):
                 raise ValueError(
                     f"Original headed launch intent changed before creation: "
                     f"worktree status is {current.status!r}"
