@@ -43,6 +43,13 @@ cleanup retains its original custody and blocks another diagnostic attempt.
 This is navigation and diagnostic entry, not a complete onboarding wizard.
 Installation, repository trust/adoption, machines, plugins, knowledge binding
 and authentication retain their existing owners and explicit commands.
+**Install core**, **Add machine**, **Adopt repo** and **Enable plugins** open
+read-only guides with prerequisites, effects, owning references and supported
+next steps. Install core can open the same real setup-plan command. Applying
+setup or adoption still uses the named CLI outside the TUI; retain its result
+and follow restart instructions before returning and selecting Reload. Machine
+creation and plugin enablement have no in-app writer here. Browsing a guide
+does not execute its displayed commands, open links or change readiness.
 Redirected/noninteractive bare invocation still prints installation status;
 explicit verbs, project launch and launcher JSON output keep their contracts.
 
