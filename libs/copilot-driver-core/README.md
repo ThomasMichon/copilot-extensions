@@ -6,6 +6,8 @@ execution and compact receiving export. It does not import Bridge, Worktrees
 or Manager. Install it as an ordinary first-party distribution and run
 `python -m agent_remote_driver.session_host --support-json`; plugin enablement
 is not required.
+Session Host shutdown closes attached clients before awaiting its cancelled
+server task, so child exit does not depend on a client disconnecting first.
 
 The [Driver application and extension connector](../../plugins/agent-remote-driver/README.md)
 provides the ordinary application front door. Bridge consumes this same
@@ -216,6 +218,11 @@ response/notification envelope. Complete but invalid envelopes and non-finite
 wire JSON hold recovery just like truncated observation. Expiry-task failure
 remains monitored after SDK loss and reaches exact owned cleanup. A Windows
 auth resume reuses the coordinator Job already armed by that same launch.
+Coordinator cancellation retires the auth-owned native scope before cancelling
+the expiry watcher or draining client transports. A connected client cannot
+extend native execution while transport shutdown waits; final cleanup retains
+the same exact retirement fallback. Legacy execution without `auth_wait` keeps
+its existing shutdown order.
 
 A confirmed idle, controlled stop enters `auth_wait`; a fresh source grant
 then creates a new receiving incarnation and cold-starts `--resume` with the

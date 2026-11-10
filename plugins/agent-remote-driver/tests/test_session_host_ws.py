@@ -260,7 +260,9 @@ async def test_standalone_authentication_is_mandatory_except_explicit_legacy(
         assert [frame async for frame in client.frames()] == []
         assert child.returncode == 0
         if policy == "acp":
-            await asyncio.wait_for(task, 2)
+            done, _ = await asyncio.wait((task,), timeout=2)
+            assert done, "Child exit must finish host shutdown before the client disconnects"
+            await task
     finally:
         if client is not None:
             await client.close()

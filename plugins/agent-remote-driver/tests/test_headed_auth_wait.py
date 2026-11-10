@@ -478,6 +478,67 @@ async def test_real_native_scope_stops_preserves_and_resumes_without_seed(
 
 
 @pytest.mark.asyncio
+async def test_cancellation_retires_native_scope_before_connected_websocket_drain(
+    tmp_path, monkeypatch,
+):
+    if os.name != "nt":
+        pytest.skip("POSIX auth wait refuses until independent owner-death custody is supported")
+    from websockets.asyncio.client import connect
+
+    from agent_remote_driver.session_host.osutil import pid_alive
+    from agent_remote_driver.session_host.ws_transport import WebSocketTransport
+
+    monkeypatch.setattr(launcher, "_require_receiving_policy", lambda *_args: None)
+    draining, release = asyncio.Event(), asyncio.Event()
+    close = WebSocketTransport.close
+
+    async def gated_close(transport, *, drain=False):
+        assert drain and transport._server.connections
+        draining.set()
+        await release.wait()
+        await close(transport, drain=drain)
+
+    monkeypatch.setattr(WebSocketTransport, "close", gated_close)
+    state_file, history_file = tmp_path / "host.json", tmp_path / "history.jsonl"
+    grant = configuration(budget_seconds=3, expires_at=time.time() + 3)
+    task = asyncio.create_task(launcher.run_headed(
+        [PYTHON, "-c", _NATIVE, "--session-id", "durable-session"],
+        session_id="durable-session", attempt_directory=tmp_path / "attempt",
+        state_file=state_file, cwd=str(tmp_path), auth_wait=grant, ws_port=0,
+        env={"AUTH_FIXTURE_HISTORY": str(history_file)},
+    ))
+    websocket = None
+    try:
+        running = await eventually(
+            lambda: json.loads(state_file.read_text(encoding="utf-8")),
+            lambda value: value.get("state") == "running",
+        )
+        child = (await eventually(
+            lambda: [json.loads(line) for line in history_file.read_text().splitlines()],
+            lambda value: len(value) == 1,
+        ))[0]
+        scheme = "bear" + "er."
+        websocket = await connect(
+            running["websocket"]["url"],
+            subprotocols=["acp.v1", scheme + running["websocket"]["nonce"]],
+        )
+        assert pid_alive(child["pid"]) and pid_alive(child["descendant"])
+        task.cancel()
+        await asyncio.wait_for(draining.wait(), 2)
+        assert not pid_alive(child["pid"]) and not pid_alive(child["descendant"])
+        await asyncio.sleep(max(0, grant["expires_at"] - time.time()) + .1)
+        assert not task.done()
+        assert not pid_alive(child["pid"]) and not pid_alive(child["descendant"])
+    finally:
+        release.set()
+        if websocket is not None:
+            await websocket.close()
+        if not draining.is_set():
+            task.cancel()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 5)
+
+
+@pytest.mark.asyncio
 async def test_sdk_loss_still_monitors_expiry_publication_failure(tmp_path, monkeypatch):
     if os.name != "nt":
         pytest.skip("POSIX auth wait refuses until independent owner-death custody is supported")

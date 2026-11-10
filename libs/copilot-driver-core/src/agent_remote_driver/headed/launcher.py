@@ -404,23 +404,28 @@ async def _run_headed_once(
             pass
         return await owner.wait()
     finally:
-        if startup is not None:
-            startup.close()
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
         try:
-            if websocket is not None:
-                await websocket.close(drain=True)
+            if auth_receiver is not None and owner.proc is not None:
+                # Cancellation must not leave the native scope alive during transport drainage.
+                await owner.terminate()
         finally:
+            if startup is not None:
+                startup.close()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             try:
-                if host is not None:
-                    await host.close()
+                if websocket is not None:
+                    await websocket.close(drain=True)
             finally:
                 try:
-                    await backend.close()
+                    if host is not None:
+                        await host.close()
                 finally:
-                    if owner.proc is not None and (
-                        auth_receiver is not None or owner.returncode is None
-                    ):
-                        await owner.terminate()
+                    try:
+                        await backend.close()
+                    finally:
+                        if owner.proc is not None and (
+                            auth_receiver is not None or owner.returncode is None
+                        ):
+                            await owner.terminate()
