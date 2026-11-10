@@ -274,7 +274,8 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
         client.append_transport(directory, state)
     original = client.load(state["request"]["request_id"])[1]
     assert original["phase"] == "transport-attempt"
-    assert original["transport_history_anchor"]
+    anchor = original.get("transport_observed_tip") or original.get("transport_history_anchor")
+    assert anchor
     assert len(pushes) == 1
     client.transport = Transport(root, str(remote))
     dispatched = []
@@ -283,14 +284,19 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
         with pytest.raises(ValueError, match="remains unknown"):
             client.resume(state["request"]["request_id"])
         assert dispatched == []
-        assert client.load(state["request"]["request_id"])[1] == original
+        saved = client.load(state["request"]["request_id"])[1]
+        keys = (
+            "repository", "request", "phase", "provider", "created_at",
+            "envelope_sha", "previous_tip", "transport_failure",
+        )
+        assert {key: saved[key] for key in keys} == {key: original[key] for key in keys}
     else:
         recovered = client.resume(state["request"]["request_id"])
         assert recovered["request"]["request_id"] == original["request"]["request_id"]
         assert recovered["request"]["source_sha"] == candidate
         assert recovered["request"]["envelope_sha"] != original["envelope_sha"]
         assert recovered["transport_failure"] is None
-        assert recovered["transport_history_anchor"] == original["transport_history_anchor"]
+        git(root, "merge-base", "--is-ancestor", anchor, recovered["transport_history_anchor"])
         assert recovered["transport_history"] == [{
             key: original[key] for key in
             ("envelope_sha", "previous_tip", "phase", "transport_failure")
@@ -299,7 +305,7 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
         git(root, "merge-base", "--is-ancestor", candidate, recovered["request"]["envelope_sha"])
 
 
-@pytest.mark.parametrize("mutation", ["delete", "rewrite", "contended-rewrite"])
+@pytest.mark.parametrize("mutation", ["delete", "rewrite", "rewind", "contended-rewrite"])
 @pytest.mark.parametrize("first_ref", [False, True])
 def test_recovery_keeps_original_history_across_append_reads_and_retries(
     tmp_path, monkeypatch, mutation, first_ref,
@@ -326,6 +332,11 @@ def test_recovery_keeps_original_history_across_append_reads_and_retries(
     original = envelope(candidate, ([previous] if previous else []) + [candidate])
     rewritten = envelope(first, [first])
     assert rewritten != competing
+    seen = competing
+    if mutation == "rewind":
+        seen = envelope(first, [competing, first])
+        git(remote, "fetch", "--no-tags", "--no-write-fetch-head", str(root), seen)
+        git(remote, "update-ref", TRANSPORT_REF, seen)
     if mutation != "delete":
         git(remote, "fetch", "--no-tags", "--no-write-fetch-head", str(root), rewritten)
     state["request"].update(source_sha=candidate, envelope_sha=None)
@@ -344,6 +355,8 @@ def test_recovery_keeps_original_history_across_append_reads_and_retries(
         nonlocal changed
         if mutation == "delete":
             git(remote, "update-ref", "-d", TRANSPORT_REF)
+        elif mutation == "rewind":
+            git(remote, "update-ref", TRANSPORT_REF, competing)
         else:
             git(remote, "update-ref", TRANSPORT_REF, rewritten)
         changed = True
@@ -357,29 +370,46 @@ def test_recovery_keeps_original_history_across_append_reads_and_retries(
         if "fetch" in argv and mutation != "contended-rewrite" and not changed:
             # The reconciliation read returns its old tip; append must read again.
             mutate()
+            if mutation == "rewind" and not first_ref:
+                raise TimeoutError("interrupted history fetch")
         return result
 
     client.transport = Transport(root, str(remote), run=moving)
     dispatches = []
     monkeypatch.setattr(client, "dispatch", lambda *args: dispatches.append(args))
-    with pytest.raises(RuntimeError, match="Original transport history"):
+    with pytest.raises((RuntimeError, TimeoutError), match="Original transport history|interrupted history"):
         client.resume(state["request"]["request_id"])
     assert changed and dispatches == []
     assert len(pushes) == (1 if mutation == "contended-rewrite" else 0)
     saved = client.load(state["request"]["request_id"])[1]
+    if mutation == "rewind" and not first_ref:
+        assert saved["transport_observed_tip"] == seen
+        with pytest.raises(ValueError, match="history"):
+            client.resume(state["request"]["request_id"])
+        saved = client.load(state["request"]["request_id"])[1]
     assert saved["request"] == state["request"]
     if mutation == "contended-rewrite":
         assert saved["transport_history"][0]["envelope_sha"] == original
     else:
-        assert saved == {**state, "transport_history_anchor": competing}
-    assert saved["transport_history_anchor"] == competing
+        assert {key: saved[key] for key in state} == state
+    assert saved["transport_history_anchor"] == seen
+    assert saved["transport_history_failure"]["required"] == seen
     with pytest.raises((ValueError, RuntimeError), match="history"):
         client.resume(state["request"]["request_id"])
     assert dispatches == []
     assert len(pushes) == (1 if mutation == "contended-rewrite" else 0)
     assert client.load(state["request"]["request_id"])[1] == saved
     current = git(root, "ls-remote", "--refs", str(remote), TRANSPORT_REF)
-    assert current == ("" if mutation == "delete" else rewritten + "\t" + TRANSPORT_REF)
+    expected = competing if mutation == "rewind" else rewritten
+    assert current == ("" if mutation == "delete" else expected + "\t" + TRANSPORT_REF)
+    if mutation == "rewind" and not first_ref:
+        git(remote, "update-ref", TRANSPORT_REF, seen)
+        client.resume(state["request"]["request_id"])
+        restored = client.load(state["request"]["request_id"])[1]
+        assert len(dispatches) == 1 and len(pushes) == 1
+        assert restored["request"]["source_sha"] == candidate
+        assert restored["request"]["request_id"] == state["request"]["request_id"]
+        git(root, "merge-base", "--is-ancestor", seen, restored["request"]["envelope_sha"])
 
 
 def test_competing_descendant_confirms_reused_tip_instead_of_rejected_envelope(tmp_path):

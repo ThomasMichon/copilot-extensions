@@ -180,9 +180,6 @@ class Client:
         required_history = required_history or state.get("transport_history_anchor")
 
         def persist(delta):
-            anchor = delta.get("transport_history_anchor")
-            if anchor and state.get("transport_history_anchor") not in {None, anchor}:
-                raise ValueError("Original transport history anchor changed")
             replacing = delta.get("phase") in {"transport-attempt", "transport-confirmed"}
             if replacing and state.get("envelope_sha") and (
                 delta["phase"] == "transport-attempt"
@@ -197,9 +194,11 @@ class Client:
             self.save(directory, state)
 
         try:
+            options = {"required_history": required_history} if required_history else {}
+            if state.get("transport_observed_tip"):
+                options["observed_tip"] = state["transport_observed_tip"]
             value["envelope_sha"] = self.transport.append(
-                value["source_sha"], persist,
-                **({"required_history": required_history} if required_history else {}),
+                value["source_sha"], persist, **options,
             )
         except Exception as exc:
             raise RuntimeError(
@@ -245,16 +244,14 @@ class Client:
             history = state.get("transport_history_anchor") or state.get("previous_tip")
 
             def remember(delta):
-                if not state.get("transport_history_anchor"):
-                    state.update(delta)
-                    self.save(directory, state)
+                state.update(delta)
+                self.save(directory, state)
 
-            tip = (
-                self.transport.tip(persist=remember)
-                if rejected_attempt(state) and history is None else self.transport.tip()
+            tip = self.transport.observe(
+                history, remember, observed_tip=state.get("transport_observed_tip"),
             )
             history = state.get("transport_history_anchor") or state.get("previous_tip")
-            if history and (not tip or self.transport.git(
+            if history and (not tip or history != tip and self.transport.git(
                 "merge-base", "--is-ancestor", history, tip, check=False,
             ).returncode):
                 raise ValueError("shared transport history changed; refusing reconciliation")

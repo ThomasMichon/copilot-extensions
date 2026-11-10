@@ -519,7 +519,7 @@ def test_interrupted_transport_resumes_only_original_confirmed_envelope(tmp_path
     monkeypatch.setattr(client, "preflight", lambda selected: state["provider"])
     client.transport = SimpleNamespace(
         scoped_credentials=lambda owner: None,
-        tip=lambda: "e" * 40 if visible else None,
+        observe=lambda *args, **kwargs: "e" * 40 if visible else None,
         validate_tip=lambda tip: None,
         git=lambda *args, **kwargs: SimpleNamespace(returncode=0),
     )
@@ -572,7 +572,7 @@ def test_confirmed_envelope_cannot_bypass_a_retained_history_anchor(tmp_path, mo
     client.save(directory, state)
     monkeypatch.setattr(client, "preflight", lambda selected: state["provider"])
     client.transport = SimpleNamespace(
-        scoped_credentials=lambda owner: None, tip=lambda: "e" * 40,
+        scoped_credentials=lambda owner: None, observe=lambda *args, **kwargs: "e" * 40,
         git=lambda *args, **kwargs: SimpleNamespace(returncode=int(args[2] == "d" * 40)),
     )
     monkeypatch.setattr(client, "dispatch", lambda *args: pytest.fail("rewritten history dispatch"))
@@ -601,7 +601,7 @@ def test_known_rejection_does_not_replace_mismatched_original_or_shared_history(
     effects = []
     client.transport = SimpleNamespace(
         scoped_credentials=lambda owner: None,
-        tip=lambda **kwargs: (
+        observe=lambda *args, **kwargs: (
             None if changed in {"missing-history", "missing-first-history"} else "f" * 40
         ),
         validate_tip=lambda envelope: None,

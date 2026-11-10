@@ -117,8 +117,47 @@ class Transport:
             raise ValueError("unexpected transport ref response")
         tip = sha(fields[0])
         if persist is not None:
-            persist({"transport_history_anchor": tip})
+            persist({"transport_observed_tip": tip})
         self.git("fetch", "--no-tags", "--no-write-fetch-head", self.remote, tip)
+        return tip
+
+    def observe(
+        self, history: str | None, persist: Callable[[dict], None], *,
+        observed_tip: str | None = None,
+    ) -> str | None:
+        """Recover a pending read, then advance only to verified descendant history."""
+        if history:
+            sha(history)
+
+        def adopt(tip):
+            try:
+                self.validate_tip(tip)
+                if history and tip != history and self.git(
+                    "merge-base", "--is-ancestor", history, tip, check=False,
+                ).returncode:
+                    raise ValueError("Original transport history is unavailable or changed")
+            except ValueError:
+                persist({
+                    "transport_observed_tip": None,
+                    "transport_history_failure": {"required": history, "observed": tip},
+                })
+                raise
+            persist({
+                "transport_history_anchor": tip, "transport_observed_tip": None,
+                "transport_history_failure": None,
+            })
+
+        if observed_tip:
+            sha(observed_tip)
+            self.git("fetch", "--no-tags", "--no-write-fetch-head", self.remote, observed_tip)
+            adopt(observed_tip)
+            history = observed_tip
+        tip = self.tip(persist=persist)
+        if tip:
+            adopt(tip)
+        elif history:
+            persist({"transport_history_failure": {"required": history, "observed": None}})
+            raise ValueError("Original transport history is unavailable or changed")
         return tip
 
     def validate_tip(self, tip: str) -> None:
@@ -143,25 +182,19 @@ class Transport:
 
     def append(
         self, candidate: str, persist: Callable[[dict], None], *,
-        required_history: str | None = None,
+        required_history: str | None = None, observed_tip: str | None = None,
     ) -> str:
         """Persist each attempted envelope before pushing; never force a shared ref."""
         sha(candidate)
         if required_history is not None:
             sha(required_history)
         history = required_history
-        if history:
-            persist({"transport_history_anchor": history})
         tree = self.git("rev-parse", candidate + "^{tree}").stdout.strip()
         for _ in range(4):
-            previous = self.tip(persist=persist if history is None else None)
-            if history and (not previous or self.git(
-                "merge-base", "--is-ancestor", history, previous, check=False,
-            ).returncode):
-                raise ValueError("Original transport history is unavailable or changed")
+            previous = self.observe(history, persist, observed_tip=observed_tip)
+            observed_tip = None
             if previous:
-                history = history or previous
-                self.validate_tip(previous)
+                history = previous
                 if self.git("merge-base", "--is-ancestor", candidate, previous, check=False).returncode == 0:
                     persist({"envelope_sha": previous, "phase": "transport-confirmed"})
                     return previous
@@ -181,7 +214,10 @@ class Transport:
                 envelope + ":" + TRANSPORT_REF, check=False, transport_push=True,
             )
             if result.returncode == 0:
-                persist({"envelope_sha": envelope, "phase": "transport-confirmed"})
+                persist({
+                    "envelope_sha": envelope, "phase": "transport-confirmed",
+                    "transport_history_anchor": envelope,
+                })
                 return envelope
             failure = {
                 "returncode": result.returncode,
@@ -189,7 +225,7 @@ class Transport:
             }
             persist({"transport_failure": failure})
             # A lost response can still have published this exact envelope.
-            actual = self.tip(persist=persist if history is None else None)
+            actual = self.observe(history, persist)
             if actual and self.git(
                 "merge-base", "--is-ancestor", envelope, actual, check=False,
             ).returncode == 0:
@@ -198,7 +234,7 @@ class Transport:
             if actual != previous and rejected_attempt({
                 "envelope_sha": envelope, "previous_tip": previous, "transport_failure": failure,
             }):
-                history = history or actual
+                history = actual or history
                 continue
             persist({"envelope_sha": envelope, "phase": "transport-unknown"})
             raise RuntimeError(

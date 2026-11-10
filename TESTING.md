@@ -167,6 +167,9 @@ For first-ref contention, the observed competing tip becomes that requirement;
 recovery never treats a missing competing tip as permission to recreate it.
 The first history anchor is saved before its reconciliation fetch and retained
 across interrupted operations and later resumes, not just retries in one process.
+Pending observations are saved before fetching and reconciled before another
+remote read. The retained anchor advances only to verified descendants or the
+confirmed envelope, so rewinding to an earlier retained ancestor is also refused.
 
 The client emits a request ID before effects and stores its state under the
 current worktree's Git metadata (`windows-qualification/<id>`). `status` and
