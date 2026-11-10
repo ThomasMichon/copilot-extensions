@@ -342,6 +342,10 @@ structured packet covers the direct-plus-entry alias union, JSON arguments,
 deduplication and 128-entry/target limits, with late protected/foreign/nested
 targets, incomplete entries and patch fallback. It also compares structured
 writes with the real original policy in legacy and selected-cell fixtures.
+The disjoint positive and protected write-name packets cover each original
+non-patch write alias, its protected-state target, JSON/structured arguments
+and heterogeneous batches. Real-policy comparisons in legacy and selected-cell scopes run in
+their own packet, retaining the same child/item/group limits.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.

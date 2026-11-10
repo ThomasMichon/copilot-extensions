@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse complete prepared native guard proof for non-patch write aliases.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
