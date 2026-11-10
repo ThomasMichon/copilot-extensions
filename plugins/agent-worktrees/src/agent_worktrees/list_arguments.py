@@ -12,7 +12,7 @@ ARGUMENTS = (
                            "choices": ["active", "complete", "finalized", "orphaned", "archived", "all"],
                            "help": "Filter by tracking status (default: all). 'archived' also needs --all."}),
     ("--all", {"action": "store_true",
-               "help": "Include worktrees whose directories no longer exist on disk"}),
+               "help": "Include archived worktrees and worktrees whose directories no longer exist on disk"}),
     ("--include-other-platforms", {"action": "store_true",
                                    "help": "Include worktrees from other platforms (e.g. Windows when on Linux)"}),
     ("--classify", {"action": "store_true",
