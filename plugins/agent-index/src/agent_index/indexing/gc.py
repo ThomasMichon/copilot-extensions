@@ -79,13 +79,19 @@ class SourceRetirementPolicy:
     live_crawl_keys: frozenset[str] = frozenset()
 
 
-class GCSummary(TypedDict):
-    """Result of a source garbage-collection pass."""
+class _GCRequiredSummary(TypedDict):
+    """Counts present in every source garbage-collection result."""
 
     purged: dict[str, int]   # stale source -> chunks removed
     kept: list[str]          # live sources, untouched
     chunks_deleted: int
     dry_run: bool
+
+
+class GCSummary(_GCRequiredSummary, total=False):
+    """Result of a source garbage-collection pass and requested maintenance."""
+
+    compaction: dict[str, object]
 
 
 class GCDecision(GCSummary, total=False):
@@ -102,6 +108,7 @@ def run_source_gc(
 
     Low-level GC functions retain their caller-owned state API. External writers
     must use this entrypoint or hold ``source_writer`` around their entire operation.
+    Requested compaction statistics are returned only when collection mutated rows.
     """
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.source_ownership import source_writer
@@ -116,7 +123,7 @@ def run_source_gc(
         if summary["chunks_deleted"] and not dry_run:
             state.save(config.state_file)
             if compact:
-                multi_store.compact()
+                summary["compaction"] = multi_store.compact()
             multi_store.ensure_fts_index()
         return summary
 

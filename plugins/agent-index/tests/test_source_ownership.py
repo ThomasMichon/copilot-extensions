@@ -81,13 +81,15 @@ def test_kernel_probe_distinguishes_contention_from_io_failure(tmp_path, monkeyp
                 ownership._try_lock(handle.fileno())
 
 
-def test_gc_owns_state_load_save_and_requested_maintenance(tmp_path, monkeypatch):
+@pytest.mark.parametrize("compact", [False, True])
+def test_gc_owns_state_load_save_and_requested_maintenance(tmp_path, monkeypatch, compact):
     from agent_index.indexing import gc
     from agent_index.indexing.state import IndexState, SourceState
 
     config = SimpleNamespace(data_dir=tmp_path, state_file=tmp_path / "state.json")
     IndexState(sources={"monorepo": SourceState(chunk_count=1)}).save(config.state_file)
     stages = []
+    compaction = {"content": {"fragments_before": 2, "fragments_after": 1}}
     with ThreadPoolExecutor(max_workers=1) as pool:
         def verify(stage):
             def contend():
@@ -113,12 +115,16 @@ def test_gc_owns_state_load_save_and_requested_maintenance(tmp_path, monkeypatch
             source_counts=lambda: verify("count") or {"monorepo": 1},
             delete_by_source_exact=lambda source: verify("delete") or 1,
             ensure_fts_index=lambda: verify("fts"),
-            compact=lambda: verify("compact"),
+            compact=lambda: verify("compact") or compaction,
         )
         monkeypatch.delenv("AGENT_INDEX_STORE_LAYOUT", raising=False)
-        result = gc.run_source_gc(config, store, compact=True)
-    assert stages == ["load", "count", "delete", "save", "compact", "fts"]
+        result = gc.run_source_gc(config, store, compact=compact)
+    assert stages == ["load", "count", "delete", "save", *(["compact"] if compact else []), "fts"]
     assert result["chunks_deleted"] == 1 and load(config.state_file).sources == {}
+    if compact:
+        assert result["compaction"] == compaction
+    else:
+        assert "compaction" not in result
 
 
 @pytest.mark.parametrize("dry_run", [True, False], ids=["dry-run", "no-rows-deleted"])
@@ -137,6 +143,7 @@ def test_gc_without_mutation_does_not_publish_state_or_maintain_tables(
                            dry_run=dry_run, compact=True)
     assert result["chunks_deleted"] == (2 if dry_run else 0)
     assert result["dry_run"] is dry_run
+    assert "compaction" not in result
     assert not state_file.exists()
     if dry_run:
         assert not (tmp_path / "path_index.db").exists()
