@@ -376,8 +376,8 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         owner.shutdown()
 
 
-@pytest.mark.parametrize("strict", [False, True])
-def test_legacy_backfill_ledger_survives_an_unrelated_stale_writer(tmp_path, monkeypatch, strict):
+@pytest.fixture
+def legacy_registry(tmp_path, monkeypatch):
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
@@ -393,8 +393,6 @@ def test_legacy_backfill_ledger_survives_an_unrelated_stale_writer(tmp_path, mon
         completed_at=None, sessions=None, creation_nonce="fixture-incarnation",
     )
     tracking.save_record(record, path)
-    stale = tracking.load_record(path)
-    original_revision = stale.lifecycle_revision
     state = tmp_path / "session-state"
     entry = state / "discovered"
     entry.mkdir(parents=True)
@@ -406,8 +404,17 @@ def test_legacy_backfill_ledger_survives_an_unrelated_stale_writer(tmp_path, mon
     monkeypatch.setattr(sessions, "mux_status_many", lambda _: {
         "one": sessions.MuxInfo(exists=False, clients=0),
     })
-    monkeypatch.setattr(tracking, "stamp_bound_live", lambda *a, **kw: None)
-    monkeypatch.setattr(tracking, "stamp_mux_live", lambda *a, **kw: None)
+    stamps = []
+    monkeypatch.setattr(tracking, "stamp_bound_live", lambda *a, **kw: stamps.append(("bound", a)))
+    monkeypatch.setattr(tracking, "stamp_mux_live", lambda *a, **kw: stamps.append(("mux", a)))
+    return path, state, stamps
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_legacy_backfill_ledger_survives_an_unrelated_stale_writer(legacy_registry, strict):
+    path, _state, _stamps = legacy_registry
+    stale = tracking.load_record(path)
+    original_revision = stale.lifecycle_revision
 
     list_cli._refresh_list_record(tracking.load_record(path), strict=strict)
     indexed = tracking.load_record(path)
@@ -422,6 +429,58 @@ def test_legacy_backfill_ledger_survives_an_unrelated_stale_writer(tmp_path, mon
     assert preserved.sessions[0].relation_revision == preserved.lifecycle_revision
     list_cli._refresh_list_record(preserved, strict=strict)
     assert tracking.load_record(path).lifecycle_revision == preserved.lifecycle_revision
+
+
+@pytest.mark.parametrize("winner", ["registration", "refresh", "incarnation"])
+def test_legacy_backfill_cannot_overwrite_interleaved_initialization(
+    legacy_registry, monkeypatch, winner,
+):
+    path, state, stamps = legacy_registry
+    stale = tracking.load_record(path)
+    discover = sessions.backfill_sessions
+    committed = []
+
+    def interleave(records):
+        found = discover(records)
+        if winner != "incarnation":
+            entry = state / "winner"
+            entry.mkdir()
+            (entry / "workspace.yaml").write_text(
+                json.dumps({"cwd": stale.worktree_path}), encoding="utf-8",
+            )
+            (entry / "events.jsonl").write_text("{}\n", encoding="utf-8")
+        with tracking._RecordLock(path, require_sidecar=True):
+            if winner == "incarnation":
+                data = read_record_mapping(path)
+                data["creation_nonce"] = "replacement"
+                path.write_text(json.dumps(data, default=str), encoding="utf-8")
+            else:
+                current = tracking.load_record(path)
+                ids = ["winner"] if winner == "registration" else ["discovered", "winner"]
+                current.sessions = [
+                    tracking.SessionEntry(session_id=session_id, started_at="")
+                    for session_id in ids
+                ]
+                current.title = "Concurrent title"
+                tracking._next_lifecycle_revision(current, *ids)
+                tracking.save_record(current, path)
+            committed.append(path.read_bytes())
+        return found
+
+    monkeypatch.setattr(sessions, "backfill_sessions", interleave)
+    list_cli._refresh_list_record(stale)
+    current = tracking.load_record(path)
+    assert path.read_bytes() == committed[0]
+    if winner == "incarnation":
+        assert current.creation_nonce == "replacement" and current.sessions is None
+        assert not stamps
+    else:
+        expected = ["winner"] if winner == "registration" else ["discovered", "winner"]
+        assert [entry.session_id for entry in current.sessions] == expected
+        assert [entry.session_id for entry in stale.sessions] == expected
+        assert current.resolved_head_session == "winner"
+        assert current.lifecycle_revision == 1
+        assert current.title == "Concurrent title"
 
 
 @pytest.mark.parametrize(("failure", "managed_state"), [

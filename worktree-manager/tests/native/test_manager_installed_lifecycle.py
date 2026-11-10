@@ -116,6 +116,7 @@ def _capture_failure(root, record_property):
                 "lifecycle-launch.jsonl",
                 "lifecycle-processes.jsonl",
                 "lifecycle-conversation.json",
+                "lifecycle-input.json",
                 "lifecycle-liveness.stdout.txt",
                 "lifecycle-liveness.stderr.txt",
                 "lifecycle-payload-closure.json",
@@ -388,6 +389,7 @@ class _Witness:
         self.native_handles = {}
         self.history = None
         self.turn_observation = None
+        self.input_observation = None
         self.provider_requests = provider_requests
         self.mux_binary = mux_binary
         self.stack = ExitStack()
@@ -409,6 +411,77 @@ class _Witness:
         state[2].feed(data[state[3]:])
         state[3] = len(data)
         return "\n".join(state[1].display)
+
+    def _new_dialog_grid(self, console):
+        frame = self.rendered(console)
+        if "New worktree" not in frame or "Creates on tty-fixture Win" not in frame:
+            return None
+        screen = self.screens[id(console)][1]
+        rows = [
+            "".join(
+                screen.buffer[row][column].data
+                if len(screen.buffer[row][column].data) == 1 else " "
+                for column in range(screen.columns)
+            )
+            for row in range(screen.lines)
+        ]
+        return screen, rows
+
+    def _new_create_focused(self, console):
+        grid = self._new_dialog_grid(console)
+        self.input_observation = {"phase": "create-focus", "dialog": grid is not None}
+        if grid is None:
+            return False
+        screen, rows = grid
+        matches = [
+            (row, match) for row, text in enumerate(rows)
+            if (match := re.search(r"\b(Create)\s+(Cancel)\b", text))
+        ]
+        if len(matches) != 1:
+            return False
+        row, match = matches[0]
+        create = [screen.buffer[row][x] for x in range(*match.span(1))]
+        cancel = [screen.buffer[row][x] for x in range(*match.span(2))]
+        self.input_observation.update(
+            create_style=[(cell.fg, cell.bg) for cell in create],
+            cancel_style=[(cell.fg, cell.bg) for cell in cancel],
+        )
+        return (
+            all(cell.fg in {"black", "000000"} for cell in create)
+            and all(cell.fg not in {"black", "000000"} for cell in cancel)
+            and all(cell.bg != cancel[0].bg for cell in create)
+        )
+
+    def _new_prompt_focused(self, console):
+        grid = self._new_dialog_grid(console)
+        self.input_observation = {"phase": "prompt-focus", "dialog": grid is not None}
+        if grid is None:
+            return False
+        screen, rows = grid
+        hints = [row for row, text in enumerate(rows) if "Prompt (optional" in text]
+        options = [row for row, text in enumerate(rows) if "Additional options:" in text]
+        if len(hints) != 1 or len(options) != 1:
+            return False
+        boxes = [
+            (row, text.index("╭"), text.rindex("╮"))
+            for row, text in enumerate(rows)
+            if hints[0] < row < options[0] - 2 and "╭" in text and "╮" in text
+        ]
+        if len(boxes) != 1:
+            return False
+        row, left, right = boxes[0]
+        if right - left < 6 or rows[row + 2][left] != "╰" or rows[row + 2][right] != "╯":
+            return False
+        # TextArea's single-cell caret is drawn only while the empty field has focus.
+        cells = [screen.buffer[row + 1][x] for x in range(left + 2, right - 1)]
+        styles = [(cell.fg, cell.bg, cell.reverse, cell.underscore) for cell in cells]
+        empty = all(cell.data.isspace() for cell in cells)
+        focused = empty and styles[0] != styles[1] and len(set(styles[1:])) == 1
+        self.input_observation.update(
+            box=[row, left, right], empty=empty, first_style=styles[0],
+            remaining_styles=list(set(styles[1:])), focused=focused,
+        )
+        return focused
 
     def wait(self, check, label, timeout=30):
         deadline = min(time.monotonic() + timeout, self.budget.execution_deadline)
@@ -886,6 +959,15 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
             failure = cleanup_error
             raise
         finally:
+            if self.input_observation is not None:
+                try:
+                    (self.root / "diagnostics" / "lifecycle-input.json").write_text(
+                        json.dumps(self.input_observation), encoding="utf-8",
+                    )
+                except OSError as write_error:
+                    if failure is None:
+                        raise
+                    failure.add_note(f"Input diagnostic write: {write_error}")
             if self.turn_observation is not None:
                 try:
                     (self.root / "diagnostics" / "lifecycle-conversation.json").write_text(
@@ -1774,6 +1856,51 @@ def test_lifecycle_prompt_paste_requires_the_actual_terminal_mode(mode):
         assert sent == []
 
 
+@pytest.mark.parametrize("phase", [
+    "create", "prompt", "idle", "unrelated-redraw", "foreign-caret", "nonempty", "missing-box",
+])
+def test_lifecycle_new_dialog_requires_its_rendered_focus_not_any_redraw(tmp_path, phase):
+    from types import SimpleNamespace
+
+    def draw(row, column, text, style="0;37;48;5;235"):
+        return f"\x1b[{row};{column}H\x1b[{style}m{text}\x1b[0m".encode()
+
+    data = bytearray(b"\x1b[2J")
+    for row, text in (
+        (2, "New worktree · tty-fixture Win"),
+        (3, "Creates on tty-fixture Win"),
+        (5, "Prompt (optional, gets queued):"),
+        (7, "╭" + "─" * 20 + "╮"),
+        (8, "│" + " " * 20 + "│"),
+        (9, "╰" + "─" * 20 + "╯"),
+        (10, "Additional options:"),
+        (12, "Anchor repo"),
+        (13, "No Mux"),
+        (14, "AHP"),
+        (16, " Create     Cancel "),
+    ):
+        data.extend(draw(row, 10, text))
+    if phase == "create":
+        data.extend(draw(16, 11, "Create", "0;30;48;5;214"))
+    if phase in {"prompt", "nonempty"}:
+        data.extend(draw(8, 12, " ", "0;37;48;5;235;7"))
+    if phase == "nonempty":
+        data.extend(draw(8, 13, "X"))
+    elif phase == "unrelated-redraw":
+        data.extend(draw(20, 1, "Background status changed"))
+    elif phase == "foreign-caret":
+        data.extend(draw(20, 1, " ", "0;37;48;5;235;7"))
+    elif phase == "missing-box":
+        data.extend(draw(7, 10, " " * 22))
+    console = SimpleNamespace(output=data)
+    witness = _Witness(tmp_path, {}, None, None, None, None)
+    assert witness._new_create_focused(console) is (phase == "create")
+    assert witness._new_prompt_focused(console) is (phase == "prompt")
+    if phase == "prompt":
+        data.extend(draw(8, 12, " "))
+        assert not witness._new_prompt_focused(console)
+
+
 @pytest.mark.parametrize("query", [b"\x1b[6n", b"\x1b[?6n"])
 def test_lifecycle_passive_renderer_accepts_status_queries_without_sending_input(tmp_path, query):
     from types import SimpleNamespace
@@ -2054,25 +2181,23 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                     first = witness.manager()
                     first.send(b"\r")
                     witness.wait(
-                        lambda: "Creates on tty-fixture Win" in witness.rendered(first),
-                        "The real New-worktree dialog did not open",
+                        lambda: witness._new_create_focused(first),
+                        "The real New-worktree dialog did not focus Create",
                     )
-                    before = len(first.output)
                     first.send(b"\t")
                     witness.wait(
-                        lambda: len(first.output) > before,
-                        "The New dialog did not render the focus transition",
+                        lambda: witness._new_prompt_focused(first),
+                        "The New dialog did not render its focused prompt caret",
                     )
                     _paste_prompt(first, PROMPTS[0])
                     witness.wait(
                         lambda: PROMPTS[0] in witness.rendered(first),
                         "The New dialog did not render the entered prompt",
                     )
-                    before = len(first.output)
                     first.send(b"\r")
                     witness.wait(
-                        lambda: len(first.output) > before,
-                        "The New dialog did not render accepting the prompt",
+                        lambda: witness._new_create_focused(first),
+                        "The New dialog did not focus Create after accepting the prompt",
                     )
                     first.send(b"\r")
                     original = witness.turn(PROMPTS[0], 1, first)

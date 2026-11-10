@@ -1284,6 +1284,9 @@ checkout path so unmatched metadata cannot be mistaken for an empty registry.
 Backfilling a legacy registry advances its canonical lifecycle revision so an
 older full-record save cannot erase the discovered Resume target. Strict Refresh
 also refuses if that revision changes during observation.
+Legacy initialization rereads the record under its canonical lock, preserves a
+concurrent initializer's registry, and refuses a replaced incarnation before
+writing or stamping liveness.
 Reusing a request ID with different filters also refuses.
 It never falls back to caller-side scans or saved rows and cannot be combined
 with `--follow` or `--passive`. `--fresh` alone is still a publication read,

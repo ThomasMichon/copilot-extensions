@@ -202,13 +202,11 @@ def _refresh_list_record(
         return refresh_record(rec)
     if getattr(rec, "sessions", None) is None:
         try:
+            from .record_liveness_refresh import initialize_registry
+
             discovered = sessions.backfill_sessions([rec])
-            rec.sessions = [
-                tracking.SessionEntry(session_id=session_id, started_at="")
-                for session_id in discovered.get(rec.worktree_id, [])
-            ]
-            tracking._next_lifecycle_revision(rec, *(entry.session_id for entry in rec.sessions))
-            tracking.save_record(rec)
+            if not initialize_registry(rec, discovered.get(rec.worktree_id, [])):
+                return None
         except Exception:
             pass
 

@@ -745,3 +745,37 @@ stale-writer merge behavior, retained Resume identity, unchanged unrelated edits
 idempotent later liveness refresh and concurrent-revision refusal. Fresh
 exact-source installed qualification, actual review and required CI remain
 mandatory; all parent acceptance gates remain open.
+
+### 2026-11-10 - Atomic legacy initialization and observable dialog focus
+
+Exact-source run 42869501687 at
+`5aae3a4938d042e62d12739a73883e13148eab16` failed before Create:
+the New dialog never rendered the entered prompt. JUnit records one test, one
+failure, zero errors/skips and 291.325 seconds. No lifecycle pass is credited.
+The terminal shows an empty prompt field; it does not establish the precise
+event ordering that lost input. The controller's byte-count focus waits could
+accept unrelated redraws, so they were not evidence that the field was ready.
+
+The witness now observes the rendered Create highlight before Tab, the empty
+prompt field's drawn caret before paste, and the Create highlight after accepting
+the prompt. Existing exact prompt/history assertions remain. The same waits keep
+their original 30-second limits and the case keeps its original 720-second
+budget. Bounded input-style diagnostics distinguish unknown focus, stale frames
+and unrelated redraws. All 65 lifecycle source controls pass, including the new
+rendered-focus positive and refusal cases; installed proof remains required.
+
+Current-head review 5846807016 confirms the previous lifecycle-revision finding
+resolved, but raises High comment 4528558342 on the best-effort path: an
+interleaved initializer can reach the same next revision as a stale backfill,
+allowing that stale save to overwrite the winner. Three real-file regressions
+reproduce concurrent registration, competing refresh initialization and a replaced
+incarnation receiving liveness stamps.
+
+Legacy initialization now reloads uncached under the canonical required-sidecar
+record lock, checks the incarnation, and initializes only a still-unindexed
+current record. It otherwise retains the winning registry and revision without
+writing. Only lifecycle fields are adopted into the caller, preserving unrelated
+snapshot/CAS pairing. A replaced incarnation stops before liveness stamps.
+The final backend packet passes 240 selected controls in 54.97 seconds, with the
+same 224 unrelated sessions/reclaim cases deselected. Fresh combined-head native
+qualification, actual review and required CI remain mandatory.

@@ -1,4 +1,4 @@
-"""Strict point reconciliation with complete discovery and confirmed persistence."""
+"""Point reconciliation and atomic initialization of legacy session registries."""
 
 from __future__ import annotations
 
@@ -37,6 +37,28 @@ def _fence(record):
         tuple(copy.deepcopy(getattr(record, name, None)) for name in fields),
         record.resolved_head_session,
     )
+
+
+def initialize_registry(record, session_ids) -> bool:
+    path = record.yaml_path
+    with tracking._RecordLock(path, require_sidecar=True):
+        current = tracking._load_record_uncached(path)
+        if any(getattr(current, name) != getattr(record, name) for name in _INCARNATION):
+            return False
+        if current.sessions is None:
+            current.sessions = [
+                tracking.SessionEntry(session_id=session_id, started_at="")
+                for session_id in session_ids
+            ]
+            tracking._next_lifecycle_revision(current, *session_ids)
+            tracking.save_record(current, path)
+        # Keep unrelated snapshot fields paired with their read-time CAS evidence.
+        for field in (
+            "sessions", "lifecycle_revision", "head_revision", "head_session",
+            "head_transitions", "handoff_counter", "handoffs",
+        ):
+            setattr(record, field, getattr(current, field))
+    return True
 
 
 def refresh_record(record):
