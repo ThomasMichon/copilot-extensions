@@ -307,6 +307,7 @@ class _SessionLifecycleMixin:
                     # The conversation and provider claim remain reserved;
                     # only its confirmed-retired connection is now free.
                     self._release_codespace_lock(session_id)
+                    self._remote_recovery_inconclusive.discard(session_id)
 
             session.status = SessionStatus.STOPPED
             session._stop_requested = False  # the stop a notice announced has happened

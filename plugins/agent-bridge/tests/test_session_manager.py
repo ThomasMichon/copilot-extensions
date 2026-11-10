@@ -2125,6 +2125,8 @@ async def test_remote_reap_stop_waits_for_confirmation_and_releases_only_connect
 ) -> None:
     manager, session, other_lock = remote_reap_stop
     entered, finish = asyncio.Event(), asyncio.Event()
+    manager._remote_recovery_inconclusive.add(session.session_id)
+    reap_calls = 0
     lock_dir = manager._codespace_locks["example-codespace"][0].path.parent
 
     def probe_connection():
@@ -2141,6 +2143,8 @@ async def test_remote_reap_stop_waits_for_confirmation_and_releases_only_connect
         ).returncode
 
     async def confirm(*_args, **_kwargs):
+        nonlocal reap_calls
+        reap_calls += 1
         entered.set()
         await finish.wait()
         return SimpleNamespace(exit_code=0, stdout="__REAPED__")
@@ -2170,6 +2174,8 @@ async def test_remote_reap_stop_waits_for_confirmation_and_releases_only_connect
         assert row["acp_session_id"] == "retained-conversation"
         assert SpawnTarget.from_json(row["target_json"]).caller_worktree == session.target.caller_worktree
         assert not manager._remote_reap_tasks
+        await manager.stop_session(session.session_id, reap_host=True)
+        assert reap_calls == 1
     finally:
         finish.set()
         await asyncio.gather(operation, return_exceptions=True)
