@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
+import argparse
+import io
+import sys
 from collections.abc import Callable
-from contextlib import ExitStack
+from contextlib import ExitStack, redirect_stderr, redirect_stdout
 from pathlib import Path
 
-from . import config as cfg, git_ops, knowledge_plugins, launch_admission, sessions, state_root, tracking
+from . import config as cfg, git_ops, knowledge_plugins, launch_admission, output, sessions, state_root, tracking
+from . import worktree_identity
 
 
 def sync_pair(
@@ -152,3 +156,118 @@ def sync_pair(
         return failed("pair-sync-failed", str(exc))
     finally:
         admission.close()
+
+
+def cmd_sync(args: argparse.Namespace) -> int:
+    if not getattr(args, "stream", False):
+        return _cmd_sync(args)
+    if not getattr(args, "json", False):
+        print("sync: --stream requires --json", file=sys.stderr)
+        return 2
+    from .sync_progress import SyncProgress
+
+    with SyncProgress() as progress:
+        try:
+            return _cmd_sync(args, progress=progress)
+        except (OSError, RuntimeError, ValueError, git_ops.GitError) as error:
+            return progress.finish({"ok": False, "reason": "sync-failed", "detail": str(error)})
+
+
+def _cmd_sync(args: argparse.Namespace, *, progress=None) -> int:
+    from . import worktree_ops_cli as operations
+
+    config = cfg.load_config()
+    repo = config.default_repo
+    tracking_path = cfg.tracking_dir()
+    as_json = getattr(args, "json", False)
+    single = getattr(args, "worktree_id", None)
+
+    if single:
+        if progress is None:
+            wt_id = worktree_identity._resolve_worktree_id(single)
+        else:
+            diagnostic = io.StringIO()
+            try:
+                with redirect_stdout(diagnostic), redirect_stderr(diagnostic):
+                    wt_id = worktree_identity._resolve_worktree_id(single)
+            except SystemExit:
+                return progress.finish({
+                    "worktree_id": single, "ok": False, "reason": "worktree-id-rejected",
+                    "detail": diagnostic.getvalue().strip() or "Worktree selection was refused",
+                    "outcome": "not-started",
+                })
+        yaml_path = tracking_path / f"{wt_id}.yaml"
+        if not yaml_path.exists():
+            res = {"worktree_id": wt_id, "updated": False, "reason": "not-found", "behind": 0}
+            if progress is not None:
+                return progress.finish(res)
+            if as_json:
+                output._json_output(res)
+            else:
+                print(f"{wt_id}: not-found")
+            return 1
+        records = [tracking.load_record(yaml_path)]
+    else:
+        records = tracking.list_records(
+            tracking_path,
+            status_filter="active",
+            platform_filter=cfg.detect_platform(),
+        )
+        records = [
+            r
+            for r in records
+            if r.kind not in tracking.MANAGED_KINDS
+            and r.worktree_path
+            and Path(r.worktree_path).exists()
+        ]
+
+    if progress is not None:
+        progress.stage("Fetching repository")
+    if git_ops.has_remote(repo.remote, cwd=repo.anchor):
+        try:
+            git_ops.fetch(repo.remote, cwd=repo.anchor)
+        except Exception:
+            pass
+        else:
+            for synced_repo in {r.repo for r in records if r.repo}:
+                tracking.record_repo_fetch_confirmed(synced_repo)
+
+    if progress is not None:
+        progress.stage("Observing worktree sessions")
+    session_ctx = sessions.scan_sessions_fast(records)
+    active_paths = operations._build_active_paths(records, session_ctx)
+
+    results = []
+    for rec in records:
+        try:
+            if getattr(args, "paired", False) and (rec.pair_id or rec.pair_ref):
+                result = sync_pair(
+                    rec, **({"on_progress": progress.stage} if progress is not None else {}),
+                )
+            else:
+                if progress is not None:
+                    progress.stage("Inspecting and synchronizing worktree")
+                result = operations._core_helper("_sync_one_record", operations._sync_one_record)(
+                    rec, repo, active_paths,
+                )
+        except Exception as error:
+            if progress is None:
+                raise
+            results.append({
+                "worktree_id": rec.worktree_id, "ok": False, "reason": "sync-interrupted",
+                "detail": str(error), "outcome": "unknown",
+            })
+            break
+        results.append(result)
+
+    if progress is not None:
+        return progress.finish(results[0] if single else {"results": results})
+    if as_json:
+        output._json_output(results[0] if single else {"results": results})
+    elif not results:
+        print("No worktrees to sync.")
+    else:
+        for result in results:
+            tag = f"updated ↑{result.get('behind', 0)}" if result.get("updated") else result.get("reason", "?")
+            print(f"{result['worktree_id']}: {tag}")
+    return 1 if any(result.get("ok") is False for result in results) else 0

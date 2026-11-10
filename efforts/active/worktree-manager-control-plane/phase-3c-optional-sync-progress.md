@@ -117,7 +117,7 @@ The version-1 declaration is included in the engine's package data.
 
 Four focused tests failed before implementation for missing frames, missing
 pre-configuration syntax refusal and unsupported parser syntax. The current
-contained Windows x64 source packet passes 30 distinct cases in disjoint
+first submitted Windows x64 source packet passed 30 distinct cases in disjoint
 selections: seven producer/real-parser-process/knowledge-side controls, ten
 ordinary pair controls and thirteen failure/policy/freshness controls. Each
 selection retains the ordinary 30-second item and 300-second group bounds.
@@ -137,6 +137,18 @@ x64 interpreter instead, without changing dependencies or host configuration.
 A later retained-cache access refusal was preserved; the normal runner's
 supported private scratch-root selection supplied a fresh owned cache.
 Focused F/E9 lint and the installation contract check pass.
+
+The first review found shortened-option acceptance, missing terminal selector
+refusals and lost completed batch results after a later exception. Four focused
+regressions failed before correction. Sync now requires exact option names,
+retains native selector diagnostics in a known-not-started terminal refusal,
+and preserves completed entries plus an explicitly unknown interrupted item.
+The command body moves into the existing native Sync module while its old CLI
+entry and native helper seams remain available. This also removes the CLI
+module's newly introduced 1000-line-cap violation without widening a baseline.
+The revised source packet passes 33 distinct cases in disjoint 10/10/13
+selections, including all 32 Sync cases and the existing fetch-ledger control.
+Exact-head review/CI and the module-size guard still gate publication acceptance.
 
 S2 local incremental rendering, selected-runtime negotiation/rollback, consumer
 two-clock and uncertain-outcome validation remain open. No Manager path uses the

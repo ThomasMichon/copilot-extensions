@@ -448,9 +448,69 @@ def test_sync_stream_parser_remains_strict():
     worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
     args = parser.parse_args(["sync", "--stream", "--json", "--worktree-id", "example"])
     assert args.stream and args.json and args.worktree_id == "example"
-    with pytest.raises(SystemExit) as failure:
-        parser.parse_args(["sync", "--streaming", "--json"])
-    assert failure.value.code == 2
+    for option in ("--streaming", "--str"):
+        with pytest.raises(SystemExit) as failure:
+            parser.parse_args(["sync", option, "--json"])
+        assert failure.value.code == 2
+
+
+@pytest.mark.parametrize("selector", ["tail", "../invalid"])
+def test_streamed_sync_selector_refusal_is_a_terminal_result(tmp_path, monkeypatch, capfd, selector):
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    for name in ("first-tail", "second-tail"):
+        (tmp_path / f"{name}.yaml").write_text("{}")
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=True, json=True, worktree_id=selector,
+    )) == 1
+    frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    assert frames[-1]["type"] == "error"
+    result = frames[-1]["result"]
+    assert result["worktree_id"] == selector and result["ok"] is False
+    assert result["reason"] == "worktree-id-rejected"
+    assert ("Ambiguous short ID" if selector == "tail" else "Invalid worktree ID") in result["detail"]
+    assert result["outcome"] == "not-started"
+
+
+def test_streamed_sync_batch_exception_retains_completed_results(tmp_path, monkeypatch, capfd):
+    records = []
+    for name in ("first", "interrupted", "unstarted"):
+        path = tmp_path / name
+        path.mkdir()
+        records.append(SimpleNamespace(
+            worktree_id=name, repo="example", kind="session", worktree_path=str(path),
+            pair_id=None, pair_ref=None,
+        ))
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(
+        default_repo=SimpleNamespace(remote="origin", anchor=str(tmp_path)),
+    ))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(tracking, "list_records", lambda *args, **kwargs: records)
+    monkeypatch.setattr(git_ops, "has_remote", lambda *args, **kwargs: False)
+    monkeypatch.setattr(worktree_sync.sessions, "scan_sessions_fast", lambda *args: None)
+    monkeypatch.setattr(worktree_ops_cli, "_build_active_paths", lambda *args: set())
+    completed = {"worktree_id": "first", "updated": True, "reason": "updated", "behind": 1}
+    calls = []
+
+    def synchronize(record, *_args):
+        calls.append(record.worktree_id)
+        if record.worktree_id != "first":
+            raise OSError("fixture checkout disappeared")
+        return completed
+
+    monkeypatch.setattr(worktree_ops_cli._core(), "_sync_one_record", synchronize)
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=True, json=True, worktree_id=None,
+    )) == 1
+    frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    assert frames[-1]["type"] == "error"
+    results = frames[-1]["result"]["results"]
+    assert results[0] == completed
+    assert results[1] == {
+        "worktree_id": "interrupted", "ok": False, "reason": "sync-interrupted",
+        "detail": "fixture checkout disappeared", "outcome": "unknown",
+    }
+    assert calls == ["first", "interrupted"]
 
 
 def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch):
