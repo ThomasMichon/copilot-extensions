@@ -134,6 +134,22 @@ for the recorded native versions, not the operator's installed build, attached
 or new-window use, or survival across caller cleanup Jobs. New packet support
 must be reviewed and promoted to the protected controller before submission.
 
+`submit --packet native-driver-auth-wait` selects only the Driver receiver's
+`test_opt_in_receiver_auth_wait_and_same_session_resume` in
+`tests/native/test_native_headed_auth_wait.py`. The candidate must supply that
+fixture; packet support neither supplies it nor enables production renewal.
+It uses the same disposable hash-pinned binaries and actual-version checks,
+but receives no configured feed secret and performs no private-feed probe.
+The canonical plugin runner prepares the Driver's source dependencies and
+public registry dependencies under its normal seasoning policy. The fixture
+uses an isolated loopback model provider, not a productive account or model.
+Its 120-second functional deadline and 180-second pytest deadline remain
+unchanged, inside a 300-second group and 420-second plugin aggregate.
+Only that exact passed case, its pinned prerequisites and all required phases
+qualify; missing, skipped, foreign or extra cases do not. Evidence sanitization
+and interruption handling are the same as the Worktrees packet. This does not
+qualify other callers, pending-work retirement or positive-renewal activation.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
