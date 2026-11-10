@@ -153,8 +153,24 @@ def test_form_single_question_has_no_tabs(monkeypatch, tmp_path):
     asyncio.run(run())
 
 
-def test_form_collect_all_types_on_confirm(monkeypatch, tmp_path):
+@pytest.mark.parametrize("defer_other_reveal", [False, True])
+def test_form_collect_all_types_on_confirm(monkeypatch, tmp_path, defer_other_reveal):
     _drafts(monkeypatch, tmp_path)
+    if defer_other_reveal:
+        original_handler = PivotFormScreen.on_radio_set_changed
+
+        def delayed_handler(screen, event):
+            if event.radio_set.id == "q-2" and event.index == 2:
+                screen.set_timer(0.5, lambda: original_handler(screen, event))
+            else:
+                original_handler(screen, event)
+
+        monkeypatch.setattr(
+            "worktree_manager.production_picker.picker_tui.field_questions."
+            "FieldQuestionsMixin.on_radio_set_changed",
+            delayed_handler,
+        )
+
     scr = PivotFormScreen(_card(), _fields(), "Steer", task_id="t-collect")
     app = _Host(scr)
 
@@ -165,7 +181,12 @@ def test_form_collect_all_types_on_confirm(monkeypatch, tmp_path):
             # decision default is index 0 -> "revise"
             sev = scr.query_one("#q-2", RadioSet)
             list(sev.query(RadioButton))[2].value = True  # the "Other…" radio
-            await pilot.pause()
+
+            async def wait_for_other():
+                while not scr.query_one("#other-2", _AutoExpandTextArea).display:
+                    await pilot.pause()
+
+            await asyncio.wait_for(wait_for_other(), timeout=5.0)
             assert scr.query_one("#other-2", _AutoExpandTextArea).display is True
             scr.query_one("#other-2", _AutoExpandTextArea).text = "in between"
             tags = scr.query_one("#q-3", SelectionList)

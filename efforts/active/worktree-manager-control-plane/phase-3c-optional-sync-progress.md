@@ -1,7 +1,7 @@
 # Optional built-in Sync progress
 
 - **Parent:** [Worktree Manager control plane](README.md#optional-built-in-lifecycle-progress).
-- **Status:** Provider/consumer source accepted; complete CLI comparison qualified, awaiting review.
+- **Status:** Bounded Sync source increment Done; independent runtime/platform lanes remain under #4183.
 - **Source:** [#4183](https://github.com/ThomasMichon/copilot-extensions/issues/4183)
   LP1-LP3/LPV, including the complete received #4274 request.
 - **Participant:** Optional Sync-progress implementer, public source
@@ -96,7 +96,7 @@ PATH-based command selection or a claim that cancelling display rolls back Git.
   the existing executor and render its latest message in ProgressScreen.
   Preserve per-item ordering, source/selection identity, bounded process ownership
   and existing complete paired diagnostics. No new persistent worker.
-- [ ] **S3 - Acceptance:** Record actual source proof and merge under normal
+- [x] **S3 - Acceptance:** Record actual source proof and merge under normal
   review/CI. Document the optional CLI/consumer contract and mixed-version
   behavior as reality only after implementation. Retain other verbs, remote
   streaming, release and authorized installed qualification explicitly.
@@ -140,15 +140,16 @@ Unconfirmed cleanup retains exact process custody and stops subsequent items.
 
 Source qualification covers 74 distinct Manager controls, including real parser,
 private Git pair and Textual consumer cases for a no-op and blocked partial pair.
-The local source implementation is accepted in #11914. Complete default-versus-
-streamed CLI result comparison (SV1) is now source-qualified; its reviewed
-acceptance, final source-validation disposition and
-independent native/installed/release qualification remain open. No host
-installation or live worktree Sync is claimed.
+The local source implementation is accepted in #11914 and complete ordinary/
+streamed CLI result comparison in #11924. This bounded source increment and its
+source-validation plan are complete. Other lifecycle verbs, remote streaming
+and independent release/native/installed acceptance remain under the open #4183
+parent, not completed by these source controls. No host installation or live
+worktree Sync is claimed.
 
 ## Validation Plan
 
-- [ ] **SV1 - CLI compatibility:** Real parser/process tests prove default text
+- [x] **SV1 - CLI compatibility:** Real parser/process tests prove default text
   and JSON behavior remains unchanged, unknown options remain strict, the opt-in
   emits flushed frames and its complete terminal result matches ordinary Sync.
   Cover a successful no-op and one real blocked/partial pair, not a synthetic
@@ -178,6 +179,25 @@ installation or live worktree Sync is claimed.
   test. The complete #4183 issue stays open for its remaining original lanes.
 
 ## Journal
+
+### 2026-11-10 - Complete source increment accepted
+
+- #11924 merged at 12:27:30 UTC as
+  `47723c5f1b547cfebd4d12b4a229adec7cd83636`. Genuine Copilot approval
+  `5841725300` covered exact head `db990fc1aada0ed44c82b306fe5afc2bc65ada49`;
+  the entire body reports no active issues and there are no inline findings.
+  Exact-head CI `42814912128` passed all jobs, including the required PR gate,
+  before the managed merge. Attribution/lockdown checks passed.
+- All 41 admitted strict checker projects passed again. The pre-publication
+  rebase changed only updater/Bridge and unrelated registration intent, not the
+  qualified parser/Sync/test/process inputs. Native post-merge synchronization
+  succeeded at the accepted merge without dropping unmerged work or finalizing
+  a held workspace. The complete #4183 tracker remains open.
+- SV1 and S3 are accepted at the recorded source tier. This finishes only the
+  reviewed producer/local-consumer increment: #11889, #11914 and #11924.
+  The parent effort remains Active for its other Plan/Validation and owners.
+  Other verbs, remote streaming, release and authorized native/installed
+  acceptance retain their separate #4183 gates; no runtime rollout occurred.
 
 ### 2026-11-10 - Complete CLI comparison source-qualified
 
