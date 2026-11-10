@@ -795,6 +795,21 @@ This effort remains **Active**, not yet ready to archive.
 
 ## Journal
 
+### 2026-11-10 - Bounded capture-duration source correction
+
+The finite #3418 leaf rejects non-finite/negative pivot waits in the ordinary
+CLI and direct runner/capture APIs before source preparation or UI creation.
+Twelve new controls first failed at the missing guards; the affected
+capture/preview/parser packet now passes 69 cases, with three additional
+unmocked parser refusals in a real fresh-profile child and unchanged profile
+inventory. Zero and finite positive waits retain their existing consumers.
+
+This is argument validation, not the historical anchor-walk cause, an
+adopted-data capture or native/installed acceptance. All six inherited #3418
+rows, its whole-operation alternatives and this root's real-mesh OR explicit
+operator-accepted demo-only validation remain open under their existing owners.
+No live capture, service, mux, deployment or cleanup operation was performed.
+
 ### 2026-10-23 - Direct retained acceptance from #3587
 
 - Added the complete #3587 direct retained acceptance to this ROOT Plan, its actual
