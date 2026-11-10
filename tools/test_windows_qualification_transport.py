@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from windows_qualification_contract import TRANSPORT_REF
+from windows_qualification_contract import TRANSPORT_MARKER, TRANSPORT_REF, canonical
 from windows_qualification_transport import Transport, command, rejected_attempt
 
 
@@ -280,6 +280,81 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
         }]
         assert len(dispatched) == 1
         git(root, "merge-base", "--is-ancestor", candidate, recovered["request"]["envelope_sha"])
+
+
+@pytest.mark.parametrize("mutation", ["delete", "rewrite", "contended-rewrite"])
+def test_recovery_keeps_original_history_across_append_reads_and_retries(
+    tmp_path, monkeypatch, mutation,
+):
+    from test_windows_qualification import fake_client
+    client, directory, state = fake_client(tmp_path, monkeypatch)
+    root = repository(tmp_path / "source")
+    remote = tmp_path / "remote.git"
+    git(root, "init", "--bare", str(remote))
+    first = git(root, "rev-parse", "HEAD")
+    previous = Transport(root, str(remote)).append(first, lambda value: None)
+    (root / "source.txt").write_text("candidate", encoding="utf-8")
+    git(root, "commit", "-am", "Candidate")
+    candidate = git(root, "rev-parse", "HEAD")
+
+    def envelope(source, parents):
+        return command(
+            ["git", "commit-tree", git(root, "rev-parse", source + "^{tree}"),
+             *[argument for parent in parents for argument in ("-p", parent)]],
+            cwd=root, data=canonical({"format": TRANSPORT_MARKER, "candidate": source}) + "\n",
+        ).stdout.strip()
+
+    original = envelope(candidate, [previous, candidate])
+    rewritten = envelope(first, [first])
+    assert rewritten != previous
+    if mutation != "delete":
+        git(remote, "fetch", "--no-tags", "--no-write-fetch-head", str(root), rewritten)
+    state["request"].update(source_sha=candidate, envelope_sha=None)
+    state.update(
+        phase="transport-attempt", envelope_sha=original, previous_tip=previous,
+        transport_failure={"returncode": 1, "stderr": "", "stdout": (
+            f"!\t{original}:{TRANSPORT_REF}\t[rejected] (fetch first)\n"
+        )},
+    )
+    client.save(directory, state)
+    monkeypatch.setattr(client, "preflight", lambda selected: state["provider"])
+    changed = False
+    pushes = []
+
+    def mutate():
+        nonlocal changed
+        if mutation == "delete":
+            git(remote, "update-ref", "-d", TRANSPORT_REF)
+        else:
+            git(remote, "update-ref", TRANSPORT_REF, rewritten)
+        changed = True
+
+    def moving(argv, **kwargs):
+        if "push" in argv:
+            pushes.append(argv)
+            if mutation == "contended-rewrite" and not changed:
+                mutate()
+        result = command(argv, **kwargs)
+        if "fetch" in argv and mutation != "contended-rewrite" and not changed:
+            # The reconciliation read returns its old tip; append must read again.
+            mutate()
+        return result
+
+    client.transport = Transport(root, str(remote), run=moving)
+    dispatches = []
+    monkeypatch.setattr(client, "dispatch", lambda *args: dispatches.append(args))
+    with pytest.raises(RuntimeError, match="Original transport history"):
+        client.resume(state["request"]["request_id"])
+    assert changed and dispatches == []
+    assert len(pushes) == (1 if mutation == "contended-rewrite" else 0)
+    saved = client.load(state["request"]["request_id"])[1]
+    assert saved["request"] == state["request"]
+    if mutation == "contended-rewrite":
+        assert saved["transport_history"][0]["envelope_sha"] == original
+    else:
+        assert saved == state
+    current = git(root, "ls-remote", "--refs", str(remote), TRANSPORT_REF)
+    assert current == ("" if mutation == "delete" else rewritten + "\t" + TRANSPORT_REF)
 
 
 def test_competing_descendant_confirms_reused_tip_instead_of_rejected_envelope(tmp_path):

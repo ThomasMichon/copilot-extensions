@@ -172,7 +172,9 @@ class Client:
         if not published:
             self.append_transport(directory, state)
 
-    def append_transport(self, directory: Path, state: dict) -> None:
+    def append_transport(
+        self, directory: Path, state: dict, *, required_history: str | None = None,
+    ) -> None:
         """Retain superseded attempt evidence before starting another envelope."""
         value = state["request"]
 
@@ -191,7 +193,10 @@ class Client:
             self.save(directory, state)
 
         try:
-            value["envelope_sha"] = self.transport.append(value["source_sha"], persist)
+            value["envelope_sha"] = self.transport.append(
+                value["source_sha"], persist,
+                **({"required_history": required_history} if required_history else {}),
+            )
         except Exception as exc:
             raise RuntimeError(
                 f"transport incomplete ({exc}); resume --request-id {value['request_id']}",
@@ -252,7 +257,7 @@ class Client:
                     "merge-base", "--is-ancestor", previous, tip, check=False,
                 ).returncode):
                     raise ValueError("shared transport history changed; refusing replacement")
-                self.append_transport(directory, state)
+                self.append_transport(directory, state, required_history=previous)
             else:
                 self.transport.validate_tip(envelope)
                 state["request"]["envelope_sha"] = envelope

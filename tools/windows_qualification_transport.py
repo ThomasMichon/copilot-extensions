@@ -139,12 +139,21 @@ class Transport:
         ).stdout:
             raise ValueError("invalid transport envelope tree")
 
-    def append(self, candidate: str, persist: Callable[[dict], None]) -> str:
+    def append(
+        self, candidate: str, persist: Callable[[dict], None], *,
+        required_history: str | None = None,
+    ) -> str:
         """Persist each attempted envelope before pushing; never force a shared ref."""
         sha(candidate)
+        if required_history is not None:
+            sha(required_history)
         tree = self.git("rev-parse", candidate + "^{tree}").stdout.strip()
         for _ in range(4):
             previous = self.tip()
+            if required_history and (not previous or self.git(
+                "merge-base", "--is-ancestor", required_history, previous, check=False,
+            ).returncode):
+                raise ValueError("Original transport history is unavailable or changed")
             if previous:
                 self.validate_tip(previous)
                 if self.git("merge-base", "--is-ancestor", candidate, previous, check=False).returncode == 0:
