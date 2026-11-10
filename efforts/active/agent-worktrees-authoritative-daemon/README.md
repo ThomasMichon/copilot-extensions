@@ -1488,6 +1488,52 @@ reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
 
+### 2026-11-10 - Finite semantic archive listing correction
+
+The bounded #5942 source correction applies the existing documented rule that
+archives require `--all`, even if their checkout remains. Plain/fresh JSON
+selection and publisher-built default-membership indexes exclude archives;
+explicit complete/status/identity inventory keeps their durable rows. Current,
+advisory and held-feed consumers preserve complete counts and barriers. A
+retained archive cannot create a default suffix collision or make checkout
+presence unready. Clients refuse older incorrect default selections without
+reconstructing facts, rewriting saved projections or changing refresh ownership.
+Legacy cached rows containing an archive cannot bypass the corrected selector.
+
+Five controls failed first at the actual plain/JSON selection, current/advisory
+admission and indexed membership boundaries. The affected four-file packet has
+240 passing controls; its new real-socket flow initially observed asynchronous
+teardown before the handler released its subscription. Waiting on the existing
+bounded feed-drain owner corrects that fixture; the three socket-flow controls
+pass, yielding 241 distinct qualified cases, including 16 new controls. No
+functional assertion or deadline was relaxed. Three nominal two-second
+full-roster load variants are deliberately excluded under #7935/#7936/#7946,
+not counted as passes or replaced by this functional result.
+The final 16 new controls pass after the cache-shape guard; module ceilings,
+touched F/E9, whitespace, documentation and all 13 install contracts pass.
+Optional admitted typing prevalidation is not qualified: prepared checker
+environments report missing `mypy_extensions`, then stop at unprepared
+`lib-config-migrate`. Worktrees is still outside that admitted typing scope.
+
+Review found a second advisory exit in `read_current` that bypassed the
+validated saved-result helper. The first new controls used the wrong fixture
+database name and did not qualify that defect. With the actual owned database
+identity corrected, both direct fallback and real passive CLI controls reproduce
+the archive leak. Both exits now use the same validated helper while preserving
+the selected runtime-home path and failure classification. The complete final
+affected packet passes 243 cases, including all 18 new controls, with only the
+same three nominal timing variants excluded. Fresh review and CI are required
+for this correction; the earlier review/checks are not acceptance of new source.
+
+This realizes `registered-by-default-listing` and
+`archival-is-a-terminus-not-a-deletion`, not a new archive/lifecycle authority.
+No new CLI form, wire field, daemon or persistence migration is added. Existing
+`--all` and status queries retain explicit archive access; the existing
+`include_missing` selection continues to carry the CLI's `--all` choice.
+Source review/CI and actual merge remain publication gates. Installed/native
+rollout, all-mutator/catalog/performance acceptance and every independent
+#3761/#918/#2619/#6748/#7937/#7946/#11864 owner remain open.
+
 ### 2026-11-06 - Prepared native cell-membership source qualification
 
 Receipt-only payload-alias retarget first reproduces two native prepared

@@ -56,6 +56,58 @@ def request(**extra):
     return {"contract_version": 1, "project": "project", **extra}
 
 
+@pytest.mark.parametrize("surface", ["resident", "saved", "fallback", "passive"])
+def test_semantic_archive_from_older_selection_is_refused_without_recompute(
+    tmp_path, monkeypatch, capfd, no_caller_compute, surface,
+):
+    path = tmp_path / "worktrees-current.sqlite3"
+    store = projection.WorktreesProjection(path)
+    store.publish("project", [{
+        "id": "archived", "status": "archived", "checkout_present": True,
+    }], observed_at=1)
+    payload = request(include_missing=False)
+    try:
+        if surface != "resident":
+            original = client.read_advisory
+            monkeypatch.setattr(
+                client, "read_advisory",
+                lambda db, project, **kw: original(db, project, include_missing=True),
+            )
+            if surface == "saved":
+                with pytest.raises(projection.ProjectionUnavailable, match="selection"):
+                    client.saved_result(payload, "legacy saved selection", db_path=path)
+            else:
+                monkeypatch.setattr(
+                    client, "_resident",
+                    lambda _: (_ for _ in ()).throw(ConnectionRefusedError("owner absent")),
+                )
+                monkeypatch.setattr(client.monitor, "_aw_runtime_home", lambda: tmp_path)
+                monkeypatch.setattr(
+                    client.monitor, "_ensure_status_monitor", lambda: pytest.fail("passive recovery"),
+                )
+                if surface == "fallback":
+                    with pytest.raises(projection.ProjectionUnavailable, match="selection"):
+                        client.read_current(payload, recover=False)
+                else:
+                    monkeypatch.setattr(client.cfg, "project_name", lambda: "project")
+                    monkeypatch.setattr(
+                        list_cli.list_cache, "note_demand", lambda *a, **k: pytest.fail("passive demand"),
+                    )
+                    assert list_cli.cmd_list(argparse.Namespace(
+                        json=True, passive=True, tracking_status="all", all=False,
+                        include_other_platforms=True,
+                    )) == 1
+                    result = json.loads(capfd.readouterr().out)
+                    assert "selection" in result["error"]
+                    assert "worktrees" not in result
+        else:
+            result = {"ok": True, "contract_version": 1, **store.read("project")}
+            with pytest.raises(projection.ProjectionUnavailable, match="selection"):
+                client.validate_result(result, payload)
+    finally:
+        store.close()
+
+
 def test_waiting_read_starts_once_and_waits_past_old_recovery_budget(
     monkeypatch, capfd, no_caller_compute,
 ):
