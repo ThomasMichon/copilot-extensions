@@ -278,6 +278,18 @@ production decoder and verifies structured-value and malformed-input parity.
 Child/item/group limits remain 10/30/300 seconds. These finite synthetic
 measurements are not installed, composed-hook or productive-throughput proof.
 
+For prepared Windows file-local writes, `prepared-membership-native.yml` runs
+`registered_file_local_write_reuses_original_guard_facts` from
+`tests/test_managed_session.py` in disjoint safe/admission and fallback packets.
+The controls use actual membership and guard-map publication for legacy and
+installation-cell scopes, retain protected-write decisions, and cover current
+metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
+The `real-policy` cases compare the same registered entry and fixture with the
+new contract and an older read-only contract, using the real caller-owned policy
+worker rather than a timing stub; they also require a real protected-state deny.
+These are finite source samples, not latency distributions or the 1-2 second
+whole-hook/throughput acceptance. Child/item/group limits stay 10/30/300 seconds.
+
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
 names the existing 3.9 executable explicitly and is version-checked before

@@ -841,7 +841,7 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert membership.exists() is (case in {"incomplete", "receipt"})
     policy_required = case not in {"view", "rg", "glob"}
-    assert validation.exists() is policy_required
+    assert validation.exists() is policy_required, (result.stdout, result.stderr)
     assert policy.exists() is policy_required
     if policy_required:
         assert policy.read_bytes() == raw
@@ -849,6 +849,245 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     else:
         assert result.stdout == b""
     assert not (legacy / "cache").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered file-local write consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "ordinary", "create", "path-alias", "json-args", "personal-state", "anchor-cwd",
+    "anchor-target", "foreign", "nested", "batch", "structured", "drive-relative",
+    "missing-map", "partial-map", "wrong-scope", "array-schema", "oversized-config",
+    "guard-drift", "reader-drift", "forms-drift", "missing-dependencies", "git-pointer-aba",
+    "delegated", "invalid-elevation", "noncanonical-map", "real-policy", "old-admission",
+    "cell-ordinary", "cell-create", "cell-personal-state", "cell-guard-drift",
+])
+def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, shell, case):
+    from agent_worktrees import guarded_anchors
+
+    cell = case.startswith("cell-")
+    if cell:
+        case = case.removeprefix("cell-")
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
+        pytest.skip(f"{shell} is unavailable")
+    anchor, registry = fixture_project(tmp_path)
+    workspace, admin = fixture_linked_worktree(tmp_path, anchor)
+    if case == "anchor-cwd":
+        workspace = anchor
+    config = workspace / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("stateless: false\n" if case == "anchor-cwd" else "stateless: true\n", encoding="utf-8")
+    session = tmp_path / ".copilot" / "session-state" / "pre-write"
+    session.mkdir(parents=True)
+    event = {
+        "sessionId": "pre-write", "cwd": str(workspace), "toolName": "edit",
+        "toolArgs": {
+            "path": "efforts/private.md" if case == "personal-state" else "source-\u00e9.py",
+            "text": "quote'\"\\\n\t",
+        },
+    }
+    if case == "create":
+        event["toolName"] = "create"
+    elif case == "path-alias":
+        event["toolArgs"]["file_path"] = event["toolArgs"].pop("path")
+    elif case == "json-args":
+        event["toolArgs"] = json.dumps(event["toolArgs"])
+    elif case == "anchor-target":
+        event["toolArgs"]["path"] = str(anchor / "source.py")
+    elif case == "foreign":
+        event["toolArgs"]["path"] = str(fixture_checkout(tmp_path / "foreign") / "source.py")
+    elif case == "nested":
+        event["toolArgs"]["path"] = str(fixture_checkout(workspace / "nested") / "source.py")
+    elif case == "batch":
+        event["toolCalls"] = [{"name": "edit", "args": event["toolArgs"]}]
+    elif case == "structured":
+        event["toolArgs"]["edits"] = [{"path": "other.py"}]
+    elif case == "drive-relative":
+        event["toolArgs"]["path"] = workspace.drive + "source.py"
+    env = environment(tmp_path, workspace)
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
+        monkeypatch.delenv(key, raising=False)
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
+        monkeypatch.setenv(key, str(tmp_path))
+    plugin = tmp_path / "payload"
+    if cell:
+        from types import SimpleNamespace
+        import test_registry_paths as fixtures
+
+        native_run = subprocess.run
+        monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+            run=lambda *args, **kwargs: native_run(
+                *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
+            ),
+        ))
+        plugin = fixtures._payload(tmp_path, "selected")
+        with (registry / "repos.yaml").open("a", encoding="utf-8") as output:
+            output.write('    remote: "https://github.com/example/project.git"\n')
+        context, selected_registry = fixtures._stamp(
+            tmp_path / "durable", plugin, marketplace="selected", repository="example/selected",
+        )
+        for name in ("projects.yaml", "repos.yaml"):
+            (selected_registry / name).write_bytes((registry / name).read_bytes())
+        registry = selected_registry
+        fixtures._select(monkeypatch, context, plugin)
+        from agent_worktrees import project_state
+
+        project_state.ensure_project_state("example")
+        env.update(
+            COPILOT_EXTENSIONS_CONTEXT=str(context), AGENT_WORKTREES_PAYLOAD_ROOT=str(plugin),
+            COPILOT_PLUGIN_ROOT=str(plugin),
+        )
+    if case == "delegated":
+        from agent_worktrees import related
+
+        related.write_related(workspace, related.RelatedConfig(
+            related={"example": related.RelatedEntry(name="example", delegate="agent-bridge")},
+        ))
+    assert guarded_anchors.refresh([workspace], registry_root=registry)["published"] == 1
+    reader = load("guarded_anchor_map")
+    facts = reader.read_map(workspace, registry)
+    assert facts.status == "ready" and not facts.posture_errors
+    assert load("managed_session").admitted(event, home=tmp_path)
+    decisions = [
+        load(name).decide(event, env=env, home=tmp_path)
+        for name in ("statelessness_guard", "cross_repo_guard", "anchor_write_guard", "pr_supersede_guard")
+    ]
+    assert any(value and value.get("permissionDecision") == "deny" for value in decisions) is (
+        case in {"personal-state", "anchor-cwd", "anchor-target", "delegated"}
+    ), decisions
+    map_path = reader.map_path(workspace, registry)
+    if case == "missing-map":
+        map_path.unlink()
+    elif case in {"partial-map", "wrong-scope", "array-schema", "invalid-elevation", "noncanonical-map"}:
+        value = json.loads(map_path.read_text(encoding="utf-8"))
+        if case == "partial-map":
+            value["posture_authority"] = "partial"
+        elif case == "wrong-scope":
+            value["source_root"] = str(anchor)
+        elif case == "array-schema":
+            value["schema"] = [value["schema"]]
+        elif case == "invalid-elevation":
+            value["postures"][0]["elevated"] = 0
+        else:
+            value["postures"][0]["identity"]["common_dir"] = str(anchor / ".git").upper()
+        map_path.write_text(json.dumps(value), encoding="utf-8")
+    elif case == "oversized-config":
+        config.write_text("#" * 16385, encoding="utf-8")
+    elif case == "git-pointer-aba":
+        alternate = admin.with_name("example-worktrex")
+        shutil.copytree(admin, alternate)
+        marker = workspace / ".git"
+        before = marker.stat()
+        text = marker.read_text(encoding="utf-8")
+        marker.write_text(text.replace("example-worktree", "example-worktrex"), encoding="utf-8")
+        os.utime(marker, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    if case == "real-policy":
+        for path in SCRIPTS.glob("*.py"):
+            shutil.copyfile(path, scripts / path.name)
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+        "pr_supersede_guard.py", "guarded_anchor_map.py", "tool_call_forms.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    drift = {
+        "guard-drift": "anchor_write_guard.py", "reader-drift": "guarded_anchor_map.py",
+        "forms-drift": "tool_call_forms.py",
+    }.get(case)
+    if drift:
+        with (scripts / drift).open("a", encoding="utf-8") as output:
+            output.write("\n# changed source\n")
+    elif case == "missing-dependencies":
+        policy = scripts / "hook-read-policy.json"
+        value = json.loads(policy.read_text(encoding="utf-8"))
+        value.pop("nativeWriteDependencies", None)
+        policy.write_text(json.dumps(value), encoding="utf-8")
+    observed = tmp_path / "policy-input"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    if cell:
+        (scripts / "installation-context" / "installation-context.ps1").write_text(
+            "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
+            + "$global:LASTEXITCODE = 0\n", encoding="utf-8",
+        )
+    if case != "real-policy":
+        (scripts / "hook_policy_process.py").write_text(
+            "import base64,json,sys\nfrom pathlib import Path\n"
+            + f"Path({str(observed)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
+            + "print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+            encoding="utf-8",
+        )
+    membership = tmp_path / "membership-interpreter"
+    if case == "old-admission":
+        admission = scripts / "managed-session.ps1"
+        admission.write_text(
+            admission.read_text(encoding="utf-8").replace(
+                "function Test-ManagedWorktreesSession {", "function Test-OriginalManagedWorktreesSession {",
+            )
+            + "\nfunction Test-ManagedWorktreesSession {\n"
+            "    param([Parameter(Mandatory = $true)][string]$Raw, [ref]$Prepared)\n"
+            "    return Test-OriginalManagedWorktreesSession -Raw $Raw -Prepared $Prepared\n"
+            "}\n",
+            encoding="utf-8",
+        )
+    with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+        output.write(
+            "\nfunction Get-ManagedWorktreesPython { "
+            + "[IO.File]::WriteAllText('" + str(membership).replace("'", "''") + "', 'called'); "
+            + "return '" + sys.executable.replace("'", "''") + "' }\n"
+        )
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
+    started = time.monotonic()
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+        input=raw, capture_output=True, timeout=10,
+        cwd=workspace, env=env, **no_window_kwargs(),
+    )
+    native_seconds = time.monotonic() - started
+    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    assert not membership.exists()
+    policy_required = case not in {"ordinary", "create", "path-alias", "json-args", "real-policy"}
+    assert observed.exists() is policy_required, result.stdout
+    if policy_required:
+        assert observed.read_bytes() == raw
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    else:
+        assert result.stdout == b""
+    if case == "real-policy":
+        contract = scripts / "hook-read-policy.json"
+        value = json.loads(contract.read_text(encoding="utf-8"))
+        value.pop("nativeWriteDependencies")
+        contract.write_text(json.dumps(value), encoding="utf-8")
+        started = time.monotonic()
+        fallback = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+            input=raw, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+        fallback_seconds = time.monotonic() - started
+        assert fallback.returncode == 0 and not fallback.stderr, fallback.stdout + fallback.stderr
+        assert json.loads(fallback.stdout) == {}
+        protected = {**event, "toolArgs": {"path": "efforts/private.md"}}
+        denied = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+            input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+        assert denied.returncode == 0 and not denied.stderr, denied.stdout + denied.stderr
+        assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+        assert not membership.exists()
+        print(json.dumps({
+            "shell": shell, "same_fixture": True, "native_entry_seconds": native_seconds,
+            "real_policy_entry_seconds": fallback_seconds,
+        }))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared cell membership")
