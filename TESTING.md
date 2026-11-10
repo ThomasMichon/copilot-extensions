@@ -733,6 +733,8 @@ possibly incomplete descendant snapshot: the witness resamples at most every
 images never satisfy readiness, and unreadable live handles still fail
 immediately. Failure diagnostics retain at most 16 observed image/name/live
 records, without command lines, inside the existing evidence size budget.
+An early consumer exit also retains up to 16 birth-bound descendant exit codes
+before Job cleanup, distinguishing already-exited processes from live ones.
 The installed-process, keyboard, native-terminal-offer and cleanup assertions
 remain unchanged; the bounded wait is not a larger readiness deadline.
 
