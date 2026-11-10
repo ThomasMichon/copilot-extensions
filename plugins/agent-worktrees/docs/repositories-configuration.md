@@ -125,9 +125,11 @@ registration never replaces that link while leaving its backing source unchanged
 The strict native reader rejects nonregular registry files before fingerprinting
 can open them, retaining the existing regular-file and subsequent symlink checks.
 After acquiring the guard-publication lock, apply re-inspects the full proposal
-and compares its token again immediately before persistence. Checkout, origin,
+and compares its token again before withdrawing prepared views for persistence. Checkout, origin,
 policy or preference drift during that wait refuses rather than persisting the
 earlier selection; the same aggregate deadline covers both inspection passes.
+A validation refusal leaves the existing prepared views untouched. Successful
+validation still withdraws them before the registry mutation begins.
 
 Successful return means registration and its normal protection publication:
 a new non-agent `class: knowledge` entry, normal registry/publication lock

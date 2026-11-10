@@ -205,12 +205,14 @@ def apply(project: str, name: str, path: str, branch: str, account: str, token: 
                 registration["account"] = selected["account"]
             raw["repos"][name] = registration
 
-            def write():
-                nonlocal attempted, committed
+            def validate():
                 current, _ = _selection(project, name, path, branch, account, budget)
                 if not hmac.compare_digest(token, _token(current)):
                     raise ConfigurationError("preview-conflict", "Registration inputs changed; refresh and preview again.")
                 fingerprint([repos._repos_yaml_path()])
+
+            def write():
+                nonlocal attempted, committed
                 attempted = True
                 write_checked(
                     repos._repos_yaml_path(), registry,
@@ -218,7 +220,7 @@ def apply(project: str, name: str, path: str, branch: str, account: str, token: 
                 )
                 committed = True
 
-            guarded_anchors.managed_write(write, budget=budget)
+            guarded_anchors.managed_write(write, budget=budget, validate=validate)
     except RegistryConflictError:
         raise
     except (guarded_anchors.GuardPublicationError, OSError, RuntimeError) as error:

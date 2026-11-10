@@ -1394,6 +1394,35 @@ def test_initial_resident_preparation_refreshes_views_and_reports_unavailability
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
 
 
+@pytest.mark.parametrize("refuse", [False, True])
+def test_managed_validation_precedes_withdrawal_and_preserves_views_on_refusal(producer, monkeypatch, refuse):
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    p.module.refresh(p.callers, registry_root=p.root)
+    before = {p.reader.map_path(caller, p.root): p.reader.map_path(caller, p.root).read_bytes() for caller in p.callers}
+    calls = []
+
+    def validate():
+        calls.append("validate")
+        assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
+        if refuse:
+            raise ValueError("synthetic validation refusal")
+
+    def write():
+        calls.append("write")
+        assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+
+    if refuse:
+        with pytest.raises(ValueError, match="validation refusal"):
+            p.module.managed_write(write, validate=validate)
+        assert calls == ["validate"]
+        assert all(path.read_bytes() == content for path, content in before.items())
+    else:
+        p.module.managed_write(write, validate=validate)
+        assert calls == ["validate", "write"]
+    assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
+
+
 def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(producer, monkeypatch):
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)

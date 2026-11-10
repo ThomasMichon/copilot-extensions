@@ -383,8 +383,8 @@ def refresh(
         return _refresh_locked(root, callers, include_prepared=include_prepared)
 
 
-def managed_write(write, *, caller: str | Path | None = None, budget=None):
-    """Serialize source mutations with publication, including all prepared views."""
+def managed_write(write, *, caller: str | Path | None = None, budget=None, validate=None):
+    """Validate under publication locks before withdrawing views for mutation."""
     root = registry_paths.registry_root()
     directory = _prepare_directory(root)
     arguments = {"budget": budget} if budget is not None else {}
@@ -393,6 +393,12 @@ def managed_write(write, *, caller: str | Path | None = None, budget=None):
         if budget is None else record_lock(directory / "publication", budget=budget)
     )
     with registry_lock(root / "repos.yaml", **arguments), publication:
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
+        if validate is not None:
+            validate()
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
         # Readers must stop using old policy before the source mutation commits.
         _withdraw_views(directory)
         if budget is not None:

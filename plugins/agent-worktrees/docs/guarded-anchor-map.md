@@ -71,6 +71,12 @@ snapshot is computed before taking that writer lock. Managed source writes
 share the lock and withdraw existing views before changing source bytes.
 Registry locking precedes publication locking, including when a registry-owned
 operation calls the writer reentrantly.
+`managed_write` can run an optional no-effect validation callback under both
+locks before withdrawing views. A validation refusal or exhausted budget at
+that boundary leaves prepared view bytes untouched and never invokes the source
+mutation. Successful validation still precedes withdrawal, mutation and refresh;
+actual partial writes and publication failures keep their unavailable-state
+behavior. Callers without this optional callback retain their existing flow.
 Prepared-view inventory uses failure-visible directory enumeration, not a glob
 that can suppress listing errors. Failed enumeration prevents source mutation
 and cannot report a successful empty refresh.

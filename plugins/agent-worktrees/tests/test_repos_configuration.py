@@ -723,7 +723,11 @@ def test_local_knowledge_registration_contention_respects_aggregate_apply_deadli
 def test_local_knowledge_registration_rechecks_after_publication_lock_wait(native, monkeypatch, change):
     from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration, tracking
 
-    root = local_knowledge(native)
+    root, caller, reader = prepared_knowledge_observer(native)
+    registry_root = repos._repos_yaml_path().parent
+    map_path = reader.map_path(caller, registry_root)
+    before_map = map_path.read_bytes()
+    assert reader.read_map(caller, registry_root).status == "ready"
     token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
     inspected = threading.Event()
     original = registration._selection
@@ -757,6 +761,8 @@ def test_local_knowledge_registration_rechecks_after_publication_lock_wait(nativ
     assert failure.value.code == "preview-conflict"
     assert repos._repos_yaml_path().read_bytes() == before
     assert tree(root) == expected_git
+    assert reader.read_map(caller, registry_root).status == "ready"
+    assert map_path.read_bytes() == before_map
 
 
 def test_local_registration_parser_rejects_unrelated_preference_fields_before_inspection(native, capsys):

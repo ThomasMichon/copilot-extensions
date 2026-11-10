@@ -83,7 +83,8 @@ Committed-policy inspection, revalidation and guard-fact construction use that
 deadline too; neither an independent probe budget nor an earlier cached snapshot
 may replace it.
 Re-inspect and compare the complete proposal after the publication-lock wait,
-immediately before persistence, rather than committing the earlier selection.
+before withdrawing prepared views for persistence, rather than committing the
+earlier selection or degrading unrelated callers on a validation refusal.
 
 Return the actual persisted registration and the supported next step: refresh
 and select the existing binding action. Do not bind automatically or report
@@ -342,3 +343,25 @@ are skipped on Windows. The source change is limited to registry read ordering,
 so no Manager UI or caller contract changes: the preceding real-form result is
 retained, while the current native CLI positive/refusal controls qualify this
 revision. Exact-source required CI and a fresh review remain separate gates.
+
+## Validation before guard withdrawal
+
+A later review identifies that final proposal refusal occurred inside the
+mutation callback, after prepared views had already been withdrawn. Both real
+publication-lock drift controls reproduce the gap with an independent prepared
+caller: registration refuses, but its map becomes unusable.
+
+The shared managed-write owner now accepts optional no-effect validation under
+the existing registry and publication locks, before view withdrawal. Native
+registration moves its final selection/token/source check to that callback.
+Refusal or an exhausted budget before mutation leaves existing view bytes
+untouched. Successful validation still precedes withdrawal and persistence;
+unknown/partial source writes and failed publication retain their existing
+unavailable-state and receipt behavior. Default callers are unchanged.
+
+The final shared packet passes 195 cases, with three Windows-unavailable FIFO
+controls skipped. It includes the full guard producer/default-caller suite,
+optional validation success/refusal ordering, actual prepared-map preservation
+through both publication-lock drift cases, and all registration controls.
+The real Manager registration form additionally passes against this native
+owner. No deadline, cleanup or partial-write assertion is relaxed.
