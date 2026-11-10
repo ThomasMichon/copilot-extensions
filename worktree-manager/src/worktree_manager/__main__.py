@@ -31,6 +31,7 @@ if __name__ == "__main__":
         raise SystemExit(_resident_picker_finish(sys.argv[2:]))
 
 import json
+import math
 import os
 import subprocess
 from pathlib import Path
@@ -894,6 +895,9 @@ def _cmd_picker(rest: list[str]) -> int:
         wait_pivot = float(values.get("--wait", "0"))
     except ValueError:
         print("error: --wait must be a number")
+        return 2
+    if not math.isfinite(wait_pivot) or wait_pivot < 0:
+        print("error: --wait must be finite and non-negative")
         return 2
 
     if demo_mode:

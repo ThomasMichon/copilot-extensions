@@ -3262,6 +3262,11 @@ pivot registry a real contributed pivot uses). The older minimal `picker_app`
 remains only as the still-live `LaunchRequest`/launch-compose machinery
 shared with other commands.
 
+The screenshot command's optional `--wait <seconds>` for a contributed pivot
+must be finite and non-negative; zero disables that additional wait. Invalid
+values return usage error 2 before preview, registry or bootstrap work. Direct
+capture APIs reject the same values with `ValueError` before starting capture.
+
 Non-live screenshots wait for the current setup epoch to apply before reading
 the compositor. Setup completion, diagnosed failure and teardown wake the
 capture without repeated per-widget render barriers. Production captures use

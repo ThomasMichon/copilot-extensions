@@ -2230,6 +2230,38 @@ def test_picker_mock_uses_production_transplant_without_acting(monkeypatch, caps
     }
 
 
+@pytest.mark.parametrize("wait", ["nan", "inf", "-1"])
+@pytest.mark.parametrize("preview", [False, True])
+def test_picker_screenshot_rejects_invalid_wait_before_source_access(
+    monkeypatch, capsys, wait, preview,
+):
+    from worktree_manager import preview as preview_mod
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid capture wait must fail before source access")
+
+    monkeypatch.setattr(entrypoint, "build_projects", forbidden)
+    monkeypatch.setattr(entrypoint, "engine_available", forbidden)
+    monkeypatch.setattr(preview_mod, "enable_preview_mode", forbidden)
+    monkeypatch.setattr(runner, "capture", forbidden)
+
+    args = ["screenshot", "demo", "--wait", wait]
+    if preview:
+        args.append("--demo")
+    assert entrypoint._cmd_picker(args) == 2
+    assert "--wait must be finite and non-negative" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("wait", [float("nan"), float("inf"), -1])
+def test_runner_capture_rejects_invalid_wait_before_bootstrap(monkeypatch, wait):
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid capture wait must fail before bootstrap")
+
+    monkeypatch.setattr(runner, "_prepare", forbidden)
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        runner.capture("demo", wait_pivot=wait)
+
+
 def test_picker_screenshot_uses_production_capture(monkeypatch, tmp_path):
     monkeypatch.setattr(entrypoint, "engine_available", lambda: False)
     monkeypatch.setattr(
