@@ -74,13 +74,19 @@ def test_post_child_custody_failure_preserves_native_exit_status(
     assert f"installer child exited {exit_code}; transaction custody is unconfirmed" in "\n".join(caught.value.__notes__)
 
 
-def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, tmp_path, monkeypatch):
+@pytest.mark.parametrize("legacy_dev", [False, True])
+def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, tmp_path, monkeypatch, legacy_dev):
     monkeypatch.setattr(adapter, "_source_digest", lambda payload: "a" * 64)
     args = _arguments(
         tmp_path, project_name="example", bootstrap_python=Path(sys.executable),
         owner=tmp_path / "source-owner", force=True,
+        action="dev" if legacy_dev else "install",
+        installation_payload=tmp_path / "canonical-payload" if legacy_dev else None,
     )
-    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
+    if legacy_dev:
+        monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    else:
+        monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(tmp_path / "context.json"))
     monkeypatch.delenv("COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", raising=False)
     queued = []
     driver = SimpleNamespace(
@@ -94,7 +100,10 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
     assert spec.project == str(args.root)
     assert spec.source == "a" * 64
     assert spec.argv == tuple(adapter._native_arguments(args))
-    assert dict(spec.context)["COPILOT_EXTENSIONS_CONTEXT"] == str(tmp_path / "context.json")
+    if legacy_dev:
+        assert "COPILOT_EXTENSIONS_CONTEXT" not in dict(spec.context)
+    else:
+        assert dict(spec.context)["COPILOT_EXTENSIONS_CONTEXT"] == str(tmp_path / "context.json")
     assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" not in dict(spec.context)
     assert adapter.NATIVE_ENV in runner.context_keys
     assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" in runner.context_keys
@@ -103,6 +112,9 @@ def test_explicit_native_installation_uses_the_existing_finite_driver(adapter, t
     )
     assert runner.argv[6] == str(SCRIPTS / "runtime_install_driver.py")
     assert "--participant" in runner.argv
+    if legacy_dev:
+        assert runner.argv[runner.argv.index("--installation-payload") + 1] == str(args.installation_payload)
+        assert spec.argv[spec.argv.index("-InstallationPayload") + 1] == str(args.installation_payload)
     driver.drain.assert_called_once_with()
     driver.wait.assert_called_once_with("request", output=sys.stderr)
 

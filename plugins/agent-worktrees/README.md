@@ -1224,6 +1224,15 @@ first-run discovery.
 
 Dev is explicit and claim-gated. Its inputs must belong to the claiming
 worktree; an omitted owner is resolved from the source checkout's Git root.
+For a legacy installation owned by an installed marketplace payload, pass
+`-InstallationPayload <existing-payload>` (PowerShell) or
+`--installation-payload <existing-payload>` (Bash) to `dev` or `dev-release`.
+The absolute payload must resolve to the installation's existing canonical
+owner through the ordinary lifecycle admission; foreign or unregistered owners
+still refuse. The source worktree remains the candidate input and claim owner.
+This option does not transfer installation ownership, rewrite a completed slot,
+or replace the source integrity, health and rollback checks. Namespaced installs
+continue to use their existing validated context receipt instead.
 In a namespaced installation, that worktree is distinct from the stable
 authorized payload named by `COPILOT_PLUGIN_STAGED_FROM` and its installation
 receipt. Owner containment and build provenance describe the actual inputs;

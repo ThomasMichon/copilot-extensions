@@ -25,6 +25,7 @@
 #   --remove-config  On uninstall: also delete config and session metadata
 #   --machine NAME   Machine name (auto-detected if omitted)
 #   --owner PATH     Claiming worktree root for explicit dev/development release
+#   --installation-payload PATH  Existing canonical legacy dev/development owner
 #   --zero-downtime  Deprecated no-op; update now auto-detects and cuts over
 #                    a live status-monitor whenever possible
 # =============================================================================
@@ -92,6 +93,7 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
     elif [[ "${__aw_args[$__aw_i]}" == --project-name ||
             "${__aw_args[$__aw_i]}" == --machine ||
             "${__aw_args[$__aw_i]}" == --owner ||
+            "${__aw_args[$__aw_i]}" == --installation-payload ||
             "${__aw_args[$__aw_i]}" == --install-source ||
             "${__aw_args[$__aw_i]}" == --runtime-source-descriptor ||
             "${__aw_args[$__aw_i]}" == --runtime-publication-plan ||
@@ -108,6 +110,13 @@ for ((__aw_i = 1; __aw_i < ${#__aw_args[@]}; __aw_i++)); do
             __aw_install_source="${__aw_args[$((__aw_i + 1))]}"
         elif [[ "${__aw_args[$__aw_i]}" == --runtime-source-descriptor ]]; then
             __aw_source_descriptor="${__aw_args[$((__aw_i + 1))]}"
+        elif [[ "${__aw_args[$__aw_i]}" == --installation-payload ]]; then
+            __aw_installation_payload="${__aw_args[$((__aw_i + 1))]}"
+            if [[ ( "$__aw_action" != dev && "$__aw_action" != dev-release ) ||
+                  -n "${COPILOT_EXTENSIONS_CONTEXT:-}" || "$__aw_installation_payload" != /* ]]; then
+                printf '%s\n' 'ERROR: --installation-payload requires an absolute legacy dev/dev-release payload' >&2
+                exit 1
+            fi
         fi
         ((__aw_i += 1))
     elif [[ "$__aw_action" == uninstall ]]; then
@@ -196,7 +205,9 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
                 exit 1
             }
             __aw_admission_source="$PLUGIN_DIR"
-            if [[ "$PLUGIN_DIR" != */.copilot/installed-plugins/* &&
+            if [[ -n "${__aw_installation_payload:-}" ]]; then
+                __aw_admission_source="$__aw_installation_payload"
+            elif [[ "$PLUGIN_DIR" != */.copilot/installed-plugins/* &&
                   -n "${COPILOT_EXTENSIONS_COMMAND_LIFECYCLE:-}" &&
                   -n "${COPILOT_PLUGIN_STAGED_FROM:-}" ]]; then
                 __aw_admission_source="$COPILOT_PLUGIN_STAGED_FROM"
@@ -252,6 +263,9 @@ if [[ -z "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
             fi
             ;;
     esac
+fi
+if [[ -n "${__aw_installation_payload:-}" ]]; then
+    export COPILOT_PLUGIN_STAGED_FROM="$__aw_installation_payload"
 fi
 # === end command-lifecycle: admission before staging ===
 if [[ -n "${COPILOT_EXTENSIONS_CONTEXT:-}" ]]; then
@@ -846,6 +860,7 @@ while [[ $# -gt 0 ]]; do
         --install-dir)   INSTALL_DIR_ARG="$2"; shift 2 ;;
         --install-source) INSTALL_SOURCE_ARG="$2"; shift 2 ;;
         --owner)         OWNER_ARG="$2"; shift 2 ;;
+        --installation-payload) shift 2 ;;
         --runtime-publication-plan) RUNTIME_PUBLICATION_PLAN="$2"; shift 2 ;;
         --runtime-publication-digest) RUNTIME_PUBLICATION_DIGEST="$2"; shift 2 ;;
         --runtime-publication-python) RUNTIME_PUBLICATION_PYTHON="$2"; shift 2 ;;
