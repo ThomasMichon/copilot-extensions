@@ -298,4 +298,12 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             banner_text="Knowledge binding is unavailable. Enable and prepare one qualified harness-knowledge owner.",
             banner_level="warn",
         )
+    from .repos_knowledge_registration import action_row, eligible
+
+    if (
+        composition_error is None and project in registry.repos
+        and registry.repos[project].repo_class == "worktree"
+        and binding_names_supported(project, project) and eligible(inspection)
+    ):
+        rows.insert(0, action_row(project))
     return {"entries": rows, "summary": summary}

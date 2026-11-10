@@ -933,10 +933,11 @@ def test_add_repo_pins_credential_for_a_resolvable_owner(home: Path, tmp_path: P
     _init_config_repo(work)
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
-         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops._active_gh_account", return_value=None):
         repos.add_repo(
             "auto-pin", str(work), repo_class="worktree",
-            remote="https://github.com/example-operator/auto-pin.git", plat="windows",
+            remote="https://github.com/example-operator/auto-pin.git", plat="windows", account="example-operator",
         )
     username = subprocess.run(
         ["git", "-C", str(work), "config", "--local",
@@ -997,14 +998,21 @@ def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, mon
         repos.os.path, "expanduser",
         lambda p: str(work) if p == "~/home-rel" else os.path.expanduser(p),
     )
-    entry = repos.add_repo(
-        "home-rel", "~/home-rel", repo_class="worktree",
-        remote="https://github.com/example-operator/home-rel.git", plat="windows",
-    )
-    assert entry.local_path("windows") == str(work)
+
+    def unexpected_auth(*args, **kwargs):
+        pytest.fail("The pin fixture must not inspect ambient authentication.")
+
+    monkeypatch.setattr("agent_worktrees.git_ops.gh_token_for_account", unexpected_auth)
+    monkeypatch.setattr("agent_worktrees.git_ops._active_gh_account", unexpected_auth)
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
-         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops._active_gh_account", return_value=None):
+        entry = repos.add_repo(
+            "home-rel", "~/home-rel", repo_class="worktree",
+            remote="https://github.com/example-operator/home-rel.git", plat="windows", account="example-operator",
+        )
+        assert entry.local_path("windows") == str(work)
         repos._best_effort_pin_credential(entry, "windows")
     username = subprocess.run(
         ["git", "-C", str(work), "config", "--local",
