@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 import time
 
 from agent_procutil import no_window_kwargs
@@ -18,19 +20,59 @@ from agent_worktrees.repos_configuration_sources import ConfigurationError
 
 
 @pytest.mark.timeout(75)
-@pytest.mark.parametrize("change_machine", [False, True])
-def test_fresh_portable_mapping_uses_real_native_binding_transaction(tmp_path, monkeypatch, change_machine):
+@pytest.mark.parametrize(("change_machine", "accepted_default"), [
+    (False, None), (True, None), (False, "unchanged"), (False, "changed"),
+])
+def test_fresh_portable_mapping_uses_real_native_binding_transaction(
+    tmp_path, monkeypatch, capsys, change_machine, accepted_default,
+):
     for key in ("AGENT_HOME", "HOME", "USERPROFILE"):
         monkeypatch.setenv(key, str(tmp_path))
     monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
     monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
     calls = []
     original_run = owned_process.run_caller_owned
+    state = tmp_path / "accepted-state"
+    machines_python = os.environ.get("KNOWLEDGE_PREFERENCE_TEST_PYTHON", "")
+    if accepted_default:
+        if not machines_python:
+            pytest.skip("select a non-editable Machines test artifact for the accepted-default flow")
+        assert Path(machines_python).is_file(), "select the packaged Machines test interpreter"
+        from agent_worktrees import _peer_launch, machines_runtime
+        prefix = [machines_python, "-I", "-B", "-X", "utf8", "-m", "agent_machines"]
+        monkeypatch.setattr(machines_runtime, "selected", lambda **k: (
+            prefix, _peer_launch.legacy_peer_environment(dict(os.environ)), Path(machines_python),
+        ))
 
     def measured(argv, **kwargs):
         phase = "capabilities" if "--capabilities" in argv else "preview" if "--configuration" in argv else "apply"
         if change_machine and phase == "apply" and "apply" in argv:
             cfg.global_config_path().write_text("machine: changed-worker\n", encoding="utf-8")
+        if accepted_default and "agent_worktrees.repos_knowledge_configuration" in argv and "apply" in argv:
+            worker = """
+import json, os, runpy, sys
+from pathlib import Path
+from agent_worktrees import _peer_launch, machines_runtime, repos_knowledge_default
+python, state, change, *arguments = sys.argv[1:]
+machines_runtime.selected = lambda **kw: (
+    [python, '-I', '-B', '-X', 'utf8', '-m', 'agent_machines'],
+    _peer_launch.legacy_peer_environment(dict(os.environ)), Path(python),
+)
+if change == 'changed':
+    original = repos_knowledge_default.revalidate
+    def revalidate(project, selection):
+        path = Path(state) / 'accepted.json'
+        path.write_bytes(path.read_bytes() + b'\\n')
+        original(project, selection)
+    repos_knowledge_default.revalidate = revalidate
+sys.argv = ['agent_worktrees.repos_knowledge_configuration', *arguments]
+runpy.run_module('agent_worktrees.repos_knowledge_configuration', run_name='__main__')
+"""
+            index = argv.index("agent_worktrees.repos_knowledge_configuration")
+            argv = [
+                sys.executable, "-I", "-B", "-c", worker, machines_python, str(state),
+                accepted_default, *argv[index + 1:],
+            ]
         started = time.monotonic()
         try:
             result = original_run(argv, **kwargs)
@@ -98,20 +140,64 @@ def test_fresh_portable_mapping_uses_real_native_binding_transaction(tmp_path, m
             "--harness-id", project_state.canonical_repository_id(project),
             "--knowledge-id", project_state.canonical_repository_id("example-knowledge"),
         ]
+        if accepted_default:
+            state.mkdir()
+            (state / "policy.json").write_text(json.dumps({
+                "schema": "agent-machines.preferences.policy", "version": 1,
+                "publisher": "example-publisher", "participant": "example-receiver", "domains": ["repositories"],
+            }), encoding="utf-8")
+            (state / "accepted.json").write_text(json.dumps({
+                "schema": "agent-machines.preferences", "version": 1,
+                "publisher": "example-publisher", "revision": 1, "parent": None,
+                "domains": {"repositories": {"knowledge": [
+                    {"harness_repository_id": args[3], "knowledge_repository_id": args[5]},
+                ]}},
+            }), encoding="utf-8")
+            document = yaml.safe_load(config_path.read_text())
+            document["knowledge_preferences"] = {"state_dir": str(state)}
+            config_path.write_text(yaml.safe_dump(document), encoding="utf-8")
+            args.append("--accepted-default")
+            from agent_worktrees.repos_configuration_catalog import catalog
+
+            listing = catalog(project)
+            row = next(row for row in listing["entries"] if row["repository"] == "example-knowledge")
+            assert row["preferred_knowledge_bindable"] == "true", listing["summary"]
+            assert row["harness_repository_id"] == args[3] and row["knowledge_repository_id"] == args[5]
         before_registry = registry.read_bytes()
         before_config = config_path.read_bytes()
+        before_state = {path.name: path.read_bytes() for path in state.iterdir()} if accepted_default else {}
         from agent_worktrees import repos_knowledge_preferences
+        from agent_worktrees import repos_configuration
 
         try:
-            proposed = repos_knowledge_preferences.preview(project, args[3], args[5])
+            if accepted_default:
+                assert repos_configuration.command(["knowledge-preview", *args]) == 0
+                proposed = json.loads(capsys.readouterr().out)
+            else:
+                proposed = repos_knowledge_preferences.preview(project, args[3], args[5])
         except ConfigurationError as error:
             pytest.fail(f"{error.code}; cause={type(error.__cause__).__name__}; stages={calls}", pytrace=False)
         assert proposed["status"] == "suggested"
         assert proposed["execution_machine"] == "example-worker"
         assert proposed["native_preview"]["operation"] == "set"
         assert config_path.read_bytes() == before_config
+        if accepted_default:
+            assert {path.name: path.read_bytes() for path in state.iterdir()} == before_state
         try:
-            result = repos_knowledge_preferences.apply(project, args[3], args[5], proposed["token"])
+            if accepted_default:
+                code = repos_configuration.command([
+                    "knowledge-apply", *args, "--preview-token", proposed["token"],
+                ])
+                result = json.loads(capsys.readouterr().out)
+                if accepted_default == "changed":
+                    assert code == 1 and result["code"] == "binding-owner-refused", (result, calls)
+                    assert config_path.read_bytes() == before_config
+                    assert registry.read_bytes() == before_registry
+                    assert not (tmp_path / "trees").exists()
+                    return
+                assert code == 0, (result, calls)
+            else:
+                result = repos_knowledge_preferences.apply(project, args[3], args[5], proposed["token"])
         except ConfigurationError as error:
             if change_machine:
                 assert error.code == "binding-owner-refused", calls
