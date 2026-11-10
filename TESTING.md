@@ -4649,8 +4649,9 @@ and agent-ssh)"`. No production credentials, remote hosts or capacity are needed
 ## Optional foreground completion custody
 
 The manual `installation-context-acceptance.yml` selector
-`interactive_completion=true` runs `libs/agent-procutil/tests/test_interactive.py`
-and `test_interactive_session_native.py` on Linux, macOS and Windows. It
+`interactive_completion=true` runs `libs/agent-procutil/tests/test_interactive.py`,
+`test_interactive_session_native.py`, `test_async_foreground.py` and
+`test_async_foreground_native.py` on Linux, macOS and Windows. It
 exercises real finite commands, normal-exit
 descendant cleanup, abrupt caller death, POSIX interruption and controlling-PTY
 input/resize/foreground restoration. Windows also generates a real SIGINT in
@@ -4664,6 +4665,17 @@ job groups, preserve redirected JSON stdout and check that an explicitly
 managed detached workload remains live. Managed-detachment cases skip inside
 the contained local runner rather than bypassing its suppression; they run in
 the explicit disposable native workflow.
+
+The Linux job also selects `test_headed_backend.py -k posix_foreground` through
+the existing Driver plugin runner. It composes the actual source-auth receiver
+and headed backend with the real async foreground provider and a private native
+SDK fixture. Expiry and revocation freeze idle sends, retire the owned native
+scope and preserve SDK EOF observed before independent settlement as a sticky
+hold; a renewed source lease cannot clear it. A bounded confirmation gate makes
+that ordering deterministic without delaying or relabeling the EOF. This is
+negative consumer-composition evidence, not POSIX `AuthPaneChild` support,
+productive Copilot recovery or permission to enable renewal. Same-session
+seedless recovery and pending/unknown-work acceptance remain separate gates.
 
 The same Linux job also runs Manager's
 `tests/native/test_warm_picker_lifetime.py` through its isolated plugin runner.
