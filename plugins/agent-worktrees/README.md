@@ -1236,6 +1236,8 @@ still refuse. The source worktree remains the candidate input and claim owner.
 This option does not transfer installation ownership, rewrite a completed slot,
 or replace the source integrity, health and rollback checks. Namespaced installs
 continue to use their existing validated context receipt instead.
+An explicitly admitted PowerShell bootstrap interpreter also drives runtime
+construction, rather than being replaced by later ambient discovery.
 In a namespaced installation, that worktree is distinct from the stable
 authorized payload named by `COPILOT_PLUGIN_STAGED_FROM` and its installation
 receipt. Owner containment and build provenance describe the actual inputs;

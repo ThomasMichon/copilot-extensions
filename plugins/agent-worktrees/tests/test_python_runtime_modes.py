@@ -1168,7 +1168,10 @@ def test_real_native_repair_preserves_broken_slot_and_allocates_distinct_generat
     (root / "current-version").write_text(version + "\n", encoding="utf-8")
     (root / "last-known-good").write_text(version + "\n", encoding="utf-8")
     environment = dict(os.environ)
-    environment.update(HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        PSModuleAnalysisCachePath=str(home / "module-analysis.cache"),
+    )
     for name in (
         "COPILOT_EXTENSIONS_CONTEXT",
         "COPILOT_PLUGIN_ROOT",

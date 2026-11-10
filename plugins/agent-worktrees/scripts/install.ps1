@@ -3109,7 +3109,8 @@ function Deploy-VenvAndPackage {
 }
 
 function Deploy-PythonRuntime {
-    $base = Get-SignedBasePython
+    $base = $BootstrapPython
+    if (-not $base) { $base = Get-SignedBasePython }
     if (-not $base) { $base = Get-BootstrapPython -ExcludeVenvDir }
     if (-not $base) {
         throw 'The Python-owned installer requires a base Python 3.11+ outside the target slot.'

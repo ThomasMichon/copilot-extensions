@@ -1,5 +1,5 @@
 {
-  "comment": "Resolve percent-encoded Azure DevOps project names to registered target policy and base branches, including singleton repositories; preserve canonical installation ownership when admitting explicit development inputs.",
+  "comment": "Resolve encoded Azure DevOps targets to registered policy and base branches, including singleton repositories; preserve canonical ownership for explicit development inputs and qualify the retained control's replacement capability.",
   "changes": [
     {
       "plugin": "agent-worktrees",
