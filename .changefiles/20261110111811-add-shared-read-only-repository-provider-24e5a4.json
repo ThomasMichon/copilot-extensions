@@ -1,0 +1,13 @@
+{
+  "comment": "Add shared read-only repository provider-policy preflight and its conditional binding consumer.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "harness-knowledge",
+      "type": "patch"
+    }
+  ]
+}

@@ -151,6 +151,11 @@ def inspect(anchor: str, default_name: str) -> dict:
 
 
 def command(argv: list[str]) -> int:
+    if argv and argv[0] == "preflight":
+        from .repos_registration_preflight import command as preflight
+
+        return preflight(argv[1:])
+
     class Parser(argparse.ArgumentParser):
         def error(self, message):
             raise RegistrationError("invalid-request", f"Invalid inspection request: {message}")

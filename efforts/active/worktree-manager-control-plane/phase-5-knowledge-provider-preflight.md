@@ -1,6 +1,7 @@
 # Phase 5 - Knowledge repository provider preflight
 
-- **Status:** Proposed owner contract; no new native operation is implemented.
+- **Status:** Contract reviewed in #11957; standalone native reader and optional
+  binding consumer qualified in source; publication and receiving gates remain.
 - **Parent:** [Configuration workbench](phase-5-configuration-workbench.md).
 - **Coordination:** #1419 KO3; bounded source slice `shiny-actuator`.
 - **Vision:** [Knowledge selection](../../../visions/installer/configurator/README.md#knowledge-selection-and-portable-defaults).
@@ -119,18 +120,18 @@ fallback across provider rollback.
 
 ## Dependency-ordered delivery and validation
 
-- [ ] Review this contract before implementing or advertising the new syntax.
-- [ ] Deliver the standalone native reader and selected-runtime support while
+- [x] Review this contract before implementing or advertising the new syntax.
+- [x] Deliver the standalone native reader and selected-runtime support while
   preserving existing registration and authentication operations.
-- [ ] Migrate the shared binding consumer conditionally; keep unsupported
+- [x] Migrate the shared binding consumer conditionally; keep unsupported
   server observations distinct from local binding readiness.
-- [ ] Cover canonical/fallback/unresolved/unverified registration, knowledge
+- [x] Cover canonical/fallback/unresolved/unverified registration, knowledge
   roles, local-only/GitHub/other origins, exact account selection, missing or
   mismatched credentials and target/default-branch drift.
-- [ ] Cover actual PR requirements and direct mode only when proven, classic
+- [x] Cover actual PR requirements and direct mode only when proven, classic
   protection plus rulesets, denied/ambiguous/malformed policy, incomplete
   pagination, unknown restrictions and aggregate deadline/cleanup failures.
-- [ ] Prove the real native CLI and shared consumer process boundaries with
+- [x] Prove the real native CLI and shared consumer process boundaries with
   synthetic provider fixtures; compare complete fixture registry, Git,
   configuration and credential-sentinel bytes before and after the reads.
 - [ ] Exercise old/new caller/provider, missing support and supported rollback;
@@ -152,3 +153,24 @@ first-use correction.
 The source plan adds no installation, credential, policy, resource, binding,
 service or rollout authority. A reviewed contract or successful fixture is not
 complete public-first onboarding or receiving acceptance.
+
+## Source qualification
+
+The final native/provider/inventory packet passes 207 cases, including the
+actual binding payload through the native parser and owned synthetic provider.
+Direct/PR/legacy-owner and real aggregate-timeout cases preserve the complete
+fixture tree. The binding regression packet passes 156 cases; its one exact
+capability expectation was updated for the additive declaration, then the
+affected consumer and real capability-probe packet passes all 19 selected
+cases. No failed assertion is waived.
+
+Strict binding-owner checks pass for Python 3.10 Linux and Windows targets.
+Scoped Python lint, all 13 install contracts, version/documentation consistency,
+local documentation links and whitespace checks pass. The actual fixed source
+GraphQL query also succeeds through the existing scoped public-repository
+reader; that schema observation is not full provider or installed acceptance.
+
+These are source/contained Windows results. Native POSIX, installed UI/runtime,
+first-restarted-model, cold bootstrap, actual Git transport and receiving remain
+unqualified; no installation, authentication acquisition or rollout occurred.
+Required current-head review and CI still precede publication acceptance.
