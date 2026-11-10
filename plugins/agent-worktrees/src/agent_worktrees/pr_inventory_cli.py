@@ -40,20 +40,13 @@ def dispatch(argv: list[str]) -> int:
         if type(args.seconds) is not int or not 1 <= args.seconds <= 60:
             raise ValueError("inventory requires 1..60 seconds")
         from .pr_credential_command import command_source
-        from .pr_read_context import load_read_config
-        from .pr_related_binding import resolve_related_binding
+        from .pr_inventory_config import load_binding
         from .providers import get_provider
         deadline = time.monotonic() + args.seconds
         source = command_source(
             args.credential_command, remaining=lambda: deadline - time.monotonic(),
         )
-        config = load_read_config(Path(args.config))
-        selected_repo, _name, error = resolve_related_binding(
-            config, args.repo, include_control_plane=False,
-        )
-        if selected_repo is None or error:
-            raise ValueError("inventory repository has no explicit native read binding")
-        selected = selected_repo.pr
+        selected = load_binding(Path(args.config), args.repo)
         result = inventory(
             get_provider(selected.provider), args.repo, api_base=selected.api_base,
             credential_source=source, max_pages=args.max_pages, max_pulls=args.max_pulls,

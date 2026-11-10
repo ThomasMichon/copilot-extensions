@@ -21,6 +21,20 @@ credentials. An older executable refuses the new verb; callers must not infer
 support from package versions or silently substitute an ambient account.
 Inventory requires explicit native repository configuration and typed existing
 read credentials. It neither enrolls accounts nor calls a credential issuer.
+Inventory loads only the named file's explicit `repos.<name>.pr` binding, with
+required `provider`, `api_base` and exact `repository` fields. It does not load
+machine/global/registry/in-repository overlays or add an ambient active project.
+For example:
+
+```yaml
+repos:
+  selected:
+    pr:
+      provider: github
+      api_base: https://github.com
+      repository: owner/repository
+```
+
 GitHub configuration selects the web origin (for example
 `https://github.com`); its typed credential binding selects the corresponding
 REST base (`https://api.github.com`). Gitea selects its configured HTTPS base.

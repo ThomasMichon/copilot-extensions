@@ -181,7 +181,7 @@ def test_native_parser_capability_discovery_is_passive_and_strict(capsys, monkey
 def test_actual_native_entry_and_executing_typed_credential_command(
     tmp_path, monkeypatch, capsys, kind,
 ):
-    from agent_worktrees import __main__ as main, config, pr_read_context
+    from agent_worktrees import __main__ as main
 
     endpoint = "https://api.github.com" if kind == "github" else "https://forge.example"
     selected = "https://github.com" if kind == "github" else endpoint
@@ -195,14 +195,9 @@ def test_actual_native_entry_and_executing_typed_credential_command(
     }
     helper = tmp_path / "read_credential.py"
     helper.write_text("import json\nprint(json.dumps(" + repr(material) + "))\n")
-    repo = config.RepoConfig(
-        anchor="", worktree_root="",
-        pr=config.PRConfig(provider=kind, api_base=selected, repository="owner/repo"),
-    )
-    monkeypatch.setattr(
-        pr_read_context, "load_read_config",
-        lambda _path: SimpleNamespace(repos={"target": repo}, checkout_free_pr={}),
-    )
+    (tmp_path / "native.yaml").write_text(json.dumps({"repos": {"target": {"pr": {
+        "provider": kind, "api_base": selected, "repository": "owner/repo",
+    }}}}))
     monkeypatch.setattr(
         main, "_resolve_active_project", lambda *_args: pytest.fail("native read needs no project"),
     )
@@ -232,11 +227,12 @@ def test_actual_native_entry_and_executing_typed_credential_command(
 
 
 def test_inventory_real_resolver_refuses_registry_only_target(tmp_path, monkeypatch):
-    from agent_worktrees import pr_config, pr_read_context, pr_related_binding
-    monkeypatch.setattr(
-        pr_read_context, "load_read_config",
-        lambda _path: SimpleNamespace(repos={}, checkout_free_pr={}),
-    )
+    from agent_worktrees import config, pr_config, pr_related_binding
+    path = tmp_path / "native.yaml"
+    path.write_text(json.dumps({"repo_name": "ambient", "repos": {"selected": {"pr": {
+        "provider": "gitea", "api_base": "https://forge.example", "repository": "owner/selected",
+    }}}}))
+    monkeypatch.setattr(config, "load_config", lambda *_a, **_kw: pytest.fail("layered inventory load"))
     monkeypatch.setattr(
         pr_config, "resolve_repo_config_for_slug",
         lambda *_args: pytest.fail("selected config fell back to registry"),
@@ -246,9 +242,21 @@ def test_inventory_real_resolver_refuses_registry_only_target(tmp_path, monkeypa
         lambda: pytest.fail("selected config fell back to control plane"),
     )
     assert pr_inventory_cli.dispatch([
-        "owner/repo", "--config", str(tmp_path / "native.yaml"),
+        "owner/repo", "--config", str(path),
         "--credential-command", json.dumps([sys.executable]), "--json",
     ]) == 2
+
+
+@pytest.mark.parametrize("text", [
+    'repos: {a: {pr: {provider: github, repository: owner/repo, api_base: https://github.com, api_base: https://other.example}}}',
+    '{"repos":{}}',
+])
+def test_inventory_source_loader_refuses_duplicate_or_empty_binding(tmp_path, text):
+    from agent_worktrees.pr_inventory_config import load_binding
+    path = tmp_path / "native.yaml"
+    path.write_text(text)
+    with pytest.raises(ValueError):
+        load_binding(path, "owner/repo")
 
 
 @pytest.mark.parametrize("operation", ["inventory", "snapshot"])
