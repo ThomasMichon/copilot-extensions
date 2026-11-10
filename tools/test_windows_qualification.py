@@ -503,11 +503,19 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
     client = object.__new__(client_module.Client)
     client.root, client.state_root, client.repository = tmp_path, tmp_path, "owner/repository"
     effects = []
+    selected = (
+        {"kind": "packet", "name": "native-driver-auth-wait"}
+        if unsupported == "packet" else focused()
+    )
+    files = [
+        "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
+        "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
+    ] if unsupported == "packet" else ["plugins/sample/tests/test_sample.py"]
     client.transport = SimpleNamespace(
         git=lambda *args: SimpleNamespace(
             stdout=(
                 "b" * 40 if args[0] == "rev-parse"
-                else "100644 blob " + "c" * 40 + "\tplugins/sample/tests/test_sample.py"
+                else "\n".join("100644 blob " + "c" * 40 + "\t" + file for file in files)
             ),
         ),
         scoped_credentials=lambda owner: effects.append("credential-selection"),
@@ -538,12 +546,39 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         }
     monkeypatch.setattr(client, "api", api)
     with pytest.raises(ValueError):
-        selected = (
-            {"kind": "packet", "name": "native-driver-auth-wait"}
-            if unsupported == "packet" else focused()
-        )
         client.submit(selected, "HEAD")
     assert effects == []
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("missing", [True, False])
+def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_transport(
+    tmp_path, monkeypatch, missing,
+):
+    client = object.__new__(client_module.Client)
+    client.root = tmp_path
+    files = [
+        "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
+        "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
+    ]
+
+    def git(*args):
+        if args[0] == "rev-parse":
+            return SimpleNamespace(stdout="b" * 40)
+        assert args == ("ls-tree", "b" * 40, "--", *files)
+        return SimpleNamespace(stdout="\n".join(
+            "100644 blob " + "c" * 40 + "\t" + file for file in files[1 if missing else 0:]
+        ))
+
+    client.transport = SimpleNamespace(git=git)
+
+    def preflight(selected):
+        assert selected == {"kind": "packet", "name": "native-driver-auth-wait"}
+        raise ValueError("provider preflight reached")
+
+    monkeypatch.setattr(client, "preflight", preflight)
+    with pytest.raises(ValueError, match="missing" if missing else "provider preflight reached"):
+        client.submit({"kind": "packet", "name": "native-driver-auth-wait"}, "HEAD")
     assert list(tmp_path.iterdir()) == []
 
 
