@@ -3,7 +3,8 @@
 [Parent effort](README.md#phase-4--bare-invocation-seam--handoff-plugin-side-landed-end-state-pending)
 and [original acceptance](https://github.com/ThomasMichon/copilot-extensions/issues/542).
 
-**Status:** Active; F1 source accepted in #11837. F2/F3 and release,
+**Status:** Active; F1 source accepted in #11837 and F2 owner sequencing
+accepted in #11847. F2a guidance implementation is below; F2b/F3 and release,
 installed/native qualification remain open.
 **Participant:** `patient-knob`, bounded Manager presentation/entry slice.
 This is an agent-recommended implementation sequence under the existing effort,
@@ -238,11 +239,10 @@ with no active issues. Both scope/timeout threads are resolved, and all three
 required checks passed before the managed merge. This is accepted source,
 not release promotion or installed rollout.
 
-Next: reconcile F2's concrete Install core, Add machine, Adopt repo and Enable
-plugins adapters against their existing command, confirmation, trust, lifetime
-and result contracts. Keep unavailable-owner guidance truthful, preserve the
-same writers and obtain reviewed intent before changing an owner's boundary.
-F3 and the original #542 checklist remain open.
+F2 owner reconciliation and bounded guidance sequencing were accepted in
+#11847. Keep unavailable-owner guidance truthful, preserve the same writers
+and obtain reviewed intent before changing an owner's boundary. F2b, F3 and
+the original #542 checklist remain open.
 
 ## F2 owner reconciliation and bounded next delivery
 
@@ -292,3 +292,43 @@ setup-plan route and actual unsuccessful receipt without apply, repository or
 trust flags. Preserve project selection and the explicit Doctor route. The
 original effectful, fresh-install, native and installed gates remain open;
 source-only guide tests cannot satisfy them.
+
+## F2a source implementation and validation
+
+The project-independent home exposes four explicitly labeled guides.
+They reuse the full-content Configuration detail compositor with setup-specific
+chrome and Return, without loading Configuration providers. Only Install core
+offers an executable choice: the existing read-only setup plan. The other
+instructions and published references are inert text, not commands or links
+automatically executed by browsing. Core apply and repository adoption remain
+explicit external CLI steps; machine creation and plugin enablement remain
+unavailable as in-app writes.
+
+Production Textual controls exercise all four guides at 48x18 and 80x24,
+scrolling when needed, button/keyboard Return, Escape and Reload. They forbid
+command invocation during guide browsing and compare the fixture home unchanged.
+The actual empty-home setup-plan consumer now enters through the core guide
+and keyboard activation, retains the real unsuccessful exit receipt, returns
+and reloads without changing the home. The guide overrides inherited Enter
+behavior so its action button works, and suppresses the superclass event handler
+so one click cannot dismiss two screens.
+
+The full pending/Setup packet passed 22 cases, alongside a passing existing
+legacy Authentication detail consumer. Its namespaced consumer initially
+exceeded the aggregate UI-test deadline; this is not evidence of a product
+authentication defect. Focused diagnostics confirmed that refresh retains
+its old error cache while the new read is pending. The fixture now waits for
+actual read settlement before asserting success and reports bounded phase
+timings on failure, rather than mistaking the old error for the new outcome.
+The isolated namespaced case and both variants together passed with the
+original 20-second UI bound unchanged; those passes do not establish the
+original timeout's cause or a native latency budget. The separate
+first-run model packet passed 13 cases and its production source is unchanged.
+
+Changed Python F/E9 lint, install-contract, headless-launch and documentation
+consistency checks passed. These are contained source/real-consumer controls,
+not native visible/input-ready latency or installed acceptance. Fresh-profile
+read-only first touch is exercised; no installer/apply behavior changed, so no
+installer clean-room/apply lane was selected. No admitted live TTY venue,
+shared-service probe, installation or rollout was exercised. F2a does not
+complete the original F2 effectful handoffs, F3 or #542.
