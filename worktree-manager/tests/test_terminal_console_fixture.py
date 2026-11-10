@@ -139,3 +139,43 @@ def test_native_departed_snapshot_pid_is_confirmed_before_omission(
         assert calls == [(child, 87)]
         (tmp_path / "finish").touch()
         assert console.wait() == 0
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.skipif(os.name != "nt", reason="Actual retained Windows process-handle settlement")
+def test_native_image_query_exit_uses_the_retained_handle(console_type, tmp_path, monkeypatch):
+    native = importlib.import_module("test_manager_installed_tty")
+    script = tmp_path / "exit.py"
+    script.write_text(
+        "import ctypes,sys,time\nfrom pathlib import Path\n"
+        "root=Path(sys.argv[1])\n"
+        "(root/'ready').touch()\n"
+        "deadline=time.monotonic()+15\n"
+        "while not (root/'release').exists() and time.monotonic()<deadline: time.sleep(.001)\n"
+        "ctypes.windll.kernel32.ExitProcess(0)\n",
+        encoding="utf-8",
+    )
+    python = getattr(sys, "_base_executable", sys.executable)
+    with console_type([python, "-I", str(script), str(tmp_path)],
+                      env=os.environ.copy(), cwd=tmp_path) as console:
+        deadline = time.monotonic() + 10
+        while not (tmp_path / "ready").exists():
+            assert time.monotonic() < deadline, "Native child did not reach its private exit wait"
+            time.sleep(.01)
+        handle = console.process.process
+        assert not console.exited(handle)
+        assert native._live_image(console, handle).resolve() == Path(python).resolve()
+        failure = _failure(5)
+        calls = []
+
+        def query(actual_console, actual_handle):
+            assert actual_console is console and actual_handle == handle
+            assert not console.exited(handle)
+            calls.append(actual_handle)
+            (tmp_path / "release").touch()
+            raise failure
+
+        monkeypatch.setattr(native, "_image", query)
+        assert native._live_image(console, handle) is None
+        assert calls == [handle] and console.exited(handle)
+        assert console.wait() == 0

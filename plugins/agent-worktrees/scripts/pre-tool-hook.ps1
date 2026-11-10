@@ -123,12 +123,32 @@ function Read-NativePreToolText([string]$Path, [int]$Limit) {
 
 function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
     try {
-        if ($Facts -isnot [Collections.IDictionary] -or $Payload.ContainsKey('toolCalls')) { return $false }
-        $name = $Payload.toolName
-        if (-not $name) { $name = $Payload.tool_name }
-        if ($name -isnot [string] -or $name -cnotin @('create', 'edit')) { return $false }
-        if ($Payload.cwd -isnot [string] -or
-            (Get-PreparedWorktreesPath $Payload.cwd) -cne $Facts.workspace) { return $false }
+        if ($Facts -isnot [Collections.IDictionary]) { return $false }
+        $writeArgs = [Collections.Generic.List[object]]::new()
+        $cwd = $Payload.cwd
+        if ($Payload.ContainsKey('toolCalls')) {
+            # tool_call_forms gives batch members precedence over top-level tool fields.
+            $calls = $Payload['toolCalls']
+            if ($calls -isnot [Collections.IList] -or $calls.Count -lt 1 -or $calls.Count -gt 128) {
+                return $false
+            }
+            foreach ($call in $calls) {
+                if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
+                    $call['name'] -cnotin @('create', 'edit', 'view', 'rg', 'glob')) { return $false }
+                foreach ($key in $call.Keys) {
+                    if ($key -cnotin @('name', 'args', 'id')) { return $false }
+                }
+                if ($call['name'] -cin @('create', 'edit')) { $writeArgs.Add($call['args']) }
+            }
+            if (-not $Payload.ContainsKey('cwd')) { $cwd = $Payload.workingDirectory }
+        } else {
+            $name = $Payload.toolName
+            if (-not $name) { $name = $Payload.tool_name }
+            if ($name -isnot [string] -or $name -cnotin @('create', 'edit')) { return $false }
+            $writeArgs.Add($(if ($Payload.ContainsKey('toolArgs')) { $Payload.toolArgs } else { $Payload.tool_input }))
+        }
+        if (-not $writeArgs.Count -or $cwd -isnot [string] -or
+            (Get-PreparedWorktreesPath $cwd) -cne $Facts.workspace) { return $false }
         $root = $Facts.identity.root
         if (-not [IO.File]::Exists([IO.Path]::Combine($root, '.git'))) { return $false }
         # Membership proves enrollment; current Git bytes still prove this target's identity.
@@ -144,19 +164,47 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
             $Facts.identity.common_dir -or -not [IO.File]::Exists([IO.Path]::Combine($gitDir, 'HEAD')) -or
             -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'objects')) -or
             -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'refs'))) { return $false }
-        $args = if ($Payload.ContainsKey('toolArgs')) { $Payload.toolArgs } else { $Payload.tool_input }
-        if ($args -is [string]) { $args = ConvertFrom-PreToolJson $args }
-        if ($args -isnot [Collections.IDictionary]) { return $false }
-        foreach ($key in @('edits', 'files', 'changes')) {
-            if ($args.ContainsKey($key)) { return $false }
+        $rawPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($args in $writeArgs) {
+            if ($args -is [string]) { $args = ConvertFrom-PreToolJson $args }
+            if ($args -isnot [Collections.IDictionary]) { return $false }
+            $entries = [Collections.Generic.List[object]]::new()
+            $entries.Add($args)
+            foreach ($key in @('edits', 'files', 'changes')) {
+                if (-not $args.ContainsKey($key)) { continue }
+                $values = $args[$key]
+                if ($values -isnot [Collections.IList] -or $values.Count -gt 128) { return $false }
+                foreach ($entry in $values) {
+                    if ($entry -isnot [Collections.IDictionary]) { return $false }
+                    foreach ($nested in @('edits', 'files', 'changes')) {
+                        if ($entry.ContainsKey($nested)) { return $false }
+                    }
+                    $entries.Add($entry)
+                }
+            }
+            $callPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            for ($index = 0; $index -lt $entries.Count; $index++) {
+                $found = $false
+                foreach ($key in @('path', 'file_path', 'filePath', 'filename', 'fileName', 'target_file', 'targetFile')) {
+                    $raw = $entries[$index][$key]
+                    if ($raw -isnot [string] -or -not $raw) { continue }
+                    $found = $true
+                    $null = $callPaths.Add($raw)
+                    if ($callPaths.Count -gt 128) { return $false }
+                }
+                if ($index -gt 0 -and -not $found) { return $false }
+            }
+            if (-not $callPaths.Count) { return $false }
+            foreach ($raw in $callPaths) {
+                $null = $rawPaths.Add($raw)
+                if ($rawPaths.Count -gt 128) { return $false }
+            }
         }
         $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-        foreach ($key in @('path', 'file_path', 'filePath', 'filename', 'fileName', 'target_file', 'targetFile')) {
-            $raw = $args[$key]
-            if ($raw -isnot [string] -or -not $raw) { continue }
+        foreach ($raw in $rawPaths) {
             if ($raw.Length -gt 4096 -or ($raw -notmatch '^[A-Za-z]:[\\/]' -and
                 ($raw.Contains(':') -or $raw -match '^[\\/]'))) { return $false }
-            $target = Get-PreparedWorktreesPath ([IO.Path]::Combine($Payload.cwd, $raw))
+            $target = Get-PreparedWorktreesPath ([IO.Path]::Combine($cwd, $raw))
             if (-not $target.StartsWith($root + '\', [StringComparison]::Ordinal)) { return $false }
             $ancestor = $target
             while ($ancestor -cne $root) {
@@ -171,7 +219,7 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
             }
             $null = $paths.Add($target)
         }
-        if ($paths.Count -ne 1 -or -not (Test-NativePreToolSources -WriteProof $true)) { return $false }
+        if (-not (Test-NativePreToolSources -WriteProof $true)) { return $false }
         $configPath = [IO.Path]::Combine($root, '.agent-worktrees', 'config.yaml')
         $null = Get-PreparedWorktreesPath $configPath
         $stateless = $false

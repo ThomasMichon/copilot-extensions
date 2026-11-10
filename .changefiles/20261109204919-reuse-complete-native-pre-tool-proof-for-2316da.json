@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse complete native pre-tool proof for bounded direct file-write batches",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1305,13 +1305,11 @@ def require_immutable_environment(slot: Path) -> None:
 
 def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                   pid: int | None = None, dev_owner: str | None = None) -> Path:
-    """Publish numbered completion once, preserving exact reuse byte-for-byte.
+    """Publish completion after isolated health, preserving exact reuse.
 
-    Call only after isolated health gating. Existing malformed evidence or
-    conflicting content refuses publication; repair requires a distinct
-    generation. Only an explicitly claimed dev slot permits replacement.
-    Retention protects publication from cleanup, not the caller's subsequent
-    promotion/drain lifetime, which requires its own retained descriptor.
+    Malformed or conflicting evidence requires distinct-generation repair.
+    Only an explicitly claimed dev slot permits replacement. Retention protects
+    publication, not the caller's subsequent promotion/drain lifetime.
     """
     import tempfile
     import time as _t
@@ -1354,6 +1352,8 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                     )
             vdir.mkdir(parents=True, exist_ok=True)
             require_immutable_environment(vdir)
+            if version != DEV_VERSION and not is_dev_generation(version):
+                _runtime_component("versioned_runtime_publication").prepare_retained_generation(vdir)
             fd, name = tempfile.mkstemp(prefix=dest.name + ".tmp-", dir=vdir)
             tmp = Path(name)
             try:

@@ -3,8 +3,9 @@
 [Parent effort](README.md#phase-4--bare-invocation-seam--handoff-plugin-side-landed-end-state-pending)
 and [original acceptance](https://github.com/ThomasMichon/copilot-extensions/issues/542).
 
-**Status:** Active; F1 source flow implemented and consumer-tested. F2/F3,
-review/CI and installed/native qualification remain open.
+**Status:** Active; F1 source accepted in #11837, F2 owner sequencing
+accepted in #11847 and F2a guidance source accepted in #11858. F2b/F3 and release,
+installed/native qualification remain open.
 **Participant:** `patient-knob`, bounded Manager presentation/entry slice.
 This is an agent-recommended implementation sequence under the existing effort,
 not a replacement for #542 or a new configurator implementation.
@@ -143,7 +144,7 @@ their independently tracked construction/replacement adoption gaps.
 - [x] Fail-first entry controls cover interactive bare, redirected stdin,
   redirected output with/without stderr terminal, absent/broken streams,
   ACP-style invocation, explicit verbs/project/help/version and launcher output.
-- [ ] Production Textual tests prove chrome before slow discovery, empty and
+- [x] Production Textual tests prove chrome before slow discovery, empty and
   partial states, explicit project selection, unknown versus empty roster,
   retry/recovery, cancellation and no late activation after owner loss.
 - [x] A real isolated Manager subprocess exercises Review setup plan and its
@@ -158,7 +159,7 @@ their independently tracked construction/replacement adoption gaps.
 - [ ] F2 adds focused real-owner handoff, confirm/cancel, failure, restart and
   reread controls for every supported missing-source action, preserving separate
   source writers and existing compatibility refusals.
-- [ ] Run required focused suites, lint, install/documentation contracts and
+- [x] For F1, run required focused suites, lint, install/documentation contracts and
   exact-head review/CI. Record clean-room first-touch and genuinely available
   live/native tiers separately, with explicit reasons when unavailable.
 
@@ -227,5 +228,142 @@ latency or installed acceptance. A full installer clean-room/apply lane is not
 selected because this flow performs no installation; fresh-profile first touch
 is exercised directly. No admitted fixture-scoped live TTY venue was exercised,
 and no shared native-service Doctor/probe or rollout was performed. Full partial
-state/action/TTY qualification and required exact-head review/CI remain separate
-unchecked gates above; #542 remains open.
+state/action/TTY qualification remains unchecked above; #542 remains open.
+
+## F1 acceptance and next slice
+
+#11837 merged to `dev` on 2026-11-10 as
+`22be86107608ad89337a528a08533ec414537768`. Copilot approval
+`5836169797` covers exact head `63bc96b642775623b6a81182008e7d53c723c76f`
+with no active issues. Both scope/timeout threads are resolved, and all three
+required checks passed before the managed merge. This is accepted source,
+not release promotion or installed rollout.
+
+F2 owner reconciliation and bounded guidance sequencing were accepted in
+#11847. Keep unavailable-owner guidance truthful, preserve the same writers
+and obtain reviewed intent before changing an owner's boundary. F2b, F3 and
+the original #542 checklist remain open.
+
+## F2 owner reconciliation and bounded next delivery
+
+The following is an agent-recommended refinement of the already-reviewed F2,
+not acceptance of the original onboarding checklist. Inspection found no
+generic no-project Configuration writer for machine creation or plugin
+enablement. Do not equate an owner of a configuration domain with a shipped
+interactive adapter for changing that domain.
+
+| Missing-source action | Qualified existing surface | Scope, consent and lifetime |
+|---|---|---|
+| Install core | Manager `setup` / `setup --apply`, `setup_cli`, `core_install` and the prerequisite provisioner | Read-only plan is already composed. Apply may provision prerequisites, run the real core installer and require a new terminal. It needs a discoverable source checkout or bootstrap staging checkout. It is a synchronous owner command, not the durable target-update API; an absent engine cannot be installed by pretending it is an updatable target. |
+| Adopt repo | Manager `register` / `setup --repository`, `repository_bootstrap`, engine `repos setup` | Choose a credential-free HTTPS source and absolute destination, and optionally a full commit and declared context. The dry-run prints the declaration only: it does not inspect or qualify remote setup. Actual acquisition/registration/setup retains native account, trust and refusal checks. Repository-setup trust is a separate explicit choice, never implied by opening a guide. |
+| Add machine | Repository topology owner and agent-ssh's documented mesh/profile contracts | Current machine roster and ordinary SSH preferences are read-only presentation. `machine_config.py` selects an overlay root; it is not a machine-creation API. No Add-machine Configuration contribution is declared by agent-ssh. Topology changes use the owning repository's worktree/review flow; profile emission, transport installation, credentials and reachability remain separate explicit operations. |
+| Enable plugins | Repository settings and the native plugin-installation/enablement workflow | The current Repositories Configuration contribution provides existing-knowledge binding and future launch preferences, not plugin enablement. Plugin source selection and settings changes retain their own trust and repository publication gates. Loading a payload is not runtime installation or service activation. |
+
+**F2a: navigable owner guidance, first.** Add four clearly named, read-only
+guides to the project-independent home, using the existing full-content screen
+and return mechanics. Each guide states the actual owner, prerequisites,
+effects, supported next step and unavailable in-app operation. Install core
+continues to offer the real read-only setup plan. Repository instructions name
+the supported Manager CLI and its declaration-only dry-run without claiming
+registration or source qualification. Machine and plugin guides point to their
+published owning references and preserve source-edit/review boundaries.
+No rendered command is executed, no guessed owner command is offered, and
+returning to the home does not fabricate a successful action or ready state.
+Guides are available even if the engine, project or contributed pivots are
+absent. They do not discover providers, open a browser, launch an agent or
+write configuration merely to display help.
+
+**F2b: effectful composition remains open.** Core apply and repository setup
+have real synchronous CLI owners, but no qualified durable no-project TUI
+handoff is established here. Do not run them under the diagnostic timeout,
+convert observer loss into installer cancellation, or introduce a second
+installer/job engine. Until their original owners provide or qualify that
+handoff, disclose that the operator must use the named CLI outside the TUI,
+retain its actual result and restart instructions, then explicitly Reload.
+Machine creation and plugin enablement likewise remain unavailable as in-app
+mutations, rather than enabled no-op actions. The original owner issues and
+Phase 5 retain that work; F2a alone does not check off F2 or F3.
+
+**F2a acceptance:** production Textual navigation must exercise all four
+guides, their return/cancel paths and compact-terminal scrolling. Compare
+fixture state before and after browsing, returning and Reload; assert no
+command/provider runs merely to open a guide. Exercise the core guide's real
+setup-plan route and actual unsuccessful receipt without apply, repository or
+trust flags. Preserve project selection and the explicit Doctor route. The
+original effectful, fresh-install, native and installed gates remain open;
+source-only guide tests cannot satisfy them.
+
+## F2a source implementation and validation
+
+The project-independent home exposes four explicitly labeled guides.
+They reuse the full-content Configuration detail compositor with setup-specific
+chrome and Return, without loading Configuration providers. Only Install core
+offers an executable choice: the existing read-only setup plan. The other
+instructions and published references are inert text, not commands or links
+automatically executed by browsing. Core apply and repository adoption remain
+explicit external CLI steps; machine creation and plugin enablement remain
+unavailable as in-app writes.
+
+Production Textual controls exercise all four guides at 48x18 and 80x24,
+scrolling when needed, button/keyboard Return, Escape and Reload. They forbid
+command invocation during guide browsing and compare the fixture home unchanged.
+The actual empty-home setup-plan consumer now enters through the core guide
+and keyboard activation, retains the real unsuccessful exit receipt, returns
+and reloads without changing the home. The guide overrides inherited Enter
+behavior so its action button works, and suppresses the superclass event handler
+so one click cannot dismiss two screens.
+
+The full pending/Setup packet passed 22 cases, alongside a passing existing
+legacy Authentication detail consumer. Its namespaced consumer initially
+exceeded the aggregate UI-test deadline; this is not evidence of a product
+authentication defect. Focused diagnostics confirmed that refresh retains
+its old error cache while the new read is pending. The fixture now waits for
+actual read settlement before asserting success and reports bounded phase
+timings on failure, rather than mistaking the old error for the new outcome.
+The isolated namespaced case and both variants together passed with the
+original 20-second UI bound unchanged; those passes do not establish the
+original timeout's cause or a native latency budget. The separate
+first-run model packet passed 13 cases and its production source is unchanged.
+
+Changed Python F/E9 lint, install-contract, headless-launch and documentation
+consistency checks passed. These are contained source/real-consumer controls,
+not native visible/input-ready latency or installed acceptance. Fresh-profile
+read-only first touch is exercised; no installer/apply behavior changed, so no
+installer clean-room/apply lane was selected. No admitted live TTY venue,
+shared-service probe, installation or rollout was exercised. F2a does not
+complete the original F2 effectful handoffs, F3 or #542.
+
+F2a is source-accepted in #11858; its review/merge receipt is retained in the
+[parent Journal](README.md#2026-11-10---first-run-owner-guidance-and-retained-effectful-gates).
+#542 remains open. The original F3 matrix retains effectful owner handoffs
+and native/installed acceptance as separate unmet gates.
+
+## F3 original-matrix reconciliation and source recovery controls
+
+The original #542 body requires bare TTY entry, state-derived Setup/Doctor
+versus Worktrees, and actual Install core, Add machine, Adopt repo and Enable
+plugins actions. The table below credits the accepted source controls without
+reducing that original outcome to read-only navigation.
+
+| Original cell | Source evidence and remaining boundary |
+|---|---|
+| Bare TTY / non-TTY entry | F1 entry and stream controls cover interactive input, usable terminal output, redirected/absent/broken streams, explicit verbs and launcher output. Native terminal modes and installed qualification remain separate. |
+| Empty and partial setup | Real fresh-profile setup-plan receipts and F2a guides are accepted. Additional production-runner/Textual controls now read actual isolated registries with partial core and an existing project, available engine with no project, and malformed project data. Engine/core observations are inert fixtures, not a real installation. |
+| Unknown data, repair and Reload | The three new controls preserve malformed versus empty, disable Open without an engine and compare every fixture file/directory before and after each observation. Only the fixture owner repairs the input; explicit Reload rereads it and exposes Open without implicitly binding, loading Worktrees or running optional project, diagnostic or maintenance work. |
+| Provisioned / project choice | Existing F1 controls retain single-project bootstrap, multiple-project explicit selection, selection-time reread, capability refusal/retry, surviving-widget activation and owner-loss cancellation. They are source/contained-consumer proof, not an installed engine/current-feed qualification. |
+| Missing-source provisioning actions | F2a supplies truthful guides and the real read-only setup plan. F2b remains unmet: core apply and adoption are external owner commands; Add machine and Enable plugins have no in-app writer. Confirmation, failure, restart and post-action reread must be qualified through those actual owners. |
+
+The three new recovery cases passed through the canonical contained runner.
+Their first attempt correctly refused noninteractive test stdin before reaching
+the app; the fixture now supplies the same explicit terminal stream as the
+existing production-entry control. No production terminal gate changed.
+Changed-test F/E9 lint passed. No runtime, installer, dependency, command or
+service contract changed, and no new suite was added to required unit CI.
+
+This closes the production-Textual observation/recovery checkbox only. The
+full pristine-profile diagnostic/nonmutation gate, F2b effectful handoffs,
+complete native/platform matrix, release and installed acceptance remain open.
+There was no shared-service Doctor, native mux probe, apply, installation or
+rollout. An installer/apply clean-room lane is inapplicable to this test-only
+delta; the read-only fresh-profile consumer remains the separately recorded F1
+proof. #542 and F3 remain open.

@@ -150,6 +150,18 @@ qualify; missing, skipped, foreign or extra cases do not. Evidence sanitization
 and interruption handling are the same as the Worktrees packet. This does not
 qualify other callers, pending-work retirement or positive-renewal activation.
 
+`submit --packet native-driver-inflight` separately selects
+`test_opt_in_receiver_inflight_expiry_preserves_hold` from the same
+candidate-supplied fixture. Its private model response stays blocked while
+the source grant expires. The exact native processes must retire, interrupted
+input must not succeed or replay, and the receiver must retain a hold that
+refuses renewal. It uses the same pins, public preparation, source checks,
+120/180-second functional/test bounds and 300/420-second group/plugin limits,
+without a configured feed. Passing the steady recovery packet does not qualify
+this negative case, all pending-work sources or productive enablement.
+The protected admission owner derives native preparation and sanitization
+from its known packet registry, never a caller-supplied flag or name prefix.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
@@ -312,6 +324,16 @@ For prepared Windows file-local writes, `prepared-membership-native.yml` runs
 The controls use actual membership and guard-map publication for legacy and
 installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
+Native batch cases prove all-call admission with mixed reads/writes, per-call
+arguments, batch-over-single precedence, the 128-call bound and a later
+protected/foreign member defeating an earlier safe write. The separate
+structured packet covers the direct-plus-entry alias union, JSON arguments,
+deduplication and 128-entry/target limits, with late protected/foreign/nested
+targets, incomplete entries and patch fallback. It also compares structured
+writes with the real original policy in legacy and selected-cell fixtures.
+Invalid
+envelopes and read-only batches retain original policy; installation-cell
+positive and protected batches use the same actual preparation.
 The `real-policy` cases compare the same registered entry and fixture with the
 new contract and an older read-only contract, using the real caller-owned policy
 worker rather than a timing stub; they also require a real protected-state deny.
@@ -551,6 +573,18 @@ Windows-only control deliberately releases a snapshotted child before pinning,
 using the strict fixture-owned Job. Portable controls are not native evidence.
 Live descendant handles, creation-time checks and installed TTY assertions
 remain unchanged.
+
+Image attribution has a separate retained-handle exit boundary. After a failed
+image query, it waits at most 250 milliseconds, capped by the remaining shared
+work deadline, for that same handle to become signalled. Only confirmed exit
+permits omission; unreadable live processes still fail, with the descendant
+PID and snapshot name retained in the exception note. No PID is reopened and
+no installed-process, input or cleanup witness is waived.
+The portable `process_image_attribution` controls cover that distinction and
+the deadline cap. The same console-fixture file's explicitly selected T3
+`native_image_query_exit` control uses a real owned Windows process and retained
+handle with an injected image-query failure; it is not proof of the precise
+lifetime of a historical failing PID.
 
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
@@ -5626,6 +5660,26 @@ receipt/parser and pending-withdrawal suites still cover malformed legacy proof;
 the new constructor must not repair it.
 
 ## Unit-only promotion packet
+
+The actor-free `test_health_composition.py` packet executes the existing domain
+age projection, normal report/parser and SVG composition. Substituted storage
+and service owners retain stale/unknown evidence, independent unavailable
+inputs and unchanged old report selection. It starts no observer, writer or
+service. The selected Machines native observation packet separately proves
+actual loopback -> confirmed local slot -> normal report/chart, while the
+configured measurement/sink packet proves valid telemetry remains usable when
+an explicitly selected health store is unavailable. Neither qualifies a native
+scheduled job, installed publisher or carrier.
+
+The same packet admits the hourly-envelope validator, write-boundary component
+preservation and explicit collection orchestration with substituted clock,
+storage, admission and native providers. Current health and historical service
+results keep separate absolute hours and one inherited collection budget.
+The selected Machines `tests/native/test_health_collection_consumer.py` packet
+separately exercises actual retained Dispatch events, private listener,
+confirmed slot transactions and report/chart, plus competing native processes
+and normal/crash run-lock release. Required unit CI starts none of those actors;
+fixture-resolved installation admission is not deployed inventory or scheduling.
 
 The actor-free `test_hourly_contributions.py` packet executes the canonical
 service contribution codec and collection policy with substituted native owners

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import time
 import venv
 
 import pytest
@@ -138,11 +139,18 @@ def test_native_authentication_navigation_stale_errors_refresh_and_rollback(
     def body(screen):
         return "\n".join(row.text.plain for row in screen.build_body(118))
 
+    milestones = []
+    started = time.monotonic()
+
+    def mark(stage):
+        milestones.append((stage, round(time.monotonic() - started, 3)))
+
     async def run():
         app = PickerApp(_fixture_source(), live=False)
         async with app.run_test(size=(118, 40)) as pilot:
             screen = app.query_one(PickerScreen)
             await _wait_for_initial_setup(pilot, screen)
+            mark("initial setup")
             assert calls() == []
             screen._open_cfgmenu()
             await pilot.pause()
@@ -165,6 +173,7 @@ def test_native_authentication_navigation_stale_errors_refresh_and_rollback(
                 release.touch()
                 await _wait(pilot, lambda: runtime.get("")[0] in ("ready", "error"))
                 assert runtime.get("")[0] == "ready", runtime.get("")
+                mark("initial observation")
                 assert len(calls()) == 1
                 auth_index = next(i for i, item in enumerate(screen.pivots)
                                   if getattr(item.get("pivot"), "name", None) == repository_authentication.PIVOT_NAME)
@@ -185,6 +194,7 @@ def test_native_authentication_navigation_stale_errors_refresh_and_rollback(
                 assert "private-sentinel" not in card
                 app.screen.dismiss(None)
                 await pilot.pause()
+                mark("details returned")
                 release.unlink()
                 control.write_text(json.dumps({"wait": True, "status": "unavailable"}), encoding="utf-8")
                 screen._dispatch_key("r")
@@ -195,6 +205,7 @@ def test_native_authentication_navigation_stale_errors_refresh_and_rollback(
                 await _wait(pilot, lambda: not runtime.read_pending(""))
                 assert runtime.get("")[0] == "ready", runtime.get("")
                 assert runtime.get_summary("")["status"] == "unavailable"
+                mark("unavailable observation")
                 assert screen.htab != auth_index, "Read completion must not steal navigation"
                 screen.htab = auth_index
                 screen.refresh()
@@ -204,10 +215,13 @@ def test_native_authentication_navigation_stale_errors_refresh_and_rollback(
                 await _wait(pilot, lambda: runtime.get("")[0] == "error")
                 assert "invalid or failed" in body(screen)
                 assert "private-malformed-provider-output" not in body(screen)
+                mark("malformed observation")
                 control.write_text("{}", encoding="utf-8")
                 monkeypatch.setattr(context, "_project", "second")
                 screen._dispatch_key("r")
-                await _wait(pilot, lambda: runtime.get("")[0] == "ready")
+                await _wait(pilot, lambda: not runtime.read_pending(""))
+                assert runtime.get("")[0] == "ready", (runtime.get("")[2], milestones)
+                mark("changed project observation")
                 assert all("second/second" in row["card"]["body"] for row in runtime.get("")[1])
                 assert calls()[-1]["argv"][-5:] == [
                     "--context-project", "second", "--repository", "second", "--json",
@@ -226,6 +240,9 @@ def test_native_authentication_navigation_stale_errors_refresh_and_rollback(
                 release.touch()
 
     async def bounded():
-        await asyncio.wait_for(run(), timeout=20)
+        try:
+            await asyncio.wait_for(run(), timeout=20)
+        except TimeoutError:
+            pytest.fail(f"Authentication UI did not settle within 20s; phases: {milestones}")
 
     asyncio.run(bounded())

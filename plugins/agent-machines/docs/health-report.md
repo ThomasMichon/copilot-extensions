@@ -7,6 +7,7 @@ changes telemetry configuration, and does not discover or publish to OneDrive.
 ```text
 agent-machines health report --input <local-jsonl> --input <another-local-jsonl>
 agent-machines health report --input <local-jsonl> --chart <new-chart.svg>
+agent-machines health report --store-dir <absolute-local-health-store> --service agent-dispatch --chart <new-chart.svg>
 ```
 
 The command writes `agent-machines.health-report.v1` JSON to stdout. `--now`
@@ -68,7 +69,7 @@ agent-machines health report --service queue=agent-dispatch --hour 2026-11-09T12
 
 An explicit `--service` selects the existing same-cell installation owner,
 not PATH, a home-directory scan or a synchronized command. At least one
-`--input` or `--service` is required. `--hour` selects exactly one absolute UTC
+`--input`, `--service` or `--store-dir` is required. `--hour` selects exactly one absolute UTC
 hour inside the report's 168-hour window; the default is its current hour.
 There are at most eight selections, 30 seconds for collection, ten seconds per
 child and 64 KiB each for complete stdout/stderr. Native tree and retained-pipe
@@ -130,6 +131,102 @@ runner:
 ```text
 python tools/run-plugin-tests.py agent-machines --test-file tests/test_health_report.py --test-file tests/native/test_health_report_consumer.py --allow-explicit-tiers
 ```
+
+## Explicit local collection candidates
+
+`health collect` adds an explicit one-hour candidate flow; it does not change
+the read-only report command or register a recurring job. Prepare a **new**
+exclusive unsynchronized store through the local configuration owner with:
+
+```json
+{
+  "schema": "agent-machines.health.store",
+  "version": 2,
+  "publisher": "example-worker",
+  "continuity": "example-generation",
+  "collection": {
+    "bridge_port": null,
+    "services": ["queue=agent-dispatch"]
+  }
+}
+```
+
+The store also needs a preprovisioned one-byte `collection.lock` regular file,
+initially containing a zero byte.
+Preparation is explicit: collection creates neither the directory, policy nor
+lock, and does not migrate an existing v1 store. Select an existing admitted
+loopback Bridge listener by numeric `bridge_port` when wanted; null means do
+not probe. Service selections use the same installed-owner contract as report,
+with at most eight unique presentation labels and no executable configuration.
+
+```text
+agent-machines health collect --store-dir <absolute-v2-store>
+agent-machines health collect --store-dir <absolute-v2-store> --hour 2026-11-09T11:00:00Z
+agent-machines health record --store-dir <absolute-v2-store> --input <candidate.json>
+agent-machines health record --store-dir <absolute-v2-store> --input <candidate.json> --apply --expect <preview-token>
+agent-machines health report --store-dir <absolute-v2-store> --chart <new-chart.svg>
+```
+
+Collect writes one `agent-machines.health.hourly` v1 envelope to stdout. Save it
+outside the store as the explicit record input. Current-hour collection runs
+only the selected local listener check; an explicit older hour within the
+168-hour window exports retained services only, never present-time probes.
+Run the two explicit commands to obtain current health and previous-hour
+telemetry; automatic two-target execution and native periodic enrollment are
+not implemented. An early/current-hour export from the separate report command
+remains its existing bounded snapshot, not a complete-hour total.
+
+Collection holds a nonblocking OS-backed run lock, uses a 45-second admission
+budget and passes the remaining ceiling to existing 30-second/ten-second
+service collection. It reserves response time and refuses on a changed policy,
+clock/hour boundary or expired budget. The native process owner retains cleanup
+custody. Before exporting, collection durably changes the existing lock byte
+to one; confirmed settlement clears it to zero. Unconfirmed native cleanup
+retains both admission locks and registers their release with that exact
+native owner's settlement callback. A failed cleanup retry cannot release them.
+If the CLI exits before settlement, the byte remains a fail-closed fence:
+later invocations refuse `collection-cleanup-unconfirmed` even after the OS
+lock releases. There is no automatic fence reset or recovery command; the
+original native owner must confirm settlement, or an explicit containment
+handoff must reconcile that exact custody before store recovery. File age,
+an exited CLI or a missing PID is not confirmation. Thus collection never writes
+evidence or slots, but can change this existing admission metadata.
+The final deadline and hour checks run after admission cleanup; late successful
+fence clearing cannot produce an on-time candidate.
+Lock, provider and filesystem failures never start a replacement
+service, change credentials or write a slot. Filesystem stalls defeating the
+budget remain a native qualification failure, not a hard-real-time guarantee.
+
+The candidate retains existing unselected components and its target revision;
+confirmed `health record` revalidates the policy, input and previous revision
+under its existing mutation lock before atomic replacement. There is no
+multi-slot transaction or automatic replay after an unknown write outcome.
+The new closed envelope holds only same-hour observation v1 and namespaced
+service contribution v1 data, with collection time separate from evidence
+times. A valid older service contribution survives a later failed or
+evidence-free export, even when the response contains a valid contribution
+wrapper. This rule is also enforced for directly supplied record candidates.
+Components without evidence remain unknown; a fresh envelope does not refresh
+their source ages. Supplied input remains unverified, not an attested probe.
+Listener-only recollection replaces only `local_listener`; retained SSH,
+session and other unselected domains keep their exact evidence and source
+timestamps. The record boundary also refuses changes to those domains.
+
+V2 slots have a 768 KiB per-envelope limit and the same 168-name ring. The ring
+accounts for at most 126 MiB; failed writes or unrelated filesystem usage are
+not disk-quota enforcement. Old v1 observations/stores retain their original
+schema and 64 KiB limit; an older runtime cannot read or write the new format.
+Use explicit store selection for adoption/rollback, never dual writers or
+synchronized execution policy. The report/chart shows stored service namespaces
+separately from direct-file totals without launching exports.
+
+`tests/test_health_collection.py` covers candidate, clock, overlap, old-format,
+revision and storage-failure controls. The selected native
+`tests/native/test_health_collection_consumer.py` exercises actual retained
+Dispatch events and a private listener through collect, confirmed staging,
+reread and chart, plus two-process overlap and normal/crash lock release.
+Its installation admission is fixture-resolved. Native scheduler qualification,
+installed adoption, carrier publication and activation remain separate gates.
 
 ## Explicit local hourly observations
 
@@ -254,10 +351,65 @@ acknowledgement through stderr when available, never an untouched slot.
 
 Inspect rechecks policy bytes and namespace identity after its scan; a concurrent
 policy change requires another read, not a view qualified by the old owner.
-These are additive explicitly selected commands. Existing `health report`
-behavior is unchanged. Discover `health --help` on the selected runtime before
+These are additive explicitly selected commands. Discover `health --help` on the selected runtime before
 calling them; an older runtime's missing command does not authorize a fallback
 writer, direct slot edits, runtime update or carrier enrollment.
+
+## Composed local health view
+
+`health report --store-dir <absolute-local-store>` composes the existing
+`health inspect` reader with the report, optionally alongside explicit telemetry
+files and installed service contributions. It is one read-only report invocation,
+not a combined observe/record job: it neither calls the listener nor changes the
+store, its policy, revisions or writer lock. Observation and confirmed storage
+remain separate explicit operations. A chart destination inside the selected
+store is refused, including new paths; keep presentation artifacts outside its
+exclusive namespace. Both lexical and resolved overlap refuse. A store that
+cannot be resolved remains unavailable evidence while a valid external chart
+can still be written; an unresolvable chart is instead an output refusal.
+
+The additive `health` object has `state: available` and the complete age-qualified
+`view`, or `state: unavailable` and `reason: local-store-unavailable` if the store
+cannot be qualified. Available means readable, not healthy. A missing, invalid
+or changed store policy cannot suppress independent valid telemetry or service
+results. It creates no missing directory and includes no raw path/error content.
+An available view retains per-slot missing, invalid, expired, future and
+owner-mismatch conditions, original domain times, observed states, proof ages,
+unknown counts/directions and the reader's `input-supplied-not-verified`
+qualification. Explicit publisher/continuity identifiers remain local view data,
+not verified identity or permission to share them.
+
+The file report and health reader use the same `--now` cutoff and 168 absolute
+UTC hours. Service contributions keep their separately documented collection
+time semantics. A readable historical listener observation never becomes
+authenticated SSH, a fresh proof or evidence of active agents. Health slots are
+not added to event totals or duration statistics. The SVG displays separate
+slot/domain rows, visible gaps and stale evidence; cell titles retain observed
+state, source age, evidence and reason. A report without `--store-dir` retains
+its prior output and does not inspect a store.
+
+The reader adds at most 168 slot reads of 64 KiB each plus its bounded policy
+checks; it does not enumerate unrelated files or acquire a writer lock. These
+are work/byte bounds, not a wall-clock deadline for a blocked filesystem.
+Native job overlap, stopped storage, Windows/Linux lifetime, installed adoption,
+scheduling and carrier qualification remain open before enrollment.
+
+This expands the existing `agent-machines.health-report.v1` result with an
+opt-in field, without changing either strict v1 policy/observation schema.
+Providers expand first; no automated caller or schedule is migrated here.
+Check `health report --help` on the exact selected runtime for `--store-dir`
+before selecting this optional feature. Legacy/rolled-back providers retain
+their old report syntax; missing support means the composed view is unavailable,
+not permission to drop a required health input or write slots directly.
+
+`tools/promotion_unit_tests/test_health_composition.py` covers actual age
+projection, report/parser composition, independent unavailable evidence and
+static rendering without native actors. The selected
+`tests/native/test_health_observe_consumer.py` extends actual loopback observation
+through confirmed slot storage to the normal report/chart and verifies storage
+is untouched by reporting. `tests/native/test_health_report_consumer.py` retains
+the real measurement/sink flow when an explicitly selected store is unavailable.
+These source/fixture controls do not establish installed or activated publishing.
 
 ## Passive local Bridge listener
 

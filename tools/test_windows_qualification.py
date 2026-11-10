@@ -142,15 +142,52 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
     assert "--allow-host-state" not in argv
 
 
-def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(tmp_path):
-    argv = worker.native_command(tmp_path, tmp_path / "out", "native-driver-auth-wait")
+@pytest.mark.parametrize("packet,case", [
+    ("native-driver-auth-wait", "opt_in_receiver_auth_wait_and_same_session_resume"),
+    ("native-driver-inflight", "opt_in_receiver_inflight_expiry_preserves_hold"),
+])
+def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(tmp_path, packet, case):
+    argv = worker.native_command(tmp_path, tmp_path / "out", packet)
     assert argv[2] == "agent-remote-driver"
     assert argv[argv.index("--test-file") + 1] == "tests/native/test_native_headed_auth_wait.py"
-    assert argv[argv.index("-k") + 1] == "opt_in_receiver_auth_wait_and_same_session_resume"
+    assert argv[argv.index("-k") + 1] == case
     assert [argv[argv.index(flag) + 1] for flag in (
         "--timeout", "--plugin-timeout", "--test-timeout",
     )] == ["300", "420", "180"]
     assert "--allow-explicit-tiers" in argv and "--allow-host-state" not in argv
+
+
+@pytest.mark.parametrize("packet,native", [
+    (None, False), ("bridge-http52", False), ("native-worktrees-embody", True),
+    ("native-driver-auth-wait", True), ("native-driver-inflight", True),
+    ("native-unrecognized", None),
+])
+def test_admission_reports_native_preparation_only_for_known_packets(
+    tmp_path, monkeypatch, packet, native,
+):
+    value = request()
+    if packet:
+        value["selection"] = {"kind": "packet", "name": packet}
+    payload = event()
+    payload["inputs"]["request"] = contract.canonical(value)
+    event_path, output = tmp_path / "event.json", tmp_path / "output"
+    event_path.write_text(contract.canonical(payload), encoding="utf-8")
+    for key, content in {
+        "GITHUB_EVENT_PATH": str(event_path), "GITHUB_OUTPUT": str(output),
+        "GITHUB_ACTOR": "owner", "GITHUB_TRIGGERING_ACTOR": "owner",
+        "GITHUB_REF": "refs/heads/main", "GITHUB_REF_PROTECTED": "true",
+    }.items():
+        monkeypatch.setenv(key, content)
+    monkeypatch.setattr(sys, "argv", ["worker", "admit"])
+    if native is None:
+        with pytest.raises(ValueError, match="unsupported named packet"):
+            worker.main()
+        assert not output.exists()
+    else:
+        assert worker.main() == 0
+        assert dict(line.split("=", 1) for line in output.read_text("utf-8").splitlines()) == {
+            "source_sha": "b" * 40, "packet": packet or "", "native": str(native).lower(),
+        }
 
 
 @pytest.mark.parametrize("require_feed", [True, False])
@@ -496,21 +533,25 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
         client.status(state["request"]["request_id"])
 
 
-@pytest.mark.parametrize("unsupported", ["version", "selector", "packet", "workflow", "unprotected"])
+@pytest.mark.parametrize("unsupported", [
+    "version", "selector", "packet", "inflight", "workflow", "unprotected",
+])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
     tmp_path, monkeypatch, unsupported,
 ):
     client = object.__new__(client_module.Client)
     client.root, client.state_root, client.repository = tmp_path, tmp_path, "owner/repository"
     effects = []
+    packet = {
+        "packet": "native-driver-auth-wait", "inflight": "native-driver-inflight",
+    }.get(unsupported)
     selected = (
-        {"kind": "packet", "name": "native-driver-auth-wait"}
-        if unsupported == "packet" else focused()
+        {"kind": "packet", "name": packet} if packet else focused()
     )
     files = [
         "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
-    ] if unsupported == "packet" else ["plugins/sample/tests/test_sample.py"]
+    ] if packet else ["plugins/sample/tests/test_sample.py"]
     client.transport = SimpleNamespace(
         git=lambda *args: SimpleNamespace(
             stdout=(
@@ -546,16 +587,17 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         }
     monkeypatch.setattr(client, "api", api)
     with pytest.raises(
-        ValueError, match="protected controller does not support" if unsupported == "packet" else None,
+        ValueError, match="protected controller does not support" if packet else None,
     ):
         client.submit(selected, "HEAD")
     assert effects == []
     assert list(tmp_path.iterdir()) == []
 
 
+@pytest.mark.parametrize("packet", ["native-driver-auth-wait", "native-driver-inflight"])
 @pytest.mark.parametrize("missing", [True, False])
 def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_transport(
-    tmp_path, monkeypatch, missing,
+    tmp_path, monkeypatch, missing, packet,
 ):
     client = object.__new__(client_module.Client)
     client.root = tmp_path
@@ -575,12 +617,12 @@ def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_trans
     client.transport = SimpleNamespace(git=git)
 
     def preflight(selected):
-        assert selected == {"kind": "packet", "name": "native-driver-auth-wait"}
+        assert selected == {"kind": "packet", "name": packet}
         raise ValueError("provider preflight reached")
 
     monkeypatch.setattr(client, "preflight", preflight)
     with pytest.raises(ValueError, match="missing" if missing else "provider preflight reached"):
-        client.submit({"kind": "packet", "name": "native-driver-auth-wait"}, "HEAD")
+        client.submit({"kind": "packet", "name": packet}, "HEAD")
     assert list(tmp_path.iterdir()) == []
 
 
@@ -862,10 +904,10 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
     assert set(value.get("on", value.get(True))) == {"workflow_dispatch"}
     assert "concurrency" not in value and value["permissions"] == {}
     assert value["jobs"]["windows"]["needs"] == "admit"
+    assert value["jobs"]["admit"]["outputs"]["native"] == "${{ steps.admit.outputs.native }}"
     upload = value["jobs"]["windows"]["steps"][-1]
     assert upload["if"] == (
-        "${{ always() && ((needs.admit.outputs.packet != 'native-worktrees-embody' && "
-        "needs.admit.outputs.packet != 'native-driver-auth-wait') || "
+        "${{ always() && (needs.admit.outputs.native != 'true' || "
         "steps.sanitize.outcome == 'success') }}"
     )
     for job in value["jobs"].values():
@@ -889,13 +931,11 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                 )
                 if step["name"].startswith("Sanitize"):
                     assert step["if"] == (
-                        "always() && (needs.admit.outputs.packet == 'native-worktrees-embody' || "
-                        "needs.admit.outputs.packet == 'native-driver-auth-wait')"
+                        "always() && needs.admit.outputs.native == 'true'"
                     )
             if step.get("id") == "native":
                 assert step["if"] == (
-                    "needs.admit.outputs.packet == 'native-worktrees-embody' || "
-                    "needs.admit.outputs.packet == 'native-driver-auth-wait'"
+                    "needs.admit.outputs.native == 'true'"
                 )
     promotion = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / ".github/workflows/validate-and-promote.yml").read_text("utf-8"),

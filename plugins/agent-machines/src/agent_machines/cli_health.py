@@ -16,6 +16,10 @@ def add_parser(subparsers) -> None:
     report = commands.add_parser("report", help="summarize explicit local telemetry files")
     report.add_argument("--input", type=Path, action="append", default=[])
     report.add_argument(
+        "--store-dir", type=Path,
+        help="Read an explicit local health store; never probes, records or publishes",
+    )
+    report.add_argument(
         "--service", action="append", default=[],
         help="Installed same-cell service, optionally LABEL=SERVICE; read-only hourly export",
     )
@@ -39,6 +43,36 @@ def add_parser(subparsers) -> None:
     observe.add_argument("--publisher", required=True)
     observe.add_argument("--continuity", required=True)
     observe.set_defaults(func=run_observe)
+    collect = commands.add_parser(
+        "collect", help="collect one local hourly candidate; never stage or enroll a job", allow_abbrev=False,
+    )
+    collect.add_argument("--store-dir", type=Path, required=True, help="explicit preprovisioned v2 store")
+    collect.add_argument("--hour", help="canonical UTC hour; current health by default, historical services only")
+    collect.set_defaults(func=run_collect)
+
+
+def run_collect(args) -> int:
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    from .health_collect import collect
+    from .health_slots import HealthError
+
+    result = None
+    try:
+        result = collect(args.store_dir, args.hour)
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 0
+    except (ValueError, OSError, OverflowError, OwnedCleanupError) as error:
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
+        reason = (
+            "collection-cleanup-unconfirmed" if isinstance(error, OwnedCleanupError)
+            else str(error) if isinstance(error, HealthError) else "collection-unavailable"
+        )
+        print(json.dumps({
+            "ok": False, "error": reason, "applied": False, "carrier_publication": "not-requested",
+        }), file=sys.stderr)
+        return 2
 
 
 def run_observe(args) -> int:
@@ -66,6 +100,21 @@ def _silence_failed_stdout() -> None:
                 os.dup2(sink.fileno(), sys.stdout.fileno())
         except (OSError, ValueError):
             pass
+
+
+def _chart_overlaps_store(chart: Path, store: Path) -> bool:
+    if Path(os.path.abspath(chart)).is_relative_to(Path(os.path.abspath(store))):
+        return True
+    try:
+        destination = chart.resolve()
+    except RuntimeError:
+        raise ValueError("invalid chart path") from None
+    try:
+        namespace = store.resolve()
+    except (OSError, RuntimeError):
+        # An unresolvable store is unavailable evidence, not an output failure.
+        return False
+    return destination.is_relative_to(namespace)
 
 
 def run_slots(args) -> int:
@@ -113,8 +162,13 @@ def run_report(args) -> int:
             if args.now else datetime.now(timezone.utc)
         )
         report = HourlyReport(now)
-        if not args.input and not args.service:
-            raise ValueError("an explicit input or service is required")
+        if not args.input and not args.service and args.store_dir is None:
+            raise ValueError("an explicit input, service or health store is required")
+        if (
+            args.store_dir is not None and args.chart is not None
+            and _chart_overlaps_store(args.chart, args.store_dir)
+        ):
+            raise ValueError("chart overlaps health store")
         seen = set()
         for path in args.input:
             descriptor = None
@@ -155,13 +209,21 @@ def run_report(args) -> int:
             from .service_reports import collect
             from process_telemetry.hourly import hour_start
 
-            hour = args.hour or now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
+            hour = args.hour if args.hour is not None else now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
             if not report.first_hour <= hour_start(hour) // 3_600_000 <= report.last_hour:
                 raise ValueError("service hour outside report window")
             result["services"] = collect(args.service, hour, now_ms=report.now_ns // 1_000_000)
             result["services_collected_at_ms"] = int(datetime.now(timezone.utc).timestamp() * 1000)
-        elif args.hour:
+        elif args.hour is not None:
             raise ValueError("hour requires an explicit service")
+        if args.store_dir is not None:
+            from . import health_slots
+
+            try:
+                view = health_slots.inspect(args.store_dir, now_ms=report.now_ns // 1_000_000)
+                result["health"] = {"state": "available", "view": view}
+            except (OSError, health_slots.HealthError):
+                result["health"] = {"state": "unavailable", "reason": "local-store-unavailable"}
         if args.chart is not None:
             from .health_chart import render
 

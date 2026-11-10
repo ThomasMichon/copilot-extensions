@@ -29,10 +29,13 @@ def dispatch(argv: list[str]) -> int:
         if args.contract:
             if args.repo or args.config or args.credential_command:
                 raise ValueError("contract discovery cannot select repository or credentials")
+            from .providers.observation_credentials import MAX_SNAPSHOT_REQUESTS
             print(json.dumps({
                 "protocol": "agent-worktrees.pr-inventory/v1",
                 "providers": ["github", "gitea"], "credential": "observe/per-request",
                 "effects": "none", "max_pages": 20, "max_pulls": 1000,
+                "snapshot_request_budget": MAX_SNAPSHOT_REQUESTS,
+                "snapshot_capture_bytes": 1_048_584,
             }))
             return 0
         if not args.repo or not args.config or not args.credential_command or not args.json:

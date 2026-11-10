@@ -19,7 +19,13 @@ from worktree_manager.first_run import SetupState
 
 async def _click(pilot, selector):
     await pilot.pause()
-    assert await pilot.click(selector)
+    widget = pilot.app.screen.query_one(selector)
+    widget.focus(scroll_visible=False)
+    widget.scroll_visible(animate=False, immediate=True, top=True)
+    await pilot.pause()
+    assert await pilot.click(selector, offset=(1, 1)), (
+        widget.region, widget.visible_region, pilot.app.focused,
+    )
 
 
 @pytest.mark.parametrize("front_door", [False, True])
@@ -99,6 +105,184 @@ def test_front_door_uses_real_setup_state_and_reload_without_operational_source(
             assert calls == [{}, {"project_override": None, "auto_open": False}]
             assert not app.query(engine.PickerScreen)
             await _click(pilot, "#setup-quit")
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("initial", ["partial", "empty", "malformed"])
+def test_observed_registry_recovery_requires_explicit_project_selection(
+    monkeypatch, tmp_path, initial,
+):
+    from worktree_manager import first_run, harness_state
+    from worktree_manager.production_picker import context, runner
+    from worktree_manager.production_picker.picker_tui import setup_home
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", Terminal())
+    home = tmp_path / "home"
+    registry = home / ".agent-worktrees"
+    registry.mkdir(parents=True)
+    projects = registry / "projects.yaml"
+    projects.write_text(
+        "projects: [broken]\n" if initial == "malformed" else
+        "projects:\n  example: {}\n" if initial == "partial" else
+        "projects: {}\n",
+        encoding="utf-8",
+    )
+    (registry / "repos.yaml").write_text(
+        "repos:\n  example:\n    class: worktree\n", encoding="utf-8",
+    )
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(key, str(home))
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "WORKTREE_PROJECT"):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(home / "manager"))
+    monkeypatch.chdir(home)
+    available = initial != "partial"
+    monkeypatch.setattr(
+        first_run, "core_status",
+        lambda: SimpleNamespace(state="installed" if available else "partial"),
+    )
+    monkeypatch.setattr(first_run, "engine_available", lambda: available)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("unselected owner work must not run while observing or reloading setup")
+
+    monkeypatch.setattr(harness_state, "build_projects", forbidden)
+    monkeypatch.setattr(runner.engine_group_b, "picker_bootstrap", forbidden)
+    monkeypatch.setattr(runner, "_start_housekeeping", forbidden)
+    monkeypatch.setattr(runner, "_start_anchor_heal_check", forbidden)
+    monkeypatch.setattr(setup_home, "diagnostic_argv", forbidden)
+    monkeypatch.setattr(setup_home, "run_caller_owned", forbidden)
+
+    def snapshot():
+        return {
+            str(path.relative_to(home)): path.read_bytes() if path.is_file() else None
+            for path in home.rglob("*")
+        }
+
+    async def exercise(app):
+        nonlocal available
+        app.animation_level = "none"
+        before = snapshot()
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-status"):
+                    break
+                await pilot.pause(.02)
+            summary = str(app.query_one("#setup-status").render())
+            if initial == "partial":
+                assert "core: partial" in summary
+                assert app.query_one("#setup-project-0").disabled
+            else:
+                assert not app.query("#setup-project-0")
+                if initial == "malformed":
+                    assert "Project registry unavailable" in summary
+                    assert "No launchable" not in summary
+                else:
+                    assert "No launchable" in summary
+            assert context.project_bootstrap() is None
+            assert not app.query(engine.PickerScreen)
+            assert snapshot() == before
+
+            # Only the fixture owner repairs the input; Reload must reread it.
+            projects.write_text("projects:\n  example: {}\n", encoding="utf-8")
+            available = True
+            corrected = snapshot()
+            await _click(pilot, "#setup-reload")
+            for _ in range(50):
+                if app.query("#setup-project-0") and not app.query_one(
+                    "#setup-project-0"
+                ).disabled:
+                    break
+                await pilot.pause(.02)
+            assert not app.query_one("#setup-project-0").disabled
+            assert "core: installed" in str(app.query_one("#setup-status").render())
+            assert app.binding_error is None
+            assert context.project_bootstrap() is None
+            assert not app.query(engine.PickerScreen)
+            assert snapshot() == corrected
+            await _click(pilot, "#setup-quit")
+        assert snapshot() == corrected
+
+    monkeypatch.setattr(engine.PickerApp, "run", lambda app: asyncio.run(exercise(app)))
+    assert runner.run("", front_door=True) is None
+
+
+@pytest.mark.parametrize("size", [(48, 18), (80, 24)])
+def test_missing_source_guides_are_navigable_without_commands_or_writes(
+    monkeypatch, tmp_path, size,
+):
+    from textual.containers import VerticalScroll
+    from textual.widgets import Button, Static
+
+    from worktree_manager.production_picker.picker_tui import setup_home
+
+    monkeypatch.chdir(tmp_path)
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(key, str(tmp_path))
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("opening, scrolling or returning from a guide must not run a command")
+
+    monkeypatch.setattr(setup_home, "diagnostic_argv", forbidden)
+    monkeypatch.setattr(setup_home, "run_caller_owned", forbidden)
+
+    async def exercise():
+        observations = []
+
+        def prepare(**kwargs):
+            observations.append(kwargs)
+            return SetupState(False, None, "Project registry unavailable. Reload to retry.")
+
+        app = engine.PickerApp(None, prepare=prepare, front_door=True)
+        app.animation_level = "none"
+        async with app.run_test(size=size) as pilot:
+            for _ in range(50):
+                if app.query("#setup-status"):
+                    break
+                await pilot.pause(.02)
+            for index, (action, expected) in enumerate((
+                ("core", "worktree-manager setup --apply"),
+                ("machine", "There is no Add-machine writer"),
+                ("repository", "It does not inspect or qualify"),
+                ("plugins", "In-app plugin enablement is unavailable"),
+            )):
+                await _click(pilot, f"#setup-guide-{action}")
+                assert isinstance(app.screen, setup_home.SetupGuideScreen)
+                assert "Setup / Doctor" in str(app.screen.query(Static).first().render())
+                body = app.screen.query(Static).last()
+                assert expected in str(body.render())
+                app.screen.query_one(VerticalScroll).focus()
+                await pilot.press("pagedown", "pagedown")
+                scroll = app.screen.query_one(VerticalScroll)
+                assert scroll.scroll_y > 0 or scroll.max_scroll_y == 0
+                if size == (48, 18):
+                    assert scroll.max_scroll_y > 0
+                if index % 2:
+                    close = next(
+                        button for button in app.screen.query(Button)
+                        if str(button.label) == "Return to Setup / Doctor"
+                    )
+                    close.focus(scroll_visible=False)
+                    await pilot.press("enter")
+                else:
+                    await pilot.press("escape")
+                await pilot.pause()
+                assert app.query("#setup-status")
+                assert not app.query(engine.PickerScreen)
+            assert observations == [{}]
+            await _click(pilot, "#setup-reload")
+            for _ in range(50):
+                if len(observations) == 2 and app.query("#setup-status"):
+                    break
+                await pilot.pause(.02)
+            assert observations[-1] == {"project_override": None, "auto_open": False}
+            await _click(pilot, "#setup-quit")
+        assert list(tmp_path.iterdir()) == []
 
     asyncio.run(exercise())
 
@@ -252,7 +436,9 @@ def test_fresh_home_real_setup_plan_is_read_only(monkeypatch, tmp_path):
                     break
                 await pilot.pause(.02)
             assert not app.query(engine.PickerScreen)
-            await _click(pilot, "#setup-plan")
+            await _click(pilot, "#setup-guide-core")
+            app.screen.query_one("#setup-guide-plan").focus()
+            await pilot.press("enter")
             for _ in range(300):
                 if app.screen.query("#command-result-close") and not app.screen.query_one(
                     "#command-result-close"

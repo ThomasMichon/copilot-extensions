@@ -885,6 +885,20 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "personal-state-dot-file", "personal-state-dot-assignments",
     "personal-state-control-space", "ordinary-nested-dot-file",
     "ordinary-unrelated-inventory",
+    "batch-mixed", "batch-json-args", "batch-protected", "batch-foreign",
+    "batch-multiple-targets", "batch-structured", "batch-missing-args",
+    "batch-null-args", "batch-extra-key", "batch-unknown", "batch-empty",
+    "batch-not-list", "batch-limit", "batch-oversized", "batch-read-only",
+    "batch-working-directory", "batch-real-policy", "batch-malformed",
+    "cell-batch-mixed", "cell-batch-protected",
+    "structured-files", "structured-changes", "structured-only", "structured-json",
+    "structured-aliases", "structured-duplicates", "structured-limit",
+    "structured-protected", "structured-foreign", "structured-nested",
+    "structured-oversized", "structured-target-overflow", "structured-incomplete",
+    "structured-invalid-list", "structured-nested-entries", "structured-patch",
+    "batch-structured-safe", "cell-structured", "cell-batch-structured-safe",
+    "structured-real-policy", "cell-structured-real-policy",
+    "batch-target-limit", "batch-target-overflow",
 ])
 def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, shell, case):
     from agent_worktrees import guarded_anchors
@@ -937,8 +951,90 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         event["toolCalls"] = [{"name": "edit", "args": event["toolArgs"]}]
     elif case == "structured":
         event["toolArgs"]["edits"] = [{"path": "other.py"}]
+    elif case.startswith("structured-"):
+        args = event["toolArgs"]
+        args["edits"] = [{"path": "other.py"}]
+        if case in {"structured-files", "structured-changes"}:
+            args[case.removeprefix("structured-")] = args.pop("edits")
+        elif case == "structured-only":
+            args.pop("path")
+        elif case == "structured-json":
+            event["toolArgs"] = json.dumps(args)
+        elif case == "structured-aliases":
+            args["edits"] = [{"file_path": "one.py", "targetFile": "two.py"}]
+            args["files"] = [{"fileName": "three.py"}]
+            args["changes"] = [{"filename": "four.py", "target_file": "five.py"}]
+        elif case == "structured-duplicates":
+            args["edits"] = [{"path": "other.py"}] * 128
+        elif case == "structured-limit":
+            args["edits"] = [{"path": f"other-{index}.py"} for index in range(127)]
+        elif case == "structured-protected":
+            args["edits"].append({"filePath": "efforts/private.md"})
+        elif case == "structured-foreign":
+            args["edits"].append({"path": str(fixture_checkout(tmp_path / "foreign") / "source.py")})
+        elif case == "structured-nested":
+            args["edits"].append({"path": str(fixture_checkout(workspace / "nested") / "source.py")})
+        elif case in {"structured-oversized", "structured-target-overflow"}:
+            args["edits"] = [
+                {"path": f"other-{index}.py"}
+                for index in range(129 if case == "structured-oversized" else 128)
+            ]
+        elif case == "structured-incomplete":
+            args["edits"].append({})
+        elif case == "structured-invalid-list":
+            args["edits"] = {"path": "efforts/private.md"}
+        elif case == "structured-nested-entries":
+            args["edits"].append({"path": "last.py", "files": [{"path": "efforts/private.md"}]})
+        elif case == "structured-patch":
+            event["toolName"] = "apply_patch"
+            args["input"] = "*** Update File: other.py\n*** Move to: final.py\n"
     elif case == "drive-relative":
         event["toolArgs"]["path"] = workspace.drive + "source.py"
+    if case.startswith("batch-"):
+        first = {"name": "create", "args": event["toolArgs"]}
+        last = {"name": "edit", "args": {"path": "second.py"}}
+        event["toolCalls"] = [first, {"name": "view", "args": {"path": "read.txt"}}, last]
+        # A top-level read must not hide a later write or supply its arguments.
+        event["toolName"] = "view"
+        event["toolArgs"] = {"path": "ignored.py"}
+        event["tool_input"] = {"path": "efforts/ignored.md"}
+        if case == "batch-json-args":
+            last["args"] = json.dumps(last["args"])
+        elif case == "batch-protected":
+            last["args"]["path"] = "efforts/private.md"
+        elif case == "batch-foreign":
+            last["args"]["path"] = str(fixture_checkout(tmp_path / "foreign") / "source.py")
+        elif case == "batch-multiple-targets":
+            last["args"]["file_path"] = "efforts/private.md"
+        elif case == "batch-structured":
+            last["args"]["edits"] = [{"path": "efforts/private.md"}]
+        elif case == "batch-structured-safe":
+            last["args"] = {"files": [{"path": "second.py"}, {"target_file": "third.py"}]}
+        elif case in {"batch-target-limit", "batch-target-overflow"}:
+            last["args"] = {"files": [
+                {"path": f"other-{index}.py"}
+                for index in range(127 if case == "batch-target-limit" else 128)
+            ]}
+        elif case == "batch-missing-args":
+            last.pop("args")
+        elif case == "batch-null-args":
+            last["args"] = None
+        elif case == "batch-extra-key":
+            last["cwd"] = str(workspace)
+        elif case == "batch-unknown":
+            last["name"] = "unknown"
+        elif case == "batch-malformed":
+            event["toolCalls"][-1] = None
+        elif case == "batch-empty":
+            event["toolCalls"] = []
+        elif case == "batch-not-list":
+            event["toolCalls"] = {"name": "edit", "args": {"path": "source.py"}}
+        elif case in {"batch-limit", "batch-oversized"}:
+            event["toolCalls"] = [first] * (128 if case == "batch-limit" else 129)
+        elif case == "batch-read-only":
+            event["toolCalls"] = [{"name": "view", "args": {}}]
+        elif case == "batch-working-directory":
+            event["workingDirectory"] = event.pop("cwd")
     env = environment(tmp_path, workspace)
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
@@ -985,12 +1081,25 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     if case == "personal-state-control-space":
         config.write_bytes(b"default_branch: main\n\x1cstateless: true\n")
     assert load("managed_session").admitted(event, home=tmp_path)
+    try:
+        guard_events = load("tool_call_forms").tool_events(event)
+    except ValueError:
+        guard_events = []
+    if case in {"structured-oversized", "structured-target-overflow"}:
+        with pytest.raises(ValueError):
+            load("tool_call_forms").write_targets(event["toolName"], event["toolArgs"])
+        guard_events = []
     decisions = [
-        load(name).decide(event, env=env, home=tmp_path)
+        load(name).decide(guard_event, env=env, home=tmp_path)
+        for guard_event in guard_events
         for name in ("statelessness_guard", "cross_repo_guard", "anchor_write_guard", "pr_supersede_guard")
     ]
     assert any(value and value.get("permissionDecision") == "deny" for value in decisions) is (
-        case.startswith("personal-state") or case in {"anchor-cwd", "anchor-target", "delegated"}
+        case.startswith("personal-state") or case in {
+            "anchor-cwd", "anchor-target", "delegated",
+            "batch-protected", "batch-multiple-targets", "batch-structured",
+            "structured-protected",
+        }
     ), decisions
     map_path = reader.map_path(workspace, registry)
     if case == "ordinary-unrelated-inventory":
@@ -1037,7 +1146,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
 
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
-    if case == "real-policy":
+    if case in {"real-policy", "batch-real-policy", "structured-real-policy"}:
         for path in SCRIPTS.glob("*.py"):
             shutil.copyfile(path, scripts / path.name)
     for name in (
@@ -1067,7 +1176,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
             + "$global:LASTEXITCODE = 0\n", encoding="utf-8",
         )
-    if case != "real-policy":
+    if case not in {"real-policy", "batch-real-policy", "structured-real-policy"}:
         (scripts / "hook_policy_process.py").write_text(
             "import base64,json,sys\nfrom pathlib import Path\n"
             + f"Path({str(observed)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
@@ -1127,7 +1236,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert native_membership.read_text() == "True"
     assert not inventory_probe.exists()
     policy_required = not (case.startswith("ordinary") or case in {
-        "create", "path-alias", "json-args", "real-policy",
+        "create", "path-alias", "json-args", "real-policy", "batch",
+        "batch-mixed", "batch-json-args", "batch-limit", "batch-working-directory", "batch-real-policy",
+        "structured", "structured-files", "structured-changes", "structured-only", "structured-json",
+        "structured-aliases", "structured-duplicates", "structured-limit", "batch-structured-safe",
+        "structured-real-policy",
+        "batch-target-limit",
     })
     assert observed.exists() is policy_required, result.stdout
     if policy_required:
@@ -1135,7 +1249,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert json.loads(result.stdout)["permissionDecision"] == "deny"
     else:
         assert result.stdout == b""
-    if case == "real-policy":
+    if case in {"real-policy", "batch-real-policy", "structured-real-policy"}:
         contract = scripts / "hook-read-policy.json"
         value = json.loads(contract.read_text(encoding="utf-8"))
         value.pop("nativeWriteDependencies")
@@ -1150,6 +1264,11 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert fallback.returncode == 0 and not fallback.stderr, fallback.stdout + fallback.stderr
         assert json.loads(fallback.stdout) == {}
         protected = {**event, "toolArgs": {"path": "efforts/private.md"}}
+        if case == "batch-real-policy":
+            protected["toolCalls"] = [
+                *event["toolCalls"][:-1],
+                {"name": "edit", "args": {"path": "efforts/private.md"}},
+            ]
         denied = subprocess.run(
             [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
             input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
