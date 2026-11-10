@@ -107,6 +107,10 @@ class BackendSession:
 
     async def _settle(self, task, sequence, control):
         await task
+        if control:
+            self._control -= 1
+        else:
+            self._application -= 1
         result = await self.peer.request("settled", epoch=self.epoch, origin=sequence)
         if (
             not isinstance(result, dict) or type(result.get("settled")) is not int
@@ -114,10 +118,6 @@ class BackendSession:
         ):
             raise ConnectionError("input settlement outcome is unknown; no replay")
         self.accepted.pop(sequence)
-        if control:
-            self._control -= 1
-        else:
-            self._application -= 1
 
     def _settled(self, task):
         self._settlers.discard(task)

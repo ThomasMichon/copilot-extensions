@@ -214,6 +214,11 @@ without cancelling their accepted mutations or retaining canceled waiters'
 wire credit until the mutations finish. Request IDs retain the MCP
 string-or-integer contract, including an empty string.
 
+Completed dispatch releases backend execution credit before publishing its
+settlement to custody. The accepted record and quiescence wait remain until
+the settlement receipt is confirmed. Coalescing that receipt with the next
+input therefore cannot expose custody capacity before the backend can admit it.
+
 The watcher compares the last successfully adopted slot and endpoint
 publication identity. Republishing a different backend from the same
 immutable slot still migrates existing sessions. Admission verifies that

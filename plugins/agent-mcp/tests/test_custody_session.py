@@ -2,6 +2,7 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+import json
 
 import pytest
 
@@ -205,6 +206,79 @@ async def test_capacity_one_replenishes_backend_credit_before_next_input(monkeyp
         await settled(owner)
         assert [item["id"] for item in output] == list(range(1, 10))
         assert upstream.starts == 1 and not owner.state.uncertain
+
+
+@pytest.mark.parametrize("lane", ["application", "control"])
+async def test_coalesced_settlement_receipt_preserves_backend_input_credit(monkeypatch, lane):
+    from agent_mcp import backend, custody_session, custody_state
+
+    for module in (backend, custody_session, custody_state):
+        monkeypatch.setattr(module, "MAX_APPLICATION" if lane == "application" else "MAX_CONTROL", 1)
+    async with composed() as (owner, backends, upstream, output):
+        release = asyncio.Event()
+        original_send = upstream.send
+
+        async def send(message):
+            if lane == "control" and message.get("params", {}).get("requestId") == 1:
+                await release.wait()
+            await original_send(message)
+
+        upstream.send = send
+
+        def message(mid):
+            if lane == "control":
+                return {"jsonrpc": "2.0", "method": "notifications/cancelled",
+                        "params": {"requestId": mid}}
+            return {"jsonrpc": "2.0", "id": mid, "method": "tools/call",
+                    "params": {"name": "test_echo", "arguments": {}}}
+
+        await owner.submit(message(1))
+        link = owner._links[owner.state.current]
+        original = link.peer.writer
+
+        class CoalescedWriter:
+            pending = b""
+            combined = False
+
+            def write(self, wire):
+                packet = json.loads(wire)
+                if packet.get("result") == {"settled": 1}:
+                    self.pending = wire
+                    return
+                if self.pending and packet.get("operation") == "input":
+                    wire, self.pending = self.pending + wire, b""
+                    self.combined = True
+                original.write(wire)
+
+            def __getattr__(self, name):
+                return getattr(original, name)
+
+        writer = CoalescedWriter()
+        link.peer.writer = writer
+        waiting = asyncio.create_task(owner.submit(message(2), wait=True))
+        try:
+            await asyncio.sleep(0)
+            assert not waiting.done()
+            if lane == "application":
+                await upstream.complete(1)
+            else:
+                release.set()
+            await asyncio.wait_for(waiting, 1)
+            while len(upstream.messages) < 2:
+                await asyncio.sleep(0)
+            assert writer.combined and not writer.pending
+            if lane == "application":
+                await upstream.complete(2)
+            await settled(owner)
+            assert [item["id"] for item in output] == ([1, 2] if lane == "application" else [])
+            if lane == "control":
+                assert upstream.messages == [message(1), message(2)]
+            else:
+                assert [item["id"] for item in upstream.messages] == [1, 2]
+            assert not owner.state.uncertain
+        finally:
+            release.set()
+            await asyncio.gather(waiting, return_exceptions=True)
 
 
 async def test_failed_preparation_restores_owned_epoch_without_reopening_or_replaying():
