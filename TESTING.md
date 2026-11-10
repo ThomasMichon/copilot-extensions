@@ -173,6 +173,19 @@ preparation, sanitization and 120/180/300/420-second limits, without a feed.
 The in-flight packet alone does not qualify loss of observation. None of these
 packets enables productive renewal or qualifies unrelated pending-work sources.
 
+The separate `native-driver-startup-seed`, `native-driver-startup-no-seed` and
+`native-driver-startup-cold-resume` packets each select one exact candidate case
+in `tests/native/test_headed_extension.py`. The seed case delays observation
+of the actual SDK startup event while the isolated provider holds the original
+response. The real retained Bridge client must observe pending readiness
+without sending, then accept one controlled enqueue after the original seed is
+observed and before its turn is idle. No-seed and cold-resume cases separately
+prove that an absent opening seed is not represented as idle or restoration.
+All retain exact history/session identity and fixture cleanup, the same native
+pins, public-only preparation, sanitization and 120/180/300/420-second limits.
+None inherits qualification from a steady recovery packet, qualifies all
+caller modes or changes productive activation authority.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
