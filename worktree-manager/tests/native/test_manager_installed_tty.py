@@ -480,7 +480,11 @@ def _live_image(console, handle):
     try:
         return _image(console, handle)
     except OSError:
-        if not console.exited(handle):
+        timeout = 250
+        if _WORK_DEADLINE is not None:
+            timeout = max(0, min(timeout, int((_WORK_DEADLINE - time.monotonic()) * 1000)))
+        # Image teardown can precede the same retained process handle becoming signalled.
+        if not console.exited(handle, timeout):
             raise
         return None
 
@@ -523,7 +527,11 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
             if not offers:
                 raise RuntimeError("Interactive shell bypassed its native terminal capability admission")
             for pid, (name, handle) in descendants.items():
-                image = _live_image(console, handle)
+                try:
+                    image = _live_image(console, handle)
+                except OSError as error:
+                    error.add_note(f"Could not identify retained TTY descendant {pid} ({name})")
+                    raise
                 if image is not None and image.resolve() in (
                     manager_python.resolve(), engine_python.resolve(),
                 ) and not console.exited(handle):
@@ -1051,7 +1059,9 @@ def test_process_image_attribution_ignores_only_confirmed_exited_handles(monkeyp
     handle = object()
     calls = []
     states = iter((False,))
-    console = SimpleNamespace(exited=lambda actual: next(states) if actual is handle else None)
+    console = SimpleNamespace(
+        exited=lambda actual, timeout=0: next(states) if actual is handle else None,
+    )
 
     def query(actual_console, actual_handle):
         assert actual_console is console and actual_handle is handle
@@ -1076,6 +1086,42 @@ def test_process_image_attribution_ignores_only_confirmed_exited_handles(monkeyp
     with pytest.raises(OSError) as caught:
         _live_image(console, handle)
     assert caught.value is error
+
+
+def test_process_image_attribution_waits_only_for_retained_exit(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    owner = _live_image.__globals__
+    handle = object()
+    error = PermissionError("controlled image query failure during process exit")
+    error.winerror = 5
+
+    def failed_query(console, actual):
+        assert actual is handle
+        raise error
+
+    monkeypatch.setitem(owner, "_image", failed_query)
+    monkeypatch.setitem(owner, "time", SimpleNamespace(monotonic=lambda: 10.0))
+    for deadline, limit in ((None, 250), (10.02, 20), (9.0, 0)):
+        checks = []
+
+        def exited(actual, timeout=0):
+            assert actual is handle
+            checks.append(timeout)
+            return timeout > 0
+
+        monkeypatch.setitem(owner, "_WORK_DEADLINE", deadline)
+        console = SimpleNamespace(exited=exited)
+        if limit:
+            assert _live_image(console, handle) is None
+        else:
+            with pytest.raises(PermissionError) as caught:
+                _live_image(console, handle)
+            assert caught.value is error
+        assert len(checks) == 2 and checks[0] == 0
+        assert 0 < checks[1] <= limit if limit else checks[1] == 0
 
 
 def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path):
