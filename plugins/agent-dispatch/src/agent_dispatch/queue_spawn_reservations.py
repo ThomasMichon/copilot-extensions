@@ -657,6 +657,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         guard: Callable[[sqlite3.Row], None] | None = None,
         require_no_native: bool = False,
         pool_startup_retry: dict | None = None,
+        in_transaction: Callable[[sqlite3.Connection, sqlite3.Row], None] | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
         with self._connect() as conn:
@@ -847,6 +848,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         "UPDATE tasks SET activity = NULL, activity_updated_at = ? WHERE id = ?",
                         (ts, row["task_id"]),
                     )
+            if in_transaction is not None:
+                in_transaction(conn, row)
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row)

@@ -1013,3 +1013,45 @@ def test_stale_detached_wake_does_not_take_its_cold_owners_lane(q: TaskQueue) ->
         prepare_recovery_wake(q, wake)
     assert q.get_reservation(key).state == SpawnState.COLD
     place(q, task(q))  # the capacity-one lane is still free
+
+
+def test_cold_restart_keeps_a_lane_wait_recorded_after_it_commits(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import queue_pool_recovery
+    publish(q, pool(capacity=2))
+    task_id, key = _suspend_placed(q, "native-a")
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/wt-native-a", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    other, _ = place(q, task(q))
+    q.resume(task_id, "host-a/wt-native-a", wake_requested=True, now=103)
+    _cold(q, other.key)
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    restart = queue_pool_recovery._restart_cold
+
+    def restart_then_resume_again(*args, **kwargs):
+        restart(*args, **kwargs)
+        # A renewed suspension and a new no-wake resume land before any cleanup.
+        q.suspend(task_id, q.get(task_id).owner, reason="intentional wait", cooldown_seconds=None, now=110)
+        _cold(q, key)
+        place(q, task(q))
+        q.resume(
+            task_id, "host-a/wt-native-a", wake_requested=False, wake_message="new resume", now=111,
+        )
+
+    monkeypatch.setattr(queue_pool_recovery, "_restart_cold", restart_then_resume_again)
+    prepare_recovery_wake(q, q.claim_due_run_waiter_wake())
+    with q._connect() as conn:
+        waiting = conn.execute(
+            "SELECT lane_wait_since, lane_wait_message, lane_wait_wake FROM task_pool_assignments"
+            " WHERE task_id=?", (task_id,),
+        ).fetchone()
+    assert tuple(waiting) == (111, "new resume", 0)
+    assert running.key

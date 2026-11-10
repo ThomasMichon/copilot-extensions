@@ -209,9 +209,10 @@ def _execution_excluded(
     )
 
 
-def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
+def _permits(pool: PoolInstanceDefinition, task: Task, *, worktree: str | None = None) -> bool:
+    """Whether ``pool`` may run ``task``, in ``worktree`` when one is recorded."""
     capabilities = pool.filters.permit.get("capabilities", frozenset())
-    worktree = task.target_worktree or task.affinity.get("worktree")
+    worktree = worktree or task.target_worktree or task.affinity.get("worktree")
     hard = _routing_requirements(
         task, machine=pool.machine, env=pool.env, registration_id=pool.registration_id,
         capabilities=capabilities, worktree=worktree,
@@ -454,13 +455,44 @@ def _require_accounting_workspace(
     ).fetchone()
     if bound is None:
         return
+    row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (reservation_key,)).fetchone()
+    hosts = reservation_hosts(row, task, execution_machine, worktree=worktree)
+    if len(hosts) != 1:
+        raise TaskError("pool workspace requires its recorded execution machine")
     conflict = bound_workspace_conflict(
-        task, worktree, execution_machine, machine=bound["machine"], env=bound["env"],
+        task, worktree, next(iter(hosts)), machine=bound["machine"], env=bound["env"],
         registration_id=bound["registration_id"],
         capabilities=frozenset(json.loads(bound["capabilities"] or "[]")),
     )
     if conflict is not None:
         raise TaskError(conflict)
+
+
+def reservation_hosts(
+    row: sqlite3.Row, task: Task | None, execution_machine: object = None,
+    *, worktree: str | None = None,
+) -> set[str]:
+    """Normalized hosts the reservation's own evidence names for its body.
+
+    The recorded execution machine (or a fleet-body handle's host) is
+    authoritative; a body without either ran where its reservation was created.
+    The owner's host counts when that owner is this body's worktree. Several
+    hosts mean conflicting evidence; none means the host is unknown.
+    """
+    from .bridge_remote import normalize_host
+    hosts: set[str] = set()
+    recorded = execution_machine or row["execution_machine"]
+    if isinstance(recorded, str) and recorded.strip():
+        hosts.add(normalize_host(recorded))
+    handle = row["session_handle"] or ""
+    if handle.startswith("fleet-body:") and handle.split(":")[1]:
+        hosts.add(normalize_host(handle.split(":")[1]))
+    if not hosts and isinstance(row["creating_host"], str) and row["creating_host"].strip():
+        hosts.add(normalize_host(row["creating_host"]))
+    owner_host, separator, owner_worktree = (task.owner or "").partition("/") if task else ("", "", "")
+    if separator and owner_host and owner_worktree == (worktree or row["worktree"]):
+        hosts.add(normalize_host(owner_host))
+    return hosts
 
 
 def bound_workspace_conflict(

@@ -135,13 +135,20 @@ pool instance whose filters permit its task on the row's execution machine and
 audits the binding. Rows matching several pools (`ambiguous`) or none
 (`no_matching_pool`) are reported and left unbound, and while the pool catalog
 is not ready (pending, expired or invalidated publications) every row is left
-unbound as `catalog_not_ready` with the catalog blockers. A row with no
+unbound as `catalog_not_ready` with the catalog blockers. The row's machine
+comes only from its own evidence: its recorded execution machine or fleet-body
+host (otherwise its creating host), plus the owner's host when that owner is
+the row's worktree. It is never inferred from the candidate pools. A row with
+no such evidence is left unbound as `machine_unrecorded`, and one whose
+evidence names several hosts as `machine_conflict`. A row with no
 recorded worktree (a launch still in flight) is left unbound as
 `workspace_unrecorded`, because pool publication requires that workspace;
-adopt it again once the launch records one. A recorded workspace the matched
-pool or the task's current routing refuses (an excluded worktree, another
-machine or target worktree) is left unbound as `workspace_conflict`, and
-publishing into an adopted binding repeats that check. Adopted bindings are
+adopt it again once the launch records one. Pool filters are evaluated against
+the recorded workspace itself, not only the task's target or affinity. A
+recorded workspace the matched pool or the task's current routing refuses (a
+pool-rejected or excluded worktree, another machine or target worktree) is
+left unbound as `workspace_conflict`, and publishing into an adopted binding
+repeats that check, including the host evidence. Adopted bindings are
 accounting-only: they create no recovery assignment, so a parked adopted body
 keeps its legacy supervisor resume path, which still waits for a free lane in
 its bound pool.

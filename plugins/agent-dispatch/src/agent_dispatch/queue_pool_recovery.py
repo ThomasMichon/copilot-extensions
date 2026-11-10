@@ -392,15 +392,29 @@ def _require_wake_admissible(owner: Any, conn: sqlite3.Connection, wake: Any,
         raise TaskError("wake reservation release or retirement advanced")
 
 
-def _restart_cold(owner: Any, wake: Any, reservation: sqlite3.Row) -> None:
-    """Validate the wake and take the lane in one write transaction."""
+def _restart_cold(
+    owner: Any, wake: Any, reservation: sqlite3.Row, *, clear_lane_wait: bool = False,
+) -> None:
+    """Validate the wake and take the lane in one write transaction.
+
+    ``clear_lane_wait`` ends a queued reactivation's wait for the lane in that
+    same transaction, so a newer resume recorded after it commits survives.
+    """
     def validate(conn: sqlite3.Connection) -> None:
         _require_wake_admissible(owner, conn, wake, reservation["key"])
+
+    def clear(conn: sqlite3.Connection) -> None:
+        conn.execute(
+            "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL,"
+            " lane_wait_wake=NULL WHERE reservation_key=? AND lane_wait_since IS NOT NULL",
+            (reservation["key"],),
+        )
 
     owner.record_spawn(
         reservation["key"], session_handle=reservation["session_handle"],
         worktree=reservation["worktree"], startup_complete=True,
         startup_revision=reservation["startup_revision"], cold_admission=validate,
+        cold_restarted=clear if clear_lane_wait else None,
     )
 
 
@@ -427,15 +441,8 @@ def _admit_cold_wake(owner: Any, wake: Any) -> None:
         ).fetchone()
     if reservation is None or reservation["state"] != SpawnState.COLD:
         return
-    _restart_cold(owner, wake, reservation)
-    if assignment is not None:
-        # The body re-took its lane; a queued reactivation no longer waits for one.
-        with owner._connect() as conn:
-            conn.execute(
-                "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL,"
-                " lane_wait_wake=NULL WHERE reservation_key=? AND lane_wait_since IS NOT NULL",
-                (reservation["key"],),
-            )
+    # The body re-takes its lane; a queued reactivation no longer waits for one.
+    _restart_cold(owner, wake, reservation, clear_lane_wait=assignment is not None)
 
 
 def prepare_recovery_wake(owner: Any, wake: Any) -> None:

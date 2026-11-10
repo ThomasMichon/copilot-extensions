@@ -242,6 +242,7 @@ def test_adopt_legacy_binds_accountable_rows_to_their_only_pool(queue, capacity)
     from tests.test_pool_placement import place, pool, publish, task
     live = queue.create("live")
     legacy, _ = queue.reserve_spawn(live.id, now=1000.0)
+    queue.record_spawn_worktree(legacy.key, "live-worktree", execution_machine="host-a")
     queue.record_spawn(legacy.key, session_handle="native-live", worktree="live-worktree", now=1000.0)
     publish(queue, pool(capacity=capacity))
     with pytest.raises(TaskError, match="legacy capacity"):
@@ -264,6 +265,7 @@ def test_adopt_legacy_reports_ambiguous_rows_without_binding(queue):
     from tests.test_pool_placement import pool, publish
     live = queue.create("live")
     legacy, _ = queue.reserve_spawn(live.id, now=1000.0)
+    _created_on(queue, legacy.key, "host-a")
     publish(queue, pool("a"), pool("b"))
     result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="operator migration")
     assert result["adopted"] == 0 and result["unresolved"] == {"ambiguous": [legacy.key]}
@@ -310,6 +312,7 @@ def test_adopted_cold_legacy_body_keeps_its_legacy_resume_owner(queue, tmp_path)
 
     parked = queue.create("parked")
     reservation, _ = queue.reserve_spawn(parked.id)
+    queue.record_spawn_worktree(reservation.key, "legacy-worktree", execution_machine="host-a")
     queue.record_spawn(
         reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:legacy-session", worktree="legacy-worktree",
@@ -338,11 +341,17 @@ def test_adopted_cold_legacy_body_keeps_its_legacy_resume_owner(queue, tmp_path)
     assert queue.get(parked.id).status == "started"
 
 
+def _created_on(queue, key, host):
+    with queue._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET creating_host=? WHERE key=?", (host, key))
+
+
 def _adopted_cold_body(queue):
     from tests.test_pool_placement import pool, publish
 
     parked = queue.create("parked")
     reservation, _ = queue.reserve_spawn(parked.id)
+    queue.record_spawn_worktree(reservation.key, "legacy-worktree", execution_machine="host-a")
     queue.record_spawn(
         reservation.key, startup_complete=True, startup_revision=1,
         session_handle="local-body:legacy-session", worktree="legacy-worktree",
@@ -430,6 +439,7 @@ def test_adopt_legacy_leaves_a_launch_without_a_recorded_workspace_publishable(q
 
     launching = queue.create("launching")
     reservation, _ = queue.reserve_spawn(launching.id)
+    _created_on(queue, reservation.key, "host-a")
     publish(queue, pool())
     result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")
     assert result["adopted"] == 0
@@ -446,7 +456,7 @@ def test_adopt_legacy_leaves_an_excluded_recorded_workspace_unresolved(queue):
 
     launching = queue.create("launching", excludes=["worktree:excluded-worktree"])
     reservation, _ = queue.reserve_spawn(launching.id)
-    queue.record_spawn_worktree(reservation.key, "excluded-worktree")
+    queue.record_spawn_worktree(reservation.key, "excluded-worktree", execution_machine="host-a")
     publish(queue, pool())
     result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")
     assert result["adopted"] == 0
@@ -460,7 +470,7 @@ def test_adopted_binding_refuses_publishing_a_newly_excluded_workspace(queue):
 
     launching = queue.create("launching")
     reservation, _ = queue.reserve_spawn(launching.id)
-    queue.record_spawn_worktree(reservation.key, "launch-worktree")
+    queue.record_spawn_worktree(reservation.key, "launch-worktree", execution_machine="host-a")
     publish(queue, pool())
     assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
     with queue._connect() as conn:
@@ -480,7 +490,7 @@ def test_adopted_binding_refuses_replacing_its_workspace_with_an_excluded_one(qu
 
     launching = queue.create("launching", excludes=["worktree:blocked"])
     reservation, _ = queue.reserve_spawn(launching.id)
-    queue.record_spawn_worktree(reservation.key, "allowed")
+    queue.record_spawn_worktree(reservation.key, "allowed", execution_machine="host-a")
     publish(queue, pool())
     assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
     with pytest.raises(TaskError, match="excluded"):
@@ -518,3 +528,48 @@ def test_client_posts_legacy_history_controls_with_control_identity():
         ("/spawn-reservations/history/adopt", {"apply": True, "permitted": True, "reason": "r"},
          scheme + " control-test"),
     ]
+
+
+def test_adopt_legacy_never_infers_an_unknown_or_conflicting_host(queue):
+    from tests.test_pool_placement import pool, publish
+
+    unknown = queue.create("unknown")
+    unrecorded, _ = queue.reserve_spawn(unknown.id)
+    queue.record_spawn_worktree(unrecorded.key, "unknown-wt")
+    remote = queue.create("remote")
+    elsewhere, _ = queue.reserve_spawn(remote.id)
+    queue.record_spawn_worktree(elsewhere.key, "legacy-wt", creating_host="host-b")
+    queue.record_spawn(
+        elsewhere.key, startup_complete=True, startup_revision=1,
+        session_handle="local-body:remote-session", worktree="legacy-wt",
+    )
+    queue.claim_one("host-b/legacy-wt", task_id=remote.id)
+    queue.start(remote.id, "host-b/legacy-wt")
+    queue.suspend(remote.id, "host-b/legacy-wt", reason="turn ended")
+    queue.record_cold(elsewhere.key)
+    publish(queue, pool())  # the only pool runs on host-a
+    result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")
+    assert result["adopted"] == 0
+    assert result["unresolved"]["machine_unrecorded"] == [unrecorded.key]
+    assert result["unresolved"]["no_matching_pool"] == [elsewhere.key]
+    with queue._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 0
+        conn.execute("UPDATE spawn_reservations SET creating_host='host-a' WHERE key=?", (elsewhere.key,))
+    # The owner on host-b contradicts a creating host of host-a.
+    result = queue.adopt_legacy_capacity()
+    assert result["unresolved"]["machine_conflict"] == [elsewhere.key]
+
+
+def test_adopt_legacy_applies_pool_filters_to_the_recorded_workspace(queue):
+    from agent_dispatch.registrar import Filters
+    from tests.test_pool_placement import pool, publish
+
+    untargeted = queue.create("untargeted")
+    reservation, _ = queue.reserve_spawn(untargeted.id)
+    queue.record_spawn_worktree(reservation.key, "blocked", execution_machine="host-a")
+    publish(queue, pool(filters=Filters(reject={"worktree": frozenset({"blocked"})})))
+    result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")
+    assert result["adoptable"] == 0 and result["adopted"] == 0
+    assert result["unresolved"]["workspace_conflict"] == [reservation.key]
+    with queue._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 0

@@ -128,7 +128,12 @@ class SpawnHistoryMixin:
         reported as ``workspace_unrecorded`` and can be adopted once recorded. A
         recorded workspace the pool or current task routing refuses (an excluded
         worktree, another machine) is reported as ``workspace_conflict``; the
-        same check guards publication into an accounting-only binding.
+        same check guards publication into an accounting-only binding. The pool's
+        own filters are evaluated against that recorded workspace. A row whose
+        execution host is unknown (no recorded execution machine, fleet handle or
+        creating host) is ``machine_unrecorded``, and one whose host evidence
+        disagrees (with the owner's host) is ``machine_conflict``; the host is
+        never inferred from the candidate pools.
         Every row stays unresolved while the pool catalog is not ready, since an
         incomplete catalog cannot prove a pool is the only match. An adopted row is
         accounting-only: it gains no pool recovery assignment, so a parked legacy
@@ -138,7 +143,7 @@ class SpawnHistoryMixin:
         if apply and (not permitted or not reason.strip()):
             raise TaskError("legacy capacity adoption requires permission and a reason")
         from .bridge_remote import normalize_host
-        from .queue_pool_placement import _permits, bound_workspace_conflict
+        from .queue_pool_placement import _permits, bound_workspace_conflict, reservation_hosts
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             timestamp = self._now(None)
@@ -157,14 +162,26 @@ class SpawnHistoryMixin:
                 if not accounting.accountable(row):
                     continue
                 task = self._fetch(conn, row["task_id"])
-                machine = row["execution_machine"]
-                matches = [
+                # Never infer the host from the candidate pools: only the row's
+                # own evidence may place it, and conflicting evidence places none.
+                hosts = reservation_hosts(row, task)
+                machine = next(iter(hosts)) if len(hosts) == 1 else None
+                candidates = [
                     pool for pool in definitions
-                    if task is not None and _permits(pool, task)
-                    and (machine is None or normalize_host(pool.machine) == normalize_host(machine))
+                    if task is not None and machine is not None
+                    and normalize_host(pool.machine) == machine and _permits(pool, task)
+                ]
+                # Pool filters judge the workspace the body actually occupies.
+                matches = [
+                    pool for pool in candidates
+                    if not row["worktree"] or _permits(pool, task, worktree=row["worktree"])
                 ]
                 if not catalog.ready:
                     unresolved["catalog_not_ready"].append(row["key"])
+                elif len(hosts) != 1:
+                    unresolved["machine_conflict" if hosts else "machine_unrecorded"].append(row["key"])
+                elif candidates and not matches:
+                    unresolved["workspace_conflict"].append(row["key"])
                 elif len(matches) == 1 and not row["worktree"]:
                     # A bound row must publish into its recorded workspace; a
                     # launch that has not recorded one stays legacy for now.
