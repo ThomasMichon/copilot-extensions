@@ -42,8 +42,9 @@ class CategoryClientMixin:
         if params.get("category") is not None:
             category_value(params["category"], selection=True)
             self.require_task_categories()
-        if params.get("standing_parent_id") is not None:
+        if params.get("standing_parent_id") is not None or params.get("kind") == "standing-charter":
             # Older coordinators silently ignore unknown query parameters.
+            # A finite-kind filter stays safe there: they cannot hold standing rows.
             self.require_standing_charters()
         clean = {k: v for k, v in params.items() if v is not None}
         return self._unwrap(self._http.get("/tasks", params=clean))

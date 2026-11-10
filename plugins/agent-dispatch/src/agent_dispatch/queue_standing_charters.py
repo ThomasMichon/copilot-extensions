@@ -13,7 +13,7 @@ from .queue_common import Task
 from .queue_execution_handoff import require_execution_admission
 from .queue_records import Status, TaskError
 from .queue_relationship_continuation import continue_owner_session, current_binding
-from .queue_standing_schema import IDENTITY_FIELDS, PROTECTED_FIELDS, STANDING_KIND
+from .queue_standing_schema import IDENTITY_FIELDS, LEGACY_CLAIM_FENCE, PROTECTED_FIELDS, STANDING_KIND
 from .queue_task_recovery import require_task_recovery_safe
 from .queue_task_relationships import _matches_receipt, latest_relationship, require_relationship
 
@@ -146,10 +146,10 @@ class QueueStandingChartersMixin:
             "lifecycle": "active", "accepted_materialization": None,
         }
         conn.execute(
-            "INSERT INTO tasks(id, title, repo, kind, source, status, standing_charter,"
-            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO tasks(id, title, repo, kind, source, status, standing_charter, requires,"
+            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             (task_id, title, canonical_repo, STANDING_KIND, STANDING_KIND, Status.QUEUED,
-             _encoded(standing), ts, ts),
+             _encoded(standing), LEGACY_CLAIM_FENCE, ts, ts),
         )
         task = self._fetch(conn, task_id)
         return self._change_standing(conn, task, {}, action="enroll", ts=ts)

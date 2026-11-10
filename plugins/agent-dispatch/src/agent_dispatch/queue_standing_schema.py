@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 
 from .queue_common import Task
@@ -10,6 +11,10 @@ from .queue_records import TaskError
 
 
 STANDING_KIND = "standing-charter"
+# Every standing row requires a capability no worker advertises. A rolled-back
+# coordinator's untargeted claim skips it as unmatched instead of selecting it
+# and aborting on the guards below, so older finite work stays claimable.
+LEGACY_CLAIM_FENCE = json.dumps(["standing-charter:explicit-attachment"])
 IDENTITY_FIELDS = ("namespace", "charter_key", "lane_key")
 PROTECTED_FIELDS = (
     "kind", "repo", "title", "prompt", "status", "owner", "owner_session_id",
@@ -54,7 +59,8 @@ def migrate_standing_charters(conn: sqlite3.Connection) -> None:
             f" BEFORE {operation} ON tasks WHEN"
             " (NEW.kind='finite' AND (NEW.standing_charter IS NOT NULL OR NEW.standing_revision<>0))"
             " OR (NEW.kind='standing-charter' AND ("
-            " NEW.repo IS NULL OR NOT COALESCE(json_valid(NEW.standing_charter), 0)"
+            f" NEW.repo IS NULL OR NEW.requires IS NOT '{LEGACY_CLAIM_FENCE}'"
+            " OR NOT COALESCE(json_valid(NEW.standing_charter), 0)"
             " OR json_extract(NEW.standing_charter, '$.version') IS NOT 1"
             " OR json_type(NEW.standing_charter, '$.declaration_generation') IS NOT 'integer'"
             " OR json_extract(NEW.standing_charter, '$.declaration_generation')<1"

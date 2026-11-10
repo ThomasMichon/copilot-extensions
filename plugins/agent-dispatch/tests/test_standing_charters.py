@@ -2,6 +2,7 @@
 
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
+import json
 import sqlite3
 from threading import Barrier
 
@@ -107,6 +108,32 @@ def test_legacy_client_finite_work_continues_beside_standing_task(queue, declara
         queue.complete(standing.id, "worker")
     with pytest.raises(TaskError, match="fenced lifecycle"):
         queue.abandon(standing.id, permitted=True)
+
+
+def test_rolled_back_untargeted_claim_skips_older_standing_task(queue, declaration):
+    standing = queue.reconcile_standing_charter(
+        "Dispatcher", declaration, repo="owner/repo", now=100.0,
+    )
+    finite = queue.create("Newer finite work", repo="owner/repo", now=200.0)
+    assert standing.requires == ["standing-charter:explicit-attachment"]
+    worker_caps = {"machine:host", "worktree:wt", "repo:owner/repo"}
+    with sqlite3.connect(queue.db_path) as old:
+        # The rolled-back coordinator's selection: oldest queued row whose
+        # requirements the worker satisfies, without any kind awareness.
+        rows = old.execute(
+            "SELECT id, requires FROM tasks WHERE status='queued' ORDER BY created_at ASC",
+        ).fetchall()
+        assert [row[0] for row in rows] == [standing.id, finite.id]
+        chosen = next(row[0] for row in rows if set(json.loads(row[1])) <= worker_caps)
+        old.execute(
+            "UPDATE tasks SET status='claimed', owner='old', generation=generation+1 WHERE id=?",
+            (chosen,),
+        )
+        with pytest.raises(sqlite3.IntegrityError, match="standing"):
+            old.execute("UPDATE tasks SET requires='[]' WHERE id=?", (standing.id,))
+    assert chosen == finite.id
+    assert queue.get(finite.id).status == "claimed"
+    assert queue.get(standing.id) == standing
 
 
 def test_linked_finite_children_finish_independently_across_parent_retirement(

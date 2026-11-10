@@ -7,7 +7,7 @@ import copy
 import pytest
 import yaml
 
-from agent_worktrees import claim_providers, tracking, tracking_write
+from agent_worktrees import claim_providers, tracking, tracking_lifecycle, tracking_write
 from agent_worktrees import resource_relationship as relationship
 from test_resource_producer import owner as owner
 from test_resource_relationship import call, reserve, retired
@@ -453,6 +453,30 @@ def test_conclusion_inspection_is_exact_read_only_and_retains_relationship(owner
     assert result["phase"] == "bound" and "head" not in result
     assert path.read_bytes() == before
     assert tracking.load_record(path).resources[0].is_unsettled
+
+
+def test_yielded_head_conclusion_after_cancelled_handoff_is_exact(owner, headed_relationship):
+    path, _ = owner
+    payload = {key: value for key, value in headed_relationship.items() if key != "expected_head"}
+    tracking.open_handoff(tracking.load_record(path), "current", "handoff-token")
+    payload["expected_conclusion"] = dict(headed_relationship["expected_head"])
+    live = call(path, "inspect", payload)
+    assert live.get("error") and "conclusion" not in live
+    tracking.conclude_session(tracking.load_record(path), "current")
+    record = tracking.load_record(path)
+    assert tracking_lifecycle.cancel_handoff(record, "handoff-token")
+    tracking.save_record(record, path)
+    record = tracking.load_record(path)
+    fence = record.replayed_head_transition
+    assert fence.session_id is None and fence.reason == "concluded"
+    payload["expected_conclusion"] = {"session_id": "current", "revision": fence.revision}
+    before = path.read_bytes()
+    result = call(path, "inspect", payload)
+    assert result.get("ok"), result
+    assert result["conclusion"] == payload["expected_conclusion"]
+    assert path.read_bytes() == before
+    tracking.conclude_session(tracking.load_record(path), "current")
+    assert tracking.load_record(path).replayed_head_transition == fence
 
 
 @pytest.mark.parametrize("change", [

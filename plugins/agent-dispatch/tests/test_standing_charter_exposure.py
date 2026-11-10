@@ -397,6 +397,7 @@ def test_client_refuses_before_effects_without_declared_support(health):
             lambda: client.change_standing_lifecycle("t", "retire", expected_revision=1),
             lambda: client.create("Child", repo=REPO, standing_parent_id="parent"),
             lambda: client.list(repo=REPO, standing_parent_id="parent"),
+            lambda: client.list(repo=REPO, kind="standing-charter"),
         ):
             with pytest.raises(DispatchUpgradeRequired):
                 call()
@@ -518,6 +519,15 @@ def test_finite_routes_never_conclude_or_claim_a_standing_task(tmp_path):
             headers=CONTROL,
         ).json()
         finite = api.post("/tasks", json={"title": "Finite", "repo": REPO}, headers=DATA).json()
+        by_kind = {
+            kind: [task["id"] for task in api.get(
+                "/tasks", params={"repo": REPO, "status": "queued", "kind": kind}, headers=DATA,
+            ).json()]
+            for kind in ("finite", "standing-charter")
+        }
+        assert by_kind == {"finite": [finite["id"]], "standing-charter": [standing["id"]]}
+        for params in ({"kind": "other"}, {"kind": "finite", "q": "F"}, {"kind": "finite", "sweep": True}):
+            assert api.get("/tasks", params=params, headers=DATA).status_code == 400
         claimed = api.post("/claim", json={"worker_id": "old", "repo": REPO}, headers=DATA)
         assert claimed.json()["id"] == finite["id"]
         refused = [

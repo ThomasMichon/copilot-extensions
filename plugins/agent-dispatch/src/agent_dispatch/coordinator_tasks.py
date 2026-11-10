@@ -315,13 +315,14 @@ def register_task_routes(
         sweep: bool = False,
         limit: int | None = None,
         standing_parent_id: str | None = None,
+        kind: str | None = None,
     ) -> list[dict]:
         if dedup_key is not None:
             selectors = {
                 "status": status, "target_machine": target_machine, "target_repo": target_repo,
                 "label": label, "evaluator_ref": evaluator_ref, "source": source,
                 "origin_ref": origin_ref, "exclusive_key": exclusive_key, "category": category,
-                "q": q, "limit": limit, "standing_parent_id": standing_parent_id,
+                "q": q, "limit": limit, "standing_parent_id": standing_parent_id, "kind": kind,
             }
             conflicts = [key for key, value in selectors.items() if value is not None]
             if sweep:
@@ -341,6 +342,10 @@ def register_task_routes(
         limit = 200 if limit is None else limit
         if standing_parent_id is not None and (sweep or q is not None):
             raise HTTPException(400, detail="standing_parent_id cannot combine with sweep or q")
+        if kind is not None and (sweep or q is not None):
+            raise HTTPException(400, detail="kind cannot combine with sweep or q")
+        if kind not in (None, "finite", "standing-charter"):
+            raise HTTPException(400, detail="kind must be 'finite' or 'standing-charter'")
         if sweep:
             return _bulk_tasks(queue.sweep(repo=repo, limit=limit, category=category))
         if q is not None:
@@ -362,6 +367,7 @@ def register_task_routes(
             category=category,
             limit=limit,
             standing_parent_id=standing_parent_id,
+            kind=kind,
         )
         return _bulk_tasks(tasks)
 

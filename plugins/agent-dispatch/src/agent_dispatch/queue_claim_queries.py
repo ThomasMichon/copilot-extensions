@@ -304,12 +304,18 @@ class QueueClaimQueriesMixin:
         exclusive_key: str | None = None,
         category: str | None = None,
         standing_parent_id: str | None = None,
+        kind: str | None = None,
         limit: int = 200,
     ) -> list[Task]:
         """List tasks, optionally filtered. Newest first."""
         repo = self._canonical_repo(repo)
         clauses: list[str] = []
         params: list[object] = []
+        if kind is not None:
+            if kind not in ("finite", "standing-charter"):
+                raise TaskError("task kind must be 'finite' or 'standing-charter'")
+            clauses.append("kind = ?")
+            params.append(kind)
         from .task_categories import category_value
         category = category_value(category, selection=True)
         if category is not None:
