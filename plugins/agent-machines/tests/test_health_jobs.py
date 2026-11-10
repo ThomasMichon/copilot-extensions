@@ -2,6 +2,7 @@
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -14,12 +15,17 @@ from agent_machines.__main__ import main
 
 ENTRY = Path(__file__).resolve().parents[1] / "scripts" / "health-collection-entry.py"
 SID = "S-1-5-21-111-222-333-1001"
+WINDOWS_RUNTIME = {
+    "gui_python": r"C:\Example Python\pythonw.exe",
+    "runtime_site": r"C:\Example Runtime\Lib\site-packages",
+}
 
 
 def test_windows_definition_is_inert_limited_utc_and_contains_the_normal_policy_action():
     result = jobs.prepare(
         platform="win32", payload=r"C:\Example Tools\payload", store=r"C:\Example Data\store",
         policy_token="a" * 64, user_id=SID, windows_root=r"C:\Windows",
+        **WINDOWS_RUNTIME,
     )
     root = ET.fromstring(result["artifacts"]["agent-machines-health.xml"])
 
@@ -35,13 +41,14 @@ def test_windows_definition_is_inert_limited_utc_and_contains_the_normal_policy_
     assert text("t:Settings/t:ExecutionTimeLimit") == "PT1M"
     assert text("t:Triggers/t:TimeTrigger/t:StartBoundary").endswith("T00:00:15Z")
     assert text("t:Triggers/t:TimeTrigger/t:Repetition/t:Interval") == "PT1H"
-    assert text("t:Actions/t:Exec/t:Command") == r"C:\Windows\System32\conhost.exe"
-    assert text("t:Actions/t:Exec/t:Arguments") == (
-        r'--headless C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe '
-        r'-NoProfile -NonInteractive -ExecutionPolicy Bypass -File '
-        r'"C:\Example Tools\payload\bin\agent-machines.ps1" health run '
-        r'--store-dir "C:\Example Data\store" --apply --expect-policy ' + "a" * 64
-    )
+    assert text("t:Actions/t:Exec/t:Command") == WINDOWS_RUNTIME["gui_python"]
+    assert text("t:Actions/t:Exec/t:Arguments") == subprocess.list2cmdline([
+        "-I", "-B", "-X", "utf8", r"C:\Example Tools\payload\scripts\health-job-entry.py",
+        "--site", WINDOWS_RUNTIME["runtime_site"],
+        "--powershell", r"C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe",
+        "--payload", r"C:\Example Tools\payload", "--store", r"C:\Example Data\store",
+        "--expect-policy", "a" * 64,
+    ])
     assert not result["registered"] and not result["enabled"]
     assert result["qualification"] == "native-scheduler-not-qualified"
 
@@ -77,11 +84,13 @@ def test_linux_working_directory_preserves_literal_characters_without_exec_quoti
 @pytest.mark.parametrize("changes", [
     {"platform": "darwin"}, {"payload": "relative"}, {"store": "/example/\nstore"},
     {"policy_token": "none"}, {"user_id": "S-1-5-18"}, {"windows_root": "relative"},
+    {"gui_python": "relative"}, {"runtime_site": r"C:\Example Runtime\..\other"},
 ])
 def test_unqualified_requests_are_not_rendered(changes):
     fields = dict(
         platform="win32", payload=r"C:\payload", store=r"C:\store",
         policy_token="a" * 64, user_id=SID, windows_root=r"C:\Windows",
+        **WINDOWS_RUNTIME,
     )
     fields.update(changes)
     with pytest.raises(ValueError):
@@ -131,6 +140,8 @@ def test_preparation_cli_reads_policy_and_never_touches_store_or_scheduler(tmp_p
 
     payload, store = tmp_path / "payload", tmp_path / "store"
     (payload / "bin").mkdir(parents=True)
+    (payload / "scripts").mkdir()
+    (payload / "scripts" / "health-job-entry.py").touch()
     (payload / "plugin.json").write_text('{"name":"agent-machines"}')
     (payload / "bin" / ("agent-machines.ps1" if sys.platform == "win32" else "agent-machines")).touch()
     store.mkdir()
@@ -149,7 +160,7 @@ def test_preparation_cli_reads_policy_and_never_touches_store_or_scheduler(tmp_p
     result = json.loads(capsys.readouterr().out)
     assert result["status"] == "prepared" and not result["registered"] and not result["enabled"]
     assert {path.name: path.read_bytes() for path in store.iterdir()} == before
-    assert sorted(path.name for path in payload.iterdir()) == ["bin", "plugin.json"]
+    assert sorted(path.name for path in payload.iterdir()) == ["bin", "plugin.json", "scripts"]
     for invalid in (str(store / ".." / "store"), "relative-store"):
         invalid_arguments = [*arguments]
         invalid_arguments[invalid_arguments.index("--store-dir") + 1] = invalid
@@ -165,3 +176,46 @@ def test_preparation_cli_reads_policy_and_never_touches_store_or_scheduler(tmp_p
     assert main(arguments) == 2
     assert json.loads(capsys.readouterr().err)["error"] == "native-health-job-unsupported"
     assert {path.name: path.read_bytes() for path in store.iterdir()} == before
+
+
+@pytest.mark.parametrize("outcome,expected", [(0, 0), (2, 2), (17, 2), ("timeout", 124)])
+def test_windowless_job_root_propagates_result_and_bounded_owned_cleanup(
+    tmp_path, monkeypatch, outcome, expected,
+):
+    from agent_procutil import owned_process
+    import site
+
+    path = ENTRY.with_name("health-job-entry.py")
+    spec = importlib.util.spec_from_file_location("health_job_root_fixture", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    monkeypatch.setattr(module, "sys", SimpleNamespace(platform="win32", path=[]))
+    monkeypatch.setattr(site, "addsitedir", lambda _path: None)
+    real_spec = importlib.util.find_spec
+    monkeypatch.setattr(module.importlib.util, "find_spec", lambda name: (
+        SimpleNamespace(origin=str(tmp_path / "agent_procutil" / "__init__.py"))
+        if name == "agent_procutil" else real_spec(name)
+    ))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        if outcome == "timeout":
+            raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+        return SimpleNamespace(returncode=outcome)
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    arguments = [
+        "--site", str(tmp_path), "--powershell", str(tmp_path / "powershell.exe"),
+        "--payload", str(tmp_path / "payload"), "--store", str(tmp_path / "store"),
+        "--expect-policy", "a" * 64,
+    ]
+    assert module.main(arguments) == expected
+    argv, options = calls[0]
+    assert argv[-7:] == [
+        "health", "run", "--store-dir", str(tmp_path / "store"), "--apply",
+        "--expect-policy", "a" * 64,
+    ]
+    assert options["timeout"] == 55 and options["budget"].cleanup_reserve == 5
+    assert options["max_stdout_bytes"] == 256 * 1024
+    assert options["max_stderr_bytes"] == 64 * 1024

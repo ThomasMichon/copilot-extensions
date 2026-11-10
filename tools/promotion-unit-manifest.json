@@ -4777,9 +4777,9 @@
         "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "a92aa05dc88c500de54daddb66fd4ff0484ba3abb4d15a38194315a04a3c4da2",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "84aaf17e7e282252d42a368f02547a74deb2a4425abb43648c435ccccff9b70c",
-        "plugins/agent-machines/src/agent_machines/health_jobs.py": "9c881f8b2fd78363a505c7a54278c29c4ee86288ebbaa7f946f92487f8709a4e",
+        "tools/promotion_unit_tests/test_health_composition.py": "69f3d26c3e3fbbb26fd6de13a6009841db22aae45cb14f56e0c677c779350682",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "0e1a1c92440b19b384c2db49d0e094e802f55b0ea997232cb84955141f214544",
+        "plugins/agent-machines/src/agent_machines/health_jobs.py": "3f763cfc0cbcc61db31fcbc0c108b2dcd2f212f5513e0347d2d59d8ff0965065",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "9317a16c7d6d70cce4afb93b5e9fb692d2a0dc25d8b5c19797ad5d0e00bb1149",

@@ -79,6 +79,8 @@ def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners
     windows = jobs.prepare(
         platform="win32", payload=r"C:\Example Tools\payload", store=r"C:\Example Data\store",
         policy_token=token, user_id="S-1-5-21-111-222-333-1001", windows_root=r"C:\Windows",
+        gui_python=r"C:\Example Python\pythonw.exe",
+        runtime_site=r"C:\Example Runtime\Lib\site-packages",
     )
     root = ElementTree.fromstring(windows["artifacts"]["agent-machines-health.xml"])
     nodes = {"t": jobs.NS}
@@ -88,8 +90,11 @@ def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners
     assert root.find("t:Settings/t:MultipleInstancesPolicy", nodes).text == "IgnoreNew"
     assert root.find("t:Settings/t:ExecutionTimeLimit", nodes).text == "PT1M"
     arguments = root.find("t:Actions/t:Exec/t:Arguments", nodes).text
-    assert "--headless" in arguments and 'health run --store-dir "C:\\Example Data\\store"' in arguments
-    assert f"--apply --expect-policy {token}" in arguments
+    assert root.find("t:Actions/t:Exec/t:Command", nodes).text == r"C:\Example Python\pythonw.exe"
+    assert '"C:\\Example Tools\\payload\\scripts\\health-job-entry.py"' in arguments
+    assert '--store "C:\\Example Data\\store"' in arguments
+    assert f"--expect-policy {token}" in arguments
+    assert '--site "C:\\Example Runtime\\Lib\\site-packages"' in arguments
     linux = jobs.prepare(
         platform="linux", payload="/example/payload $one%", store="/example/store",
         policy_token=token,

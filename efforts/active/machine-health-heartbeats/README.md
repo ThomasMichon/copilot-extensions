@@ -93,6 +93,26 @@ or remote recovery follows from plan approval. Existing custom sinks and active
 sessions must survive. Exact deployment selectors and original private approval
 evidence remain with the adopter; this public plan does not manufacture a grant.
 
+A subsequent explicit answer, `windows-fixtures-only`, authorizes bounded
+isolated Windows scheduler qualification: create, run and delete only uniquely
+named temporary limited-interactive-user test tasks, using fixture-owned
+data/processes, two accelerated periodic cycles and overlap/deadline/storage/
+exact-cleanup controls. Each action is limited to 60 seconds and a test run
+targets about ten minutes. No elevation, existing-task changes, service/runtime
+updates, production enrollment, credential work or OneDrive writes are covered.
+Linux and actual hourly cohort/carrier qualification remain separate gates.
+
+A later adopter direction delegates expected validation and deployment runs for
+the current host to its fleet monitor, without per-step approval forms. Within
+that host only, this includes native scheduler qualification, health-gated
+installer-owned carrier/job runtime replacement, enrollment after qualification,
+and live inbound Bridge/SSH verification from another host. Every deployment
+retains before-state, reversible rollback and post-change health evidence;
+regression requires rollback. New credentials/secrets, unavailable noninteractive
+elevation, other machines' services or rollout, and destructive changes to
+non-test data remain excluded. Exact private direction and resource selectors
+remain in adopter records, not this public approval summary.
+
 ## Plan
 
 ### Phase 1 - Reviewed architecture and design
@@ -1267,3 +1287,65 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   before token generation or rendering. Normal CLI controls reject both
   traversal and relative paths without changing the store; an actor-free
   contract ensures the original path reaches that owner unchanged.
+
+### 2026-11-10 - Native preparation merged; fixture qualification gate
+- #11903 merged as `5312b784ba` after current-head Copilot approval with no open
+  issues, all three resolved review threads and green required CI, including
+  actor-free units/coverage. The final focused preparation/composition packet
+  passed 37 cases; the earlier 20 managed cold/payload controls remain valid.
+- Pull-forward safely aborted on the squash-history conflict. All three local
+  commits were confirmed included in the merge, with no difference in their
+  changed paths. A retained backup allowed reconciliation of only those merged
+  commits while preserving unrelated upstream changes, then normal sync passed.
+- Completed only inert native preparation. Native registration/execution,
+  two-cycle headlessness, overlap/late wake, deadline/storage and exact cleanup
+  still require a separately authorized fixture lane; configuration-only
+  approval is not permission to register even a temporary scheduled task.
+- Next seek bounded isolated Windows fixture qualification, without changing
+  existing tasks, installed runtimes, running services, production enrollment
+  or carrier data. Linux qualification, broader domains, preferences, selected
+  carrier evidence and cohort activation remain independent open parent gates.
+  The effort remains Active and the umbrella issue remains open.
+
+### 2026-11-10 - Bounded Windows scheduler fixtures and launch correction
+- Started the separately authorized limited-user fixture lane, using only
+  unique create-only task names, fixture-owned runtime/data, finite trigger
+  expiry, 60-second actions and ownership-checked stop/delete receipts.
+- The desktop observer refused before registration because a shell/foreground
+  window was unobservable. Keep two-cycle window/focus qualification open;
+  no functional scheduler result substitutes for that evidence.
+- The first scheduler readback normalized RegistrationInfo.URI to the task
+  path and omitted the default LeastPrivilege value. Cleanup failed closed
+  rather than deleting by name alone. Exact readback proved the retained task
+  disabled, instance-free and pointed at its fixture action; exact guarded
+  deletion was confirmed. Later fixtures use a retained description marker.
+- Real calendar execution then passed two accelerated one-minute cycles through
+  the copied public payload, selected fresh runtime, actual listener, local
+  record revisions and exact cleanup, preserving policy and sentinel data.
+- Native negative controls exposed two real definition defects: terminating
+  the console host at its limit left the PowerShell descendant alive, and the
+  console host returned success after collection failure. Exact retained
+  process handles settled fixture survivors; no production task was enrolled.
+- Replaced that boundary with a GUI-subsystem finite root and the existing
+  caller-owned Job/stream executor. The root propagates collection failure,
+  bounds execution plus settlement within 55 seconds, and closes its child Job
+  when the scheduler terminates it. The payload still independently selects and
+  qualifies the collection runtime on each invocation.
+- Focused source controls passed 15 cases. The revised native packet passed
+  two calendar cycles, overlap suppression, the inner deadline and forced
+  outer scheduler termination with exact descendant settlement. Failed storage
+  also returned failure and preserved its sentinel; its fixture's HTTP-count
+  assertion incorrectly expected a request despite rejection before I/O.
+  Corrected that assertion and retained an explicit final rerun gate.
+- The final focused source/native packet passed all 22 selected cases, including
+  the corrected failed-storage control and both exact descendant-stop paths.
+  The separate actor-free composition packet passed all 26 cases. Only the
+  productive-desktop case was excluded from the final native selection; its
+  failed prerequisite remains open, not a passing headlessness result.
+- Install, headless-source, documentation, lint and enforced typing gates passed.
+  The typing run covered all 41 existing strict projects on both platform
+  targets; it does not claim new admission for the 32 pending project scopes.
+- Native late wake, productive-desktop observation, Linux, retained-closure
+  replacement/rollback, installed adoption, live peer connectivity and actual
+  hourly carrier receipt remain separate open gates. The parent stays Active;
+  no running service, installed runtime, production job or carrier was changed.

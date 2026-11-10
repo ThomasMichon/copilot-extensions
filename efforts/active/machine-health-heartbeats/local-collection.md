@@ -242,6 +242,12 @@ Late wake/start runs once for current health and the preceding hour; it does not
 replay every missed trigger. Disable scheduler restart/retry storms. Require
 headless launch and exact bounded child containment, definition readback and
 separate configured/enabled/running/last-result evidence on both platforms.
+On Windows, a GUI-subsystem finite root must own the complete payload child
+tree and propagate its result. A headless console host alone is insufficient:
+its native task timeout can leave the console descendant alive, and its own
+exit code does not attest collection success. Reuse the existing finite
+Job/stream owner within the native 60-second ceiling; retain and refresh the
+selected execution closure through installation replacement and rollback.
 No hook or default setup enrolls this job. An explicitly adopted local policy
 can authorize recurring stage writes without a new human preview every hour,
 but is revalidated at each mutation; it cannot authorize service changes or
