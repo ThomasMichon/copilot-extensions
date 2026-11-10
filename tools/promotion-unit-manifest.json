@@ -5501,6 +5501,7 @@
         "libs/remote-login-shell/src/remote_login_shell/__init__.py",
         "libs/versioned-runtime/standalone_build.py",
         "libs/versioned-runtime/versioned_runtime_leases.py",
+        "libs/versioned-runtime/versioned_runtime_publication.py",
         "libs/worktree-identity/src/worktree_identity/__init__.py",
         "plugins/agent-bridge/src/agent_bridge/agent_registry_common.py",
         "plugins/agent-bridge/src/agent_bridge/agent_registry_namespace.py",
