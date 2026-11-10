@@ -33,13 +33,14 @@ def test_native_joined_pending_work_observes_real_tool(tmp_path, offline_cli, ki
 import { existsSync, writeFileSync } from "node:fs";
 import { joinSession } from "@github/copilot-sdk/extension";
 const session = await joinSession();
-const snapshots = [];
+const snapshots = [await session.rpc.tasks.list()];
 let taskId;
 let actions;
 let settled = false;
 const save = () => writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     sessionId: session.sessionId, snapshots, actions, settled,
 }));
+save();
 writeFileSync(process.env.DRIVER_OBSERVER_READY, JSON.stringify({
     sessionId: session.sessionId, pid: process.pid,
 }));
@@ -97,7 +98,8 @@ session.on("session.idle", () => { clearInterval(timer); });
     shell_pid = offline_cli.workspace / "shell-pid"
     pinned = tmp_path / "identities-pinned"
     command = (
-        f"Set-Content -LiteralPath '{shell_pid}' -Value $PID; "
+        f"[System.IO.File]::WriteAllText('{shell_pid}.pending', [string]$PID); "
+        f"[System.IO.File]::Move('{shell_pid}.pending', '{shell_pid}'); "
         "$deadline = [DateTime]::UtcNow.AddSeconds(15); "
         f"while (-not (Test-Path -LiteralPath '{release}')) {{ "
         "if ([DateTime]::UtcNow -gt $deadline) { throw 'Pending shell was not observed' }; "
@@ -121,7 +123,7 @@ session.on("session.idle", () => { clearInterval(timer); });
             },
         }]}, "finish_reason": "tool_calls",
     })
-    settled_response = threading.Event()
+    initial_response, settled_response = threading.Event(), threading.Event()
 
     def gate_response(request):
         if any(
@@ -131,7 +133,7 @@ session.on("session.idle", () => { clearInterval(timer); });
             return offline_cli.release_response
         if any(message["role"] == "tool" for message in request["messages"]):
             return settled_response
-        return None
+        return initial_response
 
     offline_cli.response_gate.select = gate_response
     identities = []
@@ -164,6 +166,7 @@ session.on("session.idle", () => { clearInterval(timer); });
             try:
                 observer = json.loads(ready.read_text(encoding="utf-8"))
                 observed = json.loads(output.read_text(encoding="utf-8"))
+                initial_response.set()
                 active = [
                     task for snapshot in observed["snapshots"] for task in snapshot["tasks"]
                     if task["type"] == kind and task["status"] == "running"
@@ -191,6 +194,7 @@ session.on("session.idle", () => { clearInterval(timer); });
             time.sleep(.025)
         stdout, stderr = process.communicate(timeout=30)
     finally:
+        initial_response.set()
         offline_cli.release_response.set()
         settled_response.set()
         if process.poll() is None:
