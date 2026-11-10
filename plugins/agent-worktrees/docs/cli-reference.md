@@ -1273,10 +1273,14 @@ resident producer to reconcile that record's session registry and bound/mux
 liveness, then waits for its own successful publication barrier. The running
 resident must advertise `worktrees-refresh-v1`; an older resident refuses this
 optional operation without disabling ordinary reads. Success includes a
-`point_refresh` request/generation/revision receipt. It never falls back to
-caller-side scans or saved rows and cannot be combined with `--follow` or
-`--passive`. `--fresh` alone is still a publication read, not this explicit
-reconciliation.
+`point_refresh` request/generation/revision receipt bound to the reconciled
+`worktree_id`, `creation_nonce` and `path`. Refresh resolves the same status,
+platform, checkout and ID/suffix selection as the response. No readable match,
+an incomplete observation, or a returned identity differing from the receipt
+refuses success. Reusing a request ID with different filters also refuses.
+It never falls back to caller-side scans or saved rows and cannot be combined
+with `--follow` or `--passive`. `--fresh` alone is still a publication read,
+not this explicit reconciliation.
 
 An installed tmux binary with no running server is a healthy empty session
 inventory, not a failed probe. Its recognized no-server responses do not block

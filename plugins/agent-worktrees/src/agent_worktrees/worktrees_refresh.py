@@ -3,13 +3,33 @@
 from __future__ import annotations
 
 from collections import OrderedDict
+from dataclasses import asdict
 import threading
 import time
 
-from .worktrees_projection_index import ProjectionError
+from .worktrees_projection_index import ProjectionError, ProjectionUnavailable, Selection
 
 CAPABILITY = "worktrees-refresh-v1"
 MAX_REQUESTS = 128
+
+
+def record_identity(row: dict) -> dict:
+    return {
+        "worktree_id": row["id"], "creation_nonce": row.get("creation_nonce"),
+        "path": row.get("path"),
+    }
+
+
+def receipt_matches(receipt: dict, result: dict) -> bool:
+    rows, head = result["worktrees"], result["projection"]
+    return (
+        len(rows) == 1
+        and all(key in receipt and receipt[key] == value
+                for key, value in record_identity(rows[0]).items())
+        and receipt.get("generation") == head["generation"]
+        and type(receipt.get("revision")) is int
+        and 1 <= receipt["revision"] <= head["revision"]
+    )
 
 
 class RefreshRejected(ProjectionError):
@@ -29,11 +49,11 @@ class RefreshRequests:
         with self._lock:
             self._requests.clear()
 
-    def request(self, project: str, selector: str, request_id: str) -> dict | None:
+    def request(self, project: str, selection: Selection, request_id: str) -> dict | None:
         with self._lock:
             previous = self._requests.get(request_id)
             if previous is not None:
-                if (previous["project"], previous["selector"]) != (project, selector):
+                if (previous["project"], previous["selection"]) != (project, selection):
                     raise ProjectionError("refresh request identity changed selection")
                 self._requests.move_to_end(request_id)
                 if previous["error"] is not None:
@@ -49,14 +69,14 @@ class RefreshRequests:
                     raise ProjectionError("resident point-refresh capacity is exhausted")
                 del self._requests[completed]
             self._requests[request_id] = {
-                "project": project, "selector": selector, "receipt": None, "error": None,
+                "project": project, "selection": selection, "receipt": None, "error": None,
             }
             return None
 
-    def pending(self, project: str) -> tuple[tuple[str, str], ...]:
+    def pending(self, project: str) -> tuple[tuple[str, Selection], ...]:
         with self._lock:
             return tuple(
-                (key, value["selector"]) for key, value in self._requests.items()
+                (key, value["selection"]) for key, value in self._requests.items()
                 if value["project"] == project
                 and value["receipt"] is None and value["error"] is None
             )
@@ -93,16 +113,32 @@ class RefreshRequests:
                 or (entry["mapping_revision"], entry["received_at"]) > previous[0]
             )
 
-    def complete(self, project: str, requests, head: dict) -> None:
+    def complete(self, project: str, requests, *, read) -> None:
         with self._lock:
-            for request_id, selector in requests:
+            for request_id, identity in requests:
                 item = self._requests.get(request_id)
                 if (
                     item is not None and item["error"] is None
-                    and (item["project"], item["selector"]) == (project, selector)
+                    and item["receipt"] is None and item["project"] == project
                 ):
-                    item["receipt"] = {
+                    try:
+                        result = read(project, **asdict(item["selection"]))
+                    except (ProjectionError, ProjectionUnavailable) as error:
+                        item["error"] = {
+                            "message": str(error)[:1024], "code": "refresh-unavailable",
+                        }
+                        continue
+                    head = result["projection"]
+                    receipt = {
                         "request_id": request_id,
                         "generation": head["generation"],
                         "revision": head["revision"],
+                        **identity,
                     }
+                    if receipt_matches(receipt, result):
+                        item["receipt"] = receipt
+                    else:
+                        item["error"] = {
+                            "message": "Point-refresh selection changed before publication",
+                            "code": "refresh-unavailable",
+                        }

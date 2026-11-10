@@ -14,6 +14,8 @@ import pytest
 from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import worktrees_projection as projection
 from agent_worktrees import worktrees_runtime as runtime
+from agent_worktrees.worktrees_projection_index import Selection
+from agent_worktrees.worktrees_refresh import record_identity
 
 
 def request(**selection):
@@ -111,15 +113,19 @@ def test_point_refresh_requires_its_reconciled_publication_not_an_unrelated_publ
         assert owner.handle(query)["error"]["code"] == "unready"
         assert wake.is_set()
         pending = owner.refreshes.pending("project")
-        assert pending == (("a" * 32, "one"),)
+        assert pending == (("a" * 32, Selection(worktree_id="one")),)
         owner.publish("project", [{"id": "one"}], observed_at=2)
         assert owner.handle(query)["error"]["code"] == "unready"
-        owner.publish("project", [{"id": "one"}], observed_at=3, refresh_requests=pending)
+        owner.publish(
+            "project", [{"id": "one"}], observed_at=3,
+            refresh_requests=[(pending[0][0], record_identity({"id": "one"}))],
+        )
         result = owner.handle(query)
         assert result["point_refresh"] == {
             "request_id": "a" * 32,
             "generation": result["projection"]["generation"],
             "revision": 3,
+            "worktree_id": "one", "creation_nonce": None, "path": None,
         }
         assert owner.handle(query)["point_refresh"] == result["point_refresh"]
         assert owner.refreshes.pending("project") == ()
@@ -146,9 +152,62 @@ def test_point_refresh_queue_is_bounded_and_never_evicts_pending_requests(tmp_pa
         assert owner.handle(overflow)["error"]["code"] == "invalid-request"
         pending = owner.refreshes.pending("project")
         assert len(pending) == MAX_REQUESTS
-        owner.publish("project", [{"id": "one"}], observed_at=1, refresh_requests=pending[:1])
+        owner.publish(
+            "project", [{"id": "one"}], observed_at=1,
+            refresh_requests=[(pending[0][0], record_identity({"id": "one"}))],
+        )
         assert owner.handle(overflow)["error"]["code"] == "unready"
-        assert owner.refreshes.pending("project") == pending[1:] + ((overflow["refresh_id"], "one"),)
+        assert owner.refreshes.pending("project") == pending[1:] + (
+            (overflow["refresh_id"], Selection(worktree_id="one")),
+        )
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("changed", [
+    {"status_filter": "active"}, {"platform_filter": "windows"}, {"include_missing": False},
+])
+def test_refresh_request_id_cannot_be_reused_with_different_filters(tmp_path, changed):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32)
+    try:
+        assert owner.handle(query)["error"]["code"] == "unready"
+        assert owner.handle({**query, **changed})["error"]["code"] == "invalid-request"
+        assert owner.refreshes.pending("project") == (
+            ("a" * 32, Selection(worktree_id="one")),
+        )
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("when", ["before-completion", "after-completion"])
+@pytest.mark.parametrize("changed", ["id", "incarnation", "path", "empty"])
+def test_refresh_receipt_cannot_follow_a_changed_record_or_selection(tmp_path, when, changed):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32, status_filter="active")
+    reconciled = {"id": "one", "creation_nonce": "first", "path": "checkout", "status": "active"}
+    replacement = {
+        **reconciled,
+        **{
+            "id": {"id": "two-one"},
+            "incarnation": {"creation_nonce": "second"},
+            "path": {"path": "other-checkout"},
+            "empty": {"status": "archived"},
+        }[changed],
+    }
+    try:
+        owner.handle(query)
+        applied = [(query["refresh_id"], record_identity(reconciled))]
+        if when == "after-completion":
+            owner.publish("project", [reconciled], observed_at=1, refresh_requests=applied)
+            assert owner.handle(query)["ok"] is True
+            applied = ()
+        owner.publish("project", [replacement], observed_at=2, refresh_requests=applied)
+        result = owner.handle(query)
+        assert result["ok"] is False and result["error"]["code"] == "refresh-unavailable"
+        assert "point_refresh" not in result
     finally:
         owner.shutdown()
 

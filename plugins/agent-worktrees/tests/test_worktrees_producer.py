@@ -103,13 +103,18 @@ def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, 
     (None, False), (None, True), ("bound", False), ("mux", False),
     ("later-mux", False), ("publication", False), ("ambiguous", False), ("cleanup", False),
     ("unreadable-workspace", False), ("contended", False), ("unpersisted", False),
+    ("unreadable-record", False), ("malformed-record", False),
+    ("status-collision", False), ("platform-collision", False), ("checkout-collision", False),
 ])
 def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     tmp_path, monkeypatch, failure, managed,
 ):
     from datetime import datetime
+    from dataclasses import replace
     import threading
 
+    collision = failure is not None and failure.endswith("-collision")
+    selected_id = "two-one" if collision else "one"
     checkout = tmp_path / "checkout"
     checkout.mkdir()
     record = tracking.WorktreeRecord(
@@ -126,9 +131,19 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     config_path.write_text(json.dumps({"repos": {"project": {"anchor": str(checkout)}}}))
     records = [record]
     if failure == "ambiguous":
-        from dataclasses import replace
-
         records.append(replace(record, worktree_id="two-one", creation_nonce="second-incarnation"))
+    elif collision:
+        second_checkout = tmp_path / "second-checkout"
+        second_checkout.mkdir()
+        (second_checkout / ".git").write_text("gitdir: fixture")
+        records.append(replace(
+            record, worktree_id=selected_id, creation_nonce="second-incarnation",
+            worktree_path=str(second_checkout),
+        ))
+        if failure == "status-collision":
+            record.status = "archived"
+        elif failure == "platform-collision":
+            record.platform = "linux"
     tracking_dir = producer.cfg.tracking_dir("project")
     tracking_dir.mkdir(parents=True, exist_ok=True)
     paths = []
@@ -137,10 +152,23 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         tracking.save_record(item, path)
         paths.append(path)
     initial_bytes = paths[0].read_bytes()
-    monkeypatch.setattr(
-        tracking, "list_records",
-        lambda *a, **kw: [tracking.load_record(path) for path in paths],
-    )
+    if failure == "malformed-record":
+        paths[0].write_text("[invalid: yaml")
+    elif failure == "unreadable-record":
+        import builtins
+
+        with tracking.record_cache._cache_lock:
+            tracking.record_cache._cache.pop(str(paths[0]), None)
+        original_open = builtins.open
+        denied_reads = []
+
+        def unavailable_record(file, *args, **kwargs):
+            if str(file) == str(paths[0]):
+                denied_reads.append(file)
+                raise PermissionError("tracking record is unreadable")
+            return original_open(file, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "open", unavailable_record)
     monkeypatch.setattr(tracking, "stamp_bound_live", lambda *a, **kw: None)
     monkeypatch.setattr(tracking, "stamp_mux_live", lambda *a, **kw: None)
     bound_reads = []
@@ -163,7 +191,9 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         mux_reads.append(ids)
         if failure == "later-mux" and len(mux_reads) > 1:
             raise producer.MuxObservationUnavailable("publication mux observation failed")
-        return {} if failure == "mux" else {"one": sessions.MuxInfo(exists=False, clients=0)}
+        return {} if failure == "mux" else {
+            selected_id: sessions.MuxInfo(exists=False, clients=0),
+        }
 
     monkeypatch.setattr(sessions, "mux_status_many", mux)
     monkeypatch.setattr(core, "_classify_records_live", lambda *a, **kw: {
@@ -183,6 +213,12 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     query = {"contract_version": 1, "project": "project", "worktree_id": "one", "refresh_id": "a" * 32}
     if failure == "ambiguous":
         query["worktree_id"] = "ne"
+    elif collision:
+        query.update({
+            "status-collision": {"status_filter": "active"},
+            "platform-collision": {"platform_filter": "windows"},
+            "checkout-collision": {"include_missing": False},
+        }[failure])
     release, entered = threading.Event(), threading.Event()
     contender, contention_errors = None, []
     original_save = tracking.save_record
@@ -236,12 +272,16 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 producer.publish_active_project(owner, **options)
             assert owner.handle(query)["error"]["code"] == "unready"
             assert owner.refreshes.pending("project")
-        elif failure:
-            assert producer.publish_active_project(owner, **options) == 1
+        elif failure and not collision:
+            count = 0 if failure in {"unreadable-record", "malformed-record"} else 1
+            assert producer.publish_active_project(owner, **options) == count
             assert owner.handle(query)["error"]["code"] == "refresh-unavailable"
             assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
             assert owner.refreshes.pending("project") == ()
-            assert producer.publish_active_project(owner, **options) == 1
+            assert producer.publish_active_project(owner, **options) == count
+            if failure == "unreadable-record":
+                assert denied_reads
+                assert paths[0].read_bytes() == initial_bytes
             if failure in {"unreadable-workspace", "contended", "unpersisted"}:
                 assert paths[0].read_bytes() == initial_bytes
             if failure in {"contended", "unpersisted"}:
@@ -252,14 +292,21 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 monkeypatch.setattr(tracking, "save_record", original_save)
                 retry = {**query, "refresh_id": "b" * 32}
                 assert owner.handle(retry)["error"]["code"] == "unready"
-                assert producer.publish_active_project(owner, **options) == 1
+                assert producer.publish_active_project(owner, **options) == len(records)
                 assert owner.handle(retry)["point_refresh"]["request_id"] == "b" * 32
-                assert tracking.load_record(paths[0]).bound_live is False
+                assert tracking.load_record(paths[-1]).bound_live is False
         else:
-            assert producer.publish_active_project(owner, **options) == 1
+            assert producer.publish_active_project(owner, **options) == len(records)
             result = owner.handle(query)
             assert result["ok"] is True and result["point_refresh"]["request_id"] == "a" * 32
-            assert tracking.load_record(paths[0]).bound_live is False
+            assert tracking.load_record(paths[-1]).bound_live is False
+            assert result["point_refresh"]["worktree_id"] == selected_id
+            assert result["point_refresh"]["creation_nonce"] == records[-1].creation_nonce
+            assert result["point_refresh"]["path"] == records[-1].worktree_path
+            assert result["worktrees"][0]["id"] == selected_id
+            if collision:
+                assert tracking.load_record(paths[0]).bound_live is True
+                assert paths[0].read_bytes() == initial_bytes
             assert result["worktrees"][0].get("session_bound_live") is not True
             assert result["worktrees"][0]["mux_session"] is False
             if managed:
@@ -272,10 +319,14 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 })
                 assert producer.publish_active_project(owner, **options) == 1
                 assert owner.handle(query)["worktrees"][0]["mux_session"] is True
-        calls = 0 if failure in {"ambiguous", "unreadable-workspace"} else (
+        calls = 0 if failure in {
+            "ambiguous", "unreadable-workspace", "unreadable-record", "malformed-record",
+        } else (
             2 if failure in {"contended", "unpersisted"} else 1
         )
-        assert bound_reads == [{"worktree_id": "one", "session_ids": [], "strict": True}] * calls
+        assert bound_reads == [
+            {"worktree_id": selected_id, "session_ids": [], "strict": True},
+        ] * calls
     finally:
         release.set()
         if contender is not None:

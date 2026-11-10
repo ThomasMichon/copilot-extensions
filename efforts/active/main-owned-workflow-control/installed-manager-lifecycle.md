@@ -595,3 +595,43 @@ writer, reload between publications and successful new requests after fault
 removal. The changed candidate still requires exact-source native
 requalification and fresh current-head review. All broader campaign gates remain
 open.
+
+### 2026-11-10 - Confirmed-persistence pass retained; bind Refresh to its selection
+
+Run 42841168402, attempt 1, passed at
+`cf1a02310ab16e7d9510c5475926fe7db9817d33`
+(tree `86ede778df4313afd2c511359224a9356072beca`).
+JUnit records one selected test, zero failures/errors/skips and 443.431 seconds;
+the complete lifecycle receipt measures 426.578 seconds. Installed origins and
+candidate bytes are verified across 302 Manager and 693 engine modules.
+Create, same-owner Open, detach, normal exit, same-conversation Resume in a
+different native incarnation, all four persisted replies, unusable-entry
+refusal and settled cleanup pass. This qualifies that installed-core candidate,
+not the subsequent correction or the broader campaign.
+
+Review 5844439919 identifies two further High findings in its body despite
+another "No open issues" banner. Filtering before response selection could
+return a suffix match different from the producer's unfiltered exact match.
+Also, best-effort tracking enumeration could omit an unreadable record and
+acknowledge a refresh that processed nothing. Both remain merge blockers until
+the changed candidate earns its own review and native qualification.
+
+The correction retains each request's full immutable selection and uses the
+canonical SelectionIndex over the producer's current record/filter facts.
+Publication and refresh share those facts. No readable selection refuses
+success. Each applied request identifies the actually reconciled worktree ID,
+creation nonce and path; completion, subsequent server reads and client
+validation require exactly one matching returned record. Reusing an ID with
+different filters refuses rather than reusing another selection's receipt.
+This repairs the new, unreleased optional capability within this PR; it does
+not add another endpoint, caller scan or liveness authority.
+
+All 200 tests in the affected producer, runtime, client and projection files
+pass. These include real best-effort tracking enumeration with a denied file
+read and malformed YAML, status/platform/checkout exact-ID versus suffix
+collisions, filter-changing request reuse, and changed/empty record selection
+before and after completion. Lint, module ceilings and all 13 install contracts
+pass. The three separately recorded nominal feed-timing failures are outside
+this selection, not passed or waived. Exact-source installed requalification,
+fresh current-head review, required CI and all parent acceptance gates remain
+open.

@@ -416,7 +416,7 @@ class WorktreesRuntime:
             if "refresh_id" in payload:
                 try:
                     refresh_receipt = self.refreshes.request(
-                        project, selection["worktree_id"], payload["refresh_id"],
+                        project, Selection(**selection), payload["refresh_id"],
                     )
                 except ProjectionError as exc:
                     return self._failure(getattr(exc, "code", "invalid-request"), str(exc))
@@ -438,6 +438,12 @@ class WorktreesRuntime:
             return self._failure("invalid-request", str(exc))
         result = {"ok": True, "contract_version": payload["contract_version"], **result}
         if refresh_receipt is not None:
+            from .worktrees_refresh import receipt_matches
+
+            if not receipt_matches(refresh_receipt, result):
+                return self._failure(
+                    "refresh-unavailable", "Point-refresh receipt does not match the selected record",
+                )
             result["point_refresh"] = refresh_receipt
         if payload["contract_version"] == observations.VERSION:
             result["project"] = project
@@ -544,10 +550,7 @@ class WorktreesRuntime:
                 self._refreshed[project] = started
                 self._changed_pending.pop(project, None)
                 if refresh_requests:
-                    head = self.store.read(
-                        project, worktree_id=refresh_requests[0][1],
-                    )["projection"]
-                    self.refreshes.complete(project, refresh_requests, head)
+                    self.refreshes.complete(project, refresh_requests, read=self.store.read)
         self.feed.changed(project)
 
     def note_changed(self, path: str | None) -> None:

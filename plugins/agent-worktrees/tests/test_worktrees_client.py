@@ -19,6 +19,8 @@ from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import worktrees_client as client
 from agent_worktrees import worktrees_projection as projection
 from agent_worktrees import worktrees_runtime as runtime
+from agent_worktrees.worktrees_projection_index import Selection
+from agent_worktrees.worktrees_refresh import record_identity
 
 
 def test_fresh_current_dispatch_cannot_acknowledge_bridge_live_refresh(
@@ -131,8 +133,11 @@ def test_explicit_refresh_crosses_authenticated_resident_and_waits_for_its_publi
         try:
             assert wake.wait(3)
             pending = owner.refreshes.pending("project")
-            assert len(pending) == 1 and pending[0][1] == "one"
-            owner.publish("project", [{"id": "one"}], observed_at=2, refresh_requests=pending)
+            assert len(pending) == 1 and pending[0][1] == Selection(worktree_id="one")
+            owner.publish(
+                "project", [{"id": "one"}], observed_at=2,
+                refresh_requests=[(pending[0][0], record_identity({"id": "one"}))],
+            )
         except BaseException as error:
             errors.append(error)
             owner.close_admission("closed")
@@ -188,27 +193,37 @@ def test_unavailable_point_refresh_returns_its_terminal_failure_without_repeatin
         owner.shutdown()
 
 
-@pytest.mark.parametrize("changed", ["missing", "id", "generation", "revision", "unpublished"])
+@pytest.mark.parametrize("changed", [
+    "missing", "id", "generation", "revision", "unpublished",
+    "record", "incarnation", "path", "empty",
+])
 def test_refresh_result_requires_its_own_same_generation_publication_receipt(tmp_path, changed):
     owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
     owner.activate()
     query = request(worktree_id="one", refresh_id="a" * 32)
     try:
         owner.handle(query)
+        row = {"id": "one", "creation_nonce": "first", "path": "checkout"}
         owner.publish(
-            "project", [{"id": "one"}], observed_at=1,
-            refresh_requests=owner.refreshes.pending("project"),
+            "project", [row], observed_at=1,
+            refresh_requests=[(query["refresh_id"], record_identity(row))],
         )
         result = owner.handle(query)
         assert client.validate_result(result, query) is result
         if changed == "missing":
             result.pop("point_refresh")
+        elif changed == "empty":
+            result["worktrees"] = []
+            result["projection"]["selected_count"] = 0
         else:
             key, value = {
                 "id": ("request_id", "b" * 32),
                 "generation": ("generation", "b" * 32),
                 "revision": ("revision", True),
                 "unpublished": ("revision", result["projection"]["revision"] + 1),
+                "record": ("worktree_id", "two-one"),
+                "incarnation": ("creation_nonce", "second"),
+                "path": ("path", "other-checkout"),
             }[changed]
             result["point_refresh"] = {**result["point_refresh"], key: value}
         with pytest.raises(projection.ProjectionUnavailable, match="requested point refresh"):

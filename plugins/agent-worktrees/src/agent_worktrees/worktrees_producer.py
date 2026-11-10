@@ -8,8 +8,9 @@ import time
 
 from . import config as cfg
 from . import reclaim, sessions, tracking, push_timeout, git_ops
-from .worktrees_current_rows import materialize
+from .worktrees_current_rows import materialize, selection_row
 from .mux_list_result import MuxObservationUnavailable
+from .worktrees_projection_index import ProjectionError, ProjectionUnavailable, SelectionIndex
 
 
 def publish_project_rosters(
@@ -88,32 +89,45 @@ def _publish_active_project(
     refresh_requests = runtime.refreshes.pending(project)
     refreshed = set()
     if refresh_requests:
-        from .list_cli import _filter_list_worktree, _refresh_list_record
+        from .list_cli import _refresh_list_record
 
         positions = {record.worktree_id: index for index, record in enumerate(records)}
+        selection_index = SelectionIndex(selection_row(record) for record in records)
         accepted_requests = []
-        for request_id, selector in refresh_requests:
+        for request_id, selection in refresh_requests:
             try:
-                selected_records = _filter_list_worktree(records, selector)
-            except ValueError as error:
+                selected_ids = selection_index.select(selection)
+            except ProjectionError as error:
                 runtime.refreshes.reject(request_id, str(error))
                 continue
+            except ProjectionUnavailable as error:
+                runtime.refreshes.reject(request_id, str(error), code="refresh-unavailable")
+                continue
+            if len(selected_ids) != 1:
+                runtime.refreshes.reject(
+                    request_id, "Point refresh requires one readable selected record",
+                    code="refresh-unavailable",
+                )
+                continue
+            record = records[positions[selected_ids[0]]]
             try:
-                for record in selected_records:
-                    if record.worktree_id not in refreshed:
-                        previous_mux = (
-                            managed_mux_cache.get(project, record.worktree_id)
-                            if managed_mux_cache is not None else None
-                        )
-                        persisted = _refresh_list_record(record, strict=True)
-                        records[positions[record.worktree_id]] = persisted
-                        if persisted.mux_live is False:
-                            runtime.refreshes.supersede_mux(project, record.worktree_id, previous_mux)
-                        refreshed.add(record.worktree_id)
+                if record.worktree_id not in refreshed:
+                    previous_mux = (
+                        managed_mux_cache.get(project, record.worktree_id)
+                        if managed_mux_cache is not None else None
+                    )
+                    record = _refresh_list_record(record, strict=True)
+                    records[positions[record.worktree_id]] = record
+                    if record.mux_live is False:
+                        runtime.refreshes.supersede_mux(project, record.worktree_id, previous_mux)
+                    refreshed.add(record.worktree_id)
             except (OSError, ValueError, MuxObservationUnavailable, push_timeout.ObservationUnavailable) as error:
                 runtime.refreshes.reject(request_id, str(error), code="refresh-unavailable")
                 continue
-            accepted_requests.append((request_id, selector))
+            accepted_requests.append((request_id, {
+                "worktree_id": record.worktree_id, "creation_nonce": record.creation_nonce,
+                "path": record.worktree_path,
+            }))
         refresh_requests = tuple(accepted_requests)
     session_ctx = sessions.scan_sessions_fast(records)
     try:

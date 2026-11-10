@@ -150,13 +150,13 @@ def validate_result(result: dict, request: dict, *, quality: str = "current") ->
     ):
         raise ProjectionUnavailable("incomplete resident current roster")
     if "refresh_id" in request:
+        from .worktrees_refresh import receipt_matches
+
         receipt = result.get("point_refresh")
         if (
             not isinstance(receipt, dict)
             or receipt.get("request_id") != request["refresh_id"]
-            or receipt.get("generation") != generation
-            or type(receipt.get("revision")) is not int
-            or not 1 <= receipt["revision"] <= revision
+            or not receipt_matches(receipt, result)
         ):
             raise ProjectionUnavailable("resident did not prove the requested point refresh")
     return result
