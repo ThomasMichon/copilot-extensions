@@ -15,6 +15,15 @@ ASCII-safe JSON so Unicode paths do not depend on the console's encoding.
 This changes no account/ownership
 checks, command deadlines, runtime selection or immutable slot bytes.
 
+## Worktree listing and archives
+
+Ordinary `list` output excludes semantic archives, including archived records
+whose checkouts remain. `--all` explicitly includes archived and missing
+checkouts; combine it with `--tracking-status archived` for archive inspection.
+Other status/platform/identity selectors retain their existing meaning.
+This applies to plain, JSON, cached and current/feed listings. Listing does not
+delete or rewrite archived identity, lineage or session history.
+
 ## Explicit status refresh
 
 `worktree-status-bundle --worktree <id> --force-refresh --json` requests fresh
@@ -672,6 +681,35 @@ continue to work unchanged.
 | `list` | List worktrees from tracking records. `--codename <name>` restricts to the worktree with that assigned codename, as an alternative to `--worktree-id` |
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
+
+### Remote-free finalization
+
+For a non-PR repository with no configured Git remotes, `finalize` verifies
+that the actual clean checkout commit is contained in the declared local
+default branch (`refs/heads/<default>`). It neither fetches nor rewrites refs,
+merges local work, or invents an `origin`. Missing or unreadable refs,
+uncontained commits and dirty content refuse finalization.
+The default ref and ancestry are verified in the registered anchor's Git store,
+not a separate checkout's store. Immediate and deferred cleanup preserve the
+declared local default branch even when it was the finalized checkout's branch.
+Checks ignore inherited Git repository selectors and enumerate untracked files
+explicitly, regardless of `status.showUntrackedFiles`; submodule ignore settings
+cannot hide dirty submodule content. Failed status reads refuse.
+
+A failed remote inspection or fetch is not evidence that a repository is
+local-only. Configured remotes and PR-mode repositories keep their existing
+remote/PR requirements. Local containment is checked again after retirement
+inspection, and all pair, claim, live-process and cleanup guards still apply.
+Normal deferred cleanup rechecks surviving finalized local checkouts and
+branches before removal; finalization does not authorize discarding content
+added afterward. An already-removed checkout and branch may retire only after
+the branch is positively observed absent, not after an unreadable observation.
+`--dry-run` remains a plan, not proof of successful finalization.
+
+The focused `tests/test_finalize_local.py` controls cover local containment and
+refusals. The remote-free cases in `tests/test_paired_finalize_integration.py`
+exercise the actual CLI and paired settlement; successful native Windows
+retirement additionally needs qualified private PSMux observation.
 
 ### Detached embodiment versus current-terminal attachment
 

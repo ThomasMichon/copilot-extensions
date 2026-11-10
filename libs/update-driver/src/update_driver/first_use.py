@@ -495,9 +495,9 @@ def _execute(admission: dict, *, root: Path, client_only: bool = False) -> int:
         environment["PATH"] = os.pathsep.join(filter(None, (
             str(Path(sys.executable).parent), environment.get("PATH"),
         )))
-        if os.name == "nt" and admission["plugin"] == "agent-mcp" and installer_action == "provision":
+        if os.name == "nt" and admission["plugin"] in {"agent-mcp", "agent-vault"} and installer_action == "provision":
             environment.update(participant_environment())
-            environment["COPILOT_EXTENSIONS_NATIVE_INSTALLER"] = "agent-mcp"
+            environment["COPILOT_EXTENSIONS_NATIVE_INSTALLER"] = admission["plugin"]
         code = _run_installer(
             frozen.plugin, runtime_root, admission["project"], environment,
             "stamp" if installer_action == "stamp-provision" else installer_action,

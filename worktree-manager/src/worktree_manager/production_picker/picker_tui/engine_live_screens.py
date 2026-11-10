@@ -8,6 +8,7 @@ from textual.app import ComposeResult
 from textual.screen import ModalScreen
 from textual.widgets import Static
 
+from .inbox import Inbox, InboxUpdated
 from .engine_helpers import (
     C_BAND,
     C_BTN,
@@ -53,6 +54,8 @@ class ProgressScreen(ModalScreen[None]):
     def __init__(self, eng) -> None:
         super().__init__()
         self._eng = eng
+        self._run = eng.progress
+        self.inbox = Inbox(self)
 
     def compose(self) -> ComposeResult:
         yield Static(self._panel(), id="progress")
@@ -64,19 +67,20 @@ class ProgressScreen(ModalScreen[None]):
 
     def _on_tick(self) -> None:
         eng = self._eng
-        if eng.progress is None:
+        if eng.progress is None or eng.progress is not self._run:
             # A direct engine poke (e.g. a unit test) cleared the run out from
             # under us -- close if we're still the top screen.
             if self.app.screen is self:
                 self.dismiss(None)
             return
+        self._consume_action_progress()
         if not eng.progress["done"]:
             eng._advance_progress()
         self._refresh()
 
     def _panel(self) -> Panel:
         eng = self._eng
-        p = eng.progress
+        p = self._run if eng.progress is self._run else None
         if p is None:
             # The run was cleared before this screen finished mounting (e.g. a
             # direct engine poke in a unit test). Render empty; the interval
@@ -137,6 +141,12 @@ class ProgressScreen(ModalScreen[None]):
             row.append(title, style="white" if st != "pending" else C_MUTED)
             body.append_text(row)
             body.append("\n")
+            update = it.get("progress") or {}
+            if st == "running" and update:
+                message = " ".join(str(update.get("message") or "").split())
+                body.append(f"    {message[:140]}\n", style=C_META)
+                if update.get("communication_lost"):
+                    body.append("    Progress silent; Sync outcome unknown. Still observing.\n", style=C_WARN)
             if sync_details:
                 from .maintenance import finalize_diagnostics, sync_diagnostics
 
@@ -152,6 +162,8 @@ class ProgressScreen(ModalScreen[None]):
             body.append("\n v: full result details\n", style=C_META)
             if failed:
                 body.append(" Ask: help clean up worktree <id> (claims/obligations)\n", style=C_CAUTION)
+        if any((it.get("result") or {}).get("cleanup_pending") for it in items):
+            body.append("\n Cleanup unconfirmed; exact process custody retained.\n", style=C_WARN)
         if p.get("op") == "profiles" and p["done"]:
             # #1368: after Apply the fragment is regenerated, but the terminal
             # app only re-reads it on a FULL restart -- spell out what changed
@@ -180,6 +192,7 @@ class ProgressScreen(ModalScreen[None]):
     def _action_stream_panel(self, p) -> Panel:
         """Render a D4 progress-reporting action's live state: verb, latest
         message, an optional pct bar, and a Working…/Close button."""
+        self._consume_action_progress()
         eng = self._eng
         verb = p.get("verb", "Action")
         body = Text()
@@ -212,13 +225,27 @@ class ProgressScreen(ModalScreen[None]):
         body.append_text(btn)
         return Panel(body, title=verb, border_style=C_BAND, width=68)
 
+    def _consume_action_progress(self) -> None:
+        if (self._run is not None and self._eng.progress is self._run
+                and self._run.get("kind") == "action-stream"):
+            latest = self.inbox.peek("action-progress")
+            if latest is not None:
+                self._run.update(latest)
+
+    def on_inbox_updated(self, message: InboxUpdated) -> None:
+        message.stop()
+        self._refresh()
+
     def _refresh(self) -> None:
-        if self._eng.progress is not None:
+        if self.is_mounted and self._run is not None and self._eng.progress is self._run:
             self.query_one("#progress", Static).update(self._panel())
 
     def on_key(self, event) -> None:
         event.stop()
         eng = self._eng
+        if eng.progress is None or eng.progress is not self._run:
+            return
+        self._consume_action_progress()
         if (canonical_key(event.key) == "v" and eng.progress
                 and eng.progress.get("op") == "finalize" and eng.progress["done"]):
             from .configuration_form import CommandResultScreen

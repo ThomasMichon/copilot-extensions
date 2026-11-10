@@ -603,6 +603,8 @@ class Config:
     (``agent-worktrees repos find <name>``). Consumed by the state-root resolver.
     Empty means unbound -- the resolver then refuses to silently write state into
     the harness. See the ``stateless-harness`` vision."""
+    knowledge_preferences: object = None
+    """Optional machine-local accepted preference source; never an effective binding."""
     copilot_profiles: list[CopilotProfile] = field(default_factory=list)
     profile_assignment: ProfileAssignmentPolicy | None = None
     headless: bool = False
@@ -1132,6 +1134,7 @@ def _load_config_uncached(
         repos=repos,
         checkout_free_pr=checkout_free_pr,
         knowledge_repo=knowledge_repo,
+        knowledge_preferences=machine_raw.get("knowledge_preferences", global_raw.get("knowledge_preferences")),
         copilot_profiles=parsed_profiles,
         profile_assignment=_parse_profile_assignment(
             user_assignment_raw,

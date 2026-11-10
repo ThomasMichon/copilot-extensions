@@ -1,0 +1,9 @@
+{
+  "comment": "Offer accepted knowledge defaults through explicit Configuration confirmation and recheck preference inputs at the native pointer boundary.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

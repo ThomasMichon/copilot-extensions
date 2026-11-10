@@ -62,7 +62,9 @@ class PickerScreenMaintenanceActionsMixin:
         ``_key_progress`` confirm gate. The screen mutates engine state directly
         (``self.progress`` / ``self.executor`` / ``self.debug``) and needs no
         callback."""
-        self.app.push_screen(ProgressScreen(self))
+        screen = ProgressScreen(self)
+        self.app.push_screen(screen)
+        return screen
     def _start_stop(self, recs):
         """Stop the Mux/Copilot wrapper of one or more worktrees (the 'Stop'
         action -- solo from the row sub-menu, or in aggregate from the bulk
@@ -241,14 +243,21 @@ class PickerScreenMaintenanceActionsMixin:
         if not self.real_ops:
             return  # mock walker advances via _advance_progress
         from . import maintenance
+        executor = None
+        cancelled = threading.Event() if p["op"] == "sync" else None
         tasks = maintenance.build_tasks(
             p["op"], p["recs"], self.src,
             include_unused=p["include_unused"],
             include_conversations=p["include_conversations"],
             local=self._src_local(),
+            on_progress=lambda key, update: executor.report(key, update),
+            cancelled=cancelled,
         )
-        self.executor = maintenance.MaintenanceExecutor(p["op"], tasks)
-        self.executor.start()
+        executor = maintenance.MaintenanceExecutor(
+            p["op"], tasks, **({"cancelled": cancelled} if cancelled is not None else {}),
+        )
+        self.executor = executor
+        executor.start()
     def _poll_executor(self):
         """Pull real per-item states from the maintenance executor."""
         p = self.progress
@@ -258,6 +267,8 @@ class PickerScreenMaintenanceActionsMixin:
             it["state"] = ex.state(key)
             if p.get("op") in ("sync", "finalize"):
                 it["result"] = ex.result(key)
+            if p.get("op") == "sync":
+                it["progress"] = ex.progress(key)
         if ex.is_done():
             p["done"] = True
     def _scope_union(self, dlg):

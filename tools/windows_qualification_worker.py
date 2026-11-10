@@ -17,12 +17,64 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from windows_qualification_contract import (
-    NATIVE_PACKETS, NATIVE_VERSIONS, VERSION, admit, canonical, request,
+    MCP_LIFETIME_CASE, MCP_LIFETIME_PACKET, NATIVE_PACKETS, NATIVE_VERSIONS, VERSION,
+    admit, canonical, request,
     validate_files, validate_result,
 )
 from windows_qualification_transport import Transport
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def mcp_lifetime(root: Path, output: Path) -> int:
+    """Use the existing hosted native Job and runner-renewed daemon owner."""
+    from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+    from plugin_test_cache import ordinary_cache_root
+    from plugin_test_resources import venv_root
+    from _admission_protocol import acquire
+
+    started = time.monotonic()
+    environment_root = ordinary_cache_root(venv_root(root) / "agent-mcp")
+    python = environment_root / "Scripts" / "python.exe"
+    if not python.is_file():
+        raise ValueError("MCP lifetime packet requires the prepared canonical test environment")
+    temporary = os.environ.get("RUNNER_TEMP")
+    if not temporary:
+        raise ValueError("MCP lifetime packet requires its disposable hosted test owner")
+    (output / "junit").mkdir(parents=True, exist_ok=True)
+    lease = acquire(0, environment_root)
+    try:
+        with TestSandbox(prefix="mcp-lifetime-", dir=Path(temporary)) as directory:
+            sandbox = Path(directory)
+            env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
+            env.update({
+                "PYTHONPATH": str(root / "tools"),
+                "COPILOT_EXTENSIONS_TEST_VENV_ROOT": str(venv_root(root)),
+                "AGENT_MCP_NATIVE_LIFETIME": "1",
+            })
+            result = run_contained(
+                [
+                    str(python), "-m", "pytest", "-q",
+                    str(root / "plugins/agent-mcp/tests/test_custody_native_lifetime.py"),
+                    "-k", MCP_LIFETIME_CASE,
+                    "--basetemp", str(sandbox / "t"),
+                    "-o", f"cache_dir={sandbox / 'pytest-cache'}",
+                    "--junitxml=" + str(output / "junit/mcp-lifetime.xml"), "--timeout=600",
+                ],
+                cwd=root / "plugins/agent-mcp", env=env, sandbox=sandbox,
+                limits=Limits(wall_seconds=900), native_application=True,
+            )
+            if result:
+                from qualify_foundation_lifetime import report_fixture_logs
+
+                report_fixture_logs(sandbox)
+    finally:
+        lease.release()
+    if result:
+        raise ValueError(f"MCP native lifetime fixture failed ({result})")
+    if time.monotonic() - started >= 900:
+        raise ValueError("MCP native lifetime phase exceeded 900 seconds including cleanup")
+    return result
 
 
 def junit_cases(directory: Path) -> list[dict]:
@@ -280,12 +332,18 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                     status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
                     raise ValueError(f"Pinned native prerequisite acquisition did not succeed ({status})")
                 return native_prerequisites(
-                    owned, require_feed=selected["name"] == "native-worktrees-embody",
+                    owned, require_feed=native[0] == "agent-worktrees",
                 )
             result["native_prerequisites"] = phase(
                 "native-prerequisites", prepare_native,
             )
             phase(native[3], lambda: owned(native_command(root, output, selected["name"]), 1800))
+        elif selected["name"] == MCP_LIFETIME_PACKET:
+            phase("prepare-mcp-test-runtime", lambda: owned([
+                sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-mcp",
+                "--prepare-only",
+            ], 420))
+            phase(MCP_LIFETIME_PACKET, lambda: mcp_lifetime(root, output))
         else:
             phase("bridge-http52-canonical-capture", lambda: owned([
                 sys.executable, str(root / "tools/capture_bridge_http52.py"),
@@ -307,7 +365,9 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             def test_runtime():
                 from plugin_test_resources import venv_root
                 target = selected["plugin"] if selected["kind"] == "plugin" else (
-                    native[0] if native else "agent-bridge"
+                    native[0] if native else (
+                        "agent-mcp" if selected.get("name") == MCP_LIFETIME_PACKET else "agent-bridge"
+                    )
                 )
                 python = venv_root(root) / target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
                 metadata = owned([
@@ -325,11 +385,14 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             }
         result["tests"] = junit_cases(output / "junit")
         result["outcome"] = (
-            "qualified" if (selected["kind"] == "packet" and not native) or (
+            "qualified" if (
+                selected["kind"] == "packet" and not native
+                and selected["name"] != MCP_LIFETIME_PACKET
+            ) or (
                 result["tests"] and all(case["outcome"] == "passed" for case in result["tests"])
             ) else "incomplete"
         )
-        if native:
+        if native or selected.get("name") == MCP_LIFETIME_PACKET:
             validate_result(
                 result, value, run_id=result["run_id"], control_sha=result["control_sha"],
                 run_attempt=result["run_attempt"],

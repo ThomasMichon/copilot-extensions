@@ -91,6 +91,13 @@ It rechecks the confirmed portable resolution, including logical machine scope,
 after registry-lock waits. Workers require this capability before portable apply;
 older name-based version-2 callers retain their existing behavior.
 
+`binding_precondition_freshness: 1` additionally guarantees that the writer
+rechecks the exact captured configuration bytes after that callback and just
+before replacement. Concurrent unrelated edits or file creation/removal refuse
+without a pointer-commit receipt, including an otherwise already-matching
+binding. Accepted-default consumers require this additive capability; existing
+explicit callers keep their previous capability contract.
+
 `bind_knowledge.py` writes or refreshes these local artifacts:
 
 | Artifact | What it contains |

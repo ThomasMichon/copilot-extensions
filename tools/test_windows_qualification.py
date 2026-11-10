@@ -132,10 +132,11 @@ def test_plugin_adapter_preserves_typed_argv_and_default_budget(tmp_path):
     assert "--all" not in argv and "--allow-host-state" not in argv
 
 
-def test_native_packet_preserves_public_caller_selection_and_functional_bounds(tmp_path):
-    argv = worker.native_command(tmp_path, tmp_path / "out")
+@pytest.mark.parametrize("caller", ["embody", "copilot"])
+def test_native_packet_preserves_public_caller_selection_and_functional_bounds(tmp_path, caller):
+    argv = worker.native_command(tmp_path, tmp_path / "out", "native-worktrees-" + caller)
     assert argv[argv.index("--test-file") + 1] == "tests/native/test_native_seed_application.py"
-    assert argv[argv.index("-k") + 1] == "public_embody"
+    assert argv[argv.index("-k") + 1] == "public_" + caller
     assert [argv[argv.index(flag) + 1] for flag in (
         "--timeout", "--plugin-timeout", "--test-timeout",
     )] == ["900", "1200", "900"]
@@ -162,7 +163,8 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
 
 
 @pytest.mark.parametrize("packet,native", [
-    (None, False), ("bridge-http52", False), ("native-worktrees-embody", True),
+    (None, False), ("bridge-http52", False), ("mcp-caller-lifetime", False),
+    ("native-worktrees-embody", True), ("native-worktrees-copilot", True),
     ("native-driver-auth-wait", True), ("native-driver-inflight", True),
     ("native-driver-observation-loss", True),
     ("native-driver-startup-seed", True), ("native-driver-startup-no-seed", True),
@@ -413,6 +415,126 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation,
         contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
 
 
+@pytest.mark.parametrize("caller,other", [("copilot", "embody"), ("embody", "copilot")])
+def test_worktrees_packets_cannot_qualify_the_other_public_caller(caller, other):
+    value, expected = result(), request()
+    expected["selection"] = {"kind": "packet", "name": "native-worktrees-" + caller}
+    _, module, _, phase = contract.NATIVE_PACKETS[expected["selection"]["name"]]
+    value.update(
+        request=expected, native_prerequisites=contract.NATIVE_VERSIONS,
+        tests=[{"class": "native." + module, "name": "test_public_" + other, "outcome": "passed"}],
+        phases=[{"name": name, "status": "passed"} for name in (
+            "source-and-selection", "native-prerequisites", phase, "test-runtime",
+        )],
+    )
+    with pytest.raises(ValueError, match="native caller"):
+        contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+
+
+@pytest.mark.parametrize("mutation", [
+    {}, {"tests": []}, {"tests": [{"outcome": "skipped"}]}, {"phases": []},
+    {"tests": [{"class": "other", "name": contract.MCP_LIFETIME_CASE, "outcome": "passed"}]},
+    {"tests": [{"class": "test_custody_native_lifetime", "name": "other", "outcome": "passed"}]},
+])
+def test_mcp_lifetime_result_requires_exact_functional_case_and_all_owner_phases(mutation):
+    value, expected = result(), request()
+    expected["selection"] = {"kind": "packet", "name": contract.MCP_LIFETIME_PACKET}
+    value.update(
+        request=expected,
+        tests=[{"class": "test_custody_native_lifetime",
+                "name": contract.MCP_LIFETIME_CASE, "outcome": "passed"}],
+        phases=[{"name": name, "status": "passed"} for name in (
+            "source-and-selection", "prepare-mcp-test-runtime",
+            contract.MCP_LIFETIME_PACKET, "test-runtime",
+        )],
+    )
+    value.update(mutation)
+    if mutation:
+        with pytest.raises(ValueError):
+            contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+    else:
+        contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+
+
+@pytest.mark.parametrize("native_exit", [0, 1])
+def test_mcp_lifetime_execution_uses_owned_native_lane_without_cli_or_desktop_prerequisites(
+    tmp_path, monkeypatch, native_exit,
+):
+    root, output = tmp_path / "candidate", tmp_path / "evidence"
+    root.mkdir()
+    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(worker, "Transport", lambda *_: SimpleNamespace(
+        git=lambda *_: SimpleNamespace(stdout="b" * 40),
+    ))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if "-c" in argv:
+            return SimpleNamespace(returncode=0, stdout='{"system":"Windows"}', stderr="")
+        assert argv[2:] == ["agent-mcp", "--prepare-only"]
+        return SimpleNamespace(returncode=0, stdout="prepared", stderr="")
+
+    def lifetime(candidate, evidence):
+        assert candidate == root and evidence == output
+        if native_exit:
+            raise ValueError("native owner cleanup unconfirmed")
+        (output / "junit").mkdir()
+        (output / "junit/actual.xml").write_text(
+            '<testsuite><testcase classname="test_custody_native_lifetime" '
+            f'name="{contract.MCP_LIFETIME_CASE}"/></testsuite>', encoding="utf-8",
+        )
+
+    monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
+    monkeypatch.setattr(worker, "mcp_lifetime", lifetime)
+    monkeypatch.setattr(worker, "native_prerequisites", lambda *_a, **_k: pytest.fail("unrelated CLI prerequisites"))
+    value = request()
+    value["selection"] = {"kind": "packet", "name": contract.MCP_LIFETIME_PACKET}
+    actual = worker.execute(root, value, output)
+    assert actual["outcome"] == ("failed" if native_exit else "qualified")
+    assert actual["phases"][2]["name"] == contract.MCP_LIFETIME_PACKET
+    assert "native_prerequisites" not in actual
+    assert len(calls) == (1 if native_exit else 2)
+
+
+def test_mcp_lifetime_retains_containment_until_its_canonical_native_owner(tmp_path, monkeypatch):
+    import _admission_protocol
+    import plugin_test_cache
+    import plugin_test_containment
+    import plugin_test_resources
+
+    environment = tmp_path / "prepared"
+    python = environment / "Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    released = []
+    monkeypatch.setattr(plugin_test_cache, "ordinary_cache_root", lambda _: environment)
+    monkeypatch.setattr(plugin_test_resources, "venv_root", lambda _: tmp_path / "venvs")
+    monkeypatch.setattr(_admission_protocol, "acquire", lambda *_: SimpleNamespace(
+        release=lambda: released.append(True),
+    ))
+    monkeypatch.setattr(plugin_test_containment, "TestSandbox", lambda **_: nullcontext(str(sandbox)))
+
+    def run(argv, **kwargs):
+        assert kwargs["native_application"] is True
+        assert kwargs["limits"] == plugin_test_containment.Limits(wall_seconds=900)
+        assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert kwargs["env"]["AGENT_MCP_NATIVE_LIFETIME"] == "1"
+        assert os.environ["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "-k" in argv and argv[argv.index("-k") + 1] == contract.MCP_LIFETIME_CASE
+        assert argv[0] == str(python)
+        raise plugin_test_containment.ContainmentError("hosted owner refused")
+
+    monkeypatch.setattr(plugin_test_containment, "run_contained", run)
+    with pytest.raises(plugin_test_containment.ContainmentError, match="hosted owner refused"):
+        worker.mcp_lifetime(tmp_path, tmp_path / "out")
+    assert released == [True]
+
+
 @pytest.mark.parametrize("prerequisites", [True, False])
 @pytest.mark.parametrize("preparation", ["success", "failure", "cancelled", "skipped", "unrecognized"])
 @pytest.mark.parametrize("packet", list(contract.NATIVE_PACKETS))
@@ -444,7 +566,7 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
         return SimpleNamespace(returncode=0, stdout="selected feed.example.invalid", stderr="")
 
     def prepare(owned, *, require_feed):
-        assert require_feed is (packet == "native-worktrees-embody")
+        assert require_feed is (plugin == "agent-worktrees")
         if not prerequisites:
             raise ValueError("unavailable feed.example.invalid")
         return dict(contract.NATIVE_VERSIONS)
@@ -542,7 +664,7 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("unsupported", [
     "version", "selector", "packet", "inflight", "observation-loss",
-    "startup-seed", "startup-no-seed", "startup-cold-resume", "workflow", "unprotected",
+    "startup-seed", "startup-no-seed", "startup-cold-resume", "copilot", "workflow", "unprotected",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
     tmp_path, monkeypatch, unsupported,
@@ -555,11 +677,16 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "observation-loss": "native-driver-observation-loss",
         "startup-seed": "native-driver-startup-seed", "startup-no-seed": "native-driver-startup-no-seed",
         "startup-cold-resume": "native-driver-startup-cold-resume",
+        "copilot": "native-worktrees-copilot",
     }.get(unsupported)
     selected = (
         {"kind": "packet", "name": packet} if packet else focused()
     )
     files = [
+        "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
+        "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
+        "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
+    ] if packet == "native-worktrees-copilot" else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
     ] if packet else ["plugins/sample/tests/test_sample.py"]
@@ -940,7 +1067,8 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     {"UV_DEFAULT_INDEX", "WINDOWS_QUALIFICATION_NATIVE_PREPARATION"}
                 )
                 assert step["env"]["UV_DEFAULT_INDEX"] == (
-                    "${{ needs.admit.outputs.packet == 'native-worktrees-embody' && "
+                    "${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || "
+                    "needs.admit.outputs.packet == 'native-worktrees-copilot') && "
                     "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
                 )
                 if step["name"].startswith("Sanitize"):

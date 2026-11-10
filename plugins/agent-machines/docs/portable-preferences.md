@@ -243,6 +243,35 @@ Provider rollback preserves the read-only preview baseline. Local policy and
 exchange output have their own strict version-1 schemas, independent of package
 versions; no retirement window is opened by this additive change.
 
+## Read accepted repository defaults
+
+`preferences repositories --state-dir <local-state> --machine <native-logical-id>
+--harness <native-canonical-id> [--local-overrides <local.json>]` projects only
+the unsynchronized local `policy.json`, `accepted.json` and optional explicit
+override. It does not read a carrier, accept new input, resolve repositories,
+call Worktrees or create any files. Missing accepted data reports an absent
+preference; withdrawal and local suppression retain their existing meanings.
+The policy must admit repositories and all domains present in the selected
+documents. Wrong publishers, invalid inputs and mismatched local machine scope
+remain errors, not an empty default.
+
+The read-only response uses `agent-machines.preferences.repositories`, integer
+version `1`, with `scope`, `accepted_revision`, `knowledge_preference`, winning
+`provenance` and an `input_revision` bound to the exact selected input bytes and
+paths. It always reports `configuration_applied: false` and
+`binding_changed: false`. Exit `0` includes absent/suppressed defaults; exit `2`
+means unavailable or invalid selected input. No apply flag is supported.
+
+Worktrees' optional
+[Repositories Configuration consumer](../../agent-worktrees/docs/repositories-configuration.md#accepted-default-in-configuration)
+supplies native identities and owns explicit adoption. Before invoking this
+additive command it checks `preferences-repositories-v1.json` in the exact
+selected Machines runtime slot: this schema/version, `accepted_projection: 1`,
+`read_only: true` and `target_identity: caller-native`. Missing, invalid or
+unsupported metadata leaves only the optional feature unavailable; a newer
+payload is not proof of runtime support. Old preview/exchange callers keep their
+existing syntax and behavior. No baseline is retired or effectful fallback added.
+
 ## Selected OneDrive local replica
 
 The optional `preferences carrier publish|receive` commands reuse the same

@@ -169,6 +169,10 @@ session-reattachment objective.
   or legacy-adoption gates, nor authorize a public-feed fallback or trust changes.
 - The operator requested a source-backed MCP retirement/update fix and selected
   reattachment when explicitly offered reattachment versus old-host draining.
+- The operator approved coordinator custody of the retained implementation:
+  reconcile its preserved journal and prototype against current Dev, then
+  continue through normal tests and review. This grants no work discard,
+  production effects, process termination, elevation or review/CI bypass.
 - Existing live clients and state-preservation processes must not be force-killed.
   Their retained code cannot be live-patched to manufacture new protocol support.
 - This reviewed plan does not itself grant rollout, elevation, service-restart,
@@ -216,6 +220,10 @@ named tracked objective before the whole effort is Done.
 
 ### Phase 2 - Incoming publication and fresh-call convergence
 
+- [x] **Bounded source slice merged:** #10754 landed at
+  `6dec373a753716d4e780d9ed03079c263dd61b55` after required current-head CI and
+  an accepted owner-authored review with no open findings. The completion
+  items below retain promoted-release and authorized installed-consumer gates.
 - [ ] Keep the literal portable `agent-mcp bridge` entry and resolve current
   software for every fresh invocation.
 - [ ] Correct #10652: publish authentic incoming readiness, selectors, commands,
@@ -299,6 +307,10 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
 
 ### Phase 3 - Session-preserving handover and independent retirement
 
+- [x] **Provider-first source merged:** #11911 landed at
+  `70ecc34fc56bb71fa9a7a279ed7de7bfd266ce87` after current-head automated
+  approval and required CI. Internal custody/backend/conduit providers are
+  expanded; ordinary caller selection and installed adoption are unchanged.
 - [ ] **Separate warm-reuse follow-up under #10486:** qualify broader
   HTTP/dynamic-auth/routed/CLI execution and per-target context/credential
   custody before expanding sharing. Preserve actual stdio cwd semantics.
@@ -306,6 +318,20 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
   operator-selected limitations, not additional incoming gates.
 - [ ] Retain a client-owned, installation-independent stdio lifetime boundary;
   replacement payloads and shared runtime slots must not invalidate it.
+  The internal explicit-owner path and hosted packet are now qualified on
+  disposable hosted Windows. Next, supply originating-owner acquisition for
+  eligible ordinary callers without weakening native lifetime admission.
+  - [x] **Explicit-owner source merged:** #11935 landed at
+    `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
+    approval, required CI and resolution of addressed findings. The source
+    controls do not establish native caller-Job survival or installed adoption.
+  - [x] **Released controller and native lifetime packet:** Main
+    `6d99b59489c8c4a667e3713fab2a5f0c1345830c` advertises the reviewed packet.
+    [Hosted run 42858317478](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42858317478)
+    qualifies source `c0eab0d952a37607f6cf7030ac1a77f377f98a74`: actual caller-Job
+    closure, conduit survival, restrictive-outer refusal, interposed-parent exit
+    and exact owner-death settlement pass. This is not ordinary or installed
+    caller adoption.
 - [ ] Reattach adopted wrappers to the incoming shared runtime while preserving
   initialization, upstream session identity, notifications, ordering and
   accepted/in-flight/unknown call outcomes without blind mutation replay.
@@ -334,6 +360,11 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
   None is an MCP source, release or acceptance prerequisite.
 - [ ] Run focused protocol and real-process regression controls on supported
   Windows and POSIX boundaries, plus practical clean-room install qualification.
+  - [x] **Internal provider source packet:** 127 focused tests, 265 Windows
+    tests with two existing platform skips, and both native Linux cases pass
+    with verified cleanup. Physical replacement, rollback, same-slot process
+    adoption and original pipes/upstreams are covered; production lifetime,
+    default caller adoption and installed acceptance remain open.
 - [ ] Update owning reality docs, contract declarations and per-plugin
   changefiles; land implementation through review and required CI.
 - [ ] Verify promotion, then perform separately authorized installed-consumer
@@ -395,6 +426,14 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;
   an interposed parent exit does not destroy a still-owned live session.
+  - [x] **Internal owner source controls:** 47 Windows tests with two skips and
+    48 Linux tests with one hosted-native skip pass with verified cleanup,
+    including actual owner-death exit while another process retains stdin.
+  - [x] **Hosted explicit-owner lifetime:** the exact native case passed without
+    skips in 71.816 seconds, within an 89.078-second verified packet. Original
+    pipes/upstream survive caller-Job loss and physical backend replacement;
+    owner death settles the conduit/upstream with stdin still held open.
+    Ordinary caller adoption and installed-consumer acceptance remain open.
 - [ ] Actual old central retirement and client-preserver survival are verified
   independently. No process-name sweep, whole-root reset or manufactured receipt.
 - [ ] Held clients survive installer cutover beyond its grace, including the
@@ -429,6 +468,14 @@ backend execution. This plan does not assert that reattachment or legacy live
 migration already works.
 
 ## Journal
+
+### 2026-11-10 - Explicit originating-session lifetime prepared
+
+- [Pinned owner boundary and pending native caller-Job qualification](journal/2026/11.10%20explicit%20session%20owner.md).
+
+### 2026-11-09 - Retained reattachment source reconciled
+
+- [Preserved source history and next implementation boundary](journal/2026/11.09%20retained%20reattachment%20source.md).
 
 ### 2026-11-09 - Incoming-monitor correction resumed
 
@@ -1581,6 +1628,10 @@ migration already works.
   original assertions. New-source formal validation and current review/CI
   remain pending. Neither finding establishes the cause of the historical
   warm PID mismatch; that finding remains not reproduced with unknown cause.
+
+### 2026-11-06: Bounded incoming source merged; historical milestone
+
+- [Source merge, qualification scope and then-open delivery gates](journal/2026/11.06%20bounded%20incoming%20source%20merged.md).
 
 ### 2026-11-07: Corrective serving recovery and update transaction work
 

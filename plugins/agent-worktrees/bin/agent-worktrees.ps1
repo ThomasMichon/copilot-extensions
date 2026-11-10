@@ -116,7 +116,11 @@ if ($_awUpdateDiagnostic) {
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) { Invoke-AwTerminalPython 'python' (@('-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
+$_inst = if ($_snap) {
+    Join-Path $_snap 'scripts\install.ps1'
+} elseif (Test-Path -LiteralPath (Join-Path $_awPayloadRoot 'plugin.json') -PathType Leaf) {
+    Join-Path $_awPayloadRoot 'scripts\install.ps1'
+} else { '' }
 if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) {
     $_inst = Get-ChildItem (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -Recurse -Filter 'install.ps1' -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match '[\\/]agent-worktrees[\\/]scripts[\\/]install\.ps1$' } |
@@ -192,6 +196,8 @@ try {
                                 $script:worktreesDriverBusy = $true
                             } elseif ([string]$_ -ceq '::agent-worktrees-driver-reselect::') {
                                 $script:worktreesDriverReselect = $true
+                            } elseif ($_ -is [System.Management.Automation.ErrorRecord]) {
+                                [Console]::Error.WriteLine($_.Exception.Message)
                             } else {
                                 [Console]::Error.WriteLine($_)
                             }

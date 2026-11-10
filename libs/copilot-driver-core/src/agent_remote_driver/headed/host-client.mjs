@@ -166,11 +166,17 @@ export function createHeadedSession(native, { binding, cwd, nativePid }) {
     }
   }
 
+  function requireBinding() {
+    if (closed || held || native.sessionId !== binding.sessionId) {
+      fail();
+      throw unavailable();
+    }
+  }
+
   async function controlled() {
-    if (closed || held || native.sessionId !== binding.sessionId) throw unavailable();
+    requireBinding();
     connection ??= connect().catch(() => { fail(); throw unavailable(); });
-    await connection;
-    if (closed || held || native.sessionId !== binding.sessionId) throw unavailable();
+    try { await connection; } finally { requireBinding(); }
   }
 
   async function readyForInput() {
@@ -217,13 +223,14 @@ export function createHeadedSession(native, { binding, cwd, nativePid }) {
         throw new Error("Unsupported headed delivery options");
       }
       await controlled();
-      await readyForInput();
+      try { await readyForInput(); } finally { requireBinding(); }
       let result;
       try {
         result = await request("copilot-driver/native-send", {
           sessionId: binding.sessionId, prompt: options.prompt, mode: options.mode ?? "enqueue",
           ...(options.displayPrompt === undefined ? {} : { displayPrompt: options.displayPrompt }),
         });
+        requireBinding();
       } catch {
         fail();
         throw unavailable();

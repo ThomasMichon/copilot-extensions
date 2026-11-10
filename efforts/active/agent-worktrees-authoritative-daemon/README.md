@@ -1347,15 +1347,15 @@ contracts remain.
   the parent still keeps its own entire completion gate.
 
 
-### Proposed finite semantic archive exclusion from #5942
+### Finite semantic archive exclusion from #5942 - source accepted
 
-_(Agent-recommended direct selection/list case; all rows unchecked.)_
+_(Finite source acceptance in #11940; installed and parent gates stay separate.)_
 
-- [ ] **P5942-1:** Exclude semantic archives from real DEFAULT active-list
+- [x] **P5942-1:** Exclude semantic archives from real DEFAULT active-list
   selection whether the checkout is RETAINED OR ABSENT, through BOTH plain
   AND fresh JSON consumers. Checkout deletion must not be a prerequisite;
   retained checkout/`.git` existence is not active/resumable status.
-- [ ] **P5942-2:** Preserve durable identity/lineage/history, direct archival
+- [x] **P5942-2:** Preserve durable identity/lineage/history, direct archival
   inspection, explicit active/archive/all query capabilities and existing
   missing-checkout/unrelated-state filtering. Credit explicit-active and
   absent-checkout filters and resident/held-feed foundations without claiming
@@ -1364,12 +1364,12 @@ _(Agent-recommended direct selection/list case; all rows unchecked.)_
 
 #### Local Validation - #5942
 
-- [ ] **V5942-1:** Qualify the actual selector -> plain renderer AND fresh
+- [x] **V5942-1:** Qualify the actual selector -> plain renderer AND fresh
   JSON cross-product: archived/active, retained/absent checkout and default/
   explicit queries. A retained archived checkout must not leak into default
   active output; cached/presence results or an explicit active filter are not
   that default-consumer proof.
-- [ ] **V5942-2:** Preserve archival/history/identity inspection, original
+- [x] **V5942-2:** Preserve archival/history/identity inspection, original
   missing-checkout filtering and unrelated states without deletion, archive
   mutation, reset, session termination or inferred content safety. Original
   finite source/consumer and installation/platform boundaries remain.
@@ -1472,7 +1472,7 @@ _(Agent-recommended direct selection/list case; all rows unchecked.)_
       underlying fact with no real change having occurred"), checked here
       for the Worktrees pivot specifically.
 
-- [ ] **G5942:** Resolve ALL direct P5942/local Validation/continuing
+- [x] **G5942:** Resolve ALL direct P5942/local Validation/continuing
   Coordination clauses through BOTH actual ordinary listing consumers,
   retaining retained OR absent checkout, active/archive/default/explicit
   controls, history/identity access and missing-checkout behavior. Preserve
@@ -1487,6 +1487,75 @@ confirming `module-componentization-discipline`'s `tracking.py` split has
 reached a stable resting point before Phase 2 actually starts cutting code.
 
 ## Journal
+
+### 2026-11-10 15:37 UTC - Semantic archive source accepted
+
+PR #11940 actually merged as `4b32288fa2c83df2aafe875a4bbb62ca0d476694`.
+Genuine bot approval5844543016 covers exact corrected head
+`d4820dafbe305ff4e181c7e3f4b897f44f29651f`, with no open findings and the
+one reproduced Medium thread resolved. Required CI42844959439's guards,
+eligible units/coverage and actual aggregate pass before merge, as do
+lockdown/source attribution and the separately selected Linux/Windows
+cold-roster lane42844959683. The role-scoped exception concerns only the
+additional CODEOWNER vote, not these review, thread or CI obligations.
+
+Only P5942-1/P5942-2, their two local Validation rows and G5942 are accepted
+at the finite source/consumer tier: 243 complete affected controls, including
+18 new controls, original plain/fresh-JSON cross-products, explicit inventory,
+unchanged tracking bytes, old-selection refusal and actual TCP feed barriers.
+The three tracked nominal-load exclusions and optional unprepared typing
+prerequisite remain as recorded below. No installed archive operation,
+runtime rollout or cleanup was performed.
+
+The root remains Active. Continue the existing all-mutator/catalog/read-side,
+ordinary-hook, performance and native/adopter work through its retained owners;
+neither this finite acceptance nor the source merge releases their claims.
+
+### 2026-11-10 - Finite semantic archive listing correction
+
+The bounded #5942 source correction applies the existing documented rule that
+archives require `--all`, even if their checkout remains. Plain/fresh JSON
+selection and publisher-built default-membership indexes exclude archives;
+explicit complete/status/identity inventory keeps their durable rows. Current,
+advisory and held-feed consumers preserve complete counts and barriers. A
+retained archive cannot create a default suffix collision or make checkout
+presence unready. Clients refuse older incorrect default selections without
+reconstructing facts, rewriting saved projections or changing refresh ownership.
+Legacy cached rows containing an archive cannot bypass the corrected selector.
+
+Five controls failed first at the actual plain/JSON selection, current/advisory
+admission and indexed membership boundaries. The affected four-file packet has
+240 passing controls; its new real-socket flow initially observed asynchronous
+teardown before the handler released its subscription. Waiting on the existing
+bounded feed-drain owner corrects that fixture; the three socket-flow controls
+pass, yielding 241 distinct qualified cases, including 16 new controls. No
+functional assertion or deadline was relaxed. Three nominal two-second
+full-roster load variants are deliberately excluded under #7935/#7936/#7946,
+not counted as passes or replaced by this functional result.
+The final 16 new controls pass after the cache-shape guard; module ceilings,
+touched F/E9, whitespace, documentation and all 13 install contracts pass.
+Optional admitted typing prevalidation is not qualified: prepared checker
+environments report missing `mypy_extensions`, then stop at unprepared
+`lib-config-migrate`. Worktrees is still outside that admitted typing scope.
+
+Review found a second advisory exit in `read_current` that bypassed the
+validated saved-result helper. The first new controls used the wrong fixture
+database name and did not qualify that defect. With the actual owned database
+identity corrected, both direct fallback and real passive CLI controls reproduce
+the archive leak. Both exits now use the same validated helper while preserving
+the selected runtime-home path and failure classification. The complete final
+affected packet passes 243 cases, including all 18 new controls, with only the
+same three nominal timing variants excluded. Fresh review and CI are required
+for this correction; the earlier review/checks are not acceptance of new source.
+
+This realizes `registered-by-default-listing` and
+`archival-is-a-terminus-not-a-deletion`, not a new archive/lifecycle authority.
+No new CLI form, wire field, daemon or persistence migration is added. Existing
+`--all` and status queries retain explicit archive access; the existing
+`include_missing` selection continues to carry the CLI's `--all` choice.
+Source review/CI and actual merge remain publication gates. Installed/native
+rollout, all-mutator/catalog/performance acceptance and every independent
+#3761/#918/#2619/#6748/#7937/#7946/#11864 owner remain open.
 
 ### 2026-11-06 - Prepared native cell-membership source qualification
 

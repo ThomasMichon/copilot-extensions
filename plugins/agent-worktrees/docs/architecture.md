@@ -3265,6 +3265,12 @@ the Picker moved to `worktree-manager/`.
 standalone Python entry. Existing sessions that cached the old command keep
 using `hook_client.py`; a payload refresh is not proof their command changed.
 
+The declared scripts root, native script and admission-helper filesystem paths
+use `IO.Path.Combine` directly. A prepared native read therefore does not
+initialize `Microsoft.PowerShell.Management` merely to join these fixed child
+paths. Source/context/legacy selection and the original runtime, policy and CWD
+compatibility routes remain unchanged.
+
 For the default installation, `view`, `rg` and `glob` can return without Python,
 IPC, repository discovery or runtime selection. `hook-read-policy.json` binds
 that exemption to the exact normalized sources of all four guards. Missing,
@@ -3275,10 +3281,23 @@ contract tests also exercise each real guard's read decision, not just hashes.
 A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
-For prepared Windows membership, the original guards' non-patch native write
+Prepared membership also permits complete all-read native batches of
+`view`, `rg` and `glob`. Read and write branches share one strict batch-envelope
+validator: 1..128 dictionary members, nonempty string names and only
+`name`/`args`/`id` keys, including when a caller supplies a key named `Keys`.
+Every member must be a recognized read before the read exemption applies;
+batch members override top-level tool fields through the original normalization
+contract. This proof additionally binds the existing target-form and map-reader
+sources, without reading target inventories or interpreting read arguments as
+shell commands. Missing prepared evidence or incompatible source contracts,
+empty/malformed/oversized envelopes and unsupported members retain the original
+route. A later write must still satisfy the complete write proof below or use
+the original raw-event evaluator.
+
+For prepared Windows membership, the original guards' native write
 names (`create`, `edit`, `str_replace`, `str_replace_editor`,
 `str_replace_based_edit_tool`, `write`, `write_file`, `insert`, `new_file` and
-`multi_edit`) can also return natively
+`multi_edit`, plus recognizable `apply_patch` calls) can also return natively
 when current Git metadata proves every target belongs to that same linked
 worktree. Targets include the original direct path aliases and one-level
 `edits`, `files` and `changes` entry aliases. Each structured list and each
@@ -3297,7 +3316,7 @@ unrelated repositories; current source and target paths retain live checks.
 Stateless checks retain the original guard's universal-newline, whitespace
 and leading-dot path normalization, including the normalized basename.
 Protected personal-state paths, anchors, foreign or nested repositories,
-unsupported batch members, patches, nested or incomplete structured entries,
+unsupported batch members, unrecognized patches, nested or incomplete structured entries,
 malformed/oversized batches,
 unsupported paths and incomplete evidence retain
 the original raw-event policy path. Eligible installation cells retain the
@@ -3305,11 +3324,26 @@ same complete native membership proof; unprepared cells retain validation.
 This exemption additionally fingerprints the original target-form and map
 readers in `hook-read-policy.json`. Regenerate that contract after either
 reader changes. Shell commands and Git/PR operations are not exempted.
+Patch arguments may be objects, JSON objects or freeform patch strings.
+The existing collector unions direct/structured aliases with every original
+Add/Update/Delete/Move header in every `input`, `patch` and `command` field,
+including both move endpoints. Each present patch field must be a string with
+a complete Begin/End envelope, at least one original header target and at most
+131072 characters; all existing per-call/event target limits still apply.
+Fragments, targetless, non-object JSON, malformed or oversized fields retain
+the original raw-event policy path. This is a conservative relevance proof,
+not a replacement patch parser or validator.
+Argument strings containing literal original header lines retain their raw
+interpretation before JSON decoding, so permissive JSON comments cannot hide
+a target that the original strict guards would inspect as freeform input.
 The entry discovers optional facts support from the loaded admission function;
 an older helper keeps its original call and policy path without that proof.
 
-The native read contract currently hashes four bounded source files per read
-(at most 128 KiB each); it is not a daemon-published worktree-policy cache and
+The single-read contract hashes four bounded guard sources; all-read batches
+add the two existing normalizer/reader sources (at most 128 KiB per file).
+Source checks are per event, not per member. The shared envelope validation can
+run again when an ineligible read batch proceeds to write proof, but performs
+no process, filesystem or topology work. This is not a daemon-published worktree-policy cache and
 does not claim zero filesystem cost. Exact fingerprints deliberately prevent a
 partial helper upgrade from reusing a stale exemption. A future lifecycle- or
 daemon-published generation may replace this repeated check after its own

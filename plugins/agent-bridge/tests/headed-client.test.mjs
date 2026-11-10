@@ -10,7 +10,7 @@ import { createHeadedAdapter } from "../../../libs/copilot-driver-core/src/agent
 
 async function fixture(run, {
   lost = false, previous = false, supported = true, portable = false,
-  startupPrompt = null, readiness = "current",
+  startupPrompt = null, readiness = "current", onNativeSend = () => {},
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "headed-bridge-"));
   const sockets = new Set();
@@ -27,6 +27,7 @@ async function fixture(run, {
     async send(options) {
       sends.push(options);
       observer({ type: "user.message", data: { source: options.source, content: options.prompt } });
+      onNativeSend();
       return `actual-native-message-${sends.length}`;
     },
   };
@@ -117,7 +118,7 @@ async function fixture(run, {
     ...(portable ? { pluginRoot, bridgePluginRoot, expectedSessionId: native.sessionId } : {}),
   });
   try {
-    await run({ client, sends, methods, state, declaration, plugins, statusRead,
+    await run({ client, native: readonly, sends, methods, state, declaration, plugins, statusRead,
       observer: (...args) => observer(...args),
       connections: () => connections });
   } finally {
@@ -167,6 +168,23 @@ test("Bridge waits for the original seed observation without waiting for its tur
   }, { startupPrompt: "original seed" });
 });
 
+test("native identity changes during readiness permanently hold dispatch to the old conversation", async () => {
+  await fixture(async ({ client, native, sends, statusRead, observer, connections }) => {
+    const original = native.sessionId;
+    const operation = client.send({ prompt: "must not reach the old conversation" });
+    const refused = assert.rejects(operation, /no replay/);
+    await statusRead;
+    native.sessionId = "different-native";
+    observer({ type: "user.message", data: { content: "original seed" }, id: "startup" });
+    await refused;
+    assert.equal(sends.length, 0);
+    native.sessionId = original;
+    await assert.rejects(client.send({ prompt: "must remain held" }), /no replay/);
+    assert.equal(sends.length, 0);
+    assert.equal(connections(), 1);
+  }, { startupPrompt: "original seed" });
+});
+
 test("a startup observation deadline is a pre-dispatch refusal, not a permanent control reset", async (t) => {
   let now = Date.now();
   t.mock.method(Date, "now", () => now);
@@ -182,6 +200,36 @@ test("a startup observation deadline is a pre-dispatch refusal, not a permanent 
     assert.equal(sends.length, 1);
     assert.equal(connections(), 1);
   }, { startupPrompt: "original seed" });
+});
+
+test("startup timeout cannot clear an identity change or make the client reusable", async (t) => {
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  await fixture(async ({ client, native, sends, statusRead, observer }) => {
+    const original = native.sessionId;
+    const refused = assert.rejects(client.send({ prompt: "must not dispatch" }), /no replay/);
+    await statusRead;
+    native.sessionId = "different-native";
+    now += 5_001;
+    await refused;
+    native.sessionId = original;
+    observer({ type: "user.message", data: { content: "original seed" }, id: "startup" });
+    await assert.rejects(client.send({ prompt: "must remain held" }), /no replay/);
+    assert.equal(sends.length, 0);
+  }, { startupPrompt: "original seed" });
+});
+
+test("identity changes before a native receipt hold its unknown outcome without another send", async () => {
+  let caller;
+  await fixture(async ({ client, native, sends }) => {
+    caller = native;
+    const original = native.sessionId;
+    await assert.rejects(client.send({ prompt: "one original send" }), /no replay/);
+    assert.equal(sends.length, 1);
+    native.sessionId = original;
+    await assert.rejects(client.send({ prompt: "must not replay" }), /no replay/);
+    assert.equal(sends.length, 1);
+  }, { onNativeSend() { caller.sessionId = "different-native"; } });
 });
 
 test("legacy steady delivery is preserved, while unsupported readiness and wrong native identity refuse", async () => {

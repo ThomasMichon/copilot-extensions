@@ -1,0 +1,7 @@
+{
+  "schema": "agent-machines.preferences.repositories",
+  "version": 1,
+  "accepted_projection": 1,
+  "read_only": true,
+  "target_identity": "caller-native"
+}

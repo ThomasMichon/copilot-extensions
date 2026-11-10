@@ -24,6 +24,7 @@ plan the way a long or context-pressured session tends to today.
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|--------------|
 | Driving agent | Authors and drives all three phases | The effort's active worktree |
+| Full-title source implementer | Only #3581's independently qualifiable F1-F4/FV1-FV4 lane; no anchoring, slice/nudge, native-hosting or journal takeover | Managed source `patient-knob`, coordinated through #3581 and the linked finite source plan |
 
 ## Coordination
 
@@ -31,7 +32,12 @@ plan the way a long or context-pressured session tends to today.
   reviewable and shippable).
 - **Host (owns PRs):** Driving agent.
 - **Delegates:** none currently.
-- **Handoff:** n/a (single participant today).
+- **Handoff:** finite full-title work retains its existing #3581 claim and
+  source-worktree owner; broader participant responsibility does not transfer.
+- The full-title participant owns only its finite source PRs. All original
+  participants, phases, native hosting, claims and holds retain their scopes.
+  The parent remains Draft while the finite plan is reviewed; review of this
+  slice is not administrative intake or completion of the whole #3581 body.
 
 ## Context
 
@@ -197,6 +203,22 @@ fresh):
       parsing. Only pursued if Phases 1-3 reveal real friction from the
       hardcoded approach.
 
+### Finite full-title source lane from #3581
+
+This independently qualifiable lane comes from direct F1-F4/FV1-FV4 inherited
+from #4413, not from a new native-hosting or whole-parent prerequisite.
+The [bounded execution proposal](full-title-source.md) retains the full
+canonical-or-compatible-companion alternative and recommends a specific
+source design for review. Original Phases 1-4 remain unchanged and open.
+
+- [ ] Review the finite full-title source plan before functional edits.
+- [ ] Retain full new assertions/current storage/history with an explicit sane
+  bound, actual ordinary JSON/consumer fidelity and compatible short displays.
+- [ ] Preserve current/prior writer semantics through actual runtime contract
+  selection, with no silent truncating receiver or ambiguous-write replay.
+- [ ] Complete only direct F/FV source acceptance after consumer proof,
+  required review/CI and actual merge; keep #3581 and the parent open.
+
 ## Validation Plan
 
 - [ ] A worktree bound to an effort, re-titled across a simulated
@@ -241,6 +263,10 @@ fresh):
       implement.
 - [ ] An unbound worktree's behavior (titling, nudges) is unchanged by this
       effort.
+- [ ] The [finite full-title controls](full-title-source.md#validation-plan)
+      prove actual ordinary writer/storage/new-history/export, compact display,
+      supported contract skew and fresh-profile CLI behavior without native
+      hosting, real title/binding writes or parent-completion substitution.
 
 ## Proposal
 
@@ -248,6 +274,17 @@ _Pending — this effort's plan itself will be submitted for review per the
 repo's `pr-self-merge` profile before Phase 1 implementation begins._
 
 ## Journal
+
+### 2026-11-10 - Finite full-title source plan
+
+The ordinary assertion path still caps stored titles at 30 characters, so both
+current JSON and new history lose text before display. The publication-only
+normalizer does not close that gap. The bounded source plan selects existing
+title ownership and actual receiver-version negotiation rather than a second
+store or a lockstep-upgrade assumption. The current #6009 contributor changes
+anchor-list visibility in the same file, not the title-writer hunks, and remains
+untouched. This is a reviewed-plan candidate only: every new source/validation
+item is unchecked and no title, binding, native host or runtime was mutated.
 
 ### 2026-09-24 — Kickoff
 - Effort created from a facility planning session; captured operator request

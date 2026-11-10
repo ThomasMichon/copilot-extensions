@@ -34,17 +34,25 @@ jobs:
       matrix:
         include:
           - packet: admission-and-safe
-            select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell) and not (structured or write-name))"
+            select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell or batch-read-only) and not (structured or write-name or patch))"
           - packet: fallback
-            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or structured or write-name)"
+            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or batch-read-only or structured or write-name or patch)"
           - packet: structured
-            select: "registered_file_local_write_reuses_original_guard_facts and structured and not write-name"
+            select: "registered_file_local_write_reuses_original_guard_facts and structured and not (write-name or (patch and not structured-patch))"
           - packet: write-names
             select: "registered_file_local_write_reuses_original_guard_facts and write-name and not (real-policy or protected)"
           - packet: write-name-fallback
             select: "registered_file_local_write_reuses_original_guard_facts and write-name and protected"
           - packet: write-name-policy
             select: "registered_file_local_write_reuses_original_guard_facts and write-name and real-policy"
+          - packet: patch-positive
+            select: "registered_file_local_write_reuses_original_guard_facts and (patch-input or patch-patch or patch-command or patch-json or patch-freeform or patch-crlf or patch-headers or patch-union or patch-batch or patch-duplicates or patch-limit or patch-field-bound) and not (protected or overflow or nonobject)"
+          - packet: patch-protected
+            select: "registered_file_local_write_reuses_original_guard_facts and patch and protected"
+          - packet: patch-fallback
+            select: "registered_file_local_write_reuses_original_guard_facts and patch and (invalid or targetless or fragment or malformed or unknown-header or overflow or foreign or nested or anchor or oversized or nonobject)"
+          - packet: patch-policy
+            select: "registered_file_local_write_reuses_original_guard_facts and patch-real-policy"
     steps:
       - uses: actions/checkout@v4
         with:

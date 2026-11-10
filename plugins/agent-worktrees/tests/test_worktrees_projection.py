@@ -285,6 +285,32 @@ def test_filters_precede_exact_and_unique_suffix_selection(tmp_path):
         assert read("project", worktree_id="missing")["worktrees"] == []
 
 
+def test_semantic_archives_are_not_default_members_or_suffix_collisions(tmp_path):
+    path = tmp_path / "current.sqlite3"
+    store = projection.WorktreesProjection(path)
+    rows = [
+        _row("active-tail", status="active", checkout_present=True),
+        _row("archived-tail", status="archived", checkout_present=True),
+        _row("archived-gone", status="archived", checkout_present=False),
+        _row("active-gone", status="active", checkout_present=False),
+        _row("archived-unknown", status="archived"),
+    ]
+    store.publish("project", rows, observed_at=1)
+    try:
+        for read in (store.read, lambda project, **kw: projection.read_advisory(path, project, **kw)):
+            result = read("project", include_missing=False)
+            assert result["worktrees"] == rows[:1]
+            assert result["projection"]["selected_count"] == 1
+            assert result["projection"]["roster_count"] == len(rows)
+            assert read("project", include_missing=False, worktree_id="tail")["worktrees"] == rows[:1]
+            assert read("project", include_missing=False, status_filter="archived")["worktrees"] == []
+            assert read("project", status_filter="archived")["worktrees"] == rows[1:3] + rows[4:]
+            assert read("project", worktree_id="archived-tail")["worktrees"] == rows[1:2]
+            assert read("project")["worktrees"] == rows
+    finally:
+        store.close()
+
+
 def test_codename_is_case_sensitive_and_ambiguity_precedes_filters(tmp_path):
     path = tmp_path / "current.sqlite3"
     store = projection.WorktreesProjection(path)

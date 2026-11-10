@@ -120,9 +120,8 @@ def test_actual_hook_finishes_after_all_native_callers_are_lost(
                 from agent_procutil.linux_daemon_scope import caller_unit
 
                 if caller_unit() is not None:
-                    runner = shutil.which("systemd-run")
+                    runner = shutil.which("systemd-run", path=environment["PATH"])
                     assert runner, "native caller cleanup unit requires the real systemd-run"
-                    (area / "native-tools/systemd-run").symlink_to(runner)
                 for key in ("XDG_RUNTIME_DIR", "DBUS_SESSION_BUS_ADDRESS"):
                     if key in os.environ:
                         environment[key] = os.environ[key]

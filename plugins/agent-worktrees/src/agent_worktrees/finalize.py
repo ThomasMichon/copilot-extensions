@@ -67,6 +67,7 @@ from .finalize_support import authority_fenced_write as _authority_fenced_write
 from .finalize_support import dry_run_finalize_preview as _dry_run_finalize_preview
 from .finalize_support import rollback_finalizing_freeze as _rollback_finalizing_freeze
 from .finalize_ref import is_content_on_upstream as _is_content_on_upstream
+from .git_repository_environment import repository_identity_scope
 from .finalize_ref import resolve_finalize_ref as _resolve_finalize_ref
 from .finalize_ref import warn_if_tracked_branch_diverged as _warn_if_diverged
 from .pr_incremental_publish import push_refspec as _push_changes_pr_refspec
@@ -1168,6 +1169,7 @@ def _worktree_branch(
     return f"worktree/{worktree_id}"
 
 
+@repository_identity_scope()
 def validate_and_finalize(
     worktree_id: str,
     config: Config,
@@ -1334,12 +1336,21 @@ def validate_and_finalize(
     ):
         return False
 
-    # Fetch to get current upstream state
-    print(f"Fetching from {repo.remote}...")
-    git_ops.fetch(repo.remote, cwd=anchor)
-    if record and record.repo:
+    from . import finalize_local
+    try:
+        upstream, local_only = finalize_local.resolve_upstream(repo, pr_mode=pr_mode)
+    except ValueError as exc:
+        output.err(str(exc))
+        return False
+    if not local_only:
+        print(f"Fetching from {repo.remote}...")
+        git_ops.fetch(repo.remote, cwd=anchor)
+    if not local_only and record and record.repo:
         tracking.record_repo_fetch_confirmed(record.repo)
 
+    if local_only and (err := finalize_local.content_error(repo, worktree_path, branch, upstream)):
+        output.err(err)
+        return False
     preserve_tracked_branch = False
     renamed_branch_to_clean: str | None = None
     dirty_err = finalize_open_pr_gate.dirty_worktree_error(
@@ -1383,11 +1394,13 @@ def validate_and_finalize(
                 # forever (#7723).
                 renamed_branch_to_clean = current_ref
 
-        # Check if the worktree is unused (0 commits, clean tree)
-        ahead_commits = git_ops.get_commits_ahead(
-            effective_ref, upstream, cwd=worktree_path)
-        is_clean = git_ops.is_clean(cwd=worktree_path)
-        if len(ahead_commits) == 0 and is_clean:
+        # Local containment was proved in the registered anchor, not this checkout's store.
+        if local_only:
+            print(f"Verified: checkout content is contained in {upstream} in the registered anchor.")
+        elif (
+            len(git_ops.get_commits_ahead(effective_ref, upstream, cwd=worktree_path)) == 0
+            and git_ops.is_clean(cwd=worktree_path)
+        ):
             print("No commits and clean tree -- finalizing unused worktree.")
             # Fall through to cleanup
         elif not _is_content_on_upstream(effective_ref, upstream, cwd=worktree_path):
@@ -1568,7 +1581,8 @@ def validate_and_finalize(
         # Reconcile local branch pointers with origin now that the content is
         # verified upstream, so a merged-but-not-yet-cleaned worktree stops
         # rendering as diverged in the picker (#1106).
-        _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
+        if not local_only:
+            _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
         from .finalized_checkout import optional_snapshot
         finalized_identity = optional_snapshot(worktree_path) if Path(worktree_path).exists() else None
         removal_candidate = (
@@ -1590,6 +1604,10 @@ def validate_and_finalize(
                 output.err(err)
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
+        if local_only and (err := finalize_local.content_error(repo, worktree_path, branch, upstream)):
+            output.err(err)
+            _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
+            return False
         if not checkout_managed or inside_worktree or has_live_session or paired_pending or data_blocker or process_blocker:
             reason = (
                 "the checkout is owned by an external session host"
@@ -1606,7 +1624,7 @@ def validate_and_finalize(
             )
             output.ok(
                 f"Finalized: all content from {branch} is on "
-                f"{repo.remote}/{repo.default_branch}."
+                f"{upstream}."
             )
             if not checkout_managed:
                 output.info(
@@ -1652,8 +1670,9 @@ def validate_and_finalize(
             if reason := preservation_reason(worktree_path):
                 raise ValueError(reason)
 
-            print(f"Removing branch {branch}...")
-            if preserve_tracked_branch:
+            if local_only and branch == repo.default_branch:
+                output.info(f"Preserving declared local default branch {branch}.")
+            elif preserve_tracked_branch:
                 output.warn(
                     f"Preserving branch {branch} instead of deleting it -- "
                     f"it was flagged above as a stale tracked ref with "
@@ -1664,10 +1683,14 @@ def validate_and_finalize(
                     f"warning about it. Remove it manually once rescued or "
                     f"confirmed disposable."
                 )
-            elif not git_ops.delete_branch(branch, cwd=anchor):
-                output.warn(f"Could not delete branch {branch} (may already be gone).")
+            else:
+                print(f"Removing branch {branch}...")
+                if not git_ops.delete_branch(branch, cwd=anchor):
+                    output.warn(f"Could not delete branch {branch} (may already be gone).")
 
-            if renamed_branch_to_clean:
+            if renamed_branch_to_clean and not (
+                local_only and renamed_branch_to_clean == repo.default_branch
+            ):
                 print(f"Removing validated renamed branch {renamed_branch_to_clean}...")
                 if not git_ops.delete_branch(renamed_branch_to_clean, cwd=anchor):
                     output.warn(

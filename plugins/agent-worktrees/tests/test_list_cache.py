@@ -25,6 +25,72 @@ def _args(**kw):
     return types.SimpleNamespace(**base)
 
 
+@pytest.mark.parametrize("surface", ["plain", "fresh", "cached"])
+@pytest.mark.parametrize("include_all,status,expected", [
+    (False, "all", {"active-kept", "complete-kept", "finalized-kept", "orphaned-kept"}),
+    (True, "all", {
+        "active-kept", "active-gone", "archived-kept", "archived-gone",
+        "complete-kept", "finalized-kept", "orphaned-kept",
+    }),
+    (False, "active", {"active-kept"}),
+    (True, "archived", {"archived-kept", "archived-gone"}),
+])
+def test_semantic_archives_require_explicit_all_in_real_list_consumers(
+    tmp_path, monkeypatch, capfd, surface, include_all, status, expected,
+):
+    from agent_worktrees import list_cli, sessions, tracking
+    from agent_worktrees import delegate_cli
+
+    tracking_path = tmp_path / "tracking"
+    tracking_path.mkdir()
+    before = {}
+    for state, retained in [
+        ("active", True), ("active", False), ("archived", True), ("archived", False),
+        ("complete", True), ("finalized", True), ("orphaned", True),
+    ]:
+        wid = f"{state}-{'kept' if retained else 'gone'}"
+        checkout = tmp_path / wid
+        if retained:
+            checkout.mkdir()
+            (checkout / ".git").write_text("fixture checkout", encoding="utf-8")
+        rec = tracking.WorktreeRecord(
+            worktree_id=wid, branch=f"worktree/{wid}", worktree_path=str(checkout),
+            repo="example", machine="host", platform="windows", started_at="",
+            last_resumed_at="", resume_count=0, title=wid, status=state,
+            completed_at=None, sessions=[],
+        )
+        path = tracking_path / f"{wid}.yaml"
+        tracking.save_record(rec, path)
+        before[path] = path.read_bytes()
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tracking_path)
+    monkeypatch.setattr(cfg, "project_name", lambda: "example")
+    monkeypatch.setattr(cfg, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(list_cli.profile_assignment, "maintain", lambda: None)
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda *a: sessions.SessionContext())
+    monkeypatch.setattr(delegate_cli, "annotate_delegate_graph", lambda *a, **kw: None)
+    monkeypatch.setattr(lc, "note_demand", lambda *a, **kw: None)
+    args = _args(
+        json=surface != "plain", fresh=surface == "fresh", classify=False, mux_details=False,
+        all=include_all, tracking_status=status, include_other_platforms=True,
+    )
+    if surface == "cached":
+        rows = [
+            {"id": path.stem, "status": path.stem.split("-")[0]}
+            for path in before
+            if (include_all or path.stem.endswith("-kept"))
+            and (status == "all" or path.stem.startswith(status + "-"))
+        ]
+        lc.write(lc.cache_key(args, project="example", tracking_status=status), {"worktrees": rows})
+    assert list_cli.cmd_list(args) == 0
+    text = capfd.readouterr().out
+    if surface != "plain":
+        assert {row["id"] for row in json.loads(text)["worktrees"]} == expected
+    else:
+        assert {wid for wid in (path.stem for path in before) if wid in text} == expected
+    assert {path: path.read_bytes() for path in before} == before
+    assert tracking.load_record(tracking_path / "archived-kept.yaml").status == "archived"
+
+
 @pytest.mark.parametrize("surface", ["json", "stream", "status", "picker", "refresh"])
 def test_unavailable_mux_does_not_break_independent_display(
     monkeypatch, tmp_path, surface,

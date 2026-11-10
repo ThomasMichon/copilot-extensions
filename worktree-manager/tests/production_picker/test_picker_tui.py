@@ -9619,21 +9619,29 @@ def test_progress_action_stream_key_closes_and_cancels():
     assert "cancelled" in scr.debug
 
 
-def test_registered_pivot_progress_action_streams_into_modal(tmp_path, monkeypatch):
+@pytest.mark.parametrize("outcome", ["success", "failure", "cancel"])
+def test_registered_pivot_progress_action_streams_into_modal(tmp_path, monkeypatch, outcome):
     """D4 integration: a `progress: true` pivot action streams its NDJSON progress
     into the live ProgressScreen (action-stream kind), reaching done."""
     import json
     import sys
     from worktree_manager.production_picker.picker_tui import pivots as pivots_mod
+    from worktree_manager.production_picker.picker_tui.engine_live_screens import ProgressScreen
 
     script = tmp_path / "recycle.py"
+    release = tmp_path / "release"
     script.write_text(
-        "import sys, json\n"
+        "import sys, json, time\n"
+        "from pathlib import Path\n"
         "def emit(o):\n"
         "    sys.stdout.write(json.dumps(o)+'\\n'); sys.stdout.flush()\n"
+        "if sys.argv[1] == 'list':\n"
+        "    print('[]'); raise SystemExit(0)\n"
         "emit({'type':'progress','pct':10,'msg':'draining'})\n"
+        "while not Path(sys.argv[2]).exists(): time.sleep(0.01)\n"
         "emit({'type':'progress','pct':100,'msg':'gone'})\n"
-        "emit({'type':'done','message':'recycled'})\n",
+        "emit({'type':'error','message':'rejected'} if sys.argv[1] == 'failure'\n"
+        "     else {'type':'done','message':'recycled'})\n",
         encoding="utf-8",
     )
     d = tmp_path / "pivots"
@@ -9641,11 +9649,11 @@ def test_registered_pivot_progress_action_streams_into_modal(tmp_path, monkeypat
     manifest = {
         "label": "Pool",
         "after": "Worktrees",
-        "list": [sys.executable],
+        "list": [sys.executable, str(script), "list"],
         "entry": {"id": "id", "title": "display"},
         "actions": [
             {"key": "recycle", "label": "Recycle", "progress": True,
-             "run": [sys.executable, str(script)]},
+             "run": [sys.executable, str(script), outcome, str(release)]},
         ],
     }
     (d / "pool.json").write_text(json.dumps(manifest), encoding="utf-8")
@@ -9664,25 +9672,55 @@ def test_registered_pivot_progress_action_streams_into_modal(tmp_path, monkeypat
             reg = scr._reg_pivot()
             # A real runtime (not the _FakeRuntime) so run_action_stream exists.
             from worktree_manager.production_picker.picker_tui import tasks as tasks_mod
-            scr._pivot_runtimes[reg.name] = tasks_mod.RegisteredPivotRuntime(reg)
+            results, readers = [], []
 
-            # Run the progress action; it routes to the action-stream modal.
-            scr._run_task_action(reg, reg.actions[0], rows[0])
-            await pilot.pause()
-            assert scr.progress is not None
-            assert scr.progress.get("kind") == "action-stream"
+            class Runtime(tasks_mod.RegisteredPivotRuntime):
+                def run_action_stream(self, *args, **kwargs):
+                    readers.append(threading.current_thread())
+                    result = super().run_action_stream(*args, **kwargs)
+                    results.append(result)
+                    return result
 
-            for _ in range(200):
-                if scr.progress and scr.progress.get("done"):
-                    break
-                await pilot.pause()
-                await asyncio.sleep(0.05)
-            assert scr.progress["done"] is True
-            assert not scr.progress.get("error")
-            assert scr.progress.get("pct") == 100.0
-
-            scr._key_progress("enter")
-            assert scr.progress is None
+            rt = scr._pivot_runtimes[reg.name] = Runtime(reg)
+            try:
+                scr._run_task_action(reg, reg.actions[0], rows[0])
+                for _ in range(200):
+                    await pilot.pause()
+                    if scr.progress and scr.progress.get("msg") == "draining":
+                        break
+                    await asyncio.sleep(0.01)
+                assert isinstance(app.screen, ProgressScreen)
+                assert scr.progress["msg"] == "draining" and not scr.progress["done"]
+                assert "draining" in app.screen.query_one("#progress").content.renderable.plain
+                if outcome == "cancel":
+                    await pilot.press("escape")
+                    assert scr.progress is None and "cancelled" in scr.debug
+                else:
+                    release.touch()
+                for _ in range(200):
+                    await pilot.pause()
+                    if results and (outcome == "cancel" or scr.progress["done"]):
+                        break
+                    await asyncio.sleep(0.01)
+                assert results == [
+                    (True, "recycled") if outcome == "success"
+                    else (False, "rejected" if outcome == "failure" else "cancelled")
+                ]
+                if outcome != "cancel":
+                    assert scr.progress["pct"] == 100.0
+                    assert scr.progress["error"] == ("rejected" if outcome == "failure" else "")
+                    text = app.screen.query_one("#progress").content.renderable.plain
+                    assert ("rejected" if outcome == "failure" else "recycled") in text
+                    assert "Close" in text
+                    await pilot.press("enter")
+                    assert scr.progress is None
+            finally:
+                release.touch()
+                rt.close()
+                for reader in readers:
+                    reader.join(5)
+                    assert not reader.is_alive()
+                assert rt._procs == []
 
     asyncio.run(run())
 

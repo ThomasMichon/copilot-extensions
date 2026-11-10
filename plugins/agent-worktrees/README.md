@@ -229,6 +229,25 @@ The caller still owns source admission, child settlement and verification.
 This is not evidence that other installed or running update writers are
 capable or quiescent, and it does not select an authority.
 
+An operator may pass repeatable `--runtime-backend NAME=CAPABILITY` selections
+to a configured project controller. The driver records and forwards each
+selection unchanged; Worktrees does not infer a backend or persist profile
+settings. Invalid or duplicate names, standalone/phase requests, and a missing
+project controller are refused. `runtime_backend_intent` in the delegation
+capability reports support by the selected engine, not by the project
+controller. A supporting controller places a sibling
+`<script>.capabilities.json` beside the selected script:
+
+```json
+{"schema":"copilot-extensions.project-update-controller-capabilities","version":1,"capabilities":["project-runtime-backend-intent/v1"]}
+```
+
+Worktrees checks that declaration before queuing and again before launch.
+Missing or unsupported declarations refuse this option without launching the
+controller; ordinary updates remain unchanged. The option bypasses implicit
+Manager bootstrap and runtime provisioning, so an unavailable engine is
+reported rather than installed. Older engines reject the option.
+
 Runtime installers may execute from a delivered or prepared payload directory.
 The collected plan preserves the resolved invoking repository separately in
 `COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT` for native and prepared-source
@@ -417,6 +436,12 @@ trace phases. This protects these native entrypoints, not every installer or lau
 publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
 owns the policy schema and decision semantics.
 
+On Windows, an unprovisioned command honors an existing `payload-dir` selection
+and rechecks it under the provision lock. Without a saved selection, a
+payload-local command uses its adjacent `scripts\install.ps1` before installed-plugin
+discovery, so relocating an intact payload does not require a saved pointer.
+Global shims without an adjacent plugin manifest retain installed-plugin discovery.
+
 Cell installers also check before self-staging and runtime-input writes. The
 Python lifecycle repeats admission at entry, under the existing genesis/install
 locks, on candidate handover and in helper callbacks, including when invoked
@@ -489,6 +514,9 @@ stderr instead of hiding the cause behind a JSON parser error.
 The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
+
+The Windows first-use relay preserves empty stderr lines as whitespace, not
+exception type names, while retaining nonempty diagnostics and failure status.
 
 Structured installs capture the payload and canonical development libraries
 in one staging tree, preserving their relative dependency paths. Packaged
