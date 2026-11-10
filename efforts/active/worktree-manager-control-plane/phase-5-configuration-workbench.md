@@ -62,6 +62,9 @@ The [knowledge provider-preflight proposal](phase-5-knowledge-provider-preflight
 defines the shared non-mutating registration/provider/account and server-policy
 observation under #1419 KO3. Authentication acquisition, rejected-push recovery
 and protection writes remain separate.
+The [remote knowledge-checkout acquisition proposal](phase-5-knowledge-checkout-acquisition.md)
+composes the shared acquisition owner without reference registration or
+repository setup; local registration and binding remain separately confirmed.
 
 ## Plan
 
