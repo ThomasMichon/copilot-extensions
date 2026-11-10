@@ -153,7 +153,11 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 - [x] Prove a bounded versioned contribution through an actual service-owned
   export, selected-runtime declaration and normal machine report consumer (#11823).
 - [x] Compose the existing age-qualified local health reader alongside telemetry
-  and service namespaces in the normal report/chart, without a new writer or job.
+  and service namespaces in the normal report/chart, without a new writer or job (#11843).
+- [ ] Review the [bounded local collection/staging amendment](local-collection.md)
+  before implementing the combined hourly operation or native job.
+- [ ] Prove the complete explicit local collect -> stage -> reread/report flow,
+  keeping present health and prior-hour telemetry correctly attributed.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
@@ -1002,3 +1006,38 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   cyclic filesystem path with independent telemetry/external chart, the
   normal qualified local-listener flow and the actual Bridge-owner flow.
   The existing storage and chart-namespace protections remain intact.
+
+### 2026-11-09 - Read-only composition merged; bounded job remains
+- #11843 merged as `fa743aaa4896a7477aa9948c78423a5a97960a89`
+  after actual current-head Copilot approval with no active issues, a resolved
+  thread and green required CI. The updated head's units executed freshly with
+  coverage; the later metadata-triggered run also completed before merge.
+  An earlier merge attempt correctly refused its still-pending required gate.
+  No CI bypass was used, no parent closing reference was present, and #10873
+  remains open.
+- Re-read the parent Plan/Validation Plan: this completes read-only report
+  composition only. It does not collect all domains, stage a combined hourly
+  block, run independently on a schedule or qualify installed/carrier adoption.
+  The remaining preference, outage, platform and activation gates are unchanged.
+- Normal pull-forward auto-aborted on already-squashed overlapping commits.
+  Every owned file was verified present upstream; only an independent testing
+  section differed. A recovery reference was retained and the worktree advanced
+  over the verified already-merged range without discarding unmerged content.
+- Next: inspect the existing Agent Machines one-shot/native-job and health-slot
+  owners, then refine the bounded local collection/staging contract before any
+  new job or publication-envelope code. Reuse those owners and the new service
+  contributions, not another collector, registry or writer. Actual enrollment,
+  service changes and carrier publication remain separately authorized.
+
+### 2026-11-09 - Bounded local collection/staging amendment
+- Inspected the existing Windows Scheduled Task and Linux systemd-user
+  definitions, retained-runtime service collector, observation and slot owners.
+  Update jobs use update actions and unbounded execution settings; reuse their
+  platform patterns, not their execution/opt-in policy.
+- Proposed separate read, collect/preview and stage operations, a reader-first
+  versioned envelope through the existing transaction owner, explicit local
+  policy, bounded overlap/execution/storage and separately enrolled native jobs.
+  Present health and prior-complete-hour telemetry update different absolute
+  slots rather than backdating a check or claiming an early snapshot is a total.
+- The amendment is pending review. Runtime, native qualification, carrier and
+  activation remain unimplemented/unqualified by this design-only change.
