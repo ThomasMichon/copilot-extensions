@@ -184,6 +184,7 @@ def _preview_worker(project: str, name: str, expected_script: str) -> None:
 def invoke(
     project: str, name: str, operation: str, token: str = "", *, portable_resolution: dict | None = None,
     preference_selection: dict | None = None,
+    require_preference_freshness: bool = False,
 ) -> dict:
     if not binding_names_supported(project, name):
         raise ConfigurationError(
@@ -226,6 +227,10 @@ def invoke(
             or portable_resolution is not None and (
                 type(capabilities.get("portable_binding_precondition")) is not int
                 or capabilities["portable_binding_precondition"] != 1
+            )
+            or (require_preference_freshness or preference_selection is not None) and (
+                type(capabilities.get("binding_precondition_freshness")) is not int
+                or capabilities["binding_precondition_freshness"] != 1
             )
         ):
             raise ConfigurationError(

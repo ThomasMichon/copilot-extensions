@@ -117,13 +117,18 @@ def resolve(project: str, harness_id: str, knowledge_id: str) -> dict:
     }
 
 
-def preview(project: str, harness_id: str, knowledge_id: str) -> dict:
+def preview(
+    project: str, harness_id: str, knowledge_id: str, *, require_preference_freshness: bool = False,
+) -> dict:
     from .repos_knowledge_configuration import invoke
 
     resolution = resolve(project, harness_id, knowledge_id)
     if resolution["status"] != "suggested":
         return {**resolution, "token": None, "native_preview": None}
-    native = invoke(project, resolution["knowledge"]["repository"], "preview")
+    native = invoke(
+        project, resolution["knowledge"]["repository"], "preview",
+        **({"require_preference_freshness": True} if require_preference_freshness else {}),
+    )
     native_token = native.get("token")
     if not isinstance(native_token, str) or re.fullmatch(r"[a-f0-9]{64}", native_token) is None:
         raise ConfigurationError("binding-owner-unsupported", "The native binding preview needs a supported token.")

@@ -147,7 +147,7 @@ def preview(project: str, harness_id: str, knowledge_id: str) -> dict:
         or resolution["knowledge"]["repository_id"] != knowledge_id
     ):
         raise ConfigurationError("preview-conflict", "The selected accepted default changed; refresh the list.")
-    proposed = native.preview(project, harness_id, knowledge_id)
+    proposed = native.preview(project, harness_id, knowledge_id, require_preference_freshness=True)
     revalidate(project, current["selection"])
     token = hashlib.sha256(json.dumps({
         "native_token": proposed["token"], "selection": current["selection"],

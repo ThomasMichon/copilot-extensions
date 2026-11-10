@@ -179,11 +179,24 @@ def write_binding(
     committed: Callable[[], None] | None = None,
 ) -> None:
     with binding_lock(config.parent):
-        existing = config.read_text(encoding="utf-8") if config.exists() else ""
+        def revision() -> bytes | None:
+            try:
+                return config.read_bytes()
+            except FileNotFoundError:
+                return None
+
+        baseline = revision()
+        existing = baseline.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n") if baseline is not None else ""
+
+        def require_fresh() -> None:
+            if revision() != baseline:
+                raise RuntimeError("binding configuration changed; refresh and preview again")
+
         check_document_shape(existing)
         matching = check_existing_binding(existing, knowledge) if preserve else False
         if precondition is not None:
             precondition()
+        require_fresh()
         if matching:
             if committed is not None:
                 committed()
@@ -207,6 +220,7 @@ def write_binding(
                 stream.write(updated)
             if config.exists():
                 temporary.chmod(config.stat().st_mode & 0o777)
+            require_fresh()
             os.replace(temporary, config)
             if committed is not None:
                 committed()

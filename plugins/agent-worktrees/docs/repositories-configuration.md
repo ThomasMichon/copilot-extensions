@@ -261,6 +261,12 @@ runs after the potentially blocking Machines read, so an identity change during
 that read cannot commit a previous machine's preference. The machine-local source
 selection is also reread after that child returns. A changed snapshot, policy,
 override, scope, source or runtime requires a fresh preview.
+Accepted-default preview and apply additionally require the selected binding
+owner's integer `binding_precondition_freshness: 1` capability. Its preserving
+writer compares the captured configuration bytes after the callback and again
+before replacement, refusing unrelated external edits without losing them or
+reporting a pointer commit. Older owners leave this optional action unsupported;
+existing explicit portable-ID and by-name flows retain their capability contract.
 
 Existing effective local bindings win; unresolved explicit bindings require
 owner repair. Absent, withdrawn or locally suppressed defaults invoke no binder.

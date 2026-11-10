@@ -9,6 +9,8 @@ import time
 from collections.abc import Iterable
 from pathlib import Path
 
+import pytest
+
 
 SCRIPT = (
     Path(__file__).resolve().parents[1]
@@ -49,7 +51,7 @@ def test_configuration_rejects_registration_and_path_overrides_without_effects(t
     command = SCRIPT.with_name("bind_knowledge.py")
     for extra in (["--register"], ["--knowledge-path", str(tmp_path / "wrong-checkout")]):
         result = subprocess.run(
-            [sys.executable, str(command), "--configuration", "preview",
+            [sys.executable, str(command), "--configuration", "preview", "--json",
              "--harness", "sample", "--knowledge", "knowledge", *extra],
             cwd=tmp_path, capture_output=True, text=True, timeout=5,
             env={**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path),
@@ -57,6 +59,7 @@ def test_configuration_rejects_registration_and_path_overrides_without_effects(t
             creationflags=int(getattr(subprocess, "CREATE_NO_WINDOW", 0)) if os.name == "nt" else 0,
         )
         assert result.returncode == 1 and "Configuration only supports" in result.stderr
+        assert json.loads(result.stdout) == {"status": "refused", "pointer_committed": False}
         assert list(tmp_path.iterdir()) == []
 
 
@@ -135,5 +138,41 @@ def test_capability_probe_is_available_before_repository_selection_without_effec
         "preserves_registration_class": True, "control_plane_pair": True,
         "existing_binding_configuration": 2,
         "portable_binding_precondition": 1,
+        "binding_precondition_freshness": 1,
     }
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("original", [None, b"repo_name: harness\r\n", b"knowledge_repo: knowledge\n"])
+def test_callback_change_preserves_external_config_without_commit_receipt(tmp_path: Path, original) -> None:
+    config = tmp_path / "config.yaml"
+    if original is not None:
+        config.write_bytes(original)
+    changed = (original or b"") + b"headless: true\n"
+    receipts = []
+    with pytest.raises(RuntimeError, match="configuration changed"):
+        binding.write_binding(
+            config, "harness", "knowledge", preserve=True,
+            precondition=lambda: config.write_bytes(changed), committed=lambda: receipts.append(True),
+        )
+    assert config.read_bytes() == changed and not receipts
+    assert {path.name for path in tmp_path.iterdir()} == {"config.yaml", ".knowledge-binding.lock"}
+
+
+def test_change_during_render_is_rechecked_before_replace(tmp_path: Path, monkeypatch) -> None:
+    config = tmp_path / "config.yaml"
+    config.write_bytes(b"repo_name: harness\n")
+    original = binding.set_top_yaml_key
+
+    def render(text, key, value):
+        config.unlink()
+        return original(text, key, value)
+
+    monkeypatch.setattr(binding, "set_top_yaml_key", render)
+    receipts = []
+    with pytest.raises(RuntimeError, match="configuration changed"):
+        binding.write_binding(
+            config, "harness", "knowledge", preserve=True, committed=lambda: receipts.append(True),
+        )
+    assert not config.exists() and not receipts
+    assert {path.name for path in tmp_path.iterdir()} == {".knowledge-binding.lock"}

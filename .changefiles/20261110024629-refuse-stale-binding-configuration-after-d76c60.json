@@ -1,0 +1,9 @@
+{
+  "comment": "Refuse stale binding configuration after native preconditions and before pointer replacement, without a commit receipt.",
+  "changes": [
+    {
+      "plugin": "harness-knowledge",
+      "type": "patch"
+    }
+  ]
+}

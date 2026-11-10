@@ -22,7 +22,7 @@ from agent_worktrees.repos_configuration_sources import ConfigurationError
 
 @pytest.mark.timeout(75)
 @pytest.mark.parametrize(("change_machine", "accepted_default"), [
-    (False, None), (True, None), (False, "unchanged"), (False, "changed"),
+    (False, None), (True, None), (False, "unchanged"), (False, "changed"), (False, "config-changed"),
 ])
 def test_fresh_portable_mapping_uses_real_native_binding_transaction(
     tmp_path, monkeypatch, capsys, change_machine, accepted_default,
@@ -66,6 +66,14 @@ if change == 'changed':
         path.write_bytes(path.read_bytes() + b'\\n')
         original(project, selection)
     repos_knowledge_default.revalidate = revalidate
+elif change == 'config-changed':
+    original = repos_knowledge_default._read
+    def read(*args):
+        result = original(*args)
+        path = Path(state).parent / ('.' + arguments[0]) / 'config.yaml'
+        path.write_bytes(path.read_bytes() + b'headless: true\\n')
+        return result
+    repos_knowledge_default._read = read
 sys.argv = ['agent_worktrees.repos_knowledge_configuration', *arguments]
 runpy.run_module('agent_worktrees.repos_knowledge_configuration', run_name='__main__')
 """
@@ -203,9 +211,11 @@ runpy.run_module('agent_worktrees.repos_knowledge_configuration', run_name='__ma
                     "knowledge-apply", *args, "--preview-token", proposed["token"],
                 ])
                 result = json.loads(capsys.readouterr().out)
-                if accepted_default == "changed":
+                if accepted_default in {"changed", "config-changed"}:
                     assert code == 1 and result["code"] == "binding-owner-refused", (result, calls)
-                    assert config_path.read_bytes() == before_config
+                    assert config_path.read_bytes() == before_config + (
+                        b"headless: true\n" if accepted_default == "config-changed" else b""
+                    )
                     assert registry.read_bytes() == before_registry
                     assert not (tmp_path / "trees").exists()
                     return
