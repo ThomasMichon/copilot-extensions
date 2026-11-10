@@ -414,6 +414,77 @@ def test_remote_sync_keeps_its_existing_json_path(monkeypatch):
     assert calls == [["qualified-remote"]]
 
 
+@pytest.mark.parametrize(
+    "targets",
+    [
+        ("remote",),
+        ("remote", "local"),
+        ("local", "remote"),
+    ],
+)
+def test_remote_and_mixed_teardown_stop_queued_items_without_adopting_ssh(monkeypatch, targets):
+    from worktree_manager.production_picker.picker_tui import data_ssh
+
+    entered, release, cancelled = threading.Event(), threading.Event(), threading.Event()
+    calls = []
+
+    def remote(_argv):
+        calls.append("remote")
+        entered.set()
+        assert release.wait(5), "fixture remote gate not released"
+        return {"ok": True}
+
+    def local(_project, _id, **kwargs):
+        calls.append("local")
+        entered.set()
+        assert kwargs["cancelled"].wait(5), "owned local stop not received"
+        return {"ok": False, "reason": "owner closed", "outcome": "unknown"}
+
+    monkeypatch.setattr(data_ssh, "remote_op_argv", lambda *a, **k: ["qualified-remote"])
+    monkeypatch.setattr(maintenance, "_ssh_json", remote)
+    monkeypatch.setattr(engine_sync, "run", local)
+    rows = [
+        {"raw": {"id": target}, "selection_id": target, "machine": target, "env": "Win"}
+        for target in targets
+    ]
+    executor = maintenance.MaintenanceExecutor(
+        "sync",
+        maintenance.build_tasks(
+            "sync",
+            rows,
+            None,
+            project="demo",
+            local=("local", "Win"),
+            cancelled=cancelled,
+        ),
+        cancelled=cancelled,
+    )
+    executor.start()
+    join = executor._thread.join
+
+    def observe_join(timeout):
+        assert targets[0] == "local", "teardown waited on the unchanged remote SSH lifetime"
+        join(timeout)
+
+    monkeypatch.setattr(executor._thread, "join", observe_join)
+    try:
+        assert entered.wait(5)
+        executor.close()
+        assert calls == [targets[0]]
+        if targets[0] == "remote":
+            assert executor._thread.is_alive() and not executor.is_done()
+        else:
+            assert not executor._thread.is_alive() and executor.is_done()
+    finally:
+        release.set()
+        cancelled.set()
+        join(5)
+    assert not executor._thread.is_alive()
+    assert calls == [targets[0]]
+    for target in targets[1:]:
+        assert executor.state(target) == maintenance.PENDING and executor.result(target) is None
+
+
 def test_output_limit_is_a_visible_unknown_outcome_without_replay(monkeypatch):
     _provider(monkeypatch, "print('x'*2000,flush=True)\ntime.sleep(10)")
     monkeypatch.setattr(engine_sync, "_MAX_FRAME", 256)

@@ -138,7 +138,7 @@ Communication silence is observed separately from the finite execution budget.
 Escape preserves an active Sync rather than claiming cancellation or rollback.
 Unconfirmed cleanup retains exact process custody and stops subsequent items.
 
-Source qualification covers 59 distinct Manager controls, including real parser,
+Source qualification covers 74 distinct Manager controls, including real parser,
 private Git pair and Textual consumer cases for a no-op and blocked partial pair.
 Source review/CI, complete validation disposition, native/installed and release
 qualification remain open. No host installation or runtime Sync is claimed.
@@ -178,6 +178,22 @@ qualification remain open. No host installation or runtime Sync is claimed.
 
 ### 2026-11-10 - S2 review refinements
 
+- The second genuine review identified the existing local-source UI test
+  double's missing cancellation argument and an unintended 15-second teardown
+  wait on the unchanged remote SSH adapter. The test double now accepts the
+  lifetime argument and explicitly keeps its JSON-only fixture, preserving
+  stale-configuration and published-local-identity assertions.
+- Generated tasks identify local Sync ownership. Teardown stops queued work,
+  joins an active owned local Sync, and leaves an active remote SSH command on
+  its existing bounded JSON lifetime without waiting, cancellation or a false
+  settlement claim. Remote-only and both mixed-order selections have focused
+  controls; no SSH command or new remote owner is introduced.
+- All 45 affected controls pass, including the twelve existing stale/invalidated
+  local-source identity cases, three remote-only/mixed-order teardown controls,
+  four real application exits and both real private-pair flows. The 29 unchanged
+  passing controls retain their preceding qualification, giving 74 distinct
+  outcomes without claiming a monolithic rerun. Labels for Windows/WSL/Linux
+  in the identity fixtures are synthetic on the actual Windows x64 test host.
 - #11914's first exact-head review identified two real blockers: application
   exit could leave the one-hour operation without a visible screen, and
   retirement failure could discard an already received terminal result.

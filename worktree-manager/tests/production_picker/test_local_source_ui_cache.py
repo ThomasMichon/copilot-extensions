@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -40,7 +41,7 @@ def test_local_ui_actions_retain_published_identity_without_config_resolution(
     dialogs, executions, requests = [], [], []
 
     class Executor:
-        def __init__(self, op: str, tasks: list) -> None:
+        def __init__(self, op: str, tasks: list, *, cancelled: Event | None = None) -> None:
             executions.append((op, tasks))
 
         def start(self) -> None:
@@ -51,6 +52,7 @@ def test_local_ui_actions_retain_published_identity_without_config_resolution(
         maintenance.engine_client, "run_json",
         lambda project, args, **kwargs: requests.append((project, args)) or {"ok": True},
     )
+    monkeypatch.setattr(maintenance.engine_client, "engine_base_command", lambda: None)
     monkeypatch.setattr(
         data_ssh, "remote_op_argv", lambda *args, **kwargs: pytest.fail("local UI action used SSH"),
     )

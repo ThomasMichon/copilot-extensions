@@ -81,6 +81,10 @@ the application-owned lifetime; baseline syntax and its 120-second execution
 bound remain unchanged. Interrupted execution is unknown, not rolled back or
 safe to replay. If retirement fails after a terminal result, complete member/
 plugin results and bounded stderr remain attached to the retained cleanup error.
+An in-flight remote SSH Sync retains its prior bounded JSON lifetime: teardown
+stops later queued items but neither waits for that remote operation nor claims
+it cancelled or settled. Mixed selections join only the currently owned local
+Sync; remote streaming and remote-process ownership are unchanged.
 
 ## Picker notices and diagnostics
 

@@ -254,6 +254,7 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
                 "reason": f"source does not support {op}: {source_id or f'{machine} {env}'}",
             }
         return _ssh_json(argv, preserve_failure_detail=True) if op == "finalize" else _ssh_json(argv)
+    _run._owned_local_sync = op == "sync" and is_local
     return _run
 
 
@@ -276,6 +277,7 @@ class MaintenanceExecutor:
         self._done = False
         self._cancelled = cancelled if cancelled is not None else threading.Event()
         self._thread = None
+        self._active_owned_sync = None
 
     def start(self):
         self._thread = threading.Thread(target=self._run, name="maint-exec", daemon=True)
@@ -285,8 +287,11 @@ class MaintenanceExecutor:
         self._cancelled.set()
 
     def close(self):
-        """Stop queued work and settle the current owned Sync before UI teardown."""
+        """Stop queued work; settle local Sync without adopting a remote lifetime."""
         self.request_stop()
+        with self._lock:
+            if self._active_owned_sync is False:
+                return
         if self._thread is not None:
             self._thread.join(15)
             if self._thread.is_alive():
@@ -304,6 +309,7 @@ class MaintenanceExecutor:
                 if self._cancelled.is_set():
                     break
                 self._state[key] = RUNNING
+                self._active_owned_sync = bool(getattr(fn, "_owned_local_sync", False))
             try:
                 res = fn()
                 st = DONE if _result_ok(self.op, res) else FAILED
@@ -320,6 +326,7 @@ class MaintenanceExecutor:
             with self._lock:
                 self._result[key] = res
                 self._state[key] = st
+                self._active_owned_sync = None
             if self.cleanup_pending():
                 break
         with self._lock:
