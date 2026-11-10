@@ -26,7 +26,7 @@ def add_parsers(sub) -> None:
 def _resolve_environment(config: cfg.Config) -> str:
     """Build the environment key from config (e.g. ``myhost-wsl``)."""
     plat = config.platform
-    if plat in ("wsl", "windows"):
+    if plat in ("wsl", "windows") and not config.machine.endswith(f"-{plat}"):
         return f"{config.machine}-{plat}"
     return config.machine
 
