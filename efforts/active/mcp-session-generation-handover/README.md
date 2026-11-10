@@ -318,10 +318,20 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
   operator-selected limitations, not additional incoming gates.
 - [ ] Retain a client-owned, installation-independent stdio lifetime boundary;
   replacement payloads and shared runtime slots must not invalidate it.
-  Next: qualify survival across caller-owned cleanup Jobs and exact owner-death
-  settlement before migrating eligible ordinary callers. The internal explicit
-  owner path and hosted packet are prepared; review, controller promotion and
-  native execution are not yet qualification.
+  The internal explicit-owner path and hosted packet are now qualified on
+  disposable hosted Windows. Next, supply originating-owner acquisition for
+  eligible ordinary callers without weakening native lifetime admission.
+  - [x] **Explicit-owner source merged:** #11935 landed at
+    `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
+    approval, required CI and resolution of addressed findings. The source
+    controls do not establish native caller-Job survival or installed adoption.
+  - [x] **Released controller and native lifetime packet:** Main
+    `6d99b59489c8c4a667e3713fab2a5f0c1345830c` advertises the reviewed packet.
+    [Hosted run 42858317478](https://github.com/ThomasMichon/copilot-extensions/actions/runs/42858317478)
+    qualifies source `c0eab0d952a37607f6cf7030ac1a77f377f98a74`: actual caller-Job
+    closure, conduit survival, restrictive-outer refusal, interposed-parent exit
+    and exact owner-death settlement pass. This is not ordinary or installed
+    caller adoption.
 - [ ] Reattach adopted wrappers to the incoming shared runtime while preserving
   initialization, upstream session identity, notifications, ordering and
   accepted/in-flight/unknown call outcomes without blind mutation replay.
@@ -416,6 +426,14 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;
   an interposed parent exit does not destroy a still-owned live session.
+  - [x] **Internal owner source controls:** 47 Windows tests with two skips and
+    48 Linux tests with one hosted-native skip pass with verified cleanup,
+    including actual owner-death exit while another process retains stdin.
+  - [x] **Hosted explicit-owner lifetime:** the exact native case passed without
+    skips in 71.816 seconds, within an 89.078-second verified packet. Original
+    pipes/upstream survive caller-Job loss and physical backend replacement;
+    owner death settles the conduit/upstream with stdin still held open.
+    Ordinary caller adoption and installed-consumer acceptance remain open.
 - [ ] Actual old central retirement and client-preserver survival are verified
   independently. No process-name sweep, whole-root reset or manufactured receipt.
 - [ ] Held clients survive installer cutover beyond its grace, including the
