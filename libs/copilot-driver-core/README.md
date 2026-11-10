@@ -200,13 +200,19 @@ Once expired/revoked, renewal is refused until exact owned stop and old
 observation-stream drain finish.
 
 Expiry first freezes adapter sends and captures pending/sending/native-input
-state, then terminates and settles the retained Windows Job or Linux private
-process group, including ordinary inherited descendants. It does not kill a
-shared mux, remove Job limits or resolve a process by name. Other platforms
-are explicitly unsupported. Linux retains the caller's pane descriptors in
-a private session; productive terminal behavior still needs native qualification.
-Processes that deliberately escape a POSIX group are outside that containment
-contract; no unqualified host-wide descendant cleanup is attempted.
+state, then terminates and settles the retained Windows Job, including ordinary
+inherited descendants. It does not kill a shared mux, remove Job limits or
+resolve a process by name. The opt-in auth-wait launch refuses POSIX before
+opening its endpoint: a private process group alone cannot enforce owner death
+or source expiry after coordinator failure. Independent POSIX owner-death custody
+and native qualification are still required; no guardian is inferred from group
+creation. Ordinary `auth_wait=None` execution remains unchanged.
+
+The admitted SDK output is a strict auth-state record or a complete JSON-RPC
+response/notification envelope. Complete but invalid envelopes and non-finite
+wire JSON hold recovery just like truncated observation. Expiry-task failure
+remains monitored after SDK loss and reaches exact owned cleanup. A Windows
+auth resume reuses the coordinator Job already armed by that same launch.
 
 A confirmed idle, controlled stop enters `auth_wait`; a fresh source grant
 then creates a new receiving incarnation and cold-starts `--resume` with the

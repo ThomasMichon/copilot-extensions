@@ -10,6 +10,39 @@ from typing import Callable, Protocol
 from agent_procutil.daemon_instances import admit_daemon_instance
 
 
+def _invalid_constant(_value: str) -> None:
+    raise ValueError("Non-finite native observation")
+
+
+def _rpc_observation(value: object) -> bool:
+    if not isinstance(value, dict) or value.get("jsonrpc") != "2.0":
+        return False
+    if "method" in value:
+        return (
+            set(value) == {"jsonrpc", "method", "params"}
+            and isinstance(value["method"], str) and bool(value["method"])
+            and isinstance(value["params"], dict)
+        )
+    kind = "result" if "result" in value else "error"
+    if set(value) != {"jsonrpc", "id", kind}:
+        return False
+    identity = value["id"]
+    if not (
+        isinstance(identity, str)
+        or type(identity) is int and abs(identity) <= 2**53 - 1
+        or identity is None and kind == "error"
+    ):
+        return False
+    if kind == "error":
+        error = value["error"]
+        return (
+            isinstance(error, dict)
+            and set(error) in ({"code", "message"}, {"code", "message", "data"})
+            and type(error["code"]) is int and isinstance(error["message"], str)
+        )
+    return True
+
+
 class NativeOwner(Protocol):
     """The existing launch owner retains exact native process/mux custody."""
 
@@ -206,7 +239,7 @@ class HeadedBackend:
                 if self._auth_wait is not None:
                     if not line.endswith(b"\n"):
                         raise ValueError("Incomplete native observation record")
-                    value = json.loads(line)
+                    value = json.loads(line, parse_constant=_invalid_constant)
                     if isinstance(value, dict) and value.get("contract") == "copilot-driver.headed-auth-state":
                         snapshot = value.get("state")
                         if (
@@ -228,6 +261,8 @@ class HeadedBackend:
                             if any(snapshot[key] for key in ("pending", "sending", "outstanding")):
                                 self._auth_wait.preserve_hold("native-operation-unsettled")
                         continue
+                    if not _rpc_observation(value):
+                        raise ValueError("Invalid native observation envelope")
                 self.stdout.feed_data(line)
             clean_eof = True
         except (OSError, ValueError, asyncio.TimeoutError, AssertionError, RuntimeError):

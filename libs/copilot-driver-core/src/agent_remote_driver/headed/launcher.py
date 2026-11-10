@@ -175,8 +175,10 @@ async def run_headed(
     )
     if auth_wait is None:
         return await _run_headed_once(child_argv, **arguments)
+    from .auth_child import require_auth_custody
     from .auth_wait import AuthWaitReceiver
 
+    require_auth_custody()
     _native_request(child_argv, session_id)
     resumed_argv = _seedless_resume(child_argv, session_id)
     receiver = AuthWaitReceiver(session_id, auth_wait)
@@ -292,7 +294,9 @@ async def _run_headed_once(
             startup.check(child_argv, cwd, session_id, {**os.environ, **(env or {})})
         if before_exec is not None:
             before_exec()
-        if os.name == "nt" and not contained_test_mode():
+        if os.name == "nt" and not contained_test_mode() and not (
+            auth_receiver is not None and auth_resume
+        ):
             from ..winjob import setup_kill_on_close_job
 
             if not setup_kill_on_close_job(allow_breakaway=False):
@@ -367,6 +371,12 @@ async def _run_headed_once(
             auth_receiver is None or not auth_receiver.stopped_for_auth
         ):
             publish("control_unavailable")
+        if expiry_task is not None and not native_exit.done():
+            done, _ = await asyncio.wait(
+                (native_exit, expiry_task), return_when=asyncio.FIRST_COMPLETED,
+            )
+            if expiry_task in done:
+                await expiry_task
         result = await native_exit
         if auth_receiver is not None and auth_receiver.stopped_for_auth:
             await expiry_task

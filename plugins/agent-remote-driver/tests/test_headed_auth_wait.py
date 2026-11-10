@@ -6,6 +6,7 @@ import os
 import sys
 import threading
 import time
+from types import SimpleNamespace
 
 import pytest
 
@@ -80,6 +81,27 @@ async def test_expired_lease_requires_stop_then_new_revision_and_incarnation():
 def test_missing_or_unbounded_source_authorization_refused(change):
     with pytest.raises(ValueError):
         AuthWaitReceiver("durable-session", configuration(**change))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("platform", ["posix", "other"])
+async def test_unsupported_owner_death_custody_refuses_before_receiving_endpoint(
+    tmp_path, monkeypatch, platform,
+):
+    from agent_remote_driver.headed import auth_child
+
+    monkeypatch.setattr(auth_child, "os", SimpleNamespace(name=platform))
+
+    async def forbidden_server(_receiver):
+        raise AssertionError("Unsupported custody must refuse before opening the endpoint")
+
+    monkeypatch.setattr(AuthWaitReceiver, "serve", forbidden_server)
+    with pytest.raises(RuntimeError, match="owner-death custody"):
+        await launcher.run_headed(
+            ["native", "--session-id", "durable-session"], session_id="durable-session",
+            attempt_directory=tmp_path / "attempt", state_file=tmp_path / "state.json",
+            cwd=str(tmp_path), auth_wait=configuration(),
+        )
 
 
 @pytest.mark.asyncio
@@ -200,6 +222,10 @@ if os.environ.get("AUTH_FIXTURE_NATIVE_INPUT"):
         "state": {"controlled": False, "closed": False, "pending": False,
                   "sending": False, "outstanding": False, "waiting": False},
     }) + "\n").encode())
+if os.environ.get("AUTH_FIXTURE_DROP_AFTER_BIND"):
+    peer.close()
+    time.sleep(60)
+    sys.exit(0)
 stream = peer.makefile("rb")
 for line in stream:
     request = json.loads(line)
@@ -233,8 +259,8 @@ async def eventually(read, predicate):
 async def test_native_input_hold_preserves_native_lifetime_until_actual_source_revocation(
     tmp_path, monkeypatch,
 ):
-    if os.name != "nt" and not sys.platform.startswith("linux"):
-        pytest.skip("Receiver explicitly supports Windows Jobs and Linux process groups")
+    if os.name != "nt":
+        pytest.skip("POSIX auth wait refuses until independent owner-death custody is supported")
     from agent_remote_driver.session_host.osutil import pid_alive
 
     monkeypatch.setattr(launcher, "_require_receiving_policy", lambda *_args: None)
@@ -283,8 +309,8 @@ async def test_native_input_hold_preserves_native_lifetime_until_actual_source_r
 
 @pytest.mark.asyncio
 async def test_cancelled_retirement_waiter_retains_one_exact_cleanup(tmp_path, monkeypatch):
-    if os.name != "nt" and not sys.platform.startswith("linux"):
-        pytest.skip("Receiver explicitly supports Windows Jobs and Linux process groups")
+    if os.name != "nt":
+        pytest.skip("POSIX auth wait refuses until independent owner-death custody is supported")
     owner = AuthPaneChild()
     owner.launch([PYTHON, "-c", "import time;time.sleep(60)"], **no_window_kwargs())
     started, release = threading.Event(), threading.Event()
@@ -316,13 +342,25 @@ async def test_cancelled_retirement_waiter_retains_one_exact_cleanup(tmp_path, m
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("pending", [False, True])
-async def test_real_native_scope_stops_preserves_and_resumes_without_seed(tmp_path, monkeypatch, pending):
-    if os.name != "nt" and not sys.platform.startswith("linux"):
-        pytest.skip("Receiver explicitly supports Windows Jobs and Linux process groups")
+@pytest.mark.parametrize("pending,check_job_setup", [(False, False), (True, False), (False, True)])
+async def test_real_native_scope_stops_preserves_and_resumes_without_seed(
+    tmp_path, monkeypatch, pending, check_job_setup,
+):
+    if os.name != "nt":
+        pytest.skip("POSIX auth wait refuses until independent owner-death custody is supported")
     from agent_remote_driver.session_host.osutil import pid_alive
 
     monkeypatch.setattr(launcher, "_require_receiving_policy", lambda *_args: None)
+    job_setups = []
+    if check_job_setup:
+        from agent_remote_driver import winjob
+
+        def setup_job(*, allow_breakaway):
+            job_setups.append(allow_breakaway)
+            return len(job_setups) == 1
+
+        monkeypatch.setattr(launcher, "contained_test_mode", lambda: False)
+        monkeypatch.setattr(winjob, "setup_kill_on_close_job", setup_job)
     state_file, history_file = tmp_path / "host.json", tmp_path / "history.jsonl"
     unrelated = AuthPaneChild()
     unrelated.launch(
@@ -379,6 +417,8 @@ async def test_real_native_scope_stops_preserves_and_resumes_without_seed(tmp_pa
             assert histories[1]["argv"][resume_index + 1] == "durable-session"
             assert not (await request(endpoint, "revoke"))["ok"]
             assert unrelated.returncode is None
+            if check_job_setup:
+                assert job_setups == [False]
     finally:
         task.cancel()
         done, _ = await asyncio.wait((task,), timeout=5)
@@ -387,3 +427,41 @@ async def test_real_native_scope_stops_preserves_and_resumes_without_seed(tmp_pa
         await asyncio.gather(task, return_exceptions=True)
         await unrelated.terminate()
         assert done, "Receiver cancellation did not settle on its first request"
+
+
+@pytest.mark.asyncio
+async def test_sdk_loss_still_monitors_expiry_publication_failure(tmp_path, monkeypatch):
+    if os.name != "nt":
+        pytest.skip("POSIX auth wait refuses until independent owner-death custody is supported")
+    from agent_remote_driver.session_host.osutil import pid_alive
+
+    monkeypatch.setattr(launcher, "_require_receiving_policy", lambda *_args: None)
+    publish = launcher._write_host_state
+
+    def failed_expiry_publication(path, state):
+        if state.get("state") == "auth_stopping":
+            raise OSError("fixture-state-publication-failure")
+        publish(path, state)
+
+    monkeypatch.setattr(launcher, "_write_host_state", failed_expiry_publication)
+    state_file, history_file = tmp_path / "state.json", tmp_path / "history.jsonl"
+    task = asyncio.create_task(launcher.run_headed(
+        [PYTHON, "-c", _NATIVE, "--session-id", "durable-session"],
+        session_id="durable-session", attempt_directory=tmp_path / "attempt",
+        state_file=state_file, cwd=str(tmp_path), auth_wait=configuration(budget_seconds=3),
+        env={"AUTH_FIXTURE_HISTORY": str(history_file), "AUTH_FIXTURE_DROP_AFTER_BIND": "1"},
+    ))
+    read_state = lambda: json.loads(state_file.read_text(encoding="utf-8"))
+    read_history = lambda: [json.loads(line) for line in history_file.read_text().splitlines()]
+    try:
+        child = (await eventually(read_history, lambda value: len(value) == 1))[0]
+        await eventually(read_state, lambda value: value.get("state") == "control_unavailable")
+        assert pid_alive(child["pid"])
+        await asyncio.wait_for(
+            eventually(read_state, lambda value: value.get("state") == "auth_held"), 5,
+        )
+        assert not pid_alive(child["pid"]) and not pid_alive(child["descendant"])
+        assert not task.done() and len(read_history()) == 1
+    finally:
+        task.cancel()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 5)

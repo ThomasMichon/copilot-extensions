@@ -208,6 +208,13 @@ async def test_idle_freeze_then_sdk_loss_before_owned_retirement_cannot_resume()
     (b'{"jsonrpc":', False),
     (b'{"jsonrpc":"2.0"}', False),
     (b'{"jsonrpc":"2.0","id":8,"result":{}}\n', True),
+    (b'[]\n', False),
+    (b'{"jsonrpc":"2.0"}\n', False),
+    (b'{"jsonrpc":"2.0","id":true,"result":{}}\n', False),
+    (b'{"jsonrpc":"2.0","id":1,"result":{},"error":{}}\n', False),
+    (b'{"jsonrpc":"2.0","method":"session/update","params":[]}\n', False),
+    (b'{"jsonrpc":"2.0","id":1,"error":{"code":"bad","message":"text"}}\n', False),
+    (b'{"jsonrpc":"2.0","id":9,"result":NaN}\n', False),
 ])
 async def test_abnormal_sdk_drain_cannot_reuse_an_old_idle_snapshot(record, forward_failure):
     import time
@@ -231,14 +238,18 @@ async def test_abnormal_sdk_drain_cannot_reuse_an_old_idle_snapshot(record, forw
 
 
 @pytest.mark.asyncio
-async def test_owned_exit_drains_queued_sdk_reply_before_broker_eof():
+@pytest.mark.parametrize("reply", [
+    b'{"jsonrpc":"2.0","id":9,"result":{"late":true}}\n',
+    b'{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"native-fixture"}}\n',
+    b'{"jsonrpc":"2.0","id":null,"error":{"code":-32700,"message":"parse error"}}\n',
+])
+async def test_owned_exit_drains_queued_sdk_reply_before_broker_eof(reply):
     async with _auth_peer() as (owner, receiver, backend, reader, writer):
         await _freeze_idle(receiver, backend, reader, writer)
         backend.auth_retiring = True
         await owner.terminate()
         await asyncio.sleep(.01)
         assert not backend.stdout.at_eof()
-        reply = b'{"jsonrpc":"2.0","id":9,"result":{"late":true}}\n'
         writer.write(reply)
         await writer.drain()
         writer.close()
