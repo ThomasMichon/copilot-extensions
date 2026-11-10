@@ -163,9 +163,18 @@ def test_public_embody(tmp_path, monkeypatch):
     _qualify_native_application(tmp_path, monkeypatch, broker="embody")
 
 
+@pytest.mark.timeout(900)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
+    reason="Explicitly select the installed public Windows Worktrees TTY lane",
+)
+def test_public_copilot(tmp_path, monkeypatch):
+    _qualify_native_application(tmp_path, monkeypatch, broker="copilot")
+
+
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
     started = time.monotonic()
-    construction_budget = 420 if broker == "embody" else 300
+    construction_budget = 420 if broker in {"embody", "copilot"} else 300
     deadline = started + construction_budget
     print("Application construction starting", flush=True)
     sys.path.insert(0, str(ROOT / "tools"))
@@ -302,14 +311,14 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
         ], cwd=caller, env=environment, deadline=deadline)
     assert json.loads(described.stdout)["contract"] == "agent-worktrees.native-seed"
     print(f"Application packaged admission checked: {time.monotonic() - started:.2f}s", flush=True)
-    if broker == "embody":
+    if broker in {"embody", "copilot"}:
         assert time.monotonic() < deadline, "Public caller preparation exceeded 420 seconds"
         from test_manager_application_launch import _qualify_manager_application
 
         manager = tmp_path / "manager"
         manager.mkdir()
         _qualify_manager_application(
-            manager, monkeypatch, "embody", worktrees_python=python,
+            manager, monkeypatch, broker, worktrees_python=python,
             worktrees_root=root, worktrees_environment=environment,
         )
     elif broker:

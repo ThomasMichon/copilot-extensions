@@ -93,12 +93,13 @@ def _qualify_native_worktrees(
     assert executable and Path(executable).is_absolute() and Path(executable).is_file()
     assert binary and shell, "Select existing native Copilot, PSMux and PowerShell"
     installed = worktrees_python is not None
-    public_embody = control == "embody"
+    public_caller = control in {"embody", "copilot"}
+    public_tty = control == "copilot"
     if installed:
-        assert control in {"broker", "embody"} and worktrees_root is not None
+        assert control in {"broker", "embody", "copilot"} and worktrees_root is not None
         assert Path(worktrees_python).is_file()
         assert worktrees_environment is not None
-    assert not public_embody or installed
+    assert not public_caller or installed
     owner_python = str(worktrees_python) if installed else physical_executable(
         getattr(sys, "_base_executable", sys.executable),
     )
@@ -106,7 +107,7 @@ def _qualify_native_worktrees(
     source_root = Path(__file__).resolve().parents[4]
     site_packages = None if installed else sysconfig.get_paths()["purelib"]
     prefix = [str(worktrees_python) if installed else sys.executable, "-I", "-B", "-X", "utf8"]
-    home = tmp_path / (".copilot" if public_embody else "copilot-home")
+    home = tmp_path / (".copilot" if public_caller else "copilot-home")
     checkout = tmp_path / "checkout"
     home.mkdir()
     checkout.mkdir()
@@ -161,8 +162,8 @@ def _qualify_native_worktrees(
         COPILOT_OFFLINE="true", COPILOT_PROVIDER_TYPE="openai",
         COPILOT_PROVIDER_BASE_URL=f"http://127.0.0.1:{provider.server_port}",
         COPILOT_PROVIDER_MODEL_ID="gpt-4.1", COPILOT_MODEL="gpt-4.1", USE_TGREP="false",
-        HOME=str(home.parent if public_embody else home),
-        USERPROFILE=str(home.parent if public_embody else home),
+        HOME=str(home.parent if public_caller else home),
+        USERPROFILE=str(home.parent if public_caller else home),
         PSMUX_DATA_DIR=str(mux_data), PSMUX_CONFIG_FILE=os.devnull,
         PSMUX_NO_WARM="1", PSMUX_SERVER_DEBUG="1",
         WORKTREE_PANE_MIN_RUNTIME="0", WORKTREE_PANE_WAIT_TIMEOUT="0",
@@ -204,6 +205,7 @@ class Mux {
             "list-sessions", "has-session", "display-message", "list-panes", "list-windows"
         };
         var writes = new[] { "new-session", "set-option", "source-file" };
+        var attach = args.SequenceEqual(new[] { "attach-session", "-t", MANAGER_TARGET });
         if (writes.Contains(args[0])) {
             var selector = args[0] == "new-session" ? "-s" : "-t";
             var index = Array.IndexOf(args, selector);
@@ -213,7 +215,7 @@ class Mux {
                 return 2;
             File.AppendAllText(COMMAND_LOG,
                               args[0] + Environment.NewLine);
-        } else if (!reads.Contains(args[0]) &&
+        } else if (!reads.Contains(args[0]) && !attach &&
                    !(args.Length == 1 && args[0] == "--version")) {
             return 2;
         }
@@ -222,9 +224,14 @@ class Mux {
             Arguments = String.Join(" ", new[] {
                 "-L", File.ReadAllText(NAMESPACE_FILE)
             }.Concat(args).Select(Quote)),
-            UseShellExecute = false, CreateNoWindow = true,
-            RedirectStandardOutput = true, RedirectStandardError = true
+            // headless-guard: allow the real attach client to inherit the private fixture ConPTY
+            UseShellExecute = false, CreateNoWindow = !attach,
+            RedirectStandardOutput = !attach, RedirectStandardError = !attach
         })) {
+            if (attach) {
+                child.WaitForExit();
+                return child.ExitCode;
+            }
             var stdout = child.StandardOutput.ReadToEndAsync();
             var stderr = child.StandardError.ReadToEndAsync();
             if (!child.WaitForExit(5000)) { child.Kill(); child.WaitForExit(); return 2; }
@@ -263,21 +270,24 @@ class Mux {
     if control == "native-input":
         prompts.insert(2, "ISOLATED native keyboard input")
     outer_target = "headed-fixture-" + uuid4().hex
-    target = manager_target if control == "manager-mux" or public_embody else outer_target
+    target = manager_target if control == "manager-mux" or public_caller else outer_target
 
     def query(action, *arguments):
         assert action in {
             "new-session", "has-session", "display-message", "kill-session", "capture-pane", "send-keys",
+            "detach-client",
         }
         mux_arguments = arguments[:arguments.index("--")] if action == "new-session" else arguments
         assert not any(value in {"-L", "-S", ";", "kill-server", "server"} for value in mux_arguments)
-        selector = "-s" if action == "new-session" else "-t"
+        selector = "-s" if action in {"new-session", "detach-client"} else "-t"
         assert list(arguments).count(selector) == 1
         assert arguments[arguments.index(selector) + 1] in {outer_target, target}
         if action == "send-keys":
             assert arguments in (
                 ("-t", target, "-l", "--", prompts[2]), ("-t", target, "Enter"),
             )
+        if action == "detach-client":
+            assert public_tty and arguments == ("-s", target)
         return subprocess.run(
             [binary, *namespace, action, *arguments], env=environment, cwd=home,
             capture_output=True, text=True, encoding="utf-8", timeout=5, **no_window_kwargs(),
@@ -383,20 +393,20 @@ class Mux {
             "(project/'config.yaml').write_text(json.dumps({'repo_name':'native-copilot','machine':'fixture',"
             "'repos':{'native-copilot':{'anchor':str(checkout),'default_branch':'dev',"
             "'session_path':{'windows':[sys.argv[4]]}}}}),encoding='utf-8');"
-            "managed=sys.argv[3].startswith('manager-') or sys.argv[3]=='embody';"
+            "managed=sys.argv[3].startswith('manager-') or sys.argv[3] in {'embody','copilot'};"
             "tracking_path=project/'worktrees' if managed else checkout;"
             "tracking_path.mkdir(parents=True,exist_ok=True);"
             "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
             "'native-copilot','fixture',cfg.detect_platform() if managed else 'win32',"
             "tracking_path)\n"
-            "if sys.argv[3]=='embody':\n"
+            "if sys.argv[3] in {'embody','copilot'}:\n"
             "    authority=cfg.inrepo_config_path(checkout);authority.parent.mkdir(parents=True,exist_ok=True)\n"
             "    authority.write_text(json.dumps({'default_branch':'dev'}),encoding='utf-8')\n"
             "print(json.dumps(str(record.yaml_path)))",
             checkout, worktree_id, control, mux_directory,
         )
         record = Path(initialized)
-        if public_embody:
+        if public_caller:
             _initialize_fixture_repository(checkout, environment)
         if manager:
             selected = runtime(
@@ -433,7 +443,7 @@ class Mux {
             namespace_file.write_text(namespace[1], encoding="utf-8")
             environment["COPILOT_DRIVER_PSMUX_NAMESPACE"] = namespace[1]
             outer_target = "headed-fixture-" + uuid4().hex
-            target = manager_target if control == "manager-mux" or public_embody else outer_target
+            target = manager_target if control == "manager-mux" or public_caller else outer_target
             identities = {}
             plan = runtime(
                 "import json,sys;from pathlib import Path;from uuid import uuid4;"
@@ -480,7 +490,7 @@ class Mux {
                     f"    code=subprocess.call({manager_command!r})\n"
                 )
                 previous_attempts = set(record.parent.glob("launch-attempts/*"))
-            if public_embody:
+            if public_caller:
                 console = Path(worktrees_python).with_name("agent-worktrees.exe")
                 assert console.is_file(), "The installed console entrypoint is required"
                 assert len(str(console)) < 260, "Keep this consumer fixture below MAX_PATH"
@@ -498,7 +508,7 @@ class Mux {
                     executable,
                 )
                 public_command = [
-                    str(console), "--project", "native-copilot", "embody",
+                    str(console), "--project", "native-copilot", control,
                     "--worktree-id", worktree_id, "--recovery",
                     *["--copilot-arg=" + argument for argument in configured],
                 ]
@@ -514,6 +524,19 @@ class Mux {
                     f"    Path({str(public_result)!r}).write_text(reply.stdout,encoding='utf-8')\n"
                     "    code=reply.returncode\n"
                 )
+                if public_tty:
+                    def tty_invocation(command):
+                        return (
+                            "    assert sys.stdin.isatty() and sys.stdout.isatty()\n"
+                            "    for key in ('TMUX','TMUX_PANE','PSMUX_PANE','PSMUX_SESSION',"
+                            "'PSMUX_TARGET_SESSION','PSMUX_SESSION_NAME','PSMUX_DEFAULT_SESSION'):\n"
+                            "      os.environ.pop(key,None)\n"
+                            "    import subprocess\n"
+                            "    # headless-guard: allow the installed public caller to inherit the fixture ConPTY\n"
+                            f"    code=subprocess.call({command!r})\n"
+                        )
+
+                    invocation = tty_invocation(public_command)
             driver = tmp_path / (leg + ".py")
             result_file = tmp_path / (leg + "-result.txt")
             owner_log = tmp_path / (leg + "-owner.log")
@@ -530,7 +553,7 @@ class Mux {
                     ],
                 ])
 
-            driver.write_text(
+            driver_prefix = (
                 f"with open({str(owner_log)!r},'w',encoding='utf-8') as log:\n"
                 "  log.write('original owner started\\n');log.flush()\n"
                 "  import sys,traceback\n"
@@ -549,17 +572,23 @@ class Mux {
                 + (f"    site.addsitedir({site_packages!r})\n" if not installed else "")
                 + "    import time\n"
                 f"    while not Path({str(owner_ready)!r}).exists(): time.sleep(0.05)\n"
-                + invocation +
+            )
+            driver_suffix = (
                 "  except BaseException:\n"
                 "    traceback.print_exc(file=log);code=3\n"
                 f"  result=Path({str(result_file)!r})\n"
                 "  temporary=result.with_suffix('.tmp')\n"
                 "  temporary.write_text(str(code),encoding='utf-8')\n"
                 "  temporary.replace(result)\n"
-                "sys.exit(code)\n",
-                encoding="utf-8",
+                "sys.exit(code)\n"
             )
-            compile(driver.read_text(encoding="utf-8"), str(driver), "exec")
+
+            def write_driver(selected_invocation):
+                body = driver_prefix + selected_invocation + driver_suffix
+                compile(body, str(driver), "exec")
+                driver.write_text(body, encoding="utf-8")
+
+            write_driver(invocation)
             caller_command = [
                 owner_python, "-I", *([] if installed else ["-S"]), "-B", str(driver),
             ]
@@ -568,7 +597,7 @@ class Mux {
                 for argument in ("-e", f"{name}={environment[name]}")
             ]
             assert query("has-session", "-t", outer_target).returncode == 1
-            if control == "manager-mux" or public_embody:
+            if control == "manager-mux" or public_caller:
                 assert query("has-session", "-t", target).returncode == 1
             launched = query(
                 "new-session", "-d", "-s", outer_target, "-c", str(checkout),
@@ -588,7 +617,7 @@ class Mux {
 
             def bound():
                 nonlocal attempt, startup_seen, startup_diagnostic
-                if (control == "manager-mux" or public_embody) and target not in identities:
+                if (control == "manager-mux" or public_caller) and target not in identities:
                     observed = query(
                         "display-message", "-p", "-t", target,
                         "#{session_id}:#{session_created}|#{pane_id}",
@@ -597,10 +626,10 @@ class Mux {
                         identities[target] = observed.stdout.strip()
                         startup_seen = time.monotonic()
                 if result_file.exists():
-                    assert (control == "manager-mux" or public_embody) and result_file.read_text(encoding="utf-8") == "0", (
+                    assert not public_tty and (control == "manager-mux" or public_caller) and result_file.read_text(encoding="utf-8") == "0", (
                         owner_log.read_text(encoding="utf-8")
                     )
-                if manager or public_embody:
+                if manager or public_caller:
                     candidates = set(record.parent.glob("launch-attempts/*")) - previous_attempts
                     paths = [path for candidate in candidates for path in candidate.glob("*/headed.json")]
                 else:
@@ -621,7 +650,7 @@ class Mux {
                     except (FileNotFoundError, PermissionError):
                         return None
                     if value["state"] == "running":
-                        if (control == "manager-mux" or public_embody) and target not in identities:
+                        if (control == "manager-mux" or public_caller) and target not in identities:
                             return None
                         return value
 
@@ -683,7 +712,34 @@ class Mux {
                   flush=True)
             assert state["session_id"] == native and state["restoration"] == "unqualified"
             assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
-            if control == "manager-mux" or public_embody:
+
+            def attached_tty():
+                assert not result_file.exists(), caller_diagnostics()
+                observed = query("display-message", "-p", "-t", target, "#{session_attached}")
+                return observed.returncode == 0 and observed.stdout.strip() == "1"
+
+            def detach_tty():
+                _until(attached_tty, f"{leg}: public copilot did not attach its real TTY",
+                       diagnostic=caller_diagnostics)
+                observed = query(
+                    "display-message", "-p", "-t", target,
+                    "#{session_id}:#{session_created}|#{pane_id}",
+                )
+                assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
+                assert query("detach-client", "-s", target).returncode == 0
+                _until(result_file.exists, f"{leg}: public TTY caller did not return after detach",
+                       diagnostic=caller_diagnostics)
+                assert result_file.read_text(encoding="utf-8") == "0", caller_diagnostics()
+                _until(
+                    lambda: query("has-session", "-t", outer_target).returncode == 1,
+                    f"{leg}: detached TTY caller's original pane did not close",
+                )
+                assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
+
+            if public_tty:
+                _until(attached_tty, f"{leg}: public copilot did not retain its attached client",
+                       diagnostic=caller_diagnostics)
+            if control == "manager-mux" or (public_caller and not public_tty):
                 assert target in identities
                 _until(
                     result_file.exists, f"{leg}: nested Manager caller did not return",
@@ -695,7 +751,7 @@ class Mux {
                     f"{leg}: original Manager caller pane did not close",
                 )
                 assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
-                if public_embody:
+                if public_caller:
                     reply = json.loads(public_result.read_text(encoding="utf-8"))
                     assert reply["ok"] and reply["created"]
                     assert reply["launch_action"] == ("create" if leg == "fresh" else "resume")
@@ -734,7 +790,7 @@ class Mux {
                 lambda: sum(event["type"] == "assistant.turn_end" for event in messages()) >= expected_before,
                 f"{leg}: native history did not restore or finish its original seed",
             )
-            if public_embody:
+            if public_caller:
                 # This isolated application has no installed sessionStart plugin hook.
                 registered = run_caller_owned(
                     [str(console), "--project", "native-copilot", "bind-session",
@@ -748,24 +804,30 @@ class Mux {
                 binding = json.loads(registered.stdout)
                 assert binding["bound"] and binding["is_head"] and binding["head_session"] == native
                 launched_attempts = set(record.parent.glob("launch-attempts/*"))
-                reused = run_caller_owned(
-                    [str(console), "--project", "native-copilot", "embody",
-                     "--worktree-id", worktree_id, "--recovery",
-                     "--seed", "MUST NOT REPLAY LIVE SEED"],
-                    env=environment, cwd=checkout, timeout=30,
-                    max_stdout_bytes=65536, max_stderr_bytes=65536,
-                )
-                assert reused.returncode == 0, reused.stdout + reused.stderr
-                reply = json.loads(reused.stdout)
-                assert reply["ok"] and reply["created"] is False and reply["launch_action"] == "reuse"
-                assert reply["session"] == target and not reply["seeded"]
+                reuse_command = [
+                    str(console), "--project", "native-copilot", control,
+                    "--worktree-id", worktree_id, "--recovery",
+                    "--seed", "MUST NOT REPLAY LIVE SEED",
+                ]
+                if public_tty:
+                    detach_tty()
+                    write_driver(tty_invocation(reuse_command))
+                else:
+                    reused = run_caller_owned(
+                        reuse_command, env=environment, cwd=checkout, timeout=30,
+                        max_stdout_bytes=65536, max_stderr_bytes=65536,
+                    )
+                    assert reused.returncode == 0, reused.stdout + reused.stderr
+                    reply = json.loads(reused.stdout)
+                    assert reply["ok"] and reply["created"] is False and reply["launch_action"] == "reuse"
+                    assert reply["session"] == target and not reply["seeded"]
                 assert set(record.parent.glob("launch-attempts/*")) == launched_attempts
                 observed = query(
                     "display-message", "-p", "-t", target,
                     "#{session_id}:#{session_created}|#{pane_id}",
                 )
                 assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
-            if control == "manager-mux" and verify_reuse:
+            if (control == "manager-mux" and verify_reuse) or public_tty:
                 identities.pop(outer_target)
                 outer_target = "headed-fixture-" + uuid4().hex
                 result_file.unlink()
@@ -784,15 +846,20 @@ class Mux {
                 assert observed.returncode == 0 and "|" in observed.stdout
                 identities[outer_target] = observed.stdout.strip()
                 owner_ready.write_text("ready", encoding="utf-8")
-                _until(
-                    result_file.exists, f"{leg}: Manager reuse caller did not return",
-                    timeout=60, diagnostic=caller_diagnostics,
-                )
-                assert result_file.read_text(encoding="utf-8") == "0", owner_log.read_text(encoding="utf-8")
-                _until(
-                    lambda: query("has-session", "-t", outer_target).returncode == 1,
-                    f"{leg}: Manager reuse caller pane did not close",
-                )
+                if public_tty:
+                    _until(attached_tty, f"{leg}: live reuse did not attach its real TTY",
+                           diagnostic=caller_diagnostics)
+                    assert set(record.parent.glob("launch-attempts/*")) == launched_attempts
+                else:
+                    _until(
+                        result_file.exists, f"{leg}: Manager reuse caller did not return",
+                        timeout=60, diagnostic=caller_diagnostics,
+                    )
+                    assert result_file.read_text(encoding="utf-8") == "0", owner_log.read_text(encoding="utf-8")
+                    _until(
+                        lambda: query("has-session", "-t", outer_target).returncode == 1,
+                        f"{leg}: Manager reuse caller pane did not close",
+                    )
                 observed = query(
                     "display-message", "-p", "-t", target,
                     "#{session_id}:#{session_created}|#{pane_id}",
@@ -837,6 +904,8 @@ class Mux {
             ) is True
             print(f"Native {control} {leg}: history/receipts in {time.monotonic() - leg_started:.2f}s",
                   flush=True)
+            if public_tty:
+                detach_tty()
             asyncio.run(broker(state, stop=True))
             _until(
                 lambda: not any(pid_alive(state[key]) for key in ("pid", "child_pid", "extension_pid")),
@@ -860,7 +929,7 @@ class Mux {
                 "exit_code": exit_code, "process_exit_code": exit_code, "receipt_uncertain": False,
             }
             assert int(result_file.read_text(encoding="utf-8")) == (
-                0 if control == "manager-mux" or public_embody else exit_code
+                0 if control == "manager-mux" or public_caller else exit_code
             )
             pane_output = []
 
@@ -897,7 +966,7 @@ class Mux {
             home / "session-state" / native / "events.jsonl",
         ]
         assert not (home / "permissions-config.json").exists()
-        if control == "manager-mux" or public_embody:
+        if control == "manager-mux" or public_caller:
             commands = (tmp_path / "mux-commands.txt").read_text(encoding="utf-8").splitlines()
             assert commands.count("new-session") == 2
             if control == "manager-mux":

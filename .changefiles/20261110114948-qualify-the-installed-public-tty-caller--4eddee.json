@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the installed public TTY caller through fresh resume and live reuse without seed replay",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
