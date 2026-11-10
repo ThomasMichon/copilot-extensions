@@ -93,16 +93,29 @@ class WatchGateway:
     """
 
     def __init__(
-        self, store: ReplayStore, *, fleet: str, gateway: str, slot: str,
+        self, store: ReplayStore, *, fleet: str | None, gateway: str | None, slot: str | None,
         bindings: tuple[WatchScopeBinding, ...],
         checkpoint: Callable[[], None] | None = None,
         workspaces=None,
         attention=None,
         reports=None,
+        local: bool = False,
+        repositories=None,
     ) -> None:
-        for name in (fleet, gateway, slot):
-            identifier(name)
-        if store.service_identity is not None and store.service_identity != ReplayServiceIdentity(
+        if type(local) is not bool:
+            raise ValueError("explicit local profile selection required")
+        self.local, self.repositories = local, repositories
+        if repositories is not None and repositories.store is not store:
+            raise ValueError("repository projection must use the existing storage owner")
+        if local:
+            if (fleet, gateway, slot) != (None, None, None) or store.service_identity is not None:
+                raise ValueError("local ingress cannot synthesize Gateway context")
+            if repositories is None or not store.repository_continuing:
+                raise ValueError("local ingress requires continuing repository storage")
+        else:
+            for name in (fleet, gateway, slot):
+                identifier(name)
+        if not local and store.service_identity is not None and store.service_identity != ReplayServiceIdentity(
             fleet, gateway, slot,
         ):
             raise ValueError("service identity differs from replay storage binding")
@@ -153,11 +166,15 @@ class WatchGateway:
         self._closing = False
 
     def handler_binding(self, *, response_limit: int = BODY_BYTES) -> HandlerBinding:
+        if self.local:
+            raise ValueError("local ingress has no authenticated Gateway channel")
         if type(response_limit) is int and response_limit == BODY_BYTES:
             return HandlerBinding(self.fleet, self.gateway, self.handle)
         return HandlerBinding(self.fleet, self.gateway, self.handle, response_limit=response_limit)
 
     async def handle(self, request: ServiceRequest) -> ServiceResponse | BoundedServiceResponse:
+        if self.local:
+            return _response(403, {"error": "gateway_channel_not_selected"})
         if type(request) is not ServiceRequest:
             raise TypeError("expected trusted service request")
         try:
@@ -228,6 +245,18 @@ class WatchGateway:
         except asyncio.CancelledError:
             request.lifetime.close()
             raise
+
+    async def handle_local(self, request):
+        from fleet_manager.local_service_handler import LocalServiceRequest
+        from .repository_gateway import handle, response
+        if type(request) is not LocalServiceRequest or not self.local:
+            return response(403, {"error": "local_profile_not_selected"})
+        self._check(request)
+        if request.context.namespace != self.store.namespace or (
+            request.context.expires_at <= self.store.clock()
+        ):
+            return response(403, {"error": "local_caller_refused"})
+        return await handle(self, request)
 
     def _check(self, request: ServiceRequest) -> None:
         request.lifetime.check()

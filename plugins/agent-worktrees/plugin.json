@@ -19,7 +19,7 @@
   ],
   "hooks": "hooks.json",
   "sessionContext": "session-context.json",
-  "version": "1.25.71-dev1",
+  "version": "1.25.72-dev1",
   "runtimeScope": "universal",
   "installerReadiness": "installer-readiness.json",
   "installerDeadlineSeconds": 900,
