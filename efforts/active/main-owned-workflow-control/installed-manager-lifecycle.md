@@ -335,3 +335,21 @@ now retain each pinned candidate's parent PID and allowlisted CLI flag names,
 plus the completed history's lock PIDs, without raw argument values. All three
 focused diagnostic controls passed, including unavailable metadata preserving
 the original duplicate-owner refusal. No native-owner assertion changed.
+
+### 2026-11-10 - Reproduced the extension host, not a second conversation
+
+Run 42786590873 at `bb360d3e3abb51df12678042e8c020d09f415e2d`
+retained one lock-bound interactive process and a later-born direct child using
+the same executable, without recognized CLI flags. A private same-version
+Git-folder probe reproduced the child only after plugin discovery was enabled.
+Its sole argument is `extension_bootstrap.mjs`, an ordinary file within the
+private fixture. The parent alone holds the actual conversation lock.
+
+The witness now distinguishes that positively identified extension host from a
+second conversation owner. It still refuses unknown children, foreign ancestry,
+older children, a helper claiming a conversation lock, additional owners and an
+orphaned helper. Native handles and Job custody are unchanged. All eleven focused
+controls passed. The actual pinned CLI probe selected the original parent and
+proved normal exit left no native processes before fixture cleanup. This is
+lightweight consumer evidence, not installed Manager acceptance; the next exact
+native run must prove the same role binding through Manager Create/Open/Resume.

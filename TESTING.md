@@ -713,9 +713,14 @@ escape sequences from a redraw stream is not itself a rendered-screen witness.
 Failure diagnostics retain bounded event-type counts and the private provider's
 request count, never inference request bodies. These distinguish an unfinished
 native turn from completed history whose reply has not rendered.
-An ambiguous native-process count retains pinned process parent IDs,
-allowlisted CLI flag names and the matching history's lock PIDs without
-relaxing duplicate rejection or retaining argument values.
+Native-process observations retain pinned parent IDs, bounded option names,
+script basenames and the matching history's lock PIDs, never raw argument values.
+Copilot's extension host shares its executable. Exclude it from conversation-owner
+counting only when its sole argument is an ordinary, owned
+`extension_bootstrap.mjs`, it is a later-born direct child of the sole
+lock-bound conversation owner, and it has no conversation lock itself.
+Unknown children, additional owners and orphaned extension hosts still refuse.
+All processes remain under the original pinned native Job custody.
 The stateless harness has a real private knowledge repository, registered and
 bound before New; the installed coordination-readiness command must resolve it.
 Before constructing runtimes, the case requires an empty, confirmed native

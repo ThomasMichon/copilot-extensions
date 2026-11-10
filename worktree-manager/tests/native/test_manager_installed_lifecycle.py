@@ -184,7 +184,7 @@ def _job_member(console, handle):
     return bool(inside.value)
 
 
-def _process_arguments(handle):
+def _process_arguments(handle, *, owned_root=None):
     import ctypes
     from ctypes import wintypes
 
@@ -245,6 +245,20 @@ def _process_arguments(handle):
         None,
     )
     cache = next((value for value in values if value.startswith("pycache_prefix=")), "")
+    bootstrap = Path(values[1]) if len(values) == 2 else None
+    extension_host = False
+    if bootstrap is not None and bootstrap.name == "extension_bootstrap.mjs" and bootstrap.is_absolute():
+        scope = (
+            bootstrap.resolve().is_relative_to(Path(values[0]).resolve().parent)
+            or owned_root is not None and bootstrap.resolve().is_relative_to(owned_root.resolve())
+        )
+        if scope:
+            info = bootstrap.lstat()
+            extension_host = (
+                bootstrap.is_file() and not bootstrap.is_symlink()
+                and not getattr(info, "st_file_attributes", 0) & 0x400
+                and 0 < info.st_size <= 1 << 20
+            )
     return {
         "parent_pid": int(basic[5] or 0),
         "program": values[0][:2048],
@@ -268,6 +282,17 @@ def _process_arguments(handle):
         ),
         "python_flags": [value for value in values if value in {"-I", "-B", "-S"}],
         "cache_namespace": Path(cache.split("=", 1)[1]).name if cache else None,
+        "argument_count": len(values),
+        "owned_extension_bootstrap": extension_host,
+        "script_basenames": [
+            Path(value).name for value in values[1:]
+            if Path(value).suffix in {".js", ".cjs", ".mjs"}
+            and re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", Path(value).name)
+        ][:8],
+        "cli_option_names": sorted({
+            value.split("=", 1)[0] for value in values
+            if re.fullmatch(r"--?[A-Za-z_][A-Za-z0-9_-]{0,63}", value.split("=", 1)[0])
+        })[:32],
         "native_cli_flags": sorted({
             value.split("=", 1)[0] for value in values
             if value.split("=", 1)[0] in {
@@ -478,28 +503,46 @@ class _Witness:
 
     def one_native(self):
         selected = self.native()
-        if len(selected) > 1:
-            error = RuntimeError(f"Manager admitted duplicate native CLI owners: {list(selected)}")
-            try:
-                observation = self.turn_observation
-                if observation is not None:
-                    observation["native_candidates"] = [
-                        {
-                            "pid": pid, "birth": birth,
-                            **_process_arguments(handle),
-                        }
-                        for (pid, birth), (_console, handle) in sorted(selected.items())[:16]
-                    ]
-                    observation["native_candidates_complete"] = len(selected) <= 16
-                    observation["history_lock_pids"] = sorted({
-                        int(match[1])
-                        for path in self.history.parent.glob("inuse.*.lock")
-                        if (match := re.fullmatch(r"inuse\.(\d+)\.lock", path.name))
-                    })[:16]
-            except Exception as diagnostic_error:
-                error.add_note(f"Native owner observation: {diagnostic_error}")
-            raise error
-        return next(iter(selected)) if selected else None
+        if not selected:
+            return None
+        error = RuntimeError(f"Manager admitted duplicate native CLI owners: {list(selected)}")
+        try:
+            rows = [
+                {"pid": pid, "birth": birth, **_process_arguments(handle, owned_root=self.root)}
+                for (pid, birth), (_console, handle) in sorted(selected.items())[:16]
+            ]
+            locks = sorted({
+                int(match[1])
+                for path in (self.history.parent.glob("inuse.*.lock") if self.history else ())
+                if (match := re.fullmatch(r"inuse\.(\d+)\.lock", path.name))
+            })
+            if self.turn_observation is not None:
+                self.turn_observation.update(
+                    native_candidates=rows, native_candidates_complete=len(selected) <= 16,
+                    history_lock_pids=locks[:16],
+                )
+            if len(selected) == 1:
+                if rows[0].get("owned_extension_bootstrap"):
+                    raise RuntimeError("An extension host has no live native conversation owner")
+                return next(iter(selected))
+            bound = [
+                row for row in rows
+                if row["pid"] in locks and not row.get("owned_extension_bootstrap")
+            ]
+            if len(selected) <= 16 and len(bound) == 1:
+                (owner,) = bound
+                helpers = [row for row in rows if row is not owner]
+                if all(
+                    row.get("owned_extension_bootstrap") is True
+                    and row["parent_pid"] == owner["pid"]
+                    and row["birth"] > owner["birth"]
+                    and row["pid"] not in locks
+                    for row in helpers
+                ):
+                    return owner["pid"], owner["birth"]
+        except Exception as diagnostic_error:
+            error.add_note(f"Native owner observation: {diagnostic_error}")
+        raise error
 
     def turn(self, prompt, number, console):
         def finished():
@@ -1253,7 +1296,7 @@ def test_lifecycle_duplicate_native_observation_does_not_weaken_the_refusal(
     witness.turn_observation = {}
     witness.native = lambda: {(101, "first-birth"): (None, 1), (102, "second-birth"): (None, 2)}
 
-    def metadata(_handle):
+    def metadata(_handle, **_kwargs):
         if not metadata_available:
             raise OSError("controlled metadata unavailable")
         return {"native_cli_flags": ["--interactive"]}
@@ -1266,6 +1309,48 @@ def test_lifecycle_duplicate_native_observation_does_not_weaken_the_refusal(
         assert witness.turn_observation["history_lock_pids"] == [101]
     else:
         assert any("metadata unavailable" in note for note in caught.value.__notes__)
+
+
+@pytest.mark.parametrize(
+    "case", [
+        "qualified", "unbound-owner", "helper-lock", "foreign-parent",
+        "older-child", "unknown-child", "second-owner", "orphan-helper",
+    ],
+)
+def test_lifecycle_excludes_only_the_proven_native_extension_host(tmp_path, monkeypatch, case):
+    history = tmp_path / "session-state" / "fixture-session" / "events.jsonl"
+    history.parent.mkdir(parents=True)
+    if case != "unbound-owner":
+        (history.parent / "inuse.101.lock").touch()
+    if case == "helper-lock":
+        (history.parent / "inuse.102.lock").touch()
+    witness = _Witness(tmp_path, {}, None, None, None, None)
+    witness.history, witness.turn_observation = history, {}
+    owner = (101, 1000)
+    selected = {
+        owner: (None, 1),
+        (102, 900 if case == "older-child" else 1100): (None, 2),
+    }
+    if case == "second-owner":
+        selected[(103, 1200)] = (None, 3)
+        (history.parent / "inuse.103.lock").touch()
+    if case == "orphan-helper":
+        selected.pop(owner)
+    witness.native = lambda: selected
+
+    def metadata(handle, *, owned_root):
+        assert owned_root == tmp_path
+        return {
+            "parent_pid": 999 if case == "foreign-parent" else 101,
+            "owned_extension_bootstrap": handle == 2 and case != "unknown-child",
+        }
+
+    monkeypatch.setattr(sys.modules[__name__], "_process_arguments", metadata)
+    if case == "qualified":
+        assert witness.one_native() == owner
+    else:
+        with pytest.raises(RuntimeError, match="duplicate native CLI owners"):
+            witness.one_native()
 
 
 def test_lifecycle_environment_drops_foreign_identity_mux_and_inference_credentials(
@@ -1369,6 +1454,7 @@ def test_lifecycle_process_observation_uses_owned_handles_and_omits_inline_code(
             "-c",
             "import time;print('READY',flush=True);time.sleep(30)",
             "--interactive", "--resume", "private-value",
+            "--native-probe=private-option-value",
         ],
         env=env,
         cwd=tmp_path,
@@ -1401,10 +1487,12 @@ def test_lifecycle_process_observation_uses_owned_handles_and_omits_inline_code(
         )
         assert "time.sleep" not in text
         assert "private-value" not in text
+        assert "private-option-value" not in text
         assert all(row["module"] is None for row in rows)
         (child,) = [row for row in rows if row["pid"] == console.process.pid]
         assert child["parent_pid"] == os.getpid()
         assert child["native_cli_flags"] == ["--interactive", "--resume"]
+        assert "--native-probe" in child["cli_option_names"]
         assert records[-1]["complete"] is False
 
 
