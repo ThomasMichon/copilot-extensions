@@ -221,11 +221,11 @@ def test_opt_in_receiver_auth_wait_and_same_session_resume(tmp_path, monkeypatch
             diagnostic += "\n" + mux.query("capture-pane", "-p", "-t", mux.target).stdout[-8192:]
         raise AssertionError(label + "\n" + diagnostic)
 
+    def events():
+        return [json.loads(line) for line in history_file.read_text(encoding="utf-8").splitlines()]
+
     def history():
-        return [
-            value["data"]["content"] for line in history_file.read_text(encoding="utf-8").splitlines()
-            if (value := json.loads(line))["type"] == "user.message"
-        ]
+        return [value["data"]["content"] for value in events() if value["type"] == "user.message"]
 
     async def flow():
         first = await until(
@@ -236,6 +236,11 @@ def test_opt_in_receiver_auth_wait_and_same_session_resume(tmp_path, monkeypatch
         assert first["host_process_start_time"] == process_start_time(first["pid"])
         original = _native_identities(first)
         identities.extend(original)
+        await until(
+            lambda: history() == prompts[:1]
+            and any(value["type"] == "assistant.turn_end" for value in events()),
+            "The original literal launch turn did not finish before controlled input",
+        )
         await _prompt(first, prompts[1])
         await until(lambda: history() == prompts[:2], "Original literal seed/history changed")
         binding = first["auth_wait"]
