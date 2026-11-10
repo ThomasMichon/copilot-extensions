@@ -147,7 +147,10 @@ adopt it again once the launch records one. Pool filters are evaluated against
 the recorded workspace itself, not only the task's target or affinity, including
 hard worktree requirements. Later workspace attachment and publication recheck
 the bound pool's full filters inside the write transaction. A disabled or
-unavailable bound pool defers recovery without dropping the pending lane wait. A
+unavailable bound pool retains valid first resume and steer requests without
+starting recovery or dropping the pending lane wait. Late startup completion on
+a releasing reservation records cleanup facts even after pool removal; it cannot
+replace a recorded workspace or native, or return the reservation to service. A
 recorded workspace the matched pool or the task's current routing refuses (a
 pool-rejected or excluded worktree, another machine or target worktree) is
 left unbound as `workspace_conflict`, and publishing into an adopted binding

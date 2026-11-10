@@ -106,7 +106,9 @@ def _decision_deadline(conn: sqlite3.Connection, assignment: sqlite3.Row) -> flo
     return assignment["startup_deadline"]
 
 
-def _current(conn: sqlite3.Connection, task: Task, assignment: sqlite3.Row) -> sqlite3.Row:
+def _current(
+    conn: sqlite3.Connection, task: Task, assignment: sqlite3.Row, *, retain_request: bool = False,
+) -> sqlite3.Row:
     reservation = conn.execute(
         "SELECT * FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
     ).fetchone()
@@ -128,10 +130,15 @@ def _current(conn: sqlite3.Connection, task: Task, assignment: sqlite3.Row) -> s
     ):
         raise TaskError("suspended pool recovery requires its current unheld owner and retained native")
     require_execution_admission(conn, task.id)
-    require_pool_workspace(
-        conn, task, reservation["worktree"], reservation["execution_machine"],
-        driver=reservation["driver"],
-    )
+    from .queue_execution_custody import PoolLaneUnavailable
+    try:
+        require_pool_workspace(
+            conn, task, reservation["worktree"], reservation["execution_machine"],
+            driver=reservation["driver"],
+        )
+    except PoolLaneUnavailable:
+        if not retain_request:
+            raise
     return reservation
 
 
@@ -168,13 +175,13 @@ def _wait_for_lane(
     own = conn.execute(
         "SELECT state FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
     ).fetchone()
-    if own is None or own["state"] != SpawnState.COLD:
-        return False  # a body that never parked still holds its own lane
     identity = (assignment["registration_id"], assignment["machine"], assignment["env"])
     catalog = getattr(owner, "_pool_catalog_from_conn", None)
     if catalog is None:
         return False
     pool = _eligible_pool(catalog(conn, now=ts), identity)
+    if pool is not None and (own is None or own["state"] != SpawnState.COLD):
+        return False  # a body that never parked still holds its own lane
     since = assignment["lane_wait_since"]
     # A disabled pool or an unavailable catalog defers the start; it never
     # restarts intentionally suspended work outside its pool's authority.
@@ -221,7 +228,7 @@ def request_recovery(
     assignment = recovery_assignment(conn, task.id)
     if assignment is None:
         return None
-    _current(conn, task, assignment)
+    _current(conn, task, assignment, retain_request=True)
     if not math.isfinite(ts):
         raise TaskError("pool recovery requires finite time")
     continuing = task.resume_requested and assignment["recovery_requested_at"] is not None

@@ -622,6 +622,8 @@ def test_expired_suspended_worker_grant_requires_exact_trusted_renewal(
                 task_id, "host-a/worktree", "native", expected_generation=generation, expected_epoch=0,
             )
         assert waiting.value.status_code == 409
+        from tests.test_pool_startup_policy import renew
+        renew(q, clock[0])
         revision = request(q, task_id, now=clock[0])
         with DispatchClient(
             "http://testserver", task_token=original, transport=httpx.MockTransport(transport),
