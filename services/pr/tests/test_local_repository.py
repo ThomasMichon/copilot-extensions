@@ -109,6 +109,7 @@ def test_local_adoption_rechecks_private_serving_user_root_without_repair(tmp_pa
 
 @pytest.mark.parametrize("name", [
     "service-status.json", "watch-replay.json", "watch-replay.lock", "watch-subscriptions.json",
+    "agent-pull-requests-watch.lock",
 ])
 def test_local_socket_cannot_collide_with_existing_readiness_or_store_owner(
     tmp_path: Path, name: str,

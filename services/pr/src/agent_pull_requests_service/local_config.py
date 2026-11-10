@@ -102,9 +102,11 @@ class LocalHostConfig:
             _seconds(value.get("drain_timeout", 60)),
         )
         store = config.store()
+        from single_instance_lease import SingleInstance
+        writer = SingleInstance(config.root, service="agent-pull-requests-watch")
         if config.repositories.socket_path in {
             config.status_path, store.path, store._lock().path,
-            config.root / "watch-subscriptions.json",
+            config.root / "watch-subscriptions.json", writer.lock_path,
         }:
             raise ValueError("local repository socket collides with readiness or storage ownership")
         return config

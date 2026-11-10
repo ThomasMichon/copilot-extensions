@@ -90,9 +90,9 @@ value belongs in this configuration.
 Unknown/duplicate fields, ambiguous peers/targets, unconfigured resources and
 unsupported selected core/SDK/native contracts refuse. Provision/config parsing
 does not acquire credentials or probe providers.
-The socket cannot select the foreground readiness file, replay document/lock,
-or native-subscription filename; those existing owners must not replace or
-misidentify the ingress endpoint.
+The socket cannot select the foreground readiness file, writer lease,
+replay document/lock, or native-subscription filename; those existing owners
+must not replace or misidentify the ingress endpoint.
 
 ## Provision and foreground lifetime
 
