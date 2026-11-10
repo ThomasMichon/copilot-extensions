@@ -126,7 +126,7 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
         if ($Facts -isnot [Collections.IDictionary]) { return $false }
         $writeTools = @(
             'create', 'edit', 'str_replace', 'str_replace_editor', 'str_replace_based_edit_tool',
-            'write', 'write_file', 'insert', 'new_file', 'multi_edit')
+            'write', 'write_file', 'insert', 'new_file', 'multi_edit', 'apply_patch')
         $writeArgs = [Collections.Generic.List[object]]::new()
         $cwd = $Payload.cwd
         if ($Payload.ContainsKey('toolCalls')) {
@@ -141,14 +141,18 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
                 foreach ($key in $call.Keys) {
                     if ($key -cnotin @('name', 'args', 'id')) { return $false }
                 }
-                if ($call['name'] -cin $writeTools) { $writeArgs.Add($call['args']) }
+                if ($call['name'] -cin $writeTools) {
+                    $writeArgs.Add(@{ name = $call['name']; args = $call['args'] })
+                }
             }
             if (-not $Payload.ContainsKey('cwd')) { $cwd = $Payload.workingDirectory }
         } else {
             $name = $Payload.toolName
             if (-not $name) { $name = $Payload.tool_name }
             if ($name -isnot [string] -or $name -cnotin $writeTools) { return $false }
-            $writeArgs.Add($(if ($Payload.ContainsKey('toolArgs')) { $Payload.toolArgs } else { $Payload.tool_input }))
+            $writeArgs.Add(@{ name = $name; args = $(if ($Payload.ContainsKey('toolArgs')) {
+                $Payload.toolArgs
+            } else { $Payload.tool_input }) })
         }
         if (-not $writeArgs.Count -or $cwd -isnot [string] -or
             (Get-PreparedWorktreesPath $cwd) -cne $Facts.workspace) { return $false }
@@ -168,8 +172,15 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
             -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'objects')) -or
             -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'refs'))) { return $false }
         $rawPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-        foreach ($args in $writeArgs) {
-            if ($args -is [string]) { $args = ConvertFrom-PreToolJson $args }
+        foreach ($write in $writeArgs) {
+            $args = $write.args
+            if ($args -is [string]) {
+                try { $args = ConvertFrom-PreToolJson $args }
+                catch {
+                    if ($write.name -cne 'apply_patch') { return $false }
+                    $args = @{ command = $args }
+                }
+            }
             if ($args -isnot [Collections.IDictionary]) { return $false }
             $entries = [Collections.Generic.List[object]]::new()
             $entries.Add($args)
@@ -196,6 +207,29 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
                     if ($callPaths.Count -gt 128) { return $false }
                 }
                 if ($index -gt 0 -and -not $found) { return $false }
+            }
+            if ($write.name -ceq 'apply_patch') {
+                $foundPatch = $false
+                foreach ($field in @('input', 'patch', 'command')) {
+                    if (-not $args.ContainsKey($field)) { continue }
+                    $patch = $args[$field]
+                    if ($patch -isnot [string] -or $patch.Length -gt 131072 -or
+                        $patch -cnotmatch '\A\*\*\* Begin Patch\r?\n[\s\S]*\r?\n\*\*\* End Patch(?:\r?\n)?\z') {
+                        return $false
+                    }
+                    # Source-bound tool_call_forms owns this header-target grammar.
+                    $headers = [regex]::Matches($patch,
+                        '^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$', 'Multiline')
+                    if (-not $headers.Count) { return $false }
+                    $foundPatch = $true
+                    foreach ($header in $headers) {
+                        $raw = $header.Groups[1].Value
+                        if ($raw.EndsWith("`r")) { $raw = $raw.Substring(0, $raw.Length - 1) }
+                        $null = $callPaths.Add($raw)
+                        if ($callPaths.Count -gt 128) { return $false }
+                    }
+                }
+                if (-not $foundPatch) { return $false }
             }
             if (-not $callPaths.Count) { return $false }
             foreach ($raw in $callPaths) {

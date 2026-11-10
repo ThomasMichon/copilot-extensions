@@ -20,6 +20,16 @@ WRITE_ALIASES = (
     "str_replace", "str_replace_editor", "str_replace_based_edit_tool",
     "write", "write_file", "insert", "new_file", "multi_edit",
 )
+PATCH_NATIVE_CASES = (
+    "patch-input", "patch-patch", "patch-command", "patch-json", "patch-freeform",
+    "patch-crlf", "patch-headers", "patch-union", "patch-batch", "patch-duplicates",
+    "patch-limit", "patch-field-bound", "patch-real-policy",
+)
+PATCH_PROTECTED_CASES = (
+    "patch-protected-input", "patch-protected-patch", "patch-protected-command",
+    "patch-protected-move", "patch-protected-direct", "patch-protected-structured",
+    "patch-protected-batch", "patch-protected-freeform",
+)
 
 
 def load(name):
@@ -909,6 +919,11 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "protected-write-name-batch", "write-name-real-policy",
     "cell-write-name-real-policy", "cell-write-name-structured",
     "cell-protected-write-name-multi_edit",
+    *PATCH_NATIVE_CASES, *PATCH_PROTECTED_CASES,
+    "patch-invalid-field", "patch-targetless", "patch-fragment", "patch-malformed-json",
+    "patch-unknown-header", "patch-overflow", "patch-foreign", "patch-nested", "patch-anchor",
+    "patch-field-oversized", "patch-union-overflow", "patch-json-nonobject",
+    "cell-patch-union", "cell-patch-protected-move", "cell-patch-real-policy",
 ])
 def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, shell, case):
     from agent_worktrees import guarded_anchors
@@ -918,6 +933,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         case = case.removeprefix("cell-")
     real_policy = case in {
         "real-policy", "batch-real-policy", "structured-real-policy", "write-name-real-policy",
+        "patch-real-policy",
     }
     executable = shutil.which(shell)
     if not executable:
@@ -1020,6 +1036,83 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 {"name": "multi_edit", "args": {"changes": [{"file_path": "two.py"}]}},
                 {"name": "str_replace", "args": json.dumps(event["toolArgs"])},
             ]
+    if case.startswith("patch-"):
+        event["toolName"] = "apply_patch"
+
+        def patch(*headers):
+            return "*** Begin Patch\n" + "".join(f"*** {header}\n" for header in headers) + "*** End Patch\n"
+
+        args = {"input": patch("Update File: source-\u00e9.py")}
+        event["toolArgs"] = args
+        if case in {"patch-patch", "patch-command"}:
+            args[case.removeprefix("patch-")] = args.pop("input")
+        elif case == "patch-json":
+            event["toolArgs"] = json.dumps(args)
+        elif case == "patch-json-nonobject":
+            event["toolArgs"] = json.dumps(["not an argument object"])
+        elif case == "patch-freeform":
+            event["toolArgs"] = args["input"]
+        elif case == "patch-crlf":
+            args["input"] = args["input"].replace("\n", "\r\n")
+        elif case == "patch-headers":
+            args["input"] = patch("Add File: one.py", "Update File: two.py", "Move to: three.py", "Delete File: four.py")
+        elif case in {"patch-union", "patch-real-policy"}:
+            args.update(
+                patch=patch("Add File: two.py"), command=patch("Delete File: three.py"),
+                path="four.py", edits=[{"file_path": "five.py"}],
+                files=[{"targetFile": "six.py"}], changes=[{"filename": "seven.py"}],
+            )
+        elif case in {"patch-batch", "patch-protected-batch"}:
+            event.update(toolName="view", toolArgs={"path": "ignored.py"}, toolCalls=[
+                {"name": "write", "args": {"path": "one.py"}},
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "apply_patch", "args": args},
+                {"name": "apply_patch", "args": patch(
+                    "Add File: efforts/private.md" if case == "patch-protected-batch" else "Add File: last.py",
+                )},
+            ])
+        elif case.startswith("patch-protected-"):
+            field = case.removeprefix("patch-protected-")
+            if field in {"input", "patch", "command"}:
+                args[field] = patch("Update File: safe.py", "Delete File: efforts/private.md")
+            elif field == "move":
+                args["input"] = patch("Update File: safe.py", "Move to: efforts/private.md")
+            elif field == "direct":
+                args["targetFile"] = "efforts/private.md"
+            elif field == "freeform":
+                event["toolArgs"] = patch("Update File: safe.py", "Move to: efforts/private.md")
+            else:
+                args["changes"] = [{"filePath": "safe.py"}, {"path": "efforts/private.md"}]
+        elif case == "patch-duplicates":
+            args["input"] = patch(*(["Add File: same.py"] * 129))
+        elif case in {"patch-limit", "patch-overflow"}:
+            args["input"] = patch(*(
+                f"Add File: source-{index}.py" for index in range(129 if case == "patch-overflow" else 128)
+            ))
+        elif case == "patch-union-overflow":
+            args["input"] = patch(*(f"Add File: source-{index}.py" for index in range(127)))
+            args.update(path="direct.py", changes=[{"path": "structured.py"}])
+        elif case in {"patch-field-bound", "patch-field-oversized"}:
+            size = 131073 if case == "patch-field-oversized" else 131072
+            prefix = "*** Begin Patch\n*** Update File: safe.py\n+"
+            suffix = "\n*** End Patch\n"
+            args["input"] = prefix + "x" * (size - len(prefix) - len(suffix)) + suffix
+        elif case == "patch-invalid-field":
+            args["patch"] = ["*** Delete File: efforts/private.md"]
+        elif case == "patch-targetless":
+            args["input"] = "*** Begin Patch\n*** End Patch\n"
+        elif case == "patch-fragment":
+            args["input"] = "*** Update File: source.py\n"
+        elif case == "patch-malformed-json":
+            event["toolArgs"] = '{"input":'
+        elif case == "patch-unknown-header":
+            args["input"] = "*** Begin Patch\n*** Rename File: source.py\n*** End Patch\n"
+        elif case == "patch-foreign":
+            args["input"] = patch(f"Update File: {fixture_checkout(tmp_path / 'foreign') / 'source.py'}")
+        elif case == "patch-nested":
+            args["input"] = patch(f"Update File: {fixture_checkout(workspace / 'nested') / 'source.py'}")
+        elif case == "patch-anchor":
+            args["input"] = patch(f"Update File: {anchor / 'source.py'}")
     if case.startswith("batch-"):
         first = {"name": "create", "args": event["toolArgs"]}
         last = {"name": "edit", "args": {"path": "second.py"}}
@@ -1115,7 +1208,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         guard_events = load("tool_call_forms").tool_events(event)
     except ValueError:
         guard_events = []
-    if case in {"structured-oversized", "structured-target-overflow"}:
+    if case in {"structured-oversized", "structured-target-overflow", "patch-overflow", "patch-union-overflow"}:
         with pytest.raises(ValueError):
             load("tool_call_forms").write_targets(event["toolName"], event["toolArgs"])
         guard_events = []
@@ -1125,8 +1218,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         for name in ("statelessness_guard", "cross_repo_guard", "anchor_write_guard", "pr_supersede_guard")
     ]
     assert any(value and value.get("permissionDecision") == "deny" for value in decisions) is (
-        case.startswith(("personal-state", "protected-write-name-")) or case in {
-            "anchor-cwd", "anchor-target", "delegated",
+        case.startswith(("personal-state", "protected-write-name-")) or case in PATCH_PROTECTED_CASES or case in {
+            "anchor-cwd", "anchor-target", "delegated", "patch-anchor",
             "batch-protected", "batch-multiple-targets", "batch-structured",
             "structured-protected",
         }
@@ -1265,7 +1358,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     if case == "ordinary-unrelated-inventory":
         assert native_membership.read_text() == "True"
     assert not inventory_probe.exists()
-    policy_required = not (case.startswith(("ordinary", "write-name-")) or case in {
+    policy_required = not (case.startswith(("ordinary", "write-name-")) or case in PATCH_NATIVE_CASES or case in {
         "create", "path-alias", "json-args", "real-policy", "batch",
         "batch-mixed", "batch-json-args", "batch-limit", "batch-working-directory", "batch-real-policy",
         "structured", "structured-files", "structured-changes", "structured-only", "structured-json",
@@ -1294,6 +1387,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert fallback.returncode == 0 and not fallback.stderr, fallback.stdout + fallback.stderr
         assert json.loads(fallback.stdout) == {}
         protected = {**event, "toolArgs": {"path": "efforts/private.md"}}
+        if case == "patch-real-policy":
+            protected["toolArgs"] = {"input": patch("Update File: safe.py", "Move to: efforts/private.md")}
         if case == "batch-real-policy":
             protected["toolCalls"] = [
                 *event["toolCalls"][:-1],
