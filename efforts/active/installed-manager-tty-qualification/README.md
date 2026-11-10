@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed proposal, then implementation PRs against `dev`
 - **Created:** 2026-11-07
-- **Status:** Active
+- **Status:** Done
 - **Vision:** [release qualification](../../../visions/release-pipeline/README.md#configured-feed-construction-and-first-launch), [fresh-machine behavior](../../../visions/clean-room-validation/README.md#fresh-machine-fidelity), [authoritative replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #11377
 - **Related owners:** #3336 release control; #7529 configured-feed construction; #5579 installed launcher chain
@@ -92,13 +92,13 @@ The following realization details are **agent-recommended**.
 
 ### Phase 3 - Enforce the result before promotion
 
-- [ ] Reuse the supported native qualification lane with evidence bound to the
+- [x] Reuse the supported native qualification lane with evidence bound to the
   frozen candidate, installation inputs and actual terminal consumer.
 - [x] Refuse promotion for failed, timed-out, missing, skipped, incomplete or
   stale qualification; cover these decisions with bounded in-process tests.
 - [x] Document invocation, input/evidence identity and failure ownership; retain
   the existing unit coverage, source integrity and publication gates.
-- [ ] Validate and land the implementation through normal review, and verify
+- [x] Validate and land the implementation through normal review, and verify
   actual gate activation without claiming an unperformed host rollout.
 
 ## Validation Plan
@@ -114,7 +114,7 @@ The following realization details are **agent-recommended**.
   fixture-owned resources without altering host daemons, sessions or selections.
 - [x] Gate decision tests reject stale candidate identities and every missing
   or non-success result; the live/native witness is not reclassified as unit proof.
-- [ ] A supported promotion run or the existing owner's equivalent exact-candidate
+- [x] A supported promotion run or the existing owner's equivalent exact-candidate
   qualification demonstrates that this gate actually blocks publication.
 - [x] Source review, required CI and installation-contract checks pass; any
   unavailable validation tier or actual infrastructure blocker is explicit.
@@ -613,3 +613,168 @@ inventory; unsupported execution must not be reported as a successful gate.
   interpreter lacks pytest-timeout, so its native timeout markers were not
   exercised. Full native qualification still uses the canonical managed
   environment and unchanged installed-TTY deadlines.
+
+### 2026-11-09 - Exact-head native qualification and fixture merge
+
+- Owner-only run 42719539629, attempt 1, qualified exact source
+  `5c4e1a4a6352ac2a8f7a514f101332536149458a`. The typed result reports
+  `qualified` and matching requested/actual source. The actual fresh-install,
+  generated-project-binstub and ConPTY test passed in 188.511 seconds,
+  including both shell entry points, visible keyboard-driven quit, successful
+  interactive exit, live installed-process attribution, genuine installed
+  launch-failure negative control and owned cleanup. The process-attribution
+  regression also passed.
+- All current required CI checks passed. Copilot review 5834268960 reported
+  no open issues and identified the pending full native result; that result
+  is now recorded in the PR description. Updating genuine validation metadata
+  started a fresh CI run, so completion waited for run 42720628475 to finish
+  successfully rather than trusting an older green check with the same name.
+- PR #11771 merged at 23:31:48 UTC as
+  `9b46f35bb69a2474eaf5ed89e41a1c1c4d9ada6c`. Pull-forward verified every
+  authored path matches the merged source and retained independent Dev changes.
+  The source fix is merged, not yet claimed released or installed.
+- Next: observe the existing normal release owner include this fixture,
+  refresh the same workflow-only Main activation PR, and prove the activated
+  gate against an actual frozen candidate. Phase 3 and its release-enforcement
+  validation remain open. No operator runtime update is authorized or claimed
+  by this source qualification.
+
+### 2026-11-09 - Corrected fixture released; Main activation refreshed
+
+- Normal release run 42722297716 qualified merged Dev
+  `9b46f35bb69a2474eaf5ed89e41a1c1c4d9ada6c`, published and independently
+  read back immutable assets, and merged generated release #11788 at
+  23:55:53 UTC as `b00c223766f468e0f9255e97cc0c021781f34034`. Main's
+  release receipt names that exact Dev source. No duplicate generation was
+  dispatched.
+- The same independently reviewed Main activation PR #11478 now carries
+  prepared head `e45ae9a61678a4f8c347a822e0db488f5a1e7e16` on that released
+  baseline. Its only change remains the controller workflow; its SHA-256
+  remains `7ffbd3c34ab8add7e6af2d69522510704b6076304673f67ae76d64af83899171`.
+  Current released tools passed all 25 exact publication-boundary and 42
+  merge-wait cases, plus Actions lint.
+- Fresh exact-head installed-TTY qualification was accepted by the existing
+  Windows owner under request `dfd599feb18340abb4a678853426133a`, with the
+  released Main as its control. Current review, required checks and that
+  native result remain prerequisites to activation. Actual frozen-candidate
+  enforcement after activation and any separately authorized operator rollout
+  remain open.
+- That exact-head native request completed successfully as run 42725413516,
+  attempt 1. Its typed outcome is `qualified`, actual source equals the
+  prepared head, and the real fresh-install/project-binstub/ConPTY case passed
+  in 152.139 seconds (198.813 seconds total). Current prepared-membership
+  checks passed on Windows and Linux, and the genuine PR evidence update's
+  fresh required Main checks passed. No fresh review arrived within the full
+  ten-minute post-push wait, so review was explicitly re-requested without
+  changing the qualified head or bypassing the gate.
+- Copilot review 5834775363 approved that exact head with no open issues.
+  The managed merge then correctly refused strict base freshness: normal
+  release advanced Main to `9324da33891644180b0237cccaadf8d9aa086a4b`.
+  The intervening release includes runtime changes, so the same activation
+  PR was refreshed to `9043f3bf7080bf9cb4829242fa2b3fca56844877` on that
+  baseline. The controller bytes remain unchanged, and newly released tools
+  again passed all 25 publication-boundary and 42 merge-wait cases plus
+  Actions lint. Fresh native request `4e9290f1f4284fde914879f66f968ea2` and
+  current-head review remain pending. No global release pause or strict
+  freshness bypass was introduced.
+- The refreshed native request passed as run 42728520714, attempt 1:
+  actual source equals `9043f3bf7080bf9cb4829242fa2b3fca56844877`,
+  outcome `qualified`, real installed-TTY case 176.557 seconds and total
+  227.203 seconds. Its genuine evidence update's required checks also passed.
+  The automatic review wait timed out without a new verdict.
+- Normal release then advanced Main to
+  `77b783ec33037b39490f48c242d4fc838f82efc4`, including Manager plugin-contract
+  runtime changes. The same PR was refreshed to
+  `f20ee5d29fe67aef296f6eba1ca5821062201c6a`; the owed review was explicitly
+  requested immediately after publication. Native request
+  `245fe9a3fd3643d5b06cc3df5cbe6029` is accepted against that exact head.
+  Release tools and workflow files are byte-identical between the last two
+  prepared heads, so their already-passing 67 contract cases were not repeated.
+  Actual runtime qualification is being repeated because its inputs changed.
+- The latest exact head qualified in run 42730517018, attempt 1, under
+  request `245fe9a3fd3643d5b06cc3df5cbe6029` and control
+  `77b783ec33037b39490f48c242d4fc838f82efc4`. Actual source matches
+  `f20ee5d29fe67aef296f6eba1ca5821062201c6a`; outcome is `qualified`.
+  The real installed-TTY case passed in 152.879 seconds (229.625 seconds
+  total). Copilot review 5834978032 approved that exact head with no open
+  issues, no unresolved threads remain, and current required checks pass.
+  Activation still requires a provider-confirmed exact-head merge.
+
+### 2026-11-10 - Independently reviewed Main gate activated
+
+- PR #11478 merged at 00:52:07 UTC as
+  `556cb3df2969b614704b827428ed9bf4e335b29c` after exact-head native
+  qualification, approval 5834978032, green required checks and no unresolved
+  threads. Its single workflow change is now the preserved Main controller.
+  No strict freshness, CI, review, Actions-event or security gate was bypassed.
+- Re-read the effort's Plan and Validation Plan after that merge. Source
+  implementation and controller activation are complete, but the effort
+  remains Active: actual frozen-candidate installed-TTY evidence admission and
+  publication enforcement still require live release proof.
+- Automatic release run 42731655802 already uses the new controller commit.
+  Follow that existing owner rather than dispatching a duplicate generation.
+  Older running controller generations retain their ordinary freshness fence;
+  no global pause or cancellation of another owner's candidate is authorized.
+- No operator installation or host rollout is performed or claimed by this
+  activation. Separately authorized deployment remains a separate objective.
+
+### 2026-11-10 - Actual frozen-candidate TTY evidence produced
+
+- The activated controller's automatic run 42731655802, attempt 1, passed
+  `Require installed project Manager TTY readiness` (job 129551751086).
+  Its actual installed-TTY receipt reports cold construction, generated
+  project launchers through CMD and PowerShell, visible keyboard-driven
+  input, successful exits, a genuine installed-launch-failure control and
+  complete owned cleanup in 178.375 seconds.
+- The receipt's six identities match the independent frozen-owner metadata:
+  candidate `4e553df5ad89d3dd1aa6f3acec3ce0ff33c284f6`,
+  tree `bf6fce88f18f865e9dd0f1507eb217f6c155d62d`,
+  Dev source `839bf70f809ca42d97f9ac26c4f650620119fa2b`,
+  prior Main `556cb3df2969b614704b827428ed9bf4e335b29c`,
+  run 42731655802 and attempt 1.
+- The native artifact is immutable ID 13724324587, name
+  `promotion-installed-manager-42731655802-1`, archive digest
+  `sha256:32cdd16780c48a097236dc9a72e812904103fe5fd438651bb17808f0fade63fe`.
+  The downloaded receipt's SHA-256 is
+  `581660a69557bb2027372d7edbe5ad1faaea5338bc19653d12b0db55a8350a39`.
+- The actual downloaded receipt passed the canonical admission CLI using
+  independently read frozen identities. Thirteen controls were refused:
+  a missing receipt, each of six stale identities, and incomplete cold
+  installation, generated launcher, negative-control rejection, owned
+  cleanup, overall completion or visible input. All 14 contained CLI
+  admission/refusal checks passed; the validator bytes match the qualified
+  Dev source. No intentionally failing production release was injected.
+- All live qualification and artifact-attestation jobs passed. Final
+  publication must still admit the exact immutable native artifact and
+  receipt digest, and the generated release must actually merge before this
+  effort can be Done. A native job pass alone does not close that gate.
+- The older controller run 42730114810 refused publication with
+  `qualification source/base changed: main` after activation advanced Main.
+  That is the existing generation fence, not a test failure to ignore; the
+  automatically admitted current-controller run owns the replacement.
+
+### 2026-11-10 - Live gated release merged; effort complete
+
+- The live promotion job 129554134574 successfully downloaded the exact
+  native producing artifact, then passed
+  `Verify the native receipt and immutable artifact ownership before promotion`
+  before creating the candidate branch or enabling publication. Its actual
+  environment names artifact ID 13724324587, the archive and receipt digests
+  recorded above, and the same six frozen-candidate/run identities.
+- Run 42731655802 completed successfully through all qualification,
+  attestation, publication/readback and nonadministrator exact-head merge
+  jobs. Generated release PR #11811 merged at 01:09:20 UTC as
+  `3993324d54525097b6355938b456d32f11183e8c`, from the exact qualified
+  candidate `4e553df5ad89d3dd1aa6f3acec3ce0ff33c284f6`.
+- Re-read the Plan and Validation Plan after the release merge. Every item
+  is resolved: the actual frozen candidate installs and reaches an
+  input-responsive project-binstub TTY, the genuine installed-launch-failure
+  control is rejected, missing/stale/incomplete actual receipt variants are
+  refused, and the live promotion owner admits the immutable evidence before
+  publication. Failure-state publication decisions remain covered by the
+  bounded controller tests; no intentionally failing production release was
+  injected or represented as a live failure result.
+- This effort is Done. Publish this final evidence journal through the normal
+  Dev review flow and finalize its source worktree after merge. No operator
+  runtime installation is claimed; any separately authorized deployment is
+  outside this completed gate effort.
