@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify existing Configuration forms against native local knowledge registration.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

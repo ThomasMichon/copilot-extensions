@@ -89,6 +89,46 @@ written. Unrecognized local registry metadata is preserved by this API.
 YAML aliases are detached at the selected registration before an edit, so
 unselected registrations and metadata cannot change through shared mappings.
 
+## Register an existing local knowledge checkout
+
+For a canonically registered, unbound stateless harness, the native catalog
+offers **Register an existing local knowledge checkout**. Supply a new name,
+an absolute existing Git anchor, the intended default branch and an optional
+nonsecret repository-account mapping. The branch and account are registration
+metadata, not observations of the server default, landing policy or credentials.
+Ordinary and bare anchors are supported; task worktrees, descendants and
+existing name/path/repository-identity collisions require their normal owners.
+
+```text
+agent-worktrees repos configuration knowledge-register-preview --context-project sample --repository knowledge --checkout-path <absolute-anchor> --default-branch main
+agent-worktrees repos configuration knowledge-register-apply --context-project sample --repository knowledge --checkout-path <absolute-anchor> --default-branch main --preview-token <returned-token>
+```
+
+Add `--account <non-secret-login>` to both commands to declare an explicit
+mapping. Preview performs bounded, noninteractive local Git reads only. It
+does not contact the origin or inspect credentials. An origin containing
+embedded HTTP credentials or URL parameters refuses without disclosing it.
+The preview identifies the local registration action and its exact selected
+inputs. Apply requires confirmation, rechecks those inputs under the shared
+registry lock, and uses the existing compare-before-replace writer. Unrelated
+registry metadata is preserved. A concurrent registry, configuration, binding,
+checkout or origin change requires a new preview; existing registrations are
+never overwritten or reclassified.
+
+Successful return means registration only: a new non-agent `class: knowledge`
+entry and normal registry lock sidecars. Unlike ordinary `repos add`, this
+operation does not pin Git credentials. It does not create/clone a repository,
+write Git configuration or branches, bind knowledge, compose an overlay,
+allocate a pair/worktree or launch a session. Refresh and use the separately
+confirmed binding action below. A lost result requires catalog readback before
+retry; an already-present registration is a conflict, not an overwrite request.
+
+The executing catalog supplies a dedicated optional row/marker for this
+operation. Older providers omit it, so a newer manifest does not emit the new
+syntax to them. Older manifests retain existing behavior; hosts that cannot
+execute provider previews cannot apply without a valid token. Rollback affects
+only this optional action, not preferences, inspection or existing binding.
+
 ## Confirmed existing knowledge binding
 
 When the selected harness requires missing knowledge, **Bind this existing

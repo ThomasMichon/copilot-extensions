@@ -1,6 +1,6 @@
 # Phase 5 - Confirmed local knowledge registration
 
-- **Status:** Proposed owner contract; no implementation or receiving acceptance.
+- **Status:** Contract reviewed in #11920; native and Configuration source qualification in progress.
 - **Parent:** [Configuration workbench](phase-5-configuration-workbench.md).
 - **Coordination:** #1419 Track 3; bounded source slice `shiny-actuator`.
 - **Vision:** [Knowledge selection](../../../visions/installer/configurator/README.md#knowledge-selection-and-portable-defaults).
@@ -98,21 +98,21 @@ operation; preferences, inspection and existing binding remain usable.
 
 ## Dependency-ordered delivery and validation
 
-- [ ] Review this owner contract before adding executable caller syntax.
-- [ ] Implement the standalone native preview/apply and registration-only
-  writer option, preserving all ordinary registration behavior.
-- [ ] Connect the existing Configuration contribution conditionally; prove
+- [x] Review this owner contract before adding executable caller syntax.
+- [x] Implement the standalone native preview/apply and registration-only
+  transaction, preserving all ordinary registration behavior.
+- [x] Connect the existing Configuration contribution conditionally; prove
   collected values, preview, cancel, confirmation, result and refresh through
   the real native CLI boundary.
-- [ ] Cover ordinary and bare local repositories, local-only/provider origins,
+- [x] Cover ordinary and bare local repositories, local-only/provider origins,
   explicit metadata, malformed paths/configuration/registry, self/descendant/
   task-worktree selection, name/path/identity collisions and post-preview
   drift. A lock waiter must recheck the winning state.
-- [ ] Compare complete fixture Git/config/source trees before/after browse,
+- [x] Compare complete fixture Git/config/source trees before/after browse,
   preview, cancel, refused apply and successful registration. Only the exact
   registry entry and normal owned lock sidecars may change. Specifically prove
   no credential pin, branch/ref, binding, overlay or worktree mutation.
-- [ ] Prove ordinary registration still pins when appropriate; new/old
+- [x] Prove ordinary registration still pins when appropriate; new/old
   provider/manifest/Manager and supported rollback paths retain their promised
   behavior. Keep genuine failure/cleanup outcomes and fixed aggregate budgets.
 - [ ] Run required source checks, review and CI before merge. Record native
@@ -127,3 +127,49 @@ restarted model/decline, shared provider landing-policy preflight/recovery,
 general existing-task pairing and cleanup remain with their current owners.
 No live registration, binding, authentication, installation, service operation,
 rollout or resource allocation is authorized by this proposal.
+
+## Source qualification
+
+The implementation reuses the native compare-before-replace registry
+transaction directly. It preserves unknown registry metadata and never calls
+ordinary registration's credential-pinning follow-up. Neither `repos add` nor
+the binding payload changes. The selected catalog emits a distinct optional
+action row; no registration marker appears on ordinary repository rows.
+
+Final focused native controls pass 17 cases, including real ordinary/bare CLI
+transactions, replay/old-host refusal, input drift, remote identity collision,
+linked task and indirect metadata refusal, literal branch validation, shared
+owned Git budget and context isolation, and a real registry-lock waiter behind
+an ordinary native preference write. An additional real CLI case passes with
+remote/account metadata and complete Git/config preservation.
+
+The full Manager Repositories Configuration file passes all 23 cases. The new
+production form drives the real native CLI through browse, collected values,
+preview, default Cancel, confirmed apply, receipt and originating-scope refresh.
+Only the new registry entry and the two normal owned lock sidecars change.
+The native catalog remains unbound after registration. The actual manifest
+condition withholds the action from a legacy row lacking its marker.
+
+The earlier broader native file had 146 passes and one failure in the new
+concurrency test: its snapshot tried to read an actively held Windows lock.
+The corrected control excludes only those exact two owned sidecars while
+locked and still compares every other fixture byte. It passes in the final
+focused packet; that earlier whole packet is not relabeled as a pass.
+
+Five existing ordinary-registration pin controls also pass. Qualification
+exposed two fixtures still relying on namespace-as-login inference retired by
+merged #11751. They now declare their synthetic account explicitly and keep
+the active-account observation synthetic. This updates the fixtures, not the
+account resolver or ordinary credential-pinning implementation.
+
+Native reads share one 18-second aggregate and apply one 26-second aggregate,
+with their original cleanup reserves and the existing registry lock. Each of
+the three local Git reads has its own four-second cap within that aggregate.
+The catalog adds no Git/provider read for this action. No deadline, liveness
+assertion, process containment or source-safety check is relaxed.
+
+These are contained source and fresh-private-home consumer results, not an
+installed desktop, complete bootstrap, first-restarted model, provider consent
+or receiving result. No installer behavior changes; a full fresh-OS provisioning
+lane and live external operations are not run under this source-only slice.
+Review, required CI and independently authorized rollout remain separate.
