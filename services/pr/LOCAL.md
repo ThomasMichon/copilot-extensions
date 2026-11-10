@@ -175,7 +175,9 @@ fall back to one-shot watch, a state-file read or an ambient account.
 Source limits are eight admitted requests/connections, 8 KiB headers, 32 KiB
 request bodies, 1 MiB selected responses, query/event pages of 1..16 and
 subscription TTL 1..86,400 seconds. Follow intervals are 1..300 seconds and
-polling windows 1..3,600 seconds; individual transport waits are bounded too.
+polling windows 1..3,600 seconds. The original monotonic follow deadline bounds
+capability discovery, event reads, ACK and every socket send/receive; a slow
+or trickling peer cannot reset that window. No new ACK starts after expiry.
 History gaps return 410 and require explicit baseline/new-subscription recovery,
 not silent cursor advancement or successful ACK. Backpressure preserves
 unsettled deliveries instead of evicting them.
@@ -187,6 +189,8 @@ Version 2 reserves 1 MiB within that extension for registration/delivery/ACK
 progress, so a full facts/history payload cannot prevent the ACK that relieves
 pressure. Only settled old history may evict; newly published and unresolved
 delivery events remain protected.
+Eviction measures cache sizes once and subtracts each settled event's encoded
+bytes; it does not repeatedly serialize the full cache under the shared lock.
 Settled expired registration metadata may retire after its documented
 one-day reconciliation window; unresolved delivered IDs are not discarded.
 Terminal/cache capacity backpressure is explicit, never a data-reset operation.

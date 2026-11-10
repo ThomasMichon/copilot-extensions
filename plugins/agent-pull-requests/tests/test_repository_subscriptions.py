@@ -214,3 +214,32 @@ def test_query_pages_by_encoded_bytes_without_losing_current_rows(selected, monk
             break
         after = page["pulls"][-1]["number"]
     assert numbers == list(range(1, 17))
+
+
+def test_large_settled_history_trimming_does_not_reencode_full_cache_per_eviction(selected, monkeypatch):
+    import copy
+    import json
+    from agent_pull_requests import repository_state
+    from agent_pull_requests.repository_projection import _trim_bytes
+    observe(selected)
+    state = selected[1]._review_transaction(
+        lambda value: copy.deepcopy(value["repository_cache"]), expires_at=10000, persist=False,
+    )
+    event = state["events"][-1]
+    state["events"] = [
+        {**copy.deepcopy(event), "sequence": sequence, "event_id": f"{sequence:032x}"}
+        for sequence in range(1, 1001)
+    ]
+    state["next_sequence"] = 1001
+    original, full_encodes = json.dumps, []
+    def measured(value, **kwargs):
+        if isinstance(value, dict) and set(value) == set(state):
+            full_encodes.append(len(value["events"]))
+        return original(value, **kwargs)
+    monkeypatch.setattr(repository_state, "MAX_CACHE_BYTES", 8192)
+    monkeypatch.setattr(repository_state, "METADATA_RESERVE_BYTES", 4096)
+    monkeypatch.setattr(repository_state.json, "dumps", measured)
+    _trim_bytes(state, 100, 1001, 2)
+    assert 0 < len(full_encodes) <= 3
+    assert 0 < len(state["events"]) < 20 and state["events"][-1]["sequence"] == 1000
+    assert len(original(state).encode()) <= 4096

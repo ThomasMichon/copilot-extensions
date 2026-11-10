@@ -166,9 +166,17 @@ def validate(value: object, namespace: str, *, version: int = 1) -> None:
         raise RepositoryBackpressure("repository cache byte capacity exceeded")
 
 
-def fits(value, *, version=1):
+def encoded_sizes(value):
     total = len(json.dumps(value, allow_nan=False).encode())
     payload = len(json.dumps({**value, "registrations": []}, allow_nan=False).encode())
+    return total, payload
+
+
+def sizes_fit(total, payload, *, version=1):
     return total <= MAX_CACHE_BYTES and payload <= MAX_CACHE_BYTES - (
         METADATA_RESERVE_BYTES if version == 2 else 0
     )
+
+
+def fits(value, *, version=1):
+    return sizes_fit(*encoded_sizes(value), version=version)

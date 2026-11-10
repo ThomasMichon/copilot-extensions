@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import uuid
 
 from .repository_contract import MAX_EVENTS, MAX_PULLS, RepositoryBackpressure, RepositoryIdentity
@@ -69,20 +70,29 @@ def _event(state, target, number, kind, facts, now):
 
 
 def _trim_bytes(state, now, first_new, version):
-    from .repository_state import fits
-    while not fits(state, version=version):
-        if not state["events"]:
+    from .repository_state import encoded_sizes, sizes_fit
+    total, payload = encoded_sizes(state)
+    events, removed = state["events"], 0
+    active = _active(state, now)
+    while not sizes_fit(total, payload, version=version):
+        if removed == len(events):
             raise RepositoryBackpressure("current facts exceed the reserved payload capacity")
-        first = state["events"][0]
+        first = events[removed]
         protected = any(
             row["target"] == first["target"] and row["acknowledged"] < first["sequence"]
             and (not row["cancelled"] and row["expires_at"] > now
                  or first["sequence"] <= row.get("delivered", row["acknowledged"]))
-            for row in _active(state, now)
+            for row in active
         )
         if protected or first["sequence"] >= first_new:
             raise RepositoryBackpressure("unsettled or newly published events exceed capacity")
-        state["events"].pop(0)
+        amount = len(json.dumps(first, allow_nan=False).encode()) + (
+            2 if len(events) - removed > 1 else 0
+        )
+        total, payload = total - amount, payload - amount
+        removed += 1
+    if removed:
+        state["events"] = events[removed:]
 
 
 def _new_repository(identity):

@@ -36,17 +36,46 @@ class LocalClientError(ValueError):
     """A bounded unavailable/unsupported response leaves original identities intact."""
 
 
+class LocalDeadlineExpired(LocalClientError):
+    """The original finite polling window ended without advancing delivery."""
+
+
+class _DeadlineSocket(socket.socket):
+    deadline: float
+
+    def __init__(self, deadline: float) -> None:
+        if sys.platform != "linux":
+            raise LocalClientError("Linux local transport required")
+        super().__init__(socket.AF_UNIX)
+        self.deadline = deadline
+
+    def budget(self) -> None:
+        remaining = self.deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("local transport deadline expired")
+        self.settimeout(remaining)
+
+    def recv_into(self, *args: Any, **kwargs: Any) -> int:
+        self.budget()
+        return super().recv_into(*args, **kwargs)
+
+    def sendall(self, data: Any, flags: int = 0) -> None:
+        self.budget()
+        super().sendall(data, flags)
+
+
 class _Connection(http.client.HTTPConnection):
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, *, deadline: float | None = None) -> None:
         super().__init__("localhost", timeout=30)
         self.path = path
+        self.deadline = min(deadline, time.monotonic() + 30) if deadline is not None else time.monotonic() + 30
 
     def connect(self) -> None:
         if sys.platform != "linux" or not self.path.is_absolute():
             raise LocalClientError("Linux absolute Unix socket required")
-        connection = socket.socket(socket.AF_UNIX)
-        connection.settimeout(self.timeout)
+        connection = _DeadlineSocket(self.deadline)
         try:
+            connection.budget()
             connection.connect(str(self.path))
             peer = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
             if struct.unpack("3i", peer)[1] != os.getuid():
@@ -63,9 +92,12 @@ class LocalClient:
             raise LocalClientError("invalid configured target")
         self.path, self.namespace, self.target = path, namespace, target
         self.binding: dict[str, Any] | None = None
+        self.deadline: float | None = None
 
     def _http(self, method: str, operation: str, value: dict[str, Any] | None = None) -> dict[str, Any]:
-        connection = _Connection(self.path)
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise LocalDeadlineExpired("finite polling window elapsed; original IDs retained")
+        connection = _Connection(self.path, deadline=self.deadline)
         try:
             body = json.dumps(value, allow_nan=False).encode() if value is not None else None
             path = "/v1/repositories" if operation == "list" else f"/v1/repositories/{self.target}/{operation}"
@@ -86,6 +118,8 @@ class LocalClient:
                 raise LocalClientError("local namespace/contract differs")
             return value
         except (OSError, http.client.HTTPException, UnicodeError, json.JSONDecodeError):
+            if self.deadline is not None and time.monotonic() >= self.deadline:
+                raise LocalDeadlineExpired("finite polling window elapsed; original IDs retained") from None
             raise LocalClientError("local service unavailable; retain original request/registration IDs") from None
         finally:
             connection.close()
@@ -166,12 +200,15 @@ def run(args: argparse.Namespace) -> int:
         if not 1 <= args.timeout <= 3600 or not 1 <= args.interval <= 300:
             raise LocalClientError("finite follow budgets required")
         deadline = time.monotonic() + args.timeout
+        client.deadline = deadline
         while time.monotonic() < deadline:
             result = client.request("events", payload)
             print(json.dumps(result, allow_nan=False), flush=True)
             if result["events"]:
                 last = result["events"][-1]
                 if args.ack:
+                    if time.monotonic() >= deadline:
+                        return 0
                     client.request("acknowledge", {
                         "registration_id": args.registration_id, "event_id": last["event_id"],
                     })
@@ -182,6 +219,8 @@ def run(args: argparse.Namespace) -> int:
                 return 0
             time.sleep(min(args.interval, max(0, deadline - time.monotonic())))
         return 0
+    except LocalDeadlineExpired:
+        return 0 if args.command == "follow" else 2
     except LocalClientError as error:
         print(f"local repository request refused: {error}", file=sys.stderr)
         return 2
