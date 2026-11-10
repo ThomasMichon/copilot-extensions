@@ -450,3 +450,61 @@ values. Foreign engine/worktree reads refuse; unconfirmed diagnostic-process
 cleanup remains a hard failure. All seven focused projection/privacy/custody/
 discovery controls passed. This is diagnostic work, not a liveness fix or
 Resume acceptance.
+
+### 2026-11-10 - Retaining bound-live hint and dropped Refresh request identified
+
+Run 42811263198 at `749673de7fa7a81ba853d765b1a7d4d4aebd52a5`
+again proved normal native exit zero and unchanged identity, then failed
+stopped-state discovery after the real UI Refresh. The pre-teardown installed
+engine capture identifies `session_bound_live=true`; mux presence and attachment
+are false, clients are zero, and no `session_lock_live` field is emitted.
+This identifies the retaining hint, not a remaining native owner or a
+particular process identity.
+
+The source trace finds that Manager requests a current-roster point read with
+`refresh=True`. The engine routes it to `worktrees_client.emit_current` before
+the legacy refresh helper. That reader validates `--refresh` but omits it from
+the resident request, losing the requested bound/mux reconciliation. A repair
+must preserve resident authority and prove the requested observation/publication
+boundary; caller-side legacy scans, forced flags, TTL waits and substituting
+Open for Resume are not acceptance.
+
+The exact finding and repair-ownership request are recorded on #11377
+(comment 6766917141). The fleet coordinator identified a potentially overlapping
+current-roster publication owner, who received a bounded seam query. Active
+overlapping hunks and the separately held idle-project policy must be reconciled
+before editing that surface. No engine, shared native helper, runner/result or
+Main controller change is included here. Draft #11864 remains unqualified;
+full suite/Machines, authentic update and mandatory candidate enforcement
+remain open.
+
+The identified current-roster owner subsequently confirmed no active overlapping
+hunks or pending repair. The campaign driver is implementing the isolated
+resident-side explicit-refresh request and publication barrier under the normal
+Dev review gates, without taking the idle-project policy or Main controller.
+
+The correction negotiates `worktrees-refresh-v1` with the actual authenticated
+resident, queues a bounded point request and accepts only its same-generation
+reconciliation/publication receipt. The producer uses the existing refresh
+helper with strict observation failures and registered-session scoping; neither
+caller scans nor cached mux receipts can replace its observed absence.
+Ambiguous selectors reject only their request, not the project's publications.
+Ordinary/passive/feed reads and the separate `--fresh` behavior are preserved.
+
+The six-file source regression selection passed 265 controls after correcting
+a test-thread event race, with three nominal CLI timing cases deselected only
+after retaining their actual failures. The final ambiguity/point-refresh
+selection passed all nine cases. Lint, module size and all 13 install contracts
+passed. The authenticated transport/producer controls are a simple integration
+check, not installed or frozen-candidate acceptance.
+
+The three unchanged two-second, 1,100-row CLI feed cases failed in the broader
+packet and again in a diagnostic-only import-profile run. The latter completed
+their first snapshots at 2.187, 3.063 and 3.688 seconds; none qualifies the
+nominal bound. The profile identifies startup before first health along the
+existing config/control import path. The optional Refresh import is lazy and
+not on that ordinary path. These failures remain explicitly linked to the open
+nominal-performance gaps #7935/#7936/#7946, not waived or reported as passes.
+No scaled timing run, host repair or production deadline change was performed.
+Clean-room and live external validation of this correction still require the
+next exact-source isolated installed-lifecycle run.

@@ -192,7 +192,7 @@ def _filter_list_worktree(records, raw_id: str):
     return matches
 
 
-def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
+def _refresh_list_record(rec: tracking.WorktreeRecord, *, strict: bool = False) -> None:
     """Repair and refresh one record before an explicit Picker row read."""
     if getattr(rec, "sessions", None) is None:
         try:
@@ -203,14 +203,20 @@ def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
             ]
             tracking.save_record(rec)
         except Exception:
-            pass
+            if strict:
+                raise
 
     try:
         bridge_live = rec.worktree_id in reclaim.live_bridge_worktrees()
+        scope = {"session_ids": [entry.session_id for entry in rec.sessions]} if strict else {}
         bound_live = (
-            bool(reclaim.resolve_bound_copilots(worktree_id=rec.worktree_id)) or bridge_live
+            bool(reclaim.resolve_bound_copilots(worktree_id=rec.worktree_id, **scope)) or bridge_live
         )
         mux_info = sessions.mux_status_many([rec.worktree_id]).get(rec.worktree_id)
+        if strict and (mux_info is None or not getattr(mux_info, "observed", True)):
+            from .mux_list_result import MuxObservationUnavailable
+
+            raise MuxObservationUnavailable("point-refresh mux observation is unavailable")
         mux_live = bool(mux_info and mux_info.exists)
         now = datetime.now().isoformat(timespec="seconds")
         rec.bound_live = bound_live
@@ -220,7 +226,8 @@ def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
         tracking.stamp_bound_live(rec.worktree_id, bound_live)
         tracking.stamp_mux_live(rec.worktree_id, mux_live, sync=True)
     except Exception:
-        pass
+        if strict:
+            raise
 
 
 def _list_error(args: argparse.Namespace, message: str) -> int:

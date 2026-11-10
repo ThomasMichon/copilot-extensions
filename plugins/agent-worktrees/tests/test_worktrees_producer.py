@@ -99,6 +99,106 @@ def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, 
         owner.shutdown()
 
 
+@pytest.mark.parametrize(("failure", "managed"), [
+    (None, False), (None, True), ("bound", False), ("mux", False),
+    ("later-mux", False), ("publication", False), ("ambiguous", False),
+])
+def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
+    tmp_path, monkeypatch, failure, managed,
+):
+    from datetime import datetime
+
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    record = tracking.WorktreeRecord(
+        worktree_id="one", branch="worktree/one", worktree_path=str(checkout),
+        repo="project", machine="host", platform="windows", title="Task",
+        started_at="", last_resumed_at="", resume_count=0, status="active",
+        completed_at=None, sessions=[], bound_live=True,
+        bound_live_at=datetime.now().isoformat(),
+    )
+    monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
+    config_path = producer.cfg.project_dir("project") / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps({"repos": {"project": {"anchor": str(checkout)}}}))
+    records = [record]
+    if failure == "ambiguous":
+        from dataclasses import replace
+
+        records.append(replace(record, worktree_id="two-one"))
+    monkeypatch.setattr(tracking, "list_records", lambda *a, **kw: records)
+    monkeypatch.setattr(tracking, "stamp_bound_live", lambda *a, **kw: None)
+    monkeypatch.setattr(tracking, "stamp_mux_live", lambda *a, **kw: None)
+    bound_reads = []
+
+    def bound(**kwargs):
+        bound_reads.append(kwargs)
+        if failure == "bound":
+            raise OSError("bound observation failed")
+        return []
+
+    monkeypatch.setattr(reclaim, "resolve_bound_copilots", bound)
+    monkeypatch.setattr(reclaim, "bare_orphan_worktree_ids", lambda: set())
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
+    monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: sessions.SessionContext())
+    mux_reads = []
+
+    def mux(ids):
+        mux_reads.append(ids)
+        if failure == "later-mux" and len(mux_reads) > 1:
+            raise producer.MuxObservationUnavailable("publication mux observation failed")
+        return {} if failure == "mux" else {"one": sessions.MuxInfo(exists=False, clients=0)}
+
+    monkeypatch.setattr(sessions, "mux_status_many", mux)
+    monkeypatch.setattr(core, "_classify_records_live", lambda *a, **kw: {
+        "one": git_ops.WorktreeStateInfo(state=git_ops.WorktreeState.WIP),
+    })
+    owner = WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    options = {}
+    if managed:
+        cache = mux_link.ManagedMuxCache()
+        cache.apply_observation({
+            "project": "project", "worktree_id": "one", "mux_session": "managed-one",
+            "mapping_revision": 1, "live": True, "attached_clients": 2,
+            "panes": [], "worktree_path": str(checkout),
+        })
+        options["managed_mux_cache"] = cache
+    query = {"contract_version": 1, "project": "project", "worktree_id": "one", "refresh_id": "a" * 32}
+    if failure == "ambiguous":
+        query["worktree_id"] = "ne"
+    try:
+        owner.publish("project", [{"id": "one", "session_bound_live": True}], observed_at=1)
+        assert owner.handle(query)["error"]["code"] == "unready"
+        if failure == "publication":
+            def failed_publish(*a, **kw):
+                raise OSError("publication failed")
+
+            monkeypatch.setattr(owner, "publish", failed_publish)
+        if failure == "ambiguous":
+            assert producer.publish_active_project(owner, **options) == 2
+            assert owner.handle(query)["error"]["code"] == "invalid-request"
+            assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
+            assert owner.refreshes.pending("project") == ()
+        elif failure:
+            with pytest.raises((OSError, producer.MuxObservationUnavailable)):
+                producer.publish_active_project(owner, **options)
+            assert owner.handle(query)["error"]["code"] == "unready"
+            assert owner.refreshes.pending("project")
+        else:
+            assert producer.publish_active_project(owner, **options) == 1
+            result = owner.handle(query)
+            assert result["ok"] is True and result["point_refresh"]["request_id"] == "a" * 32
+            assert record.bound_live is False
+            assert result["worktrees"][0].get("session_bound_live") is not True
+            assert result["worktrees"][0]["mux_session"] is False
+        assert bound_reads == ([] if failure == "ambiguous" else [
+            {"worktree_id": "one", "session_ids": []},
+        ])
+    finally:
+        owner.shutdown()
+
+
 @pytest.mark.parametrize(("failure", "managed_state"), [
     (None, None), (sqlite3.OperationalError, None), (KeyError, None),
     (None, "live"), (None, "stale"), (None, "other-project"),

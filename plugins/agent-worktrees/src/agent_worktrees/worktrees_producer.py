@@ -85,6 +85,24 @@ def _publish_active_project(
     records = tracking.list_records(cfg.tracking_dir(project))
     if observe_records is not None:
         observe_records(project, records)
+    refresh_requests = runtime.refreshes.pending(project)
+    refreshed = set()
+    if refresh_requests:
+        from .list_cli import _filter_list_worktree, _refresh_list_record
+
+        accepted_requests = []
+        for request_id, selector in refresh_requests:
+            try:
+                selected_records = _filter_list_worktree(records, selector)
+            except ValueError as error:
+                runtime.refreshes.reject(request_id, str(error))
+                continue
+            for record in selected_records:
+                if record.worktree_id not in refreshed:
+                    _refresh_list_record(record, strict=True)
+                    refreshed.add(record.worktree_id)
+            accepted_requests.append((request_id, selector))
+        refresh_requests = tuple(accepted_requests)
     session_ctx = sessions.scan_sessions_fast(records)
     try:
         mux_map = sessions.mux_status_many([rec.worktree_id for rec in records])
@@ -92,12 +110,16 @@ def _publish_active_project(
     except MuxObservationUnavailable:
         mux_map = {}
         mux_observed = False
+    if refresh_requests and not mux_observed:
+        raise MuxObservationUnavailable("point-refresh publication lacks a current mux observation")
     # Fresh receipt alone cannot qualify cached counts during observation loss.
     if managed_mux_cache is not None and mux_observed:
         from .mux_link import MAPPING_STALE_AFTER_SECONDS
 
         now = time.time()
         for record in records:
+            if record.worktree_id in refreshed:
+                continue
             entry = managed_mux_cache.get(project, record.worktree_id)
             received_at = entry.get("received_at") if entry else None
             if (
@@ -135,6 +157,7 @@ def _publish_active_project(
         delegate_cli.annotate_delegate_graph(rows, current_only=True)
         runtime.publish(
             project, rows, observed_at=observed_at, collected_from=collected_from,
+            refresh_requests=refresh_requests,
             record_heads={
                 record.worktree_id: {
                     "creation_nonce": record.creation_nonce,

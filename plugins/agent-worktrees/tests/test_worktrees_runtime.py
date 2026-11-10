@@ -31,6 +31,10 @@ def request(**selection):
         request(passive=1),
         request(worktree_id=""),
         request(history=True),
+        request(refresh_id="a" * 32),
+        request(worktree_id="one", refresh_id=True),
+        request(worktree_id="one", refresh_id="a" * 32, passive=True),
+        request(worktree_id="one", refresh_id="a" * 32, bootstrap=True),
     ],
 )
 def test_worktrees_runtime_rejects_malformed_requests_without_storage(tmp_path, payload):
@@ -93,6 +97,59 @@ def test_worktrees_runtime_authenticated_transport_and_drain(tmp_path):
         assert client.worktrees_read(request())["ok"] is True
     finally:
         server.close()
+        owner.shutdown()
+
+
+def test_point_refresh_requires_its_reconciled_publication_not_an_unrelated_publish(tmp_path):
+    wake = threading.Event()
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3", wake=wake)
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32)
+    try:
+        owner.publish("project", [{"id": "one", "session_bound_live": True}], observed_at=1)
+        wake.clear()
+        assert owner.handle(query)["error"]["code"] == "unready"
+        assert wake.is_set()
+        pending = owner.refreshes.pending("project")
+        assert pending == (("a" * 32, "one"),)
+        owner.publish("project", [{"id": "one"}], observed_at=2)
+        assert owner.handle(query)["error"]["code"] == "unready"
+        owner.publish("project", [{"id": "one"}], observed_at=3, refresh_requests=pending)
+        result = owner.handle(query)
+        assert result["point_refresh"] == {
+            "request_id": "a" * 32,
+            "generation": result["projection"]["generation"],
+            "revision": 3,
+        }
+        assert owner.handle(query)["point_refresh"] == result["point_refresh"]
+        assert owner.refreshes.pending("project") == ()
+        changed = owner.handle({**query, "worktree_id": "other"})
+        assert changed["error"]["code"] == "invalid-request"
+        owner.close_admission()
+        owner.activate()
+        assert owner.handle(query)["error"]["code"] == "unready"
+    finally:
+        owner.shutdown()
+
+
+def test_point_refresh_queue_is_bounded_and_never_evicts_pending_requests(tmp_path):
+    from agent_worktrees.worktrees_refresh import MAX_REQUESTS
+
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    try:
+        for index in range(MAX_REQUESTS):
+            assert owner.handle(request(
+                worktree_id="one", refresh_id=f"{index:032x}",
+            ))["error"]["code"] == "unready"
+        overflow = request(worktree_id="one", refresh_id=f"{MAX_REQUESTS:032x}")
+        assert owner.handle(overflow)["error"]["code"] == "invalid-request"
+        pending = owner.refreshes.pending("project")
+        assert len(pending) == MAX_REQUESTS
+        owner.publish("project", [{"id": "one"}], observed_at=1, refresh_requests=pending[:1])
+        assert owner.handle(overflow)["error"]["code"] == "unready"
+        assert owner.refreshes.pending("project") == pending[1:] + ((overflow["refresh_id"], "one"),)
+    finally:
         owner.shutdown()
 
 

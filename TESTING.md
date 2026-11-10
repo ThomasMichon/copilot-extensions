@@ -718,6 +718,12 @@ must visibly discover the stopped worktree and offer Resume. The fixture
 checks the original tracking identity before that refresh, selects Refresh
 only after observing its actual highlight, and never injects mux absence
 or substitutes Open for an unavailable Resume.
+The source controls in `test_worktrees_runtime.py`, `test_worktrees_client.py`
+and `test_worktrees_producer.py` exercise explicit Refresh through authenticated
+resident transport and its reconciliation/publication barrier. Old providers,
+unrelated publications, changed request identity, missing mux observations,
+failed publication and wrong/missing receipts cannot satisfy the request.
+These controls do not replace the real installed UI/exit/Resume witness.
 Normal exit requires zero from the pinned Copilot process handle itself,
 not merely a successful pane wrapper or Manager return.
 Normal and private device-status queries are inert in this passive observer;

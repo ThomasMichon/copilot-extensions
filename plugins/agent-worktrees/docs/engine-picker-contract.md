@@ -523,9 +523,34 @@ readers still must not scan tracking YAML or independently compute facts.
 The Manager requires `list --json --current`. Ordinary JSON/stream listings
 also select that authority while resident monitoring is enabled; explicit
 profile-history inspection and glance retain their separate workflow paths.
-`--classify`, `--cache-only`, `--fresh`, exact IDs/codenames and `--refresh`
-do not authorize a different caller-side computation. A row refresh selects
-one indexed slot; it does not backfill sessions or enumerate the fleet.
+`--classify`, `--cache-only`, `--fresh` and exact IDs/codenames do not
+authorize a different caller-side computation. An ordinary point read selects
+one indexed slot without backfilling sessions or enumerating the fleet.
+
+Explicit `--worktree-id <id> --refresh` requires the running resident's
+`worktrees-refresh-v1` capability, discovered through the existing authenticated
+health response. It sends a fresh 32-character hexadecimal `refresh_id` on the
+current-roster point request. Only the producer reconciles the selected record's
+session registry and bound/mux liveness. The request remains `unready` until
+that reconciliation is included in a successful publication. An unrelated
+publication, missing mux observation or failed publication cannot acknowledge
+it. Freshly observed mux absence is not overridden by a cached managed-mux
+receipt for that selected record.
+
+Success adds `point_refresh: {request_id, generation, revision}`, identifying
+that request's publication barrier. The reader verifies the request ID, current
+generation and a positive revision no later than its returned roster revision.
+Repeated reads of the same request reuse its completion; changing its project
+or selector refuses. An ambiguous selector rejects only its request, without
+poisoning the project's ordinary publication. The resident retains at most
+128 requests, evicting only completed or rejected entries, and clears them
+on admission closure/re-election. Refresh
+is a point operation, incompatible with passive/bootstrap/feed requests.
+Older callers retain their existing read behavior; a newer explicit-refresh
+caller refuses a resident missing this optional capability before requesting
+reconciliation. Ordinary reads remain available after provider rollback.
+No caller-side reconstruction, advisory fallback or automatic runtime update
+substitutes for the requested observation.
 
 The existing authenticated monitor control endpoint advertises
 `worktrees-current-v1`. Its request carries `contract_version: 1`, project,
