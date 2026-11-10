@@ -2,11 +2,12 @@
 
 from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import cleanup_reap, finalize, finalize_local, git_ops, tracking
+from agent_worktrees import cleanup_gc_cli, cleanup_reap, finalize, finalize_local, git_ops, tracking
 from pr_test_helpers import _git
 
 
@@ -169,6 +170,25 @@ def test_local_finalization_refuses_ignored_dirty_submodule(local_repo, foreign_
     assert not finalize.validate_and_finalize(wid, config)
     assert pending.read_text() == "keep\n"
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "active"
+
+
+@pytest.mark.parametrize("later", ["committed", "hidden-untracked"])
+def test_local_cleanup_rechecks_content_after_finalize(local_repo, monkeypatch, later):
+    config, wid, checkout = local_repo
+    monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda path: None)
+    monkeypatch.setattr(cleanup_gc_cli.sessions, "_list_mux_sessions", lambda: [])
+    assert finalize.validate_and_finalize(wid, config)
+    pending = checkout / "later.txt"
+    pending.write_text("keep\n")
+    if later == "committed":
+        _git("add", "later.txt", cwd=checkout)
+        _git("commit", "-m", "work after finalization", cwd=checkout)
+    else:
+        _git("config", "status.showUntrackedFiles", "no", cwd=checkout)
+
+    cleanup_gc_cli.cmd_cleanup(SimpleNamespace(clean=True, include_unused=False))
+    assert pending.read_text() == "keep\n"
+    assert git_ops.ref_exists(f"refs/heads/worktree/{wid}", cwd=config.default_repo.anchor)
 
 
 def test_local_finalization_uses_registered_anchor_store(local_repo, foreign_repo):

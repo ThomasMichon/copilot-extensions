@@ -679,6 +679,8 @@ A failed remote inspection or fetch is not evidence that a repository is
 local-only. Configured remotes and PR-mode repositories keep their existing
 remote/PR requirements. Local containment is checked again after retirement
 inspection, and all pair, claim, live-process and cleanup guards still apply.
+Normal deferred cleanup rechecks surviving finalized local checkouts before
+removal; finalization does not authorize discarding content added afterward.
 `--dry-run` remains a plan, not proof of successful finalization.
 
 The focused `tests/test_finalize_local.py` controls cover local containment and
