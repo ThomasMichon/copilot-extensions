@@ -14,6 +14,20 @@ from .worktrees_projection import MAX_TEXT_BYTES
 MAX_CURRENT_CLAIM_LINKS = 8
 
 
+def selection_row(record) -> dict:
+    """Canonical identity and filter facts shared by refresh and publication."""
+    path = Path(record.worktree_path) if record.worktree_path else None
+    row = {
+        "id": record.worktree_id, "path": record.worktree_path,
+        "status": record.status, **record.machine_fields,
+        "checkout_present": bool(path and path.exists() and (path / ".git").exists()),
+    }
+    for field in ("creation_nonce", "codename"):
+        if value := getattr(record, field):
+            row[field] = value
+    return row
+
+
 def populate_claims(
     row: dict, record, active_pr, *, current_only: bool,
     claim_records: dict[tuple[str, str, str], WorktreeRecord] | None = None,
@@ -122,8 +136,7 @@ def materialize(
             bare_orphan_wts=bare_orphan_wts, bridge_live_wts=bridge_live_wts,
             claim_records=claim_records,
         )
-        path = Path(record.worktree_path) if record.worktree_path else None
-        row["checkout_present"] = bool(path and path.exists() and (path / ".git").exists())
+        row.update(selection_row(record))
         row["fact_provenance"] = {
             "record": {"quality": "current", "observed_at": observed_at},
             "git": {

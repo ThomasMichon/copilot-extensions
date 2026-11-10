@@ -235,11 +235,14 @@ def test_legacy_feed_never_receives_unnegotiated_bootstrap(tmp_path):
         owner.shutdown()
 
 
-def test_feed_refuses_a_passive_subscription_without_recording_demand(tmp_path):
+@pytest.mark.parametrize("selection", [
+    {"passive": True}, {"worktree_id": "one", "refresh_id": "a" * 32},
+])
+def test_feed_refuses_point_only_operations_without_recording_demand(tmp_path, selection):
     owner = WorktreesRuntime(tmp_path / "current.sqlite3")
     owner.activate()
     owner.publish("project", [{"id": "one"}], observed_at=1)
-    stream = owner.feed.stream(request(passive=True), lambda: False)
+    stream = owner.feed.stream(request(**selection), lambda: False)
     try:
         frame = next(stream)
         assert frame["type"] == "error" and frame["error"]["code"] == "invalid-request"

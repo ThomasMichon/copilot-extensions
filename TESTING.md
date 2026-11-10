@@ -726,6 +726,128 @@ the deadline cap. The same console-fixture file's explicitly selected T3
 handle with an injected image-query failure; it is not proof of the precise
 lifetime of a historical failing PID.
 
+The installed-core Manager lifecycle witness is explicitly selected separately:
+
+```powershell
+$env:COPILOT_NATIVE_TEST_EXECUTABLE = '<native-Copilot-executable>'
+$env:PSMUX_TEST_BIN = '<native-PSMux-executable>'
+$env:COPILOT_DRIVER_HEADED_MUX_E2E = '1'
+python tools\run-plugin-tests.py worktree-manager --test-file tests\native\test_manager_installed_lifecycle.py --allow-explicit-tiers --timeout 900 --plugin-timeout 900 --test-timeout 900
+```
+
+This case uses the existing 720-second execution/cleanup owner, including its
+30-second cleanup reserve, inside the native portfolio's 900-second runner
+bounds. PowerShell 7, the Windows .NET Framework compiler, actual Copilot and
+PSMux executables and the constructor's governed feed are prerequisites; no
+operator Copilot state or inference token is borrowed. Only inference uses a deterministic
+loopback endpoint. Real installed project entry, Manager keyboard controls,
+Git worktree creation, native process incarnation, conversation history and
+private mux attachment participate. The case checks parallel Open, preserved
+work after detaching the first view, normal Copilot exit and a fresh Manager's
+Resume, plus the existing unusable-installed-entry negative control.
+The New seed uses the terminal's enabled bracketed-paste protocol and must
+appear in the current rendered dialog before confirmation. The test-only
+`pyte==0.8.2` dependency incrementally renders the fixed 100x30 ConPTY stream;
+it never supplies UI state or input acknowledgements. Open/Resume waits for
+the current actual CLI prompt frame before sending another turn. No retry
+or deadline increase compensates for dropped input.
+Before Resume, the fresh Manager performs its ordinary per-row Refresh and
+must visibly discover the stopped worktree and offer Resume. The fixture
+checks the original tracking identity before that refresh, selects Refresh
+only after observing its actual highlight, and never injects mux absence
+or substitutes Open for an unavailable Resume.
+The source controls in `test_worktrees_runtime.py`, `test_worktrees_client.py`
+and `test_worktrees_producer.py` exercise explicit Refresh through authenticated
+resident transport and its reconciliation/publication barrier. Old providers,
+unrelated publications, changed request identity, missing mux observations,
+failed publication and wrong/missing receipts cannot satisfy the request.
+These controls do not replace the real installed UI/exit/Resume witness.
+Review controls also cover unavailable Windows process-open/exit/image queries,
+strict Bridge-lock reads, request-local observation failures, hard cleanup
+failure propagation, a second publication with the same superseded mux cache
+and acceptance of a genuinely newer managed observation.
+Strict discovery/persistence controls use real tracking files and reload them
+between publications. Unreadable legacy workspaces, a real contended record
+lock and a no-op writer cannot acknowledge success or change the prior bytes;
+a new explicit request succeeds once contention or the writer fault is removed.
+Backfill controls also preserve the old default and cover strict missing,
+malformed and relative metadata, detached sessions and the single-sweep guard.
+After Resume reaches the actual CLI prompt, its next completed provider-backed
+turn establishes the history lock used to identify the replacement owner.
+The same strict duplicate/extension-host rules apply; pre-turn process presence
+without that binding is not mistaken for completed conversation-owner proof.
+Each turn requires its exact persisted assistant reply as well as rendered
+visibility. The final resumed history must retain all four user and assistant
+messages; a reply visible only on screen cannot earn a lifecycle receipt.
+Normal exit requires zero from the pinned Copilot process handle itself,
+not merely a successful pane wrapper or Manager return.
+Normal and private device-status queries are inert in this passive observer;
+they never generate input or replace the real terminal's responses.
+Completed turns require durable conversation history and the reply in the
+terminal stream or the actual bound private pane's rendered capture. Removing
+escape sequences from a redraw stream is not itself a rendered-screen witness.
+Failure diagnostics retain bounded event-type counts and the private provider's
+request count, never inference request bodies. These distinguish an unfinished
+native turn from completed history whose reply has not rendered.
+Native-process observations retain pinned parent IDs, bounded option names,
+script basenames and the matching history's lock PIDs, never raw argument values.
+Failures retain the rendered Manager screen as well as the bounded stream tail.
+After a conversation exists, timeout diagnostics also project the private
+installed engine's current liveness flags and process identities before
+teardown. They do not request Refresh, retain credential-bearing binding
+values, or hide an unsettled diagnostic process.
+Copilot's extension host shares its executable. Exclude it from conversation-owner
+counting only when its sole argument is an ordinary, owned
+`extension_bootstrap.mjs`, it is a later-born direct child of the sole
+lock-bound conversation owner, and it has no conversation lock itself.
+Unknown children, additional owners and orphaned extension hosts still refuse.
+All processes remain under the original pinned native Job custody.
+The stateless harness has a real private knowledge repository, registered and
+bound before New; the installed coordination-readiness command must resolve it.
+Before constructing runtimes, the case requires an empty, confirmed native
+mux-server cohort. PSMux liveness checks cover the machine-wide server census;
+a private namespace and data directory on a shared mux host cannot guarantee
+complete registration coverage. Existing or unconfirmed servers fail this
+preflight, not skip qualification. Never borrow host registrations, fabricate
+sentinels or stop shared servers to make the test pass.
+If source preparation exhausts the fixed budget on the default temporary
+volume, the runner supports a private, source-external `AGENT_SCRATCH_ROOT`.
+Record the actual placement and timing; changing volumes is not permission to
+increase deadlines or reuse an installed fixture.
+
+The lifecycle witness separately archives the exact candidate and uses the
+canonical marketplace materializer for the observed native launch companions,
+`agent-conduct-guidance` and `agent-roles`, preserving the selected
+Manager/Worktrees bytes and source receipts.
+It validates catalogue paths, manifest identities and versions and retains a
+bounded, explicitly core-and-companions inventory without changing activation.
+This is not a complete catalogue payload closure. Rendered-pane
+reads use the selected real PSMux binary and verified private namespace
+explicitly, not an implicitly routed adapter command.
+This core case still constructs only Manager and Worktrees.
+It cannot satisfy complete selected-suite, actual Machines readiness,
+ordinary baseline-to-candidate update or required promotion-result acceptance.
+Those remain separate obligations in the
+[installed lifecycle contract](efforts/active/main-owned-workflow-control/installed-manager-lifecycle.md).
+The whole-suite replacement fixture remains disposable-hosted-Windows-only:
+its real service and Scheduled Tasks effects must not be enabled locally.
+No native result is counted as unit coverage or inferred from this invocation
+documentation.
+
+The existing manual `installation-context-full.yml` workflow accepts
+`portfolio=manager-lifecycle` for this installed-core case on a fresh
+GitHub-hosted Windows VM. Dispatch the published source branch and optionally
+provide its same exact commit as `source_sha`; a mismatched request fails.
+The job reuses the bounded pinned downloader and the existing Copilot 1.0.105 /
+PSMux 3.3.8 prerequisite pins, verifies checkout identity, and preserves the
+900-second runner and 720-second case limits. Its 30-minute job envelope also
+covers checkout, tooling, prerequisite acquisition and artifact retention.
+This changes no existing portfolio, schedule, required PR CI or release gate.
+The evidence checker rejects absent, skipped, failed, duplicate, stale,
+TTY-only and incomplete lifecycle results. Passing this development lane still
+does not establish complete-suite, actual Machines, authentic ordinary-update
+or required frozen-candidate promotion enforcement.
+
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
 Windows PowerShell and PowerShell 7. A controlled census verifies the real

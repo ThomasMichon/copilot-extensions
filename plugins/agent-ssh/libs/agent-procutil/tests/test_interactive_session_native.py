@@ -160,7 +160,8 @@ def observe_select(*args):
         Path(sys.argv[1]).with_suffix('.relay.json').write_text(
             json.dumps(state,default=lambda value:value.hex()))
     return result
-terminal.select=SimpleNamespace(select=observe_select)
+terminal.select=SimpleNamespace(
+    select=observe_select,poll=terminal.select.poll,POLLOUT=terminal.select.POLLOUT)
 os.environ['PTY_FIXTURE_GUARDIAN']=str(Path(sys.argv[1]).with_suffix('.guardian.txt'))
 terminal._BOOTSTRAP=terminal._BOOTSTRAP.replace(
     'from agent_procutil._interactive_session import main;main()',

@@ -141,6 +141,7 @@ def test_headed_admission_preserves_wrapper_and_literal_native_arguments(launch,
         assert command[5] == "--"
         assert not list((record.parent / "launch-attempts").glob("*/*.shell/pane-args/*.json"))
         command = session_shell.startup_command(command)
+        assert session_shell.startup_command(command, record_path=record) == command
         copied = Path(command[4])
         assert command[5] == "--startup-manifest"
         manifest = Path(command[6])
@@ -910,6 +911,55 @@ def test_old_normalized_setup_keeps_legacy_provider_instead_of_silent_native_act
     assert prepared[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
     assert prepared[-len(command):] == command
     assert not (record.parent / "launch-attempts").exists()
+
+
+@pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native PowerShell required")
+@pytest.mark.parametrize("spawn_failure", [False, True])
+def test_deferred_final_spawn_preserves_drive_colons_and_option_leading_seed(launch, monkeypatch, spawn_failure):
+    record, runtime, _assets = launch
+    scripts = runtime / "scripts"
+    scripts.mkdir()
+    canonical = Path(__file__).resolve().parents[1] / "scripts" / "launch-command.ps1"
+    wrapper = scripts / canonical.name
+    shutil.copyfile(canonical, wrapper)
+    monkeypatch.setattr(launch_seed_exec.installer, "install_dir", lambda: runtime)
+    monkeypatch.setattr(manager_launch_cli, "_worktree_manager_root", lambda: runtime.with_name("manager"))
+    monkeypatch.setattr(config, "tracking_dir", lambda: record.parent)
+    monkeypatch.setenv("AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT", str(runtime))
+    literals = [
+        r"-C=C:\two words", "--interactive=--task: keep ' \" & $literal\nnext",
+        "2026-01-01", "", "--", "--allow-all",
+    ]
+    command = [
+        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(wrapper), "--",
+        sys.executable, "-c", "import json,sys; print(json.dumps(sys.argv[1:]))", *literals,
+    ]
+    monkeypatch.setattr(
+        launch_seed_exec, "_prepare",
+        lambda *_args, **_kwargs: launch_seed_exec.PreparedLaunch(command, None, None, None),
+    )
+    if spawn_failure:
+        def failed_spawn(argv, **_kwargs):
+            assert argv[5] == "--startup-manifest"
+            assert Path(argv[6]).is_file()
+            raise OSError("fixture spawn refused")
+
+        monkeypatch.setattr(launch_seed_exec.subprocess, "Popen", failed_spawn)
+    with (runtime / "stdout.txt").open("w+") as stdout, (runtime / "stderr.txt").open("w+") as stderr:
+        monkeypatch.setattr(launch_seed_exec.sys, "stdout", stdout)
+        monkeypatch.setattr(launch_seed_exec.sys, "stderr", stderr)
+        code = launch_seed_exec._launch(record, command, invoke=False, seed_id="retained")
+        stdout.seek(0)
+        stderr.seek(0)
+        if spawn_failure:
+            assert code == 3
+            assert "fixture spawn refused" in stderr.read()
+        else:
+            assert code == 0, stderr.read()
+            assert json.loads(stdout.read()) == literals
+    shells = list((record.parent / "launch-attempts").glob("*/*.shell"))
+    assert len(shells) == 1
+    assert not list((shells[0] / "pane-args").glob("*.json"))
 
 
 def test_preview_never_materializes_native_setup_assets(launch, monkeypatch):

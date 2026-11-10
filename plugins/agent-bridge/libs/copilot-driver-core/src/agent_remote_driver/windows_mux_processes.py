@@ -11,7 +11,7 @@ from .mux_observation_types import ObservationUnavailable as MuxObservationUnava
 
 _IMAGES = {"psmux.exe", "pmux.exe", "tmux.exe"}
 _COMMAND = re.compile(
-    r'^(?:"[^"]+"|[^\s"]+)\s+(?:(-L)\s+(?:"[^"]+"|[^\s"]+)\s+)?([^\s"]+)(?:\s|$)',
+    r'^(?:"[^"]+"|[^\s"]+)\s+(?:("-L"|-L)\s+(?:"[^"]+"|[^\s"]+)\s+)?("[^"]+"|[^\s"]+)(?:\s|$)',
 )
 _CLIENTS = {
     "attach-session", "attach", "at", "a", "new-session", "new",
@@ -70,7 +70,7 @@ def servers() -> dict[int, str]:
         if before is None or command is None or locks.process_start_time(pid) != before:
             raise MuxObservationUnavailable("Native mux process identity is unavailable")
         match = _COMMAND.match(command)
-        mode = match[2] if match else None
+        mode = match[2].strip('"') if match else None
         if mode == "server" and not match[1]:
             result[pid] = before
         elif mode not in _CLIENTS:
