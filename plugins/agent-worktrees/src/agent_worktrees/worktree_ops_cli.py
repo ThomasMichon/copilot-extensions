@@ -674,6 +674,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         run_config = cfg.load_config()
         parsed_owner = tracking.parse_claim_ref(owner_ref)
+        if parsed_owner is not None and parsed_owner.is_qualified:
+            if parsed_owner.project != run_config.repo_name:
+                run_config = cfg.load_project_config(parsed_owner.project)
     except (OSError, RuntimeError, ValueError) as exc:
         output.err(f"run: cannot resolve owner: {exc}")
         return 1

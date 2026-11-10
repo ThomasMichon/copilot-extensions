@@ -465,10 +465,7 @@ def cmd_get(args: argparse.Namespace) -> int:
         "session-scope-id": lambda: session_scope_id,
         "worktree-state-dir": lambda: (str(state_dir) if state_dir is not None else ""),
         "owner-ref": lambda: (
-            tracking.format_claim_ref(
-                worktree_identity.reference_machine(config, wt_id, project=config.repo_name),
-                config.repo_name, wt_id, session_id,
-            )
+            worktree_identity.reference_owner(config, wt_id, config.repo_name, session_id)
             if wt_id
             else ""
         ),
