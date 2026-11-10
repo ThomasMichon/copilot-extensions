@@ -1241,7 +1241,8 @@ above. Writes remain scoped to the selected head.
 The repair paginates all check runs and recognizes its direct series by the
 `github-actions` app, exact `source-attribution` name, `source-metadata:` digest
 namespace (including legacy unverified/superseded suffixes), and this repository's
-Actions-run URL. Workflow-backed jobs and other same-name producers remain
+Actions-run URL or provider-normalized `/runs/<check-id>` URL matching that
+exact check ID. Workflow-backed jobs and other same-name producers remain
 untouched; this is producer scoping, not cryptographic publisher authentication.
 After a stable snapshot it reevaluates every owned historical run, including
 completed superseded failures, to the actual current decision and publishes a
