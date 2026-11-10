@@ -454,6 +454,59 @@ def test_sync_stream_parser_remains_strict():
         assert failure.value.code == 2
 
 
+def test_sync_stream_matches_the_complete_baseline_json_envelope(tmp_path, monkeypatch, capfd):
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=False, json=True, worktree_id="missing",
+    )) == 1
+    baseline = json.loads(capfd.readouterr().out)
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=True, json=True, worktree_id="missing",
+    )) == 1
+    frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    assert frames[-1]["type"] == "error"
+    assert frames[-1]["result"] == baseline
+
+
+def test_sync_stream_malformed_tracking_has_a_terminal_result(tmp_path, monkeypatch, capfd):
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    (tmp_path / "selected.yaml").write_text("[]")
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=True, json=True, worktree_id="selected",
+    )) == 1
+    frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    assert frames[-1]["type"] == "error"
+    assert frames[-1]["result"]["ok"] is False
+    assert "YAML mapping" in frames[-1]["result"]["detail"]
+
+
+def test_sync_stream_does_not_retry_a_failed_terminal_write(tmp_path, monkeypatch):
+    import io
+
+    from agent_worktrees import sync_progress
+
+    class Output(io.StringIO):
+        terminal_attempts = 0
+
+        def write(self, text):
+            if '"type": "error"' in text:
+                self.terminal_attempts += 1
+                raise OSError("fixture stdout write is unconfirmed")
+            return super().write(text)
+
+    output = Output()
+    monkeypatch.setattr(sync_progress.sys, "stdout", output)
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    with pytest.raises(OSError, match="stdout write is unconfirmed"):
+        worktree_ops_cli.cmd_sync(SimpleNamespace(
+            stream=True, json=True, worktree_id="missing",
+        ))
+    assert output.terminal_attempts == 1
+
+
 @pytest.mark.parametrize("selector", ["tail", "../invalid"])
 def test_streamed_sync_selector_refusal_is_a_terminal_result(tmp_path, monkeypatch, capfd, selector):
     monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))

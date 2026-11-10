@@ -6,6 +6,8 @@ import json
 import sys
 import threading
 
+from . import output
+
 HEARTBEAT_SECONDS = 10
 
 
@@ -27,7 +29,16 @@ class SyncProgress:
         self._thread: threading.Thread | None = None
 
     def _write(self, frame):
-        print(json.dumps(frame), file=self._output, flush=True)
+        if self._failure is not None:
+            raise self._failure
+        payload = json.dumps(frame) + "\n"
+        try:
+            self._output.write(payload)
+            self._output.flush()
+        except Exception as error:
+            self._failure = error
+            self._stopped.set()
+            raise
 
     def stage(self, message: str) -> None:
         with self._lock:
@@ -63,6 +74,7 @@ class SyncProgress:
 
     def finish(self, result: dict) -> int:
         self._stop()
+        result = json.loads(output.json_output_text(result))
         ok = result_ok(result)
         with self._lock:
             if self._failure is not None:

@@ -169,7 +169,7 @@ def cmd_sync(args: argparse.Namespace) -> int:
     with SyncProgress() as progress:
         try:
             return _cmd_sync(args, progress=progress)
-        except (OSError, RuntimeError, ValueError, git_ops.GitError) as error:
+        except Exception as error:
             return progress.finish({"ok": False, "reason": "sync-failed", "detail": str(error)})
 
 

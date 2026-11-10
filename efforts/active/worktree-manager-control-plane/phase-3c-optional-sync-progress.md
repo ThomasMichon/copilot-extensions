@@ -123,8 +123,9 @@ native helper seams remain available. Private test fixtures copy one fresh seed
 into independent repositories and inspect actual loose refs, retaining real Git
 synchronization, independent pair storage, failure assertions and cleanup.
 
-The qualified Windows x64 source packet passes 33 distinct cases in disjoint 10/10/13
-selections, including all 32 Sync cases and the existing fetch-ledger control.
+Windows x64 source qualification covers 36 distinct cases: 13 stream/current-owner
+controls and 23 default/pair/freshness controls. Evidence and reuse scope are
+recorded in the [dated Journal](#journal).
 The ordinary 30-second item and 300-second group bounds remain unchanged.
 This is not a monolithic aggregate-budget or native ARM64 qualification.
 Focused F/E9 lint, installation-contract and changed-module-size checks pass.
@@ -171,6 +172,18 @@ live venue or rollout is admitted. No installed behavior is claimed.
 
 ### 2026-11-10 - Producer validation and refinement
 
+- Three additional regressions demonstrated a missing canonical schema version,
+  an unframed non-mapping tracking refusal and a second attempt after an
+  unconfirmed terminal write. All failed before correction. Terminal results
+  use the shared ordinary-JSON formatter; the stream boundary reports ordinary
+  preflight exceptions, while default CLI handling is untouched. The progress
+  writer remembers a failed write and never attempts its bytes again.
+- All 13 affected stream/current-owner cases pass on the corrected source.
+  The 23 default/pair/freshness cases retain the preceding passing qualification:
+  their executed paths and fixtures are unchanged by the stream-only formatter,
+  writer and exception-boundary changes. This is a 36-case independent union,
+  not a claim that every case was rerun or that a monolithic budget passed.
+  Mandatory exact-head CI/review remains required.
 - Four focused tests failed before implementation for missing frames,
   pre-configuration syntax refusal and parser support. The first submitted
   source packet passed 30 distinct cases in disjoint 7/10/13 selections.

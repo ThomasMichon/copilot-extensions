@@ -140,7 +140,8 @@ The opt-in emits flushed D4 NDJSON: `{"type":"progress","pct":null,"msg":"..."}`
 at real operation stages, including owner-emitted waiting updates during
 long nested work. Percentages are indeterminate rather than estimates.
 A terminal `done` or `error` frame carries `message` and the complete original
-JSON object in `result`. Paired member outcomes, preparation state and failure
+versioned JSON object in `result`, using the same canonical formatter as ordinary
+JSON output. Paired member outcomes, preparation state and failure
 detail are not replaced with the latest message. Stream success follows actual
 Sync completion; a blocked single repository is an error even where the legacy
 JSON command's exit code alone was not a success predicate.
@@ -153,6 +154,9 @@ retains earlier completed entries and identifies the interrupted item with
 invented for that item, later items are not started, and successful earlier
 mutations are not claimed rolled back. Ordinary non-streamed exception handling
 is unchanged.
+Ordinary preflight exceptions, including malformed tracking documents, also
+produce a terminal error. Unconfirmed stdout writes are never retried; loss
+of a complete terminal frame remains an unknown observation, not replay authority.
 
 The producer does not add a Picker consumer, timeout policy, cancellation,
 rollback, retry or progress store. Built-in Manager maintenance still uses its
