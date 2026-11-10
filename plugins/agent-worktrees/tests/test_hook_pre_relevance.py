@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import ast
 import io
 import os
 import shutil
@@ -240,7 +241,7 @@ def test_irrelevant_pre_tool_never_reaches_ipc_or_policy(client, monkeypatch, tm
 
 
 @pytest.mark.parametrize("event", [
-    payload("edit"), payload("create"), payload("apply_patch"),
+    payload("edit"), payload("create"),
     payload("powershell", "Set-Content file.txt value"),
     payload("powershell", "git checkout main"),
     payload("powershell", "git reset --hard"),
@@ -268,6 +269,24 @@ def test_uncertain_or_interesting_pre_tool_preserves_resident_decision(client, m
     monkeypatch.setattr(client, "_request", resident)
     assert client.decide("preToolUse", event, home=tmp_path) is decision
     assert len(seen) == 1
+
+
+@pytest.mark.parametrize("event", [
+    payload("apply_patch"), payload("multi_edit"),
+    {**payload("powershell", "Get-Location"), "toolCalls": []},
+])
+def test_native_write_forms_preserve_original_local_fallback(client, monkeypatch, tmp_path, event):
+    seen = []
+    decision = {"permissionDecision": "deny", "permissionDecisionReason": "original local policy"}
+
+    def fallback(value, home):
+        seen.append((value, home))
+        return decision
+
+    monkeypatch.setattr(client, "_fallback_pre", fallback)
+    monkeypatch.setattr(client, "_request", lambda *args: pytest.fail("native write reached an older resident"))
+    assert client.decide("preToolUse", event, home=tmp_path) is decision
+    assert seen == [(event, tmp_path)]
 
 
 def test_installation_context_preserves_existing_admission(client, monkeypatch, tmp_path):
@@ -300,26 +319,52 @@ def test_missing_relevance_helper_retains_policy(client, monkeypatch, tmp_path):
     assert client.decide("preToolUse", payload("view"), home=tmp_path) is decision
 
 
+def test_canonical_shell_heads_preserve_ordinary_argument_grammar(client, monkeypatch, tmp_path):
+    relevance = client._load_sibling("hook_pre_relevance.py")
+    seen = []
+    decision = {"permissionDecision": "deny", "permissionDecisionReason": "original policy"}
+    monkeypatch.setattr(client, "_request", lambda *args: seen.append(args) or decision)
+    for head in relevance.SHELL_READ_HEADS:
+        for command in (head, head + " README.md"):
+            before = len(seen)
+            assert client.decide("preToolUse", payload("powershell", command), home=tmp_path) == {}
+            assert len(seen) == before
+        for suffix in (' "quoted path"', "; Get-Location", " > result.txt", " $(Get-Location)"):
+            before = len(seen)
+            assert client.decide("preToolUse", payload("powershell", head + suffix), home=tmp_path) is decision
+            assert len(seen) == before + 1
+
+
 @pytest.mark.parametrize("event, bypass", [(payload("view"), True), (payload("powershell", "Get-Date"), True), (payload("edit"), False)])
 @pytest.mark.skipif(os.name != "nt" or not os.environ.get("COPILOT_TEST_HOOK_PRE_PYTHON"), reason="explicit contained native interpreter fixture")
 def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_path, event, bypass):
     from agent_procutil import no_window_kwargs
+    from agent_worktrees import guarded_anchors
+    from test_managed_session import fixture_project
     from test_session_start_hook_fail_open import _hooks, _powershell, _run
 
     shell = _powershell()
     interpreter = Path(os.environ["COPILOT_TEST_HOOK_PRE_PYTHON"])
     assert interpreter.is_file()
     home = tmp_path / "home"
-    cwd = tmp_path / "anchor"
+    cwd, _registry = fixture_project(home)
+    monkeypatch.setenv("AGENT_HOME", str(home))
+    monkeypatch.setenv("COPILOT_PROJECT_DIR", str(cwd))
+    monkeypatch.setenv("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", "command")
+    switch = tmp_path / "switch.json"
+    switch.write_text('{"active": false}', encoding="utf-8")
+    monkeypatch.setenv("PRETOOL_KILLSWITCH_STATE_FILE", str(switch))
     scripts = home / ".agent-worktrees" / "bin"
     scripts.mkdir(parents=True)
-    cwd.mkdir()
-    (cwd / ".git").mkdir()
-    for name in ("hook_client.py", "hook_runtime.py", "hook_pre_relevance.py", "hook_pre_policy.py", "hook_policy_process.py", "pretool_killswitch.py", "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_write_guard.py", "anchor_shell_parser.py", "pr_supersede_guard.py", "registry_root.py"):
+    for name in (
+        "hook_client.py", "hook_runtime.py", "hook_pre_relevance.py", "hook_pre_policy.py",
+        "hook_policy_process.py", "pretool_killswitch.py", "statelessness_guard.py",
+        "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_write_guard.py",
+        "anchor_shell_parser.py", "pr_supersede_guard.py", "registry_root.py",
+        "managed_session.py", "managed_project_identity.py", "execution_platform.py",
+        "remote_identity.py", "tool_call_forms.py",
+    ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
-    (scripts.parent / "repos.yaml").write_text(
-        "repos:\n  fixture:\n    class: worktree\n    windows: '" + str(cwd) + "'\n", encoding="utf-8",
-    )
     (scripts.parent / "status-monitor.lock").write_text(json.dumps({
         "hook_transport": "tcp", "hook_endpoint": "127.0.0.1:1", "hook_token": "fixture",
     }), encoding="utf-8")
@@ -327,6 +372,19 @@ def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_
     probe.mkdir()
     marker = probe / "forbidden.jsonl"
     observed = probe / "interpreter.json"
+    requested = probe / "request.json"
+    client_path = scripts / "hook_client.py"
+    source = client_path.read_text(encoding="utf-8")
+    request = next(
+        node for node in ast.parse(source).body
+        if isinstance(node, ast.FunctionDef) and node.name == "_request"
+    )
+    lines = source.splitlines(keepends=True)
+    lines.insert(
+        request.body[0].lineno - 1,
+        "    Path(" + repr(str(requested)) + ").write_text('called', encoding='utf-8')\n",
+    )
+    client_path.write_text("".join(lines), encoding="utf-8")
     (probe / "sitecustomize.py").write_text(
         "import json, socket, subprocess, sys\nfrom pathlib import Path\n"
         + "Path(" + repr(str(observed)) + ").write_text(json.dumps(list(sys.version_info[:2])))\n"
@@ -337,9 +395,11 @@ def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_
     )
     monkeypatch.setenv("PATH", str(interpreter.parent) + os.pathsep + os.environ.get("PATH", ""))
     monkeypatch.setenv("PYTHONPATH", str(probe))
-    event = dict(event, cwd=str(cwd))
+    event = dict(event, cwd=str(cwd), sessionId="cached-pre-fixture")
     if event["toolName"] == "edit":
         event["toolArgs"] = {"path": str(cwd / "protected.txt")}
+    assert guarded_anchors.refresh([cwd], registry_root=scripts.parent)["published"] == 1
+    assert client._load_sibling("managed_session.py").admitted(event, home=home)
     original_run = subprocess.run
     def contained_run(*args, **kwargs):
         return original_run(*args, input=json.dumps(event), timeout=30, **no_window_kwargs(), **kwargs)
@@ -347,8 +407,9 @@ def test_cached_native_pre_command_uses_real_relevance(client, monkeypatch, tmp_
     result = _run(str(_hooks("preToolUse")[0]["powershell"]), shell, home, cwd)
     assert result.returncode == 0, result.stderr
     assert json.loads(observed.read_text()) == [3, 9]
-    assert marker.exists() is not bypass, result.stderr
+    assert requested.exists() is not bypass, (result.stdout, result.stderr)
     if bypass:
+        assert not marker.exists()
         assert result.stdout == ""
     else:
         assert result.stdout, result.stderr

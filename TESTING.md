@@ -477,11 +477,45 @@ policy stub. Fixture-only runtime-selection boundaries include CWD repair
 and selected-context validation; source/worker hashes and actual no-op/deny
 outputs accompany ordered phase-free/attributed calls. The existing fixture
 runtime/context substitutes remain, so this is not installed selection
-qualification. Production entry, guards, contract and worker are unchanged.
+qualification. Positive original-worker controls omit only the optional literal
+proof; the protected leg retains the actual packaged declaration. Original guards
+and policy worker remain in use on this path.
 All shell calls may load their original Management module. Timings retain
 instrumentation and outside-command uncertainty under the same 10/30/300
 limits; this does not qualify a shell-only replacement or Git/PR, POSIX,
 lifecycle, composed or productive-throughput acceptance.
+
+The `literal-shell-entry-attribution` cases select that same real registered
+consumer with ordinary non-command metadata and the canonical literal proof.
+They compare original-path/candidate/original-path occurrences before a real
+protected denial. Comparator legs use the same source with only the optional
+proof omitted, not historical binaries. Per-sample contract hashes and proof
+presence make that distinction explicit. Eligible attributed calls must leave
+Management unloaded and skip runtime/policy entry while retaining native
+admission/source/output phases. Protected calls still use the real original
+worker; the inspected tool never executes. No source digest is repaired.
+
+The same existing packet covers primary-command precedence, actual JSON key
+casing and collisions, alias metadata, ordinal literal comparison, argument and
+JSON-string fallback, old/invalid/drifted declarations, unprepared admission and
+late protected shell batches. A retained prior version-1 reader processes a new
+declaration without claiming shell-literal support and still handles its native
+view path. Canonical-source tests compare every declared head with original
+guard decisions and ordinary argument grammar; the renderer refuses malformed,
+nonliteral, duplicate and oversized declarations inside the existing file bound.
+Other selection-only controls retain their explicit policy stub and are not
+represented as full real-worker decisions.
+
+The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
+supplied existing Python 3.9 interpreter. Their private fixture publishes real
+project membership and the current original guard map, copies the required
+standalone helpers and observes original request entry rather than assuming a
+legacy descriptor qualifies for transport. Read/no-op cases must not enter that
+request path or attempt IPC/subprocess work, while the edit control reaches the
+original path and retains a real denial. Missing fixture prerequisites remain
+explicit skips, not relevance qualification. All these cases preserve original
+deadlines and containment; neither finite ordered observations nor process
+elimination proves full-roster, installed/composed or throughput acceptance.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
@@ -3034,6 +3068,22 @@ notification draining, or distinguish an initiated disconnect from an already
 disconnected no-op. Passing this control is not positive auth recovery or
 qualification of another pinned native runtime; unexpected SDK EOF remains
 an independent hold.
+
+The explicit T3 file `tests/native/test_native_pending_work.py` qualifies
+nonempty client-task and schedule snapshots through the selected native CLI.
+One control registers a client task, observes the same task as running, idle
+and completed, and verifies that the terminal record remains until exact
+removal. The Windows terminal control uses the real `/every 2h` command in a
+private mux pane, then the joined SDK's public schedule list/stop methods to
+observe and remove that exact future prompt before it fires. It checks one
+conversation, no extension-permission grant and birth-matched native/extension
+retirement. Select it with `COPILOT_DRIVER_HEADED_MUX_E2E=1` and an existing
+`PSMUX_TEST_BIN`; the client-task control needs only the explicitly selected
+`COPILOT_NATIVE_TEST_EXECUTABLE`. The file requires `--allow-explicit-tiers`.
+These controls do not call the SDK's internal schedule-add API or assume a
+prompt-mode model exposes `manage_schedule`. They do not qualify agent/shell
+coverage, complete pending snapshots, ACP idle grace, another pinned runtime,
+or survival after caller cleanup Jobs.
 
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied
