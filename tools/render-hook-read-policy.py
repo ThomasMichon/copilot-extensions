@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 from pathlib import Path
@@ -18,10 +19,32 @@ def render(scripts: Path = SCRIPTS) -> str:
         name: hashlib.sha256((scripts / name).read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest()
         for name in WRITE_DEPENDENCIES
     }
-    return json.dumps({
+    relevance = (scripts / "hook_pre_relevance.py").read_text(encoding="utf-8-sig")
+    declarations = [
+        node.value for node in ast.parse(relevance).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == "SHELL_READ_HEADS" for target in node.targets)
+    ]
+    if len(declarations) != 1:
+        raise ValueError("Expected one canonical shell-read head declaration")
+    commands = ast.literal_eval(declarations[0])
+    if (
+        not isinstance(commands, tuple) or not commands or len(commands) > 128
+        or any(not isinstance(command, str) or not command for command in commands)
+        or len(set(commands)) != len(commands)
+    ):
+        raise ValueError("Expected unique literal shell-read heads")
+    rendered = json.dumps({
         "schema": "agent-worktrees.native-read-policy", "version": 1, "guards": guards,
         "nativeWriteDependencies": dependencies,
+        "nativeShellReadCommands": list(commands),
+        "nativeShellReadDependencies": {
+            "hook_pre_relevance.py": hashlib.sha256(relevance.encode("utf-8")).hexdigest(),
+        },
     }, indent=2) + "\n"
+    if len(rendered.encode("utf-8")) > 4096:
+        raise ValueError("Native read policy exceeds its consumer's 4096-byte bound")
+    return rendered
 
 
 def main() -> int:
