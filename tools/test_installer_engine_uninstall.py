@@ -401,7 +401,7 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     "none", "finite-callback", "self-stage", "sparse-census", "cache",
     "forged-owner", "stale-owner", "wrong-action", "wrong-root", "changed-source",
     "witness-mismatch", "reused-native", "foreign-controller", "additional-consumer",
-    "late-source", "late-request", "missing-native-check",
+    "late-source", "late-request", "missing-native-check", "missing-isolation",
 ))
 def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch, mutation):
     home = tmp_path / "home"
@@ -499,12 +499,12 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     if mutation == "self-stage":
         actors.append((64202, powershell(original)))
     shim = [
-        sys.executable, "-I", str(original / "libs/update-driver/src/update_driver/_runner.py"),
+        sys.executable, "-I", "-S", str(original / "libs/update-driver/src/update_driver/_runner.py"),
         str(Custody.root), request.id, witness,
         str(original / "libs/procutil/src/agent_procutil/__init__.py"),
     ]
     if mutation == "cache":
-        shim[2:2] = ["-X", "pycache_prefix=" + str(Custody.root / "cache/python" / ("installed-" + "a" * 64))]
+        shim[3:3] = ["-X", "pycache_prefix=" + str(Custody.root / "cache/python" / ("installed-" + "a" * 64))]
     actors.extend((
         (64203, list(request.runner.argv)), (64204, shim),
         (64205, driver(original, "")), (64206, powershell(original)),
@@ -516,11 +516,13 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     elif mutation == "changed-source":
         (payload / "scripts/installer_driver.py").write_text("# changed\n", encoding="utf-8")
     elif mutation == "witness-mismatch":
-        shim[5] = "not-the-scoped-fixture"
+        shim[-2] = "not-the-scoped-fixture"
     elif mutation == "foreign-controller":
         actors[2][1][:] = [sys.executable, "-m", "agent_vault"]
     elif mutation == "missing-native-check":
         inspector.remove("--check-native")
+    elif mutation == "missing-isolation":
+        shim.remove("-S")
     rows = [
         {"pid": pid, "ppid": actors[index + 1][0] if index + 1 < len(actors) else 0,
          "image": argv[0], "command": subprocess.list2cmdline(argv),
