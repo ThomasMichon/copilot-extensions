@@ -512,6 +512,10 @@ An oversized assertion returns an explicit error before changing the record,
 history or other requested disposition fields, rather than silently truncating.
 An empty normalized assertion clears the title and its asserted marker.
 Non-title writes preserve the existing value without revalidating it.
+Title serialization explicitly quotes strings, so numeric assertions remain
+strings and Unicode line separators round-trip through YAML. New history
+escapes Unicode in its JSON line for legacy-reader compatibility; current
+history readers use LF delimiters and also preserve older literal Unicode.
 
 Ordinary record/list/status/history JSON carries the full value. Compact
 consumers shorten at display time: the status bar keeps its own 48-character

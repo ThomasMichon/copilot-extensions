@@ -6,6 +6,7 @@ tracking its lifecycle state.
 
 from __future__ import annotations
 
+import json
 import logging
 import math
 import os
@@ -2543,11 +2544,7 @@ def _save_record_contents_unlocked(
     from . import paired_claims
     paired_claims.validate_save(record, current)
 
-    title_val = record.title or "null"
-    # Quote titles that contain YAML-special characters (colons, etc.)
-    if title_val != "null" and any(ch in title_val for ch in ":{}[]#&*!|>',\""):
-        safe_title = title_val.replace("'", "''")
-        title_val = f"'{safe_title}'"
+    title_val = "null" if record.title is None else json.dumps(str(record.title), ensure_ascii=True)
 
     content = (
         f"worktree_id: {_yaml_scalar(record.worktree_id)}\n"

@@ -142,6 +142,28 @@ authorized by this plan; unavailable native rollout is not replaced by a fixture
 
 ## Journal
 
+### 2026-11-10 - Scalar type and Unicode framing controls
+
+Seven new controls reproduce two serialization defects: a long numeric
+assertion is read back as a YAML integer, and U+0085/U+2028/U+2029 both break
+unquoted record scalars and split JSON history entries. The cold record reader
+is asserted explicitly so a warm record cache cannot hide damaged bytes.
+
+Titles now serialize as quoted JSON-compatible YAML strings. New history
+escapes Unicode for legacy-reader compatibility, while append/read use LF
+delimiters to preserve existing literal Unicode rows. The complete affected
+core writer/storage/history packet passes 335 cases, with 54 unrelated cases
+deselected. It includes the explicit fresh-profile CLI and real transport
+controls. An intermediate serializer edit omitted the JSON import; that
+implementation error was fixed and lint plus the whole packet pass.
+
+Only the two changed import-dependency bindings are readmitted for required
+units. Their source/node inventory, coverage and effect budgets are unchanged;
+the existing JSON standard-library import introduces no actor. Earlier
+current-head CI success does not waive the two unresolved findings or the
+next exact-head review/CI. No productive record, native host or runtime is
+mutated.
+
 ### 2026-11-10 - Unit dependency readmission
 
 The initial required unit job refused execution because the admitted

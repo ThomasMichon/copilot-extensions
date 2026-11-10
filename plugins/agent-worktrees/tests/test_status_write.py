@@ -14,7 +14,11 @@ from agent_worktrees import tracking, worktree_identity
     ("\n" + "x" * 512 + "\t", "x" * 512),
     ("\x07  " + "R\u00e9sum\u00e9 phase " * 12 + "\nconsumer  ",
      "R\u00e9sum\u00e9 phase " * 12 + " consumer"),
-], ids=["normalized-boundary", "unicode-controls"])
+    ("1234567890" * 6, "1234567890" * 6),
+    ("x" * 40 + "\u0085history-suffix", "x" * 40 + "\u0085history-suffix"),
+    ("x" * 40 + "\u2028history-suffix", "x" * 40 + "\u2028history-suffix"),
+    ("x" * 40 + "\u2029history-suffix", "x" * 40 + "\u2029history-suffix"),
+], ids=["normalized-boundary", "unicode-controls", "numeric", "next-line", "line-separator", "paragraph-separator"])
 def test_full_title_survives_ordinary_writer_history_export_and_short_display(
     status_env, capfd, raw, expected,
 ):
@@ -37,6 +41,7 @@ def test_full_title_survives_ordinary_writer_history_export_and_short_display(
     ) == 0
     loaded = tracking.load_record(status_env)
     assert loaded.title == expected and loaded.title_asserted
+    assert tracking._load_record_uncached(status_env).title == expected
     assert loaded.active_effort == binding and loaded.status == record.status
     history = disposition_history.read(loaded.worktree_id, tracking_path=status_env.parent)
     assert [entry["title"] for entry in history] == ["old capped\u2026", expected]
