@@ -661,6 +661,25 @@ continue to work unchanged.
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
 
+### Remote-free finalization
+
+For a non-PR repository with no configured Git remotes, `finalize` verifies
+that the actual clean checkout commit is contained in the declared local
+default branch (`refs/heads/<default>`). It neither fetches nor rewrites refs,
+merges local work, or invents an `origin`. Missing or unreadable refs,
+uncontained commits and dirty content refuse finalization.
+
+A failed remote inspection or fetch is not evidence that a repository is
+local-only. Configured remotes and PR-mode repositories keep their existing
+remote/PR requirements. Local containment is checked again after retirement
+inspection, and all pair, claim, live-process and cleanup guards still apply.
+`--dry-run` remains a plan, not proof of successful finalization.
+
+The focused `tests/test_finalize_local.py` controls cover local containment and
+refusals. The remote-free cases in `tests/test_paired_finalize_integration.py`
+exercise the actual CLI and paired settlement; successful native Windows
+retirement additionally needs qualified private PSMux observation.
+
 ### Detached embodiment versus current-terminal attachment
 
 `embody` ensures a detached mux-backed process exists and returns JSON; it never

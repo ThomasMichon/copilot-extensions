@@ -147,6 +147,35 @@ def test_paired_claim_settles_bottom_up(environment, monkeypatch):
     assert claim.is_at_rest
 
 
+@pytest.mark.parametrize("dirty", [
+    pytest.param(False, marks=pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Successful native Windows retirement requires a qualified private PSMux observation.",
+    )),
+    True,
+])
+def test_native_cli_finalizes_remote_free_knowledge_without_weakening_pair(
+    environment, dirty,
+):
+    records, configurations = environment
+    harness, knowledge = records["harness"], records["knowledge"]
+    _git("remote", "remove", "origin", cwd=configurations["knowledge"].default_repo.anchor)
+    if dirty:
+        (Path(knowledge.worktree_path) / "unfinished.txt").write_text("keep\n")
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees", "-p", "knowledge",
+         "finalize", knowledge.worktree_id, "--json"],
+        cwd=configurations["harness"].default_repo.anchor,
+        env={**os.environ, "AGENT_WORKTREES_STATUS_MONITOR": "0"},
+        capture_output=True, text=True, timeout=25,
+    )
+    assert (result.returncode == 0) == (not dirty), result.stdout + result.stderr
+    assert tracking.load_record(knowledge.yaml_path).status == ("active" if dirty else "finalized")
+    claim, = tracking.load_record(harness.yaml_path).resources
+    assert claim.is_unsettled if dirty else claim.is_at_rest
+    assert Path(knowledge.worktree_path).is_dir()
+
+
 def _concluded_knowledge(harness, knowledge):
     tracking.update_status(knowledge, "finalized")
     tracking.settle_resource_claim(harness, harness.pair_ref)

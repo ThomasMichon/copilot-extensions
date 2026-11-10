@@ -4757,7 +4757,16 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[corruption-ps1]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[corruption-sh]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-ps1]",
-        "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
+        "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[local]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[remote]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[unknown]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[pr-required]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[contained]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[new-commit]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[unknown-ref]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[dirty]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[remote-added]"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_health_composition.py": "30960140274c035e035e25e6ef47b9889453b5c1f58f4d6f7b81debaa118ad70",
@@ -5439,7 +5448,9 @@
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
         "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
-        "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab"
+        "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
+        "tools/promotion_unit_tests/test_local_finalize.py": "372764cf83efecfd3bd346dc4b69319818b7774dc9ecbf991c5ef63b9941b6da",
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "de55aa7d7e5d57cf4da0a65f3ec0fc5a3a0a8a2d34c7f809a4ed1881ae9815f9"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_run.py",
@@ -5734,7 +5745,8 @@
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py",
         "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py",
         "tools/materialize_payload_invocation.py",
-        "libs/payload-invocation/generate.py"
+        "libs/payload-invocation/generate.py",
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py"
     ],
     "max_seconds": 300
 }

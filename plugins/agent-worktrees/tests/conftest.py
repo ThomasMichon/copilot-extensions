@@ -700,6 +700,16 @@ def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
     tracking_d = tmp_path / "tracking"
     worktree_id = "test-wt-20260618-aaaa"
     wt_path = wt_root / worktree_id
+    git_file = wt_path / ".git"
+    original_admin = Path(git_file.read_text(encoding="utf-8").removeprefix("gitdir: ").strip())
+    if not original_admin.is_absolute():
+        original_admin = seed / "worktrees" / worktree_id / original_admin
+    relative_admin = original_admin.resolve().relative_to((seed / "anchor/.git").resolve())
+    copied_admin = anchor / ".git" / relative_admin
+    assert copied_admin.is_dir()
+    # Older Git repair keeps a valid seed pointer when both copies still exist.
+    # Retarget this private copy before Git repairs its remaining linked paths.
+    git_file.write_text(f"gitdir: {copied_admin.as_posix()}\n", encoding="utf-8", newline="\n")
     _pr_git("worktree", "repair", str(wt_path), cwd=anchor)
     _pr_git("remote", "set-url", "origin", str(remote_dir), cwd=anchor)
     if (tmp_path / "fork.git").is_dir():

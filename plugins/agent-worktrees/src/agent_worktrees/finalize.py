@@ -1334,12 +1334,21 @@ def validate_and_finalize(
     ):
         return False
 
-    # Fetch to get current upstream state
-    print(f"Fetching from {repo.remote}...")
-    git_ops.fetch(repo.remote, cwd=anchor)
-    if record and record.repo:
+    from . import finalize_local
+    try:
+        upstream, local_only = finalize_local.resolve_upstream(repo, pr_mode=pr_mode)
+    except ValueError as exc:
+        output.err(str(exc))
+        return False
+    if not local_only:
+        print(f"Fetching from {repo.remote}...")
+        git_ops.fetch(repo.remote, cwd=anchor)
+    if not local_only and record and record.repo:
         tracking.record_repo_fetch_confirmed(record.repo)
 
+    if local_only and (err := finalize_local.content_error(repo, worktree_path, branch, upstream)):
+        output.err(err)
+        return False
     preserve_tracked_branch = False
     renamed_branch_to_clean: str | None = None
     dirty_err = finalize_open_pr_gate.dirty_worktree_error(
@@ -1568,7 +1577,8 @@ def validate_and_finalize(
         # Reconcile local branch pointers with origin now that the content is
         # verified upstream, so a merged-but-not-yet-cleaned worktree stops
         # rendering as diverged in the picker (#1106).
-        _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
+        if not local_only:
+            _reconcile_merged_pointers(repo, worktree_path, anchor, branch)
         from .finalized_checkout import optional_snapshot
         finalized_identity = optional_snapshot(worktree_path) if Path(worktree_path).exists() else None
         removal_candidate = (
@@ -1590,6 +1600,10 @@ def validate_and_finalize(
                 output.err(err)
                 _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
                 return False
+        if local_only and (err := finalize_local.content_error(repo, worktree_path, branch, upstream)):
+            output.err(err)
+            _rollback_finalizing_freeze(yaml_path, prior_status, worktree_id, config)
+            return False
         if not checkout_managed or inside_worktree or has_live_session or paired_pending or data_blocker or process_blocker:
             reason = (
                 "the checkout is owned by an external session host"
@@ -1606,7 +1620,7 @@ def validate_and_finalize(
             )
             output.ok(
                 f"Finalized: all content from {branch} is on "
-                f"{repo.remote}/{repo.default_branch}."
+                f"{upstream}."
             )
             if not checkout_managed:
                 output.info(

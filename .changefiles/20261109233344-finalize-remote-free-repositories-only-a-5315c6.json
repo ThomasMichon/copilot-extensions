@@ -1,0 +1,9 @@
+{
+  "comment": "Finalize remote-free repositories only after clean local default-branch containment, preserving PR and custody guards.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
