@@ -1,6 +1,6 @@
 # Phase 5 - Confirmed local knowledge registration
 
-- **Status:** Contract reviewed in #11920; native and Configuration source qualification in progress.
+- **Status:** Contract reviewed in #11920; source implementation qualified; publication and retained parent gates remain open.
 - **Parent:** [Configuration workbench](phase-5-configuration-workbench.md).
 - **Coordination:** #1419 Track 3; bounded source slice `shiny-actuator`.
 - **Vision:** [Knowledge selection](../../../visions/installer/configurator/README.md#knowledge-selection-and-portable-defaults).
@@ -15,8 +15,9 @@ intent; it is not repository creation, acquisition or a new binding engine.
 The [current native contribution](../../../plugins/agent-worktrees/docs/repositories-configuration.md)
 already binds a present canonical knowledge/worktree registration through
 `harness-knowledge`. Its existing preview/apply transaction must retain that
-promise. The separate binding skill can register local checkouts, but Manager
-does not yet offer that step when no companion is registered.
+promise. This source slice adds conditional confirmed registration when no
+companion is registered; binding remains a separate action owned by the
+existing binding provider.
 
 The native registry remains the only registration authority. Extend its
 existing registration writer and serialization, not Manager-side YAML or a
@@ -85,6 +86,11 @@ may replace it.
 Re-inspect and compare the complete proposal after the publication-lock wait,
 before withdrawing prepared views for persistence, rather than committing the
 earlier selection or degrading unrelated callers on a validation refusal.
+An execution-expiry abort during withdrawal before source mutation restores
+prior views using the original cleanup reserve. Unrecovered restoration remains
+an explicit owner failure; old views cannot be restored after uncertain source
+effects. The [guard-publication owner](../../../plugins/agent-worktrees/docs/guarded-anchor-map.md)
+defines the current recovery mechanism and its limits.
 
 Return the actual persisted registration and the supported next step: refresh
 and select the existing binding action. Do not bind automatically or report
@@ -147,7 +153,9 @@ general existing-task pairing and cleanup remain with their current owners.
 No live registration, binding, authentication, installation, service operation,
 rollout or resource allocation is authorized by this proposal.
 
-## Source qualification
+## Journal
+
+### 2026-11-10 - Initial source qualification
 
 The implementation reuses guarded managed publication around the native
 compare-before-replace registry transaction. It preserves unknown registry metadata and never calls
@@ -197,9 +205,9 @@ or receiving result. No installer behavior changes; a full fresh-OS provisioning
 lane and live external operations are not run under this source-only slice.
 Review, required CI and independently authorized rollout remain separate.
 
-## First-review corrections
+### 2026-11-10 - First-review corrections
 
-The five findings on #11929 are addressed through the existing owners:
+The five initial findings are addressed through the existing owners:
 
 - Registration uses guarded managed publication. An already-prepared independent
   caller receives the new knowledge posture; a failed post-commit refresh leaves
@@ -235,7 +243,7 @@ unit manifest. Node inventory, effects, coverage declarations and budgets remain
 unchanged. Required exact-source unit CI and review still qualify the pushed
 revision independently.
 
-## Second-review corrections
+### 2026-11-10 - Second-review corrections
 
 The next review confirms all five original findings are resolved and identifies
 two remaining gaps. Catalog availability and native preview/apply now require
@@ -264,7 +272,7 @@ retains the unbound state. Scoped F/E9 lint, documentation consistency and all
 13 install contracts pass. Review and exact-head CI remain pending; these
 source results do not authorize or qualify an installed runtime update.
 
-## Converted-bare alias correction
+### 2026-11-10 - Converted-bare alias correction
 
 A later review overview identifies a local-only converted-bare alias: both the
 anchor and its nested `.git` directory were accepted as different registration
@@ -285,7 +293,7 @@ real Manager registration form additionally passes against the updated native
 owner. The earlier four-case reproduction remains a failing-before result,
 not a passed packet.
 
-## Registry-source indirection correction
+### 2026-11-10 - Registry-source indirection correction
 
 A later review asks for assessment of a registry symlink. The real CLI
 reproduction confirms that the new operation accepted preview and reported
@@ -306,7 +314,7 @@ preparation because documentation edits overlapped its source snapshot; no tests
 ran in that attempt. The passing run held all source inputs stable through
 preparation, execution and cleanup.
 
-## Publication-time revalidation and fixture isolation
+### 2026-11-10 - Publication-time revalidation and fixture isolation
 
 A later review asks for assessment of a publication-time race and an ambient
 authentication path in a test. Two real publication-lock controls reproduce
@@ -326,7 +334,7 @@ The real Manager registration form additionally passes against this native
 owner. Final inspection remains inside the original apply budget; no deadline,
 authentication or cleanup rule is relaxed.
 
-## Nonregular registry ordering
+### 2026-11-10 - Nonregular registry ordering
 
 A later review identifies that fingerprinting before the strict reader can open
 a FIFO and block before regular-file validation. The operation now follows the
@@ -344,7 +352,7 @@ so no Manager UI or caller contract changes: the preceding real-form result is
 retained, while the current native CLI positive/refusal controls qualify this
 revision. Exact-source required CI and a fresh review remain separate gates.
 
-## Validation before guard withdrawal
+### 2026-11-10 - Validation before guard withdrawal
 
 A later review identifies that final proposal refusal occurred inside the
 mutation callback, after prepared views had already been withdrawn. Both real
@@ -366,7 +374,7 @@ through both publication-lock drift cases, and all registration controls.
 The real Manager registration form additionally passes against this native
 owner. No deadline, cleanup or partial-write assertion is relaxed.
 
-## Pre-mutation withdrawal deadline recovery
+### 2026-11-10 - Pre-mutation withdrawal deadline recovery
 
 A later review identifies execution expiry during view withdrawal, before the
 source callback begins. An actual-deadline native regression reproduces the
