@@ -450,6 +450,20 @@ latency or throughput pass.
 The boolean-only admission controls retain bounded command-entry, helper,
 input, admission and output phases; a timeout reports the partial phases
 without retrying the child or relaxing its original limit.
+The `shell-entry-attribution` cases reuse that complete-entry fixture for a
+read-only `Get-Location` event and the original recognized protected
+`Set-Content` target shape. The hook only inspects the commands: the target
+must remain absent. Both engines and legacy/cell contexts use the actual
+strict policy worker, not the ordinary client's relevance shortcut or a
+policy stub. Fixture-only runtime-selection boundaries include CWD repair
+and selected-context validation; source/worker hashes and actual no-op/deny
+outputs accompany ordered phase-free/attributed calls. The existing fixture
+runtime/context substitutes remain, so this is not installed selection
+qualification. Production entry, guards, contract and worker are unchanged.
+All shell calls may load their original Management module. Timings retain
+instrumentation and outside-command uncertainty under the same 10/30/300
+limits; this does not qualify a shell-only replacement or Git/PR, POSIX,
+lifecycle, composed or productive-throughput acceptance.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
