@@ -782,13 +782,26 @@ def test_readiness_refresh_keeps_button_identity_until_observation_completes(mon
     asyncio.run(run())
 
 
+def test_remote_knowledge_case_skips_before_preparing_native_fixtures(tmp_path, monkeypatch):
+    monkeypatch.delenv("REPOSITORIES_CONFIG_TEST_PYTHON", raising=False)
+
+    class Request:
+        def getfixturevalue(self, name):
+            pytest.fail("Native prerequisites must be checked before preparing HTTPS/Git fixtures.")
+
+    with pytest.raises(pytest.skip.Exception):
+        test_missing_knowledge_to_confirmed_native_binding_and_new(
+            tmp_path, monkeypatch, Request(), empty=False, remote=True,
+        )
+
+
 @pytest.mark.timeout(120)
 @pytest.mark.parametrize(("empty", "remote"), [(False, False), (True, False), (False, True)])
 def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeypatch, request, empty, remote):
-    https = request.getfixturevalue("public_https_knowledge") if remote else None
     owner_python = os.environ.get("REPOSITORIES_CONFIG_TEST_PYTHON")
     if not owner_python:
         pytest.skip("set REPOSITORIES_CONFIG_TEST_PYTHON to the isolated native engine interpreter")
+    https = request.getfixturevalue("public_https_knowledge") if remote else None
     from worktree_manager import engine_client
     from worktree_manager.production_picker.picker_tui import data_local
 
