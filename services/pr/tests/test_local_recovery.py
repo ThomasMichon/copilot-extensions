@@ -109,7 +109,18 @@ def test_local_foreground_recovers_original_ids_after_replacement_uncertainty(
                 registration = {"registration_id": subscription["registration_id"]}
                 pending = await request(client, "events", registration)
                 assert [row["event_id"] for row in pending["events"]] == captured["event_ids"]
-                await asyncio.sleep(1.1)
+                observed = current["pulls"][0]["observed_at"]
+                deadline = time.monotonic() + 10
+                while True:
+                    refreshed = await request(client, "query", {})
+                    if (
+                        refreshed["inventory"]["observed_at"] > observed
+                        and all(pull["observed_at"] == refreshed["inventory"]["observed_at"]
+                                for pull in refreshed["pulls"])
+                    ):
+                        break
+                    assert time.monotonic() < deadline, "restart snapshots did not reconcile"
+                    await asyncio.sleep(.02)
                 assert (await request(client, "events", registration))["events"] == pending["events"]
                 await request(client, "acknowledge", registration | {
                     "event_id": pending["events"][-1]["event_id"],

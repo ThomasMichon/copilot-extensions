@@ -198,7 +198,11 @@ def test_installed_foreground_cache_continuing_events_and_restart(
             assert separate["identity"]["provider"] == other_provider
             assert separate["pulls"][0]["facts"]["head_sha"] == "a"
             stable_cursor, observed = changed["cursor"], changed["inventory"]["observed_at"]
-            identical = await eventually(query, lambda row: row["inventory"]["observed_at"] > observed)
+            identical = await eventually(query, lambda row: (
+                row["inventory"]["observed_at"] > observed
+                and all(pull["observed_at"] == row["inventory"]["observed_at"]
+                        for pull in row["pulls"])
+            ))
             assert identical["cursor"] == stable_cursor
 
             save(github, {"head": "b", "members": [], "outcome": "partial"})
@@ -264,7 +268,14 @@ def test_installed_foreground_cache_continuing_events_and_restart(
                 "--registration-id", a["registration_id"], "--timeout", "5", "--interval", "1", "--ack",
             ))
             try:
-                await asyncio.sleep(.3)
+                await eventually(
+                    lambda: client("inspect", "--registration-id", a["registration_id"]),
+                    lambda row: (
+                        row["subscription"]["acknowledged_event"]
+                        == continued["events"][-1]["event_id"]
+                    ),
+                )
+                assert not following.done(), "follow exited after only its initial batch"
                 save(github, {"members": [9], "head": "d"})
                 code, output, error = await following
             finally:
