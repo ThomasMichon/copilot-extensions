@@ -99,6 +99,47 @@ def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path, ba
     assert {path: path.read_text(encoding="utf-8") for path in tmp_path.iterdir()} == documents
 
 
+def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_path):
+    from agent_worktrees.git_repository_environment import repository_identity_env
+    from test_headed_worktrees_copilot import _initialize_fixture_repository
+
+    environment = repository_identity_env()
+    git = shutil.which("git", path=environment.get("PATH"))
+    assert git
+
+    def command(root, *arguments):
+        result = run_caller_owned(
+            [git, *arguments], cwd=root, env=environment, timeout=15,
+            max_stdout_bytes=8192, max_stderr_bytes=8192,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        return result.stdout.strip()
+
+    foreign, checkout = tmp_path / "foreign", tmp_path / "checkout"
+    foreign.mkdir()
+    checkout.mkdir()
+    command(foreign, "init", "--initial-branch=dev")
+    (foreign / "untouched.txt").write_text("outside fixture", encoding="utf-8")
+    command(foreign, "add", "untouched.txt")
+    command(
+        foreign, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "-c", "commit.gpgsign=false", "commit", "-m", "Unrelated fixture",
+    )
+    before = command(foreign, "rev-parse", "HEAD"), (foreign / ".git/index").read_bytes()
+    authority = checkout / ".copilot-extensions/agent-worktrees/config.yaml"
+    authority.parent.mkdir(parents=True)
+    authority.write_text("default_branch: dev\n", encoding="utf-8")
+    _initialize_fixture_repository(checkout, {
+        **environment, "GIT_DIR": str(foreign / ".git"),
+        "GIT_COMMON_DIR": str(foreign / ".git"), "GIT_WORK_TREE": str(foreign),
+        "GIT_INDEX_FILE": str(foreign / ".git/index"),
+    })
+    assert Path(command(checkout, "rev-parse", "--show-toplevel")).samefile(checkout)
+    assert command(checkout, "show", "HEAD:.copilot-extensions/agent-worktrees/config.yaml")
+    assert (command(foreign, "rev-parse", "HEAD"), (foreign / ".git/index").read_bytes()) == before
+    assert (foreign / "untouched.txt").read_text(encoding="utf-8") == "outside fixture"
+
+
 @pytest.mark.timeout(300)
 def test_fresh_application_admits_its_current_native_runtime(tmp_path, monkeypatch):
     _qualify_native_application(tmp_path, monkeypatch)

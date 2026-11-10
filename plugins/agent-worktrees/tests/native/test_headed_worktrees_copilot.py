@@ -20,6 +20,7 @@ import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
 from agent_procutil.owned_process import run_caller_owned
+from agent_worktrees.git_repository_environment import repository_identity_env
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
 
@@ -56,6 +57,22 @@ def _backend_execution(attempt):
             matches.append((path, receipt))
     assert len(matches) <= 1, "The caller published more than one native backend execution"
     return matches[0] if matches else None
+
+
+def _initialize_fixture_repository(checkout, environment):
+    git = shutil.which("git", path=environment.get("PATH"))
+    assert git, "The public caller requires a real fixture repository"
+    for arguments in (
+        ["init", "--initial-branch=dev"],
+        ["add", ".copilot-extensions/agent-worktrees/config.yaml"],
+        ["-c", "user.name=Native fixture", "-c", "user.email=fixture@example.invalid",
+         "-c", "commit.gpgsign=false", "commit", "-m", "Declare fixture repository authority"],
+    ):
+        result = run_caller_owned(
+            [git, *arguments], cwd=checkout, env=repository_identity_env(environment), timeout=15,
+            max_stdout_bytes=8192, max_stderr_bytes=8192,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
 
 
 @pytest.mark.parametrize("control", ["broker", "native-input", "manager-no-mux", "manager-mux"])
@@ -138,6 +155,7 @@ def _qualify_native_worktrees(
             "PSMUX_DEFAULT_SESSION", "PSMUX_CLAUDE_TEAMMATE_MODE", "WT_SESSION", "TERM_PROGRAM",
         }
     }
+    environment = repository_identity_env(environment)
     environment.update(
         COPILOT_EXTENSIONS_TEST_CONTAINED="1", COPILOT_HOME=str(home),
         COPILOT_OFFLINE="true", COPILOT_PROVIDER_TYPE="openai",
@@ -379,19 +397,7 @@ class Mux {
         )
         record = Path(initialized)
         if public_embody:
-            git = shutil.which("git")
-            assert git, "The public caller requires a real fixture repository"
-            for arguments in (
-                ["init", "--initial-branch=dev"],
-                ["add", ".copilot-extensions/agent-worktrees/config.yaml"],
-                ["-c", "user.name=Native fixture", "-c", "user.email=fixture@example.invalid",
-                 "-c", "commit.gpgsign=false", "commit", "-m", "Declare fixture repository authority"],
-            ):
-                initialized_git = run_caller_owned(
-                    [git, *arguments], cwd=checkout, env=environment, timeout=15,
-                    max_stdout_bytes=8192, max_stderr_bytes=8192,
-                )
-                assert initialized_git.returncode == 0, initialized_git.stdout + initialized_git.stderr
+            _initialize_fixture_repository(checkout, environment)
         if manager:
             selected = runtime(
                 "import json;from agent_worktrees import config;"

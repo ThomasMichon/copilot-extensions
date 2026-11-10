@@ -3281,3 +3281,42 @@ including contention retries. Real Git deletion, rewrite and contended
 rewrite controls pass with the 28 selected recovery cases, preserving the
 original identity and no-dispatch refusal. Required CI and a new review of
 that correction remain owed before merging the prerequisite.
+
+### 2026-11-10 - Published caller head and remaining source gates
+
+#11830 publishes the functional public caller. Exact published head
+`2ed5d7e31eb44db41ef14a301c6636db96386c96` qualifies through request
+`9cb660e0d30a4d51aedaebbb27184753`, run `42738456204`, attempt 1,
+protected controller `0ba41eeca0038c618c307d8b2705c36cd2787f17`.
+The validated native case passed in 167.098 seconds, with 220.031 seconds
+including preparation and settlement. Pins, platform, actual consumer and
+cleanup remain unchanged. The preceding publication rebase preserved both
+structured and emitted diagnostics; its five focused finite-phase/discovery
+controls passed.
+
+Required CI correctly rejects the command module's growth past 1,000 lines.
+Move the new command-preparation selection into the existing cohesive
+embodiment helper rather than widen the cap. Review also correctly identifies
+inherited Git selectors in fixture mutation calls. The fixture now uses the
+canonical repository-identity environment, with a real foreign-repository
+control proving the other head, index and content remain untouched. These
+refinements pass all 103 selected caller and Git-isolation cases, F/E9 and
+whitespace. They still owe final committed-head CI, review and native evidence;
+the previous pass is not silently relabeled as the next head.
+
+#11812 remains a separate source-client prerequisite. Its first-ref history
+anchor is now persisted before the reconciliation fetch and reused across
+later resumes, including anchors learned during ordinary append contention.
+The same request remains refused after an intervening deletion or rewrite;
+an observed envelope cannot bypass an already retained history requirement.
+All 36 selected recovery controls pass. A review summary's absence of inline
+threads does not waive its substantive high-severity observation; the durable
+anchor correction owes its own review and required CI.
+
+The independent receiver-native fixture is prepared against the reviewed
+receiver revision in a separate owned qualification workspace, with no
+receiver implementation edits. It exercises explicit auth-wait launch,
+renewal/shortening, exact native and extension retirement, same-session
+seedless recovery/history and the native-input hold. It is not executed or
+qualified yet; protected packet support and its prerequisites remain owed,
+without expanding the Worktrees-only private-feed exposure.
