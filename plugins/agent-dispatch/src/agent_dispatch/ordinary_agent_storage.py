@@ -172,6 +172,11 @@ def _record_agent(
             require_pool_workspace(
                 conn, task, actual.worktree, execution_machine, driver=row["driver"],
             )
+        else:
+            require_pool_workspace(
+                conn, task, actual.worktree, execution_machine or row["execution_machine"],
+                driver=row["driver"], reservation_key=key,
+            )
         if row["agent_info"]:
             from .ordinary_invocation import historical_intent, same_facts
             persisted = json.loads(row["agent_info"])

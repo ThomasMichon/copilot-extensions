@@ -200,6 +200,13 @@ class AuthorizeFreshBody(BaseModel):
     reason: str
 
 
+class AdoptLegacyCapacityBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    apply: bool = False
+    permitted: bool = False
+    reason: str = ""
+
+
 class FenceHistoryBody(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     before: float
@@ -257,6 +264,13 @@ def register_spawn_routes(
             raise HTTPException(409, detail=str(exc)) from exc
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise HTTPException(503, detail="recovery bridge readiness unavailable") from exc
+
+    @app.post("/spawn-reservations/history/adopt", dependencies=[Depends(control_auth)])
+    def adopt_legacy_capacity(body: AdoptLegacyCapacityBody) -> dict:
+        try:
+            return queue.adopt_legacy_capacity(**body.model_dump())
+        except TaskError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
 
     def _require_task(task_id: str) -> None:
         if queue.get(task_id) is None:

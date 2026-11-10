@@ -876,19 +876,6 @@ class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlaceme
             },
         ))
 
-    def fence_legacy_history(
-        self, *, before: float, apply: bool = False, permitted: bool = False,
-        confirmed_no_live_holder: bool = False, reason: str = "",
-    ) -> dict:
-        return self._unwrap(self._http.post(
-            "/spawn-reservations/history/fence",
-            headers=self._control_headers(),
-            json={
-                "before": before, "apply": apply, "permitted": permitted,
-                "confirmed_no_live_holder": confirmed_no_live_holder, "reason": reason,
-            },
-        ))
-
     # -- external producer resource reservations ----------------------------
 
     def acquire_resource_reservation(

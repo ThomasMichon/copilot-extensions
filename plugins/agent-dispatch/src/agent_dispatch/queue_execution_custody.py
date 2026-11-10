@@ -20,6 +20,13 @@ class ExecutionSendUnresolved(TaskError):
     """Admission is deferred until an earlier transport outcome is reconciled."""
 
 
+class PoolLaneUnavailable(ExecutionSendUnresolved):
+    """A cold pool body cannot restart until its bound pool has a free lane.
+
+    Wake drains reschedule it after a short delay instead of retrying at once.
+    """
+
+
 @dataclass(frozen=True)
 class ExecutionSendIdentity:
     scope: ExecutionScope

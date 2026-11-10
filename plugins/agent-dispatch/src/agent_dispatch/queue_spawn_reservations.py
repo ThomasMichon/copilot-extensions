@@ -657,6 +657,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
         guard: Callable[[sqlite3.Row], None] | None = None,
         require_no_native: bool = False,
         pool_startup_retry: dict | None = None,
+        in_transaction: Callable[[sqlite3.Connection, sqlite3.Row], None] | None = None,
     ) -> SpawnReservation:
         ts = self._now(now)
         with self._connect() as conn:
@@ -681,10 +682,14 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             elif startup_complete is not None:
                 from .queue_pool_startup_retry import refuse_legacy_retry
                 refuse_legacy_retry(conn, key)
-            if worktree is not None:
+            releasing = preserve_releasing and row["state"] == SpawnState.RELEASING
+            if worktree is not None and releasing:
+                if row["worktree"] is not None and worktree != row["worktree"]:
+                    raise TaskError("release completion cannot change its recorded workspace")
+            elif worktree is not None:
                 from .queue_pool_placement import require_pool_workspace
                 task = self._fetch(conn, row["task_id"])
-                require_pool_workspace(conn, task, worktree, row["execution_machine"], driver=row["driver"])
+                require_pool_workspace(conn, task, worktree, row["execution_machine"], driver=row["driver"], reservation_key=key)
             validate_cooling_publication(row, cooling_token, expected_startup_revision)
             if release_requested or to_state in {SpawnState.FAILED, SpawnState.SETTLED, SpawnState.RELEASING}:
                 require_no_wake_for_release(self, conn, row)
@@ -731,9 +736,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                     raise TaskError(
                         "pool release requires independently verified exact absence before force failure"
                     )
-            if preserve_releasing and row["state"] == SpawnState.RELEASING:
-                to_state = SpawnState.RELEASING
-                exclusive_released = None
+            if releasing:
+                to_state, exclusive_released = SpawnState.RELEASING, None
             if to_state == SpawnState.DEFERRED and row["release_requested"]:
                 conn.execute("COMMIT")
                 raise TaskError(f"reservation {key} has pending release (cannot defer)")
@@ -788,7 +792,7 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
             if session_handle is not None:
                 from .queue_pool_placement import pool_native_publication
                 task = self._fetch(conn, row["task_id"])
-                clear_retirement = pool_native_publication(conn, task, row, session_handle)
+                clear_retirement = pool_native_publication(conn, task, row, session_handle, releasing=releasing)
             completion = row["startup_complete"]
             revision = row["startup_revision"]
             if startup_complete is not None:
@@ -847,6 +851,8 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         "UPDATE tasks SET activity = NULL, activity_updated_at = ? WHERE id = ?",
                         (ts, row["task_id"]),
                     )
+            if in_transaction is not None:
+                in_transaction(conn, row)
             row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (key,)).fetchone()
             conn.execute("COMMIT")
         return SpawnReservation._from_row(row)

@@ -43,9 +43,40 @@ the typed transactional placement.
 No workspace, worker or native identity is invented. Workspace preparation and
 startup must follow that commit through the existing allocation/startup owners.
 
-Capacity counts accountable `reserving`, `spawned`, `cold` and `releasing`
+Capacity counts accountable `reserving`, `spawned` and `releasing`
 reservations, failed native/startup effects and unresolved transport custody,
-not caller estimates or task status. Immutable per-reservation pool bindings
+not caller estimates or task status. A `cold` (parked) body holds no lane
+until its reactivation is in flight or a wake send to it is unresolved. Any
+other restart of a cold body bound to a pool (a detached-run completion wake,
+or the legacy supervisor resume of an adopted body) reacquires a lane in its
+immutable binding's pool inside the same write transaction that revalidates
+the wake (its delivery token, task and waiter incarnation, and reservation), so
+a superseded wake leaves the body cold; it is deferred,
+without spending an attempt, while that pool is full. A deferred wake is
+rescheduled after the drain's retry delay, so later wakes (including ones for
+pools with free lanes) are delivered in the meantime. The admission check
+excludes only the waking reservation and the task's own waiter entry; older
+accountable attempts of the same task still count. Load counting stops once it reaches the pool's
+capacity, so a saturated pool does not classify its remaining history. A suspended task whose resume finds its
+pool full waits (`lane_wait_since`) instead of over-subscribing; waiting
+reactivations count against the pool only while their body is still cold (a
+wake that re-takes the lane clears the wait, and the body is then counted once
+as a reservation), so they take freed lanes before fresh
+placements, and they start in request order when recovery reconciliation
+finds a free lane. That start wakes the owner only if a request for the
+reactivation asked for a wake. A waiter whose body is release-requested,
+startup-fenced or retired holds no lane, and reconciliation drops the wait of
+any waiter that can no longer start (the resume request and its wake choice
+are retained). As with an immediate start, a recovery started without a wake
+holds its lane until the owner affirms it or its startup deadline expires, and a
+later wake request for that recovery is still delivered. While the bound pool
+is disabled (absent from the published catalog) or the catalog is not ready,
+reactivation starts and every cold-body restart route, including one whose
+recovery was already admitted, are deferred rather than started. A renewed
+intentional suspension withdraws any outstanding resume request and its wake
+choice, even after a detached wake has already re-taken the lane.
+A body that never parked keeps its own lane and resumes
+without waiting. Immutable per-reservation pool bindings
 retain older attempts even when the task's current assignment advances.
 Unresolved launch/resume/delivery sends consume the slot of their recorded
 reservation, not every predecessor in the same lineage. Wake sends retain
@@ -97,6 +128,36 @@ Terminal unbound legacy history is reconciled explicitly with
 `reservations fence-history` (see
 [spawn startup fencing](spawn-startup-fencing.md#compatibility-and-graceful-cutover));
 active legacy reservations still settle through their own lifecycle.
+Still-accountable unbound rows can be adopted explicitly with
+`agent-dispatch reservations adopt-legacy`. It previews by default; with
+`--apply --permit --reason <text>` it binds each row to the single published
+pool instance whose filters permit its task on the row's execution machine and
+audits the binding. Rows matching several pools (`ambiguous`) or none
+(`no_matching_pool`) are reported and left unbound, and while the pool catalog
+is not ready (pending, expired or invalidated publications) every row is left
+unbound as `catalog_not_ready` with the catalog blockers. The row's machine
+comes only from its own evidence: its recorded execution machine or fleet-body
+host (otherwise its creating host), plus the owner's host when that owner is
+the row's worktree. It is never inferred from the candidate pools. A row with
+no such evidence is left unbound as `machine_unrecorded`, and one whose
+evidence names several hosts as `machine_conflict`. A row with no
+recorded worktree (a launch still in flight) is left unbound as
+`workspace_unrecorded`, because pool publication requires that workspace;
+adopt it again once the launch records one. Pool filters are evaluated against
+the recorded workspace itself, not only the task's target or affinity, including
+hard worktree requirements. Later workspace attachment and publication recheck
+the bound pool's full filters inside the write transaction. A disabled or
+unavailable bound pool retains valid first resume and steer requests without
+starting recovery or dropping the pending lane wait. Late startup completion on
+a releasing reservation records cleanup facts even after pool removal; it cannot
+replace a recorded workspace or native, or return the reservation to service. A
+recorded workspace the matched pool or the task's current routing refuses (a
+pool-rejected or excluded worktree, another machine or target worktree) is
+left unbound as `workspace_conflict`, and publishing into an adopted binding
+repeats that check, including the host evidence. Adopted bindings are
+accounting-only: they create no recovery assignment, so a parked adopted body
+keeps its legacy supervisor resume path, which still waits for a free lane in
+its bound pool.
 
 Supervisor capacity and release sweeps apply `native_release_pending` in the
 reservation query before the bounded result limit. Cleanup retries retain their
