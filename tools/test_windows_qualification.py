@@ -545,7 +545,9 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
             "path": ".github/workflows/" + contract.WORKFLOW,
         }
     monkeypatch.setattr(client, "api", api)
-    with pytest.raises(ValueError):
+    with pytest.raises(
+        ValueError, match="protected controller does not support" if unsupported == "packet" else None,
+    ):
         client.submit(selected, "HEAD")
     assert effects == []
     assert list(tmp_path.iterdir()) == []
