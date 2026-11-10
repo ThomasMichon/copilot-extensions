@@ -334,6 +334,9 @@ first, then the launcher. Roll back the launcher and provider together, or
 refuse a missing capability instead of silently reverting to a fixed listener.
 Daemon children still use the existing `--tcp-port` argument, including an
 explicit `0`; no new daemon-side protocol or live-service metadata is required.
+The shared generation-start boundary also applies and validates the default
+before taking custody or binding endpoints, covering direct service invocations
+and selected-generation startup as well as CLI-triggered startup.
 
 `AGENT_VAULT_PINNED_CONTEXT` uses the strict `identity_context.py` parser and
 installation identity; it additionally requires `AGENT_VAULT_CACHE=1` and an
