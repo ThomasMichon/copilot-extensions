@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -74,16 +75,21 @@ def test_cleanup_refuses_busy_launch_before_record_or_liveness_read(
     tmp_path, monkeypatch, force,
 ):
     path = tmp_path / "one.yaml"
-    path.write_text("unchanged", encoding="utf-8")
+    original = json.dumps({
+        "worktree_id": "one", "repo": "sample", "branch": "worktree/one",
+        "worktree_path": str(tmp_path / "one"), "machine": "fixture",
+        "platform": "windows", "status": "completed", "sessions": [],
+    })
+    path.write_text(original, encoding="utf-8")
     read = Mock(side_effect=AssertionError("busy launch must precede record read"))
-    monkeypatch.setattr(cleanup_gc_cli.tracking, "load_record", read)
     real_guard = worktree_lifecycle.guard
     monkeypatch.setattr(worktree_lifecycle, "guard", lambda p: real_guard(p, timeout=0))
     with real_guard(path):
+        monkeypatch.setattr(cleanup_gc_cli.tracking, "load_record", read)
         result = cleanup_gc_cli._revalidate_cleanup_safety(
             "one", repo=SimpleNamespace(), tracking_path=tmp_path, force=force,
             reap=Mock(side_effect=AssertionError("busy launch must not reap")),
         )
     assert not result.cleanable and result.bucket == "locked"
     read.assert_not_called()
-    assert path.read_text(encoding="utf-8") == "unchanged"
+    assert path.read_text(encoding="utf-8") == original
