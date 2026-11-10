@@ -13,7 +13,9 @@ import json
 from pathlib import Path
 import re
 import runpy
+import shutil
 import sys
+import tempfile
 import threading
 import time
 import tomllib
@@ -141,10 +143,6 @@ def prepare_git_transport(
         ["git", "--git-dir", repository, "rev-parse", "HEAD", "HEAD^{tree}"],
         environment, project, diagnostics, "suite-transport-head", timeout=30,
     ).splitlines()
-    run(
-        ["git", "--git-dir", repository, "update-server-info"],
-        environment, project, diagnostics, "suite-transport-http-info", timeout=30,
-    )
     _PROVENANCE["verify"](artifact, candidate_commit)
     return {
         "repository": str(repository),
@@ -153,15 +151,24 @@ def prepare_git_transport(
 
 
 @contextmanager
-def serve_git_transport(transport: dict):
+def serve_git_transport(
+    transport: dict, *, environment: dict, project: Path, diagnostics: Path,
+    deadline: float, run,
+):
     """Serve actual Git object data for the caller's bounded acquisition scope."""
     repository = Path(transport["repository"])
     prefix = "/suite-transport.git"
+    failures = []
+    requests = 0
 
-    class Handler(http.server.SimpleHTTPRequestHandler):
-        def __init__(self, *args, **kwargs):
-            super().__init__(*args, directory=str(repository), **kwargs)
+    @contextmanager
+    def request_directory():
+        path = Path(tempfile.mkdtemp(prefix="git-http-", dir=repository.parent))
+        # Preserve response data when backend custody or delivery fails.
+        yield path
+        shutil.rmtree(path)
 
+    class Handler(http.server.BaseHTTPRequestHandler):
         def setup(self):
             super().setup()
             self.connection.settimeout(5)
@@ -169,11 +176,83 @@ def serve_git_transport(transport: dict):
         def log_message(self, *_):
             pass
 
-        def translate_path(self, path):
-            path = urlsplit(path).path
-            if path != prefix and not path.startswith(prefix + "/"):
-                return str(repository / ".no-such-git-endpoint")
-            return super().translate_path(path[len(prefix):] or "/")
+        def do_GET(self):
+            self.git_request()
+
+        def do_POST(self):
+            self.git_request()
+
+        def git_request(self):
+            nonlocal requests
+            location = urlsplit(self.path)
+            suffix = location.path.removeprefix(prefix)
+            if not (
+                self.command == "GET" and (
+                    suffix == "/HEAD" and not location.query
+                    or suffix == "/info/refs" and location.query == "service=git-upload-pack"
+                )
+                or self.command == "POST" and suffix == "/git-upload-pack" and not location.query
+            ) or not location.path.startswith(prefix + "/"):
+                self.send_error(404)
+                return
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 <= length <= 1024 * 1024:
+                    raise ValueError("Git transport request exceeds its input bound")
+                body = self.rfile.read(length)
+                if len(body) != length:
+                    raise ValueError("Git transport request body is incomplete")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("Git transport exceeded the existing case budget")
+                requests += 1
+                with request_directory() as raw:
+                    source, target = Path(raw) / "request", Path(raw) / "response"
+                    source.write_bytes(body)
+                    env = {
+                        **environment, "GIT_PROJECT_ROOT": str(repository.parent),
+                        "GIT_HTTP_EXPORT_ALL": "1", "PATH_INFO": "/" + repository.name + suffix,
+                        "REQUEST_METHOD": self.command, "QUERY_STRING": location.query,
+                        "CONTENT_TYPE": self.headers.get("Content-Type", ""),
+                        "CONTENT_LENGTH": str(length),
+                        "HTTP_GIT_PROTOCOL": self.headers.get("Git-Protocol", ""),
+                    }
+                    program = (
+                        "import pathlib,subprocess,sys\n"
+                        "with pathlib.Path(sys.argv[1]).open('rb') as source, "
+                        "pathlib.Path(sys.argv[2]).open('wb') as target:\n"
+                        " result=subprocess.run(['git','http-backend'],stdin=source,stdout=target,"
+                        "creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+                        "raise SystemExit(result.returncode)\n"
+                    )
+                    run(
+                        [sys.executable, "-I", "-B", "-c", program, source, target],
+                        env, project, diagnostics, f"suite-git-http-{requests}",
+                        timeout=min(20, remaining),
+                    )
+                    with target.open("rb") as response:
+                        headers, status = [], 200
+                        for _ in range(32):
+                            line = response.readline(8193)
+                            if line in (b"\r\n", b"\n"):
+                                break
+                            if not line or len(line) > 8192:
+                                raise ValueError("Git backend returned invalid response headers")
+                            name, value = line.decode("latin1").rstrip("\r\n").split(":", 1)
+                            if name.lower() == "status":
+                                status = int(value.strip().split()[0])
+                            else:
+                                headers.append((name, value.strip()))
+                        else:
+                            raise ValueError("Git backend exceeded its response header bound")
+                        self.send_response(status)
+                        for name, value in headers:
+                            self.send_header(name, value)
+                        self.end_headers()
+                        shutil.copyfileobj(response, self.wfile, 64 * 1024)
+            except Exception as error:
+                failures.append(error)
+                self.close_connection = True
 
     server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
     thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
@@ -195,6 +274,8 @@ def serve_git_transport(transport: dict):
             thread.join(5)
         if thread.is_alive() or server.socket.fileno() != -1:
             raise RuntimeError("The private Git transport did not stop")
+        if failures:
+            raise failures[0]
 
 
 def install_payload_closure(

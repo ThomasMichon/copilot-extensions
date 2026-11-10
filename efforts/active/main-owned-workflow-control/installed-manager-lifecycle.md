@@ -1003,3 +1003,22 @@ before success. The small real-Git preservation check now exercises that HTTP
 route. The profile/receipt require that exact loopback Git source; foreign
 origins and invalid identities refuse. No host service, persistent daemon,
 remote repository, release admission or upgrade baseline is introduced.
+
+Run 42918039967 at `25d234b25a8287ac8660519fcdbcbd825a37e160`
+reached the real CLI's HTTP acquisition, but its exact command uses
+`git clone --depth 1 --progress`. The static/dumb Git HTTP transport cannot
+provide shallow capabilities, so it failed after 325.65 seconds. Required
+source CI has a successful pass at this head; native qualification is still
+failed, and neither is waived.
+
+The loopback transport now delegates read-only advertisement/upload-pack
+requests to the actual `git http-backend` through the same bounded native
+process owner. Binary request/response files avoid rewriting pack data;
+backend failures and unconfirmed custody remain fatal even if a client retries.
+The small real-Git check now uses the observed shallow-clone options instead
+of a full-clone proxy. Existing command/case/runner/job limits remain unchanged.
+
+The payload receipt reader also now matches the existing core reader's refusal
+of duplicate JSON fields, including identical duplicate values. Its focused
+malformed-receipt control passes; a complete result must be unambiguous before
+any later release-contract adoption.

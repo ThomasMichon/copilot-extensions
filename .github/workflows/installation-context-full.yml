@@ -1347,7 +1347,14 @@ jobs:
           assert len(cases) == len(evidence) == 1
           assert cases[0].get("name") == "test_installed_suite_payload_closure_uses_the_real_cli"
           assert not any(cases[0].find(name) is not None for name in ("failure", "error", "skipped"))
-          data = json.loads(evidence[0])
+          def unique(pairs):
+              result = {}
+              for key, value in pairs:
+                  assert key not in result, "duplicate payload receipt field"
+                  result[key] = value
+              return result
+
+          data = json.loads(evidence[0], object_pairs_hook=unique)
           assert data["candidate_commit"] == data["identity"]["candidate_commit"] == expected
           for key, value in (("run_id", "GITHUB_RUN_ID"), ("run_attempt", "GITHUB_RUN_ATTEMPT")):
               assert type(data["identity"][key]) is int and data["identity"][key] == int(os.environ[value])

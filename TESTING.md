@@ -844,7 +844,8 @@ every declared payload with the actual pinned CLI. Installed engine discovery
 and complete payload-byte comparison must succeed in the private HOME, with
 the required-readiness profile enabled. A private bare Git repository serializes
 the verified materialized bytes with a packed `git fast-import` stream. A
-context-owned loopback HTTP server serves only that real Git repository, and the
+context-owned loopback HTTP server invokes the real `git http-backend` for
+read-only advertisement/upload-pack requests against that repository, and the
 CLI registers its HTTP Git URL with `plugin marketplace add`. The pinned CLI
 does not recognize `file:` as a Git transport. A directory marketplace would load live and
 copy nothing, leaving the installed engine's cache-only discovery empty.
@@ -855,6 +856,10 @@ host service, persistent daemon or promotion transaction is created. Its separat
 `installed-manager-suite-payloads` receipt explicitly reports runtime
 installation as unobserved: payload delivery is not runtime construction,
 actual Machines readiness, an authentic update or lifecycle acceptance.
+The small transport check uses the CLI's actual `git clone --depth 1 --progress`
+contract; a static/dumb HTTP clone cannot satisfy shallow acquisition. Backend
+processes use the existing bounded command owner, and unresolved backend
+custody fails the case rather than being hidden by a recovered client request.
 The job reuses the bounded pinned downloader and the existing Copilot 1.0.105 /
 PSMux 3.3.8 prerequisite pins, verifies checkout identity, and preserves the
 900-second runner and 720-second case limits. Its 30-minute job envelope also

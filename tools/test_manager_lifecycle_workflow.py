@@ -22,7 +22,7 @@ WORKFLOW = (
 
 @pytest.mark.parametrize("outcome", [
     "passed", "failed", "skipped", "missing", "partial", "stale", "wrong-run", "runtime-claim",
-    "requested-mismatch", "foreign-transport",
+    "requested-mismatch", "foreign-transport", "duplicate-field",
 ])
 def test_payload_preflight_cannot_claim_runtime_or_accept_incomplete_evidence(
     tmp_path, monkeypatch, outcome,
@@ -75,9 +75,12 @@ def test_payload_preflight_cannot_claim_runtime_or_accept_incomplete_evidence(
             )
             if outcome == "skipped":
                 ET.SubElement(case, "skipped")
+            encoded = json.dumps(data)
+            if outcome == "duplicate-field":
+                encoded = encoded[:-1] + ',"candidate_commit":"' + "a" * 40 + '"}'
             ET.SubElement(
                 ET.SubElement(document, "properties"), "property",
-                name="installed-manager-suite-payloads", value=json.dumps(data),
+                name="installed-manager-suite-payloads", value=encoded,
             )
         ET.ElementTree(document).write(reports / "group.xml")
         return subprocess.CompletedProcess(arguments, 1 if outcome == "failed" else 0, "", "")

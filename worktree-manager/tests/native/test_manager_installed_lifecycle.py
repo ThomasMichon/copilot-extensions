@@ -2147,9 +2147,13 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
         deadline=time.monotonic() + 30, run=run,
     )
     copied = tmp_path / "copied"
-    with serve_git_transport(transport) as served:
+    serving = {
+        "environment": environment, "project": project, "diagnostics": tmp_path,
+        "deadline": time.monotonic() + 30, "run": run,
+    }
+    with serve_git_transport(transport, **serving) as served:
         run(
-            ["git", "clone", served["url"], copied],
+            ["git", "clone", "--depth", "1", "--progress", served["url"], copied],
             environment, project, tmp_path, "clone", timeout=30,
         )
     for relative, row in before.items():
@@ -2165,7 +2169,7 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
     assert _PROVENANCE["content_manifest"](artifact) == before
     assert not (artifact / ".git").exists()
     with pytest.raises(RuntimeError, match="controlled acquisition failure"):
-        with serve_git_transport(transport):
+        with serve_git_transport(transport, **serving):
             raise RuntimeError("controlled acquisition failure")
     with pytest.raises(ValueError, match="fresh fixture-owned"):
         prepare_git_transport(
@@ -2221,7 +2225,10 @@ def test_installed_suite_payload_closure_uses_the_real_cli(record_testsuite_prop
                 diagnostics=root / "diagnostics", deadline=budget.execution_deadline,
                 run=installed._run,
             )
-            transport = transports.enter_context(serve_git_transport(transport))
+            transport = transports.enter_context(serve_git_transport(
+                transport, environment=env, project=project, diagnostics=root / "diagnostics",
+                deadline=budget.execution_deadline, run=installed._run,
+            ))
             profile = selected_profile(
                 artifact, identity["candidate_commit"], configuration, transport=transport,
             )
