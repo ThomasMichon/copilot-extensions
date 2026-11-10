@@ -121,7 +121,9 @@ stale/unavailable/unsupported results. An injected Python factory, direct
 store-file read or passive health/status file is not this front door.
 Preserve existing admission, scope isolation and response/capture budgets.
 The exact command names, wire fields and capability advertisement are
-**unimplemented decisions to qualify in stage 1**, not promised existing APIs.
+implemented source contracts in
+[the local profile reference](../../../services/pr/LOCAL.md), not claims of
+released, installed or running support.
 
 ### Local hosting is independently usable
 
@@ -236,6 +238,40 @@ No separate publication/completion PR is a dependency of these stages.
 Record a real newly discovered prerequisite by concrete failure and existing
 owner rather than adding speculative dynamic-backend, full-parity or generic
 permission gates.
+
+## Source evidence map
+
+The stage-1/2/3 source deliveries are #11790, #11838 and #11866. The
+permanent stage-4 tests below qualify the packaged standalone foreground,
+not an injected Gateway substitute. Source review and required CI remain
+mandatory for every delivery; this map is not a merge waiver.
+
+| M1 source criterion | Permanent proof |
+|---|---|
+| Both native providers, qualified identity, passive config, selected declarations and rollback | Worktrees `test_pr_inventory.py` and `test_pr_observation_credentials.py`; core `test_repository_contract.py`, `test_repository_schema.py`, `test_repository_subscriptions.py`; standalone `test_repository_config.py` and `test_local_repository.py` |
+| Actual independently packaged foreground and CLI without Core/Gateway | Standalone `test_local_foreground.py` runs provision/serve/ready/list/query/subscribe/inspect/events/acknowledge/cancel/follow as isolated module processes; `test_distribution.py` builds a checkout-independent wheel |
+| Population without waits, later entry/head/review/check/terminal/departure, no timestamp events | Both provider variants in `test_local_foreground.py`; core `test_repository_discovery.py` preserves unknown-to-known and authoritative native facts |
+| Partial/capped/unavailable discovery, stale membership, empty versus unknown, recovery and budgets | Foreground partial/outage/departure and initially-empty controls; native inventory and core discovery budget/cap tests |
+| Shared acquisition, independent consumers, no query-triggered readers, no forge writes/tasks | Foreground held-inventory query/inspect call counters and explicit zero write/task counters for both providers; core discovery shared-fetch counters |
+| Original-root restart, immutable registration/event IDs, independent ACK, expiry/cancel, gaps/backpressure | Foreground restart and finite follow receiving a later change; core `test_repository_subscriptions.py` gap, delivered-ACK and byte-pressure cases; standalone `test_local_client.py` |
+| Persistence failure/recovery and bounded withdrawal joining exact work | Standalone `test_local_recovery.py` interrupts real V2 registration/state+event replacement and recovers original IDs/expiry/ACK; `test_local_lifetime.py` holds inventory/snapshot/disk cleanup while proving withdrawal and writer exclusion; core discovery pre/post-replace controls and `test_repository_local.py` owned-transport controls |
+| Default connector compatibility and typing | Existing standalone host/report/installed-process controls remain selected independently; strict `service-pr` targets analyze Linux and Windows; local runtime tests are Linux-only |
+
+These are source qualification surfaces, not host deployment artifacts or a
+native deployment exemption. [LOCAL.md](../../../services/pr/LOCAL.md) owns
+the exact arguments, UID/socket/root and native/credential-command contracts,
+budgets, retention and failure behavior. A retained deployment still needs its
+actual artifact/lifecycle and credential custodians; a portable foreground
+interface does not select them.
+
+The source vertical's operating flow is documented in
+[TESTING.md](../../../TESTING.md#optional-pr-service-lifecycle).
+Whole Fleet strict typing remains separately tracked by #9807; the focused
+standalone strict result is not a whole-project claim. Release promotion,
+installation, running support and real read-only target/event evidence are
+**open stage-5 acceptance**, with the integration/operational owners. Dynamic
+backend intake, Dispatch consumers/emission, full Author/Reviewer and CLI
+parity, fleet placement and production writes remain broader parent work.
 
 ## Validation and acceptance
 

@@ -27,6 +27,11 @@ and production writer/merge cutover; it does not replace the broader Guiding
 Intent or any original, refined or inherited Plan/Validation outcome.
 This effort remains Active under its existing integration and domain owners.
 
+The [M1 source evidence map](repository-cache-events-m1.md#source-evidence-map)
+separates the standalone synthetic vertical from still-open release,
+installed/running and authorized real-target qualification. Completing that
+source slice does not complete M1 or this effort.
+
 ## Guiding Intent
 
 Resume the deferred PR-watch delegation work without trading away wake
