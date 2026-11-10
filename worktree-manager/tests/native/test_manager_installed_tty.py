@@ -70,6 +70,7 @@ def _failure_evidence(root):
         ("install-engine.custody.json", 4 << 10), ("cmd.terminal.txt", 32 << 10),
         ("powershell.terminal.txt", 32 << 10),
         ("cmd.processes.json", 8 << 10), ("powershell.processes.json", 8 << 10),
+        ("cmd.exit.json", 8 << 10), ("powershell.exit.json", 8 << 10),
     ):
         path = root / "diagnostics" / name
         if not path.exists() or remaining < 1024:
@@ -520,9 +521,25 @@ def _installed_picker(console, manager_python, engine_python, observations):
     return (descendants, pinned) if str(expected[0]) in pinned else None
 
 
+def _consumer_exit_evidence(console, error, descendants, started, input_sent):
+    retained = {}
+    for pid, (name, handle) in list(descendants.items())[:16]:
+        retained[str(pid)] = {
+            "name": name, "birth": console.birth(handle), "exit_code": console.exit_code(handle),
+        }
+    return {
+        "label": error.label, "exit_code": error.code, "input_sent": input_sent,
+        "elapsed_seconds": time.monotonic() - started,
+        "root": {"pid": console.process.pid, "birth": console.birth(console.process.process)},
+        "retained_descendants": retained,
+    }
+
+
 def _witness(shell, stub, env, project, diagnostics, manager_python, engine_python, *, control=False):
     argv = _project_entry_command(shell, stub)
     captured = b""
+    started = time.monotonic()
+    input_sent = False
     with _owned_console(argv, env=env, cwd=project) as console:
         pinned = {}
         descendants = {}
@@ -566,6 +583,7 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
                 raise RuntimeError("Interactive shell bypassed its native terminal capability admission")
             before = bytes(console.output)
             console.send(b"q")
+            input_sent = True
             wait(lambda: "Leave the worktree picker?" in _visible(console.output[len(before):]),
                  "keyboard-driven quit dialog")
             after = bytes(console.output)
@@ -590,6 +608,12 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
                                      "observed": True},
                 "native_terminal_offer_hosts": [offer["host_pid"] for offer in offers],
             }
+        except _ConsumerExited as error:
+            label = shell + ("-negative" if control else "")
+            (diagnostics / (label + ".exit.json")).write_text(json.dumps(
+                _consumer_exit_evidence(console, error, descendants, started, input_sent),
+            ), encoding="utf-8")
+            raise
         finally:
             captured = bytes(console.output)
             label = shell + ("-negative" if control else "")
@@ -988,6 +1012,71 @@ def test_failure_evidence_retains_complete_bounded_stderr_and_refuses_oversize(t
     path.write_bytes(b"x" * ((1 << 20) + 1))
     with pytest.raises(ValueError, match="retained bound"):
         _failure_evidence(tmp_path)
+
+
+def test_consumer_exit_evidence_precedes_owned_job_cleanup(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    import _terminal_console_fixture
+    import pytest
+    from agent_procutil import _terminal_offer
+
+    request = tmp_path / "ce-terminal-fixture" / "request.json"
+    request.parent.mkdir()
+    request.touch()
+    diagnostics = tmp_path / "diagnostics"
+    diagnostics.mkdir()
+    exit_path = diagnostics / "cmd.exit.json"
+    cleaned = []
+
+    class FailedConsole:
+        process = SimpleNamespace(pid=100, process=1000)
+        output = b"installed Picker frame"
+        read_error = None
+        input_sent = False
+
+        def __init__(self, *_args, **_kwargs):
+            self.job = SimpleNamespace(terminate_and_wait=self.cleanup)
+
+        def cleanup(self, _timeout):
+            evidence = json.loads(exit_path.read_text(encoding="utf-8"))
+            assert evidence["input_sent"] is True
+            assert evidence["exit_code"] == 0xFFFFFFFF
+            assert evidence["retained_descendants"] == {
+                "101": {"name": "manager", "birth": 1020, "exit_code": 7},
+                "102": {"name": "engine", "birth": 1030, "exit_code": None},
+            }
+            cleaned.append(True)
+
+        def send(self, value):
+            assert value == b"q"
+            self.input_sent = True
+
+        def exited(self, handle):
+            return self.input_sent
+
+        def wait(self, _timeout):
+            return 0xFFFFFFFF
+
+        def birth(self, handle):
+            return handle + 10
+
+        def exit_code(self, handle):
+            assert not cleaned
+            return 7 if handle == 1010 else None
+
+        def close(self):
+            assert cleaned
+
+    monkeypatch.setattr(_terminal_console_fixture, "Console", FailedConsole)
+    monkeypatch.setattr(_terminal_offer, "validate", lambda _: (request, {"host_pid": 101}))
+    monkeypatch.setitem(globals(), "_installed_picker", lambda *_args: (
+        {101: ("manager", 1010), 102: ("engine", 1020)}, {},
+    ))
+    with pytest.raises(RuntimeError, match="Consumer exited 4294967295 before keyboard-driven"):
+        _witness("cmd", tmp_path / "project.cmd", {"TEMP": str(tmp_path)}, tmp_path,
+                 diagnostics, tmp_path / "manager", tmp_path / "engine")
+    assert _failure_evidence(tmp_path)["cmd.exit.json"]["truncated"] is False
 
 
 def test_retained_engine_source_uses_published_snapshot_not_runtime_slot(tmp_path):
