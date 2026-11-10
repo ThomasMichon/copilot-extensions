@@ -933,6 +933,12 @@ Explicit installer entry points remain separate, unadopted callers.
 Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
 
+Windows Vault provision explicitly hands its verified participant witness and
+native re-entry marker to the frozen installer, including client-only recipes.
+The installer authenticates that existing owner instead of submitting another
+request behind its own execution lock. Stamp and non-Windows recipes do not
+receive this native handoff.
+
 MCP's fixed `stamp`/`provision` recipe admits its canonical installed payload
 and default legacy root, retaining its actual `init` front rather than assuming
 `install`. Admission requires its direct command/module, native runtime gates,
