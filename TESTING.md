@@ -162,6 +162,17 @@ this negative case, all pending-work sources or productive enablement.
 The protected admission owner derives native preparation and sanitization
 from its known packet registry, never a caller-supplied flag or name prefix.
 
+`submit --packet native-driver-observation-loss` separately selects
+`test_opt_in_receiver_sdk_observation_loss_preserves_hold` from that fixture.
+After the isolated model provider observes the actual controlled request, the
+fixture closes only its authenticated SDK/control stream, not the public
+broker connection. The original observation-loss hold must survive source
+expiry and exact native retirement; a fresh lease must not create another
+incarnation or replay the interrupted input. This uses the same pins, public
+preparation, sanitization and 120/180/300/420-second limits, without a feed.
+The in-flight packet alone does not qualify loss of observation. None of these
+packets enables productive renewal or qualifies unrelated pending-work sources.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
