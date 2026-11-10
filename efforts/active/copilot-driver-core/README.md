@@ -3245,3 +3245,17 @@ request, per-request branch, forced ref update or dispatch replay was used.
 The hosted result remains pending; acceptance is not native qualification.
 The source-client correction still owes its normal review/CI/merge, and
 the parent caller, receiver, lifetime and receiving gates remain open.
+
+The original request completed as failed on run `42733468145`, attempt 1,
+with exact candidate `759e2739e7b78df521ccd60d44829589b2b0adc6` and
+protected controller `556cb3df2969b614704b827428ed9bf4e335b29c`.
+Pinned prerequisites passed; the fresh public caller was refused before
+broker binding. Its retained log says another mux became live before
+handoff. Comparison against the earlier qualified source identifies the
+new passive socket observer: unlike the fixture's CLI adapter, it was not
+given the private PSMux namespace. Align each leg's observer environment
+with its existing private namespace, preserving the cold-admission guard,
+actual consumer, clocks and cleanup. The three focused namespace controls,
+F/E9 and whitespace pass. This diagnosis and fixture correction are not
+a native pass; qualify the changed committed candidate separately and
+retain the original failed request unchanged.
