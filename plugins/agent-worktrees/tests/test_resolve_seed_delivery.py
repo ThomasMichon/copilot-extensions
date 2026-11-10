@@ -1146,3 +1146,57 @@ def test_preservation_selector_rejects_conflicting_or_empty_requests_before_seed
         setattr(args, name, value)
     assert resolve_cli.cmd_resolve(args) == 3
     assert "--preserve-seed-id requires" in json.loads(capfd.readouterr().out)["error"]
+
+
+def test_preservation_selector_rejects_restore_before_process_recovery(
+    tmp_path, monkeypatch, capfd,
+):
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    monkeypatch.setattr(
+        resolve_cli, "_restore_before_resume", lambda *a: pytest.fail("stale selector reached process recovery"),
+    )
+    assert resolve_cli.cmd_resolve(_args(
+        json=False, restore=True, preserve_seed_id="stale",
+    )) == 3
+    assert "--preserve-seed-id requires" in json.loads(capfd.readouterr().out)["error"]
+    assert launch_seed_state.peek(record.yaml_path) == seed
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("verdict", [
+    LiveVerdict(active=True, mux_live=True),
+    LiveVerdict(active=True, bare=True, live_session_ids=["live"], mux_probe_ok=False, probes_ok=False),
+])
+def test_preserved_open_reattaches_when_target_becomes_live_between_resolves(
+    tmp_path, monkeypatch, capfd, surface, verdict,
+):
+    monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    retained = launch_seed_state.peek(record.yaml_path)
+    code, original = _resume_plan(config, record, monkeypatch, capfd, surface=surface)
+    assert code == 0
+    monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: verdict)
+    for name in ("take", "finish", "restore"):
+        monkeypatch.setattr(launch_seed_state, name, lambda *a, **k: pytest.fail("live Open changed prompt custody"))
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface=surface,
+        preserve_seed_id=original["seed_preserved_id"],
+    )
+    assert code == 0 and not plan["seed_pending"] and "--admission-only" in plan["cmd"]
+    assert plan["seed_preserved_id"] == seed.seed_id and "--interactive" not in plan["cmd"]
+    assert launch_seed_state.peek(record.yaml_path) == retained

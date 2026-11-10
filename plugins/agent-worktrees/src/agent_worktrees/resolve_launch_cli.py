@@ -468,7 +468,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         if staged_seed is not None and plain_live_open(args, verdict):
             staged_seed = None
         if staged_seed is not None:
-            seed_error = cold_start_error(verdict, staged_seed.kind)
+            seed_error = cold_start_error(verdict, staged_seed.kind, preserving=retain_seed)
             if not seed_error and staged_seed.handoff_id and not retain_seed:
                 seed_error = (
                     "Previous launch-prompt handoff is unconfirmed; the seed is retained "

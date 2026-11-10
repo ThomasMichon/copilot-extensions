@@ -169,6 +169,10 @@ replacement and rollout remain with their existing owners.
   cases then passed with clean cleanup, including an explicit wrong-engine
   refusal control. Final native qualification of the complete corrected source
   and versioned preservation declaration remains pending.
+- Preserve the identity across a stopped-to-live transition without applying
+  delivery-only cold-start restrictions to promptless reattachment. A
+  preservation selector combined with `--restore` must refuse before any
+  bound-process recovery, not after that effect.
 
 ### 2026-11-09 - Native scope review corrections
 - Review identified creation-namespace drift and a scrubbed teammate flag that

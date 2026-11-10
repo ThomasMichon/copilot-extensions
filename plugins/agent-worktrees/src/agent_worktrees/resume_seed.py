@@ -38,7 +38,7 @@ def preserved_seed_selection_error(args) -> str | None:
         or getattr(args, "seed", None) is not None
         or getattr(args, "seed_id", None) is not None
         or any(getattr(args, name, None) for name in (
-            "new_worktree", "base", "machine", "environment",
+            "new_worktree", "base", "machine", "environment", "restore",
             "stage_launch_seed", "native_resume_session", "launch_request_b64", "launch_request_status",
         ))
     ):
@@ -92,7 +92,11 @@ def plain_live_open(args, verdict: LiveVerdict | None) -> bool:
     )
 
 
-def cold_start_error(verdict: LiveVerdict | None, kind: str = "resume") -> str | None:
+def cold_start_error(
+    verdict: LiveVerdict | None, kind: str = "resume", *, preserving: bool = False,
+) -> str | None:
+    if preserving and verdict is not None and verdict.active:
+        return None
     if verdict is None or not verdict.probes_ok or not verdict.mux_probe_ok:
         return (
             f"{kind.title()} prompt requires a confirmed stopped session; liveness "

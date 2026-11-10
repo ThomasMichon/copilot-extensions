@@ -813,7 +813,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         staged_seed = None
     retain_seed = preserve_unconfirmed_seed(state.args, staged_seed)
     if staged_seed is not None and not getattr(state.args, "bare_resume", False):
-        seed_error = cold_start_error(verdict, staged_seed.kind)
+        seed_error = cold_start_error(verdict, staged_seed.kind, preserving=retain_seed)
         if seed_error:
             return output._json_error(seed_error, exit_code=3)
         if staged_seed.handoff_id and not retain_seed:
