@@ -20,11 +20,7 @@ from .configuration_preview import validate_preview_actions
 from .form_drafts import parse_draft
 from .form_requests import validate_request_placement
 
-from .harness_state import (
-    build_projects,
-    repo_plugin_enablement,
-    user_enabled_plugins,
-)
+from .harness_state import build_projects
 if TYPE_CHECKING:
     from .production_picker.picker_tui.pivot_create_action import CreateAction
 
@@ -525,16 +521,6 @@ def parse_manifest(
     )
 
 
-def _enabled_keys(project_root: Path | None, home_dir: Path | None) -> set[str]:
-    enabled = {
-        item.qualified: item.enabled
-        for item in user_enabled_plugins(home_dir)
-    }
-    if project_root is not None:
-        enabled.update(repo_plugin_enablement(str(project_root)))
-    return {name for name, value in enabled.items() if value}
-
-
 def _probe_commands(
     contribution: PluginContribution,
 ) -> tuple[PluginContribution, list[str]]:
@@ -640,14 +626,14 @@ def discover_contracts(
     checkout = None
     if project:
         match = next((p for p in build_projects(home_dir) if p.name == project), None)
-        if match and match.repo:
-            checkout = Path(match.repo.path)
-    enabled = _enabled_keys(checkout, home_dir)
+        if match and match.anchor:
+            checkout = Path(match.anchor)
     activation = resolve_active_plugins(
         home=home_dir or Path(os.environ.get("USERPROFILE") or os.path.expanduser("~")),
         include_projects=False,
         project_root=checkout,
     )
+    enabled = activation.decisions.keys()
     for finding in activation.findings:
         plugin, _, marketplace = (finding.owner or "").partition("@")
         findings.append(ContractFinding(

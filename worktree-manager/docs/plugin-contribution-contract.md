@@ -12,7 +12,9 @@ shipping static JSON under its own payload:
 
 The Manager resolves active payloads through the shared plugin-activation owner,
 including directory marketplaces declared user-global or by the selected project,
-and scans their `pivots/*.json` directly. The selected scope's root wins over a
+with their local settings overrides, and scans their `pivots/*.json` directly.
+Project lookup uses its resolved anchor, including anchor-only registrations.
+The selected scope's root wins over a
 cached copy of the same plugin; marketplace and plugin identity come from that
 resolution, not the directory's name. Source-resolution failures remain typed
 `activation-*` findings, including when the resolver selects an installed fallback.

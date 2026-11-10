@@ -167,6 +167,54 @@ def test_directory_contract_respects_project_disable_and_scope(tmp_path):
     assert discover_contracts(project="repo", home_dir=home).contributions == ()
 
 
+@pytest.mark.parametrize("base,local", [(False, True), (None, True), (True, False)])
+def test_contracts_use_effective_user_local_enablement(tmp_path, base, local):
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=False)
+    settings = home / ".copilot" / "settings.json"
+    data = json.loads(settings.read_text("utf-8"))
+    data["enabledPlugins"] = {} if base is None else {"agent-local@local": base}
+    settings.write_text(json.dumps(data), encoding="utf-8")
+    (settings.parent / "settings.local.json").write_text(json.dumps({
+        "enabledPlugins": {"agent-local@local": local},
+    }), encoding="utf-8")
+    cached = home / ".copilot" / "installed-plugins"
+    _manifest(cached, "local", "agent-local", "local", _pivot())
+    legacy = home / ".agent-worktrees" / "pivots" / path.name
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(path.read_bytes())
+
+    report = discover_contracts(home_dir=home, plugins_root=cached)
+
+    assert [c.qualified_plugin for c in report.contributions] == (
+        ["agent-local@local"] if local else []
+    )
+    assert any(f.code == "disabled-contribution" for f in report.findings) is not local
+    assert any(f.code == "orphan-legacy-dropin" for f in report.findings) is not local
+
+
+@pytest.mark.parametrize("anchor_only", [False, True])
+def test_contracts_handle_project_registration_without_repository_path(tmp_path, anchor_only):
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=True)
+    aw = home / ".agent-worktrees"
+    (aw / "repos.yaml").write_text(
+        "repos: {}\n" if anchor_only else "repos:\n  repo:\n    class: worktree\n",
+        encoding="utf-8",
+    )
+    if anchor_only:
+        (aw / "projects.yaml").write_text(
+            "projects:\n  repo:\n    config_dir: \"~/.repo\"\n"
+            f"    anchor: {json.dumps(str(path.parents[3]))}\n", encoding="utf-8",
+        )
+
+    report = discover_contracts(project="repo", home_dir=home)
+
+    assert [c.qualified_plugin for c in report.contributions] == (
+        ["agent-local@local"] if anchor_only else []
+    )
+
+
 def test_directory_source_failure_retains_canonical_activation_diagnostics(tmp_path):
     home = tmp_path / "home"
     path = _directory_plugin(home, project=False)
