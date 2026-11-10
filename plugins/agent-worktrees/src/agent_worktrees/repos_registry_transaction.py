@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 from contextlib import contextmanager
 from pathlib import Path
+import time
 from typing import TYPE_CHECKING
 
 from dropin_registry import ScanAuthority
@@ -14,6 +15,8 @@ from .acquisition_report import failed, observe
 from .repos_registry_reader import RepositoryResolutionError
 
 if TYPE_CHECKING:
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
     from .repos import ReposRegistry
 
 
@@ -39,19 +42,54 @@ def read_bytes(path: Path) -> bytes | None:
     return content
 
 
+def remaining_timeout(budget: OwnedExecutionBudget, maximum: float) -> float:
+    remaining = budget.execution_deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError("Registry execution budget expired.")
+    return min(maximum, remaining)
+
+
 @contextmanager
-def registry_lock(path: Path):
-    from . import pr_authority
+def record_lock(path: Path, *, budget: OwnedExecutionBudget | None = None):
     from .tracking import _RecordLock
 
-    with pr_authority.guard(), _RecordLock(path, timeout=10.0, require_sidecar=True):
-        yield
+    if budget is None:
+        with _RecordLock(path, timeout=10.0, require_sidecar=True):
+            yield
+        return
+    deadline = time.monotonic() + remaining_timeout(budget, 10.0)
+    while True:
+        remaining_timeout(budget, 10.0)
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Registry lock acquisition budget expired.")
+        with _RecordLock(path, blocking=False, require_sidecar=True) as lock:
+            if lock.acquired:
+                remaining_timeout(budget, 10.0)
+                yield
+                return
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise TimeoutError("Registry lock acquisition budget expired.")
+        time.sleep(min(0.05, remaining))
 
 
-def write_checked(path: Path, registry: ReposRegistry, content: str) -> None:
+@contextmanager
+def registry_lock(path: Path, *, budget: OwnedExecutionBudget | None = None):
+    from . import pr_authority
+
+    arguments = {"timeout": remaining_timeout(budget, float("inf"))} if budget is not None else {}
+    with pr_authority.guard(**arguments):
+        with record_lock(path, budget=budget):
+            yield
+
+
+def write_checked(
+    path: Path, registry: ReposRegistry, content: str, *, budget: OwnedExecutionBudget | None = None,
+) -> None:
     from .tracking import _atomic_write
 
-    with registry_lock(path):
+    arguments = {"budget": budget} if budget is not None else {}
+    with registry_lock(path, **arguments):
         current = read_bytes(path)
         baseline = registry._baseline
         expected = (str(path.resolve()), revision(current))
