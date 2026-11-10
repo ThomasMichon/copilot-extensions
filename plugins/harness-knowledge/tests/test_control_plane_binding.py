@@ -307,6 +307,24 @@ def test_existing_binding_refuses_registration_changed_during_final_preflight(
     assert not (home / ".harness" / "config.yaml").exists()
 
 
+def test_existing_binding_preserves_unrelated_edit_during_portable_callback(
+    pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home, *_ = pair
+    monkeypatch.setattr(Path, "home", classmethod(lambda _cls: home))
+    config = home / ".harness" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_bytes(b"repo_name: harness\n")
+    proposed = configuration.preview(bk, "native-owner", "harness", "knowledge")
+    changed = config.read_bytes() + b"headless: true\n"
+    monkeypatch.setattr(
+        bk, "_NATIVE_BINDING_PRECONDITION", lambda: config.write_bytes(changed), raising=False,
+    )
+    with pytest.raises(RuntimeError, match="configuration changed"):
+        configuration.apply(bk, "native-owner", "harness", "knowledge", proposed["token"])
+    assert config.read_bytes() == changed
+
+
 def test_existing_binding_retains_pointer_receipt_after_legacy_cleanup_failure(
     pair: PairFixture, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

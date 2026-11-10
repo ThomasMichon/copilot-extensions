@@ -4760,7 +4760,21 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[corruption-ps1]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[corruption-sh]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-ps1]",
-        "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
+        "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[local]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[remote]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[unknown]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[pr-required]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[contained]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[new-commit]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[unknown-ref]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[dirty]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[remote-added]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[unknown-status]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[present]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[missing]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[unknown]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_health_composition.py": "a92aa05dc88c500de54daddb66fd4ff0484ba3abb4d15a38194315a04a3c4da2",
@@ -5303,7 +5317,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/machine_registry_acquisition.py": "8f7d824fef81b1fc728cb14a672e4e5bd7b0fbc02a3fbf76e635c934f9510fcf",
         "plugins/agent-worktrees/src/agent_worktrees/config_sources.py": "cced302905b2afdd0152f0c5391e6e0db640bb4af254223626e2e73dc970b1b3",
         "plugins/agent-worktrees/src/agent_worktrees/inrepo_config_source.py": "b48a5b616563646071ab76539f01dc08f5bbf6ba0626217347d0b7adad3a80e5",
-        "plugins/agent-worktrees/src/agent_worktrees/config.py": "08db6b3ca72d28d84f5e148ab8ca3551ba229b13942bd7ce92e6bbbbc2cbb2da",
+        "plugins/agent-worktrees/src/agent_worktrees/config.py": "e50cfe5c8d5cf1c9f0cd5a69e42088358ec884588eeb84b91ce3ffca0bd7fd80",
         "plugins/agent-worktrees/src/agent_worktrees/config_migrations.py": "bbd221022396cda6d02a6c6afbe4e73803a2277d8c3e6fb35eff547937c1e445",
         "plugins/agent-worktrees/src/agent_worktrees/config_adoption_defaults.py": "cb81625cc4907c088c81735ace9c8bfa4d5425bab01563503f45b5c9dcb91d20",
         "plugins/agent-worktrees/src/agent_worktrees/creation_diagnostics.py": "9e9df2522173fa739ada6c7201d37e63c17d19c9a75de215eb176304a86e8940",
@@ -5443,7 +5457,9 @@
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
         "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
-        "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab"
+        "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
+        "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "9fea9450ace2ee3461166bf5d6efcd9058414609f46e3c4614bb92e077486fbe"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_run.py",
@@ -5739,7 +5755,9 @@
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py",
         "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py",
         "tools/materialize_payload_invocation.py",
-        "libs/payload-invocation/generate.py"
+        "libs/payload-invocation/generate.py",
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py",
+        "plugins/agent-worktrees/src/agent_worktrees/git_repository_environment.py"
     ],
     "max_seconds": 300
 }

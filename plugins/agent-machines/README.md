@@ -93,6 +93,10 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   Machine-specific harness-to-knowledge values remain suggestions; no native
   apply, binding change or cloud enrollment occurs.
   See [the exchange contract](docs/portable-preferences.md).
+- **Accepted repository defaults.** `preferences repositories` reads local
+  accepted state and explicit overrides without invoking a binder. Worktrees
+  may offer the scoped knowledge default for separate native confirmation.
+  See [the projection contract](docs/portable-preferences.md#read-accepted-repository-defaults).
 - **Selected local carrier replicas.** `preferences carrier publish|receive`
   reuse that exchange with explicit account-labelled replica configuration
   and approved participants. A bounded dedicated-namespace census blocks
