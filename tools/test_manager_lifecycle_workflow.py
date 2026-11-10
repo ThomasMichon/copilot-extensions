@@ -44,6 +44,11 @@ def test_payload_preflight_cannot_claim_runtime_or_accept_incomplete_evidence(
             name: {"version": "1.0", "manifest_sha256": "b" * 64} for name in names
         },
         "runtime_installation": "not-observed", "copilot_sha256": "c" * 64,
+        "transport": {
+            "repository": str(tmp_path / "transport.git"),
+            "url": (tmp_path / "transport.git").as_uri(),
+            "commit": "d" * 40, "tree": "e" * 40,
+        },
     }
     if outcome == "partial":
         del data["payloads"]["agent-machines"]

@@ -9,6 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 from pathlib import Path
+import re
 import runpy
 import tomllib
 
@@ -21,7 +22,9 @@ _PROFILE = runpy.run_path(
 )["required_readiness_profile"]
 
 
-def selected_profile(artifact: Path, candidate_commit: str, repository_config: dict) -> dict:
+def selected_profile(
+    artifact: Path, candidate_commit: str, repository_config: dict, *, transport: dict | None = None,
+) -> dict:
     """Verify the complete frozen artifact before deriving its enabled roster."""
     if not artifact.is_absolute():
         raise ValueError("Select the absolute frozen artifact path")
@@ -45,22 +48,86 @@ def selected_profile(artifact: Path, candidate_commit: str, repository_config: d
     manager = tomllib.loads(
         (artifact / "worktree-manager" / "pyproject.toml").read_text(encoding="utf-8"),
     )
-    return _PROFILE(
+    profile = _PROFILE(
         catalog, manifests, marketplace_root=str(artifact),
         manager_version=manager["project"]["version"], repository_config=repository_config,
     )
+    if transport is not None:
+        repository = Path(transport["repository"])
+        if (
+            not repository.is_absolute() or transport["url"] != repository.as_uri()
+            or any(
+                not isinstance(transport.get(key), str)
+                or not re.fullmatch(r"[0-9a-f]{40}", transport[key])
+                for key in ("commit", "tree")
+            )
+        ):
+            raise ValueError("The frozen Git transport must name its exact private repository")
+        profile["settings"]["extraKnownMarketplaces"][catalog["name"]]["source"] = {
+            "source": "git", "url": transport["url"],
+        }
+    return profile
+
+
+def prepare_git_transport(
+    artifact: Path, candidate_commit: str, *, environment: dict, project: Path,
+    diagnostics: Path, run,
+) -> dict:
+    """Serialize frozen artifact bytes for a real copied Git install, not a release."""
+    _PROVENANCE["verify"](artifact, candidate_commit)
+    repository = project.parent / "suite-transport.git"
+    if repository.exists() or repository.is_symlink():
+        raise ValueError("Frozen Git transport requires a fresh fixture-owned repository")
+    date = run(
+        ["git", "show", "-s", "--format=%cI", candidate_commit],
+        environment, REPO, diagnostics, "suite-source-date", timeout=30,
+    )
+    env = {**environment, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+    run(
+        ["git", "init", "--bare", "--initial-branch=main", repository],
+        env, project, diagnostics, "suite-transport-init", timeout=30,
+    )
+    prefix = [
+        "git", "-C", artifact, "-c", "core.autocrlf=false", "-c", "core.longpaths=true",
+        "-c", "user.name=Suite Fixture", "-c", "user.email=fixture@example.invalid",
+        "--git-dir", repository, "--work-tree", artifact,
+    ]
+    run(
+        [*prefix, "add", "--force", "--all"],
+        env, project, diagnostics, "suite-transport-index", timeout=120,
+    )
+    tree = run(
+        [*prefix, "write-tree"], env, project, diagnostics, "suite-transport-tree", timeout=30,
+    )
+    commit = run(
+        [*prefix, "commit-tree", tree, "-m", "Frozen materialized fixture transport"],
+        env, project, diagnostics, "suite-transport-commit", timeout=30,
+    )
+    run(
+        [*prefix, "update-ref", "refs/heads/main", commit],
+        env, project, diagnostics, "suite-transport-head", timeout=30,
+    )
+    _PROVENANCE["verify"](artifact, candidate_commit)
+    return {
+        "repository": str(repository), "url": repository.as_uri(),
+        "commit": commit, "tree": tree,
+    }
 
 
 def install_payload_closure(
     artifact: Path, candidate_commit: str, *, repository_config: dict,
     copilot: Path, engine: Path, environment: dict, project: Path,
-    diagnostics: Path, run,
+    diagnostics: Path, transport: dict, run,
 ) -> dict:
     """Acquire every declared payload with the actual CLI, then verify its bytes."""
     from manager_suite_fixture import require_venue
 
     require_venue()
-    profile = selected_profile(artifact, candidate_commit, repository_config)
+    if not Path(transport["repository"]).resolve().is_relative_to(project.parent.resolve()):
+        raise ValueError("The frozen Git transport must belong to this private fixture")
+    profile = selected_profile(
+        artifact, candidate_commit, repository_config, transport=transport,
+    )
     if repository_config.get("require_application_readiness") is not True:
         raise ValueError("Apply the required-readiness profile before suite acquisition")
     if not copilot.is_absolute() or not copilot.is_file():
@@ -76,8 +143,18 @@ def install_payload_closure(
     executable_hash = hashlib.sha256(copilot.read_bytes()).hexdigest()
     marketplace = next(iter(profile["settings"]["extraKnownMarketplaces"]))
     names = sorted(profile["inventory"])
+
+    def verify_transport(phase):
+        observed = run(
+            ["git", "--git-dir", transport["repository"], "rev-parse", "HEAD", "HEAD^{tree}"],
+            environment, project, diagnostics, "suite-transport-" + phase, timeout=30,
+        )
+        if observed.splitlines() != [transport["commit"], transport["tree"]]:
+            raise ValueError("The frozen Git transport changed during acquisition")
+
+    verify_transport("before")
     run(
-        [copilot, "plugin", "marketplace", "add", artifact],
+        [copilot, "plugin", "marketplace", "add", transport["url"]],
         environment, project, diagnostics, "suite-marketplace-register", timeout=120,
     )
     for name in names:
@@ -134,10 +211,11 @@ def install_payload_closure(
             ).hexdigest(),
         }
     _PROVENANCE["verify"](artifact, candidate_commit)
+    verify_transport("after")
     if hashlib.sha256(copilot.read_bytes()).hexdigest() != executable_hash:
         raise ValueError("The native Copilot executable changed during acquisition")
     return {
         "candidate_commit": candidate_commit, "profile": profile,
         "copilot_sha256": executable_hash, "payloads": closure,
-        "runtime_installation": "not-observed",
+        "runtime_installation": "not-observed", "transport": transport,
     }

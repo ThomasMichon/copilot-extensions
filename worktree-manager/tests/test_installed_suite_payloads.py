@@ -42,10 +42,10 @@ def _artifact(tmp_path):
     return root
 
 
-def _seal(root):
+def _seal(root, commit=_COMMIT):
     provenance = _SUITE["_PROVENANCE"]
     (root / provenance["RECEIPT"]).write_text(json.dumps({
-        "schema": provenance["SCHEMA"], "version": 1, "source_commit": _COMMIT,
+        "schema": provenance["SCHEMA"], "version": 1, "source_commit": commit,
         "paths": provenance["content_manifest"](root),
     }))
 
@@ -72,13 +72,22 @@ def test_suite_profile_refuses_incomplete_or_substituted_artifact(tmp_path, defe
 
 @pytest.mark.parametrize("defect", [None, "partial-discovery", "foreign-payload", "changed-payload",
                                    "changed-nested-receipt",
-                                   "changed-artifact", "changed-cli", "reduced-settings", "command-failed"])
+                                   "changed-artifact", "changed-cli", "reduced-settings", "command-failed",
+                                   "changed-transport", "foreign-transport"])
 def test_suite_acquisition_requires_real_command_closure_and_private_selected_bytes(
     tmp_path, monkeypatch, defect,
 ):
     artifact = _artifact(tmp_path)
     config = {"project": "example", "stateless": True, "require_application_readiness": True}
-    profile = _SUITE["selected_profile"](artifact, _COMMIT, config)
+    repository = tmp_path / "suite-transport.git"
+    transport = {
+        "repository": str(repository), "url": repository.as_uri(),
+        "commit": "b" * 40, "tree": "c" * 40,
+    }
+    if defect == "foreign-transport":
+        transport["repository"] = str(tmp_path.parent / "foreign.git")
+        transport["url"] = (tmp_path.parent / "foreign.git").as_uri()
+    profile = _SUITE["selected_profile"](artifact, _COMMIT, config, transport=transport)
     project = tmp_path / "project"
     settings = project / ".github" / "copilot" / "settings.json"
     settings.parent.mkdir(parents=True)
@@ -93,11 +102,16 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
 
     def run(argv, environment, cwd, diagnostics, label, *, timeout):
         calls.append(argv)
-        if defect == "command-failed":
-            raise RuntimeError("actual command refused")
+        if argv[0] == "git":
+            return (
+                "d" * 40 if defect == "changed-transport" and label.endswith("-after")
+                else transport["commit"]
+            ) + "\n" + transport["tree"]
         if argv[0] == copilot:
+            if defect == "command-failed":
+                raise RuntimeError("actual command refused")
             if argv[1:4] == ["plugin", "marketplace", "add"]:
-                assert argv[-1] == artifact
+                assert argv[-1] == transport["url"]
                 return ""
             if argv[1:] == ["plugin", "list", "--json"]:
                 return "{}"
@@ -130,7 +144,7 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
     arguments = dict(
         repository_config=config, copilot=copilot, engine=tmp_path / "engine.exe",
         environment={"USERPROFILE": str(home), "COPILOT_HOME": str(copilot_home)},
-        project=project, diagnostics=tmp_path, run=run,
+        project=project, diagnostics=tmp_path, transport=transport, run=run,
     )
     if defect:
         with pytest.raises((ValueError, RuntimeError)):
@@ -138,15 +152,21 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
         if defect == "reduced-settings":
             assert calls == []
         if defect == "command-failed":
-            assert calls == [[copilot, "plugin", "marketplace", "add", artifact]]
+            assert [argv for argv in calls if argv[0] == copilot] == [
+                [copilot, "plugin", "marketplace", "add", transport["url"]],
+            ]
+        if defect == "foreign-transport":
+            assert calls == []
     else:
         result = _SUITE["install_payload_closure"](artifact, _COMMIT, **arguments)
-        assert calls[0] == [copilot, "plugin", "marketplace", "add", artifact]
-        assert [argv[1:] for argv in calls[1:-2]] == [
+        cli_calls = [argv for argv in calls if argv[0] == copilot]
+        assert cli_calls[0] == [copilot, "plugin", "marketplace", "add", transport["url"]]
+        assert [argv[1:] for argv in cli_calls[1:-1]] == [
             ["plugin", "install", name + "@example-marketplace"]
             for name in sorted(profile["inventory"])
         ]
-        assert calls[-2] == [copilot, "plugin", "list", "--json"]
+        assert cli_calls[-1] == [copilot, "plugin", "list", "--json"]
         assert set(result["payloads"]) == set(profile["inventory"])
         assert result["profile"]["repository_config"]["stateless"] is True
         assert result["runtime_installation"] == "not-observed"
+        assert result["transport"] == transport

@@ -950,3 +950,24 @@ custody diagnostics. It preserves the private-installation and exact-byte
 assertions rather than copying payloads into a guessed layout or substituting
 discovery. Another exact-source native observation is required before deciding
 whether the correction belongs in fixture configuration or product discovery.
+
+Run 42907778944 at `3ce7bdd6bdc3478f2ed44f65cdff9dcea295a45c`
+retains the actual discrepancy. The CLI reports all 24 selected plugins as
+`source: live` from the exact materialized artifact, explicitly stating that
+directory installation copied nothing. The installed engine's cache-only
+discovery therefore returns no paths for all 24. The 281.33-second failure is
+not a completed copied installation or a timeout, and the refusal is retained.
+
+The fixture now uses a real private Git transport for the same verified
+materialized artifact. Its bare repository is outside the artifact; actual Git
+stages all verified bytes, preserves the source commit's date, and records the
+distinct transport commit/tree. The actual CLI registers the `file:` Git URL
+and performs normal Git-backed installation; transport identity is rechecked
+before and after acquisition, while copied private payloads must still match
+the original frozen bytes. The required-readiness profile declares that same
+Git source. Nothing is copied into a guessed installation cache by the fixture.
+
+This is fixture data transport only, not a release composition, publication,
+admitted baseline or promotion writer. It adds no remote repository, service,
+daemon or manual promotion. Exact native validation is still required; no
+runtime/readiness, ordinary-upgrade or parent completion is inferred.

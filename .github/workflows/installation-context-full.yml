@@ -1355,6 +1355,10 @@ jobs:
           assert set(data["payloads"]) == set(data["profile"]["inventory"]) == set(inventory)
           assert data["profile"]["repository_config"]["require_application_readiness"] is True
           assert data["runtime_installation"] == "not-observed"
+          transport = data["transport"]
+          assert transport["url"] == Path(transport["repository"]).as_uri()
+          for key in ("commit", "tree"):
+              assert re.fullmatch(r"[0-9a-f]{40}", transport[key])
           assert re.fullmatch(r"[0-9a-f]{64}", data["copilot_sha256"])
           for name, row in data["payloads"].items():
               assert row["version"] == inventory[name]
