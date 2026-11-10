@@ -75,3 +75,41 @@ def test_withdrawal_aborts_partial_headers_before_waiting_for_listener_closure(t
             peer.close()
             await asyncio.wait_for(owner, 3)
     asyncio.run(scenario())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux OS peer admission")
+def test_withdrawal_closes_accepted_connection_before_its_coroutine_starts(tmp_path, monkeypatch):
+    async def scenario():
+        stop, accepted, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        async def handler(_request):
+            pytest.fail("withdrawn queued connection reached handler")
+        ingress = LocalIngress(
+            path=tmp_path / "queued.sock", namespace="test",
+            peers={os.getuid(): "reader"}, handler=handler, operation_seconds=30,
+        )
+        original = ingress._connection
+        async def queued(*args):
+            accepted.set()
+            await release.wait()
+            await original(*args)
+        monkeypatch.setattr(ingress, "_connection", queued)
+        owner = asyncio.create_task(ingress.run(stop))
+        peer = socket.socket(socket.AF_UNIX)
+        peer.setblocking(False)
+        try:
+            await asyncio.wait_for(ingress.connected.wait(), 2)
+            await asyncio.get_running_loop().sock_connect(peer, str(ingress.path))
+            await asyncio.wait_for(accepted.wait(), 2)
+            assert not ingress._requests
+            stop.set()
+            while not ingress._closing:
+                await asyncio.sleep(.01)
+            release.set()
+            await asyncio.wait_for(asyncio.shield(owner), 2)
+            assert not ingress._tasks and not ingress._requests
+        finally:
+            stop.set()
+            release.set()
+            peer.close()
+            await asyncio.wait_for(owner, 3)
+    asyncio.run(scenario())

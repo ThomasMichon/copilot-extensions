@@ -78,6 +78,7 @@ class LocalIngress:
     def _accept(self, reader, writer):
         if self._closing or len(self._tasks) >= 8:
             writer.close()
+            writer.transport.abort()
             return
         task = asyncio.create_task(self._connection(reader, writer))
         self._tasks.add(task)
@@ -91,6 +92,10 @@ class LocalIngress:
         self._requests[task] = (writer, lifetime)
         monitor = pending = None
         try:
+            if self._closing:
+                lifetime.close()
+                writer.transport.abort()
+                return
             raw_peer = writer.get_extra_info("socket").getsockopt(
                 socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("iII"),
             )
