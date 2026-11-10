@@ -313,7 +313,7 @@ def test_selected_ado_auth_loss_is_retryable_and_sanitized(monkeypatch):
     assert error.value.__cause__ is None
 
 
-@pytest.mark.parametrize("provider", ["github", "gitea", "azure-devops"])
+@pytest.mark.parametrize("provider", ["github", "azure-devops"])
 def test_selected_fetch_never_resolves_configured_or_ambient_account(monkeypatch, provider):
     source = Source()
     captured = []
@@ -333,13 +333,13 @@ def test_selected_fetch_never_resolves_configured_or_ambient_account(monkeypatch
 
 def test_unsupported_provider_and_explicit_token_conflicts_refuse_before_effects():
     with pytest.raises(ProviderError):
-        pr_watch.build_fetch(config.PRConfig(provider="unsupported"), "owner/repository", 7,
+        pr_watch.build_fetch(config.PRConfig(provider="gitea"), "owner/repository", 7,
                              credential_source=Source())
     with pytest.raises(ProviderError):
         pr_watch.build_fetch(config.PRConfig(provider="github"), "owner/repository", 7,
                              token="explicit", credential_source=Source())
     with pytest.raises(ProviderError):
-        configured_snapshot(SimpleNamespace(name="unsupported"), "owner/repository", 7,
+        configured_snapshot(SimpleNamespace(name="gitea"), "owner/repository", 7,
                             prcfg=config.PRConfig(), credential_source=Source())
 
 

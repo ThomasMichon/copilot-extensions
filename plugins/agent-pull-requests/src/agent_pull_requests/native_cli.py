@@ -115,9 +115,6 @@ def run(
     if args.command == "threads":
         from .native_threads import run as threads_run
         return threads_run(args, prefix_factory)
-    if args.command == "complete":
-        from .native_source_complete import run as complete_run
-        return complete_run(args, prefix_factory)
     if args.command == "cancel-creation":
         from .native_creation_cancel import run as cancellation_run
         code, payload = cancellation_run(args, prefix_factory)

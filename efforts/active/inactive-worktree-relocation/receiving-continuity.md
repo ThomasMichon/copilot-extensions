@@ -4,7 +4,7 @@
 
 ## Scope and status
 
-Reviewed in #11483, this scoped prerequisite continues
+This is a scoped prerequisite proposal, not implemented support. It continues
 the original support → old merged/final practice → broader inactive sequence.
 The decomposition below is **agent-recommended realization**. Actual adoption,
 installation, owner recovery and target effects remain separately owned.
@@ -15,15 +15,12 @@ proof**. Keep worktree identity, branch/HEAD/index/content, original allocation
 and creation history, claims, lifecycle and execution/Git-family authority.
 No active origin dependency, unsettled obligation, pair, WIP, retained session,
 opaque backend, corrupt/foreign/ambiguous receipt or unknown liveness is admitted.
-Receiving-only continuity can be implemented and qualified independently;
-that does not clear native inactivity or authorize a real move.
 
 ## Source-confirmed prerequisite boundary
 
-- Ordinary creation receipts remain excluded. The first receiving-only
-  extension separately validates a finalized original conclusion and exactly
-  closed local creator obligation. Missing metadata is never rehydrated by
-  planning or movement merely to make admission pass.
+- `checkout_relocation._ordinary_shape` excludes receiving allocations;
+  `_ordinary` also excludes retained creation receipts. Rehydrating a missing
+  field does not make that class supported.
 - `execution_spaces.require_record_mutation(..., recover_receiving=False)`
   refuses missing receiving metadata on an owner-ref/nonce record. Read-only
   planning must retain that refusal; it must not migrate an index, save a
@@ -63,20 +60,13 @@ into an authoritative negative.
    allocation/creation owners and original request, not replacement allocation
    or default-derived paths. A source-owned reconciliation may be a separate
    explicit operation; pure planning never performs it. Missing, malformed,
-   foreign, ambiguous or unsupported original evidence stays blocked. A
-   bounded immutable read of a quiescent rollback-mode creation database and
-   stable origin ledger supplies the independent first inspection; original
-   recovery/reconciliation remains a separate unmet capability.
+   foreign, ambiguous or unsupported original evidence stays blocked.
 3. **Evolve only current location.** Under the existing serialized receiving,
    creation, tracking, lifecycle and relocation owners, introduce a durable
    current-location revision bound to the unchanged original identity and
    operation. Prove original concluded child state and settled creator
    responsibility before admission. Do not rewrite allocation receipts,
    terminal conclusions, creation coordinates or parent closeout history.
-   The first implementation reuses the existing relocation journal for one
-   receiving current-location revision. It retains the original closeout
-   before effects and serializes through the original creation-operation lock;
-   no new allocator, journal database or lifecycle service is introduced.
 4. **Complete the first real flow.** Exercise native copy/publication, Git
    repair, pointer/permission rebinding, actual mutation/publication and
    lifecycle/allocation-reader consumers. The original creator's immutable
@@ -110,10 +100,7 @@ unrelated status write merely to rehydrate a receipt.
   mux command, including missing proof and owner unavailability.
 - First positive case: actual ordinary linked Git checkout, clean locally
   landed content, valid original receiving journal/receipt, concluded child,
-  settled creator responsibility and qualified inactive owners. Receiving-only
-  tests may admit their explicitly scoped newly owned fixture identities,
-  while poisoning native probes and retaining production unknown-owner
-  refusal. Such a component result is not positive native-owner evidence.
+  settled creator responsibility and qualified inactive owners.
 - Refusals: active parent dependency, unconfirmed owner, stale/foreign tuple,
   changed nonce/branch/receipt, ambiguous original request, pending creation,
   opaque obligations, pair/session/WIP, unsafe storage or permission drift.
@@ -125,9 +112,7 @@ unrelated status write merely to rehydrate a receipt.
   mutation, source publication, launch admission and stale generic writers.
   Installed/resident selection is separately qualified through its owner.
 
-**Remaining full-flow blocker:** the qualified native observation contract is
-absent. The independent first receiving component does not resolve it.
-Preserve the existing holds and source worktree; do not promote fixture-only
-admission, mocked liveness or a recovered flag into real native clearance.
-Remote/missing creator settlement, missing original metadata, WAL proof,
-additional receiving revisions and broader session/pair/WIP cases stay gated.
+**Current blocker:** the qualified native observation contract is absent.
+No receiving-class runtime implementation or native positive qualification is
+claimed by this proposal. Preserve the existing holds and source worktree;
+do not manufacture a passing move through mocked liveness or a recovered flag.

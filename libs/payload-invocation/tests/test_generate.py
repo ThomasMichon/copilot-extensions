@@ -1273,8 +1273,7 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout.strip()) == {
-        "lock": "released",
-        "flags": cast(list[str | None], ["prior-mode", "prior-snapshot"]) if prior_flags else [None, None],
+        "lock": "released", "flags": ["prior-mode", "prior-snapshot"] if prior_flags else [None, None],
     }
     dispatch = [
         event for event in _read_jsonl(plugin_root / "logs" / "activity.jsonl")

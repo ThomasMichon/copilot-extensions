@@ -29,7 +29,7 @@ from .config import (
     resolve_kpdb,
     run_dir,
 )
-from .config import PIPE_PATH as PIPE_PATH, resolve_context as resolve_context, daemon_bind_port
+from .config import PIPE_PATH as PIPE_PATH, resolve_context as resolve_context
 from .config import (
     tcp_port as configured_tcp_port,
 )
@@ -1228,7 +1228,7 @@ def _run_resident(args, *, handoff_payload=None, handoff_consumed=False):
     if args.foreground:
         print(
             f"Vault service starting (cli={service.cli.status(resolve_kpdb(required=False))}, "
-            f"TCP bind 127.0.0.1:{args.tcp_port if args.tcp_port is not None else daemon_bind_port(resolve_context())})"
+            f"TCP 127.0.0.1:{args.tcp_port or configured_tcp_port()})"
         )
 
     def sig_handler(signum, frame):

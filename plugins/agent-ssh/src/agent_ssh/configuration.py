@@ -70,7 +70,7 @@ def owner_report(root: Path) -> tuple[dict, Path] | None:
         return None
     except OSError as error:
         raise ConfigurationError("optional Worktrees installation could not be inspected") from error
-    prefix = _peer_launch.launch_prefix(
+    prefix = _worktrees.launch_prefix(
         "agent-ssh", Path(own["pluginRoot"]),
         os.environ.get("COPILOT_EXTENSIONS_CONTEXT") or str(Path(own["pluginRoot"]) / "install.json"),
         "agent-worktrees",

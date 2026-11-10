@@ -320,24 +320,6 @@ ownership. `AGENT_VAULT_SOCKET`, `AGENT_VAULT_PIPE`, `AGENT_VAULT_PID`,
 `AGENT_VAULT_LOG`, `AGENT_VAULT_RUN_DIR`, `AGENT_VAULT_ENDPOINT` select runtime
 transport/state paths. They do not become repository preferences.
 
-`AGENT_VAULT_BIND_PORT` supplies a daemon-start default in `0..65535`, where
-`0` requests an OS-assigned ephemeral listener. It does not change client
-discovery or the strictly validated client `port`. An explicit start argument
-or selected client port takes precedence; an invalid bind default refuses
-before launching a daemon. Launchers needing ephemeral startup should use this
-separate default rather than injecting an unqualified client port of `0`.
-The selected executable advertises support as `daemon-bind-default-v1` in
-`invocation-contract --json`. A launcher requiring this behavior must inspect
-that runtime's capability before migrating; older runtimes ignore the new
-environment default and are not compatible providers. Deploy the provider
-first, then the launcher. Roll back the launcher and provider together, or
-refuse a missing capability instead of silently reverting to a fixed listener.
-Daemon children still use the existing `--tcp-port` argument, including an
-explicit `0`; no new daemon-side protocol or live-service metadata is required.
-The shared generation-start boundary also applies and validates the default
-before taking custody or binding endpoints, covering direct service invocations
-and selected-generation startup as well as CLI-triggered startup.
-
 `AGENT_VAULT_PINNED_CONTEXT` uses the strict `identity_context.py` parser and
 installation identity; it additionally requires `AGENT_VAULT_CACHE=1` and an
 absolute `AGENT_VAULT_CACHE_DIR`. Pinned database/group/port/source data is an

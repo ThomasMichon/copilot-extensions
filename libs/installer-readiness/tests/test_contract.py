@@ -772,34 +772,6 @@ def test_payload_command_accepts_installation_context_v2(tmp_path: Path) -> None
     assert report.modules[0].module_id == "agent-demo/runtime"
 
 
-@pytest.mark.parametrize("version", [1, 2])
-def test_generic_payload_command_matches_the_canonical_generator(tmp_path: Path, version: int) -> None:
-    plugin = "service-demo"
-    payload = _payload(tmp_path / plugin, plugin)
-    invocation = payload / "payload-invocation.json"
-    data = json.loads(invocation.read_text(encoding="utf-8"))
-    old_command = data["command"]
-    data["command"] = plugin
-    data["runtimeRoot"] = "." + plugin
-    if version == 2:
-        data["version"] = 2
-        data["legacyRuntimeRoot"] = data.pop("runtimeRoot")
-        data["installationContext"] = "legacy"
-    _write(invocation, data)
-    for suffix in ("", ".ps1"):
-        (payload / "bin" / (old_command + suffix)).rename(payload / "bin" / (plugin + suffix))
-    declaration = payload / "installer-readiness.json"
-    data = json.loads(declaration.read_text(encoding="utf-8"))
-    for action in data["modules"][0]["readiness"]["invocations"].values():
-        action["command"] = plugin
-    _write(declaration, data)
-
-    assert payload_generator.load_manifest(invocation)["plugin"] == plugin
-    report = discover_modules([_installation(payload, plugin)])
-    assert report.valid
-    assert report.modules[0].readiness[Platform.WINDOWS].target.name == plugin + ".ps1"
-
-
 def test_payload_command_rejects_mixed_installation_context_versions(tmp_path: Path) -> None:
     payload = _payload(tmp_path / "agent-demo", "agent-demo")
     manifest = payload / "payload-invocation.json"

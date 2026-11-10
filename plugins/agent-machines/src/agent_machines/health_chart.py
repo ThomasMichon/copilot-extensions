@@ -17,19 +17,7 @@ def render(report: dict) -> str:
         for hour in hours for group in hour["groups"] if group["kind"] == "performance"
     })
     maximum = max(counts, default=0) or 1
-    service_lines = []
-    if report.get("services"):
-        service_lines.append("Service contributions: separate namespaces, not added to file totals.")
-        for service in report["services"]:
-            service_lines.append(
-                f'{service["instance"]}/{service["service"]}: {service["hour"]}; {service["state"]}',
-            )
-            for group in service.get("contribution", {}).get("groups", []):
-                line = f'{group["metric"]}/{group["stage"]}: {group["observations"]} observed events'
-                if group["metric"] == "operation-duration":
-                    line += f'; successful {group["successful_durations"]}; p95 {group["p95"]} ns'
-                service_lines.append(line)
-    chart_height = 480 + 110 * len(timing_groups) + 24 * len(service_lines)
+    chart_height = 480 + 110 * len(timing_groups)
     parts = [
         f'<svg xmlns="http://www.w3.org/2000/svg" width="1040" height="{chart_height}" '
         f'viewBox="0 0 1040 {chart_height}" role="img">',
@@ -118,8 +106,5 @@ def render(report: dict) -> str:
             parts.append(
                 f'<polyline points="{" ".join(segment)}" fill="none" stroke="#2463a5"/>',
             )
-    for row, line in enumerate(service_lines):
-        y = 480 + 110 * len(timing_groups) + row * 24
-        parts.append(f'<text x="16" y="{y}">{escape(line)}</text>')
     parts.append("</g></svg>\n")
     return "\n".join(parts)

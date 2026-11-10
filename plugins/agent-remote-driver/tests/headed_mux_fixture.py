@@ -32,6 +32,7 @@ class FixtureMux:
         allowed = {
             "new-session": ("-s",), "has-session": ("-t",),
             "display-message": ("-t",), "capture-pane": ("-t",), "kill-session": ("-t",),
+            "send-keys": ("-t",),
         }
         selectors = allowed.get(action)
         if selectors is None:

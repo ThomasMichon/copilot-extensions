@@ -11,8 +11,14 @@ import yaml
 from . import config as cfg, tracking
 
 
-def read_record(ledger: Path):
-    """Read one bounded, identity-stable ledger without recovery or owner calls."""
+def inspect(worktree_id: str, destination: str, config) -> dict:
+    """Refuse unqualified passive evidence without contacting an action owner."""
+    from . import checkout_relocation as relocation
+
+    relocation._require_native_support()
+    if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
+        raise ValueError("move requires one exact managed worktree ID")
+    ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
     before = ledger.lstat()
     if (
         not stat.S_ISREG(before.st_mode) or ledger.is_symlink()
@@ -35,26 +41,11 @@ def read_record(ledger: Path):
     data = yaml.safe_load(raw)
     if not isinstance(data, dict):
         raise ValueError("relocation ledger has an unsupported schema")
-    return tracking.parse_record_data(data, path=ledger)
-
-
-def inspect(worktree_id: str, destination: str, config) -> dict:
-    """Refuse unqualified passive evidence without contacting an action owner."""
-    from . import checkout_relocation as relocation
-
-    relocation._require_native_support()
-    if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
-        raise ValueError("move requires one exact managed worktree ID")
-    ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
-    record = read_record(ledger)
+    record = tracking.parse_record_data(data, path=ledger)
     if record.worktree_id != worktree_id or record.repo != config.repo_name:
         raise ValueError("relocation record does not match the receiving ledger identity/project")
-    relocation._ordinary_shape(record, ledger, allow_receiving=True)
-    if record.receiving_allocation_present:
-        from .receiving_relocation import inspect as inspect_receiving
-
-        inspect_receiving(record, config)
-    elif record.owner_ref and record.creation_nonce:
+    relocation._ordinary_shape(record, ledger)
+    if record.owner_ref and record.creation_nonce:
         raise ValueError(
             "read-only proof cannot recover missing receiving allocation metadata; inspect through its owner"
         )

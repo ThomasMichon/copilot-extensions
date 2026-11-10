@@ -1,9 +1,0 @@
-{
-  "comment": "Avoid Python policy startup for proven prepared Windows file-local writes while retaining original guarded fallback.",
-  "changes": [
-    {
-      "plugin": "agent-worktrees",
-      "type": "patch"
-    }
-  ]
-}

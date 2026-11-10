@@ -12,7 +12,6 @@ The only sanctioned full walk of the state root is the explicit
 from __future__ import annotations
 
 import json
-import logging
 import os
 import platform
 from collections.abc import Callable, Iterable
@@ -1270,8 +1269,7 @@ def verify_worktree_active(record) -> LiveVerdict:
     mux_probe_ok = True
     try:
         info = mux_status_many([wt_id], strict=True).get(wt_id) or MuxInfo()
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Could not verify worktree mux presence: %s", exc)
+    except Exception:
         info = MuxInfo()
         probes_ok = False
         mux_probe_ok = False
@@ -1288,8 +1286,7 @@ def verify_worktree_active(record) -> LiveVerdict:
         )
         live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
         bare = any(b.get("homing") == "bare" for b in bound)
-    except Exception as exc:
-        logging.getLogger(__name__).warning("Could not verify registered Copilot bindings: %s", exc)
+    except Exception:
         probes_ok = False
     lock_live = bool(live_ids)
 

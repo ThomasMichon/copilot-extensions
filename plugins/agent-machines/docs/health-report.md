@@ -59,62 +59,6 @@ health or successful capture. Exit 2 means invalid invocation or an unavailable
 output. Configuration, selected writer, actual persisted events, source release,
 running adoption and synchronized peer receipt are separate facts.
 
-## Installed service contributions
-
-```text
-agent-machines health report --service agent-dispatch
-agent-machines health report --service queue=agent-dispatch --hour 2026-11-09T12:00:00Z --chart <new-chart.svg>
-```
-
-An explicit `--service` selects the existing same-cell installation owner,
-not PATH, a home-directory scan or a synchronized command. At least one
-`--input` or `--service` is required. `--hour` selects exactly one absolute UTC
-hour inside the report's 168-hour window; the default is its current hour.
-There are at most eight selections, 30 seconds for collection, ten seconds per
-child and 64 KiB each for complete stdout/stderr. Native tree and retained-pipe
-cleanup use the existing caller-owned process primitive and a shared absolute
-execution budget. Cleanup is reserved inside both deadlines, not added after
-the child timeout; a collection response margin is retained.
-
-The selected immutable runtime must contain a supported
-[hourly reporting declaration](../../../libs/process-telemetry/hourly-reporting.md).
-Missing metadata is unsupported without trying new flags. The operation
-starts no producer, capture, credential acquisition, installer or periodic job.
-Legacy/unconfigured installation contexts report unavailable. Other-cell and
-standalone-service inventory adapters are not implemented by this first seam.
-
-The additive `services` array keeps each presentation label, native service,
-requested hour, state and admitted contribution together. Local installation
-identity stays local. Repeated selections of the same installation are marked
-duplicate, not executed twice; presentation aliases do not create instances.
-Independently qualified same-named selections retain their own namespace.
-Invalid/unsupported/unavailable/timed-out providers do not suppress independent
-valid results. Unknown cleanup custody remains a command failure.
-
-`services_collected_at_ms` records collection completion separately from
-`generated_at_ms` inside a contribution and its first/last source times.
-`--now` remains the explicit-file cutoff and service-hour window selector;
-service exports summarize their complete requested hour at collection time,
-not a reconstructed within-hour cutoff in the past.
-Dispatch's first exporter reduces only its own retained typed telemetry.
-No current service health, authenticated access or logical-agent population
-is inferred. No observations remain a gap, never a healthy zero.
-
-Service contributions remain separate from explicit-file totals and from each
-other. The static chart lists their namespace, source hour, coverage state and
-observed metric groups separately; it never averages percentiles or double-adds
-potentially overlapping direct-file/export observations.
-
-The focused Dispatch packet
-`tests/test_hourly_reporting.py` + `tests/native/test_hourly_export.py` proves
-actual producer events, native export, fixture-selected installed metadata,
-the normal machine report/chart and rollback to absent metadata.
-Machines' `tests/test_service_reports.py` +
-`tests/native/test_service_report_cleanup.py` cover independent gaps, wrong
-owners/hours, namespaces, strict UTF-8, output/deadline limits and retained
-streams after root exit. These are isolated source/fixture controls, not
-deployed installed-owner inventory or activated hourly publication.
-
 ## Reproducible validation
 
 Pure tests cover time units, mixed event families, malformed/partial input,

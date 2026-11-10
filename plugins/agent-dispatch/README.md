@@ -5,12 +5,6 @@ environment, reusable registrar/identity fields and configuration boundaries.
 Windows scheduling is optional and separate from service capability; see
 [scheduling and classic-lane readiness](docs/windows-scheduling.md).
 
-`telemetry hourly --hour YYYY-MM-DDTHH:00:00Z` exports a bounded, privacy-reduced
-hour from the existing retained telemetry namespace without starting the
-coordinator, capture or a schedule. Its selected runtime ships the optional
-[hourly reporting declaration and protocol](../../libs/process-telemetry/hourly-reporting.md);
-unknown coverage is not service health or an active-agent count.
-
 Sustained role charters that may use Dispatch as one adapter, such as
 sustained pull-request review (`agent-roles:review-pull-requests`) and fleet
 progress monitoring (`agent-roles:monitor-agent-fleet`), live in the separate

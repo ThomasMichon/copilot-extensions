@@ -446,25 +446,6 @@ Replay also checks the stored fingerprint and prompt kind against the request,
 and Resume must retain its requested worktree identity, including after the
 locked receipt reload.
 A target without the request capability rejects before mutation.
-## Local retained-prompt preservation (`retained-seed-v1`)
-
-An ordinary local promptless resume can request preserved-handoff plans through
-the call-scoped `AGENT_WORKTREES_RETAINED_SEED_PLANS=1` hint on its existing
-resolve invocation. A supporting Engine may return `seed_preserved_id` with
-`seed_preservation_version: 1` and `seed_pending: false`. Manager validates that
-declaration and carries the identity through local shell
-delegation using the strict `--preserve-seed-id` selector, not `--seed-id` or
-staging. Re-resolution refuses missing or replaced intent; final admission-only
-preparation revalidates the same identity without claiming it. Legacy terminal
-prompt delivery is skipped for this plan.
-
-An older Engine may ignore the optional hint and retain its original refusal;
-an older Manager never requests the feature. An unsupported explicit selector
-must reject before effects, without a weaker retry. No additional discovery RPC,
-resident cache or delivery receipt is introduced. Recognized launch-seed module
-fallbacks refresh their interpreter after runtime selection for admission-only
-as well as prompt-delivery execution.
-
 ## Resident current-roster reads
 
 The separate [`record --worktree-id <exact-id> --json`](cli-reference.md#exact-durable-record-read)

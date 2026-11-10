@@ -45,7 +45,6 @@ from typing import TYPE_CHECKING, TypedDict
 from agent_index.store.source_layout import selected_layout
 
 if TYPE_CHECKING:
-    from agent_index.index_config import IndexConfig
     from agent_index.indexing.path_index import PathIndex
     from agent_index.indexing.state import IndexState
     from agent_index.store.multi_model_store import MultiModelStore
@@ -79,8 +78,8 @@ class SourceRetirementPolicy:
     live_crawl_keys: frozenset[str] = frozenset()
 
 
-class _GCRequiredSummary(TypedDict):
-    """Counts present in every source garbage-collection result."""
+class GCSummary(TypedDict):
+    """Result of a source garbage-collection pass."""
 
     purged: dict[str, int]   # stale source -> chunks removed
     kept: list[str]          # live sources, untouched
@@ -88,44 +87,9 @@ class _GCRequiredSummary(TypedDict):
     dry_run: bool
 
 
-class GCSummary(_GCRequiredSummary, total=False):
-    """Result of a source garbage-collection pass and requested maintenance."""
-
-    compaction: dict[str, object]
-
-
 class GCDecision(GCSummary, total=False):
     deferred: list[str]
     pending_crawls: list[str]
-
-
-def run_source_gc(
-    config: IndexConfig, multi_store: MultiModelStore, *,
-    policy: SourceRetirementPolicy | None = None, dry_run: bool = False,
-    compact: bool = False,
-) -> GCSummary:
-    """Own stale-generation collection from state load through saved maintenance.
-
-    Low-level GC functions retain their caller-owned state API. External writers
-    must use this entrypoint or hold ``source_writer`` around their entire operation.
-    Requested compaction statistics are returned only when collection mutated rows.
-    """
-    from agent_index.indexing.path_index import PathIndex
-    from agent_index.indexing.source_ownership import source_writer
-    from agent_index.indexing.state import IndexState
-
-    with source_writer(config.data_dir):
-        state = IndexState.load(config.state_file)
-        summary = gc_stale_sources(
-            multi_store, None if dry_run else PathIndex(config.data_dir / "path_index.db"), state,
-            policy=policy, dry_run=dry_run,
-        )
-        if summary["chunks_deleted"] and not dry_run:
-            state.save(config.state_file)
-            if compact:
-                summary["compaction"] = multi_store.compact()
-            multi_store.ensure_fts_index()
-        return summary
 
 _FORGE_SUBTYPES = frozenset({"code", "issues", "pulls", "commits"})
 _SERVICE_SOURCES = frozenset({"service-feed:clips", "analysis-feed:videos"})
@@ -328,7 +292,7 @@ def gc_unconfigured_sources(
 @_retirement_writer
 def gc_stale_sources(
     multi_store: MultiModelStore,
-    path_index: PathIndex | None,
+    path_index: PathIndex,
     state: IndexState,
     *,
     dry_run: bool = False,
@@ -362,8 +326,6 @@ def gc_stale_sources(
     if not dry_run:
         from agent_index.indexing.pending_crawl import PendingCrawls
 
-        if path_index is None:
-            raise ValueError("Source retirement requires a path index")
         PendingCrawls(path_index).assert_gc_available()
         for source in purged:
             try:

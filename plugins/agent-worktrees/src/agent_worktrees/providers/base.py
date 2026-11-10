@@ -735,8 +735,6 @@ def run_cli(
     input_text: str | None = None,
     timeout: int = 120,
     preserve_line_endings: bool = False,
-    max_stdout_bytes: int | None = None,
-    max_stderr_bytes: int = 8192,
 ) -> subprocess.CompletedProcess[str]:
     """Run a provider CLI, returning the completed process (never raises).
 
@@ -764,12 +762,6 @@ def run_cli(
     exe = shutil.which(args[0], path=full_env.get("PATH")) or args[0]
     resolved = [exe, *args[1:]]
     sanitized = _sanitize_cli_args(resolved)
-    if max_stdout_bytes is not None:
-        from .bounded_read_cli import run_bounded
-        return run_bounded(
-            resolved, sanitized, env=full_env, input_text=input_text, timeout=timeout,
-            max_stdout_bytes=max_stdout_bytes, max_stderr_bytes=max_stderr_bytes,
-        )
     try:
         capture = (
             {"input": input_text.encode("utf-8") if input_text is not None else None}

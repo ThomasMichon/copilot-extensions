@@ -181,7 +181,7 @@ def test_deployed_legacy_resolver_requalifies_delivered_presentation(tmp_path, m
     actor = tmp_path / "owner.py"
     actor.write_text(
         "import json, os, sys\n"
-        "assert sys.argv[1:] == ['-I', '-X', 'utf8', '-B', '-m', 'agent_worktrees', "
+        "assert sys.argv[1:] == ['-I', '-X', 'utf8', '-m', 'agent_worktrees', "
         "'state-root', '--configuration', '--json']\n"
         "assert not any(key in os.environ for key in "
         "['AGENT_CONFIGURATION_CONTEXT', 'AGENT_RT_ROOT', 'PYTHONPATH', 'GITHUB_TOKEN'])\n"
@@ -327,7 +327,7 @@ def test_optional_older_peer_preserves_native_mesh_or_fails_real_refusal(tmp_pat
     monkeypatch.delenv("AGENT_CONFIGURATION_CONTEXT", raising=False)
     monkeypatch.setattr(configuration._worktrees, "validate_owner", lambda *args:
                         {"cellRoot": str(cell), "pluginRoot": str(own)})
-    monkeypatch.setattr(configuration._peer_launch, "launch_prefix", lambda *args: ["qualified-peer"])
+    monkeypatch.setattr(configuration._worktrees, "launch_prefix", lambda *args: ["qualified-peer"])
     calls = []
 
     def run(argv, **kwargs):

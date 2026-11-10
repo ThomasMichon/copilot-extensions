@@ -216,13 +216,8 @@ if (-not $context) {
 function Resolve-RuntimePython {
     param([string]$TraceMode = 'ready')
     $script:AgentRtPy = $null
-    $previousRoot = $env:AGENT_RT_ROOT
-    try {
-        $env:AGENT_RT_ROOT = $runtimeRoot
-        . $runtimeResolver -TraceMode $TraceMode
-    } finally {
-        $env:AGENT_RT_ROOT = $previousRoot
-    }
+    $env:AGENT_RT_ROOT = $runtimeRoot
+    . $runtimeResolver -TraceMode $TraceMode
     return $AgentRtPy
 }
 
@@ -258,17 +253,14 @@ function Invoke-Runtime {
     # legitimate stderr diagnostic from a non-zero exit must never become
     # a terminating exception here (copilot-extensions#5494).
     $previousEap = $ErrorActionPreference
-    $previousRoot = $env:AGENT_RT_ROOT
     $ErrorActionPreference = 'Continue'
     try {
-        $env:AGENT_RT_ROOT = $runtimeRoot
         if ($hasPipelineInput) {
             $pipelineInput | & $Python -m agent_bridge @nativeArgs
         } else {
             & $Python -m agent_bridge @nativeArgs
         }
     } finally {
-        $env:AGENT_RT_ROOT = $previousRoot
         $ErrorActionPreference = $previousEap
     }
     exit $LASTEXITCODE

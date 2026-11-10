@@ -16,7 +16,6 @@ from urllib.parse import quote
 from ..pr_contract import Comment, CommentThread, PRDiff, PRSnapshot, Review, ThreadsResult
 from .base import ProviderError, PRScope, PullResult, run_cli
 from .pr_source import gitea_source, pull_payload, source_object, source_text
-from .observation_credentials import ObservationCredentialError, ObservationCredentials
 
 # HTTP statuses (plus the synthetic 0 = curl-level failure) worth retrying when
 # resolving/attaching labels.  A label apply is a small, idempotent call against
@@ -96,17 +95,11 @@ class GiteaProvider:
         *,
         payload: dict | None = None,
         preserve_line_endings: bool = False,
-        read_deadline: float | None = None,
     ) -> tuple[int, str]:
         """Run curl; return (http_status, body_text)."""
-        if isinstance(token, ObservationCredentials):
-            from .gitea_observation_read import read
-            return read(method, url, token, invoke=run_cli, payload=payload, deadline=read_deadline)
-        scheme = "to" + "ken "
-        authorization = scheme + token
         args = [
             "curl", "-sS", "-X", method, url,
-            "-H", "Authorization: " + authorization,
+            "-H", f"Authorization: token {token}",
             "-H", "Accept: application/json",
             "-w", "\n%{http_code}",
         ]
@@ -191,8 +184,6 @@ class GiteaProvider:
         for attempt in range(1, _LABEL_RETRIES + 1):
             try:
                 status, body = self._curl(method, url, token, payload=payload)
-            except ObservationCredentialError:
-                raise
             except ProviderError:
                 status, body = 0, ""
             if status not in _TRANSIENT_LABEL_HTTP or attempt == _LABEL_RETRIES:
@@ -563,8 +554,7 @@ class GiteaProvider:
         return None
 
     def get_snapshot(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
-        credential_source=None,
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
     ) -> PRSnapshot:
         """Fetch the full review/mergeability/lifecycle snapshot for pr-watch.
 
@@ -573,10 +563,45 @@ class GiteaProvider:
         result feeds the provider-neutral ``pr_contract`` diff/classify without
         this provider knowing anything about transitions.
         """
-        from .gitea_snapshot import snapshot
-        return snapshot(
-            self, repo, number, api_base=api_base, token=token,
-            credential_source=credential_source,
+        if not token:
+            raise ProviderError("Gitea provider needs a token to query a PR.")
+        status, body = self._curl(
+            "GET", self._api(api_base, f"/repos/{repo}/pulls/{number}"), token,
+        )
+        if status != 200:
+            raise ProviderError(
+                f"Gitea PR #{number} snapshot failed (HTTP {status}).",
+                transient=_is_transient(status),
+            )
+        try:
+            pr = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise ProviderError(f"Gitea returned non-JSON PR payload: {exc}") from exc
+        if not isinstance(pr, dict):
+            raise ProviderError(f"unexpected Gitea PR payload for {repo}#{number}")
+
+        # Gitea computes ``mergeable`` asynchronously and may report it null on a
+        # freshly-opened PR; only a real bool is a known state (else None).
+        mergeable_raw = pr.get("mergeable")
+        labels = tuple(
+            str(lbl.get("name", ""))
+            for lbl in (pr.get("labels") or [])
+            if isinstance(lbl, dict) and lbl.get("name")
+        )
+        return PRSnapshot(
+            pr_state=str(pr.get("state", "")) or "open", endpoint=self.authority_endpoint(api_base),
+            merged=bool(pr.get("merged", False)),
+            head_sha=str((pr.get("head") or {}).get("sha", "")),
+            base_ref=str((pr.get("base") or {}).get("ref", "")), base_sha=str((pr.get("base") or {}).get("sha") or ""),
+            updated_at=str(pr.get("updated_at", "") or ""),
+            reviews=self._all_review_objs(repo, number, api_base, token),
+            author=str((pr.get("user") or {}).get("login", "")),
+            mergeable=mergeable_raw if isinstance(mergeable_raw, bool) else None,
+            checks_state=self._combined_status_state(
+                repo, str((pr.get("head") or {}).get("sha", "")), api_base, token),
+            labels=labels,
+            title=str(pr.get("title", "")),
+            draft=bool(pr.get("draft", False)),
         )
 
     def _combined_status_state(
