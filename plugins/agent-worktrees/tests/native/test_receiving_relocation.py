@@ -185,19 +185,22 @@ def test_native_receiving_continuity_preserves_original_results_and_current_cons
         else:
             journal_path.rename(location_backup)
         before = _snapshot(fixture.home)
-        if damage != "missing-location":
-            with pytest.raises((ValueError, OSError)):
-                location.require_idle(ledger)
+        with pytest.raises((ValueError, OSError)):
+            location.require_idle(ledger)
         with pytest.raises(execution_spaces.ExecutionSpaceError):
             execution_spaces.require_record_mutation(tracking.load_record(ledger), fixture.config)
         assert _snapshot(fixture.home) == before
         if damage == "missing-location":
+            with pytest.raises(TimeoutError, match="relocation blocks lifecycle"):
+                with relocation.worktree_lifecycle.guard(ledger):
+                    pytest.fail("unproven receiving location admitted lifecycle mutation")
+            assert ledger.read_bytes() == saved_ledger
             fresh = tracking.load_record(ledger)
             fresh.title = "must not persist without location authority"
             with pytest.raises(ValueError):
                 tracking.save_record(fresh)
             assert ledger.read_bytes() == saved_ledger
-            with pytest.raises(ValueError, match="stale checkout location"):
+            with pytest.raises(ValueError):
                 tracking.save_record(fixture.record)
             assert ledger.read_bytes() == saved_ledger
         ledger.write_bytes(saved_ledger)

@@ -142,6 +142,9 @@ receiving readers reject the changed location rather than infer support or
 rewrite provenance. Original-location records still work with those readers.
 Missing or unsupported retained proof fences current lifecycle/mutation
 consumers without recovering metadata or creating another creation journal.
+When the location journal is absent, shared lifecycle admission uses the
+existing read-only record cache to detect an original/current receiving-path
+mismatch. Ordinary records need no receiving-owner or backend query.
 The first contract supports one receiving location revision, including replay,
 prepublication cancellation and interrupted forward recovery. Another receiving
 revision is refused before leases; ordinary-checkout revision history is
