@@ -71,6 +71,10 @@ class StandingAcceptBody(StandingReserveBody):
     expected_owner_session_id: StrictStr | None = Field(default=None, min_length=1, max_length=1024)
 
 
+class StandingCancelBody(StandingReserveBody):
+    expected_generation: StrictInt = _Revision
+
+
 class StandingReleaseBody(StandingReserveBody):
     expected_generation: StrictInt = _Revision
     owner_session_id: StrictStr = _Text
@@ -78,12 +82,12 @@ class StandingReleaseBody(StandingReserveBody):
 
 
 def standing_capability(queue: TaskQueue) -> dict:
-    """Advertise standing operations; attachment also needs a relationship owner."""
+    """Advertise standing operations; attachment needs the writer's own standing support."""
     return {
         "version": STANDING_CAPABILITY_VERSION,
         "finite_child_link": 1,
         "source_set": 1,
-        "attachment": queue._relationship_writer is not None,
+        "attachment": queue.standing_attachment_supported(),
     }
 
 
@@ -178,6 +182,14 @@ def register_standing_routes(
             owner_session_id=body.owner_session_id,
             expected_head_revision=body.expected_head_revision,
             expected_owner_session_id=body.expected_owner_session_id,
+        ), task_id)
+
+    @app.post("/tasks/{task_id}/standing/cancel", dependencies=control)
+    def cancel(task_id: str, body: StandingCancelBody) -> dict:
+        workspace = _workspace(body.workspace)
+        return mutate("cancelled", lambda: queue.cancel_standing_reservation(
+            task_id, workspace, expected_revision=body.expected_revision,
+            expected_generation=body.expected_generation,
         ), task_id)
 
     @app.post("/tasks/{task_id}/standing/release", dependencies=control)

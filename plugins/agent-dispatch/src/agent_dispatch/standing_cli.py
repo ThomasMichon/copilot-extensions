@@ -89,6 +89,15 @@ def register_standing_commands(sub: argparse._SubParsersAction) -> None:
     _add_workspace(accept)
     accept.set_defaults(func=_cmd_accept)
 
+    cancel = commands.add_parser(
+        "cancel", allow_abbrev=False,
+        help="cancel one unaccepted reservation and settle its original relationship",
+    )
+    cancel.add_argument("task_id")
+    _add_revision(cancel, "expected_generation")
+    _add_workspace(cancel)
+    cancel.set_defaults(func=_cmd_cancel)
+
     release = commands.add_parser(
         "release", allow_abbrev=False, help="detach an exactly concluded owner",
     )
@@ -138,6 +147,14 @@ def _cmd_accept(args: argparse.Namespace) -> int:
         owner_session_id=args.owner_session_id,
         expected_head_revision=args.expected_head_revision,
         expected_owner_session_id=args.expected_owner_session_id,
+    )
+
+
+def _cmd_cancel(args: argparse.Namespace) -> int:
+    return _mutate(
+        args, "cancel_standing_reservation", args.task_id, _workspace(args),
+        expected_revision=args.expected_revision,
+        expected_generation=args.expected_generation,
     )
 
 

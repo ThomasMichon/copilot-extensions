@@ -161,6 +161,15 @@ def release(admission, **changes):
     })
 
 
+def cancel(admission, **changes):
+    return admission.queue.cancel_standing_reservation(admission.task.id, **{
+        "workspace": admission.workspace,
+        "expected_revision": admission.task.standing_revision,
+        "expected_generation": admission.task.generation,
+        **changes,
+    })
+
+
 def test_actual_materialization_and_exact_native_head_produce_admission_only(admission):
     before = admission.queue.get(admission.task.id)
     original = copy.deepcopy(admission.request)
@@ -179,6 +188,32 @@ def test_actual_materialization_and_exact_native_head_produce_admission_only(adm
     assert admission.queue.get(admission.task.id) == before
     assert any("inspect-materialization" in call for call in admission.calls)
     assert sum("--resident-only" in call for call in admission.calls) == 1
+
+
+def test_finite_liveness_recovery_preserves_accepted_standing_owner(admission):
+    accepted = accept(admission)
+    finite_queue = TaskQueue(
+        admission.queue.db_path, relationship_writer=admission.owner, relationship_authority="local",
+    )
+    finite = finite_queue.create("Finite work", repo="owner/repo")
+    finite_queue.claim_one(
+        "m/wt", task_id=finite.id, assignment_workspace=AssignmentWorkspace(
+            "m", "example", "wt", admission.workspace.path, "finite",
+        ),
+    )
+    finite_queue.start(finite.id, "m/wt", owner_session_id="finite-session")
+    probed = []
+
+    counts = admission.queue.reconcile_liveness(
+        lambda worktree, machine, session: probed.append(session) or "gone",
+        headless_local_verdict=lambda _session: "gone",
+        headless_fleet_verdict=lambda _handle, _session: "gone",
+    )
+
+    assert probed == ["finite-session"]
+    assert counts["checked"] == 1 and counts["suspended"] == 1
+    assert admission.queue.get(finite.id).status == "suspended"
+    assert admission.queue.get(accepted.id) == accepted
 
 
 @pytest.mark.parametrize("boundary", ["resident", "direct"])
@@ -534,6 +569,135 @@ def test_release_rollback_preserves_owner_relationship_and_attachment(admission,
     assert release(admission).owner_session_id is None
 
 
+@pytest.mark.parametrize("retirement", [None, "retire", "disable", "remove"])
+def test_cancel_settles_unaccepted_reservation_before_retirement_or_reuse(admission, retirement):
+    entry = {"title": "Dispatcher", "declaration": asdict(admission.declaration)}
+
+    def source(entries, revision, expected):
+        return admission.queue.reconcile_standing_source_set(
+            "owner/repo", admission.declaration.namespace, entries,
+            revision=revision, expected_observation=expected,
+        )
+
+    if retirement == "retire":
+        admission.queue.retire_standing_charter(
+            admission.task.id, expected_revision=admission.task.standing_revision,
+        )
+    elif retirement is not None:
+        source([entry], "commit-1", None)
+        entries = [{**entry, "enabled": False}] if retirement == "disable" else []
+        assert source(entries, "commit-2", "commit-1")["retired"] == [
+            {"id": admission.task.id, "reason": f"{retirement}d"},
+        ]
+    admission.task = admission.queue.get(admission.task.id)
+    if retirement is not None:
+        with pytest.raises(TaskError, match="not open"):
+            accept(admission)
+        with pytest.raises(TaskError, match="native owner"):
+            admission.queue.settle_standing_retirement(
+                admission.task.id, expected_revision=admission.task.standing_revision,
+            )
+    events = admission.queue.events(admission.task.id)
+    calls, owner_calls = len(admission.calls), len(admission.owner.calls)
+    task = cancel(admission)
+    assert task.status == "queued" and task.owner is None and task.owner_session_id is None
+    assert task.generation == admission.task.generation + 1
+    assert task.standing_revision == admission.task.standing_revision + 1
+    assert task.claimed_at is None and "reservation" not in task.standing_charter
+    assert task.standing_charter["lifecycle"] == admission.task.standing_charter["lifecycle"]
+    assert len(admission.queue.events(task.id)) == len(events) + 1
+    with admission.queue._connect() as conn:
+        event = conn.execute(
+            "SELECT * FROM task_events WHERE task_id=? ORDER BY id DESC LIMIT 1", (task.id,),
+        ).fetchone()
+    assert event["unassigned_worker"] == admission.workspace.worker_id
+    assert json.loads(event["standing_change"])["action"] == "cancel"
+    relationship = admission.queue.task_relationship(task.id)
+    assert relationship["state"] == "closed" and relationship["request"] == admission.request
+    assert admission.owner.claims[admission.request["request_id"]]["phase"] == "closed"
+    assert admission.queue.attachment_history(task.id) == []
+    assert not any("inspect-materialization" in call for call in admission.calls[calls:])
+    native = admission.owner.calls[owner_calls:]
+    assert {operation for operation, _ in native} <= {"inspect", "close"}
+    assert not any({"expected_head", "expected_conclusion"} & payload.keys() for _, payload in native)
+    assert cancel(admission) == task
+    assert len(admission.queue.events(task.id)) == len(events) + 1
+    if retirement is None:
+        queue = TaskQueue(
+            admission.queue.db_path, relationship_writer=admission.owner, relationship_authority="local",
+        )
+        reserved = queue.reserve_standing_charter(
+            task.id, admission.workspace, expected_revision=task.standing_revision,
+        )
+        assert reserved.generation == task.generation + 1
+        with pytest.raises(TaskError):
+            cancel(admission)
+        assert admission.queue.get(task.id) == reserved
+    else:
+        retired = admission.queue.settle_standing_retirement(
+            task.id, expected_revision=task.standing_revision,
+        )
+        assert retired.standing_charter["lifecycle"] == "retired" and retired.owner is None
+
+
+@pytest.mark.parametrize("changes", [
+    {"expected_revision": True}, {"expected_generation": True},
+    {"expected_revision": 999}, {"expected_generation": 999}, {"expected_generation": 0},
+    {"workspace": "another-creation"},
+])
+def test_cancel_refuses_stale_or_ambiguous_fences_without_effects(admission, changes):
+    if "workspace" in changes:
+        changes = {"workspace": replace(admission.workspace, creation_nonce=changes["workspace"])}
+    events = admission.queue.events(admission.task.id)
+    relationship = admission.queue.task_relationship(admission.task.id)
+    with pytest.raises(TaskError):
+        cancel(admission, **changes)
+    assert admission.queue.get(admission.task.id) == admission.task
+    assert admission.queue.events(admission.task.id) == events
+    assert admission.queue.task_relationship(admission.task.id) == relationship
+    assert admission.owner.claims[admission.request["request_id"]]["phase"] == "bound"
+
+
+def test_cancel_refuses_an_accepted_attachment(admission):
+    admission.task = accept(admission)
+    events = admission.queue.events(admission.task.id)
+    with pytest.raises(TaskError, match="unaccepted reservation"):
+        cancel(admission)
+    assert admission.queue.get(admission.task.id) == admission.task
+    assert admission.queue.events(admission.task.id) == events
+    assert admission.owner.claims[admission.request["request_id"]]["phase"] == "bound"
+
+
+def test_cancel_settles_retired_reservation_whose_binding_reply_was_lost(admission):
+    task = cancel(admission)
+    queue = TaskQueue(
+        admission.queue.db_path, relationship_writer=admission.owner, relationship_authority="local",
+    )
+    admission.owner.queue = queue
+    admission.owner.lose_reply = "bind"
+    with pytest.raises(TaskError, match="unresolved"):
+        queue.reserve_standing_charter(
+            task.id, admission.workspace, expected_revision=task.standing_revision,
+        )
+    pending = queue.get(task.id)
+    request = queue.task_relationship(task.id)["request"]
+    assert pending.status == "claimed" and queue.task_relationship(task.id)["state"] == "pending"
+    retiring = queue.retire_standing_charter(task.id, expected_revision=pending.standing_revision)
+    with pytest.raises(TaskError, match="not open"):
+        queue.reserve_standing_charter(
+            task.id, admission.workspace, expected_revision=task.standing_revision,
+        )
+    cancelled = queue.cancel_standing_reservation(
+        task.id, admission.workspace,
+        expected_revision=retiring.standing_revision, expected_generation=retiring.generation,
+    )
+    assert cancelled.status == "queued" and cancelled.owner is None
+    assert queue.task_relationship(task.id)["state"] == "closed"
+    assert admission.owner.claims[request["request_id"]]["phase"] == "closed"
+    retired = queue.settle_standing_retirement(task.id, expected_revision=cancelled.standing_revision)
+    assert retired.standing_charter["lifecycle"] == "retired"
+
+
 @pytest.mark.parametrize("succeeding", [False, True])
 def test_acceptance_replays_after_commit_reply_loss_restart_and_later_denial(
     admission, monkeypatch, succeeding,
@@ -627,6 +791,96 @@ def test_successive_heads_continue_the_original_assignment_without_reserving_aga
     assert len(history) == 3
     assert [item.session_id for item in history if item.detached_at is None] == [second.owner_session_id]
     assert all(item.detach_reason == "standing succession" for item in history if item.detached_at)
+
+
+def change_materialization(admission, materialization, objective="Changed reviewer objective."):
+    """Rematerialize the declared role and reconcile its new revisions onto the attached lane."""
+    command, _ = materialization
+    skill = Path(command[1]).parents[1]
+    topology = json.loads((skill / "assets" / "topology.example.json").read_text(encoding="utf-8"))
+    topology["assignments"][0]["charter"]["objective"] = objective
+    source = admission.path.with_name("changed-topology.json")
+    source.write_text(json.dumps(topology), encoding="utf-8")
+    result = module.run_background_capture(
+        [*command, "materialize", str(source), "--request", topology["assignments"][0]["requestId"]],
+        input_text="", timeout=15,
+    )
+    assert result is not None and result.returncode == 0, result
+    document = json.loads(result.stdout)
+    declaration = replace(
+        admission.declaration, source_revision=document["sourceRevision"],
+        expected_materialization_revision=document["materializationRevision"],
+    )
+    assert declaration != admission.declaration
+    admission.task = admission.queue.reconcile_standing_charter(
+        "Dispatcher", declaration, repo="owner/repo",
+        expected_revision=admission.task.standing_revision,
+    )
+    return document, declaration
+
+
+def test_same_head_reacceptance_restores_coverage_without_new_ownership(admission, materialization):
+    accepted = accept(admission)
+    admission.task = accepted
+    relationship = admission.queue.task_relationship(accepted.id)
+    attachments = admission.queue.attachment_history(accepted.id)
+    document, declaration = change_materialization(admission, materialization)
+    stale = admission.task.standing_charter["accepted_materialization"]
+    assert stale["source_revision"] != declaration.source_revision
+    admission.path.write_text(json.dumps(document), encoding="utf-8")
+    calls = len(admission.owner.calls)
+    admission.head = {**admission.head, "revision": 2}
+    reaccepted = accept(admission)
+    covered = reaccepted.standing_charter["accepted_materialization"]
+    assert covered["source_revision"] == declaration.source_revision
+    assert covered["materialization_revision"] == declaration.expected_materialization_revision
+    assert covered["head"] == admission.head and covered["expected_revision"] == admission.task.standing_revision
+    assert covered["generation"] == covered["expected_generation"] == accepted.generation
+    assert reaccepted.generation == accepted.generation and reaccepted.owner == accepted.owner
+    assert reaccepted.owner_session_id == accepted.owner_session_id
+    assert reaccepted.started_at == accepted.started_at and reaccepted.attempts == accepted.attempts
+    assert admission.queue.task_relationship(accepted.id) == relationship
+    assert admission.queue.attachment_history(accepted.id) == attachments
+    assert {operation for operation, _ in admission.owner.calls[calls:]} == {"inspect"}
+    assert accept(admission) == reaccepted
+    admission.task = reaccepted
+    admission.conclusion = {"session_id": admission.head["session_id"], "revision": 3}
+    released = release(admission)
+    assert released.owner is None and released.generation == accepted.generation + 1
+
+
+@pytest.mark.parametrize("change", [
+    "current", "stale-materialization", "regressed-head", "another-session", "retiring",
+])
+def test_reacceptance_requires_changed_coverage_from_the_same_admitted_head(
+    admission, materialization, change,
+):
+    admission.head = {**admission.head, "revision": 2}
+    admission.task = accept(admission)
+    changes = {}
+    if change != "current":
+        document, _ = change_materialization(admission, materialization)
+        if change != "stale-materialization":
+            admission.path.write_text(json.dumps(document), encoding="utf-8")
+    if change == "regressed-head":
+        admission.head = {**admission.head, "revision": 1}
+    elif change == "another-session":
+        admission.head = {"session_id": "another-native-session", "revision": 3}
+    elif change == "retiring":
+        admission.task = admission.queue.retire_standing_charter(
+            admission.task.id, expected_revision=admission.task.standing_revision,
+        )
+    before_events = admission.queue.events(admission.task.id)
+    before_relationship = admission.queue.task_relationship(admission.task.id)
+    with pytest.raises(TaskError, match={
+        "current": "already covers", "stale-materialization": "materialization",
+        "regressed-head": "previously accepted native head", "another-session": "native attachment",
+        "retiring": "not open",
+    }[change]):
+        accept(admission, **changes)
+    assert admission.queue.get(admission.task.id) == admission.task
+    assert admission.queue.events(admission.task.id) == before_events
+    assert admission.queue.task_relationship(admission.task.id) == before_relationship
 
 
 @pytest.mark.parametrize("changes", [
@@ -815,6 +1069,32 @@ def test_missing_checked_head_capability_keeps_finite_assignment_reads_usable(ad
     with pytest.raises(TaskError, match="unavailable"):
         with writer.admit_standing(admission.request, asdict(admission.declaration), admission.head):
             pytest.fail("unqualified owner admitted a standing attachment")
+
+
+@pytest.mark.parametrize("missing", ["policy", "head_inspect", "conclusion_inspect"])
+def test_attachment_support_requires_policy_and_native_inspection(admission, missing):
+    from agent_dispatch.coordinator_standing import standing_capability
+
+    assert admission.queue.standing_attachment_supported()
+    if missing != "policy":
+        admission.support[missing] = None
+    writer = module.WorktreeRelationshipWriter(
+        ["selected-worktrees"], admit_workspace=lambda *_: None, admit_request=lambda *_: None,
+        standing=None if missing == "policy" else admission.config, require_resident=True,
+    )
+    queue = TaskQueue(
+        admission.queue.db_path, relationship_writer=writer, relationship_authority="local",
+    )
+    assert standing_capability(queue)["attachment"] is False
+    lane = queue.reconcile_standing_charter(
+        "Secondary", replace(admission.declaration, lane_key="secondary"), repo="owner/repo",
+    )
+    calls = len(admission.owner.calls)
+    with pytest.raises(TaskError, match="cannot admit a standing attachment"):
+        queue.reserve_standing_charter(
+            lane.id, admission.workspace, expected_revision=lane.standing_revision,
+        )
+    assert queue.get(lane.id) == lane and len(admission.owner.calls) == calls
 
 
 @pytest.mark.parametrize("change", ["artifact", "source-revision", "effective-revision", "foreign-host"])

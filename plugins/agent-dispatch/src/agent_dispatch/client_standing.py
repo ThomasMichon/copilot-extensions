@@ -21,7 +21,8 @@ def standing_support(health: object) -> dict | None:
     support = health.get("standing_charters") if isinstance(health, dict) else None
     if (
         isinstance(support, dict) and type(support.get("version")) is int
-        and support["version"] == 1 and support.get("finite_child_link") == 1
+        and support["version"] == 1
+        and type(support.get("finite_child_link")) is int and support["finite_child_link"] == 1
         and type(support.get("attachment")) is bool
     ):
         return support
@@ -127,6 +128,15 @@ class StandingClientMixin:
         if expected_owner_session_id is not None:
             body["expected_owner_session_id"] = expected_owner_session_id
         return self._standing_post(f"/tasks/{task_id}/standing/accept", body, attachment=True)
+
+    def cancel_standing_reservation(
+        self, task_id: str, workspace: dict[str, str], *, expected_revision: int,
+        expected_generation: int,
+    ) -> dict:
+        return self._standing_post(f"/tasks/{task_id}/standing/cancel", {
+            "workspace": workspace, "expected_revision": expected_revision,
+            "expected_generation": expected_generation,
+        }, attachment=True)
 
     def release_standing_attachment(
         self, task_id: str, workspace: dict[str, str], *, expected_revision: int,

@@ -300,6 +300,10 @@ class WorktreeRelationshipWriter:
             raise TaskError("native conclusion did not confirm the original admitted assignment")
         return result
 
+    def standing_attachment_supported(self) -> bool:
+        """Whether acceptance and release reach configured policy and native inspection."""
+        return self._standing is not None and self._head_inspect and self._conclusion_inspect
+
     @contextmanager
     def admit_standing(self, request: dict, declaration: dict, expected_head: dict):
         """Keep host-local deny policy locked through the caller's acceptance commit."""

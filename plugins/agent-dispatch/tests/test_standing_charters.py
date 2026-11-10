@@ -386,6 +386,31 @@ def test_standing_reservation_without_qualified_writer_rolls_back(queue, declara
     assert queue.get(task.id) == task and queue.events(task.id) == events
 
 
+def test_finite_liveness_recovery_skips_reserved_standing_owner(standing_assignment):
+    queue, owner, workspace, task = standing_assignment
+    reserved = queue.reserve_standing_charter(
+        task.id, workspace, expected_revision=task.standing_revision,
+    )
+    finite = queue.create("Finite work", repo="owner/repo")
+    queue.claim_one(
+        "m/wt", task_id=finite.id,
+        assignment_workspace=AssignmentWorkspace("m", "example", "wt", workspace.path, "finite"),
+    )
+    probed = []
+
+    counts = queue.reconcile_liveness(
+        lambda worktree, machine, session: probed.append(worktree) or "gone",
+        headless_local_verdict=lambda _session: "gone",
+        headless_fleet_verdict=lambda _handle, _session: "gone",
+    )
+
+    assert probed == ["wt"]
+    assert counts["checked"] == 1 and counts["requeued"] == 1
+    assert queue.get(finite.id).status == "queued"
+    assert queue.get(task.id) == reserved
+    assert queue.task_relationship(task.id)["state"] == "bound"
+
+
 def test_held_standing_reservation_has_no_native_effects(standing_assignment):
     queue, owner, workspace, task = standing_assignment
     queue.set_hold(task.id, reason="operator hold", actor="operator")

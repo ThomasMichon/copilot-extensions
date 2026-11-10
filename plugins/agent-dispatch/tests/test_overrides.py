@@ -138,6 +138,46 @@ def test_standing_deny_selectors_clear_and_read_only_admission(tmp_path):
     assert ov.load_overrides(path) == {"unrelated": unrelated}
 
 
+@pytest.mark.parametrize("raw", [
+    "not json at all",
+    '{"a": {"disabled": true}, "b": "nope"}',
+    None,
+])
+def test_ordinary_writers_preserve_malformed_maps_and_standing_holds(tmp_path, raw):
+    path = tmp_path / "overrides.json"
+    if raw is None:
+        selector = ov.StandingAttachmentSelector("owner", "charter", "lane")
+        ov.set_standing_attachment_deny(path, selector, reason="hold", now=1)
+        held = path.read_text(encoding="utf-8")
+        raw = held.replace('"disabled": true', '"disabled": true, "disabled": false')
+        assert raw != held
+    path.write_text(raw, encoding="utf-8")
+
+    for write in (
+        lambda: ov.set_override(path, "unrelated"),
+        lambda: ov.clear_override(path, "unrelated"),
+        lambda: ov.mutate_overrides(path, lambda current: current.clear()),
+    ):
+        with pytest.raises(ValueError):
+            write()
+        assert path.read_text(encoding="utf-8") == raw
+    ov.load_overrides(path)
+
+
+def test_supervise_override_reports_preserved_malformed_map(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from agent_dispatch import config, supervise_cli
+
+    path = tmp_path / "overrides.json"
+    path.write_text("not json at all", encoding="utf-8")
+    monkeypatch.setattr(config, "overrides_path", lambda: path)
+    args = argparse.Namespace(override_command="disable", machine=None, id="unit", reason="r")
+    assert supervise_cli._cmd_supervise_override(args) == 2
+    assert "override map preserved" in capsys.readouterr().err
+    assert path.read_text(encoding="utf-8") == "not json at all"
+
+
 @pytest.mark.parametrize("damage", [
     "json", "entry", "version", "selector", "flag", "unknown", "duplicate-veto", "duplicate-selector",
 ])

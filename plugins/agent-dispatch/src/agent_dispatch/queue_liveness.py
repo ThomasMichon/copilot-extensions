@@ -210,11 +210,13 @@ class LivenessMixin:
         with self._connect() as conn:
             # The wake snapshot is taken before probing: a wake delivered while
             # a probe runs resumes the native, so its stale verdict is unusable.
+            # Standing charters retain their attached owner until its native
+            # owner releases or settles it; finite recovery never rewrites them.
             held = conn.execute(
                 "SELECT t.id, t.owner, t.owner_session_id, t.generation, t.attempts,"
                 " t.status, t.wake_operation_id, w.status AS wake_status"
                 " FROM tasks t LEFT JOIN wake_outbox w ON w.id = t.wake_operation_id"
-                " WHERE t.status IN (?, ?)",
+                " WHERE t.status IN (?, ?) AND t.kind IS NOT 'standing-charter'",
                 (Status.CLAIMED, Status.STARTED),
             ).fetchall()
             # Phase 1 (fast, DB-only): classify each held task by which probe

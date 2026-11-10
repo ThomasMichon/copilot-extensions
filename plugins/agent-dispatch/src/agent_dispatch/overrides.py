@@ -156,9 +156,14 @@ def mutate_overrides(
     mutator: Callable[[dict[str, dict]], T],
     *,
     timeout: float = 5.0,
-    loader: Callable[[Path], dict[str, dict]] = load_overrides,
+    loader: Callable[[Path], dict[str, dict]] | None = None,
 ) -> T:
-    """Serialize one complete override read-modify-write transaction."""
+    """Serialize one complete override read-modify-write transaction.
+
+    Shared-map writers load strictly by default so an unrelated mutation can
+    never rewrite malformed input, or a duplicate-key standing hold, as a
+    narrower map. Read-only consumers keep :func:`load_overrides`' tolerance.
+    """
     with locked_overrides(path, timeout=timeout, loader=loader) as overrides:
         result = mutator(overrides)
         save_overrides(path, overrides)
@@ -170,11 +175,12 @@ def locked_overrides(
     path: str | os.PathLike[str] | Path,
     *,
     timeout: float = 5.0,
-    loader: Callable[[Path], dict[str, dict]] = load_overrides,
+    loader: Callable[[Path], dict[str, dict]] | None = None,
 ):
     """Keep admission and policy mutation on the same serialization boundary."""
     from .single_instance import SingleInstance
 
+    load = _standing_policy if loader is None else loader
     target = Path(path)
     deadline = time.monotonic() + timeout
     thread_lock = _thread_lock(target)
@@ -187,7 +193,7 @@ def locked_overrides(
                 raise TimeoutError(f"timed out acquiring override lock for {target}")
             time.sleep(0.05)
         try:
-            yield loader(target)
+            yield load(target)
         finally:
             lock.release()
     finally:

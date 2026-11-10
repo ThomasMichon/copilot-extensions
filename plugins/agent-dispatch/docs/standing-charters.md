@@ -28,7 +28,8 @@ is never retried against a newer state on the caller's behalf.
 |-----------|--------|
 | `reconcile` | Upsert one declared lane; never retires, accepts or launches |
 | `reserve` | Retain one exact workspace assignment through the relationship owner (not acceptance) |
-| `accept` | Accept one already-existing native head; `--expected-owner-session-id` names a predecessor for succession |
+| `accept` | Accept one already-existing native head; `--expected-owner-session-id` names a predecessor for succession. The same head may re-accept after a declaration change to cover the new revision without a new owner |
+| `cancel` | Cancel an unaccepted reservation (including one retired before acceptance) and settle its original relationship; never inspects, accepts or launches a head |
 | `release` | Detach an owner with exact native conclusion evidence |
 | `retire` | Close admission; retain any occupant, hold and unresolved obligation |
 | `settle-retirement` | Record retirement once no occupant, hold or obligation remains |
@@ -55,6 +56,8 @@ agent-dispatch standing reserve <task-id> --expected-revision <n> \
 agent-dispatch standing accept <task-id> --expected-revision <n> \
   --expected-generation <g> --owner-session-id <session> \
   --expected-head-revision <h> <workspace flags>
+agent-dispatch standing cancel <task-id> --expected-revision <n> \
+  --expected-generation <g> <workspace flags>
 agent-dispatch standing release <task-id> --expected-revision <n> \
   --expected-generation <g> --owner-session-id <session> \
   --expected-conclusion-revision <c> <workspace flags>
@@ -121,7 +124,8 @@ fails without retrying against newer state.
 
 Retirement closes admission, not custody: an occupant, hold or unresolved
 obligation remains attached until its normal release/settlement path completes.
-Re-enabling a retiring or retired declaration does not resurrect it; explicit
+A reservation that was never accepted settles through `cancel`, after which
+retirement can settle. Re-enabling a retiring or retired declaration does not resurrect it; explicit
 re-enrollment is required. Source-set results report `enrolled`, `changed`,
 `retired`, `unchanged`, `deferred` and the retained `observation`; `retired`
 means retirement was requested, not settled.
@@ -155,6 +159,7 @@ an older peer CLI refuses the unknown flag. The HTTP filter is
 | `POST /standing-charters/source-sets` | `repo`, `namespace`, `entries` (`title`, `declaration`, optional boolean `enabled`), required nullable `revision` and `expected_observation` |
 | `POST /tasks/{id}/standing/reserve` | `expected_revision`, `workspace` |
 | `POST /tasks/{id}/standing/accept` | reserve fields plus `expected_generation`, `owner_session_id`, `expected_head_revision`, optional `expected_owner_session_id` |
+| `POST /tasks/{id}/standing/cancel` | reserve fields plus `expected_generation` |
 | `POST /tasks/{id}/standing/release` | reserve fields plus `expected_generation`, `owner_session_id`, `expected_conclusion_revision` |
 | `POST /tasks/{id}/standing/{retire,settle-retirement,reenroll}` | `expected_revision` |
 
@@ -172,11 +177,13 @@ coordinator cannot inspect its checkout. A partial read must never be posted
 as an empty set.
 
 `/health` advertises `standing_charters: {"version": 1, "finite_child_link": 1,
-"source_set": 1, "attachment": <bool>}`. `attachment` is true only when the coordinator has a
-relationship owner to admit workspace attachments. Clients re-check this
+"source_set": 1, "attachment": <bool>}`. `attachment` is true only when the
+selected relationship owner has configured local standing policy and native
+head/conclusion inspection, so it can later accept and release what it
+reserves. Clients re-check this
 capability before each standing operation, standing-parent create and
 standing-parent read, and refuse as upgrade-required before sending any
-mutation when it is absent or malformed. Reserve, accept and release also
+mutation when it is absent or malformed. Reserve, accept, cancel and release also
 refuse with 409 when `attachment` is not true. Source-set operations additionally
 require `source_set: 1`; they do not fall back to per-lane writes that could
 lose complete-set or retirement semantics. Ordinary finite requests omit

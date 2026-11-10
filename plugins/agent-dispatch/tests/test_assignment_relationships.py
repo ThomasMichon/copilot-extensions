@@ -35,6 +35,10 @@ class GroundOwner:
         self.lose_reply: str | None = None
         self.before_reply: Any = None
         self.queue: TaskQueue | None = None
+        self.standing_supported = True
+
+    def standing_attachment_supported(self) -> bool:
+        return self.standing_supported
 
     def __call__(self, workspace: AssignmentWorkspace, operation: str, payload: dict) -> dict:
         self.calls.append((operation, copy.deepcopy(payload)))

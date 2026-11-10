@@ -350,6 +350,9 @@ INVALID_REQUESTS = [
     ("/tasks/any/standing/reserve", {"expected_revision": 1, "workspace": {
         "machine": "a/b", "project": "p", "worktree": "w", "path": "x",
         "creation_nonce": "n"}}, 400),
+    ("/tasks/any/standing/cancel", {"expected_revision": 1, "expected_generation": 0, "workspace": {
+        "machine": "m", "project": "p", "worktree": "w", "path": "x",
+        "creation_nonce": "n"}}, 422),
 ]
 
 
@@ -372,6 +375,8 @@ def test_invalid_standing_requests_have_no_effects(tmp_path):
     {"standing_charters": {"version": 2, "finite_child_link": 1, "attachment": True}},
     {"standing_charters": {"version": True, "finite_child_link": 1, "attachment": True}},
     {"standing_charters": {"version": 1, "finite_child_link": 2, "attachment": True}},
+    {"standing_charters": {"version": 1, "finite_child_link": True, "attachment": True}},
+    {"standing_charters": {"version": 1, "finite_child_link": 1.0, "attachment": True}},
     {"standing_charters": {"version": 1, "finite_child_link": 1, "attachment": "yes"}},
 ])
 def test_client_refuses_before_effects_without_declared_support(health):
@@ -404,8 +409,13 @@ def test_client_refuses_before_effects_without_declared_support(health):
     assert "standing_parent_id" not in json.loads(created.content)
 
 
-def test_client_refuses_attachment_without_relationship_owner(tmp_path):
-    queue = TaskQueue(tmp_path / "queue.sqlite3")
+@pytest.mark.parametrize("writer", ["absent", "finite-only"])
+def test_client_refuses_attachment_without_relationship_owner(tmp_path, writer):
+    if writer == "absent":
+        queue = TaskQueue(tmp_path / "queue.sqlite3")
+    else:
+        queue, owner = owned_queue(tmp_path)
+        owner.standing_supported = False
     requests: list[httpx.Request] = []
     with app(queue) as api, connected(api, requests) as client:
         assert client.health()["standing_charters"]["attachment"] is False
@@ -418,6 +428,9 @@ def test_client_refuses_attachment_without_relationship_owner(tmp_path):
             lambda: client.accept_standing_charter(
                 standing["id"], workspace(tmp_path), expected_revision=1, expected_generation=1,
                 owner_session_id="native", expected_head_revision=1,
+            ),
+            lambda: client.cancel_standing_reservation(
+                standing["id"], workspace(tmp_path), expected_revision=1, expected_generation=1,
             ),
             lambda: client.release_standing_attachment(
                 standing["id"], workspace(tmp_path), expected_revision=1, expected_generation=1,
@@ -465,12 +478,26 @@ def test_cli_names_exact_revisions_without_ensure_or_failover(tmp_path, monkeypa
             "--expected-revision", str(reserved["standing_revision"]),
         )
         assert retiring["standing_revision"] == reserved["standing_revision"] + 1
+        cancelled = run(
+            "standing", "cancel", standing["id"],
+            "--expected-revision", str(retiring["standing_revision"]),
+            "--expected-generation", str(reserved["generation"]), *flags(workspace(tmp_path)),
+        )
+        assert cancelled["status"] == "queued" and cancelled["owner"] is None
+        assert cancelled["generation"] == reserved["generation"] + 1
+        assert [claim["phase"] for claim in owner.claims.values()] == ["closed"]
+        retired = run(
+            "standing", "settle-retirement", standing["id"],
+            "--expected-revision", str(cancelled["standing_revision"]),
+        )
+        assert retired["standing_charter"]["lifecycle"] == "retired"
         before = len(options)
         no_nonce = {k: v for k, v in workspace(tmp_path).items() if k != "creation_nonce"}
         for argv in (
             ["standing", "reenroll", standing["id"], "--expected-revision", "0"],
             ["standing", "reenroll", standing["id"], "--expected-rev", "1"],
             ["standing", "reserve", standing["id"], "--expected-revision", "1", *flags(no_nonce)],
+            ["standing", "cancel", standing["id"], "--expected-revision", "1", *flags(workspace(tmp_path))],
         ):
             with pytest.raises(SystemExit) as exited:
                 cli.main(argv)
@@ -478,9 +505,9 @@ def test_cli_names_exact_revisions_without_ensure_or_failover(tmp_path, monkeypa
         assert len(options) == before
     assert [option for option in options if option] == [
         {"ensure": False, "allow_ssh_failover": False},
-    ] * 3
+    ] * 5
     assert options.count({}) == 2
-    assert queue.get(standing["id"]).standing_revision == retiring["standing_revision"]
+    assert queue.get(standing["id"]).standing_revision == retired["standing_revision"]
 
 
 def test_finite_routes_never_conclude_or_claim_a_standing_task(tmp_path):

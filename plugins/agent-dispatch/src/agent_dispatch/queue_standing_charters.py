@@ -174,6 +174,11 @@ class QueueStandingChartersMixin:
         if task.owner_session_id is not None:
             raise TaskError("standing charter already has a native attachment")
 
+    def standing_attachment_supported(self) -> bool:
+        """Whether the selected writer can later accept and release what it reserves."""
+        supported = getattr(self._relationship_writer, "standing_attachment_supported", None)
+        return callable(supported) and supported() is True
+
     def reserve_standing_charter(
         self, task_id: str, workspace: AssignmentWorkspace, *,
         expected_revision: int, now: float | None = None,
@@ -183,6 +188,8 @@ class QueueStandingChartersMixin:
             raise TaskError("standing reservation requires its original workspace identity")
         if type(expected_revision) is not int or expected_revision < 1:
             raise TaskError("standing reservation requires a positive revision")
+        if self._relationship_writer is not None and not self.standing_attachment_supported():
+            raise TaskError("selected relationship owner cannot admit a standing attachment")
         ts = self._now(now)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -299,7 +306,7 @@ class QueueStandingChartersMixin:
             head["predecessor_session_id"] = expected_owner_session_id
         accepted_generation = expected_generation + int(succeeding)
 
-        def inspect(conn: sqlite3.Connection) -> tuple[Task, dict, bool]:
+        def inspect(conn: sqlite3.Connection) -> tuple[Task, dict, bool, bool]:
             task = self._fetch(conn, task_id)
             if task is None or task.kind != STANDING_KIND:
                 raise TaskError("operation requires a standing charter task")
@@ -318,11 +325,35 @@ class QueueStandingChartersMixin:
                 and accepted.get("request_id") == relationship["request"]["request_id"]
                 and accepted.get("relationship_ref") == relationship["receipt"]["ref"]
             ):
-                return task, relationship, True
+                return task, relationship, True, False
             self._require_standing(conn, task_id, expected_revision)
             if task.generation != expected_generation:
                 raise TaskError("standing assignment ownership incarnation changed")
-            if succeeding:
+            reaccepting = (
+                not succeeding and task.status == Status.STARTED
+                and task.owner_session_id == owner_session_id
+            )
+            if reaccepting:
+                self._require_standing_admission_open(conn, task, self._now(now))
+                declaration = task.standing_charter["declaration"]
+                if (
+                    not isinstance(accepted, dict) or accepted.get("generation") != task.generation
+                    or not isinstance(accepted.get("head"), dict)
+                    or accepted["head"].get("session_id") != owner_session_id
+                    or type(accepted["head"].get("revision")) is not int
+                    or accepted["head"]["revision"] > expected_head_revision
+                    or accepted.get("request_id") != relationship["request"]["request_id"]
+                    or accepted.get("relationship_ref") != relationship["receipt"]["ref"]
+                ):
+                    raise TaskError("standing reacceptance requires its previously accepted native head")
+                if (
+                    accepted.get("materialization_ref") == declaration["materialization_ref"]
+                    and accepted.get("source_revision") == declaration["source_revision"]
+                    and accepted.get("materialization_revision")
+                    == declaration["expected_materialization_revision"]
+                ):
+                    raise TaskError("standing attachment already covers the current declaration")
+            elif succeeding:
                 self._require_standing_admission_open(conn, task, self._now(now))
                 if (
                     task.status != Status.STARTED or task.owner_session_id != expected_owner_session_id
@@ -339,11 +370,11 @@ class QueueStandingChartersMixin:
                 self._require_standing_reservation_open(conn, task, self._now(now))
                 if task.status != Status.CLAIMED:
                     raise TaskError("standing acceptance requires its reserved assignment")
-            return task, relationship, False
+            return task, relationship, False, reaccepting
 
         with self._connect() as conn:
             conn.execute("BEGIN")
-            task, retained, replayed = inspect(conn)
+            task, retained, replayed, reaccepting = inspect(conn)
             if replayed:
                 return task
         admit = getattr(self._relationship_writer, "admit_standing", None)
@@ -365,10 +396,10 @@ class QueueStandingChartersMixin:
                 raise TaskError("standing admission differs from the original reserved assignment")
             with self._connect() as conn:
                 conn.execute("BEGIN IMMEDIATE")
-                current, relationship, replayed = inspect(conn)
+                current, relationship, replayed, still_reaccepting = inspect(conn)
                 if replayed:
                     return current
-                if relationship != retained:
+                if relationship != retained or still_reaccepting != reaccepting:
                     raise TaskError("standing relationship changed during native admission")
                 from .acquisition_receipts import validate_start
 
@@ -376,22 +407,29 @@ class QueueStandingChartersMixin:
                 ts = self._now(now)
                 if succeeding:
                     continue_owner_session(conn, current, owner_session_id, standing_succession=True)
-                result = self._change_standing(
-                    conn, current, {
+                standing = _encoded({
+                    **current.standing_charter,
+                    "accepted_materialization": {
+                        **admission, "expected_revision": expected_revision,
+                        "expected_generation": expected_generation,
+                        "assignment_generation": admission["generation"],
+                        "generation": accepted_generation,
+                    },
+                })
+                if reaccepting:
+                    # The same head keeps its ownership incarnation; only coverage moves.
+                    changes = {"last_seen_at": ts, "standing_charter": standing}
+                else:
+                    changes = {
                         "status": Status.STARTED, "owner_session_id": owner_session_id,
                         "generation": accepted_generation,
                         "started_at": ts, "last_seen_at": ts,
                         "activity": None, "activity_updated_at": ts,
-                        "standing_charter": _encoded({
-                            **current.standing_charter,
-                            "accepted_materialization": {
-                                **admission, "expected_revision": expected_revision,
-                                "expected_generation": expected_generation,
-                                "assignment_generation": admission["generation"],
-                                "generation": accepted_generation,
-                            },
-                        }),
-                    }, action="succeed" if succeeding else "accept", ts=ts,
+                        "standing_charter": standing,
+                    }
+                result = self._change_standing(
+                    conn, current, changes,
+                    action="succeed" if succeeding else "reaccept" if reaccepting else "accept", ts=ts,
                 )
                 self._record_attachment(
                     conn, task_id, ts=ts, old_session_id=current.owner_session_id,
@@ -522,6 +560,88 @@ class QueueStandingChartersMixin:
         except Exception as exc:
             raise TaskError(
                 "standing attachment released; original relationship close unresolved and retained"
+            ) from exc
+        self._notify_owned_transition()
+        return result
+
+    def cancel_standing_reservation(
+        self, task_id: str, workspace: AssignmentWorkspace, *,
+        expected_revision: int, expected_generation: int, now: float | None = None,
+    ) -> Task:
+        """Cancel one unaccepted reservation, then settle its original relationship.
+
+        Never observes, accepts, or launches a native head, so a reservation
+        retired before acceptance remains settleable through its original owner.
+        """
+        if not isinstance(workspace, AssignmentWorkspace) or any(
+            type(value) is not int or value < 1 for value in (expected_revision, expected_generation)
+        ):
+            raise TaskError("standing cancellation requires its workspace and positive fencing revisions")
+        with self._connect() as conn:
+            conn.execute("BEGIN IMMEDIATE")
+            task = self._fetch(conn, task_id)
+            if task is None or task.kind != STANDING_KIND:
+                raise TaskError("operation requires a standing charter task")
+            row = latest_relationship(conn, task_id)
+            relationship = json.loads(row["task_relationship"]) if row is not None else {}
+            request = relationship.get("request", {})
+            state = relationship.get("state")
+            if (
+                row is None or request.get("event_id") != row["id"]
+                or request.get("task_id") != task_id or request.get("workspace") != asdict(workspace)
+                or request.get("reservation_key") is not None
+                or current_binding(relationship).get("generation") != expected_generation
+                or state not in {"pending", "bound", "closed"}
+                or (state != "pending" and not _matches_receipt(
+                    relationship.get("receipt"), request, phase=state,
+                ))
+            ):
+                raise TaskError("standing cancellation requires its original relationship")
+            cancellation = {
+                "expected_revision": expected_revision, "expected_generation": expected_generation,
+                "assignment_event_id": request["event_id"], "request_id": request["request_id"],
+            }
+            standing = task.standing_charter
+            if (
+                task.standing_revision == expected_revision + 1
+                and task.generation == expected_generation + 1 and task.status == Status.QUEUED
+                and task.owner is None and task.owner_session_id is None
+                and standing.get("cancellation") == cancellation
+            ):
+                result = task
+            else:
+                self._require_standing(conn, task_id, expected_revision)
+                reservation = standing.get("reservation")
+                if (
+                    state == "closed" or task.status != Status.CLAIMED
+                    or task.owner != workspace.worker_id or task.owner_session_id is not None
+                    or task.generation != expected_generation
+                    or standing.get("accepted_materialization") is not None
+                    or standing["lifecycle"] not in {"active", "retiring"}
+                    or not isinstance(reservation, dict)
+                    or reservation.get("assignment_event_id") != request["event_id"]
+                ):
+                    raise TaskError("standing cancellation requires its unaccepted reservation")
+                ts = self._now(now)
+                standing = {**standing, "cancellation": cancellation}
+                standing.pop("reservation")
+                result = self._change_standing(
+                    conn, task, {
+                        "status": Status.QUEUED, "owner": None, "generation": expected_generation + 1,
+                        "claimed_at": None, "started_at": None, "lease_expires_at": None,
+                        "last_seen_at": None, "last_liveness": None, "activity": None,
+                        "activity_updated_at": ts, "standing_charter": _encoded(standing),
+                    }, action="cancel", ts=ts, unassigned_worker=workspace.worker_id,
+                )
+        try:
+            settled = self.reconcile_task_relationship(
+                task_id, event_id=cancellation["assignment_event_id"],
+            )
+            if settled["state"] != "closed" or settled["request"] != request:
+                raise TaskError("original relationship has not closed")
+        except Exception as exc:
+            raise TaskError(
+                "standing reservation cancelled; original relationship close unresolved and retained"
             ) from exc
         self._notify_owned_transition()
         return result
