@@ -124,6 +124,12 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   selected loopback Bridge `/health` endpoint once and emits a typed observation
   for the local record flow. It starts nothing, uses no credentials and does
   not infer authentication or agent counts from listener health.
+- **Inert hourly job preparation.** `health prepare-job` returns limited-user
+  Windows task or Linux systemd-user definitions as text, without installing,
+  registering or enabling them. The normal payload launcher qualifies
+  collection support from the exact selected runtime before forwarding.
+  Native qualification and explicit enrollment remain separate; see
+  [job preparation](docs/health-report.md#inert-native-job-preparation).
 - **Live Copilot CLI controls.** `copilot-cli` inspects native update preferences
   and cached versions, previews/applies live on/off and native update operations,
   and deliberately launches a cached version without another installer or

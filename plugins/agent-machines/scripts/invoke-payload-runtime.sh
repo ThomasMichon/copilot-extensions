@@ -6,7 +6,7 @@ READ_ONLY_RUNTIME_ENTRY=0
 if [[ "${1:-}" == installation-configuration ]]; then
     CONFIGURATION_ENTRY=1
 fi
-if [[ "${1:-}" == health && "${2:-}" == run ]]; then
+if [[ "${1:-}" == health && ( "${2:-}" == run || "${2:-}" == prepare-job ) ]]; then
     HEALTH_RUN_ENTRY=1
 fi
 if [[ "$CONFIGURATION_ENTRY" == 1 || "$HEALTH_RUN_ENTRY" == 1 ]]; then
@@ -85,6 +85,9 @@ run_runtime() {
         export COPILOT_EXTENSIONS_CONTEXT="$CONTEXT"
     else
         unset COPILOT_EXTENSIONS_CONTEXT
+    fi
+    if [[ "$HEALTH_RUN_ENTRY" == 1 ]]; then
+        exec "$AGENT_RT_PY" -I "$SCRIPT_DIR/health-collection-entry.py" "$@"
     fi
     exec "$AGENT_RT_PY" -m agent_machines "$@"
 }
