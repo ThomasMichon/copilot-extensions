@@ -1797,7 +1797,7 @@ function Get-VaultUninstallProcesses {
     $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     $owned = @()
     $bootstrapped = @($rows | Where-Object {
-        $_.ExecutablePath -and $_.CommandLine -cmatch 'agent_procutil\._daemon_instance_child' -and
+        $_.ExecutablePath -and $_.CommandLine -cmatch 'runpy\.run_module' -and
         $_.CommandLine -cmatch 'agent_vault\.service'
     })
     if ($bootstrapped.Count -gt 16) { throw 'Vault canonical daemon inventory exceeds its bound.' }

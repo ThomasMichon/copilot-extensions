@@ -18,7 +18,7 @@ from test_first_use_vault import (
 )
 
 
-def uninstall_child_diagnostic(result, *, shell, env, project, installation=None):
+def uninstall_child_diagnostic(result, *, shell, env, project, installation=None, payload=None):
     match = re.search(
         r"Vault still owns a live child \(pid=([1-9][0-9]*)\); refusing uninstall",
         result.stdout + result.stderr,
@@ -47,8 +47,15 @@ def uninstall_child_diagnostic(result, *, shell, env, project, installation=None
         "$parent=$null; if ($child -and $child.ParentProcessId -gt 0) { "
         "$parent=Get-CimInstance Win32_Process -Filter "
         "('ProcessId='+[string]$child.ParentProcessId) }; "
+        "$native=$null; if ($child) { try { $p=Get-Process -Id $child.ProcessId; "
+        "$native=@{image=$p.Path;birth=$p.StartTime.ToUniversalTime().ToFileTimeUtc();"
+        "captured=$child.CreationDate.ToUniversalTime().ToFileTimeUtc()}; "
+        "$owner=Invoke-CimMethod -InputObject $child -MethodName GetOwnerSid; "
+        "$native.sameUser=($owner.ReturnValue -eq 0 -and $owner.Sid -eq "
+        "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value); "
+        "$p.Dispose() } catch { $native=@{unavailable=$_.Exception.GetType().Name} } }; "
         "[ordered]@{observedAtUtc=[DateTime]::UtcNow.ToString('o');"
-        "child=(Describe $child);parent=(Describe $parent)} | ConvertTo-Json -Depth 3 -Compress"
+        "child=(Describe $child);parent=(Describe $parent);native=$native} | ConvertTo-Json -Depth 3 -Compress"
     )
     try:
         observed = subprocess.run(
@@ -57,7 +64,40 @@ def uninstall_child_diagnostic(result, *, shell, env, project, installation=None
             text=True, timeout=15, check=False, **no_window_kwargs(),
         )
         detail = f"probe exit={observed.returncode}\n{observed.stdout}{observed.stderr}"
-    except (OSError, subprocess.SubprocessError) as error:
+        if observed.returncode == 0 and payload is not None and installation is not None:
+            snapshot = json.loads(observed.stdout)
+            child = snapshot.get("child")
+            if isinstance(child, dict):
+                trace = """
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+state = {}
+def observe(frame, event, argument):
+    if frame.f_code.co_name == "admits":
+        if event == "return":
+            state["return_line"] = frame.f_lineno
+        elif event == "exception":
+            state["exception"] = argument[0].__name__
+    return observe
+sys.settrace(observe)
+state["admitted"] = module["admits"](json.load(sys.stdin))
+sys.settrace(None)
+print(json.dumps(state))
+"""
+                admitted = subprocess.run(
+                    [
+                        sys._base_executable, "-I", "-S", "-B", "-X", "utf8", "-c", trace,
+                        str(payload / "scripts/vault-uninstall-process.py"),
+                    ],
+                    input=json.dumps({
+                        "root": str(installation), "image": child["ExecutablePath"],
+                        "command": child["CommandLine"],
+                    }),
+                    env=env, cwd=project, capture_output=True, text=True, timeout=15,
+                    check=False, **no_window_kwargs(),
+                )
+                detail += f"\nsource admission exit={admitted.returncode}\n{admitted.stdout}{admitted.stderr}"
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         detail = f"probe unavailable: {type(error).__name__}: {error}"
     private_root = str(project.parent)
     for root in dict.fromkeys((json.dumps(private_root)[1:-1], private_root)):
@@ -137,6 +177,47 @@ def test_uninstall_foreign_pid_diagnostic_reads_only_a_bounded_receipt(tmp_path,
     assert bool(detail) == bool(calls)
     assert result.returncode == 1
     assert (run / "agent-vault-service.pid").read_bytes() == receipt
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows source-admission failure diagnostics")
+@pytest.mark.parametrize("caught_error", [False, True])
+def test_uninstall_refusal_diagnostic_traces_actual_read_only_admission(tmp_path, monkeypatch, caught_error):
+    installation = tmp_path / "runtime"
+    run = installation / "run"
+    run.mkdir(parents=True)
+    (run / "agent-vault-service.pid").write_text("4216", encoding="ascii")
+    payload = tmp_path / "payload"
+    helper = payload / "scripts/vault-uninstall-process.py"
+    helper.parent.mkdir(parents=True)
+    body = (
+        "def admits(request):\n"
+        "    try:\n"
+        "        raise ValueError('controlled refusal')\n"
+        "    except ValueError:\n"
+        "        return False\n"
+        if caught_error else "def admits(request):\n    return False\n"
+    )
+    helper.write_text(body, encoding="utf-8")
+    result = subprocess.CompletedProcess(
+        [], 1, "", "Vault PID receipt names a foreign process; refusing uninstall",
+    )
+    actual_run = subprocess.run
+
+    def query(command, **options):
+        if command[0] == "fixture-powershell":
+            return subprocess.CompletedProcess(command, 0, json.dumps({
+                "child": {"ExecutablePath": "fixture-image", "CommandLine": "fixture-command"},
+            }), "")
+        return actual_run(command, **options)
+
+    monkeypatch.setattr(subprocess, "run", query)
+    detail = uninstall_child_diagnostic(
+        result, shell="fixture-powershell", env=dict(os.environ), project=tmp_path,
+        installation=installation, payload=payload,
+    )
+    assert '"admitted": false' in detail and '"return_line":' in detail
+    assert ('"exception": "ValueError"' in detail) is caught_error
+    assert result.returncode == 1 and helper.read_text(encoding="utf-8") == body
 
 
 @native_genesis
@@ -245,6 +326,7 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
         )
         assert removed.returncode == 0, removed.stdout + removed.stderr + uninstall_child_diagnostic(
             removed, shell=cleanup[0], env=cleanup_env, project=project, installation=installation,
+            payload=payload,
         )
 
 

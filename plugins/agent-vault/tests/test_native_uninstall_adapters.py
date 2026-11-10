@@ -480,10 +480,11 @@ def test_vault_uninstall_stop_pins_native_identity_through_signal_and_wait(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows canonical daemon command admission")
+@pytest.mark.parametrize("leased", [False, True])
 @pytest.mark.parametrize("fault", [
     "none", "nt-prefix", "command", "source", "cache", "foreign-image", "foreign-base", "trailing-argument",
 ])
-def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path, fault):
+def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path, fault, leased):
     from agent_procutil._daemon_instance_child import _BOOTSTRAP
     from agent_vault.launch import _SERVICE_BOOTSTRAP
 
@@ -514,6 +515,15 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
         (slot / "pyvenv.cfg").write_text(f"home = {tmp_path}\n", encoding="utf-8")
     elif fault == "trailing-argument":
         command.append("--unexpected")
+    if not leased:
+        del command[3:6]
+    environment = dict(os.environ)
+    if not leased:
+        for key in (
+            "COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT", "COPILOT_EXTENSIONS_DAEMON_INSTANCE",
+            "COPILOT_EXTENSIONS_DAEMON_REGISTRY",
+        ):
+            environment.pop(key, None)
     result = subprocess.run(
         [
             sys.executable, "-I", "-S", "-B", "-X", "utf8",
@@ -522,7 +532,8 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
         input=json.dumps({
             "root": str(root), "image": image, "command": subprocess.list2cmdline(command),
         }),
-        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+        env=environment, capture_output=True, text=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert json.loads(result.stdout) is (fault in {"none", "nt-prefix"})

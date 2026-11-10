@@ -454,4 +454,5 @@ def test_actual_bootstrap_keeps_deadline_caller_independence_and_default_service
         )
         assert removed.returncode == 0, removed.stdout + removed.stderr + uninstall_child_diagnostic(
             removed, shell=cleanup[0], env=clean_env, project=project, installation=installation,
+            payload=payload,
         )

@@ -98,24 +98,34 @@ def admits(request: dict) -> bool:
         return False
     try:
         arguments = _arguments(request["command"])
-        if len(arguments) != 13:
+        if len(arguments) not in (10, 13):
             return False
         daemon, service = _contracts()
-        if arguments[1] != "-X" or arguments[3:5] != ["-c", daemon] or (
-            arguments[6:8] != ["-c", service]
-            or arguments[9:12] != ["--foreground", "--persistent", "--configuration-root"]
-        ):
+        if arguments[1] != "-X":
+            return False
+        invocation = arguments[3:]
+        bootstrap_package = None
+        if len(arguments) == 13:
+            if invocation[:2] != ["-c", daemon]:
+                return False
+            bootstrap_package = _path(invocation[2])
+            invocation = invocation[3:]
+        if invocation[:2] != ["-c", service] or invocation[3:6] != [
+            "--foreground", "--persistent", "--configuration-root",
+        ]:
             return False
         root = _path(request["root"])
-        package = _member(arguments[5], root)
-        if _path(arguments[8]) != package or tuple(part.casefold() for part in package.parts[-2:]) != (
+        package = _member(invocation[2], root)
+        if bootstrap_package is not None and bootstrap_package != package:
+            return False
+        if tuple(part.casefold() for part in package.parts[-2:]) != (
             "lib", "site-packages",
         ):
             return False
         slot = package.parent.parent
         if slot.parent != root / "versions" and slot != root / ".venv":
             return False
-        _path(arguments[12])
+        _path(invocation[6])
         prefix = arguments[2].removeprefix("pycache_prefix=")
         if prefix == arguments[2]:
             return False

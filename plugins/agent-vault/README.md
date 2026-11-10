@@ -207,7 +207,7 @@ not the retired compiled daemon adapter. The configured base path is read as
 UTF-8 under both stock Windows PowerShell and PowerShell Core.
 The canonical same-process daemon can instead run its physical interpreter
 directly. Its default persistent-service command is admitted only after exact
-matching against the source-owned daemon and service bootstrap contracts,
+matching against the source-owned service bootstrap and optional daemon lease wrapper,
 ordinary installation-slot paths, the configured physical base, cache scope,
 current-user ownership and the retained native birth/file identities. A PID
 receipt alone still cannot authorize termination; unknown commands and children
