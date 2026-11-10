@@ -172,7 +172,7 @@ def test_local_finalization_refuses_ignored_dirty_submodule(local_repo, foreign_
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "active"
 
 
-@pytest.mark.parametrize("later", ["committed", "hidden-untracked"])
+@pytest.mark.parametrize("later", ["committed", "hidden-untracked", "missing-checkout"])
 def test_local_cleanup_rechecks_content_after_finalize(local_repo, monkeypatch, later):
     config, wid, checkout = local_repo
     monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda path: None)
@@ -180,15 +180,34 @@ def test_local_cleanup_rechecks_content_after_finalize(local_repo, monkeypatch, 
     assert finalize.validate_and_finalize(wid, config)
     pending = checkout / "later.txt"
     pending.write_text("keep\n")
-    if later == "committed":
+    if later in ("committed", "missing-checkout"):
         _git("add", "later.txt", cwd=checkout)
         _git("commit", "-m", "work after finalization", cwd=checkout)
     else:
         _git("config", "status.showUntrackedFiles", "no", cwd=checkout)
+    if later == "missing-checkout":
+        assert git_ops.remove_worktree(config.default_repo.anchor, str(checkout))
 
     cleanup_gc_cli.cmd_cleanup(SimpleNamespace(clean=True, include_unused=False))
-    assert pending.read_text() == "keep\n"
+    if later != "missing-checkout":
+        assert pending.read_text() == "keep\n"
     assert git_ops.ref_exists(f"refs/heads/worktree/{wid}", cwd=config.default_repo.anchor)
+    if later != "hidden-untracked":
+        assert _git("show", f"worktree/{wid}:later.txt", cwd=config.default_repo.anchor) == "keep"
+
+
+def test_local_cleanup_retires_removed_checkout_and_branch(local_repo, monkeypatch):
+    config, wid, checkout = local_repo
+    monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda path: None)
+    monkeypatch.setattr(cleanup_gc_cli.sessions, "_list_mux_sessions", lambda: [])
+    assert finalize.validate_and_finalize(wid, config)
+    assert not checkout.exists()
+    assert not git_ops.ref_exists(f"refs/heads/worktree/{wid}", cwd=config.default_repo.anchor)
+
+    cleanup_gc_cli.cmd_cleanup(SimpleNamespace(clean=True, include_unused=False))
+    assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "archived"
+    assert git_ops.ref_exists("refs/heads/master", cwd=config.default_repo.anchor)
 
 
 def test_local_finalization_uses_registered_anchor_store(local_repo, foreign_repo):

@@ -62,3 +62,21 @@ def content_error(repo, worktree_path: str, branch: str, upstream: str) -> str |
     if contained.returncode != 0:
         return f"Unmerged local work: checkout is not contained in {upstream}; finalization refused."
     return None
+
+
+@repository_identity_scope()
+def cleanup_error(repo, worktree_path: str, branch: str) -> str | None:
+    """Reprove surviving local content, allowing an already-removed branch."""
+    upstream, local_only = resolve_upstream(repo, pr_mode=False)
+    if not local_only:
+        return None
+    if not Path(worktree_path).exists():
+        present = git_ops.git(
+            "show-ref", "--verify", "--quiet", f"refs/heads/{branch}",
+            cwd=repo.anchor, check=False,
+        )
+        if present.returncode == 1:
+            return None
+        if present.returncode != 0:
+            return "Cannot inspect local worktree branch; cleanup refused."
+    return content_error(repo, worktree_path, branch, upstream)

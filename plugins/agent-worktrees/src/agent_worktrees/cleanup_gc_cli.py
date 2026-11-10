@@ -381,18 +381,14 @@ def _revalidate_cleanup_safety(
                 return RevalidationResult(False, reason, disp.bucket)
             if (
                 latest.status == "finalized" and latest.checkout_managed
-                and latest.worktree_path and Path(latest.worktree_path).exists()
+                and latest.worktree_path
             ):
                 try:
-                    upstream, local_only = finalize_local.resolve_upstream(repo, pr_mode=False)
+                    error = finalize_local.cleanup_error(repo, latest.worktree_path, latest.branch)
                 except ValueError as exc:
                     return RevalidationResult(False, str(exc), "unmerged")
-                if local_only:
-                    error = finalize_local.content_error(
-                        repo, latest.worktree_path, latest.branch, upstream,
-                    )
-                    if error:
-                        return RevalidationResult(False, error, "unmerged")
+                if error:
+                    return RevalidationResult(False, error, "unmerged")
             return _do_reap(latest, fresh_info, disp.reason, disp.bucket)
     except TimeoutError:
         return RevalidationResult(

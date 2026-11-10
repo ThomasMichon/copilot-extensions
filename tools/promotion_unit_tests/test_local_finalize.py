@@ -106,3 +106,23 @@ def test_local_completion_requires_fresh_clean_containment(api, state):
     assert (error is None) is (state == "contained")
     assert not any(args[0] in ("fetch", "merge", "reset", "rebase") for args in calls)
     assert not git_ops.identity_scoped()
+
+
+@pytest.mark.parametrize("state", ["present", "missing", "unknown", "remote"])
+def test_cleanup_requires_positive_local_branch_observation(api, monkeypatch, state):
+    module, git_ops, repo = api
+    monkeypatch.setattr(module, "Path", lambda path: SimpleNamespace(exists=lambda: state == "present"))
+    monkeypatch.setattr(module, "content_error", lambda *args: "uncontained")
+
+    def git(*args, **kwargs):
+        assert git_ops.identity_scoped()
+        if args == ("remote",):
+            return SimpleNamespace(returncode=0, stdout="origin\n" if state == "remote" else "")
+        assert args == ("show-ref", "--verify", "--quiet", "refs/heads/worktree/task")
+        assert kwargs["cwd"] == "anchor"
+        return SimpleNamespace(returncode=1 if state == "missing" else 2, stdout="")
+
+    git_ops.git = git
+    error = module.cleanup_error(repo, "checkout", "worktree/task")
+    assert (error is None) is (state in ("missing", "remote"))
+    assert not git_ops.identity_scoped()

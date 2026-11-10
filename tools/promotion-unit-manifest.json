@@ -4767,7 +4767,11 @@
         "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[unknown-ref]",
         "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[dirty]",
         "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[remote-added]",
-        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[unknown-status]"
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[unknown-status]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[present]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[missing]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[unknown]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_health_composition.py": "30960140274c035e035e25e6ef47b9889453b5c1f58f4d6f7b81debaa118ad70",
@@ -5450,8 +5454,8 @@
         "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
         "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
-        "tools/promotion_unit_tests/test_local_finalize.py": "5927f4512526e09a23c7f6a6b07e7affdfc6ba700e6bfca2a75eeeca1513006e",
-        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "4c7b5223ce162d8f5d42c4b367e6b0ecfebbe5883003e099ea649471ec67ad6a"
+        "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "9fea9450ace2ee3461166bf5d6efcd9058414609f46e3c4614bb92e077486fbe"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_run.py",
