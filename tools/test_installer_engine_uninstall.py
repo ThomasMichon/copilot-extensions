@@ -396,6 +396,239 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
             MODULE.refuse_consumers(payload, "agent-worktrees", root, shell, profile, **kwargs)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows Vault controller stack")
+@pytest.mark.parametrize("mutation", (
+    "none", "finite-callback", "self-stage", "sparse-census", "cache",
+    "forged-owner", "stale-owner", "wrong-action", "wrong-root", "changed-source",
+    "witness-mismatch", "reused-native", "foreign-controller", "additional-consumer",
+    "late-source", "late-request",
+))
+def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch, mutation):
+    home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    root = home / ".agent-vault"
+    original = home / "source/agent-vault"
+    scripts = original / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copyfile(CONTROLLERS, scripts / CONTROLLERS.name)
+    shutil.copyfile(SOURCE.with_name("installer_engine_uninstall_windows.py"),
+                    scripts / "installer_engine_uninstall_windows.py")
+    for name in ("installer_driver.py", "installer_engine.py", "installer_engine_uninstall.py", "install.ps1"):
+        (scripts / name).write_text("# ordinary native source fixture\n", encoding="utf-8")
+    for directory, names in (
+        ("libs/update-driver/src/update_driver", ("core.py", "participant.py", "_runner.py")),
+        ("libs/procutil/src/agent_procutil", ("__init__.py",)),
+    ):
+        folder = original / directory
+        folder.mkdir(parents=True)
+        for name in names:
+            (folder / name).write_text("# ordinary library fixture\n", encoding="utf-8")
+    payload = original
+    if mutation == "self-stage":
+        payload = root / ".install-stage/20261110T100000000-64202/agent-vault"
+        shutil.copytree(original, payload)
+
+    def packages(source):
+        return (source, source / "libs/update-driver", source / "libs/procutil")
+
+    def files(roots):
+        return sorted({path for directory in roots for path in directory.rglob("*") if path.is_file()})
+
+    def fingerprint(paths):
+        return hashlib.sha256(b"".join(path.read_bytes() for path in paths)).hexdigest()
+
+    engine = ModuleType("installer_engine")
+    engine.__file__ = str(payload / "scripts/installer_engine.py")
+    engine._package_roots, engine._source_files = packages, files
+    engine._package_name = lambda path: {
+        "agent-vault": "agent-vault", "update-driver": "agent-update-driver", "procutil": "agent-procutil",
+    }[path.name]
+    engine.runtime = SimpleNamespace(fingerprint_source=fingerprint)
+    participant = ModuleType("update_driver.participant")
+    participant.__file__ = str(payload / "libs/update-driver/src/update_driver/participant.py")
+    participant.ENVIRONMENT_KEY = "UPDATE_DRIVER_WITNESS"
+    witness = "fixture-native-witness-must-not-be-published"
+    participant.participant_environment = lambda: {participant.ENVIRONMENT_KEY: witness}
+    checks = []
+
+    class Custody:
+        root = home / "execution"
+        request_id = "fixture-native-request"
+
+        def assert_owned(self):
+            checks.append("owner")
+            if mutation == "stale-owner":
+                raise MODULE.UninstallRefused("Fixture custody stale")
+
+    participant.BorrowedCustody = Custody
+    shell = str(HOST or Path(sys.executable).with_name("pwsh.exe"))
+    native = ["-Action", "uninstall", "-InstallDir", str(root)]
+
+    def driver(source, role):
+        return [
+            sys.executable, "-I", "-S", "-B", "-X", "utf8", str(source / "scripts/installer_driver.py"),
+            "--payload", str(source), "--root", str(root), "--shell", shell,
+            "--plugin", "agent-vault", "--action", "uninstall", *(["--" + role] if role else []),
+        ]
+
+    def powershell(source):
+        return [shell, "-NoProfile", "-NonInteractive", "-File", str(source / "scripts/install.ps1"), *native]
+
+    request = SimpleNamespace(
+        id=Custody.request_id, state="running",
+        runner=SimpleNamespace(argv=tuple(driver(original, "participant"))),
+        spec=SimpleNamespace(backend="plugin-native-install", project=str(root),
+                             argv=tuple(native), source=fingerprint(files(packages(payload)))),
+    )
+    core = ModuleType("update_driver.core")
+    core.__file__ = str(payload / "libs/update-driver/src/update_driver/core.py")
+    core.status = lambda *_args, **_kwargs: request
+    for module in (engine, core, participant):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    inspector = driver(payload, "remove-broker")
+    if mutation == "finite-callback":
+        inspector = [
+            sys.executable, "-I", "-B", str(payload / "scripts/installer_engine_uninstall.py"),
+            "--payload-root", str(payload), "--plugin-id", "agent-vault",
+            "--root", str(root), "--shell", shell, "--remove-runtime",
+        ]
+    actors = [(os.getpid(), inspector), (64201, powershell(payload))]
+    if mutation == "self-stage":
+        actors.append((64202, powershell(original)))
+    shim = [
+        sys.executable, "-I", str(original / "libs/update-driver/src/update_driver/_runner.py"),
+        str(Custody.root), request.id, witness,
+        str(original / "libs/procutil/src/agent_procutil/__init__.py"),
+    ]
+    if mutation == "cache":
+        shim[2:2] = ["-X", "pycache_prefix=" + str(Custody.root / "cache/python" / ("installed-" + "a" * 64))]
+    actors.extend((
+        (64203, list(request.runner.argv)), (64204, shim),
+        (64205, driver(original, "")), (64206, powershell(original)),
+    ))
+    if mutation == "wrong-action":
+        request.spec.argv = ("-Action", "update", "-InstallDir", str(root))
+    elif mutation == "wrong-root":
+        request.spec.project = str(home / "foreign")
+    elif mutation == "changed-source":
+        (payload / "scripts/installer_driver.py").write_text("# changed\n", encoding="utf-8")
+    elif mutation == "witness-mismatch":
+        shim[5] = "not-the-scoped-fixture"
+    elif mutation == "foreign-controller":
+        actors[2][1][:] = [sys.executable, "-m", "agent_vault"]
+    rows = [
+        {"pid": pid, "ppid": actors[index + 1][0] if index + 1 < len(actors) else 0,
+         "image": argv[0], "command": subprocess.list2cmdline(argv),
+         "birth": f"202611101000{10-index:02d}.000000"}
+        for index, (pid, argv) in enumerate(actors)
+    ]
+    if mutation == "additional-consumer":
+        rows.append({"pid": 64207, "ppid": 0, "image": sys.executable,
+                     "command": f"python -m agent_vault --root {root}"})
+    native_rows = [dict(row) for row in rows]
+    if mutation == "sparse-census":
+        rows = [row for row in rows if row["pid"] != 64204]
+
+    def inspect(_payload, command, **_options):
+        assert witness not in command[-1]
+        if command[-1].startswith("$expected="):
+            if mutation == "late-source":
+                (payload / "scripts/installer_driver.py").write_text("# late change\n", encoding="utf-8")
+            elif mutation == "late-request":
+                core.status = lambda *_args, **_kwargs: SimpleNamespace(
+                    id=request.id, state="completed", spec=request.spec, runner=request.runner,
+                )
+            return "false" if mutation == "reused-native" else "true"
+        if command[-1].startswith("$selected="):
+            pid = int(command[-1].splitlines()[0].split("=")[1])
+            return json.dumps(next(row for row in native_rows if row["pid"] == pid))
+        return json.dumps(rows)
+
+    monkeypatch.setattr(MODULE, "_run", inspect)
+    monkeypatch.setattr(MODULE.os, "getppid", lambda: 64201)
+    monkeypatch.setattr(sys, "argv", [inspector[6] if mutation != "finite-callback" else inspector[3]])
+    custody = object() if mutation == "forged-owner" else Custody()
+    profile = MODULE.Profile((), (), (), (), "agent_vault")
+    if mutation in {"none", "finite-callback", "self-stage", "sparse-census", "cache"}:
+        MODULE.refuse_consumers(payload, "agent-vault", root, shell, profile, controller_custody=custody)
+        assert checks == ["owner", "owner"]
+    else:
+        with pytest.raises(MODULE.UninstallRefused):
+            MODULE.refuse_consumers(payload, "agent-vault", root, shell, profile, controller_custody=custody)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Vault removal custody adapter")
+@pytest.mark.parametrize("mode", ("ordinary", "verified", "missing", "refused"))
+def test_native_vault_removal_authenticates_before_import_and_never_falls_back(tmp_path, monkeypatch, mode):
+    events = []
+    owner = object()
+    payload, root = tmp_path / "payload", tmp_path / "runtime"
+    monkeypatch.delenv("COPILOT_EXTENSIONS_NATIVE_INSTALLER", raising=False)
+    if mode != "ordinary":
+        monkeypatch.setenv("COPILOT_EXTENSIONS_NATIVE_INSTALLER", "agent-vault")
+
+    class Scope:
+        def __enter__(self):
+            events.append("authenticate")
+            if mode == "refused":
+                raise MODULE.UninstallRefused("Fixture custody refused")
+            return None if mode == "missing" else owner
+
+        def __exit__(self, *_args):
+            events.append("closed")
+
+    def load(path):
+        assert events == ["root-validated"]
+        assert path == payload / "scripts/installer_driver.py"
+        events.append("import")
+        return SimpleNamespace(
+            bootstrap=lambda source: events.append(("bootstrap", source)), custody=Scope,
+        )
+
+    monkeypatch.setattr(MODULE, "_root", lambda *_args: events.append("root-validated"))
+    monkeypatch.setattr(MODULE, "_load", load)
+    if mode in {"missing", "refused"}:
+        with pytest.raises(MODULE.UninstallRefused):
+            with MODULE._native_controller_custody(payload, "agent-vault", root):
+                pytest.fail("Unknown custody must not start cleanup")
+    else:
+        with MODULE._native_controller_custody(payload, "agent-vault", root) as actual:
+            assert actual is (None if mode == "ordinary" else owner)
+    if mode == "ordinary":
+        assert events == []
+    else:
+        assert events[:4] == [
+            "root-validated", "import", ("bootstrap", payload), "authenticate",
+        ]
+        assert ("closed" in events) is (mode != "refused")
+
+
+@pytest.mark.parametrize("plugin", ("agent-vault", "agent-bridge"))
+def test_native_broker_admission_passes_custody_only_to_the_scoped_receiver(tmp_path, monkeypatch, plugin):
+    observed = {}
+    owner = object()
+
+    def cleanup(*arguments, **options):
+        observed.update(arguments=arguments, options=options)
+
+    monkeypatch.setitem(sys.modules, "installer_engine_uninstall", SimpleNamespace(cleanup=cleanup))
+    previous = sys.path[:]
+    try:
+        driver = MODULE._load(SOURCE.with_name("installer_driver.py"))
+        args = SimpleNamespace(payload=tmp_path / "payload", root=tmp_path / "runtime",
+                               shell=Path(sys.executable), plugin=plugin)
+        driver.admit_broker_removal(args, controller_custody=owner)
+    finally:
+        sys.path[:] = previous
+    assert observed["arguments"] == (args.payload, plugin, args.root, str(args.shell))
+    assert observed["options"]["check_consumers"] is True
+    if plugin == "agent-vault":
+        assert observed["options"]["controller_custody"] is owner
+    else:
+        assert "controller_custody" not in observed["options"]
+
+
 @pytest.mark.parametrize("mutation", ("missing", "shared"))
 def test_controller_packaged_helper_fails_closed(tmp_path: Path, mutation: str) -> None:
     payload = tmp_path / "payload"

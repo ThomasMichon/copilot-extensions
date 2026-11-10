@@ -212,6 +212,10 @@ ordinary installation-slot paths, the configured physical base, cache scope,
 current-user ownership and the retained native birth/file identities. A PID
 receipt alone still cannot authorize termination; unknown commands and children
 remain refusal conditions.
+Native removal distinguishes its own source-bound driver ancestry from runtime
+consumers using the live authenticated uninstall request, not parent PIDs alone.
+Broker removal and finite code removal retain that proof; an unverified caller
+or an additional consumer still blocks removal.
 
 ## Configuration
 

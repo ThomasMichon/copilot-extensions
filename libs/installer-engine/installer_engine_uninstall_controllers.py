@@ -428,4 +428,183 @@ try {
             raise UninstallRefused("Worktrees native request changed during inspection")
         return {row["pid"] for row in chain[1:]}
 
-    return SimpleNamespace(publisher_identity=_publisher_identity, worktrees_controllers=_worktrees_controllers)
+    def _native_plugin_controllers(rows, payload, root, shell, custody) -> set[int]:
+        """Recognize only Vault's authenticated native uninstall ancestry."""
+        engine = sys.modules.get("installer_engine")
+        core = sys.modules.get("update_driver.core")
+        participant = sys.modules.get("update_driver.participant")
+        if (os.name != "nt" or engine is None or core is None or participant is None
+                or Path(engine.__file__) != payload / "scripts/installer_engine.py"):
+            raise UninstallRefused("Native Vault removal source is unavailable")
+        packages = {engine._package_name(path): path for path in engine._package_roots(payload)}
+        if not {"agent-vault", "agent-update-driver", "agent-procutil"} <= packages.keys():
+            raise UninstallRefused("Native Vault removal source closure is incomplete")
+        driver = packages["agent-update-driver"] / "src/update_driver"
+        for module, name in ((core, "core.py"), (participant, "participant.py")):
+            path = driver / name
+            _plain(path, file=True)
+            if not path.is_file() or Path(module.__file__) != path:
+                raise UninstallRefused("Native Vault execution source changed")
+        if type(custody) is not participant.BorrowedCustody:
+            raise UninstallRefused("Native Vault removal requires authenticated driver custody")
+        custody.assert_owned()
+        request = core.status(custody.request_id, root=custody.root)
+        digest = engine.runtime.fingerprint_source(engine._source_files(tuple(packages.values())))
+        if (request.id != custody.request_id or request.state != "running"
+                or request.spec.backend != "plugin-native-install"
+                or request.spec.project != str(root.resolve()) or request.spec.source != digest):
+            raise UninstallRefused("Native Vault removal has no matching running request")
+        recipe = _closed_flags(request.spec.argv, {"-action", "-installdir"},
+                               {"-noservice", "-purge", "-force"})
+        if recipe.get("-action") != "uninstall" or Path(recipe.get("-installdir", "")) != root:
+            raise UninstallRefused("Native Vault removal recipe changed")
+
+        def native_driver(arguments, role):
+            if arguments[1:6] != ["-I", "-S", "-B", "-X", "utf8"] or len(arguments) < 7:
+                raise UninstallRefused("Unexpected native Vault driver entry")
+            options, native_options = {}, []
+            index = 7
+            while index < len(arguments):
+                flag = arguments[index]
+                if flag in {"--participant", "--remove-broker"}:
+                    if flag in options:
+                        raise UninstallRefused("Duplicate native Vault controller")
+                    options[flag] = True
+                else:
+                    index += 1
+                    if index == len(arguments):
+                        raise UninstallRefused("Incomplete native Vault controller")
+                    value = arguments[index]
+                    if flag == "--option":
+                        native_options.append("-" + value.lower())
+                    elif flag in {"--payload", "--root", "--shell", "--plugin", "--action"} and flag not in options:
+                        options[flag] = value
+                    else:
+                        raise UninstallRefused("Unexpected native Vault controller argument")
+                index += 1
+            source = Path(options.pop("--payload", ""))
+            expected = {
+                "--root": str(root), "--shell": shell, "--plugin": "agent-vault", "--action": "uninstall",
+            }
+            if role:
+                expected["--" + role] = True
+            if (not source.is_absolute() or ".." in source.parts or options != expected
+                    or Path(arguments[6]) != source / "scripts/installer_driver.py"
+                    or len(native_options) != len(set(native_options))
+                    or set(native_options) != set(recipe) - {"-action", "-installdir"}):
+                raise UninstallRefused("Native Vault controller did not forward its recipe")
+            _plain(Path(arguments[6]), file=True)
+            return source
+
+        original = native_driver(list(request.runner.argv), "participant")
+        sources = {engine._package_name(path): path for path in engine._package_roots(original)}
+        if (set(sources) != set(packages)
+                or request.spec.source != engine.runtime.fingerprint_source(
+                    engine._source_files(tuple(sources.values())),
+                )):
+            raise UninstallRefused("Native Vault original source changed")
+        witness = participant.participant_environment().get(participant.ENVIRONMENT_KEY)
+        if not witness:
+            raise UninstallRefused("Native Vault removal has no scoped participant")
+        chain = []
+
+        def take():
+            pid = os.getpid() if not chain else chain[-1]["ppid"]
+            matches = [row for row in rows if row["pid"] == pid]
+            if len(matches) > 1 or pid in {row["pid"] for row in chain} or len(chain) == 7:
+                raise UninstallRefused("Native Vault controller ancestry is ambiguous")
+            row = matches[0] if matches else _controller_row(payload, shell, pid)
+            current = _controller_row(payload, shell, pid)
+            if (any(current[key] != row[key] for key in ("pid", "ppid", "command"))
+                    or Path(current["image"]) != Path(row["image"])):
+                raise UninstallRefused("Native Vault controller identity changed")
+            chain.append(current)
+            return current
+
+        inspector = take()
+        arguments = _controller_python(inspector, root)
+        if Path(sys.argv[0]) == payload / "scripts/installer_driver.py":
+            if native_driver(arguments, "remove-broker") != payload:
+                raise UninstallRefused("Native Vault broker callback changed")
+        else:
+            if len(arguments) < 4:
+                raise UninstallRefused("Native Vault finite removal entry is incomplete")
+            flags = _closed_flags(arguments[4:], {
+                "--payload-root", "--plugin-id", "--root", "--shell",
+            }, {"--remove-runtime", "--check-consumers", "--check"})
+            if (arguments[1:3] != ["-I", "-B"]
+                    or Path(arguments[3]) != payload / "scripts/installer_engine_uninstall.py"
+                    or Path(sys.argv[0]) != Path(arguments[3])
+                    or flags.get("--payload-root") != str(payload) or flags.get("--plugin-id") != "agent-vault"
+                    or flags.get("--root") != str(root) or flags.get("--shell") != shell
+                    or not (flags.get("--remove-runtime") or flags.get("--check-consumers"))):
+                raise UninstallRefused("Native Vault finite removal callback changed")
+        if inspector["ppid"] != os.getppid():
+            raise UninstallRefused("Native Vault callback parent changed")
+
+        def native_shell(row, source):
+            arguments = _windows_argv(row["command"])
+            lower = [value.lower() for value in arguments]
+            if (not arguments or Path(row["image"]) != Path(shell) or lower.count("-file") != 1
+                    or Path(arguments[0]).name.lower() != Path(shell).name.lower()):
+                raise UninstallRefused("Native Vault shell changed")
+            index = lower.index("-file")
+            if index + 1 >= len(arguments):
+                raise UninstallRefused("Native Vault shell entry is incomplete")
+            flags = _closed_flags(arguments[1:index], {"-executionpolicy"},
+                                  {"-nologo", "-noprofile", "-noninteractive"})
+            tail = arguments[index + 2:]
+            if tail and tail[0] == "uninstall":
+                tail = ["-Action", "uninstall", *tail[1:]]
+            if (flags.get("-executionpolicy", "bypass").lower() != "bypass"
+                    or Path(arguments[index + 1]) != source / "scripts/install.ps1"
+                    or _closed_flags(tail, {"-action", "-installdir"},
+                                     {"-noservice", "-purge", "-force"}) != recipe):
+                raise UninstallRefused("Native Vault shell did not forward its recipe")
+
+        native_shell(take(), payload)
+        if payload != original:
+            parent = take()
+            if (payload.name != "agent-vault"
+                    or payload.parent.parent != Path.home() / ".agent-vault/.install-stage"
+                    or re.fullmatch(r"[0-9]{8}T[0-9]{9}-" + str(parent["pid"]), payload.parent.name) is None):
+                raise UninstallRefused("Native Vault source is not its owned stage")
+            native_shell(parent, original)
+        if tuple(_controller_python(take(), root)) != request.runner.argv:
+            raise UninstallRefused("Native Vault participant is not its pinned runner")
+        arguments = _controller_python(take(), root)
+        runner = sources["agent-update-driver"] / "src/update_driver/_runner.py"
+        procutil = sources["agent-procutil"] / "src/agent_procutil/__init__.py"
+        if (len(arguments) == 9 and arguments[1:3] == ["-I", "-X"]
+                and arguments[3].startswith("pycache_prefix=")):
+            prefix = arguments[3].removeprefix("pycache_prefix=")
+            if prefix.startswith("\\\\?\\UNC\\"):
+                prefix = "\\\\" + prefix[8:]
+            elif prefix.startswith("\\\\?\\"):
+                prefix = prefix[4:]
+            cache = Path(prefix)
+            if (cache.parent == custody.root / "cache/python" and ".." not in cache.parts
+                    and re.fullmatch(r"(?:installed-[0-9a-f]{64}|unsealed-[0-9a-f]{32})", cache.name)):
+                arguments = [*arguments[:2], *arguments[4:]]
+        if (len(arguments) != 7 or arguments[1] != "-I" or Path(arguments[2]) != runner
+                or Path(arguments[3]) != custody.root or arguments[4] != request.id
+                or arguments[5] != witness or Path(arguments[6]) != procutil):
+            raise UninstallRefused("Native Vault execution shim is not its live request")
+        if native_driver(_controller_python(take(), root), "") != original:
+            raise UninstallRefused("Native Vault foreground controller changed")
+        native_shell(take(), original)
+        if not _publisher_identity(payload, shell, chain):
+            raise UninstallRefused("Native Vault controller identity is unverified")
+        custody.assert_owned()
+        current = core.status(custody.request_id, root=custody.root)
+        if (current.state != "running" or current.spec != request.spec or current.runner != request.runner
+                or request.spec.source != engine.runtime.fingerprint_source(
+                    engine._source_files(tuple(packages.values())),
+                ) or request.spec.source != engine.runtime.fingerprint_source(
+                    engine._source_files(tuple(sources.values())),
+                )):
+            raise UninstallRefused("Native Vault request changed during inspection")
+        return {row["pid"] for row in chain[1:]}
+
+    return SimpleNamespace(publisher_identity=_publisher_identity, worktrees_controllers=_worktrees_controllers,
+                           native_plugin_controllers=_native_plugin_controllers)

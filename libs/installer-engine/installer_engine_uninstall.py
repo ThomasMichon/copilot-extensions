@@ -799,11 +799,16 @@ def refuse_consumers(payload: Path, plugin: str, root: Path, shell: str, profile
     module = re.compile(r"\b(?:" + "|".join(re.escape(value) for value in identities) + r")\b")
     controllers, redirectors = _controllers(rows, payload, root, plugin)
     if controller_custody is not None:
-        if plugin != "agent-worktrees":
-            raise UninstallRefused("Driver controller qualification is Worktrees-only")
-        controllers.update(_controller_proofs(payload).worktrees_controllers(
-            rows, payload, root, shell, controller_custody, lifecycle_lease,
-        ))
+        if plugin == "agent-worktrees":
+            controllers.update(_controller_proofs(payload).worktrees_controllers(
+                rows, payload, root, shell, controller_custody, lifecycle_lease,
+            ))
+        elif plugin == "agent-vault":
+            controllers.update(_controller_proofs(payload).native_plugin_controllers(
+                rows, payload, root, shell, controller_custody,
+            ))
+        else:
+            raise UninstallRefused("Driver controller qualification is unavailable for this plugin")
     gates: set[int] = set()
     for _ in range(2):
         gates.update(row["pid"] for row in rows
@@ -970,6 +975,22 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
     return {"status": "removed", "root": str(root)}
 
 
+@contextmanager
+def _native_controller_custody(payload: Path, plugin: str, root: Path):
+    if os.name != "nt" or plugin != "agent-vault" or (
+        os.environ.get("COPILOT_EXTENSIONS_NATIVE_INSTALLER") != plugin
+    ):
+        yield None
+        return
+    _root(payload, root)
+    driver = _load(payload / "scripts" / "installer_driver.py")
+    driver.bootstrap(payload)
+    with driver.custody() as owner:
+        if owner is None:
+            raise UninstallRefused("Native Vault removal requires its authenticated execution owner")
+        yield owner
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--payload-root", required=True, type=Path)
@@ -984,9 +1005,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     action.add_argument("--remove-runtime", action="store_true")
     arguments = parser.parse_args(argv)
     try:
-        result = cleanup(arguments.payload_root, arguments.plugin_id, arguments.root, arguments.shell,
-                         profile=arguments.profile, remove_runtime=arguments.remove_runtime,
-                         check_consumers=arguments.check_consumers)
+        with _native_controller_custody(arguments.payload_root, arguments.plugin_id, arguments.root) as owner:
+            result = cleanup(arguments.payload_root, arguments.plugin_id, arguments.root, arguments.shell,
+                             profile=arguments.profile, remove_runtime=arguments.remove_runtime,
+                             check_consumers=arguments.check_consumers,
+                             **({"controller_custody": owner} if owner is not None else {}))
     except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
         print(f"Runtime uninstall refused: {error}", file=sys.stderr)
         return 1
