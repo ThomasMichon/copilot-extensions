@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -97,6 +98,51 @@ def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path, ba
     else:
         assert _backend_execution(tmp_path) is None
     assert {path: path.read_text(encoding="utf-8") for path in tmp_path.iterdir()} == documents
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows command-line quoting")
+def test_private_mux_adapter_preserves_census_command_shape(tmp_path):
+    from agent_remote_driver import windows_mux_processes
+    from test_headed_worktrees_copilot import _prepare_private_mux_adapter
+
+    compiler = next((path for framework in ("Framework64", "Framework") if (
+        path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
+        framework / "v4.0.30319" / "csc.exe"
+    ).is_file()), None)
+    assert compiler, "The fixture's private mux adapter requires the system C# compiler"
+    backend = tmp_path / "echo tools"
+    backend.mkdir()
+    source, binary = backend / "Echo.cs", backend / "psmux.exe"
+    source.write_text(
+        "using System; using System.Text;\n"
+        "class Echo { static void Main(string[] args) {\n"
+        "Console.WriteLine(Environment.CommandLine);\n"
+        "foreach (var value in args) Console.WriteLine("
+        "Convert.ToBase64String(Encoding.UTF8.GetBytes(value)));\n"
+        "} }\n",
+        encoding="utf-8",
+    )
+    compiled = run_caller_owned(
+        [str(compiler), "/nologo", f"/out:{binary}", str(source)], cwd=tmp_path, timeout=30,
+        max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    directory, namespace_file = _prepare_private_mux_adapter(
+        tmp_path, binary=binary, manager_target="wt-fixture", environment=dict(os.environ),
+    )
+    arguments = ["--version"]
+    result = run_caller_owned(
+        [str(directory / "psmux.exe"), *arguments], cwd=tmp_path, timeout=15,
+        max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    command, *encoded = result.stdout.splitlines()
+    assert [
+        base64.b64decode(value).decode("utf-8") for value in encoded
+    ] == ["-L", namespace_file.read_text(encoding="utf-8"), *arguments]
+    match = windows_mux_processes._COMMAND.match(command)
+    assert match is not None, command
+    assert match[1] == "-L" and match[2] == "--version"
 
 
 def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_path):
