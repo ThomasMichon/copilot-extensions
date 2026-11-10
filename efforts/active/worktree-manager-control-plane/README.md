@@ -2392,34 +2392,39 @@ not an implementation assignment or accepted source disposition.)_
 
 ### Proposed finite action-progress Inbox consumer from #5343
 
-_(Agent-recommended additive tracking proposal; completed Inbox/non-blocking
-I/O and static-guard credit is not reopened.)_
+_(Finite source acceptance in #11948; completed Inbox/non-blocking I/O and
+static-guard credit is not reopened.)_
 
-- [ ] **P5343-1:** Migrate the ACTUAL `_run_task_action_progress` producer
+The [bounded execution proposal](phase-8-action-progress-inbox.md) preserves
+these original rows and requires source-plan review before functional edits.
+`patient-knob` owns only this registered-action producer/modal slice under
+#5343; provider, other-progress and native/resource owners remain unchanged.
+
+- [x] **P5343-1:** Migrate the ACTUAL `_run_task_action_progress` producer
   in `engine_pivot_actions`, whose worker/reader writes `pct`, `msg`,
   `done`, `error` and final message into the UI-polled progress dict.
   Another background producer or helper presence is not this migration.
-- [ ] **P5343-2:** Publish through the existing addressed Inbox and consume
+- [x] **P5343-2:** Publish through the existing addressed Inbox and consume
   its NONDESTRUCTIVE current value in `_action_stream_panel`, using
   `post`/`peek` or the canonical equivalent. Preserve smooth in-place
   per-tick latest-value display; destructive `drain`/`drain_apply`
   changed-since-drain semantics cannot substitute.
-- [ ] **P5343-3:** Bind progress/completion/error/final message to the
+- [x] **P5343-3:** Bind progress/completion/error/final message to the
   correct run, existing cancellation boundary and late-old-run fence.
   A late reader cannot update a newer run or gain process/resource
   termination authority.
-- [ ] **P5343-4:** Credit #5315's Inbox/background primitives, addressed
+- [x] **P5343-4:** Credit #5315's Inbox/background primitives, addressed
   coalescing and raw `call_from_thread` guard, which explicitly deferred
   this shared-state producer. A clean raw-call guard does not prove that
   direct worker mutation migrated. Keep one Inbox/fabric/run/UI authority,
   not a second progress store or generic all-producer rewrite.
-- [ ] **V5343-1:** Qualify the actual worker/reader -> addressed publication
+- [x] **V5343-1:** Qualify the actual worker/reader -> addressed publication
   -> render consumer with progress, completion, real error and final
   message. Repeated current reads stay nondestructive and responsive.
-- [ ] **V5343-2:** Cover cancellation and late frames from an old run while
+- [x] **V5343-2:** Cover cancellation and late frames from an old run while
   a new run is current, preserving correct identity and existing owning
   cancellation semantics throughout the actual consumer path.
-- [ ] **V5343-3:** Preserve existing primitive/I-O/guard credit and original
+- [x] **V5343-3:** Preserve existing primitive/I-O/guard credit and original
   evidence tiers through the least expensive faithful bounded owning lane
   when separately authorized. No new universal UI/native/every-host or
   whole-Manager prerequisite is added.
@@ -2490,6 +2495,11 @@ explicit final numeric canonical remains OPEN even if this tracking lands.)_
   repeats the transfer nor changes that canonical condition.
 
 #### #5913 - Existing generic New to the same owned session
+
+The [New-venue composition proposal](phase-8-new-venue-creation.md) refines the
+captured-command/real-terminal handoff, provider target/custody and compatibility
+qualification before either manifest is enabled. Its finite planning claimant
+is `patient-knob`; no implementation or live acceptance is claimed.
 
 - [ ] **P5913-1:** Credit shipped generic row-independent `create_action`
   prompting/execution/refresh. Add actual CodeSpace AND Container provider
@@ -2720,7 +2730,7 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   personal/session/tmux boundaries and original evidence tiers; documentary
   intake is not wheel/native proof or settings/resource disposition.
 
-- [ ] **G5343:** Resolve EVERY P5343/local Validation/continuing Coordination
+- [x] **G5343:** Resolve EVERY P5343/local Validation/continuing Coordination
   clause for the actual action-progress producer AND render consumer:
   all four fields/final message, correct run/cancel/late-result fencing
   and nondestructive current-value responsiveness through the existing
@@ -2923,6 +2933,49 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-10 - Registered action-progress finite source accepted
+
+#11948 merged at 17:05:34 UTC as
+`d46ec448ba52aa3b5b8606f3083a89167ad3b1c5`, with genuine exact-head
+Copilot approval5845984279, no findings and all actual required CI green.
+The [finite slice](phase-8-action-progress-inbox.md#journal) records 106
+passing actual reader/Inbox/modal and maintenance controls, fail-first proof,
+source guards and explicit evidence limits. The complete original issue and
+direct/local/global Validation and continuing Coordination were reread.
+Only P5343/V5343/G5343 are accepted; completed primitives and all other
+provider/native/resource/installation scopes remain with their custodians.
+The Manager effort remains Active and no runtime rollout is claimed.
+
+### 2026-11-10 - Registered action-progress implementation candidate
+
+The bounded plan merged in #11944. The reader now publishes independent
+snapshots through the modal's existing Inbox, while actual rendering/ticks/input
+apply current values on the UI thread with exact-run fencing. The affected
+packet passes 106 cases, including inert-child/native Textual success, error
+and cancellation. The [slice journal](phase-8-action-progress-inbox.md#journal)
+records fail-first proof and evidence limits. Original P5343/V5343/G5343 remain
+unchecked pending implementation review/CI, merge and canonical acceptance.
+No provider, native-timing, installed-runtime or resource-owner transfer occurs.
+
+### 2026-11-10 - Registered action-progress Inbox proposal
+
+Added the bounded #5343 execution proposal after current issue/comment,
+open-source and actual producer/renderer reconciliation. The worker still
+mutates the UI progress dictionary, while the main screen's closure-draining
+Inbox would discard pure data before a later modal peek. The proposal keeps
+latest-value publication at the owning modal, preserves run/cancellation and
+provider authority, and specifies actual consumer and late-run controls.
+P5343/V5343 remain unchecked; no functional implementation or live operation
+is included. Source-plan review precedes execution.
+
+### 2026-11-10 - New-venue composition researched before provider wiring
+
+The [bounded #5913 proposal](phase-8-new-venue-creation.md) records the actual
+captured-create/real-terminal Open seam and provider allocation/result
+differences. `patient-knob` claims only research and reviewed planning.
+No New manifest, provider command, session or resource was created or changed;
+all P5913/V5913/G5913 gates and existing custodians remain unchanged.
 
 ### 2026-11-10 - Optional Sync producer source accepted
 

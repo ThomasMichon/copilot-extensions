@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import json
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -170,6 +172,650 @@ def tree(root):
         str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
         for path in root.rglob("*")
     }
+
+
+def local_knowledge(native, *, bare=False):
+    source = native / "repository" / ".agent-worktrees" / "config.yaml"
+    source.parent.mkdir()
+    source.write_text("stateless: true\nrequires_external_state_root: true\n", encoding="utf-8")
+    root = native / "knowledge"
+    child = subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "--quiet", *(["--bare"] if bare is True else []), str(root)],
+        capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+    )
+    assert child.returncode == 0, child.stderr
+    if bare == "converted":
+        clone = native / "converted-knowledge"
+        child = subprocess.run(
+            ["git", "clone", "--local", "--quiet", str(root), str(clone)],
+            capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        )
+        assert child.returncode == 0, child.stderr
+        root = clone
+        for arguments in (["remote", "remove", "origin"], ["config", "core.bare", "true"]):
+            child = subprocess.run(
+                ["git", "-C", str(root), *arguments],
+                capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+            )
+            assert child.returncode == 0, child.stderr
+    return root
+
+
+def prepared_knowledge_observer(native):
+    from agent_worktrees import guarded_anchors
+
+    root = local_knowledge(native)
+    caller = native / "observer"
+    for path in (caller, native / "repository"):
+        result = subprocess.run(
+            ["git", "-c", "init.defaultBranch=main", "init", "--quiet", str(path)],
+            capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+    path = repos._repos_yaml_path()
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["repos"]["observer"] = {
+        "class": "worktree", repos._current_platform(): str(caller), "default_branch": "main",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    assert guarded_anchors.prepare(caller) == ""
+    return root, caller, guarded_anchors._reader()
+
+
+@pytest.mark.parametrize(("bare", "remote", "included"), [
+    (False, "", False), (True, "", False), ("converted", "", False),
+    (False, "https://github.com/example/knowledge.git", False),
+    (False, "https://github.com/example/knowledge.git", True),
+], ids=["checkout", "bare", "converted-bare", "remote-metadata", "included-origin"])
+def test_real_local_knowledge_registration_is_registry_only_and_does_not_bind(native, bare, remote, included):
+    root = local_knowledge(native, bare=bare)
+    if remote:
+        arguments = ["remote", "add", "origin", remote]
+        if included:
+            include = native / "origin.gitconfig"
+            include.write_text(f'[remote "origin"]\n    url = {remote}\n', encoding="utf-8")
+            arguments = ["config", "include.path", str(include)]
+        result = subprocess.run(
+            ["git", "-C", str(root), *arguments],
+            capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+    before = tree(native)
+    catalog = cli("catalog", "--context-project", "sample")
+    assert catalog.returncode == 0, catalog.stderr
+    rows = json.loads(catalog.stdout)["entries"]
+    action = next(row for row in rows if row.get("knowledge_registration_available") == "true")
+    assert action["id"] == "action:knowledge-registration" and action["knowledge_bindable"] == "false"
+    fields = ("--checkout-path", str(root), "--default-branch", "main", "--account", "chosen-login")
+    proposed = request("knowledge-register-preview", *fields, name="local-knowledge")
+    assert proposed.returncode == 0, proposed.stderr
+    previewed = json.loads(proposed.stdout)
+    assert previewed["target"] == action["configuration"]["target"]
+    assert tree(native) == before
+    old_host = request("knowledge-register-apply", *fields, "--preview-token", "", name="local-knowledge")
+    assert old_host.returncode and json.loads(old_host.stdout)["code"] == "missing-preview"
+    assert tree(native) == before
+    completed = request(
+        "knowledge-register-apply", *fields, "--preview-token", previewed["token"], name="local-knowledge",
+    )
+    assert completed.returncode == 0, completed.stderr
+    receipt = json.loads(completed.stdout)
+    assert receipt["status"] == "persisted" and receipt["binding_changed"] is False
+    raw = yaml.safe_load(repos._repos_yaml_path().read_text(encoding="utf-8"))
+    expected = {
+        "class": "knowledge", "agent": False, repos._current_platform(): str(root),
+        "default_branch": "main", "account": "chosen-login",
+    }
+    if remote:
+        expected["remote"] = remote
+        assert any(remote in effect for effect in previewed["effects"])
+    assert raw["repos"]["local-knowledge"] == expected
+    assert raw["unrecognized_owner_metadata"] == {"sentinel": SECRET}
+    assert raw["repos"]["sample"]["custom_owner_metadata"] == {"secret": SECRET}
+    after = tree(native)
+    missing = object()
+    changed = {path for path in before.keys() | after.keys() if before.get(path, missing) != after.get(path, missing)}
+    assert changed <= {
+        str(Path(".agent-worktrees") / "repos.yaml"), str(Path(".agent-worktrees") / "repos.lock"),
+        str(Path(".agent-worktrees") / "pr-rewrite-authority.lock"),
+        str(Path(".agent-worktrees") / "guarded-anchors"),
+        str(Path(".agent-worktrees") / "guarded-anchors" / "publication.lock"),
+    }
+    assert str(Path(".agent-worktrees") / "repos.yaml") in changed
+    assert SECRET not in proposed.stdout + proposed.stderr + completed.stdout + completed.stderr
+    retry = request("knowledge-register-apply", *fields, "--preview-token", previewed["token"], name="local-knowledge")
+    assert retry.returncode and json.loads(retry.stdout)["code"] == "registration-conflict"
+    assert tree(native) == after
+
+
+@pytest.mark.parametrize("change", ["registry", "binding", "origin"])
+def test_local_knowledge_registration_rechecks_the_proposal_without_git_or_binding_writes(native, change):
+    from agent_worktrees import repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
+    if change == "registry":
+        path = repos._repos_yaml_path()
+        path.write_bytes(path.read_bytes() + b"\n# concurrent registry edit\n")
+    elif change == "binding":
+        local = cfg.project_dir("sample")
+        local.mkdir(parents=True, exist_ok=True)
+        (local / "config.yaml").write_text("knowledge_repo: another-selection\n", encoding="utf-8")
+    else:
+        result = subprocess.run(
+            ["git", "-C", str(root), "remote", "add", "origin", "https://git.example.test/other/knowledge.git"],
+            capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+    before = tree(native)
+    with pytest.raises(ConfigurationError):
+        registration.apply("sample", "local-knowledge", str(root), "main", "", token)
+    after = tree(native)
+    assert {key: value for key, value in after.items() if not key.endswith(".lock")} == before
+
+
+@pytest.mark.parametrize("owner", ["unregistered", "registered", "harness", "registered-metadata"])
+def test_local_knowledge_registration_refuses_converted_bare_metadata_aliases(native, owner):
+    root = local_knowledge(native, bare="converted")
+    registry = repos._repos_yaml_path()
+    raw = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    if owner == "harness":
+        raw["repos"]["sample"][repos._current_platform()] = str(root)
+        policy = root / ".agent-worktrees" / "config.yaml"
+        policy.parent.mkdir()
+        policy.write_text("stateless: true\nrequires_external_state_root: true\n", encoding="utf-8")
+    elif owner != "unregistered":
+        raw["repos"]["existing"] = {
+            "class": "knowledge", "agent": False,
+            repos._current_platform(): str(root / ".git" if owner == "registered-metadata" else root),
+        }
+    registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    selected = root if owner == "registered-metadata" else root / ".git"
+    before = tree(native)
+    result = request(
+        "knowledge-register-preview", "--checkout-path", str(selected),
+        "--default-branch", "main", name="local-knowledge",
+    )
+    expected = "registration-conflict" if owner == "registered-metadata" else "invalid-checkout"
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert json.loads(result.stdout)["code"] == expected
+    assert tree(native) == before
+
+
+@pytest.mark.parametrize("classification", ["reference", "singleton", "knowledge"])
+def test_local_knowledge_registration_requires_the_binding_owners_worktree_class(native, classification):
+    local_knowledge(native)
+    path = repos._repos_yaml_path()
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["repos"]["sample"]["class"] = classification
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    before = tree(native)
+    result = cli("catalog", "--context-project", "sample")
+    assert result.returncode == 0, result.stderr
+    assert not any(row.get("knowledge_registration_available") == "true" for row in json.loads(result.stdout)["entries"])
+    result = request(
+        "knowledge-register-preview", "--checkout-path", str(native / "knowledge"),
+        "--default-branch", "main", name="local-knowledge",
+    )
+    assert result.returncode == 1 and json.loads(result.stdout)["code"] == "context-not-worktree"
+    assert tree(native) == before
+
+
+def symlink_registry(native):
+    registry = repos._repos_yaml_path()
+    backing = native / "registry-source.yaml"
+    registry.rename(backing)
+    try:
+        registry.symlink_to(backing)
+    except OSError as error:
+        pytest.skip(f"native file symlinks are unavailable: {error}")
+    return backing
+
+
+def test_local_knowledge_registration_rejects_nonregular_registry_before_fingerprinting(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    registry = repos._repos_yaml_path()
+    before = tree(native)
+    original_stat, original_read = Path.stat, Path.read_bytes
+
+    def fifo_mode(path, *args, **kwargs):
+        return SimpleNamespace(st_mode=stat.S_IFIFO) if path == registry else original_stat(path, *args, **kwargs)
+
+    def read(path):
+        if path == registry:
+            pytest.fail("A nonregular registry must be rejected before attempting to open it.")
+        return original_read(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "stat", fifo_mode)
+        patch.setattr(Path, "read_bytes", read)
+        with pytest.raises(repos.RepositoryResolutionError, match="regular file"):
+            registration.preview("sample", "local-knowledge", str(root), "main")
+    assert tree(native) == before
+
+
+@pytest.mark.skipif(not hasattr(repos.os, "mkfifo"), reason="native FIFO creation is unavailable")
+@pytest.mark.parametrize("operation", ["preview", "apply"])
+def test_local_knowledge_registration_refuses_real_fifo_registry_promptly(native, operation):
+    root = local_knowledge(native)
+    registry = repos._repos_yaml_path()
+    registry.unlink()
+    repos.os.mkfifo(registry)
+    before = tree(root)
+    started = time.monotonic()
+    result = request(
+        "knowledge-register-" + operation, "--checkout-path", str(root),
+        "--default-branch", "main",
+        *(("--preview-token", "0" * 64) if operation == "apply" else ()), name="local-knowledge",
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["code"] == "owner-read-or-write-failed"
+    assert time.monotonic() - started < 5
+    assert stat.S_ISFIFO(registry.stat().st_mode) and tree(root) == before
+
+
+def test_local_knowledge_registration_refuses_symlinked_registry_without_replacing_its_owner(native):
+    root = local_knowledge(native)
+    backing = symlink_registry(native)
+    registry = repos._repos_yaml_path()
+    before = tree(native)
+    fields = ("--checkout-path", str(root), "--default-branch", "main")
+    proposed = request("knowledge-register-preview", *fields, name="local-knowledge")
+    if proposed.returncode == 0:
+        completed = request(
+            "knowledge-register-apply", *fields, "--preview-token",
+            json.loads(proposed.stdout)["token"], name="local-knowledge",
+        )
+        assert completed.returncode, "Registration replaced an indirect registry and reported persistence."
+    assert proposed.returncode == 1
+    assert json.loads(proposed.stdout)["code"] == "indirect-source"
+    assert registry.is_symlink() and backing.read_bytes() == before[str(backing.relative_to(native))]
+    assert tree(native) == before
+
+
+@pytest.mark.parametrize("phase", ["before-apply", "before-write"])
+def test_local_knowledge_registration_rechecks_registry_indirection(native, monkeypatch, phase):
+    from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
+    before = repos._repos_yaml_path().read_bytes()
+    if phase == "before-apply":
+        backing = symlink_registry(native)
+    else:
+        original = guarded_anchors.managed_write
+        backing = native / "registry-source.yaml"
+
+        def redirected(write, **kwargs):
+            symlink_registry(native)
+            return original(write, **kwargs)
+
+        monkeypatch.setattr(guarded_anchors, "managed_write", redirected)
+    with pytest.raises(ConfigurationError) as failure:
+        registration.apply("sample", "local-knowledge", str(root), "main", "", token)
+    assert failure.value.code == "indirect-source"
+    assert repos._repos_yaml_path().is_symlink() and backing.read_bytes() == before
+
+
+@pytest.mark.parametrize("invalid", [
+    "case-collision", "path-collision", "identity-collision", "descendant", "secret-origin", "relative", "indirect-metadata",
+])
+def test_local_knowledge_registration_refuses_unsafe_or_registered_inputs_without_effects(native, monkeypatch, invalid):
+    from agent_worktrees import repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    name, path = "local-knowledge", str(root)
+    if invalid == "case-collision":
+        name = "SAMPLE"
+    elif invalid == "path-collision":
+        registry = repos._repos_yaml_path()
+        raw = yaml.safe_load(registry.read_text(encoding="utf-8"))
+        raw["repos"]["existing-knowledge"] = {
+            "class": "knowledge", repos._current_platform(): str(root), "default_branch": "main",
+        }
+        registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    elif invalid == "descendant":
+        child = root / "descendant"
+        child.mkdir()
+        path = str(child)
+    elif invalid == "relative":
+        path = "relative-knowledge"
+    elif invalid == "indirect-metadata":
+        original = registration.project_state._is_link_or_reparse
+        monkeypatch.setattr(
+            registration.project_state, "_is_link_or_reparse",
+            lambda selected: selected == root / ".git" or original(selected),
+        )
+    else:
+        remote = (
+            "git@github.com:EXAMPLE/SAMPLE.git" if invalid == "identity-collision"
+            else f"https://{SECRET}@git.example.test/example/knowledge.git"
+        )
+        result = subprocess.run(
+            ["git", "-C", str(root), "remote", "add", "origin", remote],
+            capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+    before = tree(native)
+    with pytest.raises(ConfigurationError) as error:
+        registration.preview("sample", name, path, "main")
+    assert SECRET not in str(error.value)
+    assert tree(native) == before
+
+
+def test_local_knowledge_registration_refuses_real_linked_task_and_checkout_shorthand(native):
+    from agent_worktrees import repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    for args in (
+        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+         "-c", "commit.gpgsign=false", "commit", "--allow-empty", "--quiet", "-m", "fixture"],
+        ["worktree", "add", "--quiet", "-b", "task", str(native / "task")],
+        ["checkout", "--quiet", "-b", "another"],
+        ["checkout", "--quiet", "main"],
+    ):
+        result = subprocess.run(
+            ["git", "-C", str(root), *args], capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+    before = tree(native)
+    with pytest.raises(ConfigurationError, match="anchor"):
+        registration.preview("sample", "local-knowledge", str(native / "task"), "main")
+    with pytest.raises(ConfigurationError, match="literal default branch"):
+        registration.preview("sample", "local-knowledge", str(root), "@{-1}")
+    assert tree(native) == before
+
+
+def test_local_knowledge_registration_uses_one_owned_git_budget_and_scrubbed_context(native, monkeypatch):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    original = registration.run_caller_owned
+    calls = []
+
+    def measured(argv, **kwargs):
+        assert "GIT_DIR" not in kwargs["env"] and "GIT_CONFIG_COUNT" not in kwargs["env"]
+        calls.append(kwargs["budget"])
+        return original(argv, **kwargs)
+
+    monkeypatch.setattr(registration, "run_caller_owned", measured)
+    monkeypatch.setenv("GIT_DIR", str(native / "foreign-git"))
+    monkeypatch.setenv("GIT_CONFIG_COUNT", "1")
+    monkeypatch.setenv("GIT_CONFIG_KEY_0", "remote.origin.url")
+    monkeypatch.setenv("GIT_CONFIG_VALUE_0", "https://git.example.test/foreign/repository.git")
+    registration.preview("sample", "local-knowledge", str(root), "main")
+    assert len(calls) == 3 and all(budget is calls[0] for budget in calls)
+    before = tree(native)
+    expired = OwnedExecutionBudget(time.monotonic() - 1, 0.1)
+    monkeypatch.setattr(registration.OwnedExecutionBudget, "from_timeout", lambda *args, **kwargs: expired)
+    with pytest.raises((ConfigurationError, TimeoutError)):
+        registration.preview("sample", "local-knowledge", str(root), "main")
+    assert tree(native) == before
+
+
+def test_local_knowledge_registration_waiter_rechecks_the_winning_native_write(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
+    original_lock = registration.registry_lock
+    waiting = threading.Event()
+    locked_paths = {
+        repos._repos_yaml_path().with_suffix(".lock"),
+        repos._repos_yaml_path().parent / "pr-rewrite-authority.lock",
+    }
+
+    def content():
+        return {
+            str(path.relative_to(native)): path.read_bytes() if path.is_file() else None
+            for path in native.rglob("*") if path not in locked_paths
+        }
+
+    @contextmanager
+    def observed_lock(path, **kwargs):
+        waiting.set()
+        with original_lock(path, **kwargs):
+            yield
+
+    monkeypatch.setattr(registration, "registry_lock", observed_lock)
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with original_lock(repos._repos_yaml_path()):
+            future = pool.submit(registration.apply, "sample", "local-knowledge", str(root), "main", "", token)
+            assert waiting.wait(2)
+            assert not future.done()
+            preferred = preview("sample", "sample", "set", "concurrent-login")
+            apply("sample", "sample", "set", "concurrent-login", preferred["token"])
+            before = content()
+        with pytest.raises(ConfigurationError) as error:
+            future.result(timeout=15)
+        assert error.value.code == "preview-conflict"
+    assert content() == before
+
+
+@pytest.mark.parametrize("failure", [None, "before", "after"])
+def test_local_knowledge_registration_refreshes_prepared_guards_and_reports_committed_failure(
+    native, monkeypatch, capsys, failure,
+):
+    from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration
+    from agent_worktrees.repos_configuration import command
+
+    root, caller, reader = prepared_knowledge_observer(native)
+    initial = reader.read_map(caller, repos._repos_yaml_path().parent)
+    assert initial.status == "ready"
+    assert all(row["name"] != "local-knowledge" for row in initial.postures)
+    before_git = {directory: tree(directory) for directory in (caller, root, native / "repository")}
+    token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
+    if failure is not None:
+        def failed_refresh(*args, **kwargs):
+            raise guarded_anchors.GuardPublicationError("synthetic publication failure")
+
+        monkeypatch.setattr(
+            guarded_anchors, "_withdraw_views" if failure == "before" else "_refresh_locked", failed_refresh,
+        )
+    capsys.readouterr()
+    code = command([
+        "knowledge-register-apply", "--context-project", "sample", "--repository", "local-knowledge",
+        "--checkout-path", str(root), "--default-branch", "main", "--preview-token", token,
+    ])
+    receipt = json.loads(capsys.readouterr().out)
+    current = reader.read_map(caller, repos._repos_yaml_path().parent)
+    assert ("local-knowledge" in repos.read_registry(strict=True).repos) == (failure != "before")
+    if failure == "before":
+        assert code == 1 and receipt["code"] == "guard-publication-unavailable"
+        assert current.status == "ready"
+    elif failure == "after":
+        assert code == 1 and receipt["status"] == "incomplete"
+        assert receipt["registration_committed"] is True and current.status == "unusable"
+    else:
+        assert code == 0 and receipt["guard_publication"] == "complete" and current.status == "ready"
+        assert any(row["name"] == "local-knowledge" for row in current.postures)
+    assert all(tree(directory) == before for directory, before in before_git.items())
+
+
+@pytest.mark.parametrize("phase", ["validation", "publication"])
+def test_local_knowledge_registration_bounds_real_slow_policy_probes_before_and_after_commit(
+    native, monkeypatch, phase,
+):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_procutil.owned_process import run_caller_owned
+    from agent_worktrees import inrepo_config_source as policy, repos_knowledge_registration as registration
+
+    root, caller, reader = prepared_knowledge_observer(native)
+    selected, registry = registration._selection(
+        "sample", "local-knowledge", str(root), "main", "",
+        OwnedExecutionBudget.from_timeout(18, cleanup_reserve=2),
+    )
+    token = registration._token(selected)
+    if phase == "publication":
+        monkeypatch.setattr(registration, "_selection", lambda *args: (selected, registry))
+    monkeypatch.setattr(registration, "OwnedExecutionBudget", SimpleNamespace(
+        from_timeout=lambda *args, **kwargs: OwnedExecutionBudget.from_timeout(1.4, cleanup_reserve=0.2),
+    ))
+    original = policy.git_ops.git
+    timeouts = []
+
+    def slow_git(*args, **kwargs):
+        if args[:2] != ("symbolic-ref", "-q") or not args[2].startswith("refs/remotes/"):
+            return original(*args, **kwargs)
+        timeout = kwargs["timeout"]
+        timeouts.append(timeout)
+        if timeout > 1.3:
+            raise subprocess.TimeoutExpired("unbounded synthetic policy probe", timeout)
+        return run_caller_owned(
+            [sys.executable, "-c", "import time; time.sleep(3)"],
+            timeout=timeout, max_stdout_bytes=1024, max_stderr_bytes=1024,
+        )
+
+    monkeypatch.setattr(policy.git_ops, "git", slow_git)
+    started = time.monotonic()
+    if phase == "validation":
+        with pytest.raises((ConfigurationError, TimeoutError)):
+            registration.preview("sample", "local-knowledge", str(root), "main")
+        assert "local-knowledge" not in repos.read_registry(strict=True).repos
+        assert reader.read_map(caller, repos._repos_yaml_path().parent).status == "ready"
+    else:
+        result = registration.apply("sample", "local-knowledge", str(root), "main", "", token)
+        assert result["status"] == "incomplete" and result["registration_committed"] is True
+        assert reader.read_map(caller, repos._repos_yaml_path().parent).status == "unusable"
+    assert timeouts and max(timeouts) <= 1.3
+    assert time.monotonic() - started < 3
+
+
+@pytest.mark.parametrize("kind", ["authority", "registry", "publication"])
+def test_local_knowledge_registration_contention_respects_aggregate_apply_deadline(native, monkeypatch, kind):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import guarded_anchors, pr_authority, repos_knowledge_registration as registration, tracking
+
+    root = local_knowledge(native)
+    selected, registry = registration._selection(
+        "sample", "local-knowledge", str(root), "main", "",
+        OwnedExecutionBudget.from_timeout(18, cleanup_reserve=2),
+    )
+    token = registration._token(selected)
+    monkeypatch.setattr(registration, "_selection", lambda *args: (selected, registry))
+    original_budget = OwnedExecutionBudget.from_timeout
+    monkeypatch.setattr(
+        registration.OwnedExecutionBudget, "from_timeout",
+        lambda *args, **kwargs: original_budget(0.5, cleanup_reserve=0.1),
+    )
+    if kind == "authority":
+        held = pr_authority.guard()
+    else:
+        path = (
+            repos._repos_yaml_path() if kind == "registry"
+            else guarded_anchors._prepare_directory(repos._repos_yaml_path().parent) / "publication"
+        )
+        held = tracking._RecordLock(path, require_sidecar=True)
+    before = repos._repos_yaml_path().read_bytes()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with held:
+            future = pool.submit(registration.apply, "sample", "local-knowledge", str(root), "main", "", token)
+            with pytest.raises(TimeoutError):
+                future.result(timeout=2)
+            assert future.done(), "the native operation must time out, not merely this observer"
+    assert repos._repos_yaml_path().read_bytes() == before
+
+
+def test_local_knowledge_registration_restores_prepared_views_when_withdrawal_spends_deadline(native, monkeypatch):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration
+
+    root, caller, reader = prepared_knowledge_observer(native)
+    selected, registry = registration._selection(
+        "sample", "local-knowledge", str(root), "main", "",
+        OwnedExecutionBudget.from_timeout(18, cleanup_reserve=2),
+    )
+    token = registration._token(selected)
+    monkeypatch.setattr(registration, "_selection", lambda *args: (selected, registry))
+    budgets = []
+
+    def budget(*args, **kwargs):
+        value = OwnedExecutionBudget.from_timeout(1.4, cleanup_reserve=0.6)
+        budgets.append(value)
+        return value
+
+    monkeypatch.setattr(registration, "OwnedExecutionBudget", SimpleNamespace(from_timeout=budget))
+    registry_path = repos._repos_yaml_path()
+    directory = registry_path.parent / "guarded-anchors"
+    map_path = reader.map_path(caller, registry_path.parent)
+    before_registry, before_map = registry_path.read_bytes(), map_path.read_bytes()
+    before_files = set(directory.iterdir())
+    original = guarded_anchors._withdraw_views
+
+    def slow_withdrawal(*args, **kwargs):
+        original(*args, **kwargs)
+        assert reader.read_map(caller, registry_path.parent).status == "unusable"
+        time.sleep(max(0, budgets[-1].execution_deadline - time.monotonic()) + 0.02)
+
+    monkeypatch.setattr(guarded_anchors, "_withdraw_views", slow_withdrawal)
+    with pytest.raises(TimeoutError):
+        registration.apply("sample", "local-knowledge", str(root), "main", "", token)
+    assert time.monotonic() < budgets[-1].deadline
+    assert registry_path.read_bytes() == before_registry
+    assert reader.read_map(caller, registry_path.parent).status == "ready"
+    assert map_path.read_bytes() == before_map and set(directory.iterdir()) == before_files
+
+
+@pytest.mark.parametrize("change", ["origin", "defaults"])
+def test_local_knowledge_registration_rechecks_after_publication_lock_wait(native, monkeypatch, change):
+    from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration, tracking
+
+    root, caller, reader = prepared_knowledge_observer(native)
+    registry_root = repos._repos_yaml_path().parent
+    map_path = reader.map_path(caller, registry_root)
+    before_map = map_path.read_bytes()
+    assert reader.read_map(caller, registry_root).status == "ready"
+    token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
+    inspected = threading.Event()
+    original = registration._selection
+
+    def observed(*args):
+        selected = original(*args)
+        inspected.set()
+        return selected
+
+    monkeypatch.setattr(registration, "_selection", observed)
+    publication = guarded_anchors._prepare_directory(repos._repos_yaml_path().parent) / "publication"
+    before = repos._repos_yaml_path().read_bytes()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with tracking._RecordLock(publication, require_sidecar=True):
+            future = pool.submit(registration.apply, "sample", "local-knowledge", str(root), "main", "", token)
+            assert inspected.wait(5), "the proposal must be inspected before the publication wait"
+            if change == "origin":
+                result = subprocess.run(
+                    ["git", "-C", str(root), "remote", "add", "origin", "https://github.com/example/changed.git"],
+                    capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+                )
+                assert result.returncode == 0, result.stderr
+            else:
+                path = cfg.global_config_path()
+                raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+                raw["default_copilot_account"] = "changed"
+                path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+            expected_git = tree(root)
+        with pytest.raises(ConfigurationError) as failure:
+            future.result(timeout=10)
+    assert failure.value.code == "preview-conflict"
+    assert repos._repos_yaml_path().read_bytes() == before
+    assert tree(root) == expected_git
+    assert reader.read_map(caller, registry_root).status == "ready"
+    assert map_path.read_bytes() == before_map
+
+
+def test_local_registration_parser_rejects_unrelated_preference_fields_before_inspection(native, capsys):
+    from agent_worktrees.repos_configuration import command
+
+    before = tree(native)
+    assert command([
+        "knowledge-register-preview", "--context-project", "sample", "--repository", "local-knowledge",
+        "--checkout-path", str(native / "knowledge"), "--default-branch", "main",
+        "--operation", "reset",
+    ]) == 1
+    assert json.loads(capsys.readouterr().out)["code"] == "invalid-request"
+    assert tree(native) == before
 
 
 def test_missing_binding_owner_refuses_without_any_native_configuration_write(native):
@@ -641,7 +1287,7 @@ def test_binding_name_rules_match_catalog_and_preview_without_blocking_preferenc
     registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
     before = tree(native)
     monkeypatch.setattr(catalog, "inspect_project", lambda *_args: catalog.Inspection(
-        binding={"identity": ""}, readiness={"ready": False},
+        binding={"identity": ""}, readiness={"ready": False, "code": "knowledge_binding_required"},
     ))
     monkeypatch.setattr(binding, "owner_status", lambda _project: "available")
     rows = {row["id"]: row for row in catalog.catalog(project)["entries"]}
@@ -649,6 +1295,7 @@ def test_binding_name_rules_match_catalog_and_preview_without_blocking_preferenc
     assert rows[name]["knowledge_bindable"] == "false"
     assert "Binding identifiers: unsupported" in rows[name]["card"]["body"]
     assert rows["sk-knowledge"]["knowledge_bindable"] == ("true" if project == "sample" else "false")
+    assert any(row.get("knowledge_registration_available") == "true" for row in rows.values()) == (project == "sample")
     result = cli("knowledge-preview", f"--context-project={project}", f"--repository={name}")
     assert result.returncode != 0
     assert json.loads(result.stdout)["code"] == "binding-name-unsupported"

@@ -172,7 +172,8 @@ def _list_records_for_args(args: argparse.Namespace):
         records = [
             r
             for r in records
-            if r.worktree_path
+            if r.status != "archived"
+            and r.worktree_path
             and Path(r.worktree_path).exists()
             and (Path(r.worktree_path) / ".git").exists()
         ]
@@ -421,7 +422,14 @@ def cmd_list(args: argparse.Namespace) -> int:
         )
         if not getattr(args, "fresh", False):
             cached = list_cache.read_fresh(_lc_key)
-            if cached is not None:
+            if cached is not None and (
+                getattr(args, "all", False)
+                or (
+                    isinstance(cached["worktrees"], list)
+                    and all(isinstance(row, dict) and row.get("status") != "archived"
+                            for row in cached["worktrees"])
+                )
+            ):
                 output._json_output(cached)
                 return 0
         if _status_monitor_enabled():

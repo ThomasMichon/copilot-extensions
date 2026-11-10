@@ -430,6 +430,23 @@ new contract and an older read-only contract, using the real caller-owned policy
 worker rather than a timing stub; they also require a real protected-state deny.
 These are finite source samples, not latency distributions or the 1-2 second
 whole-hook/throughput acceptance. Child/item/group limits stay 10/30/300 seconds.
+The `batch-read-only-attribution` cases retain the unchanged packaged contract
+while comparing phase-free/read-attributed/phase-free calls and an attributed
+later protected write through the real worker. Both Windows shell engines run
+in legacy and selected-cell fixtures. Successful output records the executable
+hash and actual child version, registered-command/source hashes, outer elapsed
+time and same-occurrence monotonic command, script, admission and read/source
+proof phases. Only fixture copies are instrumented; the existing fixture runtime
+selector and context-validator substitutes remain, so this is not installed
+runtime qualification. Phase times include their instrumentation, and the
+outside-command startup/exit envelope is not isolated startup. Ordered controls
+do not establish exact subtractive attribution or a latency distribution.
+An after-call loaded-module observation, without importing or listing available
+modules, requires the three native read calls to leave
+`Microsoft.PowerShell.Management` unloaded while the real protected-policy call
+retains its original module work. These cases use Unicode, space and apostrophe
+source-root paths. Module absence is deterministic work-count evidence, not a
+latency or throughput pass.
 The boolean-only admission controls retain bounded command-entry, helper,
 input, admission and output phases; a timeout reports the partial phases
 without retrying the child or relaxing its original limit.
@@ -1813,6 +1830,21 @@ The fixture uses contained,
 leased instance ownership and exact cleanup, not host credentials, installed
 services, desktop observation or a production-lifetime claim. It is not part
 of required unit-only CI and does not activate the ordinary forwarder.
+
+The separate owner-only `mcp-caller-lifetime` hosted Windows packet selects
+`test_custody_native_lifetime.py::test_native_caller_jobs_and_session_owner_lifetime`.
+It prepares the canonical MCP test environment, then uses the existing native
+test owner, private physical runtimes and renewable daemon leases with a
+600-second case and unchanged 900-second aggregate boundary. Actual caller-Job
+closure, bounded-child termination, restrictive shared-outer refusal, shim exit,
+post-replacement traffic and exact owner-death settlement are distinct checks.
+The original stdin writer stays open through owner death. Cleanup belongs to
+that native owner; a failed settlement cannot qualify the packet.
+No Copilot/terminal binary, credentials, desktop observer or visible control is
+required. Ordinary local/plugin tests remain contained and cannot opt into this
+lane by setting its fixture flag. Controller support must first reach the
+protected default branch before submitting `--packet mcp-caller-lifetime`.
+Packet preparation or a platform skip is not qualification or activation.
 
 The optional `update_diagnostics` lane also runs MCP's focused
 `test_source_install_transactions.py -k footprint_routes` controls and

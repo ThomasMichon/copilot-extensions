@@ -162,7 +162,8 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
 
 
 @pytest.mark.parametrize("packet,native", [
-    (None, False), ("bridge-http52", False), ("native-worktrees-embody", True),
+    (None, False), ("bridge-http52", False), ("mcp-caller-lifetime", False),
+    ("native-worktrees-embody", True),
     ("native-driver-auth-wait", True), ("native-driver-inflight", True),
     ("native-driver-observation-loss", True),
     ("native-driver-startup-seed", True), ("native-driver-startup-no-seed", True),
@@ -411,6 +412,110 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation,
             contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
     else:
         contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+
+
+@pytest.mark.parametrize("mutation", [
+    {}, {"tests": []}, {"tests": [{"outcome": "skipped"}]}, {"phases": []},
+    {"tests": [{"class": "other", "name": contract.MCP_LIFETIME_CASE, "outcome": "passed"}]},
+    {"tests": [{"class": "test_custody_native_lifetime", "name": "other", "outcome": "passed"}]},
+])
+def test_mcp_lifetime_result_requires_exact_functional_case_and_all_owner_phases(mutation):
+    value, expected = result(), request()
+    expected["selection"] = {"kind": "packet", "name": contract.MCP_LIFETIME_PACKET}
+    value.update(
+        request=expected,
+        tests=[{"class": "test_custody_native_lifetime",
+                "name": contract.MCP_LIFETIME_CASE, "outcome": "passed"}],
+        phases=[{"name": name, "status": "passed"} for name in (
+            "source-and-selection", "prepare-mcp-test-runtime",
+            contract.MCP_LIFETIME_PACKET, "test-runtime",
+        )],
+    )
+    value.update(mutation)
+    if mutation:
+        with pytest.raises(ValueError):
+            contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+    else:
+        contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+
+
+@pytest.mark.parametrize("native_exit", [0, 1])
+def test_mcp_lifetime_execution_uses_owned_native_lane_without_cli_or_desktop_prerequisites(
+    tmp_path, monkeypatch, native_exit,
+):
+    root, output = tmp_path / "candidate", tmp_path / "evidence"
+    root.mkdir()
+    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(worker, "Transport", lambda *_: SimpleNamespace(
+        git=lambda *_: SimpleNamespace(stdout="b" * 40),
+    ))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if "-c" in argv:
+            return SimpleNamespace(returncode=0, stdout='{"system":"Windows"}', stderr="")
+        assert argv[2:] == ["agent-mcp", "--prepare-only"]
+        return SimpleNamespace(returncode=0, stdout="prepared", stderr="")
+
+    def lifetime(candidate, evidence):
+        assert candidate == root and evidence == output
+        if native_exit:
+            raise ValueError("native owner cleanup unconfirmed")
+        (output / "junit").mkdir()
+        (output / "junit/actual.xml").write_text(
+            '<testsuite><testcase classname="test_custody_native_lifetime" '
+            f'name="{contract.MCP_LIFETIME_CASE}"/></testsuite>', encoding="utf-8",
+        )
+
+    monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
+    monkeypatch.setattr(worker, "mcp_lifetime", lifetime)
+    monkeypatch.setattr(worker, "native_prerequisites", lambda *_a, **_k: pytest.fail("unrelated CLI prerequisites"))
+    value = request()
+    value["selection"] = {"kind": "packet", "name": contract.MCP_LIFETIME_PACKET}
+    actual = worker.execute(root, value, output)
+    assert actual["outcome"] == ("failed" if native_exit else "qualified")
+    assert actual["phases"][2]["name"] == contract.MCP_LIFETIME_PACKET
+    assert "native_prerequisites" not in actual
+    assert len(calls) == (1 if native_exit else 2)
+
+
+def test_mcp_lifetime_retains_containment_until_its_canonical_native_owner(tmp_path, monkeypatch):
+    import _admission_protocol
+    import plugin_test_cache
+    import plugin_test_containment
+    import plugin_test_resources
+
+    environment = tmp_path / "prepared"
+    python = environment / "Scripts/python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv("RUNNER_TEMP", str(tmp_path))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    released = []
+    monkeypatch.setattr(plugin_test_cache, "ordinary_cache_root", lambda _: environment)
+    monkeypatch.setattr(plugin_test_resources, "venv_root", lambda _: tmp_path / "venvs")
+    monkeypatch.setattr(_admission_protocol, "acquire", lambda *_: SimpleNamespace(
+        release=lambda: released.append(True),
+    ))
+    monkeypatch.setattr(plugin_test_containment, "TestSandbox", lambda **_: nullcontext(str(sandbox)))
+
+    def run(argv, **kwargs):
+        assert kwargs["native_application"] is True
+        assert kwargs["limits"] == plugin_test_containment.Limits(wall_seconds=900)
+        assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert kwargs["env"]["AGENT_MCP_NATIVE_LIFETIME"] == "1"
+        assert os.environ["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert "-k" in argv and argv[argv.index("-k") + 1] == contract.MCP_LIFETIME_CASE
+        assert argv[0] == str(python)
+        raise plugin_test_containment.ContainmentError("hosted owner refused")
+
+    monkeypatch.setattr(plugin_test_containment, "run_contained", run)
+    with pytest.raises(plugin_test_containment.ContainmentError, match="hosted owner refused"):
+        worker.mcp_lifetime(tmp_path, tmp_path / "out")
+    assert released == [True]
 
 
 @pytest.mark.parametrize("prerequisites", [True, False])

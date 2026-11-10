@@ -1,0 +1,9 @@
+{
+  "comment": "Exclude semantic archives from default listings while preserving explicit inventory and bounded current/feed reads",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

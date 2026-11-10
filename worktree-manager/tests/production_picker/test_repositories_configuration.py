@@ -391,6 +391,110 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
     asyncio.run(run())
 
 
+def test_native_local_knowledge_registration_form_cancel_confirm_and_refresh(tmp_path, monkeypatch):
+    owner_python = os.environ.get("REPOSITORIES_CONFIG_TEST_PYTHON")
+    if not owner_python:
+        pytest.skip("set REPOSITORIES_CONFIG_TEST_PYTHON to the isolated native engine interpreter")
+    native = tmp_path / "native"
+    harness, knowledge = native / "repository", native / "knowledge"
+    harness.mkdir(parents=True)
+    result = subprocess.run(
+        ["git", "-c", "init.defaultBranch=main", "init", "--quiet", str(knowledge)],
+        capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    policy = harness / ".agent-worktrees"
+    policy.mkdir()
+    (policy / "config.yaml").write_text(
+        "stateless: true\nrequires_external_state_root: true\n", encoding="utf-8",
+    )
+    registry = native / ".agent-worktrees"
+    registry.mkdir()
+    platform = "windows" if os.name == "nt" else "linux"
+    (registry / "repos.yaml").write_text(yaml.safe_dump({
+        "unrecognized_owner_metadata": {"secret": SECRET},
+        "repos": {"sample": {"class": "worktree", platform: str(harness)}},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_HOME", str(native))
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(context, "_project", "sample")
+    monkeypatch.setattr(context, "_bootstrap", None)
+    root = Path(__file__).resolve().parents[3]
+    manifest_path = root / "plugins" / "agent-worktrees" / "pivots" / "repositories-config.json"
+    manifest = json.loads(manifest_path.read_bytes())
+    prefix = [owner_python, "-m", "agent_worktrees"]
+    manifest["list"] = [*prefix, *manifest["list"][1:]]
+    for action in manifest["actions"]:
+        for key in ("run", "preview"):
+            if key in action:
+                action[key] = [*prefix, *action[key][1:]]
+    pivot_root, plugin_root = tmp_path / "pivots", tmp_path / "plugins"
+    pivot_root.mkdir()
+    plugin_root.mkdir()
+    (pivot_root / "repositories.json").write_text(json.dumps(manifest), encoding="utf-8")
+    monkeypatch.setenv("AGENT_WORKTREES_PIVOTS_DIR", str(pivot_root))
+    monkeypatch.setenv("AGENT_WORKTREES_PLUGINS_DIR", str(plugin_root))
+
+    async def propose(app, engine, pilot):
+        from worktree_manager.production_picker.picker_tui.pivot_actions import entry_matches
+
+        reg = engine._reg_pivot()
+        row = next(row for row in engine._task_rows() if row.get("knowledge_registration_available") == "true")
+        action = next(action for action in reg.actions if action.key == "register-local-knowledge")
+        assert entry_matches(action.when, row)
+        assert not entry_matches(action.when, {"id": "sample", "knowledge_bindable": "true"})
+        engine._open_pivot_form(reg, action, row, engine._task_action_ctx(reg, row), row["title"])
+        await pilot.pause()
+        assert isinstance(app.screen, ConfigurationFormScreen)
+        for field, value in zip(app.screen._q, ("chosen-knowledge", str(knowledge), "main", "")):
+            field["primary"].value = value
+        app.screen.dismiss(app.screen._collect())
+        await _wait(pilot, lambda: isinstance(app.screen, ConfigurationPreviewScreen)
+                    and not app.screen.query_one("#config-preview-retry", Button).disabled)
+        assert app.screen.preview and not app.screen.preview.blocked
+        assert SECRET not in app.screen.preview.describe()
+
+    async def run():
+        before = snapshot(native)
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            engine = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, engine)
+            engine._open_cfgmenu()
+            while engine.htabs[engine.htab] != "Repositories":
+                engine._rotate_machine(1)
+                await pilot.pause()
+            await _wait(pilot, lambda: engine._task_state()[0] in ("ready", "error"))
+            assert engine._task_state()[0] == "ready", engine._task_state()
+            await propose(app, engine, pilot)
+            assert app.focused.id == "config-preview-cancel"
+            await pilot.press("enter")
+            await pilot.pause()
+            assert snapshot(native) == before
+            await propose(app, engine, pilot)
+            await pilot.click("#config-preview-apply")
+            await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending)
+            rendered = str(app.screen.query_one("#config-result").render())
+            assert '"status": "persisted"' in rendered and SECRET not in rendered
+            app.screen.action_close()
+            await _wait(pilot, lambda: any(row["id"] == "chosen-knowledge" for row in engine._task_rows()))
+            row = next(row for row in engine._task_rows() if row["id"] == "chosen-knowledge")
+            assert row["configuration"]["registration"]["class"] == "knowledge"
+            assert row["configuration"]["binding"]["identity"] == ""
+            after = snapshot(native)
+            missing = object()
+            assert {
+                key for key in before.keys() | after.keys() if before.get(key, missing) != after.get(key, missing)
+            } == {
+                str(Path(".agent-worktrees") / "repos.yaml"), str(Path(".agent-worktrees") / "repos.lock"),
+                str(Path(".agent-worktrees") / "pr-rewrite-authority.lock"),
+                str(Path(".agent-worktrees") / "guarded-anchors"),
+                str(Path(".agent-worktrees") / "guarded-anchors" / "publication.lock"),
+            }
+
+    asyncio.run(run())
+
+
 @pytest.fixture
 def readiness_engine(monkeypatch, tmp_path):
     from worktree_manager import engine_client, resident_picker

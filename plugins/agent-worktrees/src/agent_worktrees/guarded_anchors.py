@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 import uuid
 
@@ -16,7 +17,7 @@ from plugin_activation import resolve_active_plugins
 
 from . import registry_paths, repos
 from .repos_registry_reader import read_registry
-from .repos_registry_transaction import read_bytes, registry_lock, revision
+from .repos_registry_transaction import read_bytes, record_lock, registry_lock, remaining_timeout, revision
 from .tracking import _RecordLock, _atomic_write
 
 
@@ -234,10 +235,12 @@ def _view_paths(directory: Path) -> list[Path]:
         ]
 
 
-def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
+def _withdraw_views(directory: Path, *, paths=None, reader=None, backups=None, budget=None) -> None:
     reader = reader if reader is not None else _reader()
     reader.validate_directory(directory)
     for path in _view_paths(directory) if paths is None else paths:
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
         try:
             data = _view_data(path, reader)
         except (FileNotFoundError, ValueError):
@@ -246,14 +249,52 @@ def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
             key: data[key] for key in ("source_root", "registry_root", "source_project")
             if isinstance(data, dict) and isinstance(data.get(key), str)
         }
+        if backups is not None:
+            remaining_timeout(budget, float("inf"))
+            fd, name = tempfile.mkstemp(prefix=".withdrawn-", dir=directory)
+            os.close(fd)
+            backup = Path(name)
+            try:
+                remaining_timeout(budget, float("inf"))
+                os.replace(path, backup)
+            except BaseException:
+                backup.unlink(missing_ok=True)
+                raise
+            backups.append((path, backup))
         _atomic_write(path, json.dumps({
             **scope, "inventory_authority": "unavailable",
             "generation": uuid.uuid4().hex,
         }))
 
 
+def _restore_withdrawn(backups, budget) -> None:
+    for path, backup in reversed(backups):
+        budget.cleanup_timeout()
+        os.replace(backup, path)
+
+
+def _withdraw_before_write(directory: Path, budget):
+    if budget is None:
+        _withdraw_views(directory)
+        return []
+    backups = []
+    try:
+        _withdraw_views(directory, backups=backups, budget=budget)
+        remaining_timeout(budget, float("inf"))
+    except BaseException:
+        try:
+            _restore_withdrawn(backups, budget)
+        except OSError as error:
+            raise GuardPublicationError(
+                "source mutation did not start; guard-map restoration incomplete; previous views retained"
+            ) from error
+        raise
+    return backups
+
+
 def _refresh_locked(
     root: Path, callers=(), *, include_prepared: bool = True, require_callers: bool = True,
+    budget=None,
 ) -> dict:
     directory = root / "guarded-anchors"
     reader = _reader()
@@ -302,6 +343,8 @@ def _refresh_locked(
     published = 0
     errors = []
     for caller in sorted(selected):
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
         identity = reader.repository_identity(caller)
         if identity is None or identity["root"] != caller:
             if caller in requested and caller not in prepared and not require_callers:
@@ -324,7 +367,15 @@ def _refresh_locked(
                 "source_project": prior_projects.get(caller),
                 "inventory_authority": "unavailable", "generation": generation,
             }))
-            snapshot = build_snapshot(caller, root, generation, prior_projects.get(caller))
+            if budget is None:
+                snapshot = build_snapshot(caller, root, generation, prior_projects.get(caller))
+            else:
+                from .inrepo_config_source import resolution_budget
+
+                with resolution_budget(deadline=budget.execution_deadline):
+                    snapshot = build_snapshot(caller, root, generation, prior_projects.get(caller))
+            if budget is not None:
+                remaining_timeout(budget, float("inf"))
             encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
             if len(encoded.encode("utf-8")) > reader.MAX_BYTES:
                 raise GuardPublicationError("guard map exceeds its byte bound")
@@ -372,26 +423,42 @@ def refresh(
         return _refresh_locked(root, callers, include_prepared=include_prepared)
 
 
-def managed_write(write, *, caller: str | Path | None = None):
-    """Serialize source mutations with publication, including all prepared views."""
+def managed_write(write, *, caller: str | Path | None = None, budget=None, validate=None):
+    """Validate under publication locks before withdrawing views for mutation."""
     root = registry_paths.registry_root()
     directory = _prepare_directory(root)
-    with registry_lock(root / "repos.yaml"), _RecordLock(
-        directory / "publication", timeout=10.0, require_sidecar=True,
-    ):
+    arguments = {"budget": budget} if budget is not None else {}
+    publication = (
+        _RecordLock(directory / "publication", timeout=10.0, require_sidecar=True)
+        if budget is None else record_lock(directory / "publication", budget=budget)
+    )
+    with registry_lock(root / "repos.yaml", **arguments), publication:
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
+        if validate is not None:
+            validate()
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
         # Readers must stop using old policy before the source mutation commits.
-        _withdraw_views(directory)
-        result = write()
+        backups = _withdraw_before_write(directory, budget)
         try:
-            reader = _reader()
-            identity = reader.repository_identity(caller) if caller is not None else None
-            callers = [identity["root"]] if identity else []
-            _refresh_locked(root, callers, require_callers=False)
-        except (OSError, ValueError, TypeError, RuntimeError) as exc:
-            raise GuardPublicationError(
-                f"managed source write completed; guard-map publication incomplete: {exc}"
-            ) from exc
-        return result
+            result = write()
+            try:
+                reader = _reader()
+                identity = reader.repository_identity(caller) if caller is not None else None
+                callers = [identity["root"]] if identity else []
+                _refresh_locked(root, callers, require_callers=False, **arguments)
+                if budget is not None:
+                    remaining_timeout(budget, float("inf"))
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                raise GuardPublicationError(
+                    f"managed source write completed; guard-map publication incomplete: {exc}"
+                ) from exc
+            return result
+        finally:
+            for _, backup in backups:
+                budget.cleanup_timeout()
+                backup.unlink(missing_ok=True)
 
 
 def prepare(caller: str | Path) -> str:

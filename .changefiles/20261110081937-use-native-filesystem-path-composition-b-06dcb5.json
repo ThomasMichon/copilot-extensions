@@ -1,0 +1,9 @@
+{
+  "comment": "Use native filesystem path composition before prepared pre-tool decisions without initializing the Management module or changing policy fallback.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

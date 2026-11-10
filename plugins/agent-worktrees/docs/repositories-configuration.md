@@ -89,6 +89,81 @@ written. Unrecognized local registry metadata is preserved by this API.
 YAML aliases are detached at the selected registration before an edit, so
 unselected registrations and metadata cannot change through shared mappings.
 
+## Register an existing local knowledge checkout
+
+For a canonically registered, worktree-class, unbound stateless harness, the native catalog
+offers **Register an existing local knowledge checkout**. Supply a new name,
+an absolute existing Git anchor, the intended default branch and an optional
+nonsecret repository-account mapping. The branch and account are registration
+metadata, not observations of the server default, landing policy or credentials.
+Ordinary, direct bare and converted-clone bare anchors are supported; task worktrees, descendants and
+existing name/path/repository-identity collisions require their normal owners.
+Select the anchor itself, never its `.git` metadata directory. An existing
+registration at that nested metadata path also conflicts with the anchor,
+including for local-only repositories without a provider identity.
+
+```text
+agent-worktrees repos configuration knowledge-register-preview --context-project sample --repository knowledge --checkout-path <absolute-anchor> --default-branch main
+agent-worktrees repos configuration knowledge-register-apply --context-project sample --repository knowledge --checkout-path <absolute-anchor> --default-branch main --preview-token <returned-token>
+```
+
+Add `--account <non-secret-login>` to both commands to declare an explicit
+mapping. Preview performs bounded, noninteractive local Git reads only. It
+does not contact the origin or inspect credentials. An origin containing
+embedded credentials or URL parameters refuses without disclosing it. Origin
+selection includes Git configuration includes and the same effective URL
+rewrites used by the binding owner; it never treats an included origin as absent.
+The preview identifies the local registration action and its exact selected
+inputs. Apply requires confirmation, rechecks those inputs under the shared
+registry lock, and uses the existing compare-before-replace writer. Unrelated
+registry metadata is preserved. A concurrent registry, configuration, binding,
+checkout or origin change requires a new preview; existing registrations are
+never overwritten or reclassified.
+Like native preference editing, selection and the final write reject registry
+source indirection. A symlinked registry requires inspection by its owner;
+registration never replaces that link while leaving its backing source unchanged.
+The strict native reader rejects nonregular registry files before fingerprinting
+can open them, retaining the existing regular-file and subsequent symlink checks.
+After acquiring the guard-publication lock, apply re-inspects the full proposal
+and compares its token again before withdrawing prepared views for persistence. Checkout, origin,
+policy or preference drift during that wait refuses rather than persisting the
+earlier selection; the same aggregate deadline covers both inspection passes.
+A validation refusal leaves the existing prepared views untouched. Successful
+validation still withdraws them before the registry mutation begins.
+If the execution deadline expires during withdrawal before mutation starts,
+the owner restores the prior views within its original cleanup reserve. It
+does not restart the clock or restore old views after an uncertain source write.
+Incomplete restoration is an explicit guard-owner failure, not persistence.
+
+Successful return means registration and its normal protection publication:
+a new non-agent `class: knowledge` entry, normal registry/publication lock
+sidecars, and refreshed guard facts for already-prepared callers. Existing
+guard views are withdrawn before persistence; they cannot keep reporting
+complete coverage while omitting the new protected anchor. Unlike ordinary `repos add`, this
+operation does not pin Git credentials. It does not create/clone a repository,
+write Git configuration or branches, bind knowledge, compose an overlay,
+allocate a pair/worktree or launch a session. Refresh and use the separately
+confirmed binding action below. A lost result requires catalog readback before
+retry; an already-present registration is a conflict, not an overwrite request.
+If source persistence succeeds but guard publication fails, the command returns
+nonzero with `status: incomplete` and `registration_committed: true`; affected
+views remain unavailable. An uncertain write reports a null committed result.
+Inspect actual registration and publication before retrying.
+
+Preview and apply each share their native deadline across local Git reads and
+committed-configuration probes, including policy revalidation and guard-fact
+publication. The apply budget also bounds publication-authority, registry and
+guard-publication lock acquisition. An enclosing policy scope cannot extend
+that deadline or supply an earlier snapshot instead of a fresh revalidation.
+The shared owners accept this optional budget without changing their existing
+callers' default behavior.
+
+The executing catalog supplies a dedicated optional row/marker for this
+operation. Older providers omit it, so a newer manifest does not emit the new
+syntax to them. Older manifests retain existing behavior; hosts that cannot
+execute provider previews cannot apply without a valid token. Rollback affects
+only this optional action, not preferences, inspection or existing binding.
+
 ## Confirmed existing knowledge binding
 
 When the selected harness requires missing knowledge, **Bind this existing

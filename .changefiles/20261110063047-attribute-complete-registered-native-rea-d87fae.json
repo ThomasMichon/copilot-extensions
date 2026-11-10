@@ -1,0 +1,9 @@
+{
+  "comment": "Attribute complete registered native read entry and real protected fallback in isolated fixtures without changing production policy.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
