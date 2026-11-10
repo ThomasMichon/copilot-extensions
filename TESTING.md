@@ -371,7 +371,10 @@ The commented-JSON regression preserves strict-original/freeform behavior
 when a permissive shell decoder would otherwise discard a protected header.
 Fixture-only phase markers report shell command entry, script entry,
 membership, native proof and policy entry on a native-write child timeout;
-they never retry the child, extend its ten-second bound or classify the
+they use the already-captured stderr pipe instead of opening a file per stage.
+Only complete, recognized marker lines are removed from successful stderr;
+genuine errors, blank lines, malformed markers and truncated output remain.
+They never retry the child, extend its ten-second bound or classify the
 unobserved stalled phase as a known flake.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell

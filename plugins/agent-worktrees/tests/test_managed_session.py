@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -30,6 +31,66 @@ PATCH_PROTECTED_CASES = (
     "patch-protected-move", "patch-protected-direct", "patch-protected-structured",
     "patch-protected-batch", "patch-protected-freeform", "patch-protected-commented-json",
 )
+NATIVE_WRITE_PHASES = {
+    "command-entry", "script-entry", "membership-start", "membership-complete",
+    "native-proof-start", "policy-start", "prepared-event-json", "prepared-paths",
+    "prepared-marker-opened", "prepared-marker-json", "prepared-marker-decoded",
+    "json-entry", "json-utility-load", "json-utility-ready", "json-web-load",
+    "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize",
+}
+NATIVE_WRITE_PHASE_WRITER = (
+    "function Write-NativeWriteFixturePhase([string]$Name) { "
+    "[Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' + "
+    "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
+    "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name) }; "
+    "Write-NativeWriteFixturePhase 'command-entry'; "
+)
+
+
+def native_write_fixture_stderr(stderr):
+    phases, errors = [], []
+    for line in stderr.splitlines(keepends=True):
+        match = re.fullmatch(rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)\r?\n", line)
+        if match and match[2].decode("ascii") in NATIVE_WRITE_PHASES:
+            phases.append(f"{match[1].decode('ascii')} {match[2].decode('ascii')}")
+        else:
+            errors.append(line)
+    return "\n".join(phases), b"".join(errors)
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_native_write_fixture_stderr_preserves_errors(newline):
+    phase = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
+    errors = (
+        newline + b"real error\xff" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 124 unknown-stage" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE invalid json-entry" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
+    )
+    assert native_write_fixture_stderr(phase + errors) == ("123 command-entry", errors)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows timeout diagnostics")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    command = (
+        NATIVE_WRITE_PHASE_WRITER
+        + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
+    )
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+            input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
+        )
+    progress, errors = native_write_fixture_stderr(captured.value.stderr)
+    assert progress.endswith(" command-entry")
+    assert errors == b"real fixture error\r\n"
+    assert captured.value.stdout == b""
 
 
 def load(name):
@@ -1350,15 +1411,6 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         )
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
-    phases = tmp_path / "native-write-phases"
-    env["NATIVE_WRITE_FIXTURE_PHASES"] = str(phases)
-    phase_writer = (
-        "function Write-NativeWriteFixturePhase([string]$Name) { "
-        "[IO.File]::AppendAllText($env:NATIVE_WRITE_FIXTURE_PHASES, "
-        "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
-        "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name + [Environment]::NewLine) }; "
-        "Write-NativeWriteFixturePhase 'command-entry'; "
-    )
     native_entry = scripts / "pre-tool-hook.ps1"
     # Fixture-only markers classify a timeout without retrying or extending the child.
     instrumented = native_entry.read_text(encoding="utf-8")
@@ -1402,17 +1454,19 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     started_ms = time.time_ns() // 1_000_000
     try:
         result = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", phase_writer + entry["powershell"]],
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
             input=raw, capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as error:
-        progress = phases.read_text() if phases.exists() else "no command entry"
+        progress, diagnostic = native_write_fixture_stderr(error.stderr or b"")
         raise AssertionError(
             f"{shell} native write exceeded the original 10s child limit; start_ms={started_ms}; "
-            f"phases={progress!r}; stdout={repr(error.stdout)[:512]}; stderr={repr(error.stderr)[:512]}"
+            f"phases={progress or 'no command entry'!r}; stdout={error.stdout!r}; stderr={diagnostic!r}"
         ) from error
     native_seconds = time.monotonic() - started
+    progress, result.stderr = native_write_fixture_stderr(result.stderr)
+    assert " command-entry" in progress, result.stderr
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert not membership.exists()
     if case == "ordinary-unrelated-inventory":
@@ -1439,11 +1493,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         contract.write_text(json.dumps(value), encoding="utf-8")
         started = time.monotonic()
         fallback = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", phase_writer + entry["powershell"]],
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
             input=raw, capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )
         fallback_seconds = time.monotonic() - started
+        _, fallback.stderr = native_write_fixture_stderr(fallback.stderr)
         assert fallback.returncode == 0 and not fallback.stderr, fallback.stdout + fallback.stderr
         assert json.loads(fallback.stdout) == {}
         protected = {**event, "toolArgs": {"path": "efforts/private.md"}}
@@ -1455,10 +1510,11 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 {"name": "edit", "args": {"path": "efforts/private.md"}},
             ]
         denied = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", phase_writer + entry["powershell"]],
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
             input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )
+        _, denied.stderr = native_write_fixture_stderr(denied.stderr)
         assert denied.returncode == 0 and not denied.stderr, denied.stdout + denied.stderr
         assert json.loads(denied.stdout)["permissionDecision"] == "deny"
         assert not membership.exists()
