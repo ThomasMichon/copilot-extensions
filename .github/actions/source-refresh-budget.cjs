@@ -21,10 +21,13 @@ class RefreshBudget {
     return operation();
   }
 
-  protectPending() {
+  protectPending(additionalCleanup = 0) {
+    if (!Number.isSafeInteger(additionalCleanup) || additionalCleanup < 0) {
+      throw new Error("Invalid source refresh cleanup reservation.");
+    }
     // Preserve enough requests to fence stale success and close an unfinished check.
-    if (this.used + this.held + 4 > this.limit) throw new RefreshLimitError();
-    this.held += 3;
+    if (this.used + this.held + 4 + additionalCleanup > this.limit) throw new RefreshLimitError();
+    this.held += 3 + additionalCleanup;
   }
 
   release() { this.held = 0; }

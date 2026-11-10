@@ -17,6 +17,18 @@ from .osutil import process_start_time
 
 CONTEXT_ENV = "AGENT_DRIVER_STARTUP_ADMISSION"
 _LIMIT = 1024 * 1024
+_REASON_LIMIT = 512
+
+
+def _bounded(text: str) -> str:
+    text = " ".join(text.split())
+    return text if len(text) <= _REASON_LIMIT else text[: _REASON_LIMIT - 3] + "..."
+
+
+def refusal_reason(exc: BaseException) -> str:
+    """A bounded, single-line description of why the caller refused admission."""
+    message = str(exc)
+    return _bounded(f"{type(exc).__name__}: {message}" if message else type(exc).__name__)
 
 
 def _unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -132,7 +144,9 @@ class StartupAdmissionServer:
                         self._check(value)
                     except Exception as exc:
                         self.error = exc
-                        _send(connection, {"version": 1, "accepted": False})
+                        _send(connection, {
+                            "version": 1, "accepted": False, "reason": refusal_reason(exc),
+                        })
                         return
                     _send(connection, {"version": 1, "accepted": True})
         except (OSError, ValueError) as exc:
@@ -192,10 +206,17 @@ class StartupAdmissionClient:
         })
         result = _receive(self._connection)
         if (
-            set(result) != {"version", "accepted"}
+            set(result) not in ({"version", "accepted"}, {"version", "accepted", "reason"})
             or type(result["version"]) is not int or result["version"] != 1
-            or result["accepted"] is not True
+            or type(result["accepted"]) is not bool
         ):
+            raise ValueError("Original caller refused startup admission")
+        if result["accepted"] is not True:
+            reason = result.get("reason")
+            if type(reason) is str and reason:
+                raise ValueError(
+                    f"Original caller refused startup admission: {_bounded(reason)}"
+                )
             raise ValueError("Original caller refused startup admission")
 
     def close(self) -> None:
