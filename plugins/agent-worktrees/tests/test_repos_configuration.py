@@ -356,6 +356,28 @@ def test_accepted_defaults_require_writer_freshness_without_breaking_baseline(
         assert len(calls) == 1 and "--capabilities" in calls[0]
 
 
+def test_native_binding_capability_and_worker_share_the_caller_deadline(native, monkeypatch):
+    from agent_procutil import owned_process
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    aggregate = OwnedExecutionBudget.from_timeout(4, cleanup_reserve=1)
+    budgets = []
+    monkeypatch.setattr(binding, "owner_script", lambda _project: Path(__file__))
+
+    def execute(argv, **kwargs):
+        budgets.append(kwargs["budget"])
+        value = (
+            {"version": 1, "existing_binding_configuration": 2} if "--capabilities" in argv else
+            {"version": 1, "operation": "set", "target": {"resource": "sample/sample"}}
+        )
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", execute)
+    assert binding.invoke("sample", "sample", "preview", budget=aggregate)["version"] == 1
+    assert budgets == [aggregate, aggregate]
+
+
 def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native, monkeypatch):
     from agent_worktrees import repos_knowledge_configuration as binding
 

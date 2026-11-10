@@ -267,6 +267,12 @@ writer compares the captured configuration bytes after the callback and again
 before replacement, refusing unrelated external edits without losing them or
 reporting a pointer commit. Older owners leave this optional action unsupported;
 existing explicit portable-ID and by-name flows retain their capability contract.
+Accepted-default confirmation shares one aggregate caller-owned deadline across
+preference observations, capability discovery and native preview/apply: 18 seconds
+for preview and 26 seconds for apply, including cleanup. Each preference read
+retains its eight-second local cap within that aggregate. Sequential successful
+reads cannot renew the operation beyond Manager's existing 20/30-second limits;
+the pointer-bound worker remains inside the same caller-owned execution window.
 
 Existing effective local bindings win; unresolved explicit bindings require
 owner repair. Absent, withdrawn or locally suppressed defaults invoke no binder.

@@ -32,7 +32,7 @@ def projection(native, *, status="suggested", target="shared"):
 def configured(native, monkeypatch):
     native.config.knowledge_preferences = {"state_dir": str(native.root / "state")}
     value = projection(native)
-    monkeypatch.setattr(defaults, "_read", lambda *args: (dict(value), ["selected-machines"]))
+    monkeypatch.setattr(defaults, "_read", lambda *args, **kwargs: (dict(value), ["selected-machines"]))
     original = binding.invoke
 
     def invoke(project, name, operation, *args, **kwargs):
@@ -104,6 +104,32 @@ def test_configuration_default_requires_confirmation_and_rechecks_selected_input
     assert configured.calls[-1][2] == "apply"
 
 
+@pytest.mark.parametrize("operation", ["preview", "apply"])
+def test_confirmation_shares_one_aggregate_budget_across_rechecks_and_native_owner(
+    configured, monkeypatch, operation,
+):
+    proposed = defaults.preview("first", configured.ids["first"], configured.ids["shared"])
+    observations = []
+    original_read, original_invoke = defaults._read, binding.invoke
+
+    def read(*args, **kwargs):
+        observations.append(kwargs["budget"])
+        return original_read(*args, **kwargs)
+
+    def invoke(*args, **kwargs):
+        observations.append(kwargs["budget"])
+        return original_invoke(*args, **kwargs)
+
+    monkeypatch.setattr(defaults, "_read", read)
+    monkeypatch.setattr(binding, "invoke", invoke)
+    args = ["first", configured.ids["first"], configured.ids["shared"]]
+    if operation == "apply":
+        args.append(proposed["token"])
+    getattr(defaults, operation)(*args)
+    assert len(observations) == (4 if operation == "apply" else 3)
+    assert all(budget is observations[0] for budget in observations)
+
+
 @pytest.mark.parametrize("change", ["input", "machine-during-read", "source-during-read"])
 def test_pointer_precondition_rechecks_accepted_inputs_after_native_preview(configured, monkeypatch, change):
     plan = defaults.observe("first")
@@ -161,12 +187,14 @@ def test_selected_runtime_descriptor_gates_the_new_parser_without_application_re
 
     def run(argv, **kwargs):
         calls.append(argv)
+        assert kwargs["budget"].deadline <= aggregate.execution_deadline
         return subprocess.CompletedProcess(argv, 0, json.dumps(projection(native)), "")
 
     monkeypatch.setattr(defaults, "run_caller_owned", run)
     source = {"state_dir": str(native.root / "state")}
+    aggregate = defaults.OwnedExecutionBudget.from_timeout(4, cleanup_reserve=1)
     if supported:
-        result, runtime = defaults._read(source, native.config.machine, native.ids["first"])
+        result, runtime = defaults._read(source, native.config.machine, native.ids["first"], budget=aggregate)
         assert runtime == ["selected"] and result["knowledge_preference"]["status"] == "suggested"
         assert calls == [[
             "selected", "preferences", "repositories", "--state-dir", source["state_dir"],

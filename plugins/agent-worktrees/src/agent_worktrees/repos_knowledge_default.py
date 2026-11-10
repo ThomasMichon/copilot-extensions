@@ -47,9 +47,15 @@ def _supported(python: Path) -> bool:
     )
 
 
-def _read(source: dict, machine: str, harness: str) -> tuple[dict, list[str]]:
+def _read(
+    source: dict, machine: str, harness: str, *, budget: OwnedExecutionBudget | None = None,
+) -> tuple[dict, list[str]]:
     try:
-        budget = OwnedExecutionBudget.from_timeout(8, cleanup_reserve=1)
+        local_budget = OwnedExecutionBudget.from_timeout(8, cleanup_reserve=1)
+        budget = (
+            OwnedExecutionBudget(min(local_budget.deadline, budget.execution_deadline), 1)
+            if budget is not None else local_budget
+        )
         prefix, environment, python = machines_runtime.selected(budget=budget)
         if not _supported(python):
             raise ConfigurationError(
@@ -99,7 +105,7 @@ def _read(source: dict, machine: str, harness: str) -> tuple[dict, list[str]]:
         ) from error
 
 
-def observe(project: str) -> dict:
+def observe(project: str, *, budget: OwnedExecutionBudget | None = None) -> dict:
     config = native._binding_config(project)
     selected = getattr(config, "knowledge_preferences", None)
     if selected is None:
@@ -117,7 +123,9 @@ def observe(project: str) -> dict:
     if len(harnesses) != 1:
         raise ConfigurationError("context-mismatch", "The selected project needs a native repository identity.")
     harness = native._selected(catalog, harnesses[0]["repository_id"])
-    projection, runtime = _read(source, config.machine, harness["repository_id"])
+    projection, runtime = _read(
+        source, config.machine, harness["repository_id"], **({"budget": budget} if budget is not None else {}),
+    )
     preference = projection["knowledge_preference"]
     result = {"status": preference["status"], "projection": projection}
     if preference["status"] != "suggested":
@@ -129,8 +137,8 @@ def observe(project: str) -> dict:
     }
 
 
-def revalidate(project: str, selection: dict) -> None:
-    current = observe(project)
+def revalidate(project: str, selection: dict, *, budget: OwnedExecutionBudget | None = None) -> None:
+    current = observe(project, **({"budget": budget} if budget is not None else {}))
     config = native._binding_config(project)
     if (
         current.get("status") != "suggested" or current.get("selection") != selection
@@ -139,16 +147,21 @@ def revalidate(project: str, selection: dict) -> None:
         raise ConfigurationError("preview-conflict", "Accepted preference inputs changed; preview again.")
 
 
-def preview(project: str, harness_id: str, knowledge_id: str) -> dict:
-    current = observe(project)
+def preview(
+    project: str, harness_id: str, knowledge_id: str, *, budget: OwnedExecutionBudget | None = None,
+) -> dict:
+    budget = budget or OwnedExecutionBudget.from_timeout(18, cleanup_reserve=2)
+    current = observe(project, budget=budget)
     resolution = current.get("resolution", {})
     if (
         current["status"] != "suggested" or resolution["harness"]["repository_id"] != harness_id
         or resolution["knowledge"]["repository_id"] != knowledge_id
     ):
         raise ConfigurationError("preview-conflict", "The selected accepted default changed; refresh the list.")
-    proposed = native.preview(project, harness_id, knowledge_id, require_preference_freshness=True)
-    revalidate(project, current["selection"])
+    proposed = native.preview(
+        project, harness_id, knowledge_id, require_preference_freshness=True, budget=budget,
+    )
+    revalidate(project, current["selection"], budget=budget)
     token = hashlib.sha256(json.dumps({
         "native_token": proposed["token"], "selection": current["selection"],
     }, sort_keys=True).encode()).hexdigest()
@@ -163,7 +176,8 @@ def apply(project: str, harness_id: str, knowledge_id: str, token: str) -> dict:
 
     if not isinstance(token, str) or re.fullmatch(r"[a-f0-9]{64}", token) is None:
         raise ConfigurationError("missing-preview", "A fresh accepted-default preview is required.")
-    proposed = preview(project, harness_id, knowledge_id)
+    budget = OwnedExecutionBudget.from_timeout(26, cleanup_reserve=2)
+    proposed = preview(project, harness_id, knowledge_id, budget=budget)
     if not hmac.compare_digest(token, proposed["token"]):
         raise ConfigurationError("preview-conflict", "Accepted preference inputs changed; preview again.")
     return invoke(
@@ -173,4 +187,5 @@ def apply(project: str, harness_id: str, knowledge_id: str, token: str) -> dict:
             if key not in {"token", "native_preview", "accepted_default", "default_selection"}
         },
         preference_selection=proposed["default_selection"],
+        budget=budget,
     )

@@ -12,6 +12,7 @@ import subprocess
 import sys
 import sysconfig
 
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from dropin_registry import ScanAuthority
 from plugin_activation import resolve_active_plugins
 
@@ -185,13 +186,13 @@ def invoke(
     project: str, name: str, operation: str, token: str = "", *, portable_resolution: dict | None = None,
     preference_selection: dict | None = None,
     require_preference_freshness: bool = False,
+    budget: OwnedExecutionBudget | None = None,
 ) -> dict:
     if not binding_names_supported(project, name):
         raise ConfigurationError(
             "binding-name-unsupported",
             "Binding requires exact Configuration names beginning with an ASCII letter or digit.",
         )
-    from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
     script = owner_script(project)
@@ -209,7 +210,7 @@ def invoke(
     environment = dict(os.environ)
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "COPILOT_PLUGIN_ROOT"):
         environment.pop(key, None)
-    budget = OwnedExecutionBudget.from_timeout(
+    budget = budget or OwnedExecutionBudget.from_timeout(
         26 if operation == "apply" else 18, cleanup_reserve=2,
     )
     try:

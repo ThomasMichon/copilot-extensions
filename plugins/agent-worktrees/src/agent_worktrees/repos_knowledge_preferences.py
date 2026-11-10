@@ -9,6 +9,7 @@ import json
 from pathlib import Path
 import re
 
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from dropin_registry import ScanAuthority
 
 from . import config as cfg, config_acquisition, project_state, repos, state_root
@@ -119,6 +120,7 @@ def resolve(project: str, harness_id: str, knowledge_id: str) -> dict:
 
 def preview(
     project: str, harness_id: str, knowledge_id: str, *, require_preference_freshness: bool = False,
+    budget: OwnedExecutionBudget | None = None,
 ) -> dict:
     from .repos_knowledge_configuration import invoke
 
@@ -128,6 +130,7 @@ def preview(
     native = invoke(
         project, resolution["knowledge"]["repository"], "preview",
         **({"require_preference_freshness": True} if require_preference_freshness else {}),
+        **({"budget": budget} if budget is not None else {}),
     )
     native_token = native.get("token")
     if not isinstance(native_token, str) or re.fullmatch(r"[a-f0-9]{64}", native_token) is None:
