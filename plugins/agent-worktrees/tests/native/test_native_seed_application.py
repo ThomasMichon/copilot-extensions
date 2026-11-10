@@ -175,11 +175,13 @@ def test_public_copilot(monkeypatch):
 def _qualify_public_application(monkeypatch, caller):
     from plugin_test_containment import TestSandbox
 
-    with TestSandbox(prefix="p-", dir=ROOT.parent) as directory:
+    sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+    with TestSandbox(prefix="p-", dir=sandbox) as directory:
         _qualify_native_application(Path(directory), monkeypatch, broker=caller)
 
 
 def test_public_application_workspace_is_outside_source_only_repository(tmp_path, monkeypatch):
+    from plugin_test_command_safety import private_mux_args
     from repository_policy import AgentHostingDenied, require_agent_hosting
 
     candidate = tmp_path / "candidate"
@@ -196,6 +198,7 @@ def test_public_application_workspace_is_outside_source_only_repository(tmp_path
         caller = root / "caller"
         caller.mkdir()
         assert require_agent_hosting(caller, operation="fixture launch").expose_agent is None
+        assert private_mux_args(root)
         observed.append((root, broker))
 
     monkeypatch.setitem(_qualify_public_application.__globals__, "_qualify_native_application", qualify)

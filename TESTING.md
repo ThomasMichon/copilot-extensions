@@ -2991,12 +2991,13 @@ case's clock before this distinct consumer even starts; this case is not a
 300-second Worktrees construction-performance check. The existing 300-second
 admission case and 300+180 installed execution-owner case remain unchanged,
 as do the native startup and cleanup limits.
-The public application cases allocate a short, fixture-owned sandbox beside
-the candidate checkout rather than nesting installed version slots beneath
-pytest's test-name directory. This also keeps their initial caller outside
-the source-only repository's agent-hosting boundary, without relaxing that
-policy. The real console entrypoint must still remain below MAX_PATH; no
-launcher alias or path assertion is substituted.
+The public application cases allocate a short, fixture-owned directory
+directly inside the runner's sandbox rather than nesting installed version
+slots beneath pytest's test-name directory. Their initial caller stays
+outside the source-only checkout while their mux namespace remains inside
+the runner's declared resource scope. Neither guard is relaxed. The real
+console entrypoint must still remain below MAX_PATH; no launcher alias or
+path assertion is substituted.
 
 Select `-k public_copilot` separately with those same prerequisites and bounds
 for the installed public TTY caller. Its real console entrypoint inherits an
