@@ -279,3 +279,24 @@ eligibility, shared deadlines and truthful guard-publication receipts. The
 real Manager registration form additionally passes against the updated native
 owner. The earlier four-case reproduction remains a failing-before result,
 not a passed packet.
+
+## Registry-source indirection correction
+
+A later review asks for assessment of a registry symlink. The real CLI
+reproduction confirms that the new operation accepted preview and reported
+successful apply after replacing the link while leaving its backing registry
+unchanged. Two additional controls cover indirection introduced after preview
+and immediately before the guarded write.
+
+The new operation now reuses the native preference owner's existing source
+fingerprint check during selection and immediately before persistence. It
+returns the existing `indirect-source` refusal and preserves the link and
+backing bytes. Ordinary registry writers and the shared fingerprint
+implementation are unchanged; no new protocol or source authority is added.
+
+All 36 native registration controls pass with actual file symlinks, including
+the three new source-indirection cases. The real Manager form also passes
+against the updated native owner. An earlier attempt stopped during dependency
+preparation because documentation edits overlapped its source snapshot; no tests
+ran in that attempt. The passing run held all source inputs stable through
+preparation, execution and cleanup.

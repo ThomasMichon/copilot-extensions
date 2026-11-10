@@ -19,7 +19,9 @@ import yaml
 from . import config as cfg, inrepo_config_source, project_state, repos
 from .git_repository_environment import repository_identity_env
 from .repos_configuration import target
-from .repos_configuration_sources import ConfigurationError, defaults, identity, mapping, resource_name
+from .repos_configuration_sources import (
+    ConfigurationError, defaults, fingerprint, identity, mapping, resource_name,
+)
 from .repos_registry_transaction import RegistryConflictError, registry_lock, write_checked
 
 
@@ -110,6 +112,7 @@ def _selection(project: str, name: str, path: str, branch: str, account: str, bu
         or not binding_names_supported(project, name) or name == project
     ):
         raise ConfigurationError("invalid-registration-name", "Choose distinct exact harness and knowledge names.")
+    fingerprint([repos._repos_yaml_path()])
     registry = repos.read_registry(strict=True)
     if project not in registry.repos:
         raise ConfigurationError("context-not-registered", "The selected harness is not canonically registered.")
@@ -204,6 +207,7 @@ def apply(project: str, name: str, path: str, branch: str, account: str, token: 
 
             def write():
                 nonlocal attempted, committed
+                fingerprint([repos._repos_yaml_path()])
                 attempted = True
                 write_checked(
                     repos._repos_yaml_path(), registry,

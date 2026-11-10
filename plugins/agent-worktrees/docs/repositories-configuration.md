@@ -119,6 +119,9 @@ registry lock, and uses the existing compare-before-replace writer. Unrelated
 registry metadata is preserved. A concurrent registry, configuration, binding,
 checkout or origin change requires a new preview; existing registrations are
 never overwritten or reclassified.
+Like native preference editing, selection and the final write reject registry
+source indirection. A symlinked registry requires inspection by its owner;
+registration never replaces that link while leaving its backing source unchanged.
 
 Successful return means registration and its normal protection publication:
 a new non-agent `class: knowledge` entry, normal registry/publication lock

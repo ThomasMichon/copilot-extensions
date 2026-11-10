@@ -360,6 +360,60 @@ def test_local_knowledge_registration_requires_the_binding_owners_worktree_class
     assert tree(native) == before
 
 
+def symlink_registry(native):
+    registry = repos._repos_yaml_path()
+    backing = native / "registry-source.yaml"
+    registry.rename(backing)
+    try:
+        registry.symlink_to(backing)
+    except OSError as error:
+        pytest.skip(f"native file symlinks are unavailable: {error}")
+    return backing
+
+
+def test_local_knowledge_registration_refuses_symlinked_registry_without_replacing_its_owner(native):
+    root = local_knowledge(native)
+    backing = symlink_registry(native)
+    registry = repos._repos_yaml_path()
+    before = tree(native)
+    fields = ("--checkout-path", str(root), "--default-branch", "main")
+    proposed = request("knowledge-register-preview", *fields, name="local-knowledge")
+    if proposed.returncode == 0:
+        completed = request(
+            "knowledge-register-apply", *fields, "--preview-token",
+            json.loads(proposed.stdout)["token"], name="local-knowledge",
+        )
+        assert completed.returncode, "Registration replaced an indirect registry and reported persistence."
+    assert proposed.returncode == 1
+    assert json.loads(proposed.stdout)["code"] == "indirect-source"
+    assert registry.is_symlink() and backing.read_bytes() == before[str(backing.relative_to(native))]
+    assert tree(native) == before
+
+
+@pytest.mark.parametrize("phase", ["before-apply", "before-write"])
+def test_local_knowledge_registration_rechecks_registry_indirection(native, monkeypatch, phase):
+    from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
+    before = repos._repos_yaml_path().read_bytes()
+    if phase == "before-apply":
+        backing = symlink_registry(native)
+    else:
+        original = guarded_anchors.managed_write
+        backing = native / "registry-source.yaml"
+
+        def redirected(write, **kwargs):
+            symlink_registry(native)
+            return original(write, **kwargs)
+
+        monkeypatch.setattr(guarded_anchors, "managed_write", redirected)
+    with pytest.raises(ConfigurationError) as failure:
+        registration.apply("sample", "local-knowledge", str(root), "main", "", token)
+    assert failure.value.code == "indirect-source"
+    assert repos._repos_yaml_path().is_symlink() and backing.read_bytes() == before
+
+
 @pytest.mark.parametrize("invalid", [
     "case-collision", "path-collision", "identity-collision", "descendant", "secret-origin", "relative", "indirect-metadata",
 ])
