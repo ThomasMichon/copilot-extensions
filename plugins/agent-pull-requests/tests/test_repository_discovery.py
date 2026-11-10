@@ -575,3 +575,34 @@ def test_reopening_evidence_from_wait_updates_known_departed_summary_even_if_inv
     assert not result["member"] and reads == [33]
     assert any(event["number"] == 33 and event["kind"] == "change"
                for event in document(store)["events"])
+
+
+def test_qualified_wait_is_serviced_before_unrelated_second_probe(tmp_path, monkeypatch):
+    store, identities, bindings = selected(tmp_path)
+    now = [100.0]
+    store.clock = lambda: now[0]
+    scope = ConsumerScope("first", identities[0].key, identities[0].repo)
+    store.execute(scope, "register", {
+        "request_id": "first-short", "issued_at": 100, "deadline_at": 105,
+        "number": 7, "until": ("merged",),
+    }, **authority(store))
+    order = []
+    actual = observation.qualify_native
+    def qualify(binding, **kwargs):
+        actual(binding, **kwargs)
+        order.append(binding.repository_identity.provider)
+        if binding.account == identities[1].key:
+            now[0] += 10
+    monkeypatch.setattr(observation, "qualify_native", qualify)
+    monkeypatch.setattr(observation, "fetch_inventory", lambda *_a, **_kw: {
+        "outcome": "complete", "numbers": [], "pages": 1, "error": "",
+    })
+    def fetch(*_args, **_kwargs):
+        order.append("snapshot")
+        return snapshot(identities[0], pr_state="closed", merged=True)
+    monkeypatch.setattr(observation, "fetch_snapshot", fetch)
+    owner = ReplayObserver(store, bindings=bindings)
+    owner.cycle(expires_at=160)
+    event = store.execute(scope, "pending", {}, **authority(store))["events"][0]
+    assert not event["timed_out"] and event["transitions"] == ["merged"]
+    assert order == ["github", "snapshot", "gitea"]

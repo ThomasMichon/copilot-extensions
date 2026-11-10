@@ -129,6 +129,17 @@ class ReplayObserver:
         def check():
             self.store.check_current(expires_at, checkpoint)
 
+        prepared = {}
+
+        def capture(target, snapshot):
+            key = (target.account, target.repo, target.number)
+            try:
+                prepared[key] = normalized(
+                    snapshot, self.repositories.identities[key[0]], target.number,
+                ) if snapshot is not None else None
+            except (ValueError, TypeError):
+                prepared[key] = None
+
         for binding in self.bindings.values():
             if binding.repository_identity is None:
                 continue
@@ -143,23 +154,15 @@ class ReplayObserver:
                     "outcome": "unavailable", "numbers": [], "pages": 0,
                     "error": "qualification_unavailable",
                 }
-        prepared = {}
-
-        def capture(target, snapshot):
-            key = (target.account, target.repo, target.number)
-            try:
-                prepared[key] = normalized(
-                    snapshot, self.repositories.identities[key[0]], target.number,
-                ) if snapshot is not None else None
-            except (ValueError, TypeError):
-                prepared[key] = None
-
-        current = [target for target in waiting if (target.account, target.repo) in qualified]
-        result = self._consume(current, on_read=capture, **authority)
-        if result["status"] != "observed":
-            return result
-        for name in totals:
-            totals[name] += result[name]
+                continue
+            current = [target for target in waiting if (
+                target.account, target.repo
+            ) == (binding.account, binding.repo)]
+            result = self._consume(current, on_read=capture, **authority)
+            if result["status"] != "observed":
+                return result
+            for name in totals:
+                totals[name] += result[name]
         for binding in self.bindings.values():
             if (binding.account, binding.repo) not in qualified:
                 continue
