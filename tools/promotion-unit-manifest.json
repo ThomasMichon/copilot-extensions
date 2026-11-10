@@ -4946,7 +4946,7 @@
         "libs/agent-procutil/tests/sdk_desktop_win32.py": "768228e5e275d316b744386349b27c7f43b9aa6d06455ffeadf40e5b9e60cc3b",
         "libs/agent-procutil/tests/sdk_visibility.py": "bd8c4dfcf78a732029828960da6ecb6c35c1b3060bf237fd5322f229384c953e",
         "libs/agent-procutil/tests/sdk_visibility_cases.py": "6cf438b387e7123eca6baeec1fed5d14e4297a1c336f029de4ec66dc99ad2972",
-        "libs/agent-procutil/tests/sdk_visibility_sources.py": "46ff1f4a9bba97b72dda4a291601f97b678a2f97383555ae54c15a96d31accca",
+        "libs/agent-procutil/tests/sdk_visibility_sources.py": "cb8a1706aee57a21c7b12d9133dd97124311a4403cab4f8fbe87805e789546dd",
         "libs/agent-procutil/tests/test_daemon_lifecycle_deadline.py": "c592f410eea4bb8af26afe89f20bc68ee37e61f99f8e464d391777ae66e7e256",
         "libs/agent-procutil/tests/test_daemon_shell_lifetime_native.py": "ccfe54ab6c03376318535cd379a24b08ad6368aa25964bab6f3d4e498cbf11e2",
         "libs/agent-procutil/tests/test_shell_caller_owned_native.py": "a1dfaf794e7eee7792ec287ea329366786de11fda8bf4c3c83de89d482b4def2",
