@@ -69,6 +69,7 @@ def _failure_evidence(root):
         ("seal-start-census.json", 8 << 10), ("install-manager.custody.json", 4 << 10),
         ("install-engine.custody.json", 4 << 10), ("cmd.terminal.txt", 32 << 10),
         ("powershell.terminal.txt", 32 << 10),
+        ("cmd.processes.json", 8 << 10), ("powershell.processes.json", 8 << 10),
     ):
         path = root / "diagnostics" / name
         if not path.exists() or remaining < 1024:
@@ -496,11 +497,37 @@ def _project_entry_command(shell, stub):
     return [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(stub)]
 
 
+def _installed_picker(console, manager_python, engine_python, observations):
+    if not _picker_rendered(console.output):
+        return None
+    descendants = console.pin_descendants()
+    pinned = {}
+    observations.clear()
+    expected = (manager_python.resolve(), engine_python.resolve())
+    for pid, (name, handle) in descendants.items():
+        try:
+            image = _live_image(console, handle)
+        except OSError as error:
+            error.add_note(f"Could not identify retained TTY descendant {pid} ({name})")
+            raise
+        live = image is not None and not console.exited(handle)
+        if len(observations) < 16:
+            observations[str(pid)] = {
+                "name": name, "image": str(image) if image is not None else None, "live": live,
+            }
+        if live and image.resolve() in expected:
+            pinned[str(image.resolve())] = {"pid": pid, "birth": console.birth(handle)}
+    return (descendants, pinned) if str(expected[0]) in pinned else None
+
+
 def _witness(shell, stub, env, project, diagnostics, manager_python, engine_python, *, control=False):
     argv = _project_entry_command(shell, stub)
     captured = b""
     with _owned_console(argv, env=env, cwd=project) as console:
         pinned = {}
+        descendants = {}
+        observations = {}
+        next_probe = 0.0
 
         def wait(predicate, label):
             deadline = min(time.monotonic() + 30, _WORK_DEADLINE or float("inf"))
@@ -515,8 +542,19 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
             raise TimeoutError(f"{shell}: no {label} within the native 30-second boundary")
 
         try:
-            wait(lambda: _picker_rendered(console.output), "rendered project Picker")
-            descendants = console.pin_descendants()
+            def installed_ready():
+                nonlocal descendants, pinned, next_probe
+                now = time.monotonic()
+                if now < next_probe:
+                    return False
+                next_probe = now + .1
+                selected = _installed_picker(console, manager_python, engine_python, observations)
+                if selected is None:
+                    return False
+                descendants, pinned = selected
+                return True
+
+            wait(installed_ready, "rendered project Picker")
             offers = []
             for path in Path(env["TEMP"]).glob("ce-terminal-*/request.json"):
                 from agent_procutil._terminal_offer import validate
@@ -526,20 +564,6 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
                     offers.append(offer)
             if not offers:
                 raise RuntimeError("Interactive shell bypassed its native terminal capability admission")
-            for pid, (name, handle) in descendants.items():
-                try:
-                    image = _live_image(console, handle)
-                except OSError as error:
-                    error.add_note(f"Could not identify retained TTY descendant {pid} ({name})")
-                    raise
-                if image is not None and image.resolve() in (
-                    manager_python.resolve(), engine_python.resolve(),
-                ) and not console.exited(handle):
-                    pinned[str(image.resolve())] = {
-                        "pid": pid, "birth": console.birth(handle),
-                    }
-            if str(manager_python.resolve()) not in pinned:
-                raise RuntimeError("Rendered Picker is not running from its installed Manager")
             before = bytes(console.output)
             console.send(b"q")
             wait(lambda: "Leave the worktree picker?" in _visible(console.output[len(before):]),
@@ -570,6 +594,10 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
             captured = bytes(console.output)
             label = shell + ("-negative" if control else "")
             (diagnostics / (label + ".terminal.txt")).write_bytes(captured)
+            (diagnostics / (label + ".processes.json")).write_text(json.dumps({
+                "expected_manager": str(manager_python), "expected_engine": str(engine_python),
+                "observed": observations,
+            }), encoding="utf-8")
             if console.job is not None:
                 _confirm_job_empty(console.job, 5, label)
                 console.job = None
@@ -1047,6 +1075,64 @@ def test_picker_readiness_accepts_tab_casing_but_requires_project_and_alternate_
         b"\x1b[?1049hWorktree Manager\nWORKTREES",
     ):
         assert not _picker_rendered(output)
+
+
+def test_rendered_picker_waits_for_its_live_installed_process(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    manager, engine = tmp_path / "manager" / "python.exe", tmp_path / "engine" / "python.exe"
+    snapshots = iter(({1: ("engine", 11)}, {1: ("engine", 11), 2: ("manager", 22)}))
+    console = SimpleNamespace(
+        output=b"\x1b[?1049hWorktree Picker - tty-harness\nWORKTREES",
+        pin_descendants=lambda: next(snapshots), exited=lambda _handle: False,
+        birth=lambda handle: handle * 100,
+    )
+    monkeypatch.setitem(_installed_picker.__globals__, "_live_image",
+                        lambda _console, handle: engine if handle == 11 else manager)
+    observed = {}
+    assert _installed_picker(console, manager, engine, observed) is None
+    assert observed == {"1": {"name": "engine", "image": str(engine), "live": True}}
+    descendants, pinned = _installed_picker(console, manager, engine, observed)
+    assert descendants[2] == ("manager", 22)
+    assert pinned[str(manager.resolve())] == {"pid": 2, "birth": 2200}
+
+
+def test_rendered_picker_does_not_accept_foreign_or_exited_installed_image(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    manager, engine = tmp_path / "manager" / "python.exe", tmp_path / "engine" / "python.exe"
+    console = SimpleNamespace(
+        output=b"\x1b[?1049hWorktree Picker - tty-harness\nWORKTREES",
+        pin_descendants=lambda: {1: ("python.exe", 11)}, exited=lambda _handle: False,
+        birth=lambda _handle: 100,
+    )
+    owner = _installed_picker.__globals__
+    observed = {}
+    monkeypatch.setitem(owner, "_live_image", lambda *_: tmp_path / "foreign" / "python.exe")
+    assert _installed_picker(console, manager, engine, observed) is None
+    monkeypatch.setitem(owner, "_live_image", lambda *_: manager)
+    console.exited = lambda _handle: True
+    assert _installed_picker(console, manager, engine, observed) is None
+
+
+def test_rendered_picker_does_not_turn_live_image_query_error_into_pending(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    import pytest
+
+    console = SimpleNamespace(
+        output=b"\x1b[?1049hWorktree Picker - tty-harness\nWORKTREES",
+        pin_descendants=lambda: {1: ("python.exe", 11)},
+    )
+    failure = PermissionError("still-live image unavailable")
+
+    def unreadable(*_):
+        raise failure
+
+    monkeypatch.setitem(_installed_picker.__globals__, "_live_image", unreadable)
+    with pytest.raises(PermissionError) as caught:
+        _installed_picker(console, tmp_path / "manager", tmp_path / "engine", {})
+    assert caught.value is failure
 
 
 def test_process_image_attribution_ignores_only_confirmed_exited_handles(monkeypatch):

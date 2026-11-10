@@ -726,6 +726,16 @@ the deadline cap. The same console-fixture file's explicitly selected T3
 handle with an injected image-query failure; it is not proof of the precise
 lifetime of a historical failing PID.
 
+Rendered output and installed process attribution share the original
+30-second readiness window. A rendered frame alone does not freeze one
+possibly incomplete descendant snapshot: the witness resamples at most every
+100 milliseconds until the live installed Manager image is pinned. Foreign
+images never satisfy readiness, and unreadable live handles still fail
+immediately. Failure diagnostics retain at most 16 observed image/name/live
+records, without command lines, inside the existing evidence size budget.
+The installed-process, keyboard, native-terminal-offer and cleanup assertions
+remain unchanged; the bounded wait is not a larger readiness deadline.
+
 The installed-core Manager lifecycle witness is explicitly selected separately:
 
 ```powershell
