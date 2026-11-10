@@ -124,6 +124,9 @@ function Read-NativePreToolText([string]$Path, [int]$Limit) {
 function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
     try {
         if ($Facts -isnot [Collections.IDictionary]) { return $false }
+        $writeTools = @(
+            'create', 'edit', 'str_replace', 'str_replace_editor', 'str_replace_based_edit_tool',
+            'write', 'write_file', 'insert', 'new_file', 'multi_edit')
         $writeArgs = [Collections.Generic.List[object]]::new()
         $cwd = $Payload.cwd
         if ($Payload.ContainsKey('toolCalls')) {
@@ -134,17 +137,17 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
             }
             foreach ($call in $calls) {
                 if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
-                    $call['name'] -cnotin @('create', 'edit', 'view', 'rg', 'glob')) { return $false }
+                    $call['name'] -cnotin ($writeTools + @('view', 'rg', 'glob'))) { return $false }
                 foreach ($key in $call.Keys) {
                     if ($key -cnotin @('name', 'args', 'id')) { return $false }
                 }
-                if ($call['name'] -cin @('create', 'edit')) { $writeArgs.Add($call['args']) }
+                if ($call['name'] -cin $writeTools) { $writeArgs.Add($call['args']) }
             }
             if (-not $Payload.ContainsKey('cwd')) { $cwd = $Payload.workingDirectory }
         } else {
             $name = $Payload.toolName
             if (-not $name) { $name = $Payload.tool_name }
-            if ($name -isnot [string] -or $name -cnotin @('create', 'edit')) { return $false }
+            if ($name -isnot [string] -or $name -cnotin $writeTools) { return $false }
             $writeArgs.Add($(if ($Payload.ContainsKey('toolArgs')) { $Payload.toolArgs } else { $Payload.tool_input }))
         }
         if (-not $writeArgs.Count -or $cwd -isnot [string] -or

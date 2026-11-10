@@ -3275,7 +3275,10 @@ contract tests also exercise each real guard's read decision, not just hashes.
 A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
-For prepared Windows membership, `create` and `edit` can also return natively
+For prepared Windows membership, the original guards' non-patch native write
+names (`create`, `edit`, `str_replace`, `str_replace_editor`,
+`str_replace_based_edit_tool`, `write`, `write_file`, `insert`, `new_file` and
+`multi_edit`) can also return natively
 when current Git metadata proves every target belongs to that same linked
 worktree. Targets include the original direct path aliases and one-level
 `edits`, `files` and `changes` entry aliases. Each structured list and each
