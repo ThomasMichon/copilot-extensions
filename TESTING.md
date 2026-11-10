@@ -5548,6 +5548,20 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+The actor-free `test_hourly_contributions.py` packet executes the canonical
+service contribution codec and collection policy with substituted native owners
+and stage/outcome vocabularies. Exact
+source/node admission covers owner/hour/unit/population refusals, delayed native
+evidence, missing duration statistics and strict JSON/version compatibility,
+plus task-authority preservation, independent namespaces, de-duplication and
+unsettled native custody.
+It starts no service or native actor. Dispatch's `tests/native/test_hourly_export.py`
+separately exercises producer-retained events, selected fixture package metadata
+and the normal Machines report/chart. Machines' selected
+`tests/native/test_service_report_cleanup.py` retains actual deadline, inherited
+pipe, output-limit, UTF-8 and native-settlement controls. Fixture installation
+admission is not deployed inventory, installed adoption or activation evidence.
+
 The project-routing controls distinguish the explicit `pr-watch diff` read
 from an unknown similarly named command. They exercise only the existing
 in-process routing predicate, with exact source/node admission; actual

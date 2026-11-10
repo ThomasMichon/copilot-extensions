@@ -112,7 +112,9 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   See [the telemetry preference contract](docs/portable-preferences.md#confirmed-retained-telemetry-defaults).
 - **Bounded local telemetry reports.** `health report` projects explicit local
   typed telemetry into 168 UTC-hour buckets and an optional static chart,
-  preserving unknown coverage. It starts no collector or periodic job and never
+  and conditionally collects explicit installed services' qualified hourly
+  contributions in separate namespaces, preserving unknown coverage.
+  It starts no collector or periodic job and never
   activates telemetry. See [the report contract](docs/health-report.md).
 - **Explicit hourly health storage.** `health record` confirms typed local
   observations into 168 absolute-hour slots; `health inspect` reports ages,
