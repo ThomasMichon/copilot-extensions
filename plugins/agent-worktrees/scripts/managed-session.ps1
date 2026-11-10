@@ -177,7 +177,8 @@ function Test-PreparedWorktreesContent {
 }
 
 function Test-PreparedManagedWorktreesSession {
-    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw, [ref]$Facts)
+    if ($null -ne $Facts) { $Facts.Value = $null }
     $stream = $null
     try {
         if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
@@ -355,6 +356,9 @@ function Test-PreparedManagedWorktreesSession {
                 $hasGitMarker = $true
             }
         }
+        if ($hasGitMarker -and $null -ne $Facts) {
+            $Facts.Value = @{ workspace = $workspace; registry = $registry; identity = $identity }
+        }
         return $hasGitMarker
     } catch {
         return $false
@@ -364,10 +368,13 @@ function Test-PreparedManagedWorktreesSession {
 }
 
 function Test-ManagedWorktreesSession {
-    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw, [ref]$Prepared)
+    param([Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw, [ref]$Prepared, [ref]$Facts)
     if ($null -ne $Prepared) { $Prepared.Value = $false }
-    if (Test-PreparedManagedWorktreesSession -Raw $Raw) {
+    if ($null -ne $Facts) { $Facts.Value = $null }
+    $nativeFacts = $null
+    if (Test-PreparedManagedWorktreesSession -Raw $Raw -Facts ([ref]$nativeFacts)) {
         if ($null -ne $Prepared) { $Prepared.Value = $true }
+        if ($null -ne $Facts) { $Facts.Value = $nativeFacts }
         return $true
     }
     $helper = Join-Path $PSScriptRoot 'managed_session.py'
