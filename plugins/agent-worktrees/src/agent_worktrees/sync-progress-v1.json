@@ -1,0 +1,8 @@
+{
+  "contract": "agent-worktrees.sync-progress",
+  "version": 1,
+  "envelope": "d4",
+  "operations": ["sync"],
+  "options": ["--json", "--stream"],
+  "terminal_result": true
+}
