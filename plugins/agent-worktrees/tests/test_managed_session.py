@@ -965,6 +965,14 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "batch-null-args", "batch-extra-key", "batch-unknown", "batch-empty",
     "batch-not-list", "batch-limit", "batch-oversized", "batch-read-only",
     "batch-working-directory", "batch-real-policy", "batch-malformed",
+    "batch-shadowed-keys",
+    "batch-read-only-mixed", "cell-batch-read-only",
+    "batch-read-only-limit", "batch-read-only-overflow", "batch-read-only-protected",
+    "batch-read-only-unknown", "batch-read-only-shell", "batch-read-only-malformed",
+    "batch-read-only-extra-key", "batch-read-only-missing-dependencies",
+    "batch-read-only-forms-drift", "batch-read-only-old-admission",
+    "batch-read-only-working-directory", "batch-read-only-real-policy",
+    "cell-batch-read-only-real-policy",
     "cell-batch-mixed", "cell-batch-protected",
     "structured-files", "structured-changes", "structured-only", "structured-json",
     "structured-aliases", "structured-duplicates", "structured-limit",
@@ -994,7 +1002,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         case = case.removeprefix("cell-")
     real_policy = case in {
         "real-policy", "batch-real-policy", "structured-real-policy", "write-name-real-policy",
-        "patch-real-policy",
+        "patch-real-policy", "batch-read-only-real-policy",
     }
     executable = shutil.which(shell)
     if not executable:
@@ -1210,6 +1218,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             last["args"] = None
         elif case == "batch-extra-key":
             last["cwd"] = str(workspace)
+        elif case == "batch-shadowed-keys":
+            last.update(Keys=[], cwd=str(workspace))
         elif case == "batch-unknown":
             last["name"] = "unknown"
         elif case == "batch-malformed":
@@ -1224,6 +1234,32 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             event["toolCalls"] = [{"name": "view", "args": {}}]
         elif case == "batch-working-directory":
             event["workingDirectory"] = event.pop("cwd")
+        if case.startswith("batch-read-only-"):
+            event["toolName"] = "powershell"
+            event["toolArgs"] = {"command": "Set-Content efforts/private.md fixture"}
+            event["toolCalls"] = [
+                {"name": "view", "args": {"path": "efforts/private.md", "command": "write-looking data"}},
+                {"name": "rg", "args": json.dumps({"pattern": "quoted'\"\\text"})},
+                {"name": "glob", "args": None},
+            ]
+            if case in {"batch-read-only-limit", "batch-read-only-overflow"}:
+                event["toolCalls"] = [event["toolCalls"][0]] * (
+                    129 if case == "batch-read-only-overflow" else 128
+                )
+            elif case == "batch-read-only-protected":
+                event["toolCalls"].append({"name": "edit", "args": {"path": "efforts/private.md"}})
+            elif case == "batch-read-only-unknown":
+                event["toolCalls"][-1]["name"] = "unknown"
+            elif case == "batch-read-only-shell":
+                event["toolCalls"][-1] = {
+                    "name": "powershell", "args": {"command": "Get-Content source.py"},
+                }
+            elif case == "batch-read-only-malformed":
+                event["toolCalls"][-1] = None
+            elif case == "batch-read-only-extra-key":
+                event["toolCalls"][-1].update(Keys=[], cwd=str(workspace))
+            elif case == "batch-read-only-working-directory":
+                event["workingDirectory"] = event.pop("cwd")
     env = environment(tmp_path, workspace)
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
@@ -1287,7 +1323,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         case.startswith(("personal-state", "protected-write-name-")) or case in PATCH_PROTECTED_CASES or case in {
             "anchor-cwd", "anchor-target", "delegated", "patch-anchor",
             "batch-protected", "batch-multiple-targets", "batch-structured",
-            "structured-protected",
+            "structured-protected", "batch-read-only-protected",
         }
     ), decisions
     map_path = reader.map_path(workspace, registry)
@@ -1346,12 +1382,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         shutil.copyfile(SCRIPTS / name, scripts / name)
     drift = {
         "guard-drift": "anchor_write_guard.py", "reader-drift": "guarded_anchor_map.py",
-        "forms-drift": "tool_call_forms.py",
+        "forms-drift": "tool_call_forms.py", "batch-read-only-forms-drift": "tool_call_forms.py",
     }.get(case)
     if drift:
         with (scripts / drift).open("a", encoding="utf-8") as output:
             output.write("\n# changed source\n")
-    elif case == "missing-dependencies":
+    elif case in {"missing-dependencies", "batch-read-only-missing-dependencies"}:
         policy = scripts / "hook-read-policy.json"
         value = json.loads(policy.read_text(encoding="utf-8"))
         value.pop("nativeWriteDependencies", None)
@@ -1391,7 +1427,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 "        throw 'Unexpected inventory filesystem probe'\n    }\n"
                 "    return & $script:originalPreparedPath $Path\n}\n",
             )
-    if case == "old-admission":
+    if case in {"old-admission", "batch-read-only-old-admission"}:
         admission = scripts / "managed-session.ps1"
         admission.write_text(
             admission.read_text(encoding="utf-8").replace(
@@ -1399,8 +1435,13 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             )
             + "\nfunction Test-ManagedWorktreesSession {\n"
             "    param([Parameter(Mandatory = $true)][string]$Raw, [ref]$Prepared)\n"
-            "    return Test-OriginalManagedWorktreesSession -Raw $Raw -Prepared $Prepared\n"
-            "}\n",
+            + (
+                "    return Test-OriginalManagedWorktreesSession -Raw $Raw -Prepared $Prepared\n"
+                if case == "old-admission" else
+                "    $admitted = Test-OriginalManagedWorktreesSession -Raw $Raw\n"
+                "    if ($null -ne $Prepared) { $Prepared.Value = $false }\n"
+                "    return $admitted\n"
+            ) + "}\n",
             encoding="utf-8",
         )
     with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
@@ -1490,6 +1531,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "structured-aliases", "structured-duplicates", "structured-limit", "batch-structured-safe",
         "structured-real-policy",
         "batch-target-limit",
+        "batch-read-only", "batch-read-only-mixed", "batch-read-only-limit",
+        "batch-read-only-working-directory", "batch-read-only-real-policy",
     })
     assert observed.exists() is policy_required, result.stdout
     if policy_required:
@@ -1515,7 +1558,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         protected = {**event, "toolArgs": {"path": "efforts/private.md"}}
         if case == "patch-real-policy":
             protected["toolArgs"] = {"input": patch("Update File: safe.py", "Move to: efforts/private.md")}
-        if case == "batch-real-policy":
+        if case in {"batch-real-policy", "batch-read-only-real-policy"}:
             protected["toolCalls"] = [
                 *event["toolCalls"][:-1],
                 {"name": "edit", "args": {"path": "efforts/private.md"}},

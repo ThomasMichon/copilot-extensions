@@ -34,9 +34,9 @@ jobs:
       matrix:
         include:
           - packet: admission-and-safe
-            select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell) and not (structured or write-name or patch))"
+            select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell or batch-read-only) and not (structured or write-name or patch))"
           - packet: fallback
-            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or structured or write-name or patch)"
+            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or batch-read-only or structured or write-name or patch)"
           - packet: structured
             select: "registered_file_local_write_reuses_original_guard_facts and structured and not (write-name or (patch and not structured-patch))"
           - packet: write-names
