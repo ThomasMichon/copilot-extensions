@@ -12,6 +12,8 @@ from .watch_contract import PRSnapshot
 from .watch_provider import command_path, fetch_snapshot
 from .watch_replay import ConsumerScope, ObservationTarget, ReplayEventTooLarge
 from .watch_replay_store import ReplayStore
+from .repository_contract import RepositoryIdentity
+from pathlib import Path
 
 _MAX_READS = 4
 _CHECK_INTERVAL = 0.1
@@ -26,10 +28,24 @@ class NativeObservationBinding:
     command: str
     prefix: tuple[str, ...] | None = None
     credential_command: tuple[str, ...] | None = None
+    repository_identity: RepositoryIdentity | None = None
+    inventory_config: str | None = None
 
     def __post_init__(self) -> None:
         ConsumerScope("observer", self.account, self.repo)
         command_path(self.command)
+        if self.repository_identity is not None:
+            if (
+                type(self.repository_identity) is not RepositoryIdentity
+                or self.repository_identity.key != self.account
+                or self.repository_identity.repo != self.repo
+                or self.credential_command is None
+                or not isinstance(self.inventory_config, str)
+                or not Path(self.inventory_config).is_absolute()
+            ):
+                raise ValueError("repository observation requires a full selected native read binding")
+        elif self.inventory_config is not None:
+            raise ValueError("inventory configuration requires repository observation selection")
         for argv in (self.prefix, self.credential_command):
             if argv is not None:
                 if (

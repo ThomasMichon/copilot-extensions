@@ -279,8 +279,7 @@
       "b:transport.py::spawn_local::create_subprocess_exec": 1,
       "b:transport.py::spawn_raw::create_subprocess_exec": 1,
       "cd:session_host/launcher.py::_spawn_child::create_subprocess_exec": 1,
-      "cd:headed/auth_child.py::AuthPaneChild.launch::Popen": 1,
-      "cd:headed/launcher.py::_run_headed_once::Popen": 1,
+      "cd:headed/launcher.py::run_headed::Popen": 1,
       "cd:headed/caller.py::execute::Popen": 1,
       "k:stdio_pump.py::exec_stdio::Popen": 1,
       "s:copilot_detach.py::cmd_attached::Popen": 1,
@@ -362,7 +361,6 @@
       "t:clean-room/scenarios/plugin-process-hygiene-convergence/fixtures/plugin_process_hygiene_convergence.py::_spawn::Popen": 1
     },
     "caller-contained": {
-      "cd:headed/auth_wait.py::AuthWaitReceiver.serve::start_server": 1,
       "v:authenticated_curl.py::execute::create_subprocess_exec": 1,
       "r:plugins/agent-index/scripts/historical_registration_owner.py::NativeTaskOwner.__enter__::Popen": 1,
       "t:core_native_feed_resolution.py::_run_uv::Popen": 1,

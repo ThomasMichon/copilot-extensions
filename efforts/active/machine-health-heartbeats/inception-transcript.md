@@ -63,3 +63,14 @@ machine-specific overrides. It does not authorize automatically replacing a
 binding, registering/cloning a repository, selecting credentials or activating
 the carrier. The [Phase 4 amendment](preferences.md) separates the requested
 behavior from the proposed schema and implementation sequence.
+
+## Installable-service contribution follow-up
+
+On 2026-11-09 the operator resumed this effort:
+
+> Oh perfect. This means you can get back on-track with that effort. We'll ned a by-convention way that installable services can surface their hourly data payloads and telemetry, to be properly aggregated into the reports.
+
+This adds a reusable service contribution/discovery requirement to the
+continuing health/report flow. It does not remove the earlier configuration-only
+activation boundary. The [service contribution amendment](service-contributions.md)
+separates the required outcome from agent-recommended protocol and sequencing.

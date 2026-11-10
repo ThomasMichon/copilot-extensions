@@ -34,16 +34,16 @@ def _runtime_agent_plugins() -> list[tuple[str, Path, dict[str, Any]]]:
     for entry in marketplace["plugins"]:
         name = entry["name"]
         plugin = REPO / entry["source"]
+        manifest = plugin / "payload-invocation.json"
         if (
             name.startswith("agent-")
-            and (plugin / "pyproject.toml").is_file()
-            and (plugin / "payload-invocation.json").is_file()
+            and (manifest.exists() or manifest.is_symlink())
         ):
             plugins.append(
                 (
                     name,
                     plugin,
-                    generator.load_manifest(plugin / "payload-invocation.json"),
+                    generator.load_manifest(manifest),
                 )
             )
     return plugins
@@ -61,36 +61,32 @@ def test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary() -> N
         if not name.startswith("agent-"):
             continue
         plugin = REPO / entry["source"]
-        if not (plugin / "pyproject.toml").is_file():
-            continue
-
         manifest = plugin / "payload-invocation.json"
-        if not manifest.is_file():
-            failures.append(f"{name}: missing payload-invocation.json")
+        if not manifest.exists() and not manifest.is_symlink():
             continue
         try:
             generated = generator.expected_files(manifest)
-        except ValueError as error:
+            canonical_errors = generator.source_check(manifest)
+            if canonical_errors:
+                failures.extend(f"{name}: {error}" for error in canonical_errors)
+                continue
+            data = generator.load_manifest(manifest)
+        except (OSError, ValueError) as error:
             failures.append(f"{name}: invalid payload manifest: {error}")
             continue
-        for path, expected in generated.items():
-            try:
-                actual = path.read_text(encoding="utf-8")
-            except OSError:
-                actual = ""
-            if actual != expected:
-                failures.append(
-                    f"{name}: missing or stale generated file "
-                    f"{path.relative_to(REPO).as_posix()}"
-                )
 
-        data = generator.load_manifest(manifest)
+        # Promotion owns materialized equality; Dev validates canonical plans.
         installer = str(data["installer"])
         for suffix in ("sh", "ps1"):
+            catalog = plugin / "scripts" / f"emit-command-catalog.{suffix}"
+            if catalog not in generated:
+                failures.append(
+                    f"{name}: missing planned generated catalog "
+                    f"{catalog.relative_to(REPO).as_posix()}"
+                )
             required_scripts = [
                 plugin / "scripts" / f"{installer}.{suffix}",
                 plugin / "scripts" / f"bootstrap-check.{suffix}",
-                plugin / "scripts" / f"emit-command-catalog.{suffix}",
             ]
             if name == "agent-pull-requests":
                 required_scripts.append(
@@ -162,6 +158,177 @@ def test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary() -> N
                     )
 
     assert not failures, "\n" + "\n".join(failures)
+
+
+@pytest.fixture
+def canonical_agent_roster(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, dict[Path, str | bytes]]:
+    plugin = tmp_path / "plugins" / "agent-example"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    marketplace = tmp_path / ".github" / "plugin" / "marketplace.json"
+    marketplace.parent.mkdir(parents=True)
+    marketplace.write_text(json.dumps({
+        "plugins": [{"name": "agent-example", "source": "plugins/agent-example"}],
+    }), encoding="utf-8")
+    (plugin / "pyproject.toml").write_text("", encoding="utf-8")
+    manifest = plugin / "payload-invocation.json"
+    manifest.write_text(json.dumps({
+        "schema": "copilot-extensions.payload-invocation", "version": 1,
+        "command": "agent-example", "module": "agent_example",
+        "runtimeRoot": ".agent-example",
+        "noSelfProvisionEnv": "AGENT_EXAMPLE_NO_SELFPROVISION",
+        "purpose": "Exercise an example runtime",
+    }), encoding="utf-8")
+    for stem in ("install", "bootstrap-check", "write-session-guidance"):
+        for suffix in ("sh", "ps1"):
+            (scripts / f"{stem}.{suffix}").write_text("", encoding="utf-8")
+    (plugin / "plugin.json").write_text(
+        json.dumps({"hooks": "hooks.json"}), encoding="utf-8",
+    )
+    (plugin / "hooks.json").write_text(json.dumps({
+        "hooks": {"sessionStart": [
+            {"type": "command",
+             "bash": f"$COPILOT_PLUGIN_ROOT/scripts/{stem}.sh",
+             "powershell": f"$COPILOT_PLUGIN_ROOT/scripts/{stem}.ps1"}
+            for stem in ("bootstrap-check", "write-session-guidance")
+        ]},
+    }), encoding="utf-8")
+    outputs: dict[Path, str | bytes] = {
+        scripts / "emit-command-catalog.sh": "#!/bin/sh\n",
+        scripts / "emit-command-catalog.ps1": "# canonical catalog\n",
+        scripts / "canonical.py": "VALUE = 1\n",
+        scripts / "toolkit.pyz": b"\xff\x00canonical-binary",
+    }
+
+    def expected_files(
+        path: Path, *, canonical_root: Path | None = None,
+    ) -> dict[Path, str | bytes]:
+        assert path == manifest
+        return outputs
+
+    monkeypatch.setitem(globals(), "REPO", tmp_path)
+    monkeypatch.setattr(generator, "expected_files", expected_files)
+    return plugin, outputs
+
+
+@pytest.mark.parametrize("stale", [False, True])
+def test_runtime_agent_roster_uses_plans_without_reading_generated_mirrors(
+    canonical_agent_roster: tuple[Path, dict[Path, str | bytes]],
+    monkeypatch: pytest.MonkeyPatch, stale: bool,
+) -> None:
+    _plugin, outputs = canonical_agent_roster
+    if stale:
+        for path in outputs:
+            path.write_bytes(b"\xffstale")
+    read_text = Path.read_text
+
+    def read_authored(
+        path: Path, encoding: str | None = None, errors: str | None = None,
+    ) -> str:
+        assert path not in outputs, "generated mirrors are not canonical inputs"
+        return read_text(path, encoding=encoding, errors=errors)
+
+    monkeypatch.setattr(Path, "read_text", read_authored)
+    test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary()
+
+
+@pytest.mark.parametrize("bad_plan", ["python", "escape", "catalog"])
+def test_runtime_agent_roster_refuses_invalid_canonical_plans(
+    canonical_agent_roster: tuple[Path, dict[Path, str | bytes]],
+    bad_plan: str,
+) -> None:
+    plugin, outputs = canonical_agent_roster
+    if bad_plan == "python":
+        outputs[plugin / "scripts" / "canonical.py"] = "def broken(\n"
+        diagnostic = "invalid canonical generated Python"
+    elif bad_plan == "escape":
+        outputs[plugin.parent / "escape.py"] = "VALUE = 1\n"
+        diagnostic = "generated output escapes its payload"
+    else:
+        del outputs[plugin / "scripts" / "emit-command-catalog.ps1"]
+        diagnostic = "missing planned generated catalog"
+    with pytest.raises(AssertionError, match=diagnostic):
+        test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary()
+
+
+@pytest.mark.parametrize("missing", [
+    "scripts/install.ps1", "scripts/bootstrap-check.sh",
+    "scripts/write-session-guidance.ps1", "hooks.json",
+])
+def test_runtime_agent_roster_preserves_authored_source_requirements(
+    canonical_agent_roster: tuple[Path, dict[Path, str | bytes]],
+    missing: str,
+) -> None:
+    plugin, _outputs = canonical_agent_roster
+    (plugin / missing).unlink()
+    with pytest.raises(AssertionError, match="missing"):
+        test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary()
+
+
+@pytest.mark.parametrize("python_project", [False, True])
+def test_runtime_agent_roster_allows_undeclared_applications(
+    canonical_agent_roster: tuple[Path, dict[Path, str | bytes]],
+    python_project: bool,
+) -> None:
+    plugin, _outputs = canonical_agent_roster
+    (plugin / "payload-invocation.json").unlink()
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "agent-example"}), encoding="utf-8",
+    )
+    (plugin / "hooks.json").unlink()
+    if not python_project:
+        (plugin / "pyproject.toml").unlink()
+    assert _runtime_agent_plugins() == []
+    test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary()
+
+
+@pytest.mark.parametrize("bad_plan", [False, True])
+def test_runtime_agent_roster_validates_declared_thin_plugins(
+    canonical_agent_roster: tuple[Path, dict[Path, str | bytes]],
+    bad_plan: bool,
+) -> None:
+    plugin, outputs = canonical_agent_roster
+    (plugin / "pyproject.toml").unlink()
+    assert [(name, path) for name, path, _data in _runtime_agent_plugins()] == [
+        ("agent-example", plugin),
+    ]
+    if bad_plan:
+        outputs[plugin / "scripts" / "canonical.py"] = "def broken(\n"
+        with pytest.raises(AssertionError, match="invalid canonical generated Python"):
+            test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary()
+    else:
+        test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary()
+
+
+@pytest.mark.parametrize("declaration", ["json", "schema", "directory", "dangling"])
+def test_runtime_agent_roster_refuses_invalid_present_declarations(
+    canonical_agent_roster: tuple[Path, dict[Path, str | bytes]],
+    monkeypatch: pytest.MonkeyPatch, declaration: str,
+) -> None:
+    plugin, _outputs = canonical_agent_roster
+    (plugin / "pyproject.toml").unlink()
+    manifest = plugin / "payload-invocation.json"
+    if declaration == "json":
+        manifest.write_text("{", encoding="utf-8")
+    elif declaration == "schema":
+        manifest.write_text(json.dumps({"schema": "invalid"}), encoding="utf-8")
+    else:
+        manifest.unlink()
+        if declaration == "directory":
+            manifest.mkdir()
+        else:
+            is_symlink = Path.is_symlink
+
+            def declared_link(path: Path) -> bool:
+                return path == manifest or is_symlink(path)
+
+            monkeypatch.setattr(Path, "is_symlink", declared_link)
+    with pytest.raises((OSError, ValueError)):
+        _runtime_agent_plugins()
+    with pytest.raises(AssertionError, match="invalid payload manifest"):
+        test_runtime_agent_plugins_bootstrap_and_write_their_command_glossary()
 
 
 def test_runtime_agent_roster_declares_output_free_session_start() -> None:

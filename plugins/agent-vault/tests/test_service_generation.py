@@ -25,6 +25,61 @@ from zdd.private_peer import PeerProcess
 from single_instance_lease import AlreadyRunningError
 
 
+@pytest.mark.parametrize("source,client_port,explicit,expected", [
+    ("default", 19999, None, 0),
+    ("env", 4242, None, 4242),
+    ("repo", 4242, None, 4242),
+    ("default", 19999, 4343, 4343),
+    ("default", 19999, 0, 0),
+])
+def test_direct_generation_start_applies_listener_default_before_binding(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    source: str, client_port: int, explicit: int | None, expected: int,
+) -> None:
+    from agent_vault import config, service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setenv(config.BIND_PORT_ENV, "0")
+    monkeypatch.setattr(
+        config, "resolve_context",
+        lambda: SimpleNamespace(port=client_port, sources={"port": source}),
+    )
+    controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
+
+    def stop_before_binding() -> None:
+        raise AlreadyRunningError("synthetic generation; no endpoint may be opened", holder_pid=123)
+
+    controller.generation_lease = SimpleNamespace(acquire=stop_before_binding)
+    asyncio.run(controller.start(explicit))
+    assert controller.requested_port == expected
+    assert not controller.servers and not controller.pipes
+
+
+def test_direct_generation_rejects_invalid_bind_default_before_custody(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_vault import config, service
+
+    monkeypatch.setattr(service, "run_dir", lambda: tmp_path / "run")
+    monkeypatch.setattr(generation, "home_dir", lambda: tmp_path)
+    monkeypatch.setenv(config.BIND_PORT_ENV, "-1")
+    monkeypatch.setattr(
+        config, "resolve_context",
+        lambda: SimpleNamespace(port=19999, sources={"port": "default"}),
+    )
+    controller = generation.ServiceGeneration(
+        SimpleNamespace(_runtime_can_work=True), SimpleNamespace(), [], [],
+    )
+    controller.generation_lease = SimpleNamespace(
+        acquire=lambda: pytest.fail("invalid default must not acquire generation custody"),
+    )
+    with pytest.raises(ValueError, match="AGENT_VAULT_BIND_PORT"):
+        asyncio.run(controller.start(None))
+    assert controller.service._runtime_can_work
+    assert not controller.servers and not controller.pipes
+
+
 def test_retirement_releases_writer_before_nonsettling_transport_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

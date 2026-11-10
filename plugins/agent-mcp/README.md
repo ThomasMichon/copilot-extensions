@@ -69,9 +69,11 @@ accepted as process identity.
 
 agent-mcp is the **standalone** MCP-wrapper path: it is launched directly from a
 Copilot agent's `mcp-servers` entry, imports no agent-bridge code, uses no
-worktree/repo resolver, and needs no resident daemon. The optional `serve`
-command only warms repeated shell `call`/materialized-stub usage; it is not part
-of normal agent wiring.
+worktree/repo resolver, and needs no resident daemon. The optional `serve` host
+can warm repeated shell `call`/materialized-stub usage and stdio sessions.
+Pre-attach contention with another selected-generation startup takes the normal
+in-process bridge fallback after rechecking physical selection. It does not
+steal the cutover lease or replay an already-attached session.
 
 Windows setup probes optional Python-launcher versions quietly when choosing a
 signed base interpreter. Unavailable candidates are verbose diagnostics; actual

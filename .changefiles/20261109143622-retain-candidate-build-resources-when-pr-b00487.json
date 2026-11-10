@@ -1,0 +1,9 @@
+{
+  "comment": "Retain candidate build resources when preparing the sparse installed Manager TTY fixture.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

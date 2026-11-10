@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
+import venv
 from pathlib import Path
 
 import pytest
@@ -40,7 +42,7 @@ def test_ready_prefix_retains_qualified_interpreter_and_module(tmp_path: Path) -
         return selected
 
     assert ready_owner_prefix(tmp_path, "agent_worktrees", resolver=resolve) == [
-        str(selected), "-m", "agent_worktrees",
+        str(selected), "-B", "-m", "agent_worktrees",
     ]
     assert roots == [tmp_path]
     assert not selected.exists()
@@ -54,6 +56,48 @@ def test_readiness_failure_never_becomes_optional_absence(tmp_path: Path) -> Non
         ready_owner_prefix(tmp_path, "agent_worktrees", resolver=refuse)
     with pytest.raises(ConfigurationError, match="relative interpreter"):
         ready_owner_prefix(tmp_path, "agent_worktrees", resolver=lambda root: Path("python"))
+
+
+def test_native_owner_read_preserves_package_and_startup_bytecode(tmp_path: Path) -> None:
+    environment = tmp_path / "owner" / ".venv"
+    venv.EnvBuilder(with_pip=False).create(environment)
+    if os.name == "nt":
+        python = environment / "Scripts" / "python.exe"
+        packages = environment / "Lib" / "site-packages"
+    else:
+        python = environment / "bin" / "python"
+        packages = environment / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    module = packages / "configuration_owner_fixture"
+    module.mkdir()
+    (module / "__init__.py").write_text("", encoding="utf-8")
+    (module / "payload.py").write_text("VALUE = 'native-owner'\n", encoding="utf-8")
+    (packages / "startup_witness.py").write_text("VALUE = 'startup'\n", encoding="utf-8")
+    (packages / "sitecustomize.py").write_text("import startup_witness\n", encoding="utf-8")
+    report = {
+        "schema": "agent-worktrees.configuration", "version": 1,
+        "context": {
+            "repository_id": "fixture-repo", "execution_machine": "fixture-worker",
+            "installation_cell": "fixture-cell", "binding": "unbound",
+            "base_root": str(tmp_path),
+        },
+    }
+    (module / "__main__.py").write_text(
+        "import json, sys\nfrom . import payload\n"
+        "assert sys.argv[1:] == ['state-root', '--configuration', '--json']\n"
+        "assert payload.VALUE == 'native-owner'\n"
+        f"print(json.dumps({report!r}))\n",
+        encoding="utf-8",
+    )
+    before = {path.relative_to(packages): path.read_bytes()
+              for path in packages.rglob("*") if path.is_file()}
+    child_env = {key: value for key, value in os.environ.items()
+                 if key not in {"PYTHONPYCACHEPREFIX", "PYTHONDONTWRITEBYTECODE", "PYTHONPATH"}}
+    prefix = ready_owner_prefix(tmp_path / "owner", "configuration_owner_fixture",
+                                resolver=lambda _: python)
+    assert read_owner_context(prefix, tmp_path, required=True, environment=child_env) == report
+    after = {path.relative_to(packages): path.read_bytes()
+             for path in packages.rglob("*") if path.is_file()}
+    assert after == before
 
 
 @pytest.mark.parametrize("stream", ["stdout", "stderr"])

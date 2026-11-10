@@ -29,48 +29,6 @@ function fixture(options = {}) {
   };
 }
 
-test("auth wait freezes sends without laundering native control or uncertain operations", async () => {
-  const states = [];
-  const f = fixture({ observeState: (state) => states.push(state) });
-  try {
-    const operation = f.prompt();
-    const frozen = f.adapter.authWait();
-    assert.equal(frozen.pending, true);
-    assert.equal(frozen.waiting, true);
-    assert.match((await f.prompt(2)).error.message, /unavailable/);
-    f.event("user.message", { content: "native input while stopping" });
-    assert.match((await operation).error.message, /Native input took control/);
-    assert.equal(f.adapter.authWait().controlled, false);
-    assert.equal(f.sent.length, 1);
-    assert.ok(states.some((state) => state.pending && state.waiting));
-  } finally { f.adapter.close(); }
-  assert.equal(states.at(-1).closed, true);
-});
-
-test("idle auth wait is reversible only through a new receiving incarnation", async () => {
-  const f = fixture();
-  try {
-    assert.deepEqual(f.adapter.authWait(), {
-      controlled: true, closed: false, pending: false,
-      sending: false, outstanding: false, waiting: true,
-    });
-    assert.match((await f.prompt()).error.message, /unavailable/);
-    assert.equal(f.sent.length, 0);
-    assert.equal(typeof f.adapter.authRenew, "undefined");
-  } finally { f.adapter.close(); }
-});
-
-test("an unobserved launch seed remains outstanding at auth stop", () => {
-  const f = fixture({ startupPrompt: "original seed" });
-  try {
-    assert.equal(f.adapter.authWait().outstanding, true);
-    f.event("user.message", { content: "original seed" });
-    assert.equal(f.adapter.authWait().outstanding, true);
-    f.event("session.idle");
-    assert.equal(f.adapter.authWait().outstanding, false);
-  } finally { f.adapter.close(); }
-});
-
 test("literal text goes to one native session and stale idle cannot complete it", async () => {
   const f = fixture();
   try {

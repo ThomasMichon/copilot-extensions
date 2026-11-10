@@ -27,11 +27,10 @@ def test_every_fixture_operation_names_its_private_mux_namespace_and_exact_targe
         ("has-session", ("-t", fixture.target)),
         ("display-message", ("-p", "-t", fixture.target, "#{session_id}")),
         ("capture-pane", ("-p", "-t", fixture.target)),
-        ("send-keys", ("-t", fixture.target, "-l", "--", "isolated native input")),
         ("kill-session", ("-t", fixture.target)),
     ):
         fixture.query(action, *arguments)
-    assert len(observed) == 6
+    assert len(observed) == 5
     for argv, options in observed:
         assert argv[:3] == ["psmux.exe", *fixture.mux_args]
         assert command_problem(argv, sandbox=fixture.sandbox, cwd=tmp_path) is None
@@ -44,7 +43,6 @@ def test_every_fixture_operation_names_its_private_mux_namespace_and_exact_targe
     ("kill-server", ()), ("server", ()), ("list-sessions", ()),
     ("kill-session", ()), ("kill-session", ("-t", "productive")),
     ("has-session", ("-t", "productive")),
-    ("send-keys", ("-t", "productive", "Enter")),
     ("new-session", ("-s", "productive")),
 ])
 def test_unsafe_fixture_commands_refuse_before_any_process(tmp_path, monkeypatch, action, arguments):

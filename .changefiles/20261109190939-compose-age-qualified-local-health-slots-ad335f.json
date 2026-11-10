@@ -1,0 +1,9 @@
+{
+  "comment": "Compose age-qualified local health slots with telemetry and service reports without new collection or storage effects.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

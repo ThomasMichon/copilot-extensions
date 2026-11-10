@@ -6,6 +6,12 @@ durable update, recovery, delivery, approval or process-membership facts.
 
 ## Existing consumers
 
+The optional [hourly service contribution protocol](hourly-reporting.md)
+provides a closed summary schema and bounded read-only reduction primitives.
+Dispatch supplies the first native exporter; Machines conditionally collects
+qualified selected-runtime contributions. This does not start capture or
+establish installed-host adoption.
+
 Manager's explicit [source observation](../../worktree-manager/docs/source-observation.md)
 consumer also uses this schema/exporter, through its **existing frame-health
 writer**, not a second buffer or exporter worker. Its `source_entry`,

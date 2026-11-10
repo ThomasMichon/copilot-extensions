@@ -1,0 +1,9 @@
+{
+  "comment": "Ship selected-tree release consumer discovery and quoted source-path handling in packaged helpers.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

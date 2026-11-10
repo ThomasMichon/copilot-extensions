@@ -14,6 +14,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -107,11 +108,25 @@ def test_revision_diff_is_unambiguously_separated_from_paths(guard_module, monke
 
     def git(*args):
         calls.append(args)
-        return subprocess.CompletedProcess(args, 0, "plugins/alpha/feature.py\n", "")
+        return subprocess.CompletedProcess(args, 0, "plugins/alpha/feature.py\0", "")
 
     monkeypatch.setattr(guard_module, "_git", git)
     assert guard_module._changed_files("a" * 40, "b" * 40) == ["plugins/alpha/feature.py"]
-    assert calls == [("diff", "--name-only", "a" * 40 + ".." + "b" * 40, "--")]
+    assert calls == [("diff", "--name-only", "-z", "a" * 40 + ".." + "b" * 40, "--")]
+
+
+def test_git_text_decoding_preserves_nul_protocol_bytes(
+    guard_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    _git(tmp_path, "init", "-q")
+    monkeypatch.setattr(guard_module, "REPO", tmp_path)
+    payload = b"libs/leaf/src/name\r.py\0"
+    result = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"], cwd=tmp_path, input=payload,
+        capture_output=True, check=True,
+    )
+    oid = result.stdout.decode("ascii").strip()
+    assert guard_module._git("cat-file", "blob", oid).stdout == payload.decode("utf-8")
 
 
 def test_revision_blob_reads_are_unambiguously_separated_from_paths(guard_module, monkeypatch):
@@ -146,6 +161,86 @@ def test_diff_failure_is_not_reported_as_no_changes(guard_module, monkeypatch, c
     captured = capsys.readouterr()
     assert "fixture diff refused" in captured.err
     assert "no changes" not in captured.out
+
+
+def _consumer_map_at(guard_module, monkeypatch, root: Path):
+    for module in (guard_module, guard_module.uer):
+        monkeypatch.setattr(module, "REPO", root)
+        monkeypatch.setattr(module, "PLUGINS_DIR", root / "plugins")
+        monkeypatch.setattr(module, "LIBS_DIR", root / "libs")
+    return guard_module._vendored_consumers()
+
+
+def _library_with_dependencies(root: Path, name: str, *dependencies: str):
+    entries = "".join(
+        f'"{dependency}" = {{ path = "../{dependency}", editable = true }}\n'
+        for dependency in dependencies
+    )
+    _write(root, f"libs/{name}/pyproject.toml", "[tool.uv.sources]\n" + entries)
+
+
+def test_nested_shared_dependencies_charge_every_consumer_form(
+    guard_module, monkeypatch, tmp_path,
+):
+    _plugin_with_editable_ref(tmp_path, "pointer", "1.0", "parent")
+    _plugin(tmp_path, "copy", "1.0", vendors=["parent"])
+    _write(tmp_path, "plugins/payload/libs/parent/src/parent.py", "")
+    _out_of_plugin_consumer_with_editable_ref(tmp_path, "worktree-manager", "1.0", "other")
+    _library_with_dependencies(tmp_path, "parent", "middle", "leaf")
+    _library_with_dependencies(tmp_path, "other", "middle")
+    _library_with_dependencies(tmp_path, "middle", "leaf")
+    _library_with_dependencies(tmp_path, "leaf")
+
+    consumers = _consumer_map_at(guard_module, monkeypatch, tmp_path)
+    expected = ["copy", "payload", "pointer", "worktree-manager"]
+    assert consumers["leaf"] == expected
+    assert consumers["middle"] == expected
+    assert consumers["parent"] == ["copy", "payload", "pointer"]
+    assert sorted(guard_module._plugins_needing_bump(
+        ["libs/leaf/pyproject.toml"], consumers,
+    )) == expected
+
+
+def test_nested_dependency_cycles_and_aliases_are_deterministic(
+    guard_module, monkeypatch, tmp_path,
+):
+    _plugin_with_editable_ref(tmp_path, "zeta", "1.0", "first")
+    _plugin_with_editable_ref(tmp_path, "alpha", "1.0", "second")
+    _library_with_dependencies(tmp_path, "first", "second")
+    _library_with_dependencies(tmp_path, "second", "first", "leaf")
+    _library_with_dependencies(tmp_path, "leaf")
+    with (tmp_path / "libs/first/pyproject.toml").open("a", encoding="utf-8") as manifest:
+        manifest.write('alias = { path = "../second", editable = true }\n')
+
+    consumers = _consumer_map_at(guard_module, monkeypatch, tmp_path)
+    assert consumers == {
+        "first": ["alpha", "zeta"],
+        "leaf": ["alpha", "zeta"],
+        "second": ["alpha", "zeta"],
+    }
+    assert _consumer_map_at(guard_module, monkeypatch, tmp_path) == consumers
+
+
+@pytest.mark.parametrize("manifest", [
+    "[broken",
+    '[tool.uv]\nsources = "not-a-table"\n',
+    "[tool.uv.sources]\nleaf = { path = 1 }\n",
+    '[tool.uv.sources]\nleaf = { path = "../../elsewhere/leaf", editable = true }\n',
+])
+def test_invalid_nested_manifest_fails_closed(guard_module, monkeypatch, tmp_path, manifest):
+    _plugin_with_editable_ref(tmp_path, "pointer", "1.0", "parent")
+    _write(tmp_path, "libs/parent/pyproject.toml", manifest)
+    with pytest.raises(SystemExit, match="parent"):
+        _consumer_map_at(guard_module, monkeypatch, tmp_path)
+
+
+def test_symlinked_nested_manifest_fails_closed(guard_module, monkeypatch, tmp_path):
+    _plugin_with_editable_ref(tmp_path, "pointer", "1.0", "parent")
+    manifest = tmp_path / "libs/parent/pyproject.toml"
+    original = Path.is_symlink
+    monkeypatch.setattr(Path, "is_symlink", lambda path: path == manifest or original(path))
+    with pytest.raises(SystemExit, match="symlink"):
+        _consumer_map_at(guard_module, monkeypatch, tmp_path)
 
 
 @pytest.fixture()
@@ -614,7 +709,9 @@ def test_violation_message_for_payload_only_plugin_omits_nonexistent_pyproject(r
     assert "marketplace.json" in gamma_lines[0]
 
 
-def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Path):
+def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(
+    repo: Path, native_file_symlink,
+):
     """A plugin whose `pyproject.toml` is a SYMLINK must never be silently
     dropped from the consumer map either (PR #4465 review):
     `find_uv_editable_refs()` deliberately returns `[]` for a symlinked
@@ -630,7 +727,7 @@ def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Pat
         'shared-lib = { path = "../../libs/shared-lib", editable = true }\n',
         encoding="utf-8",
     )
-    (repo / "plugins" / "gamma" / "pyproject.toml").symlink_to(real)
+    native_file_symlink(repo / "plugins" / "gamma" / "pyproject.toml", real)
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "add gamma with a symlinked pyproject.toml")
     result = _run(repo, "--list")
@@ -639,7 +736,9 @@ def test_symlinked_pyproject_fails_closed_instead_of_dropping_consumer(repo: Pat
     assert "symlink" in result.stderr.lower()
 
 
-def test_dangling_symlinked_pyproject_fails_closed_instead_of_being_filtered_out(repo: Path):
+def test_dangling_symlinked_pyproject_fails_closed_instead_of_being_filtered_out(
+    repo: Path, native_file_symlink,
+):
     """A symlinked `pyproject.toml` whose target does NOT exist (or resolves
     to a directory) must still be rejected -- `iter_consumer_dirs()` filters
     candidates by `pyproject.toml.is_file()`, which returns `False` for a
@@ -651,8 +750,9 @@ def test_dangling_symlinked_pyproject_fails_closed_instead_of_being_filtered_out
     _write(repo, "plugins/gamma/plugin.json",
            json.dumps({"name": "gamma", "version": "3.0.0-dev1"}) + "\n")
     _write(repo, "plugins/gamma/src/gamma/__init__.py", "x = 1\n")
-    (repo / "plugins" / "gamma" / "pyproject.toml").symlink_to(
-        repo / "plugins" / "gamma" / "does-not-exist.toml"
+    native_file_symlink(
+        repo / "plugins" / "gamma" / "pyproject.toml",
+        repo / "plugins" / "gamma" / "does-not-exist.toml",
     )
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "add gamma with a dangling symlinked pyproject.toml")

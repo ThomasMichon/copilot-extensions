@@ -1,0 +1,13 @@
+{
+  "comment": "Export and collect bounded selected-runtime hourly service contributions without activation",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

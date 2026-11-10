@@ -614,7 +614,7 @@ continue to work unchanged.
 |------------|-------------|
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan. `--new` creates + launches a **muxed interactive** session (refused without a TTY). `--codename <name>` selects an existing worktree by its assigned public-safe codename, as an alternative to `--worktree-id` (effort `pr-attribution-codenames`); resolved locally first, then via a cross-machine SSH scan (Phase 3) -- a match on a different machine fails closed (reports the machine, does not attempt a remote launch) |
 | `create` | Create a worktree **programmatically** -- no launch, no mux; prints id + path (add `--json`). The path for agents and daemons. Assigns the new worktree a random, public-safe **codename** (`codename.wordlist_path` configures a repo-declared vocabulary; falls back to a built-in neutral one) -- surfaced in the JSON output and usable later as an alternate lookup key via `list`/`resolve --codename` |
-| `move` | Read-only inactive-checkout relocation plan; `--apply` transfers and rebinds a qualified ordinary checkout, `--abort` cancels before publication. Discover the selected runtime with `get checkout-relocation` first. See [supported scope, original-operation recovery and mixed-root authority](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
+| `move` | Read-only inactive-checkout relocation plan; `--apply` transfers and rebinds a qualified checkout within the declared ordinary/receiving scope, `--abort` cancels before publication. Discover the selected runtime with `get checkout-relocation` first; receiving continuity does not qualify native inactivity. See [supported scope, original-operation recovery and mixed-root authority](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; for a merged PR with a missing cached head SHA, use a fresh provider-observed head only after the provider confirms the merge, and keep refusing when its boundary remains unverifiable; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
@@ -1470,6 +1470,33 @@ metadata survives local/remote serialization and is used only for accepted
 completion of those exact children. Older bundles still support exact source
 references; an alias-only retry without either the source ledger or durable
 proof fails explicitly rather than guessing equivalence.
+
+## Opening with a retained prompt handoff
+
+A preservation-capable Worktree Manager can reopen a stopped worktree, or
+reattach if it becomes live while the launcher resolves again, when its previous
+prompt handoff is unconfirmed. It warns and preserves the prompt
+and handoff unchanged, using admission-only execution rather than submitting
+that prompt again. Existing history selection is unchanged.
+
+The call-scoped `AGENT_WORKTREES_RETAINED_SEED_PLANS=1` hint requests a plan with
+`seed_preserved_id` and `seed_preservation_version: 1`. Manager forwards that identity as
+`resolve --worktree-id <id> --preserve-seed-id <seed-id>` when the local launcher
+resolves again. That selector never requests delivery, even if the original
+handoff has since been released. A missing, replaced or conflicting selection
+refuses before staging another intent. Combining preservation with `--restore`
+refuses before any bound-process recovery. The launchers also skip legacy prompt
+delivery for a preserved plan.
+
+Older Managers do not request these plans and keep the original safe refusal.
+Older Engines may ignore the optional hint, but reject an unsupported explicit
+preservation selector before effects; there is no weaker retry.
+
+Explicit delivery of an unconfirmed retained prompt still refuses. A changed staged
+identity between planning and execution also refuses rather than consuming the
+new intent. Opening the worktree is not a delivery receipt or permission to
+discard, restore or replay the retained prompt; reconcile its original handoff
+separately. Liveness, hosting and execution admission checks remain in force.
 
 ## Resolve previews
 

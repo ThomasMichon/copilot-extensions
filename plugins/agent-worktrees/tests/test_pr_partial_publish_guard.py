@@ -7,6 +7,7 @@ import pytest
 
 from agent_worktrees import git_ops, pr_publish, pr_rebase
 from agent_worktrees import providers
+from agent_worktrees.tracking import PRRecord
 from agent_worktrees.providers.base import PullResult
 
 
@@ -21,7 +22,7 @@ from agent_worktrees.providers.base import PullResult
 def test_initial_stale_publication_dispatches_only_proven_recovery(monkeypatch, tip, ancestor, has_repo, recovered):
     record = object()
     repo = object() if has_repo else None
-    pr = SimpleNamespace(remote="", rewrite_identity="")
+    pr = PRRecord(remote="", rewrite_identity="", branch="pr/topic-abcd")
     stale = git_ops.PushResult(ok=False, stderr="rejected (stale info)")
     success = git_ops.PushResult(ok=True)
     refused = git_ops.PushResult(ok=False, stdout="recovery stdout", stderr="recovery refused")

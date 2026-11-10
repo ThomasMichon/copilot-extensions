@@ -296,8 +296,7 @@ def _run(arguments, env, cwd, diagnostics, label, *, timeout=None):
     return out.read_text(encoding="utf-8").strip()
 
 
-def _payloads(root, identity, env, diagnostics):
-    import prepare_runtime_source
+def _candidate_snapshot(root, identity, env, diagnostics):
     from agent_procutil import no_window_kwargs
 
     actual = _run(["git", "rev-parse", "HEAD"], env, REPO, diagnostics, "candidate-head")
@@ -308,7 +307,7 @@ def _payloads(root, identity, env, diagnostics):
     result = subprocess.run(
         ["git", "archive", "--format=tar", "--output", str(archive), actual,
          "worktree-manager", "plugins/agent-worktrees", "libs", "tools", "docs",
-         ".github/plugin/marketplace.json"],
+         "plugins/agent-containers/setup.py", ".github/plugin/marketplace.json"],
         cwd=REPO, env=env, timeout=30, capture_output=True, check=False, **no_window_kwargs(),
     )
     if result.returncode:
@@ -324,6 +323,13 @@ def _payloads(root, identity, env, diagnostics):
                 raise RuntimeError("Candidate archive contains a non-file or unsafe path")
         source.extractall(snapshot, filter="data")
     archive.unlink()
+    return snapshot
+
+
+def _payloads(root, identity, env, diagnostics):
+    import prepare_runtime_source
+
+    snapshot = _candidate_snapshot(root, identity, env, diagnostics)
     marketplace = root / "payloads" / ".github" / "plugin"
     marketplace.mkdir(parents=True)
     shutil.copy2(snapshot / ".github" / "plugin" / "marketplace.json",
@@ -444,6 +450,15 @@ def _visible(output):
     return re.sub(r"\x1b(?:\[[0-?]*[ -/]*[@-~]|\][^\x07]*(?:\x07|\x1b\\))", "", text)
 
 
+def _picker_rendered(output):
+    text = _visible(output)
+    return (
+        b"\x1b[?1049h" in output
+        and "tty-harness" in text
+        and "worktrees" in text.casefold()
+    )
+
+
 def _image(console, handle):
     import ctypes
     from ctypes import wintypes
@@ -457,6 +472,21 @@ def _image(console, handle):
     if not query(handle, 0, text, ctypes.byref(size)):
         raise ctypes.WinError(ctypes.get_last_error())
     return Path(text.value)
+
+
+def _live_image(console, handle):
+    if console.exited(handle):
+        return None
+    try:
+        return _image(console, handle)
+    except OSError:
+        timeout = 250
+        if _WORK_DEADLINE is not None:
+            timeout = max(0, min(timeout, int((_WORK_DEADLINE - time.monotonic()) * 1000)))
+        # Image teardown can precede the same retained process handle becoming signalled.
+        if not console.exited(handle, timeout):
+            raise
+        return None
 
 
 def _project_entry_command(shell, stub):
@@ -485,11 +515,7 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
             raise TimeoutError(f"{shell}: no {label} within the native 30-second boundary")
 
         try:
-            wait(lambda: (
-                b"\x1b[?1049h" in console.output
-                and "tty-harness" in _visible(console.output)
-                and "Worktrees" in _visible(console.output)
-            ), "rendered project Picker")
+            wait(lambda: _picker_rendered(console.output), "rendered project Picker")
             descendants = console.pin_descendants()
             offers = []
             for path in Path(env["TEMP"]).glob("ce-terminal-*/request.json"):
@@ -501,8 +527,14 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
             if not offers:
                 raise RuntimeError("Interactive shell bypassed its native terminal capability admission")
             for pid, (name, handle) in descendants.items():
-                image = _image(console, handle)
-                if image.resolve() in (manager_python.resolve(), engine_python.resolve()):
+                try:
+                    image = _live_image(console, handle)
+                except OSError as error:
+                    error.add_note(f"Could not identify retained TTY descendant {pid} ({name})")
+                    raise
+                if image is not None and image.resolve() in (
+                    manager_python.resolve(), engine_python.resolve(),
+                ) and not console.exited(handle):
                     pinned[str(image.resolve())] = {
                         "pid": pid, "birth": console.birth(handle),
                     }
@@ -1006,6 +1038,124 @@ def test_native_cmd_project_binstub_handles_space_path(tmp_path):
     assert b"NATIVE PROJECT COMMAND REACHED" in console.output
 
 
+def test_picker_readiness_accepts_tab_casing_but_requires_project_and_alternate_screen():
+    for label in (b"Worktrees", b"WORKTREES"):
+        assert _picker_rendered(b"\x1b[?1049hWorktree Picker - tty-harness\n" + label)
+    for output in (
+        b"tty-harness WORKTREES",
+        b"\x1b[?1049hWorktree Picker - tty-harness\nResolving project binding",
+        b"\x1b[?1049hWorktree Manager\nWORKTREES",
+    ):
+        assert not _picker_rendered(output)
+
+
+def test_process_image_attribution_ignores_only_confirmed_exited_handles(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    owner = _live_image.__globals__
+    image = Path("installed-manager-python.exe")
+    handle = object()
+    calls = []
+    states = iter((False,))
+    console = SimpleNamespace(
+        exited=lambda actual, timeout=0: next(states) if actual is handle else None,
+    )
+
+    def query(actual_console, actual_handle):
+        assert actual_console is console and actual_handle is handle
+        calls.append(actual_handle)
+        return image
+
+    monkeypatch.setitem(owner, "_image", query)
+    assert _live_image(console, handle) == image
+    states = iter((True,))
+    assert _live_image(console, handle) is None
+    assert calls == [handle]
+
+    error = OSError("controlled image query failure")
+
+    def failed_query(*_args):
+        raise error
+
+    monkeypatch.setitem(owner, "_image", failed_query)
+    states = iter((False, True))
+    assert _live_image(console, handle) is None
+    states = iter((False, False))
+    with pytest.raises(OSError) as caught:
+        _live_image(console, handle)
+    assert caught.value is error
+
+
+def test_process_image_attribution_waits_only_for_retained_exit(monkeypatch):
+    from types import SimpleNamespace
+
+    import pytest
+
+    owner = _live_image.__globals__
+    handle = object()
+    error = PermissionError("controlled image query failure during process exit")
+    error.winerror = 5
+
+    def failed_query(console, actual):
+        assert actual is handle
+        raise error
+
+    monkeypatch.setitem(owner, "_image", failed_query)
+    monkeypatch.setitem(owner, "time", SimpleNamespace(monotonic=lambda: 10.0))
+    for deadline, limit in ((None, 250), (10.02, 20), (9.0, 0)):
+        checks = []
+
+        def exited(actual, timeout=0):
+            assert actual is handle
+            checks.append(timeout)
+            return timeout > 0
+
+        monkeypatch.setitem(owner, "_WORK_DEADLINE", deadline)
+        console = SimpleNamespace(exited=exited)
+        if limit:
+            assert _live_image(console, handle) is None
+        else:
+            with pytest.raises(PermissionError) as caught:
+                _live_image(console, handle)
+            assert caught.value is error
+        assert len(checks) == 2 and checks[0] == 0
+        assert 0 < checks[1] <= limit if limit else checks[1] == 0
+
+
+def test_sparse_candidate_materializes_invocation_admission_toolkit(tmp_path):
+    from materialize_main import materialize_payload_invocation_into
+
+    diagnostics = tmp_path / "diagnostics"
+    diagnostics.mkdir()
+    env = _git_environment()
+    env.update(HOME=str(tmp_path), USERPROFILE=str(tmp_path))
+    commit = _run(["git", "rev-parse", "HEAD"], env, REPO, diagnostics, "source-head")
+    tree = _run(["git", "rev-parse", "HEAD^{tree}"], env, REPO, diagnostics, "source-tree")
+    identity = {"candidate_commit": commit, "candidate_tree": tree, "source_commit": commit}
+
+    snapshot = _candidate_snapshot(tmp_path, identity, env, diagnostics)
+    consumer = snapshot / "plugins" / "agent-worktrees"
+    log = materialize_payload_invocation_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=snapshot,
+    )
+    assert log and not any(entry.startswith("SKIP ") for entry in log), log
+    toolkit = consumer / "scripts" / "_runtime_admission"
+    inventory = json.loads((toolkit / "toolkit.json").read_text(encoding="utf-8"))
+    assert inventory["files"]
+    assert all((toolkit / relative).is_file() for relative in inventory["files"])
+    resource = Path("plugins") / "agent-containers" / "setup.py"
+    assert (toolkit / resource).read_bytes() == (
+        snapshot / resource
+    ).read_bytes()
+    (snapshot / resource).unlink()
+    refused = materialize_payload_invocation_into(
+        source_consumer_dir=consumer, dest_consumer_dir=consumer, canonical_root=snapshot,
+    )
+    assert len(refused) == 1 and refused[0].startswith("SKIP Invocation materialization:")
+
+
 def test_unreaped_error_preserves_enclosing_sandboxes_and_original_exception(tmp_path, monkeypatch):
     import runpy
     from types import SimpleNamespace
@@ -1229,6 +1379,11 @@ if "pytest" in sys.modules:
     test_inherited_git_context_cannot_redirect_private_repository = pytest.mark.skipif(
         os.name != "nt", reason="Native Windows fixture environment",
     )(test_inherited_git_context_cannot_redirect_private_repository)
+    test_sparse_candidate_materializes_invocation_admission_toolkit = pytest.mark.timeout(180)(
+        pytest.mark.skipif(os.name != "nt", reason="Native Windows candidate preparation owner")(
+            test_sparse_candidate_materializes_invocation_admission_toolkit,
+        ),
+    )
 
 
 if __name__ == "__main__":
