@@ -1,0 +1,9 @@
+{
+  "comment": "Observe current native terminal frames and use enabled atomic paste for lifecycle seed entry",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

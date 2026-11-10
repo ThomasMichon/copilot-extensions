@@ -107,6 +107,7 @@ def _capture_failure(root, record_property):
             evidence = installed._failure_evidence(root)
             for pattern in (
                 "lifecycle-*.terminal.txt",
+                "lifecycle-*.screen.txt",
                 "knowledge-*.stdout.txt",
                 "knowledge-*.stderr.txt",
                 "lifecycle-bootstrap.stdout.txt",
@@ -153,6 +154,13 @@ def _manager_ready(output):
         and PROJECT in current
         and "worktrees" in current.casefold()
     )
+
+
+def _paste_prompt(console, prompt):
+    output = bytes(console.output)
+    if output.rfind(b"\x1b[?2004h") <= output.rfind(b"\x1b[?2004l"):
+        raise RuntimeError("The native dialog has not enabled bracketed paste")
+    console.send(b"\x1b[200~" + prompt.encode("utf-8") + b"\x1b[201~")
 
 
 def _require_mux_venue():
@@ -374,12 +382,29 @@ class _Witness:
         self.engine, self.copilot = engine, copilot
         self.budget = budget
         self.consoles = []
+        self.screens = {}
         self.native_handles = {}
         self.history = None
         self.turn_observation = None
         self.provider_requests = provider_requests
         self.mux_binary = mux_binary
         self.stack = ExitStack()
+
+    def rendered(self, console):
+        import pyte
+
+        key = id(console)
+        if key not in self.screens:
+            # Match the existing native ConPTY fixture's fixed dimensions.
+            screen = pyte.Screen(100, 30)
+            self.screens[key] = [console, screen, pyte.ByteStream(screen), 0]
+        state = self.screens[key]
+        data = bytes(console.output)
+        if not state[3] <= len(data) <= 1 << 20:
+            raise RuntimeError("Rendered ConPTY evidence was truncated or exceeded its bound")
+        state[2].feed(data[state[3]:])
+        state[3] = len(data)
+        return "\n".join(state[1].display)
 
     def wait(self, check, label, timeout=30):
         deadline = min(time.monotonic() + timeout, self.budget.execution_deadline)
@@ -391,7 +416,7 @@ class _Witness:
                 if console.read_error:
                     raise RuntimeError(console.read_error)
             time.sleep(0.05)
-        screens = "\n".join(installed._visible(c.output)[-4000:] for c in self.consoles)
+        screens = "\n".join(self.rendered(c)[-4000:] for c in self.consoles)
         try:
             self._capture_processes()
         except Exception as diagnostic_error:
@@ -671,6 +696,12 @@ class _Witness:
         )
         console.send(b"\r")
 
+        def attached():
+            screen = self.rendered(console)
+            return "Start of Prompt Indicator" in screen and "Interactive" in screen
+
+        self.wait(attached, f"Real Manager {verb} did not attach the native CLI prompt")
+
     def close_cli(self, console, identity):
         owner, handle = self.native_handles[identity]
         before = len(console.output)
@@ -699,6 +730,14 @@ class _Witness:
 
     def __exit__(self, *error):
         failure = error[1]
+        if failure is not None:
+            for index, console in enumerate(self.consoles):
+                try:
+                    (self.root / "diagnostics" / f"lifecycle-{index}.screen.txt").write_text(
+                        self.rendered(console), encoding="utf-8",
+                    )
+                except Exception as diagnostic_error:
+                    failure.add_note(f"Rendered terminal diagnostic: {diagnostic_error}")
         try:
             return self.stack.__exit__(*error)
         except BaseException as cleanup_error:
@@ -1065,6 +1104,7 @@ def test_lifecycle_diagnostics_retain_the_constructor_refusal(tmp_path):
 
 
 @pytest.mark.timeout(180)
+@pytest.mark.skipif(os.name != "nt", reason="Installed-core preparation uses native Windows")
 def test_lifecycle_launch_companions_use_the_real_candidate_archive():
     from plugin_test_containment import SANDBOX_ENV, TestSandbox
 
@@ -1222,6 +1262,7 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
 
 
 @pytest.mark.parametrize("reply", ["LIFECYCLE_REPLY_1", "unfinished"])
+@pytest.mark.skipif(os.name != "nt", reason="The native pane uses a private PSMux namespace")
 def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeypatch, reply):
     from types import SimpleNamespace
     from plugin_test_command_safety import private_mux_args
@@ -1400,6 +1441,74 @@ def test_lifecycle_manager_readiness_requires_the_current_project_binding():
     assert _manager_ready(alternate + bound)
     assert not _manager_ready(alternate + bound + loading)
     assert _manager_ready(alternate + loading + bound)
+
+
+@pytest.mark.parametrize("case", ["split-redraw", "stale-frame"])
+def test_lifecycle_prompt_observation_uses_the_current_rendered_screen(tmp_path, case):
+    from types import SimpleNamespace
+
+    witness = _Witness(tmp_path, {}, None, None, None, None)
+    console = SimpleNamespace(output=bytearray(b"\x1b[2J\x1b[5;5H"))
+    if case == "split-redraw":
+        console.output.extend(b"L\x1b[1;1Hdialog header\x1b[5;")
+        assert PROMPTS[0] not in witness.rendered(console)
+        console.output.extend(b"6H" + PROMPTS[0][1:].encode())
+        assert PROMPTS[0] not in installed._visible(console.output)
+        assert PROMPTS[0] in witness.rendered(console)
+    else:
+        console.output.extend(PROMPTS[0].encode())
+        assert PROMPTS[0] in witness.rendered(console)
+        console.output.extend(b"\x1b[5;5H\x1b[2K" + PROMPTS[0][1:].encode())
+        assert PROMPTS[0] in installed._visible(console.output)
+        assert PROMPTS[0] not in witness.rendered(console)
+
+
+@pytest.mark.parametrize("mode", [b"", b"\x1b[?2004h\x1b[?2004l", b"\x1b[?2004l\x1b[?2004h"])
+def test_lifecycle_prompt_paste_requires_the_actual_terminal_mode(mode):
+    from types import SimpleNamespace
+
+    sent = []
+    console = SimpleNamespace(output=mode, send=sent.append)
+    if mode.endswith(b"\x1b[?2004h"):
+        _paste_prompt(console, PROMPTS[0])
+        assert sent == [b"\x1b[200~" + PROMPTS[0].encode() + b"\x1b[201~"]
+    else:
+        with pytest.raises(RuntimeError, match="has not enabled bracketed paste"):
+            _paste_prompt(console, PROMPTS[0])
+        assert sent == []
+
+
+@pytest.mark.parametrize("attached", [True, False])
+def test_lifecycle_selection_waits_for_the_current_cli_prompt(tmp_path, attached):
+    from types import SimpleNamespace
+
+    witness = _Witness(tmp_path, {}, None, None, None, None)
+    console = SimpleNamespace(
+        output=bytearray(b"c123 Start of Prompt Indicator\r\nInteractive"),
+    )
+    checks = []
+
+    def send(value):
+        if value == b"\t\r":
+            console.output.extend(b"Open")
+        elif value == b"\r":
+            console.output.extend(
+                b"\x1b[2J\x1b[H"
+                + (b"Start of Prompt Indicator\r\nInteractive" if attached else b"Loading"),
+            )
+
+    def wait(check, label):
+        checks.append(label)
+        if not check():
+            raise TimeoutError(label)
+
+    console.send, witness.wait = send, wait
+    if attached:
+        witness.select(console, {"id": "fixture-c123"}, "Open")
+    else:
+        with pytest.raises(TimeoutError, match="did not attach the native CLI prompt"):
+            witness.select(console, {"id": "fixture-c123"}, "Open")
+    assert len(checks) == 3
 
 
 def test_lifecycle_terminal_diagnostics_retain_the_recent_refusal(tmp_path):
@@ -1585,7 +1694,7 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                     first = witness.manager()
                     first.send(b"\r")
                     witness.wait(
-                        lambda: "Creates on tty-fixture Win" in installed._visible(first.output),
+                        lambda: "Creates on tty-fixture Win" in witness.rendered(first),
                         "The real New-worktree dialog did not open",
                     )
                     before = len(first.output)
@@ -1594,9 +1703,9 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                         lambda: len(first.output) > before,
                         "The New dialog did not render the focus transition",
                     )
-                    first.send(PROMPTS[0].encode())
+                    _paste_prompt(first, PROMPTS[0])
                     witness.wait(
-                        lambda: PROMPTS[0] in installed._visible(first.output[before:]),
+                        lambda: PROMPTS[0] in witness.rendered(first),
                         "The New dialog did not render the entered prompt",
                     )
                     before = len(first.output)

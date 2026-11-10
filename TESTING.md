@@ -707,6 +707,12 @@ Git worktree creation, native process incarnation, conversation history and
 private mux attachment participate. The case checks parallel Open, preserved
 work after detaching the first view, normal Copilot exit and a fresh Manager's
 Resume, plus the existing unusable-installed-entry negative control.
+The New seed uses the terminal's enabled bracketed-paste protocol and must
+appear in the current rendered dialog before confirmation. The test-only
+`pyte==0.8.2` dependency incrementally renders the fixed 100x30 ConPTY stream;
+it never supplies UI state or input acknowledgements. Open/Resume waits for
+the current actual CLI prompt frame before sending another turn. No retry
+or deadline increase compensates for dropped input.
 Completed turns require durable conversation history and the reply in the
 terminal stream or the actual bound private pane's rendered capture. Removing
 escape sequences from a redraw stream is not itself a rendered-screen witness.
@@ -715,6 +721,7 @@ request count, never inference request bodies. These distinguish an unfinished
 native turn from completed history whose reply has not rendered.
 Native-process observations retain pinned parent IDs, bounded option names,
 script basenames and the matching history's lock PIDs, never raw argument values.
+Failures retain the rendered Manager screen as well as the bounded stream tail.
 Copilot's extension host shares its executable. Exclude it from conversation-owner
 counting only when its sole argument is an ordinary, owned
 `extension_bootstrap.mjs`, it is a later-born direct child of the sole

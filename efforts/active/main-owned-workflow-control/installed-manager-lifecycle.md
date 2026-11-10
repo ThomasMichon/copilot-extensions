@@ -353,3 +353,32 @@ controls passed. The actual pinned CLI probe selected the original parent and
 proved normal exit left no native processes before fixture cleanup. This is
 lightweight consumer evidence, not installed Manager acceptance; the next exact
 native run must prove the same role binding through Manager Create/Open/Resume.
+
+### 2026-11-10 - A fresh run stopped at dialog prompt observation
+
+Run 42790346307 at `179a2541da52792a4193e0091185a1f14321b7e2`
+timed out before Create, while observing the New dialog's entered prompt.
+The retained raw fragment lacked its leading character. There is no native
+conversation or hosted extension-role result from this attempt.
+
+The owned witness now renders the actual fixed-size ConPTY stream incrementally
+and checks the current dialog, rather than a concatenated redraw history.
+Failure evidence includes that rendered screen. A private real-dialog
+preflight also failed the rendered prompt check once; later focus/model
+observations accepted the exact prompt with both key-burst and paste input.
+The cause of the earlier missing prefix remains unproved. The witness uses
+the supported, explicitly enabled bracketed-paste operation for atomic seed
+entry and still requires the exact current prompt and subsequent durable CLI
+history. It does not claim to qualify rapid key-burst input or repair that
+production behavior. No input retry, acknowledgement injection or timeout
+extension is introduced.
+
+Open/Resume also waits for the actual CLI prompt frame before another turn,
+instead of sending keys as soon as the menu action is dispatched. The existing
+UI and overall deadlines remain unchanged. The new renderer is a test-only
+dependency; its exact pin passed the canonical seven-day seasoning check.
+All 36 source controls passed, followed by all seven focused current-screen,
+paste-mode and attachment-readiness controls after the latter addition.
+The real native dialog accepted the exact seed through the same fixture helper
+with no options selected. Lint, size and all 13 installation contracts passed.
+These are source/consumer checks, not installed lifecycle acceptance.
