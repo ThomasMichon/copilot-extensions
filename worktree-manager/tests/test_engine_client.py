@@ -969,6 +969,26 @@ def test_resolve_retained_hint_keeps_selected_engine(monkeypatch):
     assert len(seen) == 1
 
 
+def test_preserved_selector_rollback_refuses_before_effects(tmp_path):
+    engine = tmp_path / "legacy_engine.py"
+    effect = tmp_path / "effect.txt"
+    engine.write_text(
+        "import argparse,json\nfrom pathlib import Path\n"
+        "p=argparse.ArgumentParser()\np.add_argument('--project')\n"
+        "p.add_argument('verb',choices=['resolve'])\n"
+        "p.add_argument('--json',action='store_true')\np.add_argument('--worktree-id')\n"
+        f"p.parse_args()\nPath({str(effect)!r}).write_text('executed')\n"
+        "print(json.dumps({'action':'exec','cmd':['copilot']}))\n",
+        encoding="utf-8",
+    )
+    ec.set_engine_command([sys.executable, str(engine)])
+    with pytest.raises(ec.EngineError, match="unrecognized arguments: --preserve-seed-id"):
+        ec.run_json("demo", [
+            "resolve", "--json", "--worktree-id", "wt-a", "--preserve-seed-id", "original-a",
+        ])
+    assert not effect.exists()
+
+
 def test_resolve_new_sends_new_flag(monkeypatch):
     def handler(cmd, kw):
         assert "--new" in cmd and "--worktree-id" not in cmd
