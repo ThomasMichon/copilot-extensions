@@ -122,7 +122,11 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                 )
             tail = (
                 "Write-NativeWriteFixturePhase 'command-complete'; " if attributed else ""
-            ) + "[Console]::Error.WriteLine('NATIVE_ENTRY_BUILD ' + $PSVersionTable.PSVersion.ToString())"
+            ) + (
+                "[Console]::Error.WriteLine('NATIVE_ENTRY_BUILD ' + $PSVersionTable.PSVersion.ToString()); "
+                "[Console]::Error.WriteLine('NATIVE_ENTRY_MANAGEMENT ' + "
+                "[int][bool](Get-Module -Name Microsoft.PowerShell.Management))"
+            )
             command_entry = entry
             if attributed:
                 command_entry = entry.replace(
@@ -143,21 +147,30 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                     f"stdout={error.stdout!r}; stderr={error.stderr!r}"
                 ) from error
             elapsed = time.monotonic() - started
-            builds, stderr = [], []
+            builds, management, stderr = [], [], []
             for line in result.stderr.splitlines(keepends=True):
                 match = re.fullmatch(rb"NATIVE_ENTRY_BUILD ([0-9][0-9A-Za-z.+-]{0,127})\r?\n", line)
-                (builds if match else stderr).append(match[1].decode("ascii") if match else line)
+                module = re.fullmatch(rb"NATIVE_ENTRY_MANAGEMENT ([01])\r?\n", line)
+                if match:
+                    builds.append(match[1].decode("ascii"))
+                elif module:
+                    management.append(int(module[1]))
+                else:
+                    stderr.append(line)
             progress, errors = native_write_fixture_stderr(b"".join(stderr))
             phases = [(int(tick), name) for tick, name in (line.split(" ", 1) for line in progress.splitlines())]
             sample = {
                 "variant": variant, "outer_seconds": elapsed,
                 "shell_version": builds[0] if len(builds) == 1 else None,
+                "management_module_loaded": bool(management[0]) if len(management) == 1 else None,
                 "phases_monotonic_ms": phases,
                 "stdout": result.stdout.decode("utf-8", errors="backslashreplace"), "validated": False,
             }
             samples.append(sample)
             assert result.returncode == 0 and not errors, (variant, result.stdout, result.stderr)
             assert len(builds) == 1, (variant, builds, result.stderr)
+            assert len(management) == 1, (variant, management, result.stderr)
+            assert bool(management[0]) is (variant == "attributed-protected"), (variant, sample)
             assert [tick for tick, _ in phases] == sorted(tick for tick, _ in phases), phases
             names = [name for _, name in phases]
             if attributed:
@@ -192,7 +205,7 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                 "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
                 "source_sha256": source_digests, "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
                 "samples": samples, "complete": len(samples) == 4 and all(sample["validated"] for sample in samples),
-                "limits": "Fixture timing only; phases include instrumentation. Outer-minus-last-phase includes startup/exit and marker overhead, not isolated startup. Ordered controls are not subtractive attribution or a latency distribution.",
+                "limits": "Fixture timing only; phases include instrumentation. Outer-minus-last-phase includes startup/exit and marker/module-observer overhead, not isolated startup. Ordered controls are not subtractive attribution or a latency distribution.",
             }}))
 
 
@@ -1405,7 +1418,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         monkeypatch.delenv(key, raising=False)
     for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
         monkeypatch.setenv(key, str(tmp_path))
-    plugin = tmp_path / "payload"
+    payload_label = "payload-\u00e9 space'root" if case == "batch-read-only-attribution" else "payload"
+    plugin = tmp_path / payload_label
     if cell:
         from types import SimpleNamespace
         import test_registry_paths as fixtures
@@ -1416,7 +1430,9 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
             ),
         ))
-        plugin = fixtures._payload(tmp_path, "selected")
+        plugin = fixtures._payload(
+            tmp_path, payload_label if case == "batch-read-only-attribution" else "selected",
+        )
         with (registry / "repos.yaml").open("a", encoding="utf-8") as output:
             output.write('    remote: "https://github.com/example/project.git"\n')
         context, selected_registry = fixtures._stamp(

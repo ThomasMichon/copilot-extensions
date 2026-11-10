@@ -399,7 +399,7 @@ function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnosti
 try {
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
-    $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
+    $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')
     if (-not [IO.File]::Exists($admission)) { exit 0 }
     . $admission
     $preparedMembership = $false
