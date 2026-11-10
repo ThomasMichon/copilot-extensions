@@ -126,22 +126,27 @@ def test_caller_head_scopes_duplicate_worktree_ids_to_project(monkeypatch):
         project = argv[argv.index("--project") + 1] if "--project" in argv else "first"
         assert kwargs["timeout"] == 8
         return SimpleNamespace(returncode=0, stdout=json.dumps({
-            "tracked": True, "active": True, "head_session": heads[project],
+            "ok": True, "worktree": {
+                "id": "shared-id", "repo": project, "last_session_id": heads[project],
+            },
         }))
     monkeypatch.setattr(provider_process, "run_captured", run)
     for project, session in heads.items():
         head = _REAL_CALLER_HEAD("shared-id", project=project)
         assert head.tracked and head.active and head.head_session == session
     assert calls == [
-        ["worktrees", "--project", project, "head-session",
+        ["worktrees", "--project", project, "record",
          "--worktree-id", "shared-id", "--json"]
         for project in heads
     ]
 
 
 @pytest.mark.parametrize("response", [
-    SimpleNamespace(returncode=1, stdout='{"tracked":true,"active":true,"head_session":"child"}'),
+    SimpleNamespace(returncode=1, stdout='{"ok":true,"worktree":{"id":"worktree","repo":"harness","last_session_id":"child"}}'),
     SimpleNamespace(returncode=0, stdout="not-json"),
+    SimpleNamespace(returncode=0, stdout='{"ok":true,"worktree":{"id":"worktree","repo":"other","last_session_id":"child"}}'),
+    SimpleNamespace(returncode=0, stdout='{"ok":true,"worktree":{"id":"other","repo":"harness","last_session_id":"child"}}'),
+    SimpleNamespace(returncode=0, stdout='{"ok":true,"worktree":{"id":"worktree","repo":"harness"}}'),
 ])
 def test_caller_head_query_failure_cannot_authorize_dispatch(monkeypatch, response):
     from agent_bridge import agent_registry, provider_process

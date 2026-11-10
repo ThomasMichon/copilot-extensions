@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import subprocess
 from typing import TYPE_CHECKING
 
-from .caller_session import caller_session_id_from_env
+from .caller_session import caller_session_id_from_env, normalize_caller_session_id
 
 if TYPE_CHECKING:
     from .worktree_head import HeadInfo
@@ -23,23 +24,38 @@ class CallerProjectContextError(ValueError):
 
 
 def _caller_head(worktree_id: str, *, project: str) -> HeadInfo:
-    """Read CLI caller state without changing the service-side head guard."""
+    """Read one exact project record, never the global head-session fallback."""
     from .agent_registry import _agent_worktrees_bin
     from .provider_process import run_captured
-    from .worktree_head import parse_head_payload
+    from .worktree_head import HeadInfo
 
+    unknown = HeadInfo(active=False)
     executable = _agent_worktrees_bin()
     if not executable:
-        return parse_head_payload(None)
+        return unknown
     try:
         result = run_captured(
-            [executable, "--project", project, "head-session",
+            [executable, "--project", project, "record",
              "--worktree-id", worktree_id, "--json"],
             timeout=8,
         )
-    except (OSError, subprocess.SubprocessError, UnicodeError, RuntimeError):
-        return parse_head_payload(None)
-    return parse_head_payload(result.stdout if result.returncode == 0 else None)
+        if result.returncode != 0:
+            return unknown
+        payload = json.loads(result.stdout)
+    except (OSError, subprocess.SubprocessError, UnicodeError, RuntimeError, ValueError, TypeError):
+        return unknown
+    record = payload.get("worktree") if isinstance(payload, dict) and payload.get("ok") is True else None
+    if (
+        not isinstance(record, dict) or record.get("id") != worktree_id
+        or record.get("repo") != project or "last_session_id" not in record
+    ):
+        return unknown
+    head = record["last_session_id"]
+    if head is not None and (not isinstance(head, str) or normalize_caller_session_id(head) != head):
+        return unknown
+    return HeadInfo(
+        tracked=True, active=head is not None, occupied=head is not None, head_session=head,
+    )
 
 
 def owning_project() -> str | None:
