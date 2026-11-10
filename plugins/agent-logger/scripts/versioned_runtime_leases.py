@@ -97,6 +97,8 @@ def _windows_private_lease_file(
     import sys
     import uuid
 
+    root, directory = _native_path(root), _native_path(directory)
+
     class Attributes(c.Structure):
         _fields_ = [("length", w.DWORD), ("descriptor", w.LPVOID), ("inherit", w.BOOL)]
 
@@ -506,6 +508,7 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
     key = hashlib.sha256(version.lower().encode("utf-8")).hexdigest()
     lock_dir = root / f".{kind}-leases"
     lock_path = lock_dir / (key + ".lock")
+    lookup_path = _native_path(lock_path) if os.name == "nt" else lock_path
     if open_lock is None:
         if os.name == "nt":
             fd = _windows_private_lease_file(root, lock_dir, lock_path.name)
@@ -519,7 +522,7 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
         fd = open_lock(lock_dir, lock_path.name)
     try:
         opened = os.fstat(fd)
-        named = os.lstat(lock_path)
+        named = os.lstat(lookup_path)
         if (not stat.S_ISREG(named.st_mode) or
                 (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
             raise OSError(f"{kind} lease path is not the opened ordinary file")
@@ -588,7 +591,7 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
                     ) from exc
                 time.sleep(min(poll_interval, remaining))
         try:
-            named = os.lstat(lock_path)
+            named = os.lstat(lookup_path)
             if (not stat.S_ISREG(named.st_mode) or
                     (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
                 raise OSError(f"{kind} lease path changed while waiting")
