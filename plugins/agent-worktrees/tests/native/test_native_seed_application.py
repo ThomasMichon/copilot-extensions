@@ -175,8 +175,34 @@ def test_public_copilot(monkeypatch):
 def _qualify_public_application(monkeypatch, caller):
     from plugin_test_containment import TestSandbox
 
-    with TestSandbox(prefix="p-", dir=ROOT) as directory:
+    with TestSandbox(prefix="p-", dir=ROOT.parent) as directory:
         _qualify_native_application(Path(directory), monkeypatch, broker=caller)
+
+
+def test_public_application_workspace_is_outside_source_only_repository(tmp_path, monkeypatch):
+    from repository_policy import AgentHostingDenied, require_agent_hosting
+
+    candidate = tmp_path / "candidate"
+    (candidate / ".git").mkdir(parents=True)
+    configuration = candidate / ".agent-worktrees" / "config.yaml"
+    configuration.parent.mkdir()
+    configuration.write_text("expose_agent: false\n", encoding="utf-8")
+    with pytest.raises(AgentHostingDenied, match="expose_agent: false"):
+        require_agent_hosting(candidate, operation="fixture launch")
+    monkeypatch.setitem(_qualify_public_application.__globals__, "ROOT", candidate)
+    observed = []
+
+    def qualify(root, _patch, *, broker):
+        caller = root / "caller"
+        caller.mkdir()
+        assert require_agent_hosting(caller, operation="fixture launch").expose_agent is None
+        observed.append((root, broker))
+
+    monkeypatch.setitem(_qualify_public_application.__globals__, "_qualify_native_application", qualify)
+    for caller in ("embody", "copilot"):
+        _qualify_public_application(monkeypatch, caller)
+    assert [caller for _, caller in observed] == ["embody", "copilot"]
+    assert all(not root.exists() for root, _ in observed)
 
 
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
