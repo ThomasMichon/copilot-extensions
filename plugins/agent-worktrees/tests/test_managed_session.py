@@ -41,6 +41,7 @@ NATIVE_WRITE_PHASES = {
     "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize",
     "command-complete", "admission-start", "admission-complete", "read-proof-start",
     "read-proof-complete", "source-proof-start", "source-proof-complete", "policy-complete",
+    "runtime-start", "runtime-complete",
 }
 NATIVE_WRITE_PHASE_WRITER = (
     "function Write-NativeWriteFixturePhase([string]$Name) { "
@@ -49,14 +50,42 @@ NATIVE_WRITE_PHASE_WRITER = (
     "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name) }; "
     "Write-NativeWriteFixturePhase 'command-entry'; "
 )
+NATIVE_WRITE_LOAD_WRITER = """
+function Write-NativeWriteFixtureAssemblyState([string]$Name) {
+    $utility = 0
+    $web = 0
+    foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
+        $assemblyName = $assembly.GetName().Name
+        if ($assemblyName -ceq 'Microsoft.PowerShell.Commands.Utility') { $utility = 1 }
+        if ($assemblyName -ceq 'System.Web.Extensions') { $web = 1 }
+    }
+    $process = [Diagnostics.Process]::GetCurrentProcess()
+    try { $cpu = $process.TotalProcessorTime.Ticks }
+    finally { $process.Dispose() }
+    [Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' +
+        [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString(
+            [Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name +
+        ' cpu_ticks=' + $cpu.ToString([Globalization.CultureInfo]::InvariantCulture) +
+        ' utility=' + $utility.ToString() + ' web=' + $web.ToString())
+}
+"""
 
 
 def native_write_fixture_stderr(stderr):
     phases, errors = [], []
     for line in stderr.splitlines(keepends=True):
-        match = re.fullmatch(rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)\r?\n", line)
-        if match and match[2].decode("ascii") in NATIVE_WRITE_PHASES:
-            phases.append(f"{match[1].decode('ascii')} {match[2].decode('ascii')}")
+        match = re.fullmatch(
+            rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)"
+            rb"( cpu_ticks=[0-9]{1,20} utility=[01] web=[01])?\r?\n", line,
+        )
+        if (
+            match and match[2].decode("ascii") in NATIVE_WRITE_PHASES
+            and (not match[3] or match[2] in {b"json-web-load", b"json-resolver-type"})
+        ):
+            phases.append(
+                f"{match[1].decode('ascii')} {match[2].decode('ascii')}"
+                + (match[3].decode("ascii") if match[3] else "")
+            )
         else:
             errors.append(line)
     return "\n".join(phases), b"".join(errors)
@@ -86,18 +115,26 @@ def instrument_prepared_admission(source):
         ("prepared-marker-decoded", "        $scope = $value['scope']"),
     ):
         assert statement in source
-        source = source.replace(
-            statement, f"Write-NativeWriteFixturePhase '{boundary}'\n" + statement, 1,
+        writer = (
+            "Write-NativeWriteFixtureAssemblyState"
+            if boundary in {"json-web-load", "json-resolver-type"} else "Write-NativeWriteFixturePhase"
         )
-    return source
+        source = source.replace(statement, f"{writer} '{boundary}'\n" + statement, 1)
+    return NATIVE_WRITE_LOAD_WRITER + source
 
 
 def qualify_complete_native_entry(scripts, entry, executable, event, env, workspace, capsys):
+    shell_event = "toolCalls" not in event and event.get("toolName") == "powershell"
     source_names = (
         "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
         "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
         "pr_supersede_guard.py", "tool_call_forms.py", "guarded_anchor_map.py",
     )
+    if shell_event:
+        source_names += ("hook_policy_process.py", "hook_client.py", "hook_pre_policy.py")
+        for name in source_names:
+            if name not in {"pre-tool-hook.ps1", "managed-session.ps1"}:
+                assert (scripts / name).read_bytes() == (SCRIPTS / name).read_bytes()
     source_digests = {
         name: hashlib.sha256((SCRIPTS / name).read_bytes()).hexdigest() for name in source_names
     }
@@ -134,13 +171,28 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
     instrumented["pre-tool-hook.ps1"] = instrumented["pre-tool-hook.ps1"].replace(
         script_entry, script_entry + "\nWrite-NativeWriteFixturePhase 'script-entry'", 1,
     )
+    if shell_event:
+        for phase, statement in (
+            ("runtime-start", "    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }"),
+            ("runtime-complete", "    $script:preToolBoundary = 'policy worker execution'"),
+        ):
+            assert instrumented["pre-tool-hook.ps1"].count(statement) == 1
+            instrumented["pre-tool-hook.ps1"] = instrumented["pre-tool-hook.ps1"].replace(
+                statement, f"Write-NativeWriteFixturePhase '{phase}'\n" + statement, 1,
+            )
     writer = "$global:nativeEntryClock=[Diagnostics.Stopwatch]::StartNew(); " + NATIVE_WRITE_PHASE_WRITER.replace(
         "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()", "$global:nativeEntryClock.ElapsedMilliseconds",
     )
     samples = []
-    protected = {**event, "toolCalls": [
-        *event["toolCalls"], {"name": "edit", "args": {"path": "efforts/private.md"}},
-    ]}
+    target = workspace / "efforts" / "private.md"
+    protected = (
+        {**event, "toolArgs": {"command": f'Set-Content "{target}" -Value "leak"'}}
+        if shell_event else
+        {**event, "toolCalls": [
+            *event["toolCalls"], {"name": "edit", "args": {"path": "efforts/private.md"}},
+        ]}
+    )
+    assert not target.exists()
     try:
         for variant, payload in (
             ("phase-free-before", event), ("attributed-read", event),
@@ -201,7 +253,7 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
             assert result.returncode == 0 and not errors, (variant, result.stdout, result.stderr)
             assert len(builds) == 1, (variant, builds, result.stderr)
             assert len(management) == 1, (variant, management, result.stderr)
-            assert bool(management[0]) is (variant == "attributed-protected"), (variant, sample)
+            assert bool(management[0]) is (shell_event or variant == "attributed-protected"), (variant, sample)
             assert [tick for tick, _ in phases] == sorted(tick for tick, _ in phases), phases
             names = [name for _, name in phases]
             if attributed:
@@ -209,7 +261,12 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                     "command-entry", "script-entry", "admission-start", "admission-complete",
                     "read-proof-start",
                 ]
-                if variant == "attributed-read":
+                if shell_event:
+                    required += [
+                        "read-proof-complete", "runtime-start", "runtime-complete",
+                        "policy-start", "policy-complete",
+                    ]
+                elif variant == "attributed-read":
                     required += ["source-proof-start", "source-proof-complete", "read-proof-complete"]
                 else:
                     required += [
@@ -222,8 +279,11 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                 assert not phases, (variant, phases)
             if variant == "attributed-protected":
                 assert json.loads(result.stdout)["permissionDecision"] == "deny", result.stdout
+            elif shell_event:
+                assert json.loads(result.stdout) == {}, result.stdout
             else:
                 assert result.stdout == b"", result.stdout
+            assert not target.exists()
             assert (scripts / "hook-read-policy.json").read_bytes() == contract
             sample["validated"] = True
     finally:
@@ -235,6 +295,7 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                 "executable_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
                 "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
                 "source_sha256": source_digests, "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
+                "event_kind": "shell-policy" if shell_event else "native-read",
                 "samples": samples, "complete": len(samples) == 4 and all(sample["validated"] for sample in samples),
                 "limits": "Fixture timing only; phases include instrumentation. Outer-minus-last-phase includes startup/exit and marker/module-observer overhead, not isolated startup. Ordered controls are not subtractive attribution or a latency distribution.",
             }}))
@@ -243,13 +304,22 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
 @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
 def test_native_write_fixture_stderr_preserves_errors(newline):
     phase = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
+    before = b"NATIVE_WRITE_FIXTURE_PHASE 124 json-web-load cpu_ticks=250000 utility=1 web=0" + newline
+    after = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-resolver-type cpu_ticks=500000 utility=1 web=1" + newline
     errors = (
         newline + b"real error\xff" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 124 unknown-stage" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE invalid json-entry" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 127 json-web-load cpu_ticks=NaN utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 128 command-entry cpu_ticks=1 utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 129 json-web-load cpu_ticks=1 utility=1 web=2" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 130 json-web-load cpu_ticks=" + b"1" * 21 + b" utility=1 web=0" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
     )
-    assert native_write_fixture_stderr(phase + errors) == ("123 command-entry", errors)
+    assert native_write_fixture_stderr(phase + before + after + errors) == (
+        "123 command-entry\n124 json-web-load cpu_ticks=250000 utility=1 web=0\n"
+        "126 json-resolver-type cpu_ticks=500000 utility=1 web=1", errors,
+    )
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -261,7 +331,8 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
     if not executable:
         pytest.skip(f"{shell} is unavailable")
     command = (
-        NATIVE_WRITE_PHASE_WRITER
+        NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LOAD_WRITER
+        + "Write-NativeWriteFixtureAssemblyState 'json-web-load'; "
         + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
     )
     with pytest.raises(subprocess.TimeoutExpired) as captured:
@@ -270,7 +341,9 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
             input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
         )
     progress, errors = native_write_fixture_stderr(captured.value.stderr)
-    assert progress.endswith(" command-entry")
+    assert re.fullmatch(
+        r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+ utility=[01] web=[01]", progress,
+    ), progress
     assert errors == b"real fixture error\r\n"
     assert captured.value.stdout == b""
 
@@ -1161,6 +1234,7 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "batch-read-only-working-directory", "batch-read-only-real-policy",
     "cell-batch-read-only-real-policy",
     "batch-read-only-attribution", "cell-batch-read-only-attribution",
+    "shell-entry-attribution", "cell-shell-entry-attribution",
     "cell-batch-mixed", "cell-batch-protected",
     "structured-files", "structured-changes", "structured-only", "structured-json",
     "structured-aliases", "structured-duplicates", "structured-limit",
@@ -1192,6 +1266,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "real-policy", "batch-real-policy", "structured-real-policy", "write-name-real-policy",
         "patch-real-policy", "batch-read-only-real-policy",
         "batch-read-only-attribution",
+        "shell-entry-attribution",
     }
     executable = shutil.which(shell)
     if not executable:
@@ -1449,6 +1524,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 event["toolCalls"][-1].update(Keys=[], cwd=str(workspace))
             elif case == "batch-read-only-working-directory":
                 event["workingDirectory"] = event.pop("cwd")
+    if case == "shell-entry-attribution":
+        event.update(toolName="powershell", toolArgs={"command": "Get-Location"})
     env = environment(tmp_path, workspace)
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
@@ -1644,7 +1721,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         )
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
-    if case == "batch-read-only-attribution":
+    if case in {"batch-read-only-attribution", "shell-entry-attribution"}:
         qualify_complete_native_entry(scripts, entry["powershell"], executable, event, env, workspace, capsys)
         assert not membership.exists()
         return
@@ -1711,6 +1788,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert json.loads(result.stdout)["permissionDecision"] == "deny"
     else:
         assert result.stdout == b""
+    if case == "patch-protected-input":
+        with capsys.disabled():
+            print(json.dumps({
+                "shell": shell, "case": case, "start_ms": started_ms,
+                "native_entry_seconds": native_seconds, "phases": progress.splitlines(),
+            }))
     if real_policy:
         contract = scripts / "hook-read-policy.json"
         value = json.loads(contract.read_text(encoding="utf-8"))

@@ -170,6 +170,16 @@ for the recorded native versions, not the operator's installed build, attached
 or new-window use, or survival across caller cleanup Jobs. New packet support
 must be reviewed and promoted to the protected controller before submission.
 
+`submit --packet native-worktrees-copilot` separately selects the candidate's
+`test_public_copilot` in the same application fixture module. It requires the
+real installed public `copilot` entrypoint and an owned private controlling
+terminal, with fresh/resume/reuse, broker/history, seed non-replay and exact
+cleanup evidence. It uses the same pinned prerequisites, Worktrees-only feed,
+sanitization and unchanged functional/preparation bounds as the detached
+packet. Controller support does not supply or qualify the candidate fixture.
+Neither packet qualifies new-window/no-mux modes or survival after all caller
+cleanup Jobs close; a detached `embody` result cannot qualify the TTY caller.
+
 `submit --packet native-driver-auth-wait` selects only the Driver receiver's
 `test_opt_in_receiver_auth_wait_and_same_session_resume` in
 `tests/native/test_native_headed_auth_wait.py`. The candidate must supply that
@@ -422,6 +432,14 @@ Registered entries assert that membership-marker opening precedes marker JSON
 decoding, so a similarly shaped content reader cannot stand in for that stage.
 They never retry the child, extend its ten-second bound or classify the
 unobserved stalled phase as a known flake.
+On PS5.1, the copied admission helper records process CPU ticks (100 ns units)
+and whether Utility/Web assemblies are already loaded immediately before and
+after the original `System.Web.Extensions` load. Enumeration uses only the
+current AppDomain; it does not load an assembly or warm another child.
+The `patch-protected-input` control retains those successful-call phases too.
+Snapshots include their observer work and cannot establish why an earlier
+unobserved load stalled. Malformed or out-of-bound snapshot markers remain
+real stderr; native timeout controls preserve valid snapshots alongside errors.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
@@ -450,6 +468,20 @@ latency or throughput pass.
 The boolean-only admission controls retain bounded command-entry, helper,
 input, admission and output phases; a timeout reports the partial phases
 without retrying the child or relaxing its original limit.
+The `shell-entry-attribution` cases reuse that complete-entry fixture for a
+read-only `Get-Location` event and the original recognized protected
+`Set-Content` target shape. The hook only inspects the commands: the target
+must remain absent. Both engines and legacy/cell contexts use the actual
+strict policy worker, not the ordinary client's relevance shortcut or a
+policy stub. Fixture-only runtime-selection boundaries include CWD repair
+and selected-context validation; source/worker hashes and actual no-op/deny
+outputs accompany ordered phase-free/attributed calls. The existing fixture
+runtime/context substitutes remain, so this is not installed selection
+qualification. Production entry, guards, contract and worker are unchanged.
+All shell calls may load their original Management module. Timings retain
+instrumentation and outside-command uncertainty under the same 10/30/300
+limits; this does not qualify a shell-only replacement or Git/PR, POSIX,
+lifecycle, composed or productive-throughput acceptance.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
