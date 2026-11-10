@@ -6,9 +6,12 @@ import re
 
 
 _READ_TOOLS = frozenset({"view", "rg", "glob"})
+SHELL_READ_HEADS = (
+    "Get-Date", "Get-Item", "Get-ChildItem", "Get-Content", "Get-Location", "pwd", "ls", "cat",
+)
 _SAFE_READ_SHELL = re.compile(
-    r"[ \t]*(?:Get-Date|Get-Item|Get-ChildItem|Get-Content|Get-Location|pwd|ls|cat)"
-    r"(?:[ \t]+[A-Za-z0-9_./:\\?*=-]+)*[ \t]*",
+    r"[ \t]*(?:" + "|".join(re.escape(head) for head in SHELL_READ_HEADS)
+    + r")(?:[ \t]+[A-Za-z0-9_./:\\?*=-]+)*[ \t]*",
     re.IGNORECASE,
 )
 _GUARDS = (
