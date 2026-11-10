@@ -2934,6 +2934,17 @@ own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
 
+### 2026-11-10 - Registered action-progress implementation candidate
+
+The bounded plan merged in #11944. The reader now publishes independent
+snapshots through the modal's existing Inbox, while actual rendering/ticks/input
+apply current values on the UI thread with exact-run fencing. The affected
+packet passes 106 cases, including inert-child/native Textual success, error
+and cancellation. The [slice journal](phase-8-action-progress-inbox.md#journal)
+records fail-first proof and evidence limits. Original P5343/V5343/G5343 remain
+unchecked pending implementation review/CI, merge and canonical acceptance.
+No provider, native-timing, installed-runtime or resource-owner transfer occurs.
+
 ### 2026-11-10 - Registered action-progress Inbox proposal
 
 Added the bounded #5343 execution proposal after current issue/comment,

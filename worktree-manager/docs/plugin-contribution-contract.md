@@ -231,6 +231,19 @@ For the existing provider-owned authentication use of these seams, see the
 It covers account/scope verification, safe progress presentation, cancellation,
 SSH browser use and candidate-consumer ownership without changing this schema.
 
+### Registered row-action progress
+
+A registered row action with `progress: true` streams through its runtime into
+the owning `ProgressScreen`'s Inbox. The reader publishes independent latest-value
+snapshots; only the UI thread applies them. Rendering uses nondestructive reads,
+so coalesced updates and terminal messages remain visible across ticks, including
+completion before mounting or a failed wake. Closed or replaced runs cannot
+change or cancel a newer run through late data, queued wakes or old modal input.
+Provider errors and unexpected reader/refresh failures settle as errors rather
+than leaving Working indefinitely. The existing provider owns cancellation and
+source refresh; this presentation path changes neither its NDJSON schema nor
+process-lifecycle authority.
+
 ### Shared form drafts
 
 A row-scoped `kind: "form"` action may declare `draft`:

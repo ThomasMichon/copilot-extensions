@@ -14,11 +14,12 @@ This closes the [Picker vision](../../../visions/picker/README.md)'s
 right-size the surface, preserve process contracts and keep provider authority
 outside the renderer. No standing intent or primitive contract changes.
 
-## Current source and ownership
+## Source boundary and ownership
 
-`engine_pivot_actions._run_task_action_progress` creates a UI progress dictionary,
-then its reader thread directly changes `pct`, `msg`, `done`, `error` and the
-final message. `ProgressScreen._action_stream_panel` reads that shared dictionary.
+`engine_pivot_actions._run_task_action_progress` creates the UI progress dictionary.
+Its reader publishes independent `pct`, `msg`, `done`, `error` and final-message
+snapshots through the modal's Inbox. `ProgressScreen._action_stream_panel`
+consumes the current value without draining it.
 The existing cancellation callback belongs to the provider runtime, and its
 cache invalidation/refresh remains separately owned.
 
@@ -33,10 +34,10 @@ public #5343 reservation. Existing provider execution, configuration, other
 progress modes, native timing and all resource owners retain their scopes.
 There is no new runtime service, progress store or process-lifecycle authority.
 
-## Proposed mechanism
+## Mechanism
 
-The following mechanics are agent-recommended implementation details, subject
-to review; they do not amend the original outcome or authorize live effects.
+The reviewed mechanics retain the original outcome and do not authorize live
+effects. Source acceptance still requires the implementation's review and merge.
 
 - Use the existing Inbox primitive at the owning action-progress modal, with
   one addressed latest-value slot for that run. Do not mix its data with the
@@ -71,35 +72,36 @@ not replaced by a version assertion.
 
 ## Plan
 
-- [ ] I0: Review and merge this source proposal before functional edits.
-- [ ] I1: Capture failing controls on the actual registered action producer,
+- [x] I0: Review and merge this source proposal before functional edits
+  (#11944).
+- [x] I1: Capture failing controls on the actual registered action producer,
   including no render-dictionary mutation before UI consumption.
-- [ ] I2: Connect reader publication to the modal's existing Inbox and
+- [x] I2: Connect reader publication to the modal's existing Inbox and
   nondestructive current-value rendering, with exact run and cancellation fences.
-- [ ] I3: Preserve completion, provider error/final message and unexpected-reader
+- [x] I3: Preserve completion, provider error/final message and unexpected-reader
   failure; keep provider refresh and other progress consumers unchanged.
 - [ ] I4: Pass the affected consumer packet, source guards and required review/CI,
   merge the implementation and reconcile only the finite P5343/V5343 rows.
 
 ## Validation Plan
 
-- [ ] IV1: Exercise real worker callbacks and the actual modal renderer: multiple
+- [x] IV1: Exercise real worker callbacks and the actual modal renderer: multiple
   updates, partial percentage/message updates, coalescing, repeated peeks,
   completion, failure and final message. Show that only UI consumption changes
   the UI-owned state.
-- [ ] IV2: Gate the reader deterministically across cancellation, closing A,
+- [x] IV2: Gate the reader deterministically across cancellation, closing A,
   starting B and late A progress/completion/error. Include an old queued wake
   and old modal input; B's state and cancellation callback remain untouched.
-- [ ] IV3: Cover early completion before mounting and unavailable wake delivery,
+- [x] IV3: Cover early completion before mounting and unavailable wake delivery,
   retaining current-value display rather than manufacturing a successful wake.
-- [ ] IV4: Use an owned inert streaming child through the real runtime/parser
+- [x] IV4: Use an owned inert streaming child through the real runtime/parser
   and native Textual progress modal for the simple consumer check. Preserve
   existing success/error/cancel behavior and explicit fixture cleanup. No
   real provider, shared mux, service or operator session is a fixture.
 - [ ] IV5: Run the directly affected progress/action/Inbox packet and existing
   applicable lint, install-contract, module-size and documentation checks.
   Keep the original primitive and nonblocking-I/O credit intact.
-- [ ] IV6: Record evidence tiers honestly. Unprepared modal/reader fixtures
+- [x] IV6: Record evidence tiers honestly. Unprepared modal/reader fixtures
   establish first-use consumer behavior, not a fresh-machine installer pass.
   No installer is changed. Live external-provider or installed/native timing
   claims require their own applicable authority and evidence; they are not
@@ -112,3 +114,29 @@ modal flow and every applicable control pass, required review and CI pass,
 the implementation merges and the canonical effort records its accepted rows.
 Other progress producers, provider lifecycle, native performance, release,
 authorized rollout and the wider Manager/Picker campaign remain separate.
+
+## Journal
+
+### 2026-11-10 - Implementation candidate
+
+The source plan merged in #11944 before functional edits. Three focused
+pre-change controls failed on actual reader mutation and bypassed publication.
+The affected seven-file packet now passes 106 cases, including nine new
+deterministic reader/modal controls and the expanded actual inert-child/Textual
+success, provider-error and cancellation cases. The packet also exercises
+existing Inbox, progress and Sync consumers. No source-specific assertion is
+weakened; 329 unrelated cases are excluded by the focused selector.
+
+Snapshots stay private to their producing reader and publication never mutates
+an earlier snapshot. The modal retains current data through repeated peeks,
+early completion and failed wakes. Old completion/error, queued wake, tick and
+input cannot alter or cancel a replacement. Reader and refresh failures settle
+terminally; a secondary refresh failure retains the original provider error.
+
+These are source/unit and simple real-consumer checks on Windows with Python
+3.13 x64. First-use modal fixtures are not a clean-machine installation check:
+no installer changes. No real external provider, productive session or installed
+native timing was exercised; that lane has no execution/rollout authority in
+this slice. Runtime publication and installed acceptance remain separate.
+I4, IV5 and the original P5343/V5343/G5343 remain open until the remaining
+source checks, implementation review and actual merge are reconciled.
