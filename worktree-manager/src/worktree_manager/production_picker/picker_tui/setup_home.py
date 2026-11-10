@@ -13,9 +13,89 @@ from textual.widgets import Button, Static
 
 from ...first_run import diagnostic_argv
 from .command_transport import child_process_env, command_result
-from .configuration_form import CommandResultScreen
+from .configuration_form import CommandResultScreen, ConfigurationDetailScreen
 
 DIAGNOSTIC_TIMEOUT = 30.0
+
+_GUIDES = {
+    "core": ("Install core", (
+        "Owner: Worktree Manager setup and the existing prerequisite/core installers.\n\n"
+        "First review the read-only setup plan below. No installation runs from this guide.\n\n"
+        "To apply, Quit and run worktree-manager setup --apply in your terminal. "
+        "This can install prerequisites and the agent-worktrees core on this machine. "
+        "Use the intended installation context and retain the command's actual result; "
+        "follow any restart instructions before returning and selecting Reload.\n\n"
+        "The real installer requires a copilot-extensions source checkout or the "
+        "bootstrap's staging checkout. If neither is available, follow the Manager "
+        "installation instructions rather than using Update to bootstrap a missing engine.\n\n"
+        "In-app Apply is unavailable; the diagnostic deadline is not an installer lifetime.\n\n"
+        "https://github.com/ThomasMichon/copilot-extensions/blob/main/worktree-manager/README.md"
+    )),
+    "machine": ("Add machine", (
+        "Owner: the selected repository's machine topology and native SSH/profile workflow.\n\n"
+        "There is no Add-machine writer in this setup screen. Machine display preferences "
+        "cannot create a machine or grant SSH access.\n\n"
+        "Next: select the repository that owns your topology. Review its machines.yaml "
+        "declarations through that repository's worktree and publication flow. "
+        "Use the SSH configuration reference for the supported mesh schema and the "
+        "transport owner's instructions for profile emission.\n\n"
+        "Topology editing, transport installation, credentials and reachability checks "
+        "are separate explicit operations. Opening this guide performs none of them.\n\n"
+        "https://github.com/ThomasMichon/copilot-extensions/blob/main/plugins/agent-ssh/docs/configuration.md"
+    )),
+    "repository": ("Adopt repo", (
+        "Owner: Manager register and the engine's repository setup flow.\n\n"
+        "Quit and run worktree-manager register --help for the supported arguments. "
+        "Choose a credential-free HTTPS repository URL and an absolute "
+        "--repository-target destination; optionally choose a full --repository-commit "
+        "and a declared --context.\n\n"
+        "Without --apply, register only prints the proposed declaration. "
+        "It does not inspect or qualify the repository's setup code. "
+        "Actual acquisition, registration and setup require --apply and retain the "
+        "engine owner's account, trust and refusal checks. "
+        "--trust-repository-setup is a separate explicit choice, never implied by this guide.\n\n"
+        "Install core first if the engine is unavailable. In-app adoption is unavailable. "
+        "Retain the owner command's actual result, then return and select Reload; "
+        "this guide does not mark a repository ready.\n\n"
+        "https://github.com/ThomasMichon/copilot-extensions/blob/main/docs/adoption.md"
+    )),
+    "plugins": ("Enable plugins", (
+        "Owner: the selected repository's plugin settings and native plugin installation workflow.\n\n"
+        "In-app plugin enablement is unavailable here. First choose the repository and "
+        "qualify the marketplace/source and trust using its setup instructions. "
+        "Review shared enabledPlugins and extraKnownMarketplaces changes through that "
+        "repository's contribution flow; use private or machine-local preferences only "
+        "where the owning workflow explicitly supports them.\n\n"
+        "Payload installation, repository enablement, runtime installation and service "
+        "activation are separate states. A loaded plugin does not establish a running service. "
+        "Opening this guide does not edit settings, install a payload or start a service. "
+        "After the owner workflow completes, follow its restart instructions and Reload.\n\n"
+        "https://github.com/ThomasMichon/copilot-extensions/blob/main/docs/configuration.md\n"
+        "https://github.com/ThomasMichon/copilot-extensions/blob/main/docs/installation.md"
+    )),
+}
+
+
+class SetupGuideScreen(ConfigurationDetailScreen, inherit_bindings=False):
+    BINDINGS = [("escape", "close", "Return")]
+
+    def __init__(self, action):
+        title, body = _GUIDES[action]
+        super().__init__(
+            title, {"body": body}, context="Setup / Doctor",
+            return_label="Return to Setup / Doctor",
+        )
+        self.action = action
+
+    def compose(self):
+        yield from super().compose()
+        if self.action == "core":
+            yield Button("Review setup plan (read-only)", id="setup-guide-plan")
+
+    def on_button_pressed(self, event):
+        event.prevent_default()
+        event.stop()
+        self.dismiss("setup" if event.button.id == "setup-guide-plan" else None)
 
 
 def _timeout_report(error):
@@ -60,6 +140,8 @@ class SetupHome(Widget):
             )
             yield Button("Review setup plan (read-only)", id="setup-plan")
             yield Button("Inspect Manager setup (read-only)", id="setup-doctor")
+            for action, (title, _) in _GUIDES.items():
+                yield Button(f"{title} (guide)", id=f"setup-guide-{action}")
         yield Button("Reload", id="setup-reload")
         yield Button("Quit", id="setup-quit")
 
@@ -86,8 +168,16 @@ class SetupHome(Widget):
             self.action_quit()
         elif button in {"setup-plan", "setup-doctor"}:
             self._diagnose("setup" if button == "setup-plan" else "doctor")
+        elif button and button.startswith("setup-guide-"):
+            self.app.push_screen(
+                SetupGuideScreen(button.removeprefix("setup-guide-")), self._guide_returned,
+            )
         elif button and button.startswith("setup-project-"):
             self.app.reload_setup(self.state.projects[int(button.rsplit("-", 1)[1])])
+
+    def _guide_returned(self, action):
+        if action == "setup" and self.is_mounted:
+            self._diagnose(action)
 
     def _diagnose(self, action):
         result = CommandResultScreen(

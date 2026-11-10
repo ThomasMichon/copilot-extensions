@@ -135,16 +135,20 @@ class ConfigurationDetailScreen(Screen):
         Binding("enter", "close", show=False),
     ]
 
-    def __init__(self, title, card):
+    def __init__(
+        self, title, card, *, context="Configuration", return_label="Return to Configuration",
+    ):
         super().__init__()
         self.title = title
         self.card = card
+        self.context = context
+        self.return_label = return_label
 
     def compose(self):
-        yield Static(f"Configuration / {self.title}", markup=False)
+        yield Static(f"{self.context} / {self.title}", markup=False)
         with VerticalScroll():
             yield Static(str(self.card.get("body") or ""), markup=False)
-        yield Button("Return to Configuration")
+        yield Button(self.return_label)
 
     def on_button_pressed(self, event):
         self.dismiss()
