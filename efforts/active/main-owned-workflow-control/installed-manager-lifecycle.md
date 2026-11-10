@@ -204,3 +204,28 @@ The required-readiness contributor accepted the two new companion/control
 paths above. The Campaign driver reserved the distinct lifecycle witness.
 Shared helper/runner/result edits still require concrete overlap coordination;
 neither this split nor the open Main PR establishes executed lifecycle proof.
+
+### 2026-11-10 - Isolated the deferred Windows argument boundary
+
+The second disposable native run (42766907684, candidate
+`5dbe28a88ea64d482c7513f748a551a65887a605`) passed the repaired quoted-process
+census and created the actual private PSMux session, then the pinned CLI
+rejected its command before inference. Direct tests against that exact pinned
+CLI accepted the configured flags and both directory spellings; those inputs
+were not removed or weakened.
+
+A separate private argv witness reproduced PowerShell's `-File` conversion
+of `-C=<drive>:\...` into two arguments. The ordinary startup manifest and
+full pane-manifest route preserved it. The deferred seed owner can reach a
+later canonical setup spawn after mux serialization, leaving that final
+boundary unprotected. The fix reuses the existing copied shell and one-shot
+manifest at that spawn, retaining the original admission and seed ownership.
+No provider mock, policy, budget or native-session identity was changed.
+
+Focused source validation passed 254 shell/seed controls with 16 platform
+skips, followed by both native final-spawn success/failure variants. Lint,
+install-contract and module-size checks passed. These controls are not the
+installed Manager lifecycle result: draft #11864 remains unqualified until
+the exact updated source completes the disposable native witness. Authentic
+selected-suite installation, ordinary upgrade and frozen-candidate mandatory
+enforcement remain open under this parent.

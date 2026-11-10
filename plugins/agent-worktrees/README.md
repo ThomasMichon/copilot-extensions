@@ -652,6 +652,11 @@ requires separately qualified peer support; source publication alone does not
 activate different-worktree launch parallelism. The new lease is distinct from
 seed/native admission and the Windows mux check/create lease.
 
+Deferred Windows launches serialize the final canonical PowerShell setup argv
+through the same one-shot manifest used by mux startup. This preserves literal
+drive-qualified arguments and option-leading prompts across `pwsh -File`;
+it does not change the selected admission, seed or conversation owner.
+
 ### Explicit restart Resume
 
 `embody --worktree-id <exact-id> --restart-request <json> --json` is a separate,

@@ -162,7 +162,7 @@ def prepare_for_mux(
         raise RuntimeError("Could not prepare launch-owned pane assets") from error
 
 
-def startup_command(command: list[str]) -> list[str]:
+def startup_command(command: list[str], *, record_path: Path | None = None) -> list[str]:
     """Serialize copied setup only after launch and seed planning are complete."""
     from .sessions_pane_args import _launch_args_root, _write_manifest
 
@@ -173,11 +173,26 @@ def startup_command(command: list[str]) -> list[str]:
     ):
         return command
     script = Path(command[4])
-    if (
-        script.name not in {"launch-command.ps1", "default-setup.ps1"}
-        or not _launch_args_root(script.parent / "pane-args")
-    ):
+    if script.name not in {"launch-command.ps1", "default-setup.ps1"}:
         return command
+    if command[5:6] == ["--startup-manifest"]:
+        return command
+    if not _launch_args_root(script.parent / "pane-args"):
+        from . import installer
+        from .manager_launch_cli import _worktree_manager_root
+
+        if record_path is None or script.resolve() != (installer.scripts_dir() / script.name).resolve():
+            return command
+        wrapper = script.with_name("launch-command.ps1")
+        _plain(wrapper)
+        if STARTUP_MANIFEST_MARKER not in wrapper.read_text(encoding="utf-8-sig").splitlines():
+            return command
+        prepared = prepare(
+            record_path.absolute(), script.absolute(),
+            installation_roots=(installer.install_dir().absolute(), _worktree_manager_root().absolute()),
+        )
+        script = prepared.wrapper
+        command = [*command[:4], str(script), *command[5:]]
     wrapper = script.with_name("launch-command.ps1")
     _plain(script)
     _plain(wrapper)
