@@ -12,7 +12,7 @@ runtime-root state, or track each remaining case.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent PRs against `dev`
 - **Created:** 2026-11-09
-- **Status:** Active
+- **Status:** Done
 - **Vision:** agent-fabric `derive-dont-duplicate`,
   `trusted-cooperation-with-economical-evidence`
 - **Umbrella issue:** #11883
@@ -75,11 +75,11 @@ is included. Required review, CI and merge gates remain intact.
 - [x] Remove launch writers and replace readers with CWD or explicit arguments.
 - [x] Preserve managed caller checks against the resolved worktree head.
 - [x] Update affected documentation and focused regression tests.
-- [ ] Deliver the implementation through reviewed merge.
+- [x] Deliver the implementation through reviewed merge (#11895).
 
 ### Phase 3 - Environment audit
 - [x] Inventory non-test environment inputs across plugins, libraries and tools.
-- [ ] Post a per-variable classification table on #11883: test/diagnostic,
+- [x] Post a per-variable classification table on #11883: test/diagnostic,
   legitimate host input, or leaking identity/owner/runtime state.
 - [x] Deferred to `#11891, #11892, #11893`: Fix category-three cases through
   reviewed PRs or transfer each to a linked tracked issue with concrete evidence
@@ -92,8 +92,8 @@ is included. Required review, CI and merge gates remain intact.
   explicit caller context and missing managed context.
 - [x] Run affected tests through bounded test supervision and Python lint.
 - [x] Run relevant install-contract and documentation checks.
-- [ ] Audit the final public diff and live issue/PR surfaces for private data.
-- [ ] Verify reviewed implementation merges and finalized source worktrees;
+- [x] Audit the final public diff and live issue/PR surfaces for private data.
+- [x] Verify reviewed implementation merges and finalized source worktrees;
   report source delivery separately from release or rollout.
 
 ## Proposal
@@ -105,6 +105,39 @@ Existing explicit CLI context remains supported. Test-only controls and
 legitimate host inputs are not removed merely because they are variables.
 
 ## Journal
+
+### 2026-11-10 - Source delivery and audit complete
+
+- Implementation #11895 merged after a current-head Copilot Comment with no
+  open findings and required green Linux CI. Caller impact from deliberately
+  removing environment-owner fallback was assessed against the explicit removal
+  intent, documented CLI forms and regression coverage. The implementation
+  source worktree was finalized after provider-confirmed merge.
+- Final audit: 595 distinct inputs/declarations, classified as 52
+  test/diagnostic, 400 operational/host inputs and 143 migration candidates.
+  The first 537 rows and the 58-row indirect/declaration closure are published
+  on #11883. Non-input constants, prefixes and probe labels are excluded.
+  Declaration/scrub-only entries do not assert active readers or live defects.
+- Every remaining migration candidate is individually checklist-tracked:
+  #11891 owns 60 runtime/state selectors, #11892 owns 42 identity markers and
+  #11893 owns 41 retained command carriers. Live readback verified all 143
+  items. This completes the requested removal-and-audit scope, not those broader
+  migrations. #11785 retains the narrower credential-client symptom.
+- Final focused controls include 258 Bridge caller/registry/head cases,
+  115 Worktrees ownership/claim cases, two actual owner-query identity cases,
+  one actual exact-record/foreign-head case and 42 configuration-delivery cases.
+  Earlier Codespaces 120, Dispatch diagnostics 49 and shared supervisor five
+  cases also passed. All pytest execution used bounded supervision.
+- Module caps, exact source admission, changefile coverage, Python lint and the
+  unchanged contract checker passed. All 1,086 wire fixtures and historical
+  provenance remain unchanged; caller-only lookup uses the existing exact
+  project record interface instead of altering the service-side head reader.
+- The native Windows full unit attempt stopped after 2,620 passes at the
+  known symlink-privilege fixture gap #6093. No privilege, skip, selection,
+  effect allowance or budget changed, and local packet completion is not
+  claimed. Required Linux CI passed the admitted unit gate.
+- Public commit and issue/PR readback audits passed. No live host rollout,
+  runtime replacement or service restart was performed or authorized.
 
 ### 2026-11-09 - Kickoff
 

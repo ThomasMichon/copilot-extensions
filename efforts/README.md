@@ -8,9 +8,6 @@ that pattern to this repository.
 
 ## Active effort index
 
-- [CWD-Owned Command Context](active/cwd-owned-command-context/README.md) -
-  #11883; remove inherited owner references and classify environment inputs.
-
 Installer/update campaigns and bug-fix slices, including already-active work,
 must cite and evaluate their objective and completion/validation gates against
 [authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
@@ -184,6 +181,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [CWD-Owned Command Context](2026/11/10%20cwd-owned-command-context/README.md) | Done for requested source-and-audit scope; owner-reference removal merged in #11895, 595 inputs/declarations classified and implementation worktree finalized | #11883; 143 migration candidates remain individually tracked in #11891/#11892/#11893; no rollout |
 | [Portable Agent Topology](2026/11/09%20portable-agent-topology/README.md) | Done for source scope; portable dispatcher, schema and read-only helper merged in #11738 after approval and required CI | #11715 retains archive and native settlement; normal promotion and authorized live adoption remain separate, no rollout |
 | [Mux Question Answers](2026/11/09%20mux-question-answers/README.md) | Done; reviewed source released, both authorized installed environments accepted a fresh mux answer and same-conversation continuation | #11371 retains archive review/Main publication and exact resource settlement; #10486 keeps broader MCP handover/whole-suite acceptance |
 | [Mux Functional Continuity](2026/11/09%20mux-functional-continuity/README.md) | Done for source scope; plan #11547 and implementation #11564 merged, exact-source PSMux 3.3.8/3.4.0 native consumers passed | #11544; normal promotion and separately authorized installed adoption remain independent; no host rollout |
