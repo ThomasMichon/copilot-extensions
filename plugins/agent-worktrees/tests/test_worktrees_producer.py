@@ -10,6 +10,7 @@ import pytest
 from agent_worktrees import __main__ as core
 from agent_worktrees import git_ops, mux_link, reclaim, sessions, tracking
 from agent_worktrees import worktrees_producer as producer
+from agent_worktrees.record_io import read_record_mapping
 from agent_worktrees.worktrees_runtime import CONTRACT_VERSION, WorktreesRuntime
 from agent_worktrees.hook_facts_publication import HookFactsPublisher
 
@@ -100,11 +101,15 @@ def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, 
 
 
 @pytest.mark.parametrize(("failure", "managed"), [
-    (None, False), (None, True), ("bound", False), ("mux", False),
+    (None, False), (None, True), ("registered", False), ("unindexed", False),
+    ("bound", False), ("mux", False),
     ("later-mux", False), ("publication", False), ("ambiguous", False), ("cleanup", False),
     ("unreadable-workspace", False), ("contended", False), ("unpersisted", False),
     ("unreadable-record", False), ("malformed-record", False),
     ("status-collision", False), ("platform-collision", False), ("checkout-collision", False),
+    ("malformed-registry", False), ("malformed-entry", False), ("malformed-id", False),
+    ("partial-registry", False), ("numeric-id", False),
+    ("malformed-during-observation", False),
 ])
 def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     tmp_path, monkeypatch, failure, managed,
@@ -125,6 +130,10 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         creation_nonce="fixture-incarnation", bound_live=True,
         bound_live_at=datetime.now().isoformat(),
     )
+    if failure == "registered":
+        record.sessions = [tracking.SessionEntry(session_id="registered-session", started_at="")]
+    elif failure == "unindexed":
+        record.sessions = None
     monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
     config_path = producer.cfg.project_dir("project") / "config.yaml"
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -152,6 +161,24 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         tracking.save_record(item, path)
         paths.append(path)
     initial_bytes = paths[0].read_bytes()
+    malformed = {
+        "malformed-registry": {"session_id": "unobserved"},
+        "malformed-entry": ["unobserved"],
+        "malformed-id": [{"session_id": None}],
+        "partial-registry": [{"session_id": "unobserved"}, {}],
+        "numeric-id": [{"session_id": 17}],
+    }
+
+    def corrupt_sessions(value):
+        nonlocal initial_bytes
+
+        data = read_record_mapping(paths[0])
+        data["sessions"] = value
+        paths[0].write_text(json.dumps(data, default=str), encoding="utf-8")
+        initial_bytes = paths[0].read_bytes()
+
+    if failure in malformed:
+        corrupt_sessions(malformed[failure])
     if failure == "malformed-record":
         paths[0].write_text("[invalid: yaml")
     elif failure == "unreadable-record":
@@ -175,6 +202,8 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
 
     def bound(**kwargs):
         bound_reads.append(kwargs)
+        if failure == "malformed-during-observation":
+            corrupt_sessions(malformed["malformed-registry"])
         if failure == "bound":
             raise OSError("bound observation failed")
         if failure == "cleanup":
@@ -272,7 +301,7 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 producer.publish_active_project(owner, **options)
             assert owner.handle(query)["error"]["code"] == "unready"
             assert owner.refreshes.pending("project")
-        elif failure and not collision:
+        elif failure and not collision and failure not in {"registered", "unindexed"}:
             count = 0 if failure in {"unreadable-record", "malformed-record"} else 1
             assert producer.publish_active_project(owner, **options) == count
             assert owner.handle(query)["error"]["code"] == "refresh-unavailable"
@@ -283,6 +312,8 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 assert denied_reads
                 assert paths[0].read_bytes() == initial_bytes
             if failure in {"unreadable-workspace", "contended", "unpersisted"}:
+                assert paths[0].read_bytes() == initial_bytes
+            if failure in malformed or failure == "malformed-during-observation":
                 assert paths[0].read_bytes() == initial_bytes
             if failure in {"contended", "unpersisted"}:
                 release.set()
@@ -319,13 +350,15 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 })
                 assert producer.publish_active_project(owner, **options) == 1
                 assert owner.handle(query)["worktrees"][0]["mux_session"] is True
-        calls = 0 if failure in {
+        calls = 0 if failure in malformed or failure in {
             "ambiguous", "unreadable-workspace", "unreadable-record", "malformed-record",
         } else (
             2 if failure in {"contended", "unpersisted"} else 1
         )
         assert bound_reads == [
-            {"worktree_id": selected_id, "session_ids": [], "strict": True},
+            {"worktree_id": selected_id,
+             "session_ids": [entry.session_id for entry in record.sessions or []],
+             "strict": True},
         ] * calls
     finally:
         release.set()

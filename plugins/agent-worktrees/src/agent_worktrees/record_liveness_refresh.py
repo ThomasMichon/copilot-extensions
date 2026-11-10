@@ -7,13 +7,26 @@ import copy
 from . import config as cfg, reclaim, sessions, tracking
 from .push_timeout import ObservationUnavailable
 from .record_io import read_record_mapping
+from .session_projection import _valid_session_id
 
 _INCARNATION = ("worktree_id", "worktree_path", "repo", "branch", "creation_nonce")
 _HINTS = ("bound_live", "bound_live_at", "mux_live", "mux_live_at")
 
 
 def _read(path):
-    return tracking.parse_record_data(read_record_mapping(path), path=path)
+    data = read_record_mapping(path)
+    registry = data.get("sessions")
+    if registry is not None and (
+        not isinstance(registry, list)
+        or any(
+            not isinstance(entry, dict)
+            or not isinstance(entry.get("session_id"), str)
+            or not _valid_session_id(entry["session_id"])
+            for entry in registry
+        )
+    ):
+        raise ObservationUnavailable("Strict refresh session registry metadata is malformed")
+    return tracking.parse_record_data(data, path=path)
 
 
 def _fence(record):

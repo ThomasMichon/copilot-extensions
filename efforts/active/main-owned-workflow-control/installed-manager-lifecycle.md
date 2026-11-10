@@ -674,3 +674,38 @@ pass in 86.66 seconds; no deadline was increased or failed attempt credited.
 The rebased, stricter candidate still requires exact-source installed
 qualification, a fresh actual review and required CI. No complete-suite,
 authentic-update, mandatory frozen-candidate or Main-adoption gate is closed.
+
+### 2026-11-10 - Strict owner-binding native pass; reject malformed raw registries
+
+Run 42857279887, attempt 1, passed at
+`86d8f360d0b874f1e2e6ddbe2b895b864870072e`
+(tree `7ebb4e982a7f37bd1a0aaebf29d3ad0004b0c30b`).
+JUnit records one selected test, zero failures/errors/skips and 348.862 seconds;
+the complete lifecycle receipt measures 339.735 seconds. Installed origins and
+exact candidate bytes are verified across 303 Manager and 697 engine modules.
+The complete real flow, stricter conversation-owner binding, all four persisted
+replies, refusal and settled cleanup pass. Required CI passed; a metadata-parser
+npm configuration timeout also passed its single job-only retry under unchanged
+limits. This is installed-core evidence for that candidate, not broader suite,
+update or publication enforcement.
+
+After the full post-push wait expired, an actual current-head Copilot review
+5845864973 arrived during the explicit re-request. Its body recommends changes:
+malformed session metadata can become an empty registry before strict Refresh
+checks the native owner. There are no new inline comments; the negative body
+remains blocking despite its "No open issues" banner.
+
+Five real tracking-file controls reproduced successful acknowledgements for a
+non-list registry, a discarded entry, coerced null/numeric IDs and a partially
+discarded registry. Strict reconciliation now validates raw registry structure
+and every session identity before the existing parser, on each initial,
+locked-fence and persistence-confirmation read. Malformed metadata refuses
+before absence stamps or receipts; legacy best-effort parsing is unchanged.
+The valid indexed-empty, valid registered-session and unindexed discovery paths
+remain covered, as does malformed metadata introduced during observation.
+
+All 213 tests in the affected producer/runtime/client/projection files pass in
+58.06 seconds, including successful unindexed discovery. The changed candidate
+still requires exact-source installed
+requalification, fresh actual review and required CI. No prior native pass
+qualifies this correction, and no parent acceptance gate is closed.
