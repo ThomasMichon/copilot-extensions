@@ -156,6 +156,9 @@ def collect(store: Path, hour: str | None = None) -> dict:
             "observed_at_ms": finished_ms, "observation": observation,
             "services": list(services.values()), "coverage": coverage,
         })
-        if time.monotonic() >= deadline - .25:
-            raise slots.HealthError("collection-timeout")
-        return candidate
+    if time.monotonic() >= deadline - .25:
+        raise slots.HealthError("collection-timeout")
+    completed_ms = time.time_ns() // 1_000_000
+    if completed_ms < started_ms or completed_ms // slots.HOUR_MS != current_hour:
+        raise slots.HealthError("collection-hour-changed")
+    return candidate

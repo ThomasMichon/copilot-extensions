@@ -218,6 +218,31 @@ def test_unconfirmed_exporter_cleanup_holds_admission_until_native_settlement(
     assert collector.collect(store)["hour"] == HOUR
 
 
+def test_successful_fence_cleanup_cannot_return_a_candidate_after_the_parent_deadline(
+    store, monkeypatch,
+):
+    tick, calls = 10.0, 0
+    fsync = collector.os.fsync
+    monkeypatch.setattr(collector.time, "monotonic", lambda: tick)
+
+    def delayed_cleanup(descriptor):
+        nonlocal tick, calls
+        fsync(descriptor)
+        calls += 1
+        if calls == 2:
+            tick = 60.0
+
+    monkeypatch.setattr(collector.os, "fsync", delayed_cleanup)
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: [])
+    with pytest.raises(slots.HealthError, match="collection-timeout"):
+        collector.collect(store, "2026-11-09T11:00:00Z")
+    assert calls == 2
+    assert (store / "collection.lock").read_bytes() == b"\0"
+    assert not list(store.glob("[0-9][0-9][0-9].json"))
+    with collector.admission(store):
+        pass
+
+
 def test_collection_overlap_refuses_before_native_owners_and_releases_on_exit(store, monkeypatch):
     monkeypatch.setattr(health_observe, "observe_bridge", lambda *a: pytest.fail("overlapping probe"))
     with collector.admission(store):

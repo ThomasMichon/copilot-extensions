@@ -4746,7 +4746,7 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "6f6d13314e868cdc2b377be5e365ae6ea1ea7f052a4a84fdf6c1474dc5d3922e",
+        "tools/promotion_unit_tests/test_health_composition.py": "e2d6671e1e240e8d4fd230058862ce013482bafa573acbb39f3e927b8881b689",
         "plugins/agent-machines/src/agent_machines/cli_health.py": "3eee04902b962b7c1366fe24457a568514c1d4e1f26b02e611b91d310968ca88",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
@@ -5423,7 +5423,7 @@
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
         "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
-        "plugins/agent-machines/src/agent_machines/health_collect.py": "ea14a9d7c7fb1e3aa5f6480869d2fd468e126a2c59986b3b760ca74f98058425"
+        "plugins/agent-machines/src/agent_machines/health_collect.py": "1cd2b74bb789a50b522078a88164b4fafc0791094dd577340e5d4655d235302c"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_hourly.py",

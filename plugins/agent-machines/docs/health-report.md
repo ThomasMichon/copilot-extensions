@@ -191,6 +191,8 @@ original native owner must confirm settlement, or an explicit containment
 handoff must reconcile that exact custody before store recovery. File age,
 an exited CLI or a missing PID is not confirmation. Thus collection never writes
 evidence or slots, but can change this existing admission metadata.
+The final deadline and hour checks run after admission cleanup; late successful
+fence clearing cannot produce an on-time candidate.
 Lock, provider and filesystem failures never start a replacement
 service, change credentials or write a slot. Filesystem stalls defeating the
 budget remain a native qualification failure, not a hard-real-time guarantee.

@@ -8,7 +8,7 @@ import importlib.util
 import io
 import json
 import sys
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -442,3 +442,15 @@ def test_explicit_collection_orchestration_keeps_hours_and_parent_budget(owners,
         collector.collect(Path("synthetic-store"), "2026-11-09T13:00:00Z")
     with pytest.raises(ValueError, match="canonical UTC hour"):
         collector.collect(Path("synthetic-store"), "")
+    tick = 10.0
+
+    @contextmanager
+    def admission(store):
+        nonlocal tick
+        yield lambda: None
+        tick = 60.0
+
+    monkeypatch.setattr(collector, "admission", admission)
+    monkeypatch.setattr(collector.time, "monotonic", lambda: tick)
+    with pytest.raises(slots.HealthError, match="collection-timeout"):
+        collector.collect(Path("synthetic-store"), "2026-11-09T11:00:00Z")
