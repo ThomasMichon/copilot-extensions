@@ -1609,6 +1609,7 @@ def test_windows_cold_foundation_modules_have_independent_aggregate_budgets() ->
     assert "vault_uninstall_admits_only_native_service_redirector_closure" in native["run"]
     assert "vault_uninstall_stop_pins_native_identity" in native["run"]
     assert "vault_uninstall_admits_only_the_canonical_same_process_daemon" in native["run"]
+    assert "vault_uninstall_file_observations_normalize_native_namespace" in native["run"]
     assert not any(
         "tests/test_native_uninstall_adapters.py" in entry.get("run", "")
         for entry in workflow["jobs"]["foundation-linux"]["steps"]

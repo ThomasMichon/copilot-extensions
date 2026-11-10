@@ -1621,7 +1621,12 @@ result = []
 for value in paths:
     if not isinstance(value, str) or not Path(value).is_absolute():
         raise ValueError("Native file observation requires an absolute path")
-    path = Path(value).resolve(strict=True)
+    resolved = str(Path(value).resolve(strict=True))
+    if resolved.startswith("\\\\?\\UNC\\"):
+        resolved = "\\\\" + resolved[8:]
+    elif resolved.startswith("\\\\?\\"):
+        resolved = resolved[4:]
+    path = Path(resolved)
     info = path.stat()
     result.append({"path": str(path), "identity": f"{info.st_dev}:{info.st_ino}"})
 print(json.dumps(result))

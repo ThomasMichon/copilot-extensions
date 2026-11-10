@@ -481,7 +481,7 @@ def test_vault_uninstall_stop_pins_native_identity_through_signal_and_wait(
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows canonical daemon command admission")
 @pytest.mark.parametrize("fault", [
-    "none", "command", "source", "cache", "foreign-image", "foreign-base", "trailing-argument",
+    "none", "nt-prefix", "command", "source", "cache", "foreign-image", "foreign-base", "trailing-argument",
 ])
 def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path, fault):
     from agent_procutil._daemon_instance_child import _BOOTSTRAP
@@ -498,7 +498,11 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
         "--foreground", "--persistent", "--configuration-root", str(tmp_path),
     ]
     image = str(Path(sys._base_executable))
-    if fault == "command":
+    if fault == "nt-prefix":
+        image = "\\\\?\\" + image
+        command[0] = image
+        command[2] = "pycache_prefix=\\\\?\\" + command[2].removeprefix("pycache_prefix=")
+    elif fault == "command":
         command[7] = "import time; time.sleep(20)"
     elif fault == "source":
         command[8] = str(tmp_path)
@@ -521,7 +525,25 @@ def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path,
         capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert json.loads(result.stdout) is (fault == "none")
+    assert json.loads(result.stdout) is (fault in {"none", "nt-prefix"})
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native image path observations")
+def test_vault_uninstall_file_observations_normalize_native_namespace(tmp_path):
+    base = Path(sys._base_executable).resolve()
+    extended = Path("\\\\?\\" + str(base))
+    body = "\n".join((
+        "$ErrorActionPreference='Stop'",
+        f". {_quote(REPO / 'plugins/agent-vault/scripts/versioned_runtime_native.ps1')}",
+        f"$InstallDir={_quote(tmp_path / 'unused-runtime')}",
+        f"function Get-FiniteUninstallPython {{ param($InstallRoot); {_quote(base)} }}",
+        _function("agent-vault", "ps1", "Get-VaultUninstallPathInfo"),
+        f"ConvertTo-Json -InputObject @(Get-VaultUninstallPathInfo @({_quote(base)},{_quote(extended)})) -Compress",
+    ))
+    result = _run(tmp_path, "ps1", body)
+    assert result.returncode == 0, result.stdout + result.stderr
+    records = json.loads(result.stdout)
+    assert len(records) == 2 and records[0] == records[1]
 
 
 @pytest.mark.parametrize("plugin", PLUGINS)

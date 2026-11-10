@@ -3059,7 +3059,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-vault
           --test-file tests/test_native_uninstall_adapters.py
-          -k "vault_uninstall_admits_only_native_service_redirector_closure or vault_uninstall_stop_pins_native_identity or vault_uninstall_admits_only_the_canonical_same_process_daemon"
+          -k "vault_uninstall_admits_only_native_service_redirector_closure or vault_uninstall_stop_pins_native_identity or vault_uninstall_admits_only_the_canonical_same_process_daemon or vault_uninstall_file_observations_normalize_native_namespace"
           --allow-explicit-tiers --test-timeout 60 --timeout 300
   foundation-first-use-windows:
     if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'foundation' || inputs.portfolio == 'foundation-services')
