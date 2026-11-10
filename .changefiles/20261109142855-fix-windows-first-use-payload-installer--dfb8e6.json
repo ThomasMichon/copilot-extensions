@@ -1,0 +1,9 @@
+{
+  "comment": "Fix Windows first-use payload installer discovery, signed Python probing and stderr diagnostics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
