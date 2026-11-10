@@ -41,6 +41,10 @@ def fake_popen(monkeypatch, declared_mock_daemon):
     monkeypatch.setattr(daemon_broker, "caller_in_job", lambda: False)
     monkeypatch.setattr(pu.subprocess, "Popen", fake)
     monkeypatch.setattr(
+        "agent_procutil.linux_daemon_scope.scope_command",
+        lambda command, *_args, **_kwargs: command,
+    )
+    monkeypatch.setattr(
         daemon, "spawn_brokered_daemon", Mock(side_effect=pu.DaemonSpawnError(
             "fixture", process_created=False, admission_sent=False,
         )),
@@ -78,12 +82,45 @@ def test_without_stderr_log_stderr_is_merged(tmp_path, fake_popen):
     assert kwargs["stderr"] is subprocess.STDOUT
 
 
+def test_explicit_stdio_fds_remain_caller_owned(tmp_path, fake_popen):
+    with (tmp_path / "input").open("w+b") as incoming, (
+        tmp_path / "output"
+    ).open("w+b") as outgoing:
+        descriptors = (incoming.fileno(), outgoing.fileno(), outgoing.fileno())
+        pu.spawn_daemon(
+            ["py"], cwd=tmp_path, log_path=tmp_path / "launch.log",
+            stdio_fds=descriptors,
+        )
+        (_, options), = fake_popen.calls
+        assert tuple(options[name] for name in ("stdin", "stdout", "stderr")) == descriptors
+        assert not incoming.closed and not outgoing.closed
+        assert not os.get_inheritable(incoming.fileno())
+        assert not os.get_inheritable(outgoing.fileno())
+    assert "spawn_daemon cwd=" in (tmp_path / "launch.log").read_text()
+
+
+@pytest.mark.parametrize("descriptors", [
+    (), (0, 1), [0, 1, 2], (True, 1, 2), (-1, 1, 2), (0, "1", 2),
+])
+def test_invalid_stdio_fds_refused_before_creation(tmp_path, fake_popen, descriptors):
+    with pytest.raises(ValueError, match="stdio_fds"):
+        pu.spawn_daemon(
+            ["py"], cwd=tmp_path, log_path=tmp_path / "launch.log",
+            stdio_fds=descriptors,
+        )
+    assert fake_popen.calls == []
+    assert not (tmp_path / "launch.log").exists()
+
+
 def test_stderr_log_equal_to_log_path_merges(tmp_path, fake_popen):
     log = tmp_path / "svc.log"
     pu.spawn_daemon(["py"], cwd=tmp_path, log_path=log, stderr_log_path=str(log))
     (_, kwargs), = fake_popen.calls
     assert kwargs["stderr"] is subprocess.STDOUT
-    assert len(log.read_text(encoding="utf-8").splitlines()) == 1
+    assert sum(
+        "spawn_daemon cwd=" in line
+        for line in log.read_text(encoding="utf-8").splitlines()
+    ) == 1
 
 
 def test_relative_stderr_log_is_rejected(tmp_path, fake_popen, monkeypatch):
@@ -187,3 +224,25 @@ def test_real_child_splits_stdout_and_stderr(tmp_path):
     err_text = err_log.read_text(encoding="utf-8", errors="replace")
     assert "to-out" in out_text and "to-err" not in out_text
     assert "to-err" in err_text and "to-out" not in err_text
+
+
+def test_real_child_retains_explicit_stdio_and_separate_launch_log(tmp_path):
+    out_log = tmp_path / "launch.log"
+    with (tmp_path / "input").open("w+b") as incoming, (
+        tmp_path / "output"
+    ).open("w+b") as outgoing, (tmp_path / "errors").open("w+b") as errors:
+        incoming.write(b"original-pipe-input")
+        incoming.seek(0)
+        process = pu.spawn_daemon(
+            [sys.executable, "-c",
+             "import sys; sys.stdout.buffer.write(sys.stdin.buffer.read()); "
+             "sys.stderr.buffer.write(b'original-stderr')"],
+            cwd=tmp_path, log_path=out_log,
+            stdio_fds=(incoming.fileno(), outgoing.fileno(), errors.fileno()),
+        )
+        assert process.wait(timeout=15) == 0
+        outgoing.seek(0)
+        errors.seek(0)
+        assert outgoing.read() == b"original-pipe-input"
+        assert errors.read() == b"original-stderr"
+    assert "original-pipe-input" not in out_log.read_text()

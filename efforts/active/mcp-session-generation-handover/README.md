@@ -307,6 +307,10 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
 
 ### Phase 3 - Session-preserving handover and independent retirement
 
+- [x] **Provider-first source merged:** #11911 landed at
+  `70ecc34fc56bb71fa9a7a279ed7de7bfd266ce87` after current-head automated
+  approval and required CI. Internal custody/backend/conduit providers are
+  expanded; ordinary caller selection and installed adoption are unchanged.
 - [ ] **Separate warm-reuse follow-up under #10486:** qualify broader
   HTTP/dynamic-auth/routed/CLI execution and per-target context/credential
   custody before expanding sharing. Preserve actual stdio cwd semantics.
@@ -314,6 +318,10 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
   operator-selected limitations, not additional incoming gates.
 - [ ] Retain a client-owned, installation-independent stdio lifetime boundary;
   replacement payloads and shared runtime slots must not invalidate it.
+  Next: qualify survival across caller-owned cleanup Jobs and exact owner-death
+  settlement before migrating eligible ordinary callers. The internal explicit
+  owner path and hosted packet are prepared; review, controller promotion and
+  native execution are not yet qualification.
 - [ ] Reattach adopted wrappers to the incoming shared runtime while preserving
   initialization, upstream session identity, notifications, ordering and
   accepted/in-flight/unknown call outcomes without blind mutation replay.
@@ -342,6 +350,11 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
   None is an MCP source, release or acceptance prerequisite.
 - [ ] Run focused protocol and real-process regression controls on supported
   Windows and POSIX boundaries, plus practical clean-room install qualification.
+  - [x] **Internal provider source packet:** 127 focused tests, 265 Windows
+    tests with two existing platform skips, and both native Linux cases pass
+    with verified cleanup. Physical replacement, rollback, same-slot process
+    adoption and original pipes/upstreams are covered; production lifetime,
+    default caller adoption and installed acceptance remain open.
 - [ ] Update owning reality docs, contract declarations and per-plugin
   changefiles; land implementation through review and required CI.
 - [ ] Verify promotion, then perform separately authorized installed-consumer
@@ -437,6 +450,10 @@ backend execution. This plan does not assert that reattachment or legacy live
 migration already works.
 
 ## Journal
+
+### 2026-11-10 - Explicit originating-session lifetime prepared
+
+- [Pinned owner boundary and pending native caller-Job qualification](journal/2026/11.10%20explicit%20session%20owner.md).
 
 ### 2026-11-09 - Retained reattachment source reconciled
 

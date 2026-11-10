@@ -32,6 +32,17 @@ entrypoint. The caller must retain the complete source closure for the worker's
 lifetime. Omission keeps the launcher's package; this option changes neither
 native containment nor leases and does not add a production admission wrapper.
 
+An explicit `stdio_fds=(stdin_fd, stdout_fd, stderr_fd)` retains an existing
+caller-owned stdio channel while using the same native daemon admission,
+Job-escape verification and instance lease. All three must be open, nonnegative
+file descriptors; pipe-creation sentinels and a simultaneous `stderr_log_path`
+are refused. The descriptors remain borrowed: the caller keeps its copies and
+their inheritance flags, while native process creation supplies the child's
+standard handles. `log_path` still receives separate startup diagnostics, never
+protocol output. Omission retains DEVNULL stdin and the existing log routing.
+This option neither creates a relay nor establishes an originating-session
+lifetime; the application must own that boundary explicitly.
+
 The explicit Linux user-systemd fixture is
 `tests/systemd_daemon_fixture.py qualify <fresh-private-directory>`.
 It uses finite caller units and a renewable test-instance lease to prove

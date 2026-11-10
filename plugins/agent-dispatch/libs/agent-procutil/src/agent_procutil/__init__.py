@@ -974,6 +974,7 @@ def spawn_daemon(
     stderr_log_path: str | os.PathLike[str] | None = None,
     instance=None,
     python_bootstrap_root: str | os.PathLike[str] | None = None,
+    stdio_fds: tuple[int, int, int] | None = None,
 ) -> subprocess.Popen | WindowsDaemonProcess:
     """Launch a resident daemon; load its implementation only for daemon callers.
 
@@ -989,4 +990,5 @@ def spawn_daemon(
         contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
         display=display, stderr_log_path=stderr_log_path, instance=instance,
         python_bootstrap_root=python_bootstrap_root,
+        stdio_fds=stdio_fds,
     )

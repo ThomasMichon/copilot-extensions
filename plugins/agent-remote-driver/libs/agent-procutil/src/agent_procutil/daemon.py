@@ -106,6 +106,7 @@ def spawn_daemon(
     stderr_log_path: str | os.PathLike[str] | None = None,
     instance=None,
     python_bootstrap_root: str | os.PathLike[str] | None = None,
+    stdio_fds: tuple[int, int, int] | None = None,
 ) -> subprocess.Popen | WindowsDaemonProcess:
     """Launch a windowless resident daemon from an explicit durable cwd.
 
@@ -130,6 +131,7 @@ def spawn_daemon(
             contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
             display=display, stderr_log_path=stderr_log_path, instance=instance,
             python_bootstrap_root=python_bootstrap_root, _creation=creation,
+            stdio_fds=stdio_fds,
         )
     except BaseException as error:
         if not creation[0]:
@@ -154,6 +156,7 @@ def _spawn_daemon(
     stderr_log_path: str | os.PathLike[str] | None,
     instance,
     python_bootstrap_root: str | os.PathLike[str] | None = None,
+    stdio_fds: tuple[int, int, int] | None = None,
     _creation: list[bool],
 ) -> subprocess.Popen | WindowsDaemonProcess:
     import agent_procutil as pu
@@ -162,6 +165,15 @@ def _spawn_daemon(
     extra_creationflags = pu._validated_extra_creationflags(extra_creationflags)
     cwd_path = pu._validated_daemon_cwd(cwd)
     log_file = pu._validated_daemon_log_path(log_path)
+    if stdio_fds is not None:
+        if (
+            type(stdio_fds) is not tuple or len(stdio_fds) != 3
+            or any(type(fd) is not int or fd < 0 for fd in stdio_fds)
+            or stderr_log_path is not None
+        ):
+            raise ValueError("stdio_fds requires three open descriptors and no stderr_log_path")
+        for descriptor in stdio_fds:
+            os.fstat(descriptor)
     err_file = None
     if stderr_log_path is not None:
         err_file = pu._validated_daemon_log_path(stderr_log_path, "stderr_log_path")
@@ -296,6 +308,8 @@ def _spawn_daemon(
             "stderr": subprocess.STDOUT if err_fh is None else err_fh,
             "close_fds": True,
         }
+        if stdio_fds is not None:
+            popen_kwargs.update(zip(("stdin", "stdout", "stderr"), stdio_fds))
         flags = kwargs.get("creationflags", 0)
         durable_windows = bool(flags & pu._CREATE_BREAKAWAY_FROM_JOB)
         if pu._is_windows():

@@ -31,8 +31,12 @@ from agent_mcp.custody_host import CustodyHost
 from agent_mcp.custody_launch import attach
 from agent_mcp.serve import Server
 
-role, root, handle, fixed, config = sys.argv[1:]
+role, root, handle, fixed, config = sys.argv[1:6]
 if role.startswith("conduit"):
+    if len(sys.argv) > 6:
+        from agent_mcp.custody_launch import run_adopted
+        raise SystemExit(run_adopted(
+            fixed, config, owner_pid=int(sys.argv[6]), owner_birth=sys.argv[7]))
     admission = incoming.ensure_current(fixed)
     connection = attach(fixed, config, admission, ensure=role == "conduit-launcher")
     raise SystemExit(sockio.pump(connection))
