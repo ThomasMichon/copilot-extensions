@@ -204,6 +204,9 @@ def _process_arguments(handle):
         ctypes.POINTER(wintypes.ULONG),
     ]
     query.restype = wintypes.LONG
+    basic = (ctypes.c_void_p * 6)()
+    if query(handle, 0, basic, ctypes.sizeof(basic), None) != 0:
+        raise RuntimeError("Owned parent-process metadata query failed")
     size = wintypes.ULONG()
     query(handle, 60, None, 0, ctypes.byref(size))
     if not ctypes.sizeof(UnicodeString) <= size.value <= 65536:
@@ -243,6 +246,7 @@ def _process_arguments(handle):
     )
     cache = next((value for value in values if value.startswith("pycache_prefix=")), "")
     return {
+        "parent_pid": int(basic[5] or 0),
         "program": values[0][:2048],
         "module": module if module in {"agent_worktrees", "worktree_manager"} else None,
         "verb": next(
@@ -264,6 +268,16 @@ def _process_arguments(handle):
         ),
         "python_flags": [value for value in values if value in {"-I", "-B", "-S"}],
         "cache_namespace": Path(cache.split("=", 1)[1]).name if cache else None,
+        "native_cli_flags": sorted({
+            value.split("=", 1)[0] for value in values
+            if value.split("=", 1)[0] in {
+                "--interactive", "--resume", "--experimental", "--screen-reader",
+                "--allow-all", "--no-auto-update", "--disable-builtin-mcps", "--no-color",
+                "--server", "--stdio", "--lsp", "--mcp-server", "--headless", "--version",
+                "--help", "--backend", "--ui", "--internal", "--worker", "--agent",
+                "--acp", "--jsonrpc", "--plugin-dir",
+            }
+        }),
     }
 
 
@@ -465,7 +479,26 @@ class _Witness:
     def one_native(self):
         selected = self.native()
         if len(selected) > 1:
-            raise RuntimeError(f"Manager admitted duplicate native CLI owners: {list(selected)}")
+            error = RuntimeError(f"Manager admitted duplicate native CLI owners: {list(selected)}")
+            try:
+                observation = self.turn_observation
+                if observation is not None:
+                    observation["native_candidates"] = [
+                        {
+                            "pid": pid, "birth": birth,
+                            **_process_arguments(handle),
+                        }
+                        for (pid, birth), (_console, handle) in sorted(selected.items())[:16]
+                    ]
+                    observation["native_candidates_complete"] = len(selected) <= 16
+                    observation["history_lock_pids"] = sorted({
+                        int(match[1])
+                        for path in self.history.parent.glob("inuse.*.lock")
+                        if (match := re.fullmatch(r"inuse\.(\d+)\.lock", path.name))
+                    })[:16]
+            except Exception as diagnostic_error:
+                error.add_note(f"Native owner observation: {diagnostic_error}")
+            raise error
         return next(iter(selected)) if selected else None
 
     def turn(self, prompt, number, console):
@@ -1207,6 +1240,34 @@ def test_lifecycle_diagnostic_write_cannot_mask_unsettled_custody(tmp_path):
     assert any("controlled diagnostic write failure" in note for note in original.__notes__)
 
 
+@pytest.mark.parametrize("metadata_available", [True, False])
+def test_lifecycle_duplicate_native_observation_does_not_weaken_the_refusal(
+    tmp_path, monkeypatch, metadata_available,
+):
+    history = tmp_path / "session-state" / "fixture-session" / "events.jsonl"
+    history.parent.mkdir(parents=True)
+    (history.parent / "inuse.101.lock").touch()
+    (history.parent / "inuse.invalid.lock").touch()
+    witness = _Witness(tmp_path, {}, None, None, None, None)
+    witness.history = history
+    witness.turn_observation = {}
+    witness.native = lambda: {(101, "first-birth"): (None, 1), (102, "second-birth"): (None, 2)}
+
+    def metadata(_handle):
+        if not metadata_available:
+            raise OSError("controlled metadata unavailable")
+        return {"native_cli_flags": ["--interactive"]}
+
+    monkeypatch.setattr(sys.modules[__name__], "_process_arguments", metadata)
+    with pytest.raises(RuntimeError, match="duplicate native CLI owners") as caught:
+        witness.one_native()
+    if metadata_available:
+        assert [row["pid"] for row in witness.turn_observation["native_candidates"]] == [101, 102]
+        assert witness.turn_observation["history_lock_pids"] == [101]
+    else:
+        assert any("metadata unavailable" in note for note in caught.value.__notes__)
+
+
 def test_lifecycle_environment_drops_foreign_identity_mux_and_inference_credentials(
     tmp_path, monkeypatch
 ):
@@ -1307,6 +1368,7 @@ def test_lifecycle_process_observation_uses_owned_handles_and_omits_inline_code(
             "-B",
             "-c",
             "import time;print('READY',flush=True);time.sleep(30)",
+            "--interactive", "--resume", "private-value",
         ],
         env=env,
         cwd=tmp_path,
@@ -1338,7 +1400,11 @@ def test_lifecycle_process_observation_uses_owned_handles_and_omits_inline_code(
             for row in rows
         )
         assert "time.sleep" not in text
+        assert "private-value" not in text
         assert all(row["module"] is None for row in rows)
+        (child,) = [row for row in rows if row["pid"] == console.process.pid]
+        assert child["parent_pid"] == os.getpid()
+        assert child["native_cli_flags"] == ["--interactive", "--resume"]
         assert records[-1]["complete"] is False
 
 

@@ -713,6 +713,9 @@ escape sequences from a redraw stream is not itself a rendered-screen witness.
 Failure diagnostics retain bounded event-type counts and the private provider's
 request count, never inference request bodies. These distinguish an unfinished
 native turn from completed history whose reply has not rendered.
+An ambiguous native-process count retains pinned process parent IDs,
+allowlisted CLI flag names and the matching history's lock PIDs without
+relaxing duplicate rejection or retaining argument values.
 The stateless harness has a real private knowledge repository, registered and
 bound before New; the installed coordination-readiness command must resolve it.
 Before constructing runtimes, the case requires an empty, confirmed native

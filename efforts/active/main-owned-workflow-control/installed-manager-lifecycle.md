@@ -317,3 +317,21 @@ byte-preserved runtime payloads/receipts, catalogue and manifest mismatches,
 unsafe paths, absent companions and unexpected runtime companions, plus
 command-safety admission of the explicit private-pane read. This is lightweight
 source-consumer evidence, not the installed native lifecycle result.
+
+### 2026-11-10 - Private pane proof passed; native owner count is ambiguous
+
+Run 42784466120 at `3f5ec453b093ff1960175e153285e8a62c38d7a7`
+recorded one actual request, one completed history with the exact reply and a
+successful real private-pane capture. The retained companion inventory
+confirms unchanged selected runtime payloads/receipts and its deliberately
+limited scope. Other missing-catalogue-payload warnings are still visible;
+the installation closure is not accepted.
+
+The next assertion found two live Job-owned processes using the exact pinned
+Copilot executable. Their executable identity alone does not establish whether
+these are two independent CLI sessions or a runtime helper/owner relationship.
+The witness continues to refuse the ambiguous count. Failure-only diagnostics
+now retain each pinned candidate's parent PID and allowlisted CLI flag names,
+plus the completed history's lock PIDs, without raw argument values. All three
+focused diagnostic controls passed, including unavailable metadata preserving
+the original duplicate-owner refusal. No native-owner assertion changed.
