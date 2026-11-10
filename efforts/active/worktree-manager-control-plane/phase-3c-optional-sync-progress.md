@@ -1,7 +1,7 @@
 # Optional built-in Sync progress
 
 - **Parent:** [Worktree Manager control plane](README.md#optional-built-in-lifecycle-progress).
-- **Status:** Provider expansion implemented and source-tested; review pending.
+- **Status:** Provider source accepted; local consumer implemented and awaiting source review.
 - **Source:** [#4183](https://github.com/ThomasMichon/copilot-extensions/issues/4183)
   LP1-LP3/LPV, including the complete received #4274 request.
 - **Participant:** Optional Sync-progress implementer, public source
@@ -87,7 +87,7 @@ PATH-based command selection or a claim that cancelling display rolls back Git.
 
 - [x] **S0 - Review:** Accept this bounded proposal and participant before code.
   Keep the original #4183 LP acceptance open and preserve PK/WI owners.
-- [ ] **S1 - Provider expansion:** Add optional stage callbacks inside the
+- [x] **S1 - Provider expansion:** Add optional stage callbacks inside the
   existing Sync owner and the strict CLI opt-in/packaged declaration. Preserve
   paired admission, both-member preflight, safe fast-forward, composition order,
   policy reload and all original failure results. No alternate Sync engine.
@@ -129,13 +129,19 @@ recorded in the [dated Journal](#journal).
 The ordinary 30-second item and 300-second group bounds remain unchanged.
 This is not a monolithic aggregate-budget or native ARM64 qualification.
 Focused F/E9 lint, installation-contract and changed-module-size checks pass.
-Exact-head review/CI still gate publication acceptance.
 
-S2 local incremental rendering, selected-runtime negotiation/rollback, consumer
-two-clock and uncertain-outcome validation remain open. No Manager path uses the
-new flag yet. Native/installed and external-venue qualification were not run:
-this producer increment changes no installer or live host, and no qualified
-live venue or rollout is admitted. No installed behavior is claimed.
+The S2 local consumer now qualifies the exact engine command before selecting
+the optional flag. Missing, invalid and unsupported metadata retain the pinned
+JSON invocation; remote Sync remains JSON. The existing executor and native
+ProgressScreen retain per-item identity, live messages and complete pair results.
+Communication silence is observed separately from the finite execution budget.
+Escape preserves an active Sync rather than claiming cancellation or rollback.
+Unconfirmed cleanup retains exact process custody and stops subsequent items.
+
+Source qualification covers 50 distinct Manager controls, including real parser,
+private Git pair and Textual consumer cases for a no-op and blocked partial pair.
+Source review/CI, complete validation disposition, native/installed and release
+qualification remain open. No host installation or runtime Sync is claimed.
 
 ## Validation Plan
 
@@ -169,6 +175,72 @@ live venue or rollout is admitted. No installed behavior is claimed.
   test. The complete #4183 issue stays open for its remaining original lanes.
 
 ## Journal
+
+### 2026-11-10 - S2 local consumer source qualification
+
+- Implemented exact-command support selection, incremental D4 observation,
+  complete terminal/exit agreement and existing ProgressScreen integration.
+  The selected command is pinned for the invocation; unsupported generations
+  retain JSON before effects. No started stream is replayed.
+- Kept a 30-second communication observation and an independent one-hour
+  execution budget. Initial/inter-phase silence is visible without killing the
+  operation; unfamiliar updates and optional-message progress renew contact.
+  Execution expiry, malformed/absent terminal results and output-budget failure
+  preserve unknown outcomes, last stage and diagnostic detail.
+- Reused the existing engine Job/group owner with file-backed stdout/stderr
+  draining. Its optional Windows cleanup confirmation retains exact failed
+  custody. The shared owned-process `output_fds` seam is POSIX-only; no parallel
+  process framework, shared-library extension or new persistent worker was added.
+- The standard contained Windows x64 packet passes 49 cases, without extending
+  the 30-second item or 300-second group bounds. The two real private-pair flows
+  take 15.07s and 12.37s: both render a real fetch stage before release, continue
+  Textual ticks/keyboard handling while held, and retain the final result.
+  Additional controls cover selected-runtime rollback, legacy/remote baseline,
+  malformed/contradictory output, stderr pressure, independent clocks and exact
+  descendant/cleanup behavior. Synthetic POSIX ownership controls are not native
+  POSIX qualification.
+- The final unknown-outcome rendering change passes all ten affected screen
+  controls, including its new uncertain-partial-result case. Together with the
+  40 unchanged controls retained from the preceding 49-case packet, this is a
+  50-case union, not a claim that the entire packet was rerun after that
+  diagnostic-only change.
+- Cleanup failure retains the output directory as well as native process
+  custody, so failed file retirement cannot mask the original exception.
+  The confirmed POSIX stream keeps its existing unreaped group owner inside
+  test containment; default engine preparation is unchanged. The screen also
+  names unknown Sync outcomes explicitly rather than relying on a failed glyph.
+- Fixture failures were corrected rather than waived: nested child quoting,
+  a redundant pre-stream Sync, clean no-op index preparation and the actual
+  native `plugins: skipped` failure value. Real Git/Sync remained in the flow,
+  and neither item/group deadlines nor product assertions were weakened.
+- Focused lint, the installation contract and all 41 admitted strict checker
+  projects pass. The checker used fresh, hash-locked private test environments
+  after the default cache reported missing prerequisites; no shared cache or
+  host runtime was repaired. Manager's pending type-check scope is not thereby
+  qualified. Required exact-source
+  review/CI still govern acceptance. No installer or first-provision behavior
+  changes; native ARM64, desktop, installed and live external lanes were not
+  exercised and are not inferred from source tests. No qualified external
+  development venue or rollout is part of this bounded source increment.
+
+### 2026-11-10 - S1 producer source accepted
+
+- #11889 merged to `dev` at 09:31:30 UTC as
+  `0b3c3304e750ed6df153d3c52a113beb14ab62d4`. Genuine Copilot approval
+  `5839544987` covered exact head `613e44f73c31181a7da3d95722e47e5075591b83`
+  with no active issues. All five inline threads were resolved; the body-only
+  schema/tracking findings were addressed, not inferred clean from a summary.
+- Exact-head CI `42790051375` and the later required-gate producer
+  `42790195698` both passed, with required metadata checks successful before
+  the managed merge. The parent #4183 remains open.
+- Supported post-squash reconciliation retained a backup, verified the merged
+  published head and absence of post-merge commits, and advanced the source
+  past its five accepted commits. Native synchronization succeeded. Unrelated
+  incoming Create/Run ownership changes were preserved.
+- Only S1 is accepted. S2 local runtime-qualified incremental rendering,
+  S3 complete-flow acceptance, all Validation Plan items and independent
+  release/native/installed gates remain open. No live Sync, installation,
+  session probe or rollout ran.
 
 ### 2026-11-10 - Producer validation and refinement
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from contextlib import ExitStack, contextmanager
+from contextlib import ExitStack, contextmanager, nullcontext
 from collections.abc import Iterator
 from typing import IO
 import json
@@ -142,9 +142,10 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     cancelled = kwargs.pop("cancelled", None)
     kwargs.pop("check", None)
     kwargs.pop("stdin", None)
-    kwargs.pop("stdout", None)
+    destination = kwargs.pop("stdout", None)
     text = kwargs.get("text", False)
-    with _capture_file() as output, ExitStack() as cleanup:
+    external_output = callable(getattr(destination, "fileno", None))
+    with (nullcontext(destination) if external_output else _capture_file()) as output, ExitStack() as cleanup:
         capture_errors = kwargs.get("stderr") == subprocess.PIPE
         errors = cleanup.enter_context(_capture_file()) if capture_errors else None
         if errors is not None:
@@ -160,23 +161,31 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
             )
             if "error" in receipt:
                 raise OSError(receipt["error"])
-            output.seek(0)
-            stdout = output.read()
+            stdout = None
+            if not external_output:
+                output.seek(0)
+                stdout = output.read()
             stderr = None
             if errors is not None:
                 errors.seek(0)
                 stderr = errors.read()
             if text:
-                stdout = stdout.decode(kwargs.get("encoding") or "utf-8", errors="replace")
+                if stdout is not None:
+                    stdout = stdout.decode(kwargs.get("encoding") or "utf-8", errors="replace")
                 if stderr is not None:
                     stderr = stderr.decode(kwargs.get("encoding") or "utf-8", errors="replace")
             return subprocess.CompletedProcess(argv, receipt["returncode"], stdout, stderr)
         finally:
             # No poll/wait reaps this owner before the group sweep, reserving its PID
             # even if the engine already exited or the owner itself became a zombie.
-            with cleanup_phase():
-                try:
-                    os.killpg(owner.pid, signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
-                owner.communicate(timeout=5)
+            try:
+                with cleanup_phase():
+                    try:
+                        os.killpg(owner.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+                    owner.communicate(timeout=5)
+            except EngineCleanupError as error:
+                error.process = owner
+                error.group_id = owner.pid
+                raise

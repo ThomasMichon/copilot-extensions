@@ -1,0 +1,9 @@
+{
+  "comment": "Document the runtime-qualified local Manager Sync progress consumer and unchanged remote baseline",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

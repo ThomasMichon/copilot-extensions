@@ -53,6 +53,27 @@ does not execute its displayed commands, open links or change readiness.
 Redirected/noninteractive bare invocation still prints installation status;
 explicit verbs, project launch and launcher JSON output keep their contracts.
 
+## Explicit Sync progress
+
+Local paired Sync reads `agent_worktrees/sync-progress-v1.json` beside the exact
+selected engine interpreter. A valid version-1 declaration enables
+`sync --paired --json --stream`; missing, invalid or unsupported support retains
+the ordinary JSON invocation. The selected command is pinned for that invocation.
+Remote Sync remains on its existing attributable JSON path. Neither path retries
+an uncertain operation or strips an optional flag after execution starts.
+
+The existing progress screen shows real stage messages while the engine runs
+off-thread and retains the complete final result, including both pair members.
+A 30-second communication interval reports initial or later silence without
+cancelling Sync; received updates, including unfamiliar kinds, renew contact.
+A separate one-hour execution budget remains finite despite progress.
+Missing or contradictory terminal/process results are unknown outcomes, not
+success. Output is bounded; expiry retires the owned Job/group and preserves
+diagnostics. Unconfirmed cleanup retains exact custody and blocks another item.
+Escape does not dismiss an active Sync or claim cancellation/rollback. Completed
+results keep the existing diagnostic browsing controls. This does not install,
+update or automatically synchronize a worktree.
+
 ## Picker notices and diagnostics
 
 Mux uncertainty is separate from process liveness: `MUX(?)` means last-known

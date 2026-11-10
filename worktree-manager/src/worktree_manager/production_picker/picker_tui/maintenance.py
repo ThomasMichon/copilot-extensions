@@ -92,9 +92,9 @@ def _result_ok(op, res):
         # A refusal is expected on unsettled work, not an invitation to force.
         return res.get("success") is True
     # sync: a no-op that was already current is success; a real skip is not.
-    if "ok" in res:
-        return res["ok"] is True
-    return bool(res.get("updated")) or res.get("reason") == "up-to-date"
+    from ...engine_sync import result_ok
+
+    return result_ok(res)
 
 
 def sync_diagnostics(result):
@@ -113,6 +113,8 @@ def sync_diagnostics(result):
         lines.append(compact(f"{reason}: {detail}" if detail else reason))
     elif detail:
         lines.append(detail)
+    if result.get("outcome") == "unknown":
+        lines.append("Sync outcome unknown; no automatic replay.")
     members = result.get("pair_results")
     if isinstance(members, list):
         progress = []
@@ -147,7 +149,8 @@ def finalize_diagnostics(result):
 
 def build_tasks(op, items, src, *, project=None, include_unused=False,
                 include_conversations=False,
-                local: tuple[str | None, str | None] | None = None):
+                local: tuple[str | None, str | None] | None = None,
+                on_progress=None):
     """Build ``(key, callable)`` tasks for *items* under data source *src*.
 
     *items* are engine record dicts (collision-safe ``selection_id`` +
@@ -181,6 +184,7 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
             include_unused=include_unused,
             include_conversations=include_conversations,
             refusal=refusal,
+            report=(lambda update, key=key: on_progress(key, update)) if on_progress else None,
         )))
     return tasks
 
@@ -200,13 +204,19 @@ def _finalize_blocker(row):
 
 
 def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
-               include_unused=False, include_conversations=False, refusal=None):
+               include_unused=False, include_conversations=False, refusal=None, report=None):
     def _run():
         if refusal:
             return {"success": False, "reason": refusal}
         if not wt_id:
             return {"ok": False, "reason": "no worktree id"}
         if is_local:
+            if op == "sync":
+                from ... import engine_sync
+
+                return engine_sync.run(
+                    project, wt_id, **({"report": report} if report is not None else {}),
+                )
             if op == "cleanup":
                 args = ["cleanup", "--worktree-id", wt_id, "--clean", "--json"]
                 if include_unused:
@@ -258,6 +268,8 @@ class MaintenanceExecutor:
         self._lock = threading.Lock()
         self._state = {k: PENDING for k, _ in self._tasks}
         self._result = {}
+        self._progress = {}
+        self._cleanup_errors = {}
         self._done = False
 
     def start(self):
@@ -272,9 +284,15 @@ class MaintenanceExecutor:
                 st = DONE if _result_ok(self.op, res) else FAILED
             except Exception as exc:  # any failure -> failed item
                 res, st = {"ok": False, "reason": str(exc) or type(exc).__name__}, FAILED
+                if self.op == "sync" and isinstance(exc, engine_client.EngineCleanupError):
+                    with self._lock:
+                        self._cleanup_errors[key] = exc
+                    res.update(outcome="unknown", cleanup_pending=True)
             with self._lock:
                 self._result[key] = res
                 self._state[key] = st
+            if self.cleanup_pending():
+                break
         with self._lock:
             self._done = True
 
@@ -285,6 +303,18 @@ class MaintenanceExecutor:
     def result(self, key):
         with self._lock:
             return self._result.get(key)
+
+    def report(self, key, update):
+        with self._lock:
+            self._progress[key] = dict(update)
+
+    def progress(self, key):
+        with self._lock:
+            return dict(self._progress.get(key, {}))
+
+    def cleanup_pending(self):
+        with self._lock:
+            return bool(self._cleanup_errors)
 
     def is_done(self):
         with self._lock:
