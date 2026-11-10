@@ -286,8 +286,18 @@ class AsyncForegroundProcess:
             self._dispose()
             self.retirement_started = requested and self._receipt
         except BaseException as error:
-            self._request_retirement()
-            await self._stop_relay()
+            try:
+                self._request_retirement()
+                await self._stop_relay()
+            except BaseException as retirement_error:
+                retirement_error.__cause__ = error
+                error = retirement_error
+            try:
+                if self._terminal is not None:
+                    self._terminal.restore()
+            except BaseException as restore_error:
+                restore_error.__cause__ = error
+                error = restore_error
             raise OwnedCleanupError(
                 self._guardian, cleanup_resources=(self,), cleanup_retry=self._retry_cleanup,
             ) from error
@@ -305,11 +315,9 @@ class AsyncForegroundProcess:
     def _dispose(self):
         self._request_retirement()
         if self._terminal is not None:
-            try:
-                self._terminal.restore()
-            finally:
-                self._terminal.close()
-                self._terminal = None
+            self._terminal.restore()
+            self._terminal.close()
+            self._terminal = None
         for descriptor in tuple(self._descriptors):
             self._close(descriptor)
 
@@ -318,7 +326,7 @@ class AsyncForegroundProcess:
             confirm_session(self._guardian, timeout=min(2, max(0, deadline - time.monotonic())))
             self._scope_settled = True
         if self._terminal is not None:
-            _drain(self._master, self._terminal, self._output)
+            _drain(self._master, self._terminal, self._output, deadline=deadline)
         self._dispose()
 
     async def wait(self) -> int:

@@ -68,8 +68,11 @@ def main(*, asynchronous=False):
                     if asynchronous:
                         with native_wait_lock:
                             if child is not None:
+                                if child.returncode is None:
+                                    child.kill()
                                 child.wait(timeout=2)
                                 report_exit()
+                        custody.retire()
                         emit(f"settled {os.getpid()}\n".encode("ascii"))
                     os.killpg(os.getpid(), signal.SIGKILL)
                 except Exception:
@@ -112,13 +115,16 @@ def main(*, asynchronous=False):
         gate, start = os.pipe()
         try:
             # headless-guard: allow the actual user-interactive completion terminal
-            child = subprocess.Popen(  # noqa: S603 - argv, no shell
-                [
-                    sys.executable, "-I", "-S", "-c", _EXEC,
-                    str(acknowledgement), str(gate), *sys.argv[6:],
-                ],
-                pass_fds=(acknowledgement, gate),
-            )
+            with retirement_lock:
+                if retiring.is_set():
+                    return
+                child = subprocess.Popen(  # noqa: S603 - argv, no shell
+                    [
+                        sys.executable, "-I", "-S", "-c", _EXEC,
+                        str(acknowledgement), str(gate), *sys.argv[6:],
+                    ],
+                    pass_fds=(acknowledgement, gate),
+                )
         finally:
             os.close(acknowledgement)
             os.close(gate)
@@ -146,10 +152,15 @@ def main(*, asynchronous=False):
             with native_wait_lock:
                 if asynchronous and child.returncode is not None:
                     return
-                pid, status = os.waitpid(child.pid, os.WUNTRACED)
-                if not os.WIFSTOPPED(status):
+                pid, status = os.waitpid(
+                    child.pid, os.WUNTRACED | (os.WNOHANG if asynchronous else 0),
+                )
+                if pid and not os.WIFSTOPPED(status):
                     child.returncode = os.waitstatus_to_exitcode(status)
                     report_exit()
+            if not pid:
+                time.sleep(.005)
+                continue
             if pid != child.pid:
                 raise RuntimeError("interactive command identity changed")
             if os.WIFSTOPPED(status):

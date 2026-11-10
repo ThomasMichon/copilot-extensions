@@ -27,6 +27,8 @@ _NATIVE = """
 import json,os,sys,time
 from pathlib import Path
 command=sys.argv[3] if len(sys.argv)>3 else 'import time;time.sleep(60)'
+if os.environ.get('FOREGROUND_FIXTURE_GUARDIAN_GROUP')=='1':
+    os.setpgid(0,os.getsid(0))
 child=os.posix_spawn(sys.executable,[sys.executable,'-c',command,*sys.argv[4:]],
                      os.environ,setpgroup=0)
 Path(sys.argv[1]).write_text(json.dumps({'pid':os.getpid(),'descendant':child}))
@@ -45,7 +47,7 @@ async def _eventually(read, predicate):
     raise AssertionError("Native fixture did not reach its bounded checkpoint")
 
 
-@pytest.mark.parametrize("mode", ["natural", "terminate", "cancelled-waiter"])
+@pytest.mark.parametrize("mode", ["natural", "terminate", "cancelled-waiter", "guardian-group"])
 def test_native_scope_and_single_cleanup_retire_descendants_not_unrelated(
     tmp_path, monkeypatch, mode,
 ):
@@ -70,7 +72,10 @@ def test_native_scope_and_single_cleanup_retire_descendants_not_unrelated(
         try:
             owner = await api.AsyncForegroundProcess.start([
                 sys.executable, "-c", _NATIVE, str(history), str(gate),
-            ])
+            ], env={
+                **os.environ,
+                "FOREGROUND_FIXTURE_GUARDIAN_GROUP": "1" if mode == "guardian-group" else "0",
+            })
             native = await _eventually(lambda: _read(history), lambda value: value is not None)
             assert owner.pid == native["pid"] and not owner.retirement_started
             assert api._pidfd_pid(owner._native_fd) == owner.pid
@@ -81,7 +86,9 @@ def test_native_scope_and_single_cleanup_retire_descendants_not_unrelated(
                 gate.touch()
                 assert await asyncio.wait_for(owner.wait(), 5) == 0
                 assert not owner.retirement_started
-            elif mode == "terminate":
+            elif mode in {"terminate", "guardian-group"}:
+                if mode == "guardian-group":
+                    assert os.getpgid(owner.pid) == owner._guardian.pid
                 await asyncio.wait_for(owner.terminate(), 5)
                 assert await owner.wait() == -signal.SIGKILL and owner.retirement_started
             else:
@@ -216,7 +223,8 @@ def test_native_admission_refusal_does_not_execute_the_command(tmp_path, monkeyp
     assert guardians[0].returncode is not None
 
 
-def test_caller_sigkill_independently_retires_native_scope(tmp_path):
+@pytest.mark.parametrize("guardian_group", [False, True])
+def test_caller_sigkill_independently_retires_native_scope(tmp_path, guardian_group):
     history, gate, receipt = tmp_path / "native.json", tmp_path / "exit", tmp_path / "owner.json"
     caller = """
 import asyncio,json,sys
@@ -232,13 +240,17 @@ asyncio.run(run())
         [sys.executable, "-c", caller, str(receipt),
          sys.executable, "-c", _NATIVE, str(history), str(gate)],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        env=_environment(), **no_window_kwargs(),
+        env={
+            **_environment(), "FOREGROUND_FIXTURE_GUARDIAN_GROUP": "1" if guardian_group else "0",
+        }, **no_window_kwargs(),
     )
     pins = []
     try:
         owner = _wait(lambda: _read(receipt), "caller did not publish its owned native identity")
         native = _wait(lambda: _read(history), "native fixture did not start")
         assert owner["pid"] == native["pid"]
+        if guardian_group:
+            assert os.getpgid(owner["pid"]) == owner["guardian"]
         pins = [psutil.Process(pid) for pid in (*native.values(), owner["guardian"])]
         process.kill()
         process.wait(timeout=5)
@@ -250,6 +262,60 @@ asyncio.run(run())
         for pin in pins:
             if not _gone(pin):
                 pin.kill()
+
+
+@pytest.mark.parametrize("failure", ["confirmation", "drain"])
+def test_failed_cleanup_restores_real_terminal_and_retains_retry_custody(tmp_path, failure):
+    result = tmp_path / "restored.json"
+    caller = """
+import asyncio,fcntl,json,os,sys,termios,time
+from pathlib import Path
+from agent_procutil import async_foreground as api
+from agent_procutil.owned_process import OwnedCleanupError
+os.setsid()
+fcntl.ioctl(0,termios.TIOCSCTTY,0)
+before=termios.tcgetattr(0)
+original=api.confirm_session if sys.argv[2]=='confirmation' else api._drain
+def fail(*args,**kwargs):
+    raise OSError('fixture cleanup failure')
+async def run():
+    owner=await api.AsyncForegroundProcess.start([sys.executable,'-c','pass'])
+    if sys.argv[2]=='confirmation':
+        api.confirm_session=fail
+    else:
+        api._drain=fail
+    try:
+        await owner.wait()
+    except OwnedCleanupError as error:
+        restored=termios.tcgetattr(0)==before
+        retained=error.cleanup_resources==(owner,) and owner._terminal is not None
+        if sys.argv[2]=='confirmation':
+            api.confirm_session=original
+        else:
+            api._drain=original
+        await asyncio.to_thread(error.retry_cleanup,deadline=time.monotonic()+2)
+        Path(sys.argv[1]).write_text(json.dumps({
+            'restored':restored,'retained':retained,
+            'settled':owner._terminal is None and not owner._descriptors}))
+    else:
+        raise AssertionError('fixture cleanup failure was not observed')
+asyncio.run(run())
+"""
+    master, slave = os.openpty()
+    process = subprocess.Popen(
+        [sys.executable, "-c", caller, str(result), failure],
+        stdin=slave, stdout=slave, stderr=slave, env=_environment(),
+    )
+    os.close(slave)
+    try:
+        process.wait(timeout=10)
+        assert process.returncode == 0
+        assert _read(result) == {"restored": True, "retained": True, "settled": True}
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+        os.close(master)
 
 
 def test_pty_input_resize_redirected_output_and_terminal_restore(tmp_path):

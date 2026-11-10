@@ -277,12 +277,14 @@ def _relay(events, control, master, terminal, output):
             signal.signal(signal.SIGWINCH, previous)
 
 
-def _drain(master, terminal, output):
+def _drain(master, terminal, output, *, deadline=None):
     if master is None:
         return
-    deadline = time.monotonic() + 2
+    quiet_deadline = time.monotonic() + 2
     finished = False
     while output or not finished:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("interactive terminal cleanup deadline expired")
         if not finished and len(output) < _BUFFER:
             data = _read_pty(master, min(65536, _BUFFER - len(output)))
             if data:
@@ -291,14 +293,15 @@ def _drain(master, terminal, output):
                 finished = True
         if not output:
             continue
-        remaining = deadline - time.monotonic()
+        limit = quiet_deadline if deadline is None else min(quiet_deadline, deadline)
+        remaining = limit - time.monotonic()
         if remaining <= 0 or not select.select([], [terminal.fd], [], remaining)[1]:
             raise TimeoutError("interactive terminal output did not drain")
         try:
             count = os.write(terminal.fd, output[:65536])
             del output[:count]
             if count:
-                deadline = time.monotonic() + 2
+                quiet_deadline = time.monotonic() + 2
         except BlockingIOError:
             pass
 

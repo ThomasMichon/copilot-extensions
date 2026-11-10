@@ -951,6 +951,10 @@ awaits that same cleanup. Cancelled waiters do not cancel the retained cleanup;
 callers still explicitly terminate their owned foreground scope on unwind.
 Failed settlement raises `OwnedCleanupError` retaining the original guardian,
 provider resources and bounded retry, not permission to signal a numeric PID.
+Confirmation or output-drain failure still restores caller terminal modes while
+retaining unresolved custody and descriptors; a restoration failure is preserved
+in the cleanup error chain. Retry output drainage honors the caller's absolute
+deadline even while bytes continue progressing.
 Managed detachment outside the private session keeps the existing exemption.
 
 The guardian's opt-in receipt reports **settlement**, not early acceptance of a
