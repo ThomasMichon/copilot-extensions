@@ -22,7 +22,9 @@ The native registry remains the only registration authority. Extend its
 existing registration writer and serialization, not Manager-side YAML or a
 second inventory. Ordinary `repos add` retains its existing behavior, including
 its separately documented best-effort Git credential pin. This new confirmed
-operation must explicitly omit that pin: its only mutation is registration.
+operation must explicitly omit that pin. The only new policy/state is the
+registration; its existing owner must also withdraw and republish the derived
+protection facts, rather than leave previously prepared callers falsely complete.
 
 The forced project-config preservation repair #7611 and installed-lifecycle
 qualification #11864 are independent. This slice does not edit their writers,
@@ -50,12 +52,14 @@ network call, credential inspection or Git configuration write:
    and is currently unbound. Preserve a valid local or inherited choice.
    Malformed/unreadable binding or composition is an explicit refusal.
 2. Resolve and validate the chosen path as an actual local Git root, including
-   supported bare anchors. Refuse a descendant, linked task worktree,
+   direct and converted-clone bare anchors. Refuse a descendant, linked task worktree,
    harness self-selection or an unavailable/ambiguous path.
 3. Read origin and local repository identity through sanitized, noninteractive,
    caller-owned Git reads. No fetch, `ls-remote`, hook or authentication helper
    is needed. A local-only checkout is supported; provider identity and landing
    policy remain unobserved, not inferred from that absence.
+   Resolve included Git configuration and effective origin rewrites consistently
+   with the binding owner before URL-safety and identity validation.
 4. Require the exact new name and checkout to be unregistered. Refuse canonical
    name/case, local-path and provider-identity collisions rather than replacing
    or reclassifying an existing entry. Existing registrations use their normal
@@ -70,12 +74,19 @@ proposal before invoking the owner registration writer. Persist only the new
 `class: knowledge`, non-agent local registration and its reviewed metadata,
 preserving all unrelated registry content. Do not write a project config,
 credential pin/helper, binding pointer, plugin overlay or repository source.
+Use the existing guarded managed-write boundary for derived protection maps.
+Withdraw prepared views before persistence and refresh their actual coverage
+afterward. Bound every publication-authority, registry and publication lock by
+the same remaining execution deadline, preserving the cleanup reserve.
 
 Return the actual persisted registration and the supported next step: refresh
 and select the existing binding action. Do not bind automatically or report
 New-ready. A lost result requires readback through the ordinary catalog before
 retry; an already-present registration is not permission to overwrite it.
 Preserve write/cleanup failure and uncertain completion instead of replaying.
+Post-persistence publication failure is nonzero/incomplete with an explicit
+committed registration; unknown persistence remains unknown. Never report a
+failed publication as registration rollback or healthy guard coverage.
 
 ## Manager composition and compatibility
 
@@ -110,7 +121,8 @@ operation; preferences, inspection and existing binding remain usable.
   drift. A lock waiter must recheck the winning state.
 - [x] Compare complete fixture Git/config/source trees before/after browse,
   preview, cancel, refused apply and successful registration. Only the exact
-  registry entry and normal owned lock sidecars may change. Specifically prove
+  registry entry, normal owned lock sidecars and canonical derived guard facts
+  may change. Specifically prove
   no credential pin, branch/ref, binding, overlay or worktree mutation.
 - [x] Prove ordinary registration still pins when appropriate; new/old
   provider/manifest/Manager and supported rollback paths retain their promised
@@ -130,8 +142,8 @@ rollout or resource allocation is authorized by this proposal.
 
 ## Source qualification
 
-The implementation reuses the native compare-before-replace registry
-transaction directly. It preserves unknown registry metadata and never calls
+The implementation reuses guarded managed publication around the native
+compare-before-replace registry transaction. It preserves unknown registry metadata and never calls
 ordinary registration's credential-pinning follow-up. Neither `repos add` nor
 the binding payload changes. The selected catalog emits a distinct optional
 action row; no registration marker appears on ordinary repository rows.
@@ -146,7 +158,8 @@ remote/account metadata and complete Git/config preservation.
 The full Manager Repositories Configuration file passes all 23 cases. The new
 production form drives the real native CLI through browse, collected values,
 preview, default Cancel, confirmed apply, receipt and originating-scope refresh.
-Only the new registry entry and the two normal owned lock sidecars change.
+Only the new registry entry, normal owned lock sidecars and canonical derived
+guard-publication artifacts may change.
 The native catalog remains unbound after registration. The actual manifest
 condition withholds the action from a legacy row lacking its marker.
 
@@ -163,8 +176,9 @@ the active-account observation synthetic. This updates the fixtures, not the
 account resolver or ordinary credential-pinning implementation.
 
 Native reads share one 18-second aggregate and apply one 26-second aggregate,
-with their original cleanup reserves and the existing registry lock. Each of
-the three local Git reads has its own four-second cap within that aggregate.
+with their original cleanup reserves and existing lock owners. Each local Git
+read has its own four-second cap within that aggregate: three for local-only
+anchors and four when resolving an effective origin.
 The catalog adds no Git/provider read for this action. No deadline, liveness
 assertion, process containment or source-safety check is relaxed.
 
@@ -173,3 +187,41 @@ installed desktop, complete bootstrap, first-restarted model, provider consent
 or receiving result. No installer behavior changes; a full fresh-OS provisioning
 lane and live external operations are not run under this source-only slice.
 Review, required CI and independently authorized rollout remain separate.
+
+## First-review corrections
+
+The five findings on #11929 are addressed through the existing owners:
+
+- Registration uses guarded managed publication. An already-prepared independent
+  caller receives the new knowledge posture; a failed post-commit refresh leaves
+  its view unusable and returns a nonzero, explicitly committed partial result.
+  Pre-write publication refusal is separately structured and does not claim
+  persistence.
+- Catalog availability uses the same context-project binding-name check as
+  preview. Generic preference inspection/editing keeps its broader name grammar.
+- Physical Git metadata can be the root or its nested `.git`, supporting both
+  direct bare repositories and actual clones converted to bare. Common-directory,
+  root and indirection checks remain.
+- Origin discovery processes Git includes and resolves the effective native
+  remote URL before URL-safety and canonical-identity validation.
+- One optional budget reaches publication authority, registry and publication
+  locks, including nonblocking native thread/sidecar acquisition. Existing
+  unbudgeted callers retain their prior behavior and lock order.
+
+The shared native packet passes 212 cases, with one Windows-unavailable FIFO
+control skipped. It includes the full guard producer and registry transaction
+files plus the selected registration controls. The five real positive layout/
+origin cases additionally pass with strict file-and-directory write boundaries.
+Three prepared-caller controls pass for success, pre-write refusal and committed
+publication failure. Contention controls hold each of the three actual locks
+beyond a short execution budget and require the native future itself to finish.
+
+The Manager file's 22 other controls pass. Its new real consumer passes after
+the write-boundary assertion was corrected to distinguish absent paths from
+existing empty directories; the earlier failed packet is retained as a failure.
+No application assertion or deadline was relaxed.
+
+Only the changed registry-transaction source record is refreshed in the positive
+unit manifest. Node inventory, effects, coverage declarations and budgets remain
+unchanged. Required exact-source unit CI and review still qualify the pushed
+revision independently.

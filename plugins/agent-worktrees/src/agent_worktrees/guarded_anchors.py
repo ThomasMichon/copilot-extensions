@@ -16,7 +16,7 @@ from plugin_activation import resolve_active_plugins
 
 from . import registry_paths, repos
 from .repos_registry_reader import read_registry
-from .repos_registry_transaction import read_bytes, registry_lock, revision
+from .repos_registry_transaction import read_bytes, record_lock, registry_lock, remaining_timeout, revision
 from .tracking import _RecordLock, _atomic_write
 
 
@@ -254,6 +254,7 @@ def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
 
 def _refresh_locked(
     root: Path, callers=(), *, include_prepared: bool = True, require_callers: bool = True,
+    budget=None,
 ) -> dict:
     directory = root / "guarded-anchors"
     reader = _reader()
@@ -302,6 +303,8 @@ def _refresh_locked(
     published = 0
     errors = []
     for caller in sorted(selected):
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
         identity = reader.repository_identity(caller)
         if identity is None or identity["root"] != caller:
             if caller in requested and caller not in prepared and not require_callers:
@@ -325,6 +328,8 @@ def _refresh_locked(
                 "inventory_authority": "unavailable", "generation": generation,
             }))
             snapshot = build_snapshot(caller, root, generation, prior_projects.get(caller))
+            if budget is not None:
+                remaining_timeout(budget, float("inf"))
             encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)
             if len(encoded.encode("utf-8")) > reader.MAX_BYTES:
                 raise GuardPublicationError("guard map exceeds its byte bound")
@@ -372,21 +377,28 @@ def refresh(
         return _refresh_locked(root, callers, include_prepared=include_prepared)
 
 
-def managed_write(write, *, caller: str | Path | None = None):
+def managed_write(write, *, caller: str | Path | None = None, budget=None):
     """Serialize source mutations with publication, including all prepared views."""
     root = registry_paths.registry_root()
     directory = _prepare_directory(root)
-    with registry_lock(root / "repos.yaml"), _RecordLock(
-        directory / "publication", timeout=10.0, require_sidecar=True,
-    ):
+    arguments = {"budget": budget} if budget is not None else {}
+    publication = (
+        _RecordLock(directory / "publication", timeout=10.0, require_sidecar=True)
+        if budget is None else record_lock(directory / "publication", budget=budget)
+    )
+    with registry_lock(root / "repos.yaml", **arguments), publication:
         # Readers must stop using old policy before the source mutation commits.
         _withdraw_views(directory)
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
         result = write()
         try:
             reader = _reader()
             identity = reader.repository_identity(caller) if caller is not None else None
             callers = [identity["root"]] if identity else []
-            _refresh_locked(root, callers, require_callers=False)
+            _refresh_locked(root, callers, require_callers=False, **arguments)
+            if budget is not None:
+                remaining_timeout(budget, float("inf"))
         except (OSError, ValueError, TypeError, RuntimeError) as exc:
             raise GuardPublicationError(
                 f"managed source write completed; guard-map publication incomplete: {exc}"

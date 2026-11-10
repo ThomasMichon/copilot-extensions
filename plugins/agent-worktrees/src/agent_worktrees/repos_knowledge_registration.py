@@ -20,7 +20,7 @@ from . import config as cfg, project_state, repos
 from .git_repository_environment import repository_identity_env
 from .repos_configuration import target
 from .repos_configuration_sources import ConfigurationError, defaults, identity, mapping, resource_name
-from .repos_registry_transaction import registry_lock, write_checked
+from .repos_registry_transaction import RegistryConflictError, registry_lock, write_checked
 
 
 def action_target(project: str) -> dict[str, str]:
@@ -67,10 +67,11 @@ def _checkout(path: str, branch: str, budget: OwnedExecutionBudget) -> dict:
     ], budget).splitlines()
     if len(values) != 3 or values[2] not in {"true", "false"}:
         raise ConfigurationError("invalid-checkout", "The local Git root could not be established.")
-    metadata = root if values[2] == "true" else root / ".git"
+    reported = Path(values[0]).resolve()
+    metadata = root / ".git" if reported == (root / ".git").resolve() else root
     if (
         not metadata.is_dir() or project_state._is_link_or_reparse(metadata)
-        or Path(values[0]).resolve() != metadata.resolve()
+        or reported != metadata.resolve() or metadata == root and values[2] != "true"
         or Path(values[1]).resolve() != metadata.resolve()
     ):
         raise ConfigurationError("invalid-checkout", "Select the repository anchor, not a task worktree or descendant.")
@@ -78,10 +79,10 @@ def _checkout(path: str, branch: str, budget: OwnedExecutionBudget) -> dict:
         raise ConfigurationError("invalid-branch", "Supply the intended default branch as registration metadata.")
     if _git(root, ["check-ref-format", "--branch", branch], budget) != branch:
         raise ConfigurationError("invalid-branch", "Supply a literal default branch, not a checkout shorthand.")
-    origins = _git(root, ["config", "--local", "--get-all", "remote.origin.url"], budget, absent=True).splitlines()
+    origins = _git(root, ["config", "--includes", "--get-all", "remote.origin.url"], budget, absent=True).splitlines()
     if len(origins) > 1:
         raise ConfigurationError("ambiguous-origin", "The checkout has more than one origin URL.")
-    remote = origins[0] if origins else ""
+    remote = _git(root, ["remote", "get-url", "origin"], budget) if origins else ""
     parsed = urlsplit(remote)
     if parsed.password or parsed.query or parsed.fragment or (
         parsed.scheme.casefold() in {"http", "https"} and (parsed.username or parsed.password)
@@ -169,31 +170,58 @@ def preview(project: str, name: str, path: str, branch: str, account: str = "") 
 
 
 def apply(project: str, name: str, path: str, branch: str, account: str, token: str) -> dict:
+    from . import guarded_anchors
+
     if not re.fullmatch(r"[a-f0-9]{64}", token):
         raise ConfigurationError("missing-preview", "A fresh local-registration preview is required.")
     budget = OwnedExecutionBudget.from_timeout(26, cleanup_reserve=2)
-    with registry_lock(repos._repos_yaml_path()):
-        selected, registry = _selection(project, name, path, branch, account, budget)
-        if not hmac.compare_digest(token, _token(selected)):
-            raise ConfigurationError("preview-conflict", "Registration inputs changed; refresh and preview again.")
-        raw = mapping(repos._repos_yaml_path())
-        raw["repos"] = dict(raw.get("repos", {}))
-        registration = {
-            "class": "knowledge", "agent": False,
-            repos._current_platform(): selected["path"], "default_branch": branch,
+    attempted = committed = False
+    try:
+        with registry_lock(repos._repos_yaml_path(), budget=budget):
+            selected, registry = _selection(project, name, path, branch, account, budget)
+            if not hmac.compare_digest(token, _token(selected)):
+                raise ConfigurationError("preview-conflict", "Registration inputs changed; refresh and preview again.")
+            raw = mapping(repos._repos_yaml_path())
+            raw["repos"] = dict(raw.get("repos", {}))
+            registration = {
+                "class": "knowledge", "agent": False,
+                repos._current_platform(): selected["path"], "default_branch": branch,
+            }
+            if selected["remote"]:
+                registration["remote"] = selected["remote"]
+            if selected["account"]:
+                registration["account"] = selected["account"]
+            raw["repos"][name] = registration
+
+            def write():
+                nonlocal attempted, committed
+                attempted = True
+                write_checked(
+                    repos._repos_yaml_path(), registry,
+                    yaml.safe_dump(raw, sort_keys=False, allow_unicode=True), budget=budget,
+                )
+                committed = True
+
+            guarded_anchors.managed_write(write, budget=budget)
+    except RegistryConflictError:
+        raise
+    except (guarded_anchors.GuardPublicationError, OSError, RuntimeError) as error:
+        if not attempted:
+            if isinstance(error, guarded_anchors.GuardPublicationError):
+                raise ConfigurationError(
+                    "guard-publication-unavailable", "Registration did not start; inspect its guard-publication owner.",
+                ) from error
+            raise
+        return {
+            "status": "incomplete", "operation": "set", "target": action_target(project),
+            "registration_committed": True if committed else None,
+            "guard_publication": "incomplete",
+            "message": "Registration or guard publication is incomplete; inspect the catalog before retrying.",
         }
-        if selected["remote"]:
-            registration["remote"] = selected["remote"]
-        if selected["account"]:
-            registration["account"] = selected["account"]
-        raw["repos"][name] = registration
-        if time.monotonic() >= budget.execution_deadline:
-            raise TimeoutError("Local registration budget expired before persistence.")
-        # Use the shared compare-before-replace writer, not add_repo's credential-pinning follow-up.
-        write_checked(repos._repos_yaml_path(), registry, yaml.safe_dump(raw, sort_keys=False, allow_unicode=True))
     return {
         "status": "persisted", "operation": "set", "target": selected["target"],
         "registration": {"name": name, **registration}, "binding_changed": False,
+        "guard_publication": "complete",
         "message": "Registered only. Refresh and use the separately confirmed knowledge-binding action.",
     }
 

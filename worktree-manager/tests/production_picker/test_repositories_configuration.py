@@ -482,9 +482,14 @@ def test_native_local_knowledge_registration_form_cancel_confirm_and_refresh(tmp
             assert row["configuration"]["registration"]["class"] == "knowledge"
             assert row["configuration"]["binding"]["identity"] == ""
             after = snapshot(native)
-            assert {key for key in before.keys() | after.keys() if before.get(key) != after.get(key)} == {
+            missing = object()
+            assert {
+                key for key in before.keys() | after.keys() if before.get(key, missing) != after.get(key, missing)
+            } == {
                 str(Path(".agent-worktrees") / "repos.yaml"), str(Path(".agent-worktrees") / "repos.lock"),
                 str(Path(".agent-worktrees") / "pr-rewrite-authority.lock"),
+                str(Path(".agent-worktrees") / "guarded-anchors"),
+                str(Path(".agent-worktrees") / "guarded-anchors" / "publication.lock"),
             }
 
     asyncio.run(run())

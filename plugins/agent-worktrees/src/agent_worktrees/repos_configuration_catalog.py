@@ -300,6 +300,9 @@ def catalog(project: str, *, workspace: str = "") -> dict:
         )
     from .repos_knowledge_registration import action_row, eligible
 
-    if composition_error is None and project in registry.repos and eligible(inspection):
+    if (
+        composition_error is None and project in registry.repos
+        and binding_names_supported(project, project) and eligible(inspection)
+    ):
         rows.insert(0, action_row(project))
     return {"entries": rows, "summary": summary}
