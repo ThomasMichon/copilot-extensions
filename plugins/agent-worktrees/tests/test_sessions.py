@@ -2133,21 +2133,22 @@ def test_session_state_sweep_confined_to_backfill():
     import ast
 
     import agent_worktrees.sessions as sessions_mod
+    import agent_worktrees.session_backfill as backfill_mod
 
-    src = Path(sessions_mod.__file__).read_text(encoding="utf-8")
-    tree = ast.parse(src)
     sweep_attrs = {"iterdir", "scandir", "listdir"}
     offenders: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if node.name == "backfill_sessions":
-            continue
-        for sub in ast.walk(node):
-            if (isinstance(sub, ast.Call)
-                    and isinstance(sub.func, ast.Attribute)
-                    and sub.func.attr in sweep_attrs):
-                offenders.append(f"{node.name}:{sub.func.attr}")
+    for module in (sessions_mod, backfill_mod):
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name == "backfill_sessions":
+                continue
+            for sub in ast.walk(node):
+                if (isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr in sweep_attrs):
+                    offenders.append(f"{node.name}:{sub.func.attr}")
     assert not offenders, (
         "session-state sweep found outside backfill_sessions -- resolve by "
         f"exact session id instead: {sorted(set(offenders))}"

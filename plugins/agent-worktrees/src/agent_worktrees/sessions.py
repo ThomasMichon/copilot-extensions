@@ -34,9 +34,9 @@ from .sessions_pane_retire import (
 )
 
 try:  # libyaml (C) is dramatically faster; the one sanctioned sweep uses it.
-    from yaml import CSafeLoader as _YamlSafeLoader
+    from yaml import CSafeLoader as _YamlSafeLoader  # noqa: F401 -- backfill compatibility export
 except ImportError:  # pragma: no cover - pure-Python fallback
-    from yaml import SafeLoader as _YamlSafeLoader
+    from yaml import SafeLoader as _YamlSafeLoader  # noqa: F401 -- backfill compatibility export
 
 
 @dataclass
@@ -853,76 +853,9 @@ def backfill_sessions(records: list) -> dict[str, list[str]]:
     ``doctor``), never implicitly on a routine read. Parsed with the C YAML
     loader since this is the lone remaining O(sessions) path.
     """
-    session_dir = _session_state_dir()
-    if not session_dir.exists():
-        return {}
+    from .session_backfill import backfill_sessions as discover
 
-    # Collect worktrees that need backfilling
-    path_to_wt: dict[str, str] = {}  # normalized_path → worktree_id
-    for rec in records:
-        sessions = getattr(rec, "sessions", None)
-        if sessions:
-            continue  # already has entries
-        if not rec.worktree_path:
-            continue
-        path_to_wt[_normalize_path(rec.worktree_path)] = rec.worktree_id
-
-    if not path_to_wt:
-        return {}
-
-    # Single pass over all session directories
-    # worktree_id → list of (session_id, updated_at)
-    discovered: dict[str, list[tuple[str, str]]] = {}
-
-    for entry in session_dir.iterdir():
-        if not entry.is_dir():
-            continue
-
-        # Skip detached parent-continuation sessions (subconscious /
-        # rem-agent runs); they reuse the parent's cwd and must not be
-        # backfilled into a worktree's session registry.
-        if _is_detached_session(entry):
-            continue
-
-        ws_file = entry / "workspace.yaml"
-        if not ws_file.exists():
-            continue
-
-        # Must have conversation data (not a stale stub)
-        if not (entry / "session.db").exists() and not (entry / "events.jsonl").exists():
-            continue
-
-        try:
-            with open(ws_file, encoding="utf-8") as f:
-                ws_data = yaml.load(f, Loader=_YamlSafeLoader)
-        except Exception:
-            continue
-
-        if not ws_data or not isinstance(ws_data, dict):
-            continue
-
-        cwd = ws_data.get("cwd", "")
-        if not cwd:
-            continue
-
-        norm_cwd = _normalize_path(cwd)
-
-        # Match against worktree paths
-        for wt_path, wt_id in path_to_wt.items():
-            if norm_cwd == wt_path or norm_cwd.startswith(wt_path + os.sep):
-                updated_at = str(ws_data.get("updated_at", ""))
-                discovered.setdefault(wt_id, []).append(
-                    (entry.name, updated_at)
-                )
-                break
-
-    # Return just the session IDs, sorted by updated_at (newest last)
-    result: dict[str, list[str]] = {}
-    for wt_id, entries in discovered.items():
-        entries.sort(key=lambda e: e[1])
-        result[wt_id] = [sid for sid, _ in entries]
-
-    return result
+    return discover(records)
 
 
 # Copilot CLI event types that render meaningfully in a transcript view.
