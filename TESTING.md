@@ -324,6 +324,11 @@ For prepared Windows file-local writes, `prepared-membership-native.yml` runs
 The controls use actual membership and guard-map publication for legacy and
 installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
+Native batch cases prove all-call admission with mixed reads/writes, per-call
+arguments, batch-over-single precedence, the 128-call bound and a later
+protected/foreign/structured member defeating an earlier safe write. Invalid
+envelopes and read-only batches retain original policy; installation-cell
+positive and protected batches use the same actual preparation.
 The `real-policy` cases compare the same registered entry and fixture with the
 new contract and an older read-only contract, using the real caller-owned policy
 worker rather than a timing stub; they also require a real protected-state deny.
