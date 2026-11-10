@@ -1,0 +1,9 @@
+{
+  "comment": "Add installed Manager Create Open detach exit and Resume native qualification",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

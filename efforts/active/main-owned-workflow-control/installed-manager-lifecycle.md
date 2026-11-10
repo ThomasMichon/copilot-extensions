@@ -47,10 +47,18 @@ installed or frozen-candidate release evidence.
 
 ## Ownership and scope
 
-- Campaign driver owns this CI/promotion requirement, plan and review.
+- Campaign driver owns this CI/promotion requirement, plan, review and the new
+  `worktree-manager/tests/native/test_manager_installed_lifecycle.py` witness.
+  It consumes existing qualified helpers without taking their edit ownership.
+- The accepted required-readiness contributor owns only the new
+  `worktree-manager/tests/native/manager_installed_readiness_profile.py` and
+  `worktree-manager/tests/test_installed_readiness_profile.py` input/control
+  modules. Actual runtime discovery, installation and execution remain in the
+  shared lifecycle witness, not a second fixture or promotion job.
 - The existing #11377 qualification coordinator retains native installation,
-  TTY fixture source and its open Main-activation PR. Agree exact extension
-  files before implementation; this proposal does not supersede that work.
+  TTY fixture source and its open Main-activation PR. Agree actual overlapping
+  helper/runner/result edits before touching those files; independent new-file
+  work does not wait for that entire PR to merge. This does not supersede it.
 - #3336 retains the promotion transaction and independently governed Main
   controller; #7529 retains configured-feed construction and its wider matrix.
 - Existing launcher, path resolver, launch-admission, Copilot driver and
@@ -70,10 +78,13 @@ The following implementation decomposition is **agent-recommended**.
 
 ### Phase 1 - Review and accept existing-owner seams
 
-- [ ] Review the release-vision extension and this linked parent amendment
-  before implementation.
-- [ ] Agree the native lifecycle fixture and release-result integration seams
-  with #11377 and #3336; preserve their active PRs and existing source custody.
+- [x] Review the release-vision extension and this linked parent amendment
+  before implementation. #11739 merged after current-head Copilot approval,
+  correction of the exception-list finding and required green CI.
+- [ ] Agree actual overlapping native-helper and release-result integration
+  seams with #11377 and #3336; preserve their active PRs and source custody.
+  Proceed independently on the assigned new witness/profile files rather than
+  make Main-PR completion or a blanket acknowledgement a prerequisite.
 - [ ] Select the representative generic harness and its complete declared suite
   installation recipe from canonical owners. Enumerate what is installed and
   enabled; a manually assembled Manager/engine pair cannot be called a suite
@@ -174,3 +185,22 @@ frozen-candidate gate seams. Coordination was posted on #6237 and #11377.
 No native or workflow implementation is claimed; exact extension ownership
 and reviewed intent precede those edits. Existing TTY activation remains
 with its current coordinator, and all broader campaign gates remain open.
+
+### 2026-11-09 - Reviewed lifecycle contract accepted
+
+#11739 merged at `6c5be356d7a66bd10c9895d1270b607e312cff09`.
+The [dated acceptance record](journal/2026/11.09-installed-manager-lifecycle.md)
+retains the review, qualification limits and next existing-owner seam.
+Only the reviewed-intent item closes; native lifecycle implementation,
+suite closure and actual candidate enforcement remain unproved.
+
+### 2026-11-09 - Independent file split instead of whole-PR blocking
+
+Following the operator's coordination direction, the Campaign driver traced
+the owned Main PR's publishing controller across machines and posted the exact
+source split on its PR thread. Direct peer delivery was not acknowledged;
+the existing session and control transaction were preserved.
+The required-readiness contributor accepted the two new companion/control
+paths above. The Campaign driver reserved the distinct lifecycle witness.
+Shared helper/runner/result edits still require concrete overlap coordination;
+neither this split nor the open Main PR establishes executed lifecycle proof.

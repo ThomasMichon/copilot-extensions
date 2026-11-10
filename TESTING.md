@@ -688,6 +688,63 @@ the deadline cap. The same console-fixture file's explicitly selected T3
 handle with an injected image-query failure; it is not proof of the precise
 lifetime of a historical failing PID.
 
+The installed-core Manager lifecycle witness is explicitly selected separately:
+
+```powershell
+$env:COPILOT_NATIVE_TEST_EXECUTABLE = '<native-Copilot-executable>'
+$env:PSMUX_TEST_BIN = '<native-PSMux-executable>'
+$env:COPILOT_DRIVER_HEADED_MUX_E2E = '1'
+python tools\run-plugin-tests.py worktree-manager --test-file tests\native\test_manager_installed_lifecycle.py --allow-explicit-tiers --timeout 900 --plugin-timeout 900 --test-timeout 900
+```
+
+This case uses the existing 720-second execution/cleanup owner, including its
+30-second cleanup reserve, inside the native portfolio's 900-second runner
+bounds. PowerShell 7, the Windows .NET Framework compiler, actual Copilot and
+PSMux executables and the constructor's governed feed are prerequisites; no
+operator Copilot state or inference token is borrowed. Only inference uses a deterministic
+loopback endpoint. Real installed project entry, Manager keyboard controls,
+Git worktree creation, native process incarnation, conversation history and
+private mux attachment participate. The case checks parallel Open, preserved
+work after detaching the first view, normal Copilot exit and a fresh Manager's
+Resume, plus the existing unusable-installed-entry negative control.
+The stateless harness has a real private knowledge repository, registered and
+bound before New; the installed coordination-readiness command must resolve it.
+Before constructing runtimes, the case requires an empty, confirmed native
+mux-server cohort. PSMux liveness checks cover the machine-wide server census;
+a private namespace and data directory on a shared mux host cannot guarantee
+complete registration coverage. Existing or unconfirmed servers fail this
+preflight, not skip qualification. Never borrow host registrations, fabricate
+sentinels or stop shared servers to make the test pass.
+If source preparation exhausts the fixed budget on the default temporary
+volume, the runner supports a private, source-external `AGENT_SCRATCH_ROOT`.
+Record the actual placement and timing; changing volumes is not permission to
+increase deadlines or reuse an installed fixture.
+
+The candidate source snapshot retains sibling plugin inputs needed by canonical
+invocation materialization, but this core case constructs only Manager and
+Worktrees. It cannot satisfy complete selected-suite, actual Machines readiness,
+ordinary baseline-to-candidate update or required promotion-result acceptance.
+Those remain separate obligations in the
+[installed lifecycle contract](efforts/active/main-owned-workflow-control/installed-manager-lifecycle.md).
+The whole-suite replacement fixture remains disposable-hosted-Windows-only:
+its real service and Scheduled Tasks effects must not be enabled locally.
+No native result is counted as unit coverage or inferred from this invocation
+documentation.
+
+The existing manual `installation-context-full.yml` workflow accepts
+`portfolio=manager-lifecycle` for this installed-core case on a fresh
+GitHub-hosted Windows VM. Dispatch the published source branch and optionally
+provide its same exact commit as `source_sha`; a mismatched request fails.
+The job reuses the bounded pinned downloader and the existing Copilot 1.0.105 /
+PSMux 3.3.8 prerequisite pins, verifies checkout identity, and preserves the
+900-second runner and 720-second case limits. Its 30-minute job envelope also
+covers checkout, tooling, prerequisite acquisition and artifact retention.
+This changes no existing portfolio, schedule, required PR CI or release gate.
+The evidence checker rejects absent, skipped, failed, duplicate, stale,
+TTY-only and incomplete lifecycle results. Passing this development lane still
+does not establish complete-suite, actual Machines, authentic ordinary-update
+or required frozen-candidate promotion enforcement.
+
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
 Windows PowerShell and PowerShell 7. A controlled census verifies the real
