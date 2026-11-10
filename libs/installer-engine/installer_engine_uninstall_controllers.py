@@ -1,15 +1,69 @@
 """Finite native-uninstall controller proofs, bound to the remover's operations."""
 from __future__ import annotations
 
+import argparse
 import hashlib
 import json
 import os
 import re
+import subprocess
 import sys
 from collections.abc import Sequence
+from contextlib import contextmanager
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
+
+
+def parse_cli(argv: Sequence[str] | None = None, *, description: str | None = None):
+    parser = argparse.ArgumentParser(description=description)
+    parser.add_argument("--payload-root", required=True, type=Path)
+    parser.add_argument("--plugin-id", required=True)
+    parser.add_argument("--root", required=True, type=Path)
+    parser.add_argument("--shell", required=True)
+    parser.add_argument("--profile", type=Path)
+    parser.add_argument("--check-consumers", action="store_true",
+                        help="Also acquire removal custody and refuse consumers during admission")
+    action = parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--check", action="store_true")
+    action.add_argument("--remove-runtime", action="store_true")
+    return parser.parse_args(argv)
+
+
+@contextmanager
+def native_controller_custody(payload: Path, plugin: str, root: Path, *, root_check, load, error):
+    if os.name != "nt" or plugin != "agent-vault" or (
+        os.environ.get("COPILOT_EXTENSIONS_NATIVE_INSTALLER") != plugin
+    ):
+        yield None
+        return
+    root_check(payload, root)
+    driver = load(payload / "scripts/installer_driver.py")
+    driver.bootstrap(payload)
+    with driver.custody() as owner:
+        if owner is None:
+            raise error("Native Vault removal requires its authenticated execution owner")
+        yield owner
+
+
+def run_cli(argv=None, *, description, cleanup, root_check, load, error) -> int:
+    arguments = parse_cli(argv, description=description)
+    try:
+        with native_controller_custody(
+            arguments.payload_root, arguments.plugin_id, arguments.root,
+            root_check=root_check, load=load, error=error,
+        ) as owner:
+            result = cleanup(
+                arguments.payload_root, arguments.plugin_id, arguments.root, arguments.shell,
+                profile=arguments.profile, remove_runtime=arguments.remove_runtime,
+                check_consumers=arguments.check_consumers,
+                **({"controller_custody": owner} if owner is not None else {}),
+            )
+    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as failure:
+        print(f"Runtime uninstall refused: {failure}", file=sys.stderr)
+        return 1
+    print(json.dumps(result, sort_keys=True))
+    return 0
 
 
 def lifecycle_controllers(rows, payload, root, plugin, *, load, authority_payload,
@@ -594,7 +648,9 @@ try {
             raise UninstallRefused("Native Vault execution shim is not its live request")
         if native_driver(_controller_python(take(), root), "") != original:
             raise UninstallRefused("Native Vault foreground controller changed")
-        native_shell(take(), original)
+        original_host = take()
+        if Path(original_host["image"]) != Path(shell) or Path(shell).is_relative_to(root):
+            raise UninstallRefused("Native Vault original host changed")
         if not _publisher_identity(payload, shell, chain):
             raise UninstallRefused("Native Vault controller identity is unverified")
         custody.assert_owned()

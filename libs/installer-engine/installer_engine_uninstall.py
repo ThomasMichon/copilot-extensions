@@ -5,7 +5,6 @@ This module never stops a service/process, provisions code, or deletes a data ro
 """
 from __future__ import annotations
 
-import argparse
 import hashlib
 import importlib.util
 import json
@@ -975,46 +974,11 @@ def cleanup(payload_root: Path, plugin_id: str, root: Path, shell: str, *,
     return {"status": "removed", "root": str(root)}
 
 
-@contextmanager
-def _native_controller_custody(payload: Path, plugin: str, root: Path):
-    if os.name != "nt" or plugin != "agent-vault" or (
-        os.environ.get("COPILOT_EXTENSIONS_NATIVE_INSTALLER") != plugin
-    ):
-        yield None
-        return
-    _root(payload, root)
-    driver = _load(payload / "scripts" / "installer_driver.py")
-    driver.bootstrap(payload)
-    with driver.custody() as owner:
-        if owner is None:
-            raise UninstallRefused("Native Vault removal requires its authenticated execution owner")
-        yield owner
-
-
 def main(argv: Sequence[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--payload-root", required=True, type=Path)
-    parser.add_argument("--plugin-id", required=True)
-    parser.add_argument("--root", required=True, type=Path)
-    parser.add_argument("--shell", required=True)
-    parser.add_argument("--profile", type=Path)
-    parser.add_argument("--check-consumers", action="store_true",
-                        help="Also acquire removal custody and refuse consumers during admission")
-    action = parser.add_mutually_exclusive_group(required=True)
-    action.add_argument("--check", action="store_true")
-    action.add_argument("--remove-runtime", action="store_true")
-    arguments = parser.parse_args(argv)
-    try:
-        with _native_controller_custody(arguments.payload_root, arguments.plugin_id, arguments.root) as owner:
-            result = cleanup(arguments.payload_root, arguments.plugin_id, arguments.root, arguments.shell,
-                             profile=arguments.profile, remove_runtime=arguments.remove_runtime,
-                             check_consumers=arguments.check_consumers,
-                             **({"controller_custody": owner} if owner is not None else {}))
-    except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
-        print(f"Runtime uninstall refused: {error}", file=sys.stderr)
-        return 1
-    print(json.dumps(result, sort_keys=True))
-    return 0
+    helper = _load(Path(__file__).with_name("installer_engine_uninstall_controllers.py"))
+    return helper.run_cli(
+        argv, description=__doc__, cleanup=cleanup, root_check=_root, load=_load, error=UninstallRefused,
+    )
 
 
 if __name__ == "__main__":

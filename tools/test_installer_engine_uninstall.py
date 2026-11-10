@@ -402,6 +402,7 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     "forged-owner", "stale-owner", "wrong-action", "wrong-root", "changed-source",
     "witness-mismatch", "reused-native", "foreign-controller", "additional-consumer",
     "late-source", "late-request", "missing-native-check", "missing-isolation",
+    "default-original", "relative-original", "command-original", "interactive-original", "foreign-original",
 ))
 def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch, mutation):
     home = tmp_path / "home"
@@ -523,6 +524,16 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
         inspector.remove("--check-native")
     elif mutation == "missing-isolation":
         shim.remove("-S")
+    elif mutation == "default-original":
+        del actors[-1][1][-2:]
+    elif mutation == "relative-original":
+        actors[-1][1][actors[-1][1].index("-File") + 1] = r"source\agent-vault\scripts\install.ps1"
+    elif mutation == "command-original":
+        actors[-1][1][:] = [shell, "-NoProfile", "-Command", "& './scripts/install.ps1' uninstall"]
+    elif mutation == "interactive-original":
+        actors[-1][1][:] = [shell, "-NoLogo"]
+    elif mutation == "foreign-original":
+        actors[-1][1][:] = [sys.executable, "-c", "pass"]
     rows = [
         {"pid": pid, "ppid": actors[index + 1][0] if index + 1 < len(actors) else 0,
          "image": argv[0], "command": subprocess.list2cmdline(argv),
@@ -556,7 +567,10 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
     monkeypatch.setattr(sys, "argv", [inspector[6] if mutation != "finite-callback" else inspector[3]])
     custody = object() if mutation == "forged-owner" else Custody()
     profile = MODULE.Profile((), (), (), (), "agent_vault")
-    if mutation in {"none", "finite-callback", "self-stage", "sparse-census", "cache"}:
+    if mutation in {
+        "none", "finite-callback", "self-stage", "sparse-census", "cache",
+        "default-original", "relative-original", "command-original", "interactive-original",
+    }:
         MODULE.refuse_consumers(payload, "agent-vault", root, shell, profile, controller_custody=custody)
         assert checks == ["owner", "owner"]
     else:
@@ -569,6 +583,7 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
 def test_native_vault_removal_authenticates_before_import_and_never_falls_back(tmp_path, monkeypatch, mode):
     events = []
     owner = object()
+    controller = MODULE._load(CONTROLLERS)
     payload, root = tmp_path / "payload", tmp_path / "runtime"
     monkeypatch.delenv("COPILOT_EXTENSIONS_NATIVE_INSTALLER", raising=False)
     if mode != "ordinary":
@@ -594,12 +609,15 @@ def test_native_vault_removal_authenticates_before_import_and_never_falls_back(t
 
     monkeypatch.setattr(MODULE, "_root", lambda *_args: events.append("root-validated"))
     monkeypatch.setattr(MODULE, "_load", load)
+    admission = controller.native_controller_custody(
+        payload, "agent-vault", root, root_check=MODULE._root, load=MODULE._load, error=MODULE.UninstallRefused,
+    )
     if mode in {"missing", "refused"}:
         with pytest.raises(MODULE.UninstallRefused):
-            with MODULE._native_controller_custody(payload, "agent-vault", root):
+            with admission:
                 pytest.fail("Unknown custody must not start cleanup")
     else:
-        with MODULE._native_controller_custody(payload, "agent-vault", root) as actual:
+        with admission as actual:
             assert actual is (None if mode == "ordinary" else owner)
     if mode == "ordinary":
         assert events == []
