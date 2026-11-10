@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from windows_qualification_contract import TRANSPORT_REF
-from windows_qualification_transport import Transport, command
+from windows_qualification_transport import Transport, command, rejected_attempt
 
 
 def git(root, *args):
@@ -192,6 +192,94 @@ def test_lost_push_response_reconciles_exact_original_envelope(tmp_path):
     envelope = Transport(root, str(remote), run=lost_response).append(source, updates.append)
     assert len(pushes) == 1
     assert envelope == updates[0]["envelope_sha"] == updates[-1]["envelope_sha"]
+
+
+@pytest.mark.parametrize("observed", [
+    "valid", "other-envelope", "other-ref", "other-previous", "lost-response", "policy",
+])
+def test_only_exact_contention_rejection_permits_recovery(observed):
+    envelope, previous = "a" * 40, "b" * 40
+    status_envelope = "d" * 40 if observed == "other-envelope" else envelope
+    ref = "refs/heads/other" if observed == "other-ref" else TRANSPORT_REF
+    expected = "d" * 40 if observed == "other-previous" else previous
+    reason = (
+        f"[remote rejected] (cannot lock ref '{ref}': is at {'c' * 40} but expected {expected})"
+    )
+    if observed == "policy":
+        reason = "[remote rejected] (fixture policy)"
+    output = "" if observed == "lost-response" else f"!\t{status_envelope}:{ref}\t{reason}\n"
+    assert rejected_attempt({
+        "envelope_sha": envelope, "previous_tip": previous,
+        "transport_failure": {"returncode": 1, "stdout": output, "stderr": "push failed"},
+    }) is (observed == "valid")
+
+
+@pytest.mark.parametrize("lost", [False, True])
+def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
+    tmp_path, monkeypatch, lost,
+):
+    from test_windows_qualification import fake_client
+    client, directory, state = fake_client(tmp_path, monkeypatch)
+    root = repository(tmp_path / "source")
+    remote = tmp_path / "remote.git"
+    git(root, "init", "--bare", str(remote))
+    first = git(root, "rev-parse", "HEAD")
+    Transport(root, str(remote)).append(first, lambda value: None)
+    (root / "source.txt").write_text("candidate", encoding="utf-8")
+    git(root, "commit", "-am", "Candidate")
+    candidate = git(root, "rev-parse", "HEAD")
+    state["request"].update(source_sha=candidate, envelope_sha=None)
+    client.save(directory, state)
+    monkeypatch.setattr(client, "preflight", lambda selected: state["provider"])
+    pushes = []
+    raced = False
+
+    def interrupted(argv, **kwargs):
+        nonlocal raced
+        if "fetch" in argv and raced:
+            raise TimeoutError("interrupted read-only reconciliation")
+        if "push" in argv:
+            pushes.append(argv)
+            raced = True
+            # A different valid envelope advances the one shared ref.
+            tree = git(root, "rev-parse", first + "^{tree}")
+            previous = git(root, "ls-remote", str(remote), TRANSPORT_REF).split()[0]
+            body = git(root, "show", "-s", "--format=%B", previous)
+            competitor = command(
+                ["git", "commit-tree", tree, "-p", previous, "-p", first],
+                cwd=root, data=body + "\n",
+            ).stdout.strip()
+            git(root, "push", str(remote), competitor + ":" + TRANSPORT_REF)
+            if lost:
+                return subprocess.CompletedProcess(argv, 1, "", "response lost")
+        return command(argv, **kwargs)
+
+    client.transport = Transport(root, str(remote), run=interrupted)
+    with pytest.raises(RuntimeError, match="interrupted read-only"):
+        client.append_transport(directory, state)
+    original = client.load(state["request"]["request_id"])[1]
+    assert original["phase"] == "transport-attempt"
+    assert len(pushes) == 1
+    client.transport = Transport(root, str(remote))
+    dispatched = []
+    monkeypatch.setattr(client, "dispatch", lambda directory, value: dispatched.append(value) or value)
+    if lost:
+        with pytest.raises(ValueError, match="remains unknown"):
+            client.resume(state["request"]["request_id"])
+        assert dispatched == []
+        assert client.load(state["request"]["request_id"])[1] == original
+    else:
+        recovered = client.resume(state["request"]["request_id"])
+        assert recovered["request"]["request_id"] == original["request"]["request_id"]
+        assert recovered["request"]["source_sha"] == candidate
+        assert recovered["request"]["envelope_sha"] != original["envelope_sha"]
+        assert recovered["transport_failure"] is None
+        assert recovered["transport_history"] == [{
+            key: original[key] for key in
+            ("envelope_sha", "previous_tip", "phase", "transport_failure")
+        }]
+        assert len(dispatched) == 1
+        git(root, "merge-base", "--is-ancestor", candidate, recovered["request"]["envelope_sha"])
 
 
 def test_competing_descendant_confirms_reused_tip_instead_of_rejected_envelope(tmp_path):

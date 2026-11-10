@@ -156,8 +156,11 @@ child's environment only, so older worktree PR hooks admit the transport
 without disabling local hooks. Its command boundary rejects branch, force
 and deletion refspecs and suppresses automatic tag following. No installed
 hook, shared Git configuration or ordinary source-push policy is changed.
-Rejected pushes retain their bounded diagnostic with the original request;
-an absent or uncertain effect is not permission for automatic replay.
+Rejected pushes retain their bounded diagnostic with the original request.
+An exact Git contention rejection permits same-request recovery after an
+interrupted reconciliation read; each replacement envelope retains the prior
+attempt's identity and diagnostic. An absent or uncertain effect is not
+permission for automatic replay, even when the shared ref has advanced.
 
 The client emits a request ID before effects and stores its state under the
 current worktree's Git metadata (`windows-qualification/<id>`). `status` and

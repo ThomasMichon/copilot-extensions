@@ -536,6 +536,68 @@ def test_interrupted_transport_resumes_only_original_confirmed_envelope(tmp_path
         assert dispatches == []
 
 
+def test_new_transport_attempt_cannot_inherit_old_rejection(tmp_path, monkeypatch):
+    client, directory, state = fake_client(tmp_path, monkeypatch)
+    state.update(
+        phase="transport-attempt", envelope_sha="e" * 40, previous_tip="d" * 40,
+        transport_failure={"returncode": 1, "stdout": "old rejection", "stderr": ""},
+    )
+    original = copy.deepcopy(state)
+
+    def interrupted(candidate, persist):
+        persist({
+            "phase": "transport-attempt", "envelope_sha": "f" * 40,
+            "previous_tip": "e" * 40, "transport_failure": None,
+        })
+        raise TimeoutError("push response unavailable")
+
+    client.transport = SimpleNamespace(append=interrupted)
+    with pytest.raises(RuntimeError, match="push response unavailable"):
+        client.append_transport(directory, state)
+    saved = client.load(state["request"]["request_id"])[1]
+    assert saved["transport_failure"] is None
+    assert saved["transport_history"] == [{
+        key: original[key] for key in
+        ("envelope_sha", "previous_tip", "phase", "transport_failure")
+    }]
+    assert saved["envelope_sha"] == "f" * 40
+    assert saved["request"] == original["request"]
+
+
+@pytest.mark.parametrize("changed", ["candidate", "missing-history", "rewritten-history"])
+def test_known_rejection_does_not_replace_mismatched_original_or_shared_history(
+    tmp_path, monkeypatch, changed,
+):
+    client, directory, state = fake_client(tmp_path, monkeypatch)
+    envelope, previous = "e" * 40, "d" * 40
+    state.update(
+        phase="transport-attempt", envelope_sha=envelope, previous_tip=previous,
+        transport_failure={"returncode": 1, "stderr": "", "stdout": (
+            f"!\t{envelope}:{contract.TRANSPORT_REF}\t[rejected] (fetch first)\n"
+        )},
+    )
+    client.save(directory, state)
+    monkeypatch.setattr(client, "preflight", lambda selected: state["provider"])
+    effects = []
+    client.transport = SimpleNamespace(
+        scoped_credentials=lambda owner: None,
+        tip=lambda: None if changed == "missing-history" else "f" * 40,
+        validate_tip=lambda envelope: None,
+        git=lambda *args, **kwargs: SimpleNamespace(
+            returncode=1,
+            stdout=previous + " " + (
+                "a" * 40 if changed == "candidate" else state["request"]["source_sha"]
+            ),
+        ),
+        append=lambda *args: effects.append("push"),
+    )
+    monkeypatch.setattr(client, "dispatch", lambda *args: effects.append("dispatch"))
+    with pytest.raises(ValueError, match="ancestry differs|history changed"):
+        client.resume(state["request"]["request_id"])
+    assert effects == []
+    assert client.load(state["request"]["request_id"])[1] == state
+
+
 @pytest.mark.parametrize("foreign", [False, True])
 def test_result_download_uses_original_run_attempt_and_checks_manifest(tmp_path, monkeypatch, foreign):
     client, _, state = fake_client(tmp_path, monkeypatch)

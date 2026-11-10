@@ -3,12 +3,43 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
 from typing import Callable
 
 from windows_qualification_contract import TRANSPORT_MARKER, TRANSPORT_REF, canonical, sha
+
+
+def rejected_attempt(state: dict) -> bool:
+    """Recognize only Git's exact attempted-ref contention rejection."""
+    failure = state.get("transport_failure") or {}
+    envelope, previous = state.get("envelope_sha"), state.get("previous_tip")
+    if failure.get("returncode") != 1 or not envelope:
+        return False
+    try:
+        sha(envelope)
+        if previous is not None:
+            sha(previous)
+    except ValueError:
+        return False
+    rows = [line for line in failure.get("stdout", "").splitlines() if "\t" in line]
+    if len(rows) != 1:
+        return False
+    prefix = "!\t" + envelope + ":" + TRANSPORT_REF + "\t"
+    if not rows[0].startswith(prefix):
+        return False
+    reason = rows[0][len(prefix):]
+    if reason in {"[rejected] (fetch first)", "[rejected] (non-fast-forward)"}:
+        return True
+    expected = previous or "0" * 40
+    return re.fullmatch(
+        re.escape("[remote rejected] (cannot lock ref '" + TRANSPORT_REF + "': is at ")
+        + r"[0-9a-f]{40}"
+        + re.escape(" but expected " + expected + ")"),
+        reason,
+    ) is not None
 
 
 def command(
@@ -126,7 +157,10 @@ class Transport:
                 "-c", "user.email=qualification@users.noreply.github.com",
                 "commit-tree", tree, *parents, data=body,
             ).stdout.strip())
-            persist({"envelope_sha": envelope, "previous_tip": previous, "phase": "transport-attempt"})
+            persist({
+                "envelope_sha": envelope, "previous_tip": previous,
+                "phase": "transport-attempt", "transport_failure": None,
+            })
             result = self.git(
                 "push", "--porcelain", "--no-follow-tags", self.remote,
                 envelope + ":" + TRANSPORT_REF, check=False, transport_push=True,
@@ -134,10 +168,11 @@ class Transport:
             if result.returncode == 0:
                 persist({"envelope_sha": envelope, "phase": "transport-confirmed"})
                 return envelope
-            persist({"transport_failure": {
+            failure = {
                 "returncode": result.returncode,
                 "stdout": result.stdout[-8192:], "stderr": result.stderr[-8192:],
-            }})
+            }
+            persist({"transport_failure": failure})
             # A lost response can still have published this exact envelope.
             actual = self.tip()
             if actual and self.git(
@@ -145,7 +180,9 @@ class Transport:
             ).returncode == 0:
                 persist({"envelope_sha": envelope, "phase": "transport-confirmed"})
                 return envelope
-            if actual != previous:
+            if actual != previous and rejected_attempt({
+                "envelope_sha": envelope, "previous_tip": previous, "transport_failure": failure,
+            }):
                 continue
             persist({"envelope_sha": envelope, "phase": "transport-unknown"})
             raise RuntimeError(
