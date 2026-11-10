@@ -690,10 +690,11 @@ class _Witness:
         )
         console.send(b"/")
         console.send(record["id"][-4:].encode() + b"\r")
-        before = len(console.output)
         console.send(b"\t\r")
+        if verb == "Resume":
+            self._refresh_before_resume(console, record)
         self.wait(
-            lambda: verb in installed._visible(console.output[before:]),
+            lambda: self._action_location(console, verb) is not None,
             f"Real Manager discovery did not offer {verb}",
         )
         console.send(b"\r")
@@ -704,11 +705,76 @@ class _Witness:
 
         self.wait(attached, f"Real Manager {verb} did not attach the native CLI prompt")
 
+    def _action_location(self, console, label):
+        self.rendered(console)
+        screen = self.screens[id(console)][1]
+        for row in range(screen.lines):
+            cells = [screen.buffer[row][column] for column in range(screen.columns)]
+            text = "".join(cell.data if len(cell.data) == 1 else " " for cell in cells)
+            offset = 0
+            for segment in text.split("\u2502"):
+                if segment.strip() == label:
+                    return row, offset + segment.index(label)
+                offset += len(segment) + 1
+        return None
+
+    def _activate_refresh(self, console):
+        target = self.wait(
+            lambda: self._action_location(console, "Refresh"),
+            "Real Manager discovery did not offer Refresh",
+        )
+        starts = [
+            location for label in ("Open", "Resume", "Restore", "Reclaim", "Stop", "Repair")
+            if (location := self._action_location(console, label)) is not None
+        ]
+        if not starts or target[0] < min(starts)[0]:
+            raise RuntimeError("The real action list cannot be safely navigated to Refresh")
+        console.send(b"\x1b[H" + b"\x1b[B" * (target[0] - min(starts)[0]))
+
+        def highlighted():
+            location = self._action_location(console, "Refresh")
+            if location is None:
+                return False
+            row, column = location
+            screen = self.screens[id(console)][1]
+            return all(screen.buffer[row][x].bold for x in range(column, column + len("Refresh")))
+
+        self.wait(highlighted, "Real Manager did not highlight the safe Refresh action")
+        console.send(b"\r")
+
+    def _refresh_before_resume(self, console, record):
+        self._activate_refresh(console)
+
+        def stopped():
+            screen = self.rendered(console)
+            return (
+                "Worktree actions" not in screen
+                and "0 active" in screen
+                and record["id"][-4:] in screen
+            )
+
+        self.wait(
+            stopped, "Real Manager Refresh did not discover the stopped worktree",
+        )
+        console.send(b"\r")
+        self.wait(
+            lambda: "Worktree actions" in self.rendered(console),
+            "Real Manager did not reopen the refreshed worktree actions",
+        )
+
     def close_cli(self, console, identity):
+        import ctypes
+        from ctypes import wintypes
+
         owner, handle = self.native_handles[identity]
         before = len(console.output)
         console.send(b"/exit\r")
         self.wait(lambda: owner.exited(handle), "Copilot did not exit normally")
+        code = wintypes.DWORD()
+        if not owner.api.GetExitCodeProcess(handle, ctypes.byref(code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        if code.value != 0:
+            raise RuntimeError(f"The native Copilot process exited with code {code.value}")
         self.wait(
             lambda: (
                 console.exited(console.process.process)
@@ -1354,6 +1420,40 @@ def test_lifecycle_duplicate_native_observation_does_not_weaken_the_refusal(
         assert any("metadata unavailable" in note for note in caught.value.__notes__)
 
 
+@pytest.mark.parametrize("exit_code", [0, 7])
+def test_lifecycle_normal_exit_checks_the_native_owner_not_only_the_wrapper(tmp_path, exit_code):
+    from types import SimpleNamespace
+
+    sent = []
+
+    def native_code(_handle, result):
+        result._obj.value = exit_code
+        return True
+
+    owner = SimpleNamespace(
+        exited=lambda _handle: True,
+        api=SimpleNamespace(GetExitCodeProcess=native_code),
+    )
+    console = SimpleNamespace(
+        output=b"", send=sent.append, exited=lambda _handle: True,
+        process=SimpleNamespace(process=object()), wait=lambda _timeout: 0,
+    )
+    witness = _Witness(tmp_path, {}, None, None, None, None)
+    identity = (101, 1000)
+    witness.native_handles[identity] = (owner, object())
+
+    def wait(check, _label):
+        assert check()
+
+    witness.wait = wait
+    if exit_code:
+        with pytest.raises(RuntimeError, match="native Copilot process exited with code 7"):
+            witness.close_cli(console, identity)
+    else:
+        witness.close_cli(console, identity)
+    assert sent == [b"/exit\r"]
+
+
 @pytest.mark.parametrize(
     "case", [
         "qualified", "unbound-owner", "helper-lock", "foreign-parent",
@@ -1509,7 +1609,7 @@ def test_lifecycle_selection_waits_for_the_current_cli_prompt(tmp_path, attached
 
     def send(value):
         if value == b"\t\r":
-            console.output.extend(b"Open")
+            console.output.extend(b"\x1b[2J\x1b[HWorktree actions\r\n\xe2\x94\x82 Open \xe2\x94\x82")
         elif value == b"\r":
             console.output.extend(
                 b"\x1b[2J\x1b[H"
@@ -1528,6 +1628,53 @@ def test_lifecycle_selection_waits_for_the_current_cli_prompt(tmp_path, attached
         with pytest.raises(TimeoutError, match="did not attach the native CLI prompt"):
             witness.select(console, {"id": "fixture-c123"}, "Open")
     assert len(checks) == 3
+
+
+@pytest.mark.parametrize("case", ["stopped", "wrong-highlight", "still-unknown"])
+def test_lifecycle_resume_refresh_requires_a_safe_action_and_real_stopped_frame(tmp_path, case):
+    from types import SimpleNamespace
+
+    def menu(primary, selected):
+        labels = (primary, "Finalize", "Refresh", "View details")
+        lines = ["Worktree actions"] + [
+            "\u2502 " + ("\x1b[1m" if label == selected else "\x1b[22m")
+            + label + "\x1b[22m \u2502"
+            for label in labels
+        ]
+        return ("\x1b[2J\x1b[H" + "\r\n".join(lines)).encode()
+
+    witness = _Witness(tmp_path, {}, None, None, None, None)
+    console = SimpleNamespace(output=bytearray(menu("Open", "Open")))
+    sent = []
+
+    def send(value):
+        sent.append(value)
+        if value.startswith(b"\x1b[H"):
+            assert value == b"\x1b[H" + b"\x1b[B" * 2
+            console.output.extend(menu("Open", "Finalize" if case == "wrong-highlight" else "Refresh"))
+        elif sent.count(b"\r") == 1:
+            console.output.extend(
+                b"\x1b[2J\x1b[Hc123 "
+                + (b"1 active" if case == "still-unknown" else b"0 active"),
+            )
+        else:
+            console.output.extend(menu("Resume", "Resume"))
+
+    def wait(check, label):
+        value = check()
+        if not value:
+            raise TimeoutError(label)
+        return value
+
+    console.send, witness.wait = send, wait
+    if case == "stopped":
+        witness._refresh_before_resume(console, {"id": "fixture-c123"})
+        assert witness._action_location(console, "Resume") is not None
+        assert sent.count(b"\r") == 2
+    else:
+        with pytest.raises(TimeoutError, match="highlight the safe|discover the stopped"):
+            witness._refresh_before_resume(console, {"id": "fixture-c123"})
+        assert sent.count(b"\r") == (0 if case == "wrong-highlight" else 1)
 
 
 def test_lifecycle_terminal_diagnostics_retain_the_recent_refusal(tmp_path):
@@ -1759,6 +1906,7 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                     assert witness.records("records-opened") == record
                     witness.close_cli(second, original)
                     assert not witness.one_native()
+                    assert witness.records("records-after-exit") == record
 
                     resumed = witness.manager()
                     witness.select(resumed, record, "Resume")

@@ -399,3 +399,34 @@ requires the actual prompt frame. All six focused query/current-frame/
 attachment controls passed, including split queries and proof that no input
 was sent. No UI, provider, process-owner, history, cleanup or deadline
 assertion changed.
+
+### 2026-11-10 - Active Open, detach and normal exit passed; discovery was advisory
+
+Run 42799090979 at `1627fabf579eb3c3bb00ba797196501821da1e3d`
+completed three actual provider-backed turns in one conversation. Active
+Open preserved the original native owner, detaching the first view preserved
+work, and normal Copilot/Manager exit left no native CLI owner. The fresh
+Manager then offered Open rather than Resume; its advisory `HOST(?)` state
+and lack of Stop identify the conservative unknown-observation branch, not
+proof that a mux terminal remained alive.
+
+The existing UI contract reserves Resume for proven stopped worktrees and
+provides per-row Refresh for an on-demand live observation/cache update.
+The witness now drives that ordinary UI operation once before Resume.
+It checks unchanged worktree/head/session identity immediately after exit,
+requires the actual Refresh highlight before Enter, and still requires the
+stopped row and real Resume action afterward. No cache, liveness, PID or
+session-ID data is injected or rewritten by the fixture.
+
+All seven focused safe-action/current-frame/query controls passed, including
+wrong-highlight and still-unknown refusals. A real native production action
+menu selected Refresh through the same controller. That component check is
+not installed liveness or Resume acceptance. All original deadlines and
+broader suite/promotion holds remain unchanged.
+
+The exit proof now also checks zero from the pinned native Copilot handle,
+not only the pane/Manager wrapper, whose success can conceal a nonzero child
+exit. The earlier run observed the normal exit command, owner termination
+and clean wrapper returns; it did not retain the native exit code directly.
+All nine focused native-exit/live-discovery/current-frame controls passed,
+including rejection of a nonzero native code behind a successful wrapper.

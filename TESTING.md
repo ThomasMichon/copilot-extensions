@@ -713,6 +713,13 @@ appear in the current rendered dialog before confirmation. The test-only
 it never supplies UI state or input acknowledgements. Open/Resume waits for
 the current actual CLI prompt frame before sending another turn. No retry
 or deadline increase compensates for dropped input.
+Before Resume, the fresh Manager performs its ordinary per-row Refresh and
+must visibly discover the stopped worktree and offer Resume. The fixture
+checks the original tracking identity before that refresh, selects Refresh
+only after observing its actual highlight, and never injects mux absence
+or substitutes Open for an unavailable Resume.
+Normal exit requires zero from the pinned Copilot process handle itself,
+not merely a successful pane wrapper or Manager return.
 Normal and private device-status queries are inert in this passive observer;
 they never generate input or replace the real terminal's responses.
 Completed turns require durable conversation history and the reply in the
