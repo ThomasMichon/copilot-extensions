@@ -326,7 +326,12 @@ installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
 Native batch cases prove all-call admission with mixed reads/writes, per-call
 arguments, batch-over-single precedence, the 128-call bound and a later
-protected/foreign/structured member defeating an earlier safe write. Invalid
+protected/foreign member defeating an earlier safe write. The separate
+structured packet covers the direct-plus-entry alias union, JSON arguments,
+deduplication and 128-entry/target limits, with late protected/foreign/nested
+targets, incomplete entries and patch fallback. It also compares structured
+writes with the real original policy in legacy and selected-cell fixtures.
+Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
 The `real-policy` cases compare the same registered entry and fixture with the
