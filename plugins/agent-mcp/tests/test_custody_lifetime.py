@@ -2,6 +2,7 @@
 
 import io
 import os
+import socket
 import subprocess
 import sys
 import threading
@@ -64,6 +65,30 @@ def test_owner_exiting_before_admission_never_starts_monitor(monkeypatch):
     released.assert_called_once_with()
 
 
+def test_initial_post_attach_observation_outage_retains_owner(monkeypatch, caplog):
+    unavailable, dead, fired = threading.Event(), threading.Event(), threading.Event()
+    unavailable.set()
+    released = Mock()
+
+    def alive():
+        if unavailable.is_set():
+            raise OSError("first post-attach observation unavailable")
+        return not dead.is_set()
+
+    monkeypatch.setattr(custody_lifetime, "_pin", lambda *_: (alive, released))
+    with custody_lifetime.SessionOwner(12, "native:1") as owner:
+        owner.start(fired.set)
+        assert not fired.wait(.25)
+        unavailable.clear()
+        dead.set()
+        assert fired.wait(2)
+    released.assert_called_once_with()
+    assert len([
+        record for record in caplog.records
+        if record.name == "agent-mcp.custody-lifetime" and "unavailable" in record.message
+    ]) == 1
+
+
 def test_pump_uses_explicit_owner_instead_of_parent_watchdog(monkeypatch):
     parent = Mock(side_effect=AssertionError("ancestry is not adopted-session ownership"))
     monkeypatch.setattr("agent_mcp.watchdog.install_parent_death_watchdog", parent)
@@ -102,6 +127,29 @@ def test_unverifiable_owner_refuses_before_incoming_or_custody_effects(monkeypat
     attach.assert_not_called()
 
 
+def test_dedicated_exit_follows_connection_and_owner_cleanup(monkeypatch):
+    events = []
+    owner = Mock()
+    owner.__enter__ = Mock(return_value=owner)
+    owner.__exit__ = Mock(side_effect=lambda *_: events.append("owner-released"))
+    monkeypatch.setattr(custody_lifetime, "SessionOwner", Mock(return_value=owner))
+    monkeypatch.setattr(custody_launch.incoming, "ensure_current", Mock())
+    monkeypatch.setattr(custody_launch, "attach", Mock())
+    monkeypatch.setattr(
+        sockio, "pump", lambda *_args, **_kwargs: events.append("pump-settled"),
+    )
+
+    def exit_process(code):
+        events.append("process-exit")
+        raise SystemExit(code)
+
+    monkeypatch.setattr(custody_launch.os, "_exit", exit_process)
+    with pytest.raises(SystemExit) as result:
+        custody_launch.run_adopted("fixed", "bridge", owner_pid=12, owner_birth="native:1")
+    assert result.value.code == 0
+    assert events == ["pump-settled", "owner-released", "process-exit"]
+
+
 @pytest.mark.skipif(
     os.name != "nt" and not sys.platform.startswith("linux"),
     reason="explicit session owner currently supports Windows and Linux",
@@ -129,3 +177,53 @@ def test_real_owner_pin_observes_exit_without_signalling_the_owner():
         finally:
             process.stdin.close()
             process.wait(timeout=5)
+
+
+@pytest.mark.skipif(
+    os.name != "nt" and not sys.platform.startswith("linux"),
+    reason="explicit session owner currently supports Windows and Linux",
+)
+def test_dedicated_conduit_exits_cleanly_with_stdin_writer_still_open():
+    code = """
+import socket, sys
+from unittest.mock import patch
+from agent_mcp import custody_launch
+connection = socket.create_connection(('127.0.0.1', int(sys.argv[1])))
+with patch.object(custody_launch.incoming, 'ensure_current', return_value=object()), \\
+     patch.object(custody_launch, 'attach', return_value=connection):
+    custody_launch.run_adopted(
+        'fixed', 'bridge', owner_pid=int(sys.argv[2]), owner_birth=sys.argv[3])
+"""
+    with subprocess.Popen(
+        [sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"],
+        stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **no_window_kwargs(),
+    ) as owner, socket.socket() as listener:
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        listener.settimeout(5)
+        with subprocess.Popen(
+            [sys.executable, "-c", code, str(listener.getsockname()[1]),
+             str(owner.pid), birth_identity(owner.pid)],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            **no_window_kwargs(),
+        ) as conduit:
+            try:
+                with listener.accept()[0] as connection:
+                    connection.settimeout(5)
+                    conduit.stdin.write(b"reader-started\n")
+                    conduit.stdin.flush()
+                    assert connection.recv(65536) == b"reader-started\n"
+                    owner.stdin.write(b"x")
+                    owner.stdin.flush()
+                    assert owner.wait(timeout=5) == 0
+                    result = conduit.wait(timeout=5)
+                    error = conduit.stderr.read()
+                    assert result == 0, error.decode(errors="replace")
+                    assert conduit.stdout.read() == b""
+                    assert not conduit.stdin.closed
+            finally:
+                conduit.stdin.close()
+                conduit.wait(timeout=5)
+                owner.stdin.close()
+                owner.wait(timeout=5)

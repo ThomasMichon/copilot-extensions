@@ -9,6 +9,7 @@ import time
 
 import agent_procutil as pu
 from agent_procutil._daemon_instance_identity import birth_identity
+from agent_procutil.daemon_instances import DaemonInstanceSpec
 
 
 def wait_for(path):
@@ -24,27 +25,50 @@ def main():
     area = Path(private)
     if mode == "owner":
         birth = birth_identity(os.getpid())
-        with subprocess.Popen(
+        shim, job = pu.spawn_sync_in_kill_on_close_job(
             [sys.executable, "-I", __file__, "shim", actor, root, fixed, config, private,
              str(os.getpid()), birth],
+            require_job=True, allow_breakaway=True,
             **pu.no_window_kwargs(),
-        ) as shim:
+        )
+        try:
             area.joinpath("owner.json").write_text(
-                json.dumps({"pid": os.getpid(), "birth": birth}), encoding="utf-8",
+                json.dumps({
+                    "pid": os.getpid(), "birth": birth, "caller_job": job.name,
+                    "shim": shim.pid, "shim_birth": birth_identity(shim.pid),
+                }), encoding="utf-8",
             )
             if shim.wait(timeout=40) != 0:
                 raise RuntimeError("native lifetime shim failed")
-        area.joinpath("shim-exited").write_text("settled", encoding="ascii")
-        wait_for(area / "owner-release")
+            area.joinpath("shim-exited").write_text("settled", encoding="ascii")
+            wait_for(area / "caller-job-release")
+            if not pu._kernel32().CloseHandle(job.handle):
+                raise OSError("native caller Job close failed")
+            job._handle = None
+            area.joinpath("caller-job-closed").write_text("settled", encoding="ascii")
+            wait_for(area / "owner-release")
+        finally:
+            job.close()
+            shim.wait(timeout=5)
         return
     if mode == "shim":
-        child = subprocess.Popen(
+        child = pu.spawn_daemon(
             [sys.executable, "-I", actor, "conduit-launcher", root, fixed, fixed, config,
              *sys.argv[7:9]],
+            cwd=area, log_path=area / "conduit-launch.log",
+            instance=DaemonInstanceSpec("agent-mcp-conduit", area, Path(actor)),
+            stdio_fds=(0, 1, 2),
+        )
+        control = subprocess.Popen(
+            [sys.executable, "-I", "-c", "import time; time.sleep(120)"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
             **pu.no_window_kwargs(),
         )
         area.joinpath("conduit.json").write_text(
-            json.dumps({"pid": child.pid, "birth": birth_identity(child.pid)}), encoding="utf-8",
+            json.dumps({
+                "pid": child.pid, "birth": birth_identity(child.pid),
+                "control": control.pid, "control_birth": birth_identity(control.pid),
+            }), encoding="utf-8",
         )
         wait_for(area / "shim-release")
         if child.poll() is not None:
@@ -72,11 +96,28 @@ def main():
     except pu.DaemonSpawnError as error:
         if mode != "refused":
             raise
-        area.joinpath("refused.json").write_text(json.dumps({
+        refusal = {
             "cleanup_confirmed": error.cleanup_confirmed,
             "admission_sent": error.admission_sent,
-        }), encoding="utf-8")
-        return
+        }
+        try:
+            unexpected = pu.spawn_daemon(
+                [sys.executable, "-I", "-c", "pass"], cwd=area,
+                log_path=area / "refused-conduit.log",
+                instance=DaemonInstanceSpec("agent-mcp-conduit", area, Path(actor)),
+                stdio_fds=(0, 1, 2),
+            )
+        except pu.DaemonSpawnError as conduit_error:
+            refusal["stdio"] = {
+                "cleanup_confirmed": conduit_error.cleanup_confirmed,
+                "admission_sent": conduit_error.admission_sent,
+            }
+            area.joinpath("refused.json").write_text(
+                json.dumps(refusal), encoding="utf-8",
+            )
+            return
+        unexpected.wait(timeout=5)
+        raise RuntimeError("restrictive caller Job admitted an escaping stdio conduit")
     if mode == "refused":
         sockio._close(connection)
         raise RuntimeError("restrictive caller Job admitted an escaping custodian")

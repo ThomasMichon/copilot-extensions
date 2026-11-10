@@ -133,7 +133,10 @@ async def test_native_caller_jobs_and_session_owner_lifetime(
             rejected, rejected_job = caller("nested", home, fixed, config, env, breakaway=False)
             assert await asyncio.to_thread(rejected.wait, 40) == 0
             refusal = json.loads((home / "refused.json").read_text())
-            assert refusal == {"cleanup_confirmed": True, "admission_sent": False}
+            assert refusal == {
+                "cleanup_confirmed": True, "admission_sent": False,
+                "stdio": {"cleanup_confirmed": True, "admission_sent": False},
+            }
             close_job(pu, rejected_job)
             assert not any(
                 row["service"] == "agent-mcp-custody" and row["state"] == "running"
@@ -185,6 +188,24 @@ async def test_native_caller_jobs_and_session_owner_lifetime(
             owner_record = await record(home / "owner.json")
             original_owner = pin(owner_record["pid"], owner_record["birth"])
             pins.append(original_owner)
+            shim = pin(owner_record["shim"], owner_record["shim_birth"])
+            shim_control = pin(conduit_record["control"], conduit_record["control_birth"])
+            pins.extend((shim, shim_control))
+            kernel.OpenJobObjectW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+            kernel.OpenJobObjectW.restype = wintypes.HANDLE
+            shim_job = kernel.OpenJobObjectW(0x0004, False, owner_record["caller_job"])
+            assert shim_job
+            try:
+                for process, expected in (
+                    (shim, True), (shim_control, True), (conduit, False),
+                    (original_owner, False),
+                ):
+                    member = wintypes.BOOL()
+                    assert kernel.IsProcessInJob(process._handle, shim_job, ctypes.byref(member))
+                    assert bool(member.value) is expected
+                    assert process.poll() is None
+            finally:
+                assert kernel.CloseHandle(shim_job)
             assert initial["backend_pid"] == old_pid and initial["initialized"] == 1
             (home / "setup-release").write_text("complete", encoding="ascii")
             assert await asyncio.to_thread(setup.wait, 10) == 0
@@ -193,6 +214,10 @@ async def test_native_caller_jobs_and_session_owner_lifetime(
             assert keeper.poll() is None
             (home / "shim-release").write_text("complete", encoding="ascii")
             await observed(lambda: (home / "shim-exited").exists())
+            assert await asyncio.to_thread(shim.wait, 5) == 0
+            (home / "caller-job-release").write_text("complete", encoding="ascii")
+            await observed(lambda: (home / "caller-job-closed").exists())
+            await asyncio.to_thread(shim_control.wait, 5)
             assert conduit.poll() is None and original_owner.poll() is None
             new_pid = await backend("new", home, fixed, config, env)
             sequence = 10
@@ -236,13 +261,18 @@ async def test_native_caller_jobs_and_session_owner_lifetime(
             flags = wintypes.DWORD()
             assert kernel.GetHandleInformation(retained_stdin, ctypes.byref(flags))
             record_testsuite_property("caller_job_closed", True)
+            record_testsuite_property("conduit_caller_job_closed", True)
+            record_testsuite_property("conduit_bounded_control_exited", True)
             record_testsuite_property("bounded_control_exited", True)
             record_testsuite_property("restrictive_outer_refused", True)
+            record_testsuite_property("restrictive_outer_stdio_refused", True)
             record_testsuite_property("interposed_parent_exited", True)
             record_testsuite_property("original_owner_death_settled", True)
             record_testsuite_property("post_parent_runtime", slots["new"][0])
         finally:
-            for name in ("setup-release", "shim-release", "owner-release"):
+            for name in (
+                "setup-release", "shim-release", "caller-job-release", "owner-release",
+            ):
                 if "home" in locals():
                     (home / name).write_text("settle", encoding="ascii")
             if owner is not None:

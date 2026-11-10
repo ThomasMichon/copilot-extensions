@@ -206,6 +206,8 @@ Neither path signals the owner. Unsupported or unverifiable admission refuses
 before startup, and observation errors after admission retain the session
 rather than claiming owner death. This explicit path currently supports Windows
 and Linux; native macOS ownership remains unqualified.
+The first post-attach observation follows the same unknown-lifetime rule as
+later probes; it does not undo a successful native pin and admitted connection.
 
 The adopted conduit observes that pin instead of the ordinary ancestor
 watchdog. A shim's exit alone therefore does not close its original stdio or
@@ -214,12 +216,23 @@ initiating the existing exact upstream/session settlement. Other attached
 clients and the shared custody host retain their independent lifetimes.
 Normal forwarders and installer selection do not invoke this internal path.
 Source controls are not native caller-Job, installed-consumer or rollout proof.
+`run_adopted` is a dedicated process entrypoint, not a returning library pump.
+After the connection and native owner pin close, successful completion exits
+the process without Python's buffered-stdio finalization: another process may
+still hold the input writer after the originating owner dies.
 
 The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the
 existing native test Job owner and runner-renewed daemon leases. It selects one
 functional fixture: actual custody startup, caller-Job closure with a bounded
 child control, restrictive shared-outer refusal, shim exit, physical backend
 replacement and owner death while the original input pipe remains open.
+The independent owner launches its shim inside a real caller cleanup Job.
+That shim uses canonical daemon admission with explicitly borrowed stdio
+descriptors to launch the conduit outside the caller-owned Jobs. Native
+membership checks precede closure; a separate bounded child must die when the
+shim's Job closes, while the same conduit and original owner remain alive.
+The restrictive-outer negative covers that stdio launch as well as custody
+startup. The packet does not infer conduit independence from keeper survival.
 There is no desktop observer, visible control, Copilot binary, terminal host,
 private credential or debugger prerequisite. Controller support must be
 promoted before that packet can be submitted; preparing it does not qualify it.

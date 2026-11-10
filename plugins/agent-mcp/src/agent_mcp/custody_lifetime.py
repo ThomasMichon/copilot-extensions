@@ -77,11 +77,18 @@ class SessionOwner:
     def start(self, on_death):
         if self._closed or self._thread is not None:
             raise RuntimeError("MCP session owner observation is closed or already started")
-        if not self._alive():
-            raise ProcessLookupError("MCP session owner exited before conduit admission")
+        unavailable = False
+        try:
+            alive = self._alive()
+        except OSError:
+            log.warning("MCP session owner observation unavailable; lifetime retained")
+            unavailable = True
+        else:
+            if not alive:
+                raise ProcessLookupError("MCP session owner exited before conduit admission")
 
         def watch():
-            unavailable = False
+            nonlocal unavailable
             while not self._stop.wait(.1):
                 try:
                     alive = self._alive()
