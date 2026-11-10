@@ -3,6 +3,7 @@
 from dataclasses import dataclass, field
 
 from .gateway_service_handler import RequestLifetime
+from .gateway_service_channel import BODY_BYTES, RESPONSE_BYTES
 
 
 @dataclass(frozen=True)
@@ -28,3 +29,8 @@ class LocalServiceRequest:
     headers: tuple[tuple[str, str], ...]
     body: bytes
     lifetime: RequestLifetime = field(default_factory=RequestLifetime, repr=False, compare=False)
+    response_limit: int = field(default=BODY_BYTES, kw_only=True)
+
+    def __post_init__(self) -> None:
+        if type(self.response_limit) is not int or not BODY_BYTES <= self.response_limit <= RESPONSE_BYTES:
+            raise ValueError("invalid admitted local response budget")

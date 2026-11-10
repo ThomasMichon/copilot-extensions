@@ -3,8 +3,10 @@
 The repository-cache milestone extends the separately packaged PR service's
 existing observation and ReplayStore owners. Its source contracts are opt-in;
 the connector profile, one-shot waits, reports and workspace routes retain their
-existing defaults. These foundational source interfaces do not yet advertise
-repository-cache support from a running foreground host.
+existing defaults. The explicit standalone local profile now exposes supported cache queries and
+continuing subscriptions through this same foreground owner. See
+[local operation](../../../services/pr/LOCAL.md). Source support and synthetic
+qualification do not establish release, installation or live target acceptance.
 
 ## Native inventory and credentials
 
@@ -87,6 +89,11 @@ unselected storage remains supported. There is no automatic production
 migration, reset or deletion, nor rollback of adopted data into a prior reader.
 Rollback means retaining the compatible reader/state or selecting a separately
 fresh root, never discarding original replay/effect identities.
+The continuing profile positively provisions `repository_cache_version:2`,
+retaining immutable request intent, delivered high-water and original ACK-event
+identity. Version-1 cache readers and selected version-2 readers refuse each
+other's retained layouts rather than migrating/recreating them. Existing
+unselected watch/report/workspace defaults remain unchanged.
 
 ## Configured observation and current-state projection
 
@@ -169,14 +176,14 @@ refreshes alone produce no PR-change event. Event sequence and IDs are durable.
 Current facts, event identities and coverage survive restart. The fixed current
 summary/event capacities apply backpressure rather than erasing unsettled state.
 
-This is the internal observation/projection source seam. Supported local
-query/subscription clients, continuing registration/ACK/cancel handlers and their
-foreground host integration remain separate source work, not an advertised CLI
-or a permission to read the state file directly.
+This remains the internal observation/projection seam. Supported local clients
+use the bounded HTTP handler and never read the state file directly. Continuing
+registration/replay/ACK/cancel metadata shares this same transaction owner;
+subscriber traffic never becomes another forge poller.
 
 ## Local ingress selection
 
-`RepositoryConfig.parse` is a passive source parser, not a listening host.
+`RepositoryConfig.parse` is passive; only explicit foreground serve opens ingress.
 The selected protocol is `agent-pull-requests.repository-cache/v1`. The local
 profile uses HTTP over a private Unix-domain socket below the dedicated state
 root, with trusted numeric Linux `SO_PEERCRED` UID-to-principal bindings and
@@ -188,7 +195,8 @@ authentication. The existing connector profile remains portable.
 The SDK's `LocalCallerContext` and `LocalServiceRequest` deliberately differ from
 Gateway channel-derived context. They reuse the canonical request lifetime and
 response budget semantics without fabricating a fleet, Gateway or placement
-permit. Local reachability alone grants no permission. The foreground host
-integration must enforce read-only repository routes, eight admitted requests,
-bounded bodies/results, disconnect, expiry and drain; parsing alone is not
-evidence of that runtime integration.
+permit. Local reachability alone grants no permission. The selected foreground profile enforces repository-only routes, eight admitted
+requests, bounded bodies/results, disconnect, expiry and the existing drain.
+It constructs no connector or Gateway credential references. The full actual
+foreground-process vertical remains a separately recorded synthetic source
+qualification, never inferred from passive parsing or healthy readiness.

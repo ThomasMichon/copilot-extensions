@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import copy
+import json
 import uuid
 
-from .repository_contract import MAX_EVENTS, MAX_PULLS, RepositoryIdentity
+from .repository_contract import MAX_EVENTS, MAX_PULLS, RepositoryBackpressure, RepositoryIdentity
 from .watch_replay import ObservationTarget
 
 FACTS = (
@@ -45,21 +46,53 @@ def normalized(snapshot, identity, number):
 
 
 def _active(state, now):
-    return [row for row in state["registrations"] if not row["cancelled"] and row["expires_at"] > now]
+    return [row for row in state["registrations"] if (
+        not row["cancelled"] and row["expires_at"] > now
+        or row.get("delivered", row["acknowledged"]) > row["acknowledged"]
+    )]
 
 
 def _event(state, target, number, kind, facts, now):
     if len(state["events"]) == MAX_EVENTS:
         first = state["events"][0]
-        if any(row["target"] == first["target"] and row["acknowledged"] < first["sequence"]
+        if any(row["target"] == first["target"] and row["acknowledged"] < first["sequence"] and (
+                   not row["cancelled"] and row["expires_at"] > now
+                   or first["sequence"] <= row.get("delivered", row["acknowledged"])
+               )
                for row in _active(state, now)):
-            raise ValueError("repository event backpressure; unresolved delivery retained")
+            raise RepositoryBackpressure("repository event backpressure; unresolved delivery retained")
         state["events"].pop(0)
     state["events"].append({
         "sequence": state["next_sequence"], "event_id": uuid.uuid4().hex,
         "target": target, "number": number, "kind": kind, "facts": copy.deepcopy(facts),
     })
     state["next_sequence"] += 1
+
+
+def _trim_bytes(state, now, first_new, version):
+    from .repository_state import encoded_sizes, sizes_fit
+    total, payload = encoded_sizes(state)
+    events, removed = state["events"], 0
+    active = _active(state, now)
+    while not sizes_fit(total, payload, version=version):
+        if removed == len(events):
+            raise RepositoryBackpressure("current facts exceed the reserved payload capacity")
+        first = events[removed]
+        protected = any(
+            row["target"] == first["target"] and row["acknowledged"] < first["sequence"]
+            and (not row["cancelled"] and row["expires_at"] > now
+                 or first["sequence"] <= row.get("delivered", row["acknowledged"]))
+            for row in active
+        )
+        if protected or first["sequence"] >= first_new:
+            raise RepositoryBackpressure("unsettled or newly published events exceed capacity")
+        amount = len(json.dumps(first, allow_nan=False).encode()) + (
+            2 if len(events) - removed > 1 else 0
+        )
+        total, payload = total - amount, payload - amount
+        removed += 1
+    if removed:
+        state["events"] = events[removed:]
 
 
 def _new_repository(identity):
@@ -128,6 +161,7 @@ class RepositoryProjection:
             raise ValueError("invalid observation cycle timestamp")
         def apply(state):
             now = int(self.store.clock())
+            first_new = state["next_sequence"]
             for key, identity in self.identities.items():
                 row = next((row for row in state["repositories"]
                             if RepositoryIdentity.parse(row["identity"]).key == key), None)
@@ -153,7 +187,7 @@ class RepositoryProjection:
                 for number in scan["numbers"]:
                     if number not in known:
                         if len(row["pulls"]) >= MAX_PULLS * 2:
-                            raise ValueError("retained repository summary capacity reached")
+                            raise RepositoryBackpressure("retained repository summary capacity reached")
                         pull = {"number": number, "member": True, "departed_at": None,
                                 "observed_at": None, "error": "", "facts": None}
                         row["pulls"].append(pull)
@@ -189,6 +223,7 @@ class RepositoryProjection:
                         )
                         _event(state, key, number, kind, facts, now)
                     pull.update(facts=facts, observed_at=observed_at, error="")
+            _trim_bytes(state, now, first_new, 2 if self.store.repository_continuing else 1)
             return {"status": "projected", "cursor": state["next_sequence"] - 1}
         return self._transaction(apply, persist=True, **authority)
 
@@ -199,15 +234,6 @@ class RepositoryProjection:
         ) or number is not None and (type(number) is not int or number < 1):
             raise ValueError("invalid bounded repository query")
         def query(state):
-            row = next((row for row in state["repositories"]
-                        if RepositoryIdentity.parse(row["identity"]).key == key), None)
-            row = row or _new_repository(self.identities[key])
-            rows = sorted((pull for pull in row["pulls"] if pull["number"] > after
-                           and (number is None or pull["number"] == number)),
-                          key=lambda pull: pull["number"])
-            return {
-                "identity": row["identity"], "inventory": row["inventory"],
-                "pulls": rows[:limit], "more": len(rows) > limit,
-                "cursor": state["next_sequence"] - 1, "now": int(self.store.clock()),
-            }
+            from .repository_subscriptions import _page
+            return _page(state, self.identities[key], after, limit, number, int(self.store.clock()))
         return self._transaction(query, **authority)

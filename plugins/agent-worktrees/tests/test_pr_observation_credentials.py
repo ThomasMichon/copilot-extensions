@@ -389,6 +389,18 @@ def test_disabled_native_ado_cannot_fall_back_to_ambient_az(monkeypatch):
         )
 
 
+def test_gitea_observation_requires_the_credential_owners_bearer_profile():
+    source = Source(Binding(
+        provider="gitea", api_base="https://gitea.example.test", authentication="basic",
+    ))
+    selected = ObservationCredentials(
+        source, provider="gitea", api_base="https://gitea.example.test",
+        repository="owner/repository",
+    )
+    with pytest.raises(ObservationCredentialError, match="binding mismatch"):
+        selected.acquire()
+
+
 def test_configured_native_ado_carries_the_source_to_the_actual_request(monkeypatch):
     source = Source(ado_binding())
     provider = AzureDevOpsProvider()

@@ -28,7 +28,8 @@ from test_gateway_runtime import running
 def forge(provider="azure-devops", authentication="bearer"):
     return ForgeScope(
         provider, "https://dev.azure.test/example" if provider == "azure-devops"
-        else "https://api.github.test", "project/repository", "observe", authentication,
+        else "https://gitea.example.test" if provider == "gitea" else "https://api.github.test",
+        "project/repository", "observe", authentication,
     )
 
 
@@ -108,7 +109,7 @@ def responding(fixture, gateway, provider, *, protected_review=False):
 
 
 @pytest.mark.parametrize("provider,authentication", [
-    ("github", "bearer"), ("azure-devops", "bearer"), ("azure-devops", "basic"),
+    ("github", "bearer"), ("gitea", "bearer"), ("azure-devops", "bearer"), ("azure-devops", "basic"),
 ])
 def test_pr_worker_renews_exact_scoped_material_without_index_identity(
     tmp_path, capsys, provider, authentication,
@@ -381,7 +382,7 @@ def worker_policy(fixture, parameters, port=1):
 
 
 @pytest.mark.parametrize("provider,authentication", [
-    ("github", "bearer"), ("azure-devops", "bearer"), ("azure-devops", "basic"),
+    ("github", "bearer"), ("gitea", "bearer"), ("azure-devops", "bearer"), ("azure-devops", "basic"),
 ])
 def test_typed_policy_and_real_credential_cli_renew_through_tls(tmp_path, provider, authentication):
     scope = forge(provider, authentication)
@@ -423,6 +424,17 @@ def test_typed_policy_and_real_credential_cli_renew_through_tls(tmp_path, provid
         assert refused.stderr.strip() == "fleet-manager: controller-unavailable"
         assert len(source.calls) == 3
     assert not any("synthetic-forge-secret" in part for part in argv)
+
+
+def test_gitea_scope_keeps_https_observe_and_explicit_supported_authentication():
+    scope = forge("gitea")
+    assert ForgeScope.load(scope.to_dict()) == scope
+    for changed in (
+        {"api_base": "http://gitea.example.test"}, {"permission": "write"},
+        {"authentication": "basic"}, {"provider": "unknown"},
+    ):
+        with pytest.raises(GatewayError):
+            ForgeScope.load(scope.to_dict() | changed)
 
 
 @pytest.mark.parametrize("change,code", [

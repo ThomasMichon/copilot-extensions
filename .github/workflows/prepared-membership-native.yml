@@ -34,11 +34,17 @@ jobs:
       matrix:
         include:
           - packet: admission-and-safe
-            select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell) and not structured)"
+            select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell) and not (structured or write-name))"
           - packet: fallback
-            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or structured)"
+            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or structured or write-name)"
           - packet: structured
-            select: "registered_file_local_write_reuses_original_guard_facts and structured"
+            select: "registered_file_local_write_reuses_original_guard_facts and structured and not write-name"
+          - packet: write-names
+            select: "registered_file_local_write_reuses_original_guard_facts and write-name and not (real-policy or protected)"
+          - packet: write-name-fallback
+            select: "registered_file_local_write_reuses_original_guard_facts and write-name and protected"
+          - packet: write-name-policy
+            select: "registered_file_local_write_reuses_original_guard_facts and write-name and real-policy"
     steps:
       - uses: actions/checkout@v4
         with:

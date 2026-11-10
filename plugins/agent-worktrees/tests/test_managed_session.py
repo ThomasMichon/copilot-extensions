@@ -16,6 +16,10 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+WRITE_ALIASES = (
+    "str_replace", "str_replace_editor", "str_replace_based_edit_tool",
+    "write", "write_file", "insert", "new_file", "multi_edit",
+)
 
 
 def load(name):
@@ -899,6 +903,12 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "batch-structured-safe", "cell-structured", "cell-batch-structured-safe",
     "structured-real-policy", "cell-structured-real-policy",
     "batch-target-limit", "batch-target-overflow",
+    *[f"write-name-{name}" for name in WRITE_ALIASES],
+    *[f"protected-write-name-{name}" for name in WRITE_ALIASES],
+    "write-name-json", "write-name-structured", "write-name-batch",
+    "protected-write-name-batch", "write-name-real-policy",
+    "cell-write-name-real-policy", "cell-write-name-structured",
+    "cell-protected-write-name-multi_edit",
 ])
 def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, shell, case):
     from agent_worktrees import guarded_anchors
@@ -906,6 +916,9 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     cell = case.startswith("cell-")
     if cell:
         case = case.removeprefix("cell-")
+    real_policy = case in {
+        "real-policy", "batch-real-policy", "structured-real-policy", "write-name-real-policy",
+    }
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -990,6 +1003,23 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             args["input"] = "*** Update File: other.py\n*** Move to: final.py\n"
     elif case == "drive-relative":
         event["toolArgs"]["path"] = workspace.drive + "source.py"
+    if "write-name-" in case:
+        alias = case.removeprefix("protected-").removeprefix("write-name-")
+        event["toolName"] = alias if alias in WRITE_ALIASES else "multi_edit"
+        if case.startswith("protected-"):
+            event["toolArgs"]["path"] = "efforts/private.md"
+        if alias == "json":
+            event["toolArgs"] = json.dumps(event["toolArgs"])
+        elif alias in {"structured", "real-policy"}:
+            event["toolArgs"] = {"files": [{"filePath": "one.py"}, {"targetFile": "two.py"}]}
+        elif alias == "batch":
+            event["toolName"] = "view"
+            event["toolCalls"] = [
+                {"name": "write", "args": {"path": "one.py"}},
+                {"name": "rg", "args": {"pattern": "read"}},
+                {"name": "multi_edit", "args": {"changes": [{"file_path": "two.py"}]}},
+                {"name": "str_replace", "args": json.dumps(event["toolArgs"])},
+            ]
     if case.startswith("batch-"):
         first = {"name": "create", "args": event["toolArgs"]}
         last = {"name": "edit", "args": {"path": "second.py"}}
@@ -1095,7 +1125,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         for name in ("statelessness_guard", "cross_repo_guard", "anchor_write_guard", "pr_supersede_guard")
     ]
     assert any(value and value.get("permissionDecision") == "deny" for value in decisions) is (
-        case.startswith("personal-state") or case in {
+        case.startswith(("personal-state", "protected-write-name-")) or case in {
             "anchor-cwd", "anchor-target", "delegated",
             "batch-protected", "batch-multiple-targets", "batch-structured",
             "structured-protected",
@@ -1146,7 +1176,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
 
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
-    if case in {"real-policy", "batch-real-policy", "structured-real-policy"}:
+    if real_policy:
         for path in SCRIPTS.glob("*.py"):
             shutil.copyfile(path, scripts / path.name)
     for name in (
@@ -1176,7 +1206,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
             + "$global:LASTEXITCODE = 0\n", encoding="utf-8",
         )
-    if case not in {"real-policy", "batch-real-policy", "structured-real-policy"}:
+    if not real_policy:
         (scripts / "hook_policy_process.py").write_text(
             "import base64,json,sys\nfrom pathlib import Path\n"
             + f"Path({str(observed)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
@@ -1235,7 +1265,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     if case == "ordinary-unrelated-inventory":
         assert native_membership.read_text() == "True"
     assert not inventory_probe.exists()
-    policy_required = not (case.startswith("ordinary") or case in {
+    policy_required = not (case.startswith(("ordinary", "write-name-")) or case in {
         "create", "path-alias", "json-args", "real-policy", "batch",
         "batch-mixed", "batch-json-args", "batch-limit", "batch-working-directory", "batch-real-policy",
         "structured", "structured-files", "structured-changes", "structured-only", "structured-json",
@@ -1249,7 +1279,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert json.loads(result.stdout)["permissionDecision"] == "deny"
     else:
         assert result.stdout == b""
-    if case in {"real-policy", "batch-real-policy", "structured-real-policy"}:
+    if real_policy:
         contract = scripts / "hook-read-policy.json"
         value = json.loads(contract.read_text(encoding="utf-8"))
         value.pop("nativeWriteDependencies")
