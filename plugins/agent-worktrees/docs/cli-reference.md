@@ -1931,16 +1931,32 @@ after PowerShell has already split them.
 ### Bulk account resolution (`repos account list --json --with-resolutions`)
 
 This optional read-only form adds versioned `repository_accounts`,
-`owner_accounts` and `unmapped_owner_fallback` metadata to `account_map`.
+`owner_accounts` and `unmapped_owner_fallback` metadata to `account_map` and
+the configured `default_account` (null when unpinned).
 It uses one strict registry snapshot and the canonical `account-for` policy,
 with per-snapshot first-match indexes rather than repeated registry scans.
 Malformed account mappings are refused, not treated as an empty map.
 Exact registered targets take precedence over owner policy; bare registry names
 remain case-sensitive, while GitHub slugs and owners match case-insensitively.
-The explicit fallback flag means an otherwise unknown owner resolves to its
-literal name. Unreadable or malformed registry storage fails rather than
-certifying missing targets. Without the flag, the legacy JSON shape is unchanged.
-Consumers of older peers must retain their individual `account-for` fallback.
+Current snapshots set `unmapped_owner_fallback: false`: namespaces are not
+accounts, and a repo exception never becomes owner-wide policy. Older peers may
+declare the retired literal-owner fallback. Consumers retain that distinction
+and their older-peer lookup path rather than inventing a preferred identity.
+Malformed preferred identities and unreadable storage refuse, not empty success.
+
+Use `repos account default <your-login>` to select a preferred GitHub identity,
+`repos account default` to read it, and `repos account default --unset` to
+remove that preference. Exact repository overrides win over owner maps, then
+the preferred account. With no policy, ambient authentication remains unpinned;
+neither an org nor a third-party user namespace identifies the operator.
+This changes no login, credential or machine-global active account.
+The preference is stored as the reserved `account_map["github.com:*"]` entry, preserving
+it through existing registry writers instead of adding a field they discard.
+Older runtimes do not enforce this policy. Discover the selected runtime's
+`repos account default --help` support before configuring it. New CodeSpace
+consumers require a wildcard-bearing snapshot to report the same preferred
+account and `unmapped_owner_fallback: false`; an older/inconsistent receiver
+refuses rather than selecting its legacy owner-derived login.
 
 ### Strict repository inventory (`repos list --strict --json`)
 

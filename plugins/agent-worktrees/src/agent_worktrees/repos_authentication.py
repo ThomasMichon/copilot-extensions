@@ -40,6 +40,7 @@ def _configuration(result: dict) -> dict:
         f"Repository: {selection['repository'] or '(unsupported)'}\n"
         f"Configured account: {selection['account'] or '(not selected)'} "
         f"({selection['account_source']})\n"
+        f"Repository owner kind: {result['repository_access'].get('owner_kind', 'unknown')}\n"
         f"Observation: {result['status']}\n"
         "Read only: no sign-in, credential write, global account switch or provisioning.\n"
         "Git transport, GCM, write permission, CodeSpaces, MCP and Copilot are not observed.\n"
@@ -88,7 +89,11 @@ def inspect_repository(project: str, name: str) -> dict:
         else remote.split("@", 1)[-1].split(":", 1)[0]
     )
     login = repos.resolve_account(entry, registry=registry, configured_only=True)
-    source = "repository" if entry.account else "account-map" if login else "unconfigured"
+    source = (
+        "repository" if entry.account else
+        "account-map" if repos.account_from_map(repos.github_owner(entry.remote), registry=registry) else
+        "default-account" if login else "unconfigured"
+    )
     if login:
         login = identity(login)
     result = {

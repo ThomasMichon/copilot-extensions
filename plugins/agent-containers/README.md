@@ -347,6 +347,12 @@ host-mount keys) are rejected on a driver fleet. Restricted fleets stay
 Docker-only. The protocol is specified in
 [`docs/runtime-drivers.md`](docs/runtime-drivers.md).
 
+`driver: podman` also has a bundled fallback with configured native image
+acquisition, preserving explicit registration precedence. See
+[Bundled Podman configuration](docs/runtime-drivers.md#bundled-podman-configuration)
+for image/client/connection selection and the initial POSIX SSH boundary.
+Windows driver-backed SSH remains unsupported.
+
 ### Externally managed trusted members
 
 An external deployment manager may own a trusted fleet's lifecycle while

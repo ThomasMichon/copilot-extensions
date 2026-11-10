@@ -2409,6 +2409,9 @@ function Materialize-SnapshotVendoredLibs {
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
     $sources = [ordered]@{
+        'copilot-driver-core'  = (Resolve-VendoredLib -LibName 'copilot-driver-core')
+        'configuration-layers' = (Resolve-VendoredLib -LibName 'configuration-layers')
+        'venue-copilot'        = (Resolve-VendoredLib -LibName 'venue-copilot')
         'ssh-manager'          = (Resolve-SshManager)
         'credential-relay'     = (Resolve-CredentialRelay)
         'zdd'                  = (Resolve-Zdd)
@@ -2435,13 +2438,16 @@ function Materialize-SnapshotVendoredLibs {
             continue
         }
         Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
-        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+        Copy-InstallerStageDirectory -Source $source -Destination $destination
     }
 
     $snapshotPyproject = Join-Path $SnapshotDir 'pyproject.toml'
     if (Test-Path -LiteralPath $snapshotPyproject) {
         $pyprojectText = [System.IO.File]::ReadAllText($snapshotPyproject)
         $rewrites = [ordered]@{
+            'agent-copilot-driver-core'  = 'copilot-driver-core'
+            'agent-configuration-layers' = 'configuration-layers'
+            'agent-venue-copilot'        = 'venue-copilot'
             'agent-ssh-manager'          = 'ssh-manager'
             'agent-credential-relay'     = 'credential-relay'
             'agent-zdd'                  = 'zdd'

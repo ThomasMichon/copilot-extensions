@@ -145,6 +145,7 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
 @pytest.mark.parametrize("packet,case", [
     ("native-driver-auth-wait", "opt_in_receiver_auth_wait_and_same_session_resume"),
     ("native-driver-inflight", "opt_in_receiver_inflight_expiry_preserves_hold"),
+    ("native-driver-observation-loss", "opt_in_receiver_sdk_observation_loss_preserves_hold"),
 ])
 def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(tmp_path, packet, case):
     argv = worker.native_command(tmp_path, tmp_path / "out", packet)
@@ -160,6 +161,7 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
 @pytest.mark.parametrize("packet,native", [
     (None, False), ("bridge-http52", False), ("native-worktrees-embody", True),
     ("native-driver-auth-wait", True), ("native-driver-inflight", True),
+    ("native-driver-observation-loss", True),
     ("native-unrecognized", None),
 ])
 def test_admission_reports_native_preparation_only_for_known_packets(
@@ -534,7 +536,7 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("unsupported", [
-    "version", "selector", "packet", "inflight", "workflow", "unprotected",
+    "version", "selector", "packet", "inflight", "observation-loss", "workflow", "unprotected",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
     tmp_path, monkeypatch, unsupported,
@@ -544,6 +546,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
     effects = []
     packet = {
         "packet": "native-driver-auth-wait", "inflight": "native-driver-inflight",
+        "observation-loss": "native-driver-observation-loss",
     }.get(unsupported)
     selected = (
         {"kind": "packet", "name": packet} if packet else focused()
@@ -594,7 +597,9 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("packet", ["native-driver-auth-wait", "native-driver-inflight"])
+@pytest.mark.parametrize("packet", [
+    "native-driver-auth-wait", "native-driver-inflight", "native-driver-observation-loss",
+])
 @pytest.mark.parametrize("missing", [True, False])
 def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_transport(
     tmp_path, monkeypatch, missing, packet,
