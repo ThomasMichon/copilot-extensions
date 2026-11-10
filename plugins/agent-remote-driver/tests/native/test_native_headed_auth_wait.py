@@ -104,28 +104,34 @@ def native_provider():
                 "choices": [{"index": 0, "delta": {"role": "assistant", "content": "FIXTURE"},
                              "finish_reason": "stop"}],
             }
-            self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
-            self.wfile.flush()
+            if provider.pause_response.is_set():
+                provider.response_started.set()
+                if not provider.release_response.wait(30):
+                    return
+            try:
+                self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
+                self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
 
     provider = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     provider.daemon_threads = True
+    provider.pause_response = threading.Event()
+    provider.response_started = threading.Event()
+    provider.release_response = threading.Event()
     thread = threading.Thread(target=provider.serve_forever)
     thread.start()
     try:
         yield provider, requests
     finally:
+        provider.release_response.set()
         provider.shutdown()
         provider.server_close()
         thread.join(timeout=5)
         assert not thread.is_alive()
 
 
-@pytest.mark.timeout(180)
-@pytest.mark.skipif(
-    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
-    reason="Explicitly select the disposable pinned Windows receiver qualification lane",
-)
-def test_opt_in_receiver_auth_wait_and_same_session_resume(tmp_path, monkeypatch, native_provider):
+def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight=False):
     import sys
 
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
@@ -241,9 +247,45 @@ def test_opt_in_receiver_auth_wait_and_same_session_resume(tmp_path, monkeypatch
             and any(value["type"] == "assistant.turn_end" for value in events()),
             "The original literal launch turn did not finish before controlled input",
         )
+        binding = first["auth_wait"]
+        if inflight:
+            provider.pause_response.set()
+            operation = asyncio.create_task(_prompt(first, prompts[1]))
+            try:
+                await until(
+                    provider.response_started.is_set,
+                    "The actual native model request did not remain in flight",
+                )
+                shortened_at = time.monotonic()
+                shortened = await _auth(
+                    binding, "renew", lease_revision=2,
+                    budget_seconds=3, expires_at=time.time() + 30,
+                )
+                assert shortened["ok"]
+                stopped = await until(
+                    lambda: value if (value := state())["state"] == "auth_held" else None,
+                    "In-flight native work did not preserve a hold after source expiry", timeout=3,
+                )
+                assert time.monotonic() - shortened_at < 3 and _retired(original)
+                assert stopped["auth_wait"]["hold"] == "native-operation-unsettled"
+                assert stopped["auth_wait"]["incarnation"] == binding["incarnation"]
+                assert not (await _auth(
+                    binding, "renew", lease_revision=3,
+                    budget_seconds=30, expires_at=time.time() + 30,
+                ))["ok"]
+                outcome, = await asyncio.wait_for(
+                    asyncio.gather(operation, return_exceptions=True), 2,
+                )
+                assert isinstance(outcome, Exception), "An interrupted native turn cannot succeed"
+                assert history() == prompts[:2] and len(requests) == 2
+            finally:
+                provider.release_response.set()
+                if not operation.done():
+                    operation.cancel()
+                await asyncio.gather(operation, return_exceptions=True)
+            return
         await _prompt(first, prompts[1])
         await until(lambda: history() == prompts[:2], "Original literal seed/history changed")
-        binding = first["auth_wait"]
         active = await _auth(
             binding, "renew", lease_revision=2, budget_seconds=30, expires_at=time.time() + 30,
         )
@@ -334,3 +376,21 @@ def test_opt_in_receiver_auth_wait_and_same_session_resume(tmp_path, monkeypatch
                 assert mux.query("kill-session", "-t", mux.target).returncode == 0
     assert identities and _retired(identities)
     assert all(result.status == "settled" for result in cleanup), cleanup
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
+    reason="Explicitly select the disposable pinned Windows receiver qualification lane",
+)
+def test_opt_in_receiver_auth_wait_and_same_session_resume(tmp_path, monkeypatch, native_provider):
+    _qualify_native_receiver(tmp_path, monkeypatch, native_provider)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
+    reason="Explicitly select the disposable pinned Windows receiver qualification lane",
+)
+def test_opt_in_receiver_inflight_expiry_preserves_hold(tmp_path, monkeypatch, native_provider):
+    _qualify_native_receiver(tmp_path, monkeypatch, native_provider, inflight=True)
