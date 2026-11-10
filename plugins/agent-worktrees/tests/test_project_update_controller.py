@@ -174,13 +174,50 @@ def test_backend_capability_is_read_from_the_selected_project(project, monkeypat
     repo, script = project
     seen = []
     monkeypatch.setattr(
-        config, "load_config",
-        lambda **kwargs: seen.append(kwargs["project"]) or SimpleNamespace(default_repo=repo),
+        config, "load_project_config",
+        lambda name: seen.append(name) or SimpleNamespace(default_repo=repo),
     )
     assert not project_update_controller.supports_runtime_backend("example")
     advertise_runtime_backends(script)
     assert project_update_controller.supports_runtime_backend("example")
     assert seen == ["example", "example"]
+
+
+def test_backend_capability_uses_selected_project_machine_config(tmp_path, monkeypatch):
+    from agent_worktrees import pr_related_binding, repos
+
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    monkeypatch.setattr(config, "_ACTIVE_PROJECT", "caller")
+    monkeypatch.setattr(config, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(config, "global_config_path", lambda: tmp_path / "global-missing.yaml")
+    monkeypatch.setattr(
+        config, "project_dir",
+        lambda name=None: tmp_path / f".{name or config.project_name()}",
+    )
+    monkeypatch.setattr(pr_related_binding, "control_plane_pr_map", lambda: {})
+    monkeypatch.setattr(repos, "read_registry", lambda: repos.ReposRegistry(repos={}))
+    scripts = {}
+    for name in ("caller", "selected"):
+        anchor = tmp_path / name
+        script = anchor / "tools" / "update.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("pass\n", encoding="utf-8")
+        directory = tmp_path / f".{name}"
+        directory.mkdir()
+        (directory / "config.yaml").write_text(json.dumps({
+            "repo_name": name,
+            "platform": "windows",
+            "repos": {name: {
+                "anchor": str(anchor), "worktree_root": str(tmp_path / f"{name}-worktrees"),
+                "update_controller": {"windows": "tools/update.py"},
+            }},
+        }), encoding="utf-8")
+        scripts[name] = script
+    advertise_runtime_backends(scripts["selected"])
+
+    assert not project_update_controller.supports_runtime_backend("caller")
+    assert project_update_controller.supports_runtime_backend("selected")
+    assert config.active_project() == "caller"
 
 
 def test_runtime_backend_never_falls_back_without_a_controller(project, monkeypatch):

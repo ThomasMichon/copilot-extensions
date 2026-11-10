@@ -244,7 +244,9 @@ controller. A supporting controller places a sibling
 
 Worktrees checks that declaration before queuing and again before launch.
 Missing or unsupported declarations refuse this option without launching the
-controller; ordinary updates remain unchanged. Older engines reject the option.
+controller; ordinary updates remain unchanged. The option bypasses implicit
+Manager bootstrap and runtime provisioning, so an unavailable engine is
+reported rather than installed. Older engines reject the option.
 
 Runtime installers may execute from a delivered or prepared payload directory.
 The collected plan preserves the resolved invoking repository separately in

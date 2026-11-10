@@ -241,7 +241,7 @@ def supports_runtime_backend(project: str | None) -> bool:
     if not project:
         return False
     try:
-        repo = cfg.load_config(project=project).default_repo
+        repo = cfg.load_project_config(project).default_repo
         script = configured_script(repo)
         return bool(script) and _controller_supports_runtime_backend(_controller_path(repo, script)[1])
     except (AttributeError, OSError, TypeError, ValueError):
