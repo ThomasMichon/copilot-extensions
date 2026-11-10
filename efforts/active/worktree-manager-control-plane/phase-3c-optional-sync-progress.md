@@ -1,7 +1,7 @@
 # Optional built-in Sync progress
 
 - **Parent:** [Worktree Manager control plane](README.md#optional-built-in-lifecycle-progress).
-- **Status:** Provider source accepted; local consumer implemented and awaiting source review.
+- **Status:** Provider/consumer source accepted; complete CLI comparison qualified, awaiting review.
 - **Source:** [#4183](https://github.com/ThomasMichon/copilot-extensions/issues/4183)
   LP1-LP3/LPV, including the complete received #4274 request.
 - **Participant:** Optional Sync-progress implementer, public source
@@ -32,7 +32,7 @@ Follow [version-skew-safe contracts](../../../docs/patterns/service-contract-evo
 and [progress and timeout semantics](../../../docs/patterns/progress-and-timeouts.md),
 and the [engine/Picker boundary](../../../plugins/agent-worktrees/docs/engine-picker-contract.md).
 
-Current `maintenance.build_tasks` invokes local and remote terminal-JSON Sync;
+Before this increment, `maintenance.build_tasks` invoked local and remote terminal-JSON Sync;
 `MaintenanceExecutor` already runs it off-thread and retains each result.
 `worktree_ops_cli.cmd_sync` fetches, observes and synchronizes; `sync_pair`
 validates both members before advancing them and prepares local plugins only
@@ -91,7 +91,7 @@ PATH-based command selection or a claim that cancelling display rolls back Git.
   existing Sync owner and the strict CLI opt-in/packaged declaration. Preserve
   paired admission, both-member preflight, safe fast-forward, composition order,
   policy reload and all original failure results. No alternate Sync engine.
-- [ ] **S2 - First real consumer:** Qualify the exact local engine generation,
+- [x] **S2 - First real consumer:** Qualify the exact local engine generation,
   consume frames incrementally off the UI thread, retain the terminal result in
   the existing executor and render its latest message in ProgressScreen.
   Preserve per-item ordering, source/selection identity, bounded process ownership
@@ -140,8 +140,11 @@ Unconfirmed cleanup retains exact process custody and stops subsequent items.
 
 Source qualification covers 74 distinct Manager controls, including real parser,
 private Git pair and Textual consumer cases for a no-op and blocked partial pair.
-Source review/CI, complete validation disposition, native/installed and release
-qualification remain open. No host installation or runtime Sync is claimed.
+The local source implementation is accepted in #11914. Complete default-versus-
+streamed CLI result comparison (SV1) is now source-qualified; its reviewed
+acceptance, final source-validation disposition and
+independent native/installed/release qualification remain open. No host
+installation or live worktree Sync is claimed.
 
 ## Validation Plan
 
@@ -150,31 +153,76 @@ qualification remain open. No host installation or runtime Sync is claimed.
   emits flushed frames and its complete terminal result matches ordinary Sync.
   Cover a successful no-op and one real blocked/partial pair, not a synthetic
   percentage-only producer.
-- [ ] **SV2 - Incremental user flow:** A contained temporary Git/pair fixture and
+- [x] **SV2 - Incremental user flow:** A contained temporary Git/pair fixture and
   the production maintenance/ProgressScreen path prove a real stage message
   appears before a deliberately held operation completes, the UI stays usable,
   and final pair progress/refusal diagnostics remain visible. Release the gate
   and settle the operation; do not infer incremental consumption from final text.
-- [ ] **SV3 - Selected-runtime skew:** New consumer/current provider, legacy or
+- [x] **SV3 - Selected-runtime skew:** New consumer/current provider, legacy or
   missing declaration, invalid/out-of-range declaration, changed selection and
   supported rollback choose the intended path before effects. Existing callers
   against the new provider keep their original result and no stream is retried.
-- [ ] **SV4 - Failure/lifetime:** Missing terminal, malformed/non-object frames,
+- [x] **SV4 - Failure/lifetime:** Missing terminal, malformed/non-object frames,
   contradictory terminal/exit, stderr pressure, timeout and view dismissal do not
   report false success, rollback or safe replay. Preserve partial results and
   exact child cleanup; no background reader outlives its owned run.
-- [ ] **SV4a - Two clocks:** Healthy nested progress outlasts the communication
+- [x] **SV4a - Two clocks:** Healthy nested progress outlasts the communication
   interval; unfamiliar updates and owner keepalives renew contact, local timers
   do not. Initial/inter-phase silence preserves uncertain execution without
   replay. The independent execution budget still expires despite continuing
   updates, with the original operation identity and exact cleanup retained.
-- [ ] **SV5 - Scope and publication:** Focused owner/Manager suites, lint and
+- [x] **SV5 - Scope and publication:** Focused owner/Manager suites, lint and
   mandatory repository checks pass on the final source. Record native/platform,
   release and installed tiers separately, with actual blockers or reasons for
   unexercised lanes. No host install or live worktree Sync is part of a source
   test. The complete #4183 issue stays open for its remaining original lanes.
 
 ## Journal
+
+### 2026-11-10 - Complete CLI comparison source-qualified
+
+- Four focused native-owner controls pass: strict parser, existing complete
+  missing-record JSON envelope plus unchanged text output, and two new real
+  parser/process comparisons for no-op and blocked/partial private pairs.
+- Each new case executes ordinary and streamed CLI composition in one owned
+  child against the same temporary Git pair. The partial case restores only
+  its private harness ref/index/file before the second invocation, preserving
+  equivalent starting state and actual Git advancement. Entire terminal
+  objects compare equal, without dropping or normalizing fields. Exit status,
+  frame type, version, member/plugin outcomes and real refs are also asserted.
+- The source packet passes in 33.92s, 135.26s including preparation/cleanup;
+  pair cases take 18.16s and 14.99s. The child bound is 25s inside unchanged
+  30-second item/300-second group bounds. Existing Manager qualification is
+  unchanged and not rerun by these test-only additions.
+- SV1/S3 remain open pending the validation follow-up's normal review/CI/merge.
+  No product behavior, installer, live Sync, native session probe or rollout
+  changed. Source acceptance does not qualify installed or other-platform use.
+
+### 2026-11-10 - Local consumer source accepted; CLI comparison next
+
+- #11914 merged at 11:45:56 UTC as
+  `f6446aba1b8b83fb2f78ea2683c6f4b3a3305244`. Genuine Copilot approval
+  `5841218922` covered exact head `7eec4ef83035892e2caace69430f8637b69cb0b3`;
+  its complete body reports no active issues and no new inline findings.
+  All four original threads are resolved. Author-side empty inline-reply
+  review records were not counted as bot verdicts.
+- Exact-head CI `42808788629` passed; the later metadata-triggered run
+  `42808871434` also completed successfully, including its required PR gate,
+  before the managed merge. Source attribution and lockdown checks passed.
+  Only the provider-authorized extra CODEOWNER vote was excepted; no finding,
+  thread or CI was bypassed. The complete #4183 tracker remains open.
+- Post-merge source sync safely auto-aborted a squash-history conflict.
+  Native completion preview verified exactly three accepted commits and no
+  post-merge work; reconciliation retained a backup and advanced onto the
+  actual merged source. The only incoming Manager difference was unrelated
+  bootstrap-test maintenance. Subsequent native sync succeeded. No held
+  workspace was finalized.
+- S2 and source-tier SV2/SV3/SV4/SV4a/SV5 are accepted at the recorded actual
+  Windows x64/controlled-runtime scope. Native POSIX, ARM64, desktop/installed
+  and release evidence are not inferred. SV1 still needs full ordinary-versus-
+  streamed result equality for both no-op and blocked/partial pair CLI paths,
+  beyond existing error-envelope comparisons and field assertions. Keep S3
+  and the parent's validation row open until that exact oracle is qualified.
 
 ### 2026-11-10 - S2 review refinements
 
