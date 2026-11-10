@@ -28,7 +28,7 @@ PATCH_NATIVE_CASES = (
 PATCH_PROTECTED_CASES = (
     "patch-protected-input", "patch-protected-patch", "patch-protected-command",
     "patch-protected-move", "patch-protected-direct", "patch-protected-structured",
-    "patch-protected-batch", "patch-protected-freeform",
+    "patch-protected-batch", "patch-protected-freeform", "patch-protected-commented-json",
 )
 
 
@@ -1081,6 +1081,11 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 args["targetFile"] = "efforts/private.md"
             elif field == "freeform":
                 event["toolArgs"] = patch("Update File: safe.py", "Move to: efforts/private.md")
+            elif field == "commented-json":
+                event["toolArgs"] = (
+                    '{/*\n*** Delete File: efforts/private.md\n*/"input":'
+                    + json.dumps(args["input"]) + "}"
+                )
             else:
                 args["changes"] = [{"filePath": "safe.py"}, {"path": "efforts/private.md"}]
         elif case == "patch-duplicates":
@@ -1345,13 +1350,46 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         )
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    phases = tmp_path / "native-write-phases"
+    env["NATIVE_WRITE_FIXTURE_PHASES"] = str(phases)
+    phase_writer = (
+        "function Write-NativeWriteFixturePhase([string]$Name) { "
+        "[IO.File]::AppendAllText($env:NATIVE_WRITE_FIXTURE_PHASES, "
+        "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
+        "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name + [Environment]::NewLine) }; "
+        "Write-NativeWriteFixturePhase 'command-entry'; "
+    )
+    native_entry = scripts / "pre-tool-hook.ps1"
+    # Fixture-only markers classify a timeout without retrying or extending the child.
+    instrumented = native_entry.read_text(encoding="utf-8")
+    for boundary, source in (
+        ("script-entry", "$ErrorActionPreference = 'Stop'"),
+        ("membership-start", "    $admitted = if ($supportsFacts) {"),
+        ("membership-complete", "    if (-not $admitted) { exit 0 }"),
+        ("native-proof-start", "function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {"),
+        ("policy-start", "function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnostic) {"),
+    ):
+        assert instrumented.count(source) == 1
+        marker = f"Write-NativeWriteFixturePhase '{boundary}'"
+        instrumented = instrumented.replace(
+            source, source + "\n" + marker if source.endswith("{") else marker + "\n" + source,
+        )
+    native_entry.write_text(instrumented, encoding="utf-8")
     raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
     started = time.monotonic()
-    result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
-        input=raw, capture_output=True, timeout=10,
-        cwd=workspace, env=env, **no_window_kwargs(),
-    )
+    started_ms = time.time_ns() // 1_000_000
+    try:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", phase_writer + entry["powershell"]],
+            input=raw, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        progress = phases.read_text() if phases.exists() else "no command entry"
+        raise AssertionError(
+            f"{shell} native write exceeded the original 10s child limit; start_ms={started_ms}; "
+            f"phases={progress!r}; stdout={repr(error.stdout)[:512]}; stderr={repr(error.stderr)[:512]}"
+        ) from error
     native_seconds = time.monotonic() - started
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert not membership.exists()
@@ -1379,7 +1417,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         contract.write_text(json.dumps(value), encoding="utf-8")
         started = time.monotonic()
         fallback = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+            [executable, "-NoProfile", "-NonInteractive", "-Command", phase_writer + entry["powershell"]],
             input=raw, capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )
@@ -1395,7 +1433,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 {"name": "edit", "args": {"path": "efforts/private.md"}},
             ]
         denied = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+            [executable, "-NoProfile", "-NonInteractive", "-Command", phase_writer + entry["powershell"]],
             input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )

@@ -127,6 +127,8 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
         $writeTools = @(
             'create', 'edit', 'str_replace', 'str_replace_editor', 'str_replace_based_edit_tool',
             'write', 'write_file', 'insert', 'new_file', 'multi_edit', 'apply_patch')
+        # Source-bound tool_call_forms owns this header-target grammar.
+        $patchTarget = '^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$'
         $writeArgs = [Collections.Generic.List[object]]::new()
         $cwd = $Payload.cwd
         if ($Payload.ContainsKey('toolCalls')) {
@@ -175,10 +177,15 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
         foreach ($write in $writeArgs) {
             $args = $write.args
             if ($args -is [string]) {
-                try { $args = ConvertFrom-PreToolJson $args }
-                catch {
-                    if ($write.name -cne 'apply_patch') { return $false }
+                if ($write.name -ceq 'apply_patch' -and [regex]::IsMatch($args, $patchTarget, 'Multiline')) {
+                    # A permissive JSON decoder must not discard headers inside comments.
                     $args = @{ command = $args }
+                } else {
+                    try { $args = ConvertFrom-PreToolJson $args }
+                    catch {
+                        if ($write.name -cne 'apply_patch') { return $false }
+                        $args = @{ command = $args }
+                    }
                 }
             }
             if ($args -isnot [Collections.IDictionary]) { return $false }
@@ -217,9 +224,7 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
                         $patch -cnotmatch '\A\*\*\* Begin Patch\r?\n[\s\S]*\r?\n\*\*\* End Patch(?:\r?\n)?\z') {
                         return $false
                     }
-                    # Source-bound tool_call_forms owns this header-target grammar.
-                    $headers = [regex]::Matches($patch,
-                        '^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$', 'Multiline')
+                    $headers = [regex]::Matches($patch, $patchTarget, 'Multiline')
                     if (-not $headers.Count) { return $false }
                     $foundPatch = $true
                     foreach ($header in $headers) {

@@ -3314,6 +3314,9 @@ a complete Begin/End envelope, at least one original header target and at most
 Fragments, targetless, non-object JSON, malformed or oversized fields retain
 the original raw-event policy path. This is a conservative relevance proof,
 not a replacement patch parser or validator.
+Argument strings containing literal original header lines retain their raw
+interpretation before JSON decoding, so permissive JSON comments cannot hide
+a target that the original strict guards would inspect as freeform input.
 The entry discovers optional facts support from the loaded admission function;
 an older helper keeps its original call and policy path without that proof.
 
