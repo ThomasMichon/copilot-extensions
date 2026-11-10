@@ -377,6 +377,7 @@ def test_actual_prior_runtime_accepts_original_but_refuses_new_location_without_
     })
 
     def observe():
+        relocation.durability.directory(fixture.source.parent)
         before = _snapshot(fixture.home)
         result = run_caller_owned(
             [selected, "-I", "-B", "-c", _PRIOR_READER, options],

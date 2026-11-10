@@ -74,7 +74,7 @@ def test_cleanup_refuses_busy_launch_before_record_or_liveness_read(
     tmp_path, monkeypatch, force,
 ):
     path = tmp_path / "one.yaml"
-    original = "worktree_id: one\n"
+    original = "worktree_id: one\nrepo: sample\n"
     path.write_text(original, encoding="utf-8")
     read = Mock(side_effect=AssertionError("busy launch must precede record read"))
     real_guard = worktree_lifecycle.guard
