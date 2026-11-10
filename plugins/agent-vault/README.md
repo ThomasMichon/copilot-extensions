@@ -15,8 +15,8 @@ Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
 generated resolvers and service launchers. Configuration, authentication,
 `run/`, `logs/`, `core/`, `cache/` and unknown files are retained by default.
 Explicit purge still retains transaction coordination, and dry runs remain
-non-mutating. Linked roots, foreign manifests, unclassified consumers and live
-child processes refuse removal. Canonical batch-removal custody remains held
+non-mutating. Linked roots, foreign manifests and unclassified consumers or
+descendants refuse removal. Canonical batch-removal custody remains held
 through deletion; released lease registries retain their inodes without
 preventing idle removal. See the
 [install contract](../../docs/install-contract.md).
@@ -194,6 +194,28 @@ the install directory may remain. Normal self-staging reap removes dead-owner
 stages on later invocations.
 An uninstall preview neither takes the transaction lock nor removes contents;
 normal transient payload self-staging still applies.
+
+On Windows, an owned service's venv redirector can have a physical-interpreter
+child outside the runtime directory. Uninstall retires that child before its
+waiting launcher only after checking the venv's configured base interpreter,
+the exact native process identities and ancestry, the current user, and matching
+service arguments. Unknown or additional descendants still refuse removal;
+an executable name or parent PID alone does not establish ownership.
+Native process handles retain the birth identity through termination. File
+observations use the existing external uninstall Python and headless capture,
+not the retired compiled daemon adapter. The configured base path is read as
+UTF-8 under both stock Windows PowerShell and PowerShell Core.
+The canonical same-process daemon can instead run its physical interpreter
+directly. Its default persistent-service command is admitted only after exact
+matching against the source-owned service bootstrap and optional daemon lease wrapper,
+ordinary installation-slot paths, the configured physical base, cache scope,
+current-user ownership and the retained native birth/file identities. A PID
+receipt alone still cannot authorize termination; unknown commands and children
+remain refusal conditions.
+Native removal distinguishes its own source-bound driver ancestry from runtime
+consumers using the live authenticated uninstall request, not parent PIDs alone.
+Broker removal and finite code removal retain that proof; an unverified caller
+or an additional consumer still blocks removal.
 
 ## Configuration
 

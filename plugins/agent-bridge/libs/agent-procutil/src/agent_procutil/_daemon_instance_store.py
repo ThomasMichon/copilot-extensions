@@ -588,7 +588,11 @@ def test_lifecycle(
                 if cleanup_results is not None:
                     cleanup_results.append(outcome)
                 if outcome.status == "held":
-                    _log.warning("daemon instance cleanup held: %s %s", receipt.instance_id, outcome.reason)
+                    _log.warning(
+                        "daemon instance cleanup held: %s %s state=%s pid=%s runtime=%s",
+                        receipt.instance_id, outcome.reason, current.get("state"),
+                        current.get("pid"), current.get("runtime_root"),
+                    )
             except (OSError, ValueError, KeyError) as error:
                 # Preserve the exact original entry for explicit reconciliation.
                 _log.warning(
@@ -910,6 +914,7 @@ def cleanup(
             # The canonical lock entry stays: unlinking a lock permits split custody.
             return result("settled", "process-exit-observed")
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+        _log.warning("daemon instance cleanup failed: %s", receipt.instance_id, exc_info=True)
         return result("held", type(error).__name__)
 
 

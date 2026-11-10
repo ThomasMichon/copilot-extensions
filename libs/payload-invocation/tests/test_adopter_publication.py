@@ -69,11 +69,6 @@ def _adopter(fixture: dict[str, Any], plugin: str, source: Path | None = None) -
     ):
         environment.pop(name, None)
     if os.name != "nt":
-        helper = payload / "scripts/installation-context/installation-context.ps1"
-        content = helper.read_text(encoding="utf-8")
-        original = "$passwdHome = [CePosixAccount]::Home()"
-        assert content.count(original) == 1
-        helper.write_text(content.replace(original, "$passwdHome = $env:HOME"), encoding="utf-8")
         getent = fixture["home"] / "test-bin/getent"
         getent.write_text(
             "#!/bin/sh\n"

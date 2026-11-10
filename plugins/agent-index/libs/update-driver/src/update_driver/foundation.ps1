@@ -417,7 +417,8 @@ namespace CopilotExtensions {
             foreach (string support in new[] {
                 "installer-engine.ps1", "installer-engine.sh",
                 "installer_engine.py", "installer_engine_process.py", "installer_dependency_policy.py",
-                "installer_dependency_config.py", "installer_dependency_arguments.py", "runtime_launcher.py", "versioned_runtime.py",
+                "installer_dependency_config.py", "installer_dependency_arguments.py",
+                "runtime_launcher.py", "resolve-runtime.ps1", "versioned_runtime.py",
                 "versioned_runtime_leases.py", "versioned_runtime_construction.py",
                 "versioned_runtime_source.py", "versioned_runtime_publication.py"
             }) Ordinary(Path.Combine(plugin, "scripts", support), false, false);
@@ -531,7 +532,8 @@ function Start-NativeFoundationProducer {
     param(
         [Parameter(Mandatory)][string]$Root,
         [Parameter(Mandatory)][string]$Plugin,
-        [string]$ExpectedSourceHash
+        [string]$ExpectedSourceHash,
+        [string]$AdmissionRuntimeRoot
     )
     $digest = [CopilotExtensions.NativeFoundationState]::SourceDigest($Plugin)
     if ($PSBoundParameters.ContainsKey('ExpectedSourceHash') -and $digest -cne $ExpectedSourceHash) {
@@ -543,8 +545,10 @@ function Start-NativeFoundationProducer {
     . (Join-Path $library 'agent-procutil\src\agent_procutil\native_daemon.ps1')
     New-NativeExecutionDirectory -Root $Root
     $log = Join-Path $Root ('foundation-launch-' + [Guid]::NewGuid().ToString('N') + '.log')
+    $arguments = @($Root, $digest)
+    if ($AdmissionRuntimeRoot) { $arguments += $AdmissionRuntimeRoot }
     return Start-NativeDaemon -Script (Join-Path $Plugin 'scripts\foundation-produce.ps1') `
-        -Arguments @($Root, $digest) -WorkingDirectory $Plugin -LogPath $log
+        -Arguments $arguments -WorkingDirectory $Root -LogPath $log
 }
 
 function Complete-NativeFoundationProgress {

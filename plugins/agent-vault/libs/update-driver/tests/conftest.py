@@ -144,7 +144,13 @@ def owning_payload(owning_context):
     (scripts / "install.ps1").write_text(
         "param([string]$Action,[string]$InstallDir,[switch]$NoService)\n"
         "if ($Action -cnotin @('provision', 'stamp')) { exit 90 }\n"
+        "$plugin = (Get-Content -Raw (Join-Path $PSScriptRoot '..\\plugin.json') | ConvertFrom-Json).name\n"
+        "if ($plugin -eq 'agent-vault' -and $Action -eq 'provision') {\n"
+        "if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -or -not $env:UPDATE_DRIVER_WITNESS -or "
+        "$env:COPILOT_EXTENSIONS_NATIVE_INSTALLER -cne 'agent-vault') { exit 91 }\n"
+        "} else {\n"
         "if ($env:UPDATE_DRIVER_WITNESS -or $env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE) { exit 91 }\n"
+        "}\n"
         "if ($env:COPILOT_PROJECT_DIR -or $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) { exit 93 }\n"
         "[IO.Directory]::CreateDirectory($InstallDir) | Out-Null\n"
         "[IO.File]::AppendAllText((Join-Path $InstallDir 'executed'), $Action)\n"

@@ -67,10 +67,6 @@ def test_real_managed_cell_repair_and_callbacks(
                 "def _current_environment(**arguments: Any) -> tuple[dict[str, Any], Path]:\n"
                 "    return _fixture_current_environment(**{**arguments, 'os_profile': Path(os.environ['HOME'])})\n"
             )
-        native = plugin / "scripts/installation-context/installation-context.ps1"
-        native.write_text(native.read_text(encoding="utf-8").replace(
-            "$passwdHome = [CePosixAccount]::Home()", "$passwdHome = $env:HOME",
-        ), encoding="utf-8")
     foreign = tmp_path / "foreign-repository"
     foreign.mkdir()
     clean_git_environment = {

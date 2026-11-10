@@ -8,7 +8,7 @@ Copilot agent through a trust-profiled venue transport.
 """
 
 # Fallback only for running from a source tree with no installed distribution.
-_FALLBACK_VERSION = "0.2.245-dev1"
+_FALLBACK_VERSION = "0.2.246-dev1"
 
 
 def __getattr__(name: str) -> str:
