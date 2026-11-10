@@ -704,6 +704,16 @@ the deadline cap. The same console-fixture file's explicitly selected T3
 handle with an injected image-query failure; it is not proof of the precise
 lifetime of a historical failing PID.
 
+Rendered output and installed process attribution share the original
+30-second readiness window. A rendered frame alone does not freeze one
+possibly incomplete descendant snapshot: the witness resamples at most every
+100 milliseconds until the live installed Manager image is pinned. Foreign
+images never satisfy readiness, and unreadable live handles still fail
+immediately. Failure diagnostics retain at most 16 observed image/name/live
+records, without command lines, inside the existing evidence size budget.
+The installed-process, keyboard, native-terminal-offer and cleanup assertions
+remain unchanged; the bounded wait is not a larger readiness deadline.
+
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
 Windows PowerShell and PowerShell 7. A controlled census verifies the real
