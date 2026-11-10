@@ -796,7 +796,8 @@ worktree-manager.
       Preserve #356/#8545 repository setup, native Configuration/readiness
       writers and the full original acceptance matrix; an F1 navigation flow
       is not completion of F2/F3 or the parent issue. F1 source flow is
-      accepted in #11837; F2 owner-adapter reconciliation, F3 and
+      accepted in #11837 and F2 owner sequencing in #11847. F2a read-only
+      guides have contained source/consumer proof; effectful F2b, F3 and
       release/native/installed acceptance remain open.
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
@@ -2900,6 +2901,16 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-10 - First-run owner guidance and retained effectful gates
+
+- #11847 accepted the concrete four-action owner matrix and read-only F2a
+  sequencing before implementation. The [Phase 4 source record](phase-4-first-run-front-door.md#f2a-source-implementation-and-validation)
+  records guide navigation, real setup-plan and source-preservation controls.
+  Existing Configuration detail defaults retain their consumer coverage.
+- F2b effectful composition, F3, release/native/installed qualification and
+  the original #542 checklist remain open. No installer, writer, trust,
+  maintenance or rollout authority moves to the guide screen.
 
 ### 2026-11-10 - First-run F1 source accepted; F2 owner composition next
 
