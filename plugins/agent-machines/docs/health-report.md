@@ -225,6 +225,10 @@ operation v1. It deliberately does not bind the hour or slot revision.
 Missing, wrong or changed approval refuses before effects; a token without
 `--apply` also refuses. Keep this local policy and approval outside synchronized
 report data. They authorize neither service changes nor carrier writes.
+Both payload entry points select an already provisioned runtime read-only for
+`health run`, including apply. A missing runtime refuses with the existing
+launcher failure status before calling an installer, stamping diagnostics or
+creating runtime/store state; use the normal setup owner separately.
 
 Apply holds one existing admission lock and one 45-second parent budget for
 two independent targets: current-hour listener health first, then the preceding
@@ -254,6 +258,13 @@ write. Reconcile the exact returned hour and transaction through the original
 owner before any explicit store recovery; there is no automatic fence reset.
 Unconfirmed exporter cleanup preserves the existing native owner's callback
 and admission custody. Neither outcome rolls back earlier confirmed slots.
+In-process Python callers receive the original `OwnedCleanupError` with a
+bounded `health_run_result` attribute, retaining access to `retry_cleanup()`.
+The CLI emits that partial result and exits 2; a process exit does not clear
+its durable fence. Interrupted commits are marked unknown before entering the
+writer and preserve the fence even when a `KeyboardInterrupt` escapes.
+Python interruption errors also carry `health_run_result`; the CLI emits it
+for a keyboard interruption rather than claiming no write happened.
 
 Independently installed callers must first qualify the exact selected Machines
 runtime's packaged `agent_machines/health-collection-v1.json` declaration:

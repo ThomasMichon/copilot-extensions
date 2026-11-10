@@ -21,16 +21,28 @@ from agent_machines import health_slots
 @contextmanager
 def listener(response, *, drip=False, count=1):
     requests, failures = [], []
+    stopping = threading.Event()
+    deadline = time.monotonic() + (8 if count == 1 else 45 * count + 5)
     with socket.socket() as server:
         server.bind(("127.0.0.1", 0))
         server.listen(1)
-        server.settimeout(8)
+        server.settimeout(.1)
         port = server.getsockname()[1]
 
         def serve():
             try:
                 for _ in range(count):
-                    with server.accept()[0] as peer:
+                    while not stopping.is_set():
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError("owned listener lifetime expired")
+                        try:
+                            peer = server.accept()[0]
+                            break
+                        except socket.timeout:
+                            continue
+                    else:
+                        return
+                    with peer:
                         peer.settimeout(5)
                         request = b""
                         while b"\r\n\r\n" not in request:
@@ -57,9 +69,25 @@ def listener(response, *, drip=False, count=1):
         try:
             yield port, requests
         finally:
+            stopping.set()
             worker.join(9)
             assert not worker.is_alive(), "owned finite listener did not exit"
             assert not failures, failures
+
+
+def test_listener_cancels_unrequested_cycles():
+    with listener(response(QUALIFYING_BODY), count=2) as (_port, requests):
+        assert requests == []
+
+
+def test_listener_waits_across_a_bounded_first_run():
+    from agent_machines.health_observe import observe_bridge
+
+    with listener(response(QUALIFYING_BODY), count=2) as (port, requests):
+        assert observe_bridge(port, "example-worker", "example-generation")["domains"]["local_listener"]["state"] == "ok"
+        time.sleep(8.25)
+        assert observe_bridge(port, "example-worker", "example-generation")["domains"]["local_listener"]["state"] == "ok"
+    assert len(requests) == 2
 
 
 def call(arguments):

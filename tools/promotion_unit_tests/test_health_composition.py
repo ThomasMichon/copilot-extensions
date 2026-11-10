@@ -578,3 +578,39 @@ def test_one_shot_actor_free_partial_late_write_retains_actual_commit(one_shot, 
     assert result["targets"][1]["transaction"] == "recorded"
     assert result["targets"][1]["applied"] and result["targets"][1]["changed"]
     assert len(files) == 2 and len([call for call in calls if call[0] == "write"]) == 1
+
+
+def test_one_shot_actor_free_interruption_retains_unknown_transaction(one_shot, monkeypatch):
+    modules, store, files, _calls, _parser = one_shot
+    slots, runner = modules["health_slots"], modules["health_run"]
+    write = slots._write
+
+    def interrupted(*args):
+        write(*args)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(slots, "_write", interrupted)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    result = caught.value.health_run_result
+    assert result["qualification"] == "collection-interrupted"
+    assert result["targets"][1]["transaction"] == "unknown"
+    assert result["targets"][1]["applied"] is result["targets"][1]["changed"] is None
+    assert len(files) == 2
+
+
+def test_one_shot_actor_free_cleanup_preserves_original_exception_and_partial_result(one_shot, monkeypatch):
+    modules, store, _files, _calls, _parser = one_shot
+    runner, collector = modules["health_run"], modules["health_collect"]
+    owner_type = sys.modules["agent_procutil.owned_process"].OwnedCleanupError
+
+    def collect(*args, **kwargs):
+        raise owner_type("fixture cleanup")
+
+    monkeypatch.setattr(sys.modules[collector.__package__ + ".service_reports"], "collect", collect)
+    with pytest.raises(owner_type) as caught:
+        runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    result = caught.value.health_run_result
+    assert result["qualification"] == "collection-cleanup-unconfirmed"
+    assert result["targets"][1]["collection"] == "failed"
+    assert not result["targets"][1]["applied"]

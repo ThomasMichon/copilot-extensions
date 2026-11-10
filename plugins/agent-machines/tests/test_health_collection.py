@@ -526,30 +526,33 @@ def test_late_confirmed_first_commit_retains_fact_and_stops_new_collectors(store
 
 def test_one_shot_unknown_cleanup_keeps_first_commit_and_original_admission_custody(store, monkeypatch):
     ready = False
+    owner = None
 
     def settle(deadline):
         if not ready:
             raise TimeoutError("fixture not settled")
 
-    error = service_reports.OwnedCleanupError(None, cleanup_retry=settle)
-
     def export(*args, **kwargs):
-        raise error
+        raise service_reports.OwnedCleanupError(None, cleanup_retry=settle)
 
     monkeypatch.setattr(service_reports, "collect", export)
     try:
-        result = apply_run(store)
+        with pytest.raises(service_reports.OwnedCleanupError) as caught:
+            apply_run(store)
+        owner = caught.value
+        result = owner.health_run_result
         assert result["status"] == "partial"
         assert result["qualification"] == "collection-cleanup-unconfirmed"
         assert result["targets"][0]["applied"]
         assert not result["targets"][1]["applied"]
         assert collector._RUN_LOCK.locked()
         with pytest.raises(TimeoutError):
-            error.retry_cleanup(deadline=time.monotonic() + 1)
+            owner.retry_cleanup(deadline=time.monotonic() + 1)
         assert apply_run(store)["qualification"] == "collection-overlap"
     finally:
         ready = True
-        error.retry_cleanup(deadline=time.monotonic() + 1)
+        if owner is not None:
+            owner.retry_cleanup(deadline=time.monotonic() + 1)
     assert (store / "collection.lock").read_bytes() == b"\0"
     assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == 1
 
@@ -597,3 +600,31 @@ def test_one_shot_final_admission_settlement_cannot_hide_a_late_success(store, m
     assert all(row["transaction"] == "recorded" and row["applied"] for row in result["targets"])
     assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == 2
     assert (store / "collection.lock").read_bytes() == b"\0"
+
+
+@pytest.mark.parametrize("surface", ["python", "cli"])
+def test_interrupted_post_replace_sync_preserves_unknown_target_and_replay_fence(store, monkeypatch, capsys, surface):
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: pytest.fail("post-interrupt export"))
+
+    def interrupt(path):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(slots, "_sync_directory", interrupt)
+    token = approve(store)
+    if surface == "python":
+        with pytest.raises(KeyboardInterrupt) as caught:
+            runner.run(store, apply=True, expected=token)
+        result = caught.value.health_run_result
+    else:
+        assert main([
+            "health", "run", "--store-dir", str(store), "--apply", "--expect-policy", token,
+        ]) == 2
+        result = json.loads(capsys.readouterr().out)
+    assert result["qualification"] == "collection-interrupted"
+    assert result["targets"][0]["hour"] == HOUR
+    assert result["targets"][0]["transaction"] == "unknown"
+    assert result["targets"][0]["applied"] is result["targets"][0]["changed"] is None
+    assert not result["targets"][1]["applied"]
+    assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == 1
+    assert (store / "collection.lock").read_bytes() == b"\1"
+    assert apply_run(store)["qualification"] == "collection-cleanup-unconfirmed"

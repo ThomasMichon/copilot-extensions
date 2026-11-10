@@ -39,6 +39,16 @@ def _reason(error):
     return "collection-unavailable"
 
 
+def _finish(result):
+    requested = [row for row in result["targets"] if row["requested"]]
+    completed = sum(row["transaction"] == "recorded" for row in requested)
+    result["status"] = (
+        "completed" if completed == len(requested) and result["qualification"] == "within-budget"
+        else "partial" if completed else "failed"
+    )
+    return result
+
+
 def run(store: Path, *, apply=False, expected="") -> dict:
     if expected and not apply:
         raise slots.HealthError("confirmation-requires-apply")
@@ -81,7 +91,7 @@ def run(store: Path, *, apply=False, expected="") -> dict:
             raise slots.HealthError("store-policy-changed")
         window()
 
-    active = None
+    active = cleanup_error = None
     result["qualification"] = "within-budget"
     try:
         with collector.admission(
@@ -101,6 +111,7 @@ def run(store: Path, *, apply=False, expected="") -> dict:
                     guard()
                     # A crash/unknown commit must fence automatic invocations too.
                     begin_exports()
+                    active.update(transaction="unknown", applied=None, changed=None)
                     transaction = slots.record_collected(
                         store, candidate, now_ms=time.time_ns() // 1_000_000, guard=guard,
                         deadline=deadline - RESPONSE_MARGIN,
@@ -119,25 +130,29 @@ def run(store: Path, *, apply=False, expected="") -> dict:
                     if active["collection"] == "not-attempted":
                         active["collection"] = "failed"
                     else:
-                        active["transaction"] = "refused"
+                        active.update(transaction="refused", applied=False, changed=False)
                     guard()
             guard()
     except (ValueError, OSError, OverflowError, OwnedCleanupError) as error:
         reason = _reason(error)
+        if isinstance(error, OwnedCleanupError):
+            cleanup_error = error
         result["qualification"] = reason
         if active is not None and active["requested"]:
             active["reason"] = reason
             if active["collection"] == "not-attempted":
                 active["collection"] = "failed"
+    except BaseException as error:
+        result["qualification"] = "collection-interrupted"
+        error.health_run_result = _finish(result)
+        raise
     try:
         guard()
     except (ValueError, OSError, OverflowError) as error:
         # Settlement and filesystem calls may finish late; retain committed facts.
         result["qualification"] = _reason(error)
-    requested = [row for row in targets if row["requested"]]
-    completed = sum(row["transaction"] == "recorded" for row in requested)
-    result["status"] = (
-        "completed" if completed == len(requested) and result["qualification"] == "within-budget"
-        else "partial" if completed else "failed"
-    )
+    _finish(result)
+    if cleanup_error is not None:
+        cleanup_error.health_run_result = result
+        raise cleanup_error
     return result

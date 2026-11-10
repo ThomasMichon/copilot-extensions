@@ -5700,6 +5700,11 @@ executes one approved invocation through a real fixture listener and retained
 Dispatch export into both slots, then injects a second-target failure while
 preserving the first confirmed commit and normal report/chart. It does not
 enroll a job or qualify an installed runtime/carrier.
+Interruption controls retain an unknown transaction before writer entry;
+in-process cleanup controls recover the original retry owner and partial
+result. Native controls additionally exercise the durable fence after CLI exit,
+delayed second requests, prompt fixture cancellation and both payload entry
+points' refusal to provision a missing one-shot runtime.
 
 The actor-free `test_hourly_contributions.py` packet executes the canonical
 service contribution codec and collection policy with substituted native owners

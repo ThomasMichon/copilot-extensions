@@ -211,7 +211,8 @@ def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
         pass
 
 
-def test_unconfirmed_exporter_fence_survives_its_cli_owner_exit(tmp_path):
+@pytest.mark.parametrize("flow", ["collect", "run"])
+def test_unconfirmed_exporter_fence_survives_its_cli_owner_exit(tmp_path, flow):
     store = tmp_path / "store"
     store.mkdir()
     (store / "policy.json").write_text(json.dumps({
@@ -223,19 +224,32 @@ def test_unconfirmed_exporter_fence_survives_its_cli_owner_exit(tmp_path):
     prior = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00Z")
     code = """
 import sys
+from pathlib import Path
 from agent_machines import service_reports
 from agent_machines.__main__ import main
+from agent_machines.health_run import run
 def unconfirmed(*args, **kwargs):
     raise service_reports.OwnedCleanupError(None)
 service_reports.collect = unconfirmed
-raise SystemExit(main(["health", "collect", "--store-dir", sys.argv[1], "--hour", sys.argv[2]]))
+arguments = ["health", sys.argv[3], "--store-dir", sys.argv[1]]
+if sys.argv[3] == "run":
+    arguments += ["--apply", "--expect-policy", run(Path(sys.argv[1]))["policy_token"]]
+else:
+    arguments += ["--hour", sys.argv[2]]
+raise SystemExit(main(arguments))
 """
     child = subprocess.run(
-        [sys.executable, "-I", "-c", code, str(store), prior],
+        [sys.executable, "-I", "-c", code, str(store), prior, flow],
         capture_output=True, text=True, timeout=10, **no_window_kwargs(),
     )
-    assert child.returncode == 2 and not child.stdout
-    assert json.loads(child.stderr)["error"] == "collection-cleanup-unconfirmed"
+    assert child.returncode == 2
+    if flow == "collect":
+        assert not child.stdout and json.loads(child.stderr)["error"] == "collection-cleanup-unconfirmed"
+    else:
+        result = json.loads(child.stdout)
+        assert not child.stderr
+        assert result["qualification"] == "collection-cleanup-unconfirmed"
+        assert not result["targets"][1]["applied"]
     assert (store / "collection.lock").read_bytes() == b"\1"
     with pytest.raises(health_slots.HealthError, match="collection-cleanup-unconfirmed"):
         health_collect.collect(store, prior)

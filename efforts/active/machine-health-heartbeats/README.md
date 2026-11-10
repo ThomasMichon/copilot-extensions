@@ -1159,3 +1159,29 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   native Linux/job qualification, cold/warm scheduled cost or carrier receipt.
   Required exact-source review/CI still gate the implementation; the parent
   stays Active and enrollment, deployment and activation remain held.
+
+### 2026-11-09 - Interrupted-write and cleanup ownership corrections
+- An interruption after replacement but before transaction return must retain
+  an unknown target, not clear admission as though no write began. One-shot
+  staging now marks uncertainty before writer entry; original interruption
+  errors retain the bounded partial result and the durable fence stays set.
+- Unconfirmed native cleanup propagates the original retry owner with
+  `health_run_result`. Python callers can settle that exact owner; CLI callers
+  receive partial JSON while process exit leaves the durable fence unchanged.
+  The regression constructs the cleanup exception inside the exporter, not in
+  an external test reference.
+- A two-request fixture must remain available during a valid first run's
+  export/commit work. Its finite listener lifetime spans both operation budgets,
+  with explicit teardown cancellation rather than an eight-second second
+  accept deadline. Native controls delay the second request and cancel unused
+  cycles without abandoning a thread.
+- The new command's cold payload route also selects the existing runtime
+  read-only on both platforms. Preview/apply refuse a missing runtime before
+  installer execution, diagnostic stamping or directory creation, preserving
+  ordinary command provisioning and existing configuration entry behavior.
+- The focused packet passed 123 cases. The managed corrected collection,
+  cold-payload and native-consumer packet passed 64 cases with one expected
+  original Bridge-interpreter skip. Ruff, install and documentation checks
+  passed. Six focused actor-free composition nodes cover the orchestration;
+  native matrices remain opt-in. Fresh exact-source CI and review still gate
+  #11880; no enrollment, installed update, carrier write or activation occurred.

@@ -59,12 +59,17 @@ def add_parser(subparsers) -> None:
 
 
 def run_collection(args) -> int:
+    from agent_procutil.owned_process import OwnedCleanupError
+
     from .health_run import run
     from .health_slots import HealthError
 
     result = None
     try:
-        result = run(args.store_dir, apply=args.apply, expected=args.expect_policy)
+        try:
+            result = run(args.store_dir, apply=args.apply, expected=args.expect_policy)
+        except (OwnedCleanupError, KeyboardInterrupt) as error:
+            result = error.health_run_result
         print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
         return 0 if result["status"] in {"preview", "completed"} else 2
     except (ValueError, OSError, OverflowError) as error:

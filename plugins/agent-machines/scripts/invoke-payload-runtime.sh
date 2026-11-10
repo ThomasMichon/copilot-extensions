@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 set -euo pipefail
 CONFIGURATION_ENTRY=0
+HEALTH_RUN_ENTRY=0
+READ_ONLY_RUNTIME_ENTRY=0
 if [[ "${1:-}" == installation-configuration ]]; then
     CONFIGURATION_ENTRY=1
+fi
+if [[ "${1:-}" == health && "${2:-}" == run ]]; then
+    HEALTH_RUN_ENTRY=1
+fi
+if [[ "$CONFIGURATION_ENTRY" == 1 || "$HEALTH_RUN_ENTRY" == 1 ]]; then
+    READ_ONLY_RUNTIME_ENTRY=1
     export AGENT_RT_RESOLVE_TRACE_MODE=read-only
 fi
 
@@ -181,8 +189,10 @@ resolve_runtime
 if [[ -n "${AGENT_RT_PY:-}" ]]; then
     run_runtime "$@"
 fi
-if [[ "$CONFIGURATION_ENTRY" == 1 ]]; then
-    printf '[agent-machines] Configuration requires an already provisioned runtime; use the native setup owner.\n' >&2
+if [[ "$READ_ONLY_RUNTIME_ENTRY" == 1 ]]; then
+    operation=Configuration
+    if [[ "$HEALTH_RUN_ENTRY" == 1 ]]; then operation='Health collection'; fi
+    printf '[agent-machines] %s requires an already provisioned runtime; use the native setup owner.\n' "$operation" >&2
     exit 1
 fi
 if [[ -n "${AGENT_MACHINES_NO_SELFPROVISION:-}" ]]; then
