@@ -425,6 +425,7 @@ class Mux {
             print(f"Native {control} {leg}: starting", flush=True)
             namespace = private_mux_args(tmp_path)
             namespace_file.write_text(namespace[1], encoding="utf-8")
+            environment["COPILOT_DRIVER_PSMUX_NAMESPACE"] = namespace[1]
             outer_target = "headed-fixture-" + uuid4().hex
             target = manager_target if control == "manager-mux" or public_embody else outer_target
             identities = {}
