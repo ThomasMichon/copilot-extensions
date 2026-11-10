@@ -213,6 +213,42 @@ def test_project_authority_routes_to_the_selected_project(queued, monkeypatch):
     assert seen["runner"].argv[-3:] == ("--project", "harness", "update")
 
 
+def test_explicit_runtime_backend_is_bound_to_the_project_request(queued, monkeypatch):
+    import update_driver
+    from agent_worktrees import project_update_controller
+    from update_driver.authority import selection
+
+    seen, _request = queued
+    monkeypatch.setattr(
+        update_driver, "current_authority", lambda **_kwargs: selection("project", "harness"),
+    )
+    monkeypatch.setattr(boundary, "_request_context", lambda **_kwargs: ())
+    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda *_a, **_kw: True)
+    monkeypatch.setattr(project_update_controller, "supports_runtime_backend", lambda _project: True)
+    assert boundary.cmd_update_request(_args(runtime_backend=["agent-worktrees=cpu"])) == 4
+    assert seen["spec"].argv == ("--runtime-backend", "agent-worktrees=cpu")
+    assert seen["runner"].argv[-2:] == ("--runtime-backend", "agent-worktrees=cpu")
+
+
+def test_explicit_runtime_backend_is_not_queued_for_an_unadvertised_controller(queued, monkeypatch):
+    from agent_worktrees import project_update_controller
+
+    seen, _request = queued
+    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda *_a, **_kw: True)
+    monkeypatch.setattr(project_update_controller, "supports_runtime_backend", lambda _project: False)
+    assert boundary.cmd_update_request(_args(runtime_backend=["agent-worktrees=cpu"])) == 1
+    assert "spec" not in seen
+
+
+@pytest.mark.parametrize("internal_hint", [False, True])
+def test_explicit_runtime_backend_is_not_queued_without_a_project_controller(queued, monkeypatch, internal_hint):
+    seen, _request = queued
+    if internal_hint:
+        monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "1")
+    assert boundary.cmd_update_request(_args(runtime_backend=["agent-worktrees=cpu"])) == 1
+    assert "spec" not in seen
+
+
 @pytest.mark.parametrize("options", [{}, {"no_project_controller": True}, {"target": "agent-bridge"},
                                       {"phase": "runtimes"}])
 def test_project_authority_never_queues_a_standalone_fallback(queued, monkeypatch, options):

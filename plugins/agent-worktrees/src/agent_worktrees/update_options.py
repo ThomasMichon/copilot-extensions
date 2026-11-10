@@ -11,6 +11,7 @@ from pathlib import Path
 from . import output, update_events
 
 UPDATE_PHASES = ("payloads", "preflight", "runtimes", "anchors", "prune", "integration")
+RUNTIME_BACKEND_INTENT_CAPABILITY = "project-runtime-backend-intent/v1"
 
 
 def add_update_options(p: argparse.ArgumentParser) -> None:
@@ -22,6 +23,10 @@ def add_update_options(p: argparse.ArgumentParser) -> None:
         help="Use the standalone suite updater instead of the configured project controller",
     )
     p.add_argument("--runtime-sources", metavar="JSON", help=argparse.SUPPRESS)
+    p.add_argument(
+        "--runtime-backend", action="append", metavar="NAME=CAPABILITY",
+        help="Explicit backend selection for a project-controller update (repeatable)",
+    )
     p.add_argument(
         "--phase", choices=UPDATE_PHASES,
         help="Run only this diagnostic phase through the update queue, without "
@@ -67,6 +72,25 @@ def forced_runtimes(args: argparse.Namespace) -> frozenset[str]:
     return frozenset(getattr(args, "force_runtime", None) or ())
 
 
+def request_runtime_backends(argv: tuple[str, ...] | list[str]) -> tuple[str, ...]:
+    if not isinstance(argv, (tuple, list)) or any(not isinstance(item, str) for item in argv):
+        raise ValueError("update request arguments are invalid")
+    values = []
+    tokens = iter(argv)
+    for token in tokens:
+        if token == "--runtime-backend":
+            value = next(tokens, None)
+            if not value or value.startswith("--"):
+                raise ValueError("update request backend selection is invalid")
+            values.append(value)
+        elif token.startswith("--runtime-backend="):
+            value = token.partition("=")[2]
+            if not value:
+                raise ValueError("update request backend selection is invalid")
+            values.append(value)
+    return tuple(values)
+
+
 def forwarded_flags(args: argparse.Namespace) -> list[str]:
     """The options above, rebuilt for forwarding through the Manager seam."""
     flags: list[str] = []
@@ -78,6 +102,8 @@ def forwarded_flags(args: argparse.Namespace) -> list[str]:
         flags += ["--target", args.target]
     if getattr(args, "runtime_sources", None) is not None:
         flags += ["--runtime-sources", args.runtime_sources]
+    for selection in getattr(args, "runtime_backend", None) or ():
+        flags += ["--runtime-backend", selection]
     if getattr(args, "auth_report", False):
         flags.append("--auth-report")
     if phase := getattr(args, "phase", None):
@@ -129,6 +155,24 @@ def validate_auth_flags(args: argparse.Namespace) -> None:
     phase = getattr(args, "phase", None)
     selected = set(getattr(args, "plugin", None) or ())
     parser = argparse.ArgumentParser(prog="update")
+    backends = getattr(args, "runtime_backend", None) or ()
+    owners = []
+    for value in backends:
+        match = re.fullmatch(
+            r"([a-z0-9]+(?:-[a-z0-9]+)*)=([A-Za-z0-9][A-Za-z0-9._:-]{0,255})",
+            value,
+        ) if isinstance(value, str) else None
+        if match is None or match.group(1) in owners:
+            parser.error("--runtime-backend requires a unique NAME=CAPABILITY per runtime")
+        owners.append(match.group(1))
+    if backends and (
+        phase or getattr(args, "target", None) is not None
+        or any(getattr(args, name, False) for name in (
+            "no_project_controller", "inventory", "auth_report",
+            "request_status", "recovery_status", "recover_after_restart", "recover_for_repair",
+        ))
+    ):
+        parser.error("--runtime-backend requires a project-controller update")
     cleanup = getattr(args, "auth_cleanup", False) or any(
         getattr(args, name, None) is not None
         for name in ("apply_auth_cleanup", "revert_auth_cleanup")

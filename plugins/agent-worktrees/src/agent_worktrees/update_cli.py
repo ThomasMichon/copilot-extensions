@@ -29,6 +29,7 @@ from .update_runtime import (
     _project_update_context as _project_update_context,
 )
 
+
 def _core():
     from . import __main__ as core
 
