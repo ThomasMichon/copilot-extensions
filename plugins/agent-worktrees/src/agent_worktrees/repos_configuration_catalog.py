@@ -283,6 +283,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
                 preferred.get("status") == "suggested"
                 and preferred["resolution"]["knowledge"]["repository"] == name
                 and binding_names and not inspection.findings and binding_owner == "available"
+                and inspection.readiness.get("ready") is False
             ).lower(),
             "harness_repository_id": preferred.get("resolution", {}).get("harness", {}).get("repository_id", ""),
             "knowledge_repository_id": preferred.get("resolution", {}).get("knowledge", {}).get("repository_id", ""),

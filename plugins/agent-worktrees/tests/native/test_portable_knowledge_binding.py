@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -163,6 +164,14 @@ runpy.run_module('agent_worktrees.repos_knowledge_configuration', run_name='__ma
             row = next(row for row in listing["entries"] if row["repository"] == "example-knowledge")
             assert row["preferred_knowledge_bindable"] == "true", listing["summary"]
             assert row["harness_repository_id"] == args[3] and row["knowledge_repository_id"] == args[5]
+            decoder_source = (
+                Path(__file__).resolve().parents[4] / "worktree-manager" / "src"
+                / "worktree_manager" / "configuration_preview.py"
+            )
+            spec = importlib.util.spec_from_file_location("_fixture_manager_preview", decoder_source)
+            decoder = importlib.util.module_from_spec(spec)
+            monkeypatch.setitem(sys.modules, spec.name, decoder)
+            spec.loader.exec_module(decoder)
         before_registry = registry.read_bytes()
         before_config = config_path.read_bytes()
         before_state = {path.name: path.read_bytes() for path in state.iterdir()} if accepted_default else {}
@@ -177,9 +186,14 @@ runpy.run_module('agent_worktrees.repos_knowledge_configuration', run_name='__ma
                 proposed = repos_knowledge_preferences.preview(project, args[3], args[5])
         except ConfigurationError as error:
             pytest.fail(f"{error.code}; cause={type(error.__cause__).__name__}; stages={calls}", pytrace=False)
-        assert proposed["status"] == "suggested"
-        assert proposed["execution_machine"] == "example-worker"
-        assert proposed["native_preview"]["operation"] == "set"
+        if accepted_default:
+            consumed = decoder.parse_configuration_preview(json.dumps(proposed), row["configuration"]["target"])
+            assert consumed.token == proposed["token"] and not consumed.blocked
+            assert consumed.operation == "set"
+        else:
+            assert proposed["status"] == "suggested"
+            assert proposed["execution_machine"] == "example-worker"
+            assert proposed["native_preview"]["operation"] == "set"
         assert config_path.read_bytes() == before_config
         if accepted_default:
             assert {path.name: path.read_bytes() for path in state.iterdir()} == before_state

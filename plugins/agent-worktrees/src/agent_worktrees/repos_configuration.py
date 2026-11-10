@@ -201,6 +201,12 @@ def command(argv: list[str]) -> int:
                 if operation == "apply":
                     arguments.append(args.preview_token)
                 result = function(*arguments)
+                if args.accepted_default and operation == "preview":
+                    result = {
+                        **result["native_preview"], "token": result["token"],
+                        "summary": "Bind the accepted knowledge default after native confirmation. "
+                        + result["native_preview"]["summary"],
+                    }
             elif args.command == "catalog":
                 from .repos_configuration_catalog import catalog
 

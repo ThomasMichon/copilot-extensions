@@ -245,9 +245,15 @@ An absent/old/refused owner leaves the optional default visibly unavailable,
 without disabling existing Configuration rows or the by-name binding flow.
 
 For an unbound harness, the matching registered knowledge row offers **Bind the
-accepted knowledge default**. The form still requires the existing explicit
+accepted knowledge default** only when native knowledge readiness is false;
+already-ready/self-hosted repositories retain the existing action gate.
+The form still requires the existing explicit
 preview and confirmation. It uses the ID-bound transaction above with
 `--accepted-default` on both `knowledge-preview` and `knowledge-apply`.
+The selected preview projects the binding owner's exact version-1 Configuration
+envelope with the combined token, so the existing Manager decoder and
+Cancel-default confirmation remain unchanged. The richer portable-resolution
+response is not passed to that strict UI decoder.
 The token additionally binds the configured source, selected runtime and
 Machines' scoped input revision. Apply rechecks them, including inside the
 existing binding pointer-write precondition. A changed snapshot, policy,
@@ -304,6 +310,7 @@ repository's normal seasoned/retained source installer; never copy a descriptor
 into an editable environment or disable the support check. Without the explicit
 artifact selector these two integration cases skip, not pass.
 It exercises the actual catalog, Configuration parser and selected binding
-payload through pointer/readback, and refuses changed accepted bytes at the
+payload through pointer/readback, consumes the preview with Manager's actual
+strict decoder, and refuses changed accepted bytes at the
 pointer precondition. This is not qualification of installed peer discovery or
 productive Manager/carrier use.

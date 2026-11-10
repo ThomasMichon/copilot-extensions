@@ -33,6 +33,19 @@ def configured(native, monkeypatch):
     native.config.knowledge_preferences = {"state_dir": str(native.root / "state")}
     value = projection(native)
     monkeypatch.setattr(defaults, "_read", lambda *args: (dict(value), ["selected-machines"]))
+    original = binding.invoke
+
+    def invoke(project, name, operation, *args, **kwargs):
+        result = original(project, name, operation, *args, **kwargs)
+        if operation == "preview":
+            result.update(
+                target=repos_configuration.target(project, name),
+                scope="machine-local", summary="Confirm the native binding.",
+                effects=["Set the existing knowledge pointer."], findings=[],
+            )
+        return result
+
+    monkeypatch.setattr(binding, "invoke", invoke)
     native.projection = value
     return native
 
@@ -75,7 +88,8 @@ def test_configuration_default_requires_confirmation_and_rechecks_selected_input
     ]
     assert repos_configuration.command(["knowledge-preview", *args]) == 0
     plan = json.loads(capsys.readouterr().out)
-    assert plan["accepted_default"]["accepted_revision"] == 1
+    assert plan["operation"] == "set" and plan["target"]["resource"] == "first/shared"
+    assert "accepted knowledge default" in plan["summary"]
     assert all(call[2] == "preview" for call in configured.calls)
     assert repos_configuration.command(["knowledge-apply", *args]) == 1
     assert json.loads(capsys.readouterr().out)["code"] == "missing-preview"
@@ -170,3 +184,20 @@ def test_optional_provider_failure_keeps_the_existing_configuration_catalog(nati
     assert all(row["editable"] == "true" for row in result["entries"])
     assert all(row["preferred_knowledge_bindable"] == "false" for row in result["entries"])
     assert result["summary"]["knowledge_preference"]["code"] == "preference-owner-unsupported"
+
+
+@pytest.mark.parametrize("ready", [True, False])
+def test_preferred_binding_action_preserves_the_native_readiness_gate(configured, monkeypatch, ready):
+    monkeypatch.setattr(catalog, "inspect_project", lambda *a: catalog.Inspection(
+        readiness={"ready": ready}, binding={"status": "absent", "identity": ""},
+    ))
+    monkeypatch.setattr(binding, "owner_status", lambda p: "available")
+    monkeypatch.setattr(catalog, "defaults", lambda p: {})
+    monkeypatch.setattr(catalog, "compose_preference", lambda p, n, *a: {
+        "target": repos_configuration.target(p, n), "effective": "inherited", "sources": [],
+    })
+    result = catalog.catalog("first")
+    row = next(row for row in result["entries"] if row["repository"] == "shared")
+    assert row["preferred_knowledge_bindable"] == str(not ready).lower()
+    assert row["knowledge_bindable"] == str(not ready).lower()
+    assert configured.calls == []
