@@ -60,7 +60,7 @@ def test_unknown_plan_never_enters_action_or_mutation_owners(planning_record, mo
     [
         ({"repo": "foreign"}, "identity/project"),
         ({"owner_ref": "original/project/creator"}, "cannot recover missing"),
-        ({"receiving_allocation": {"schema": "ambiguous"}}, "ordinary sessionless"),
+        ({"receiving_allocation": {"schema": "ambiguous"}}, "receiving allocation receipt"),
         ({"status": "active"}, "ordinary sessionless"),
         ({"sessions": [{"session_id": "registered", "state": "active"}]}, "ordinary sessionless"),
     ],

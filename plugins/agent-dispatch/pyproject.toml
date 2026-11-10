@@ -89,7 +89,7 @@ where = ["src"]
 [tool.setuptools.package-data]
 # Built-in named worker identities (agent_dispatch.worker_identities); must be
 # shipped in the wheel, not just present in an editable/dev checkout.
-agent_dispatch = ["identities/*.identity.md", "windows-scheduling.ps1"]
+agent_dispatch = ["identities/*.identity.md", "windows-scheduling.ps1", "hourly-reporting.json"]
 
 [tool.ruff]
 target-version = "py310"

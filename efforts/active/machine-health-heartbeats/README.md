@@ -149,7 +149,7 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 - [x] Prove the first passive local owner-listener observation through the
   normal CLI and existing local record/reader flow (#11157), keeping all other
   domains unknown and installed-provider qualification separate.
-- [ ] Review the installable-service hourly contribution/discovery amendment.
+- [x] Review the installable-service hourly contribution/discovery amendment.
 - [ ] Prove a bounded versioned contribution through an actual service-owned
   export, selected-runtime declaration and normal machine report consumer.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
@@ -840,3 +840,108 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   implementation follows review and required CI; scheduling, real carrier
   writes, installed adoption, service activation and the rest of the parent
   completion gate remain open.
+
+### 2026-11-09 - Contribution convention reviewed; implement the real flow
+- #11793 merged as `a0172e394ae3e997ca38c8a692fa03f221193bd9`
+  after actual current-head Copilot approval with no findings, green required
+  CI, and no closing reference to the still-open parent.
+- Completed only the design-review checkbox. The next acceptance criterion
+  is an actual service-owned hourly export, qualified selected-runtime support
+  and normal Agent Machines report consumer, with missing/partial evidence
+  preserved. A protocol validator alone does not satisfy this checkpoint.
+- Existing telemetry library, retained service inventory and pinned native
+  invocation seams are implementation candidates, not a second telemetry bus,
+  service registry or authority. Keep independent owner work and all remaining
+  platform, scheduling, carrier and activation gates open.
+
+### 2026-11-09 - First native service contribution implemented locally
+- Added the closed hourly protocol and bounded retained-file reducer in the
+  existing telemetry library. Dispatch owns the first privacy-reduced native
+  export and optional installed-package reporting declaration.
+- The normal Machines report reuses same-cell installation selection and
+  immutable-runtime retention, qualifies installed metadata before invoking the
+  normal service parser, and preserves independent namespaced contributions
+  in JSON and the static chart. Missing/newer support stays unsupported without
+  a trial new command. Repeated installation selections are not executed twice.
+- Dispatch's focused packet passed 57 cases, including actual retained producer
+  events, the native export, fixture-selected package metadata, normal report/
+  chart, version skew, rollback to absent metadata and unchanged legacy sinks.
+  Machines passed 35 existing/new report controls and then 16 focused collection/
+  native cleanup controls after strict byte capture was added. Nine actor-free
+  wire-codec cases also pass and have explicit required-CI source/node admission.
+- The first cleanup experiment did not explicitly inherit the descendant's
+  pipes on Windows. The corrected fixture passes actual stdout/stderr handles,
+  separately observes root exit versus stream completion, and confirms the
+  existing native settlement callback on timeout and output-bound paths.
+- This is source/fixture qualification, not a deployed installation inventory,
+  a built-wheel release, running capture or activated publication. The full
+  clean-room installer and live external lanes were not exercised: this slice
+  changes package data and read-only source operations, not install/lifecycle
+  machinery; no enrolled external service venue is authorized for this effort.
+  The fresh fixture interpreter proves first export/consumer use only.
+- Install-contract, touched-Python lint, documentation consistency and headless
+  launch guards pass. Final admitted type/unit gates, review and merge remain
+  in progress. No service update/reload, schedule, credentials or carrier write
+  occurred; all independent parent gates remain open.
+
+### 2026-11-09 - Exact source gates and package delivery
+- The final Machines report/native-cleanup packet passed 41 cases. The
+  canonical wire/collection policy packet now passes 13 actor-free cases,
+  including task-scope refusal, independent namespaces, duplicate installation
+  identity and preservation of unsettled native custody.
+- All 41 admitted strict typing projects pass for both their Linux and
+  Windows target configurations. This is static target checking, not Linux
+  native execution. Shared-library release metadata includes every current
+  telemetry consumer and the canonical library; changefile presence passes.
+- Built the actual Dispatch wheel without build-environment installation and
+  independently verified that its reporting declaration matches source bytes
+  and that the native exporter is included. This is package-content proof, not
+  an installed service update or release.
+- The full local Windows unit runner refused six checkout-CRLF template files
+  before test execution. Their committed Git blobs match the admitted hashes.
+  The ongoing full-packet run uses a canonical committed-source snapshot;
+  no source admission hash or machine Git configuration was changed to accept
+  those checkout transformations. Required PR CI remains an independent gate.
+
+### 2026-11-09 - Native history priority and deadline corrections
+- #11823 opened on the rebased source. Its first current-head required CI was
+  green, while two Medium findings correctly blocked review acceptance.
+- Archive ordering and early file truncation could hide the active source;
+  an old prefix within that active file could likewise exhaust record work.
+  Selection now reserves the known active source before archive/directory
+  limits, prioritizes archive rotation near the requested hour, and reduces
+  bounded snapshot windows newest-line first. Only source event time assigns
+  the hour; clipped/partial/oversized fragments remain excluded and explicit.
+- Native execution timeout alone did not include retirement/pipe waits.
+  Collection now passes the existing absolute `OwnedExecutionBudget`, capped
+  by child and aggregate deadlines with cleanup and response reserves inside
+  those limits. Unconfirmed native custody still propagates unchanged.
+- The corrected Dispatch packet passed 60 cases, including saturated archives
+  and active prefixes. Machines passed 19 focused policy/native-cleanup cases;
+  native settlement callbacks occurred before their actual absolute deadlines.
+  Eighteen actor-free codec/selection/collection/snapshot controls pass, and
+  the changed shared library passes both strict target configurations.
+- The full prior Windows source packet produced 4,705 passes and three skips;
+  its no-skip evidence gate correctly refused completion. A minimal control
+  identified exactly the intentionally POSIX-only filesystem/kernel-lease and
+  existing-mode cases. No skip, hash or permission was changed to claim a
+  Windows all-pass result. Current-head Linux PR CI is the independent full
+  unit gate; the new source head still needs fresh CI and review acceptance.
+
+### 2026-11-09 - Duration producer/reducer qualification
+- The corrected-head review confirms both runtime fixes and their resolved
+  threads. Its remaining Medium observation identifies missing qualification
+  of the advertised duration path, not another runtime change.
+- Added actual adapter admission cases for missing/boolean/negative/overflow
+  timing, foreign components and unsupported stage/outcome/kind; completion
+  time rather than start or emit time determines the absolute source hour.
+- The required packet now executes the actual span adapter, snapshot reducer
+  and shared percentile primitive on raw events with successful, error,
+  cancelled and unavailable outcomes. Only the successful population affects
+  p50/p95/maximum; a span completing immediately before the hour is excluded.
+  All 28 actor-free cases pass.
+- The targeted Dispatch adapter/native packet passes 35 cases. The existing
+  measurement producer reaches the normal machine report/chart, and native
+  retained mixed-outcome export independently confirms the duration summary
+  without leaking correlation fields. Fixture source hours are controlled;
+  no production performance, service activation or deployed adoption is claimed.
