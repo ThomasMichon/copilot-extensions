@@ -160,16 +160,18 @@ if '-m' in sys.argv and 'supervise' in sys.argv:
     publisher = root / "publish.ps1"
     publisher.write_text(f"""
 $ErrorActionPreference='Stop'
+$script:GlobalActivationLockTimeoutSeconds=5
 $InstallDir={quote(root)};$LinkDir={quote(root / '.venv')};$LinkPython={quote(python)}
 $utf8NoBom=[Text.UTF8Encoding]::new($false)
 $tokens=$null;$errors=$null
 $tree=[Management.Automation.Language.Parser]::ParseFile({quote(INSTALLER)},[ref]$tokens,[ref]$errors)
 if($errors.Count){{throw 'source parse failed'}}
 $definition=@($tree.FindAll({{param($node)
- $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq 'Write-SupervisorLauncher'
+ $node -is [Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -in @(
+  'Enter-PluginSnapshotLock','Publish-FileAtomically','Publish-ServiceLauncher','Write-SupervisorLauncher')
 }},$true))
-if($definition.Count -ne 1){{throw 'writer boundary is ambiguous'}}
-. ([scriptblock]::Create($definition[0].Extent.Text))
+if($definition.Count -ne 4){{throw 'writer and publication helper boundaries are ambiguous'}}
+foreach($function in $definition){{ . ([scriptblock]::Create($function.Extent.Text)) }}
 Write-SupervisorLauncher|Out-Null
 """)
     if not master:
@@ -574,7 +576,18 @@ while not (r/'release').exists(): time.sleep(.02)
                       file=sys.stderr, flush=True)
             pytest.fail("new primary reader did not accept the marker-free producer")
         assert control.returncode == 0, diagnostics(root)
-        status, error = read_status(runtime_status_path(scope, directory=root / "run"))
+        status_path = runtime_status_path(scope, directory=root / "run")
+        status, error = read_status(status_path)
+        # Admission can finish while the next cycle is publishing its progress.
+        # Observe a completed cycle within the original shared deadline.
+        while time.monotonic() < deadline and (
+            error is not None or not isinstance(status, dict)
+            or not isinstance(status.get("updated_at"), (int, float))
+            or not isinstance(status.get("cycle_started_at"), (int, float))
+            or status["updated_at"] < status["cycle_started_at"]
+        ):
+            time.sleep(.02)
+            status, error = read_status(status_path)
         assert error is None and status["cycle_id"] > 0
         assert status["updated_at"] >= status["cycle_started_at"]
         assert status["generation"]["pid"] == produced["pid"]

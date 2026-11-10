@@ -64,6 +64,16 @@ selectors. Older providers still trigger the installer's pre-driver refusal
 rather than dropping the override. The installation-root policy remains
 available without that additional provider support.
 
+The compatibility PowerShell installer compares generated coordinator and
+supervisor launcher bytes under its existing installation publication mutex.
+Byte-identical launchers are left untouched, including when a live reader
+denies writes or replacement. Changed launchers use the existing bounded
+atomic publisher: readers permitting replacement retain the complete old
+script, while a handle denying replacement causes a visible publication
+failure after bounded retry. This does not stop readers, alter scheduling
+intent, or treat an unpublished change as successful. The POSIX launch path
+and Source application's separate scheduled-launcher publisher are unchanged.
+
 ## Task-only retirement
 
 ```powershell
