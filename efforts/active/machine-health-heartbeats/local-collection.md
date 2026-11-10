@@ -18,7 +18,7 @@ Keep three operations distinct:
 | Operation | Effects and authority |
 |---|---|
 | Inspect/report | Read admitted local evidence; no probe, lock, write or job |
-| Collect/preview | Explicit bounded native observations and qualified service exports; no persistent write, registration or carrier access |
+| Collect/preview | Explicit bounded native observations and qualified service exports; no persistent evidence write, registration or carrier access; existing admission metadata can retain an unconfirmed-custody fence |
 | Stage | Revalidate a locally approved collection policy and commit complete local slots through the existing health transaction owner |
 
 Collection must not invoke self-update, fleet-update, restore, ensure, repair,
@@ -137,6 +137,13 @@ Use one local nonblocking run-admission lock in the existing health owner before
 probes/exports. A second manual or scheduled run reports overlap and does no
 collection. OS-backed ownership must release on actual process exit; do not
 delete a lock or kill an incumbent from its age, process name, port or PID alone.
+Before launching exports, persist an unsettled byte in that existing lock file.
+Clear it only after native settlement; retain admission through the native
+cleanup owner's callback when cleanup is unconfirmed. Process exit releases
+the OS lock but not this custody fence. A later invocation must refuse rather
+than infer that an exporter ended with its CLI. No automatic fence reset or
+second custody registry is introduced; recovery requires the exact native
+owner's settlement or explicit containment handoff.
 Native scheduler IgnoreNew/single-unit behavior is defense in depth, not the
 only overlap check. Run admission and the existing short slot mutation lock have
 one documented acquisition order and bounded/nonblocking contention.
