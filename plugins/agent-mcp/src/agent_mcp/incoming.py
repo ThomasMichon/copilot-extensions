@@ -156,14 +156,9 @@ def ensure_current(handle) -> Admission | None:
 
         if not _ensure_serve_enabled() or os.environ.get("AGENT_MCP_NO_CUTOVER"):
             raise OSError("current serving generation is unavailable; stale execution refused")
-        from zdd import CutoverLockedError
-
         # The callback owns actual slot/native readiness and compare-before-publish.
         # No predecessor drain, census, reset, or fabricated layout is involved.
-        try:
-            _run_slot_startup(layout, generation, health_timeout=15, fixed_socket=handle)
-        except CutoverLockedError as exc:
-            raise OSError("serving startup is busy before attach; shared execution unavailable") from exc
+        _run_slot_startup(layout, generation, health_timeout=15, fixed_socket=handle)
         reply = _ping(handle)
     try:
         _require_selected(layout)

@@ -165,6 +165,73 @@ async def run_headed(
     env: dict[str, str] | None = None, port: int = 0, ws_port: int | None = None,
     nonce: str = "", policy_context: str | None = None,
     before_exec: Callable[[], None] | None = None,
+    auth_wait: dict | None = None,
+) -> int:
+    """Run legacy headed execution, or an explicitly source-authorized receiver."""
+    arguments = dict(
+        session_id=session_id, attempt_directory=attempt_directory, state_file=state_file,
+        cwd=cwd, env=env, port=port, ws_port=ws_port, nonce=nonce,
+        policy_context=policy_context, before_exec=before_exec,
+    )
+    if auth_wait is None:
+        return await _run_headed_once(child_argv, **arguments)
+    from .auth_wait import AuthWaitReceiver
+
+    _native_request(child_argv, session_id)
+    resumed_argv = _seedless_resume(child_argv, session_id)
+    receiver = AuthWaitReceiver(session_id, auth_wait)
+    await receiver.serve()
+    try:
+        argv = child_argv
+        while True:
+            result = await _run_headed_once(argv, **arguments, auth_receiver=receiver)
+            if not receiver.stopped_for_auth:
+                return result
+            await receiver.next_grant()
+            # A cold resume is a new process, never a repetition of the launch seed.
+            argv = resumed_argv
+            arguments["auth_resume"] = True
+            arguments["before_exec"] = None
+            arguments["env"] = {
+                key: value for key, value in (env or {}).items()
+                if key not in {_STARTUP_ENV, _ACQUISITION_ENV}
+            }
+    finally:
+        await receiver.close()
+
+
+def _seedless_resume(argv: list[str], session_id: str) -> list[str]:
+    result = [argv[0]]
+    index = 1
+    while index < len(argv):
+        argument = argv[index]
+        name, separator, _ = argument.partition("=")
+        if name == "--":
+            # Positional launch text is not silently carried across recovery.
+            if index != len(argv) - 1:
+                raise ValueError("Auth recovery cannot replay positional launch input")
+            break
+        if name in {"--session-id", "--resume", "-i", "--interactive"}:
+            if not separator:
+                index += 1
+        else:
+            result.append(argument)
+            if not separator and (name in VALUE_OPTIONS or name == "-C"):
+                index += 1
+                result.append(argv[index])
+        index += 1
+    result.extend(("--resume", session_id))
+    _native_request(result, session_id)
+    return result
+
+
+async def _run_headed_once(
+    child_argv: list[str], *, session_id: str, attempt_directory: str | os.PathLike[str],
+    state_file: str | os.PathLike[str], cwd: str | None = None,
+    env: dict[str, str] | None = None, port: int = 0, ws_port: int | None = None,
+    nonce: str = "", policy_context: str | None = None,
+    before_exec: Callable[[], None] | None = None, auth_receiver=None,
+    auth_resume: bool = False,
 ) -> int:
     startup_prompt = _native_request(child_argv, session_id)
     cwd = str(Path(cwd or os.getcwd()).resolve())
@@ -173,15 +240,21 @@ async def run_headed(
     _require_receiving_policy(cwd, policy_context)
     if ws_port is not None:
         from ..session_host.ws_transport import WebSocketTransport
-    owner = _PaneChild()
+    if auth_receiver is None:
+        owner = _PaneChild()
+    else:
+        from .auth_child import AuthPaneChild
+
+        owner = AuthPaneChild()
     backend = HeadedBackend(
         owner, session_id=session_id, nonce=secrets.token_hex(32), startup_prompt=startup_prompt,
+        auth_wait=auth_receiver,
     )
     nonce = nonce or (env or {}).get(_NONCE_ENV) or os.environ.get(_NONCE_ENV) or secrets.token_hex(32)
     plugin = stage_extension(Path(attempt_directory))
     child_env = {**os.environ, **(env or {})}
-    startup_context = child_env.get(_STARTUP_ENV)
-    if child_env.get(_ACQUISITION_ENV) is not None and before_exec is None:
+    startup_context = None if auth_resume else child_env.get(_STARTUP_ENV)
+    if not auth_resume and child_env.get(_ACQUISITION_ENV) is not None and before_exec is None:
         raise ValueError("Original launch context requires its receiving owner")
     startup = StartupAdmissionClient(startup_context) if startup_context is not None else None
     for key in ("COPILOT_PLUGIN_ROOT", _NONCE_ENV, _ACQUISITION_ENV, _STARTUP_ENV):
@@ -189,10 +262,21 @@ async def run_headed(
     host, websocket = None, None
     tasks: list[asyncio.Task] = []
     state: dict = {}
+    expiry_task = None
 
     def publish(status: str) -> None:
         state["state"] = status
+        if auth_receiver is not None:
+            state["auth_wait"] = auth_receiver.declaration()
         _write_host_state(Path(state_file), state)
+
+    async def expire() -> None:
+        await auth_receiver.expiry()
+        publish("auth_stopping")
+        await backend.freeze_auth()
+        await owner.terminate()
+        await backend.finish_auth_stop()
+        publish("auth_wait" if auth_receiver.hold is None else "auth_held")
 
     try:
         await backend.serve()
@@ -215,11 +299,18 @@ async def run_headed(
             if not setup_kill_on_close_job(allow_breakaway=False):
                 raise RuntimeError("The headed coordinator could not contain its native child")
         # headless-guard: allow: the interactive child inherits the caller's existing pane console
-        owner.proc = subprocess.Popen(
-            argv, cwd=cwd, env=child_env,
-            **({} if _interactive_console() else no_window_kwargs()),
+        native_kwargs = dict(
+            cwd=cwd, env=child_env, **({} if _interactive_console() else no_window_kwargs()),
         )
-        owner.started.set()
+        if auth_receiver is None:
+            owner.proc = subprocess.Popen(argv, **native_kwargs)
+            owner.started.set()
+        else:
+            if not auth_receiver.authorized():
+                raise RuntimeError("Source authorization expired before native launch")
+            owner.launch(argv, **native_kwargs)
+            expiry_task = asyncio.create_task(expire())
+            tasks.append(expiry_task)
         if startup is not None:
             startup.close()
             startup = None
@@ -238,10 +329,19 @@ async def run_headed(
         native_exit = asyncio.create_task(owner.wait())
         binding = asyncio.create_task(backend.bound.wait())
         tasks.extend((native_exit, binding))
-        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(
+            (native_exit, binding, *([expiry_task] if expiry_task is not None else [])),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if expiry_task is not None and expiry_task in done:
+            await expiry_task
+            return await native_exit
         if native_exit in done:
+            if auth_receiver is not None and auth_receiver.stopped_for_auth:
+                await expiry_task
             state["child_exit_code"] = native_exit.result()
-            publish("child_exited")
+            if auth_receiver is None or not auth_receiver.stopped_for_auth:
+                publish("child_exited")
             return native_exit.result()
         host = SessionHost(backend, nonce=nonce, lifetime_policy="cli")
         state["port"] = await host.serve(port=port)
@@ -253,19 +353,37 @@ async def run_headed(
                 "contract": "acp.v1", "url": f"ws://127.0.0.1:{websocket.port}/acp",
                 "nonce": websocket.nonce,
             }
+        if auth_receiver is not None and auth_receiver.authorized():
+            auth_receiver.phase = "running"
         publish("control_unavailable" if backend.lost.is_set() else "running")
         lost = asyncio.create_task(backend.lost.wait())
         tasks.append(lost)
-        await asyncio.wait((native_exit, lost), return_when=asyncio.FIRST_COMPLETED)
-        if not native_exit.done():
+        done, _ = await asyncio.wait(
+            (native_exit, lost, *([expiry_task] if expiry_task is not None else [])),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if expiry_task is not None and expiry_task in done:
+            await expiry_task
+        if not native_exit.done() and (
+            auth_receiver is None or not auth_receiver.stopped_for_auth
+        ):
             publish("control_unavailable")
         result = await native_exit
+        if auth_receiver is not None and auth_receiver.stopped_for_auth:
+            await expiry_task
         state["child_exit_code"] = result
-        publish("child_exited")
+        if auth_receiver is None or not auth_receiver.stopped_for_auth:
+            publish("child_exited")
         return result
     except Exception:
         if owner.proc is None:
             raise
+        if auth_receiver is not None:
+            auth_receiver.preserve_hold("coordinator-unavailable")
+            await owner.terminate()
+            auth_receiver.stopped(None)
+            publish("auth_held")
+            return await owner.wait()
         # A broker/bootstrap failure after native creation is not authority to
         # retire a user's interactive session or retry its original seed.
         state["control_error"] = "coordinator-unavailable"
@@ -288,6 +406,10 @@ async def run_headed(
                 if host is not None:
                     await host.close()
             finally:
-                await backend.close()
-                if owner.proc is not None and owner.returncode is None:
-                    await owner.terminate()
+                try:
+                    await backend.close()
+                finally:
+                    if owner.proc is not None and (
+                        auth_receiver is not None or owner.returncode is None
+                    ):
+                        await owner.terminate()

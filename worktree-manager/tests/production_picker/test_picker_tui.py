@@ -3545,8 +3545,7 @@ def test_profiles_grid_cell_restored_on_tab():
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("output", ["pipe", "absent", "closed"])
-def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch, output):
+def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
     """When stdout is captured (launcher) but stderr is a TTY, Textual must
     render to stderr while the real stdout stays reserved for the plan."""
     import io
@@ -3573,10 +3572,6 @@ def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch, output):
             return True
 
     pipe, tty = _Pipe(), _Tty()
-    if output == "absent":
-        pipe = None
-    elif output == "closed":
-        pipe.close()
     monkeypatch.setattr(sys, "stdin", tty)
     monkeypatch.setattr(sys, "__stdout__", pipe)
     monkeypatch.setattr(sys, "stderr", tty)

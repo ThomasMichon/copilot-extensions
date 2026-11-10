@@ -157,10 +157,10 @@ def test_guards_cover_final_join_and_pre_create_without_live_delivery():
     assert ps.index("Assert-AwColdResume\nif ($noMux)") < ps.index("if ($noMux) {")
     assert sh.index('aw_assert_cold_resume\n    if [[ "$NO_MUX"') < sh.index('if [[ "$NO_MUX" == "1" ]]')
     assert re.search(
-        r"if \(-not \$plan.seed_pending -and -not \$plan.seed_preserved_id\) \{\s+Invoke-SeedDeliverySafe", ps,
+        r"if \(-not \$plan.seed_pending\) \{\s+Invoke-SeedDeliverySafe", ps,
     )
     assert re.search(
-        r'if \[\[ "\$_PENDING_NEW_SEED" != "1" && "\$_PRESERVED_LAUNCH_SEED" != "1" \]\]; then\s+_aw_deliver_pending_seed', sh,
+        r'if \[\[ "\$_PENDING_NEW_SEED" != "1" \]\]; then\s+_aw_deliver_pending_seed', sh,
     )
 
 
@@ -211,7 +211,6 @@ def test_ordinary_launches_do_not_require_new_flag_on_older_engine(monkeypatch, 
     from worktree_manager import engine_client
 
     seen = []
-    monkeypatch.delenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", raising=False)
     def older_engine(project, args, **kwargs):
         if args[:2] == ["agent-policy", "check"]:
             return {
@@ -220,78 +219,10 @@ def test_ordinary_launches_do_not_require_new_flag_on_older_engine(monkeypatch, 
             }
         seen.append(args)
         assert "--stage-launch-seed" not in args
-        assert "--preserve-seed-id" not in args
-        environment = kwargs.get("environment") or {}
-        assert (environment.get("AGENT_WORKTREES_RETAINED_SEED_PLANS") == "1") == bool(selector.get("worktree_id"))
         return {"action": "exec", "cmd": ["copilot"]}
     monkeypatch.setattr(engine_client, "run_json", older_engine)
     assert engine_client.resolve_launch_plan("demo", **selector).is_exec
     assert len(seen) == 1
-    assert "AGENT_WORKTREES_RETAINED_SEED_PLANS" not in os.environ
-
-
-@pytest.mark.parametrize("windows", [False, True])
-def test_delegation_carries_preserved_identity_after_intent_replacement(monkeypatch, windows):
-    from types import SimpleNamespace
-
-    calls, deliveries = [], []
-    monkeypatch.setattr(relocated_launch._core(), "_is_windows", lambda: windows)
-    monkeypatch.setattr(os, "environ", dict(os.environ))
-    current_identity = "replacement-b"
-
-    def boundary(argv):
-        calls.append(argv)
-        expected = argv[argv.index("--preserve-seed-id") + 1]
-        if expected != current_identity:
-            return 3
-        deliveries.append(current_identity)
-        return 0
-
-    monkeypatch.setattr(
-        relocated_launch.subprocess, "Popen",
-        lambda argv: SimpleNamespace(wait=lambda: boundary(argv)),
-    )
-    class ExecResult(Exception):
-        pass
-    def execvp(_file, argv):
-        raise ExecResult(boundary(argv))
-    monkeypatch.setattr(relocated_launch.os, "execvp", execvp)
-    req = SimpleNamespace(
-        project="demo", mode="resume", worktree_id="wt-a", no_mux=True,
-        new_window=False, seed_prompt=None,
-    )
-    plan = SimpleNamespace(
-        worktree_id="wt-a", raw={
-            "seed_pending": False, "seed_preserved_id": "original-a", "seed_preservation_version": 1,
-        },
-    )
-    if windows:
-        assert relocated_launch._run_relocated_mux_launch(req, plan, Path("launch-session.ps1")) == 3
-    else:
-        with pytest.raises(ExecResult) as result:
-            relocated_launch._run_relocated_mux_launch(req, plan, Path("launch-session.sh"))
-        assert result.value.args == (3,)
-    assert len(calls) == 1 and deliveries == []
-    assert "--stage-launch-seed" not in calls[0] and "--seed-id" not in calls[0]
-
-
-@pytest.mark.parametrize("raw", [
-    {"seed_preserved_id": ""},
-    {"seed_preserved_id": True},
-    {"seed_preserved_id": "retained", "seed_pending": True, "seed_id": "delivery"},
-    {"seed_preserved_id": "retained", "seed_preservation_version": 2},
-])
-def test_delegation_rejects_invalid_or_conflicting_retained_identity(monkeypatch, raw):
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(
-        relocated_launch.subprocess, "Popen", lambda *a, **k: pytest.fail("invalid ownership reached spawn"),
-    )
-    req = SimpleNamespace(project="demo", mode="resume", worktree_id="wt-a", seed_prompt=None)
-    assert relocated_launch._run_relocated_mux_launch(
-        req, SimpleNamespace(worktree_id="wt-a", raw={"seed_preservation_version": 1, **raw}),
-        Path("launch-session.ps1"),
-    ) == 1
 
 
 @pytest.mark.parametrize("selector", [{"new": True}, {"worktree_id": "wt-a"}])

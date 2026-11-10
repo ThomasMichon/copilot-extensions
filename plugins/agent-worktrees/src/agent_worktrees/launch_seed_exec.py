@@ -499,12 +499,8 @@ def _launch_headed(
         subject["attempt_id"], subject["resolution_id"], subject["parent_id"],
     )
 
-    planned_status = getattr(execution, "planned_status", None)
-
     def admit() -> None:
-        launch_seed_native.admit(
-            record_path, correlation, subject["operation_id"], planned_status=planned_status,
-        )
+        launch_seed_native.admit(record_path, correlation, subject["operation_id"])
 
     def spawned(pid: int, birth: str) -> None:
         launch_seed_native.spawned(
@@ -525,7 +521,6 @@ def _launch_headed(
             with launch_seed_native.admission(
                 record_path, correlation, subject["operation_id"], admission_only=True,
                 preserve_seed_id=preserve_seed_id, require_cold_stop=False,
-                planned_status=planned_status,
             ) as check:
                 code, certain = run(check)
         else:

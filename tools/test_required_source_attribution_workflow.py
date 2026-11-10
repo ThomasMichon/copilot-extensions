@@ -73,12 +73,6 @@ def test_existing_heads_refresh_from_default_branch_or_verified_promotion():
         "--health-module commonmark --health-module parse5"
     )
     assert ".backfill(" in backfill["with"]["script"]
-    assert workflow["on"]["workflow_dispatch"]["inputs"]["pull_request_number"] == {
-        "description": "Reconcile only this open dev PR's owned source checks (not a promotion)",
-        "required": "false", "type": "string",
-    }
-    assert backfill["env"] == {"SOURCE_PULL_REQUEST": "${{ inputs.pull_request_number }}"}
-    assert "pullRequest: process.env.SOURCE_PULL_REQUEST || undefined" in backfill["with"]["script"]
     assert backfill["with"]["retries"] == "0"
     assert "labeled" in workflow["jobs"]["request-review"]["if"]
     assert "unlabeled" in workflow["jobs"]["request-review"]["if"]

@@ -86,7 +86,7 @@ function Register-AwNativeSeedConsoleControl {
 }
 
 function Invoke-AwNativeSeedPhase {
-    param([string]$Root, [string[]]$Arguments, [hashtable]$Runtime, [hashtable]$Environment, [hashtable]$Diagnostics)
+    param([string]$Root, [string[]]$Arguments, [hashtable]$Runtime, [hashtable]$Environment)
     $runtime = if ($Runtime) { $Runtime } else { Get-AwNativeSeedRuntime $Root }
     if (-not $runtime) { return $null }
     $process = $null
@@ -120,17 +120,7 @@ function Invoke-AwNativeSeedPhase {
         if (-not [Threading.Tasks.Task]::WaitAll(
             [Threading.Tasks.Task[]]@($stdout, $stderr), 1000
         )) { return $null }
-        if ($process.ExitCode -ne 0) {
-            $diagnostic = $stderr.GetAwaiter().GetResult()
-            if ($null -ne $Diagnostics) { $Diagnostics['stderr'] = $diagnostic }
-            [Console]::Error.Write($diagnostic)
-            if ($env:WORKTREE_SETUP_LOG) {
-                try {
-                    [IO.File]::AppendAllText($env:WORKTREE_SETUP_LOG, $diagnostic)
-                } catch {}
-            }
-            return $null
-        }
+        if ($process.ExitCode -ne 0) { return $null }
         $raw = $stdout.GetAwaiter().GetResult()
         $reply = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
         $document = [System.Text.Json.JsonDocument]::Parse($raw)
@@ -214,17 +204,6 @@ function Read-AwAdmissionBytes {
     return ,$bytes
 }
 
-function Get-AwAdmissionRefusalReason {
-    param([string]$Stderr, [bool]$HostExited)
-    if ($HostExited) { return 'Session host exited before admission completed' }
-    $prefix = 'Startup admission refused: '
-    $line = @($Stderr -split "`r?`n" | Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) })
-    if (-not $line.Count) { return $null }
-    $reason = (($line[-1].Substring($prefix.Length)) -replace '\s+', ' ').Trim()
-    if ($reason.Length -gt 512) { $reason = $reason.Substring(0, 509) + '...' }
-    return $reason
-}
-
 function Invoke-AwHeadedAdmission {
     param(
         [Net.Sockets.TcpListener]$Listener, [Diagnostics.Process]$Process,
@@ -277,19 +256,13 @@ function Invoke-AwHeadedAdmission {
         foreach ($argument in $nativeArguments.EnumerateArray()) {
             if ($argument.GetString() -cne $Headed.argv[$index++]) { return $false }
         }
-        $diagnostics = @{}
         $admitted = Invoke-AwNativeSeedPhase $Root (
             @('--phase', 'admit') + $Callback + $AdmissionArguments
-        ) -Runtime $Runtime -Diagnostics $diagnostics
+        ) -Runtime $Runtime
         $accepted = [bool]($admitted -and $admitted.recorded -eq $true -and -not $Process.HasExited)
-        $answer = '{"version":1,"accepted":' + $accepted.ToString().ToLowerInvariant()
-        if (-not $accepted) {
-            $reason = Get-AwAdmissionRefusalReason ([string]$diagnostics['stderr']) $Process.HasExited
-            if ($reason) {
-                $answer += ',"reason":' + [System.Text.Json.JsonSerializer]::Serialize($reason, [string])
-            }
-        }
-        $reply = [Text.Encoding]::UTF8.GetBytes($answer + '}')
+        $reply = [Text.Encoding]::UTF8.GetBytes(
+            '{"version":1,"accepted":' + $accepted.ToString().ToLowerInvariant() + '}'
+        )
         $header = [BitConverter]::GetBytes([uint32]$reply.Length)
         if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($header) }
         $stream.WriteTimeout = 1000

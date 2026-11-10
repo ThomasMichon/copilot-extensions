@@ -1,9 +1,0 @@
-{
-  "comment": "Preserve direct bridge fallback during selected startup contention.",
-  "changes": [
-    {
-      "plugin": "agent-mcp",
-      "type": "patch"
-    }
-  ]
-}

@@ -33,7 +33,6 @@ def run_tui_picker(
     prepare=None,
     project_label="project",
     lifetime_cancelled=None,
-    front_door=False,
 ):
     """Run the TUI picker and return its result (a launch decision or None).
 
@@ -82,7 +81,12 @@ def run_tui_picker(
             source = data_local
 
     saved_stdout = sys.__stdout__
-    redirect = not _interactive_stdin(saved_stdout) and _interactive_stdin(sys.stderr)
+    redirect = (
+        saved_stdout is not None
+        and hasattr(saved_stdout, "isatty") and not saved_stdout.isatty()
+        and sys.stderr is not None
+        and hasattr(sys.stderr, "isatty") and sys.stderr.isatty()
+    )
     app = None
     try:
         if redirect:
@@ -94,8 +98,6 @@ def run_tui_picker(
             app_kwargs.update(prepare=prepare, project_label=project_label)
         if lifetime_cancelled is not None:
             app_kwargs["lifetime_cancelled"] = lifetime_cancelled
-        if front_door:
-            app_kwargs["front_door"] = True
         app = PickerApp(source, **app_kwargs)
         from .frame_health import append_launch_event
 

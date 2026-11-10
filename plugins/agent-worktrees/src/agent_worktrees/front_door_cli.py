@@ -44,10 +44,6 @@ def agenda_project_unavailable(argv, message: str) -> int:
 
 def unavailable_project_response(argv: list[str], message: str) -> int | None:
     """Keep each bounded owner command's own error envelope on missing context."""
-    if argv and argv[0] == "pr-complete" and any(
-        word.split("=", 1)[0] in ("--repo", "--expected-branch", "--expected-head") for word in argv[1:]
-    ):
-        return project_resolution_failure(argv, RuntimeError(message))
     if argv and argv[0] in {
         "worktree-data-read", "worktree-data-allocate",
         "worktree-observations", "worktree-observation-history",
@@ -59,11 +55,6 @@ def unavailable_project_response(argv: list[str], message: str) -> int | None:
 
 
 def project_resolution_failure(argv, error: Exception) -> int:
-    if argv and argv[0] == "pr-complete" and any(
-        word.split("=", 1)[0] in ("--repo", "--expected-branch", "--expected-head") for word in argv[1:]
-    ):
-        from .pr_source_complete import project_unavailable
-        return project_unavailable(argv, str(error))
     if argv and argv[0] in ("pr-author-ready", "pr-author-nudge", "pr-thread-resolve", "pr-thread-reopen"):
         from .pr_author_cli import readiness_project_unavailable
 

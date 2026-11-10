@@ -86,7 +86,7 @@ def note_conclusion(record: tracking.WorktreeRecord, config: cfg.Config) -> None
             if not isinstance(worktree, dict) or any(
                 worktree.get(key) != value for key, value in {
                     "id": record.worktree_id, "repo": record.repo,
-                    "branch": record.branch, "path": record_identity(record).path,
+                    "branch": record.branch, "path": record.worktree_path,
                 }.items()
             ) or saved.get("creation_nonce") != record.creation_nonce:
                 raise ValueError("cannot retain conclusion for a different receiving incarnation")
@@ -99,8 +99,6 @@ def note_conclusion(record: tracking.WorktreeRecord, config: cfg.Config) -> None
                     raise ValueError("cannot retain conclusion for a different receiving incarnation")
                 if status == "archived" and record.status != "archived":
                     raise ValueError("cannot downgrade retained archived receiving conclusion")
-                if status == record.status:
-                    return
             receipt = {
                 **({} if row[2] == "pending" else saved),
                 "worktree": worktree, "creation_nonce": record.creation_nonce,

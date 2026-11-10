@@ -1,23 +1,22 @@
 # Plugin Service Model — Vision
 
-- **Subject:** The copilot-extensions **service and connector model** — how
-  independently installed applications expose and coordinate services, and how
-  lightweight Copilot plugins reach them.
+- **Subject:** The copilot-extensions plugin **service model** — how
+  installer-deployed plugin runtimes expose, coordinate, and are reached as
+  local services on a user's machine.
 - **Scope:** branch (links cross-cutting and per-plugin child visions)
 - **Status:** Active
-- **Last revised:** 2026-11-09
+- **Last revised:** 2026-11-02
 - **Reality docs:** [`docs/architecture.md`](../../docs/architecture.md) ·
   [`docs/install-contract.md`](../../docs/install-contract.md) · each plugin's
   `docs/architecture.md`
 
 ## Purpose & Intent
 
-Copilot plugins supply independently deliverable knowledge and connectors;
-applications and services have their own installation and lifecycle owners.
-Neither adoption implies the other. A connector resolves a compatible installed
-backend or reports what is missing; enabling it never provisions that backend.
-The north star: **independent components work on their own, and selected
-components compose without hidden installation dependencies.**
+Each plugin in this suite is an **independently installable addon**. A user
+picks whatever subset they want from the marketplace; that is the unit of
+adoption, and the service model must honor it. The north star: **whatever you
+install just works on its own, and whatever you install *together* composes —
+with nothing in between assumed.**
 
 Two forces are always in tension, and the model resolves them in the user's
 favor:
@@ -31,7 +30,7 @@ favor:
   and without the user hand-wiring them together.
 
 Success is a suite that feels coherent when fully installed, yet where every
-service stands entirely on what its **own independent installation owner** deployed. The friction this
+service stands entirely on what its **own** installer deployed. The friction this
 vision exists to abolish is the manual deconfliction of shared machine resources
 — the hand-maintained port table, the per-platform "+1" workaround, the "which
 service owns which address" bookkeeping — that turns adding or moving a service
@@ -99,11 +98,10 @@ declared lifecycle contract, not an independently invented updater/keepalive.
 This does not weaken immutable-runtime, attributable invocation, safe cutover,
 resource fencing, or existing standalone-service defaults.
 
-- **Component runtime** — the self-contained versioned runtime and invocation
-  surface an application or service's installation owner deploys, per the shared
-  **install contract**. Its implementation and installation inputs are
-  distributed independently of the Copilot connector. The installed runtime,
-  not a plugin payload, git checkout or unowned ambient command, is what executes.
+- **Plugin runtime** — the self-contained versioned runtime and invocation
+  surface a runtime plugin's own installer deploys inside its marketplace
+  installation cell, per the shared **install contract**. The installed runtime,
+  not a git checkout or an ambient command with the same name, is what executes.
 - **Drop-in contribution registry** — a consumer-owned `*.d` directory through
   which independently-installed plugins contribute manifests, pointers, or
   config fragments without importing across runtimes or editing one shared file.
@@ -141,8 +139,9 @@ resource fencing, or existing standalone-service defaults.
   cross-entity traversal question either points to the existing command(s) that
   answer it or adds the missing one; it is never left to bit-rot as tribal
   knowledge. See the `entity-relationship-model` pattern.
-- **Service connector** — a plugin that reaches an independently installed
-  service, rather than bundling or owning that service's implementation.
+- **Service-bearing plugin** — a plugin whose runtime includes a **long-lived
+  local service** (an always-on daemon), as distinct from an on-demand CLI or a
+  payload-only (skills/extension) plugin.
 - **Local endpoint** — the machine-local address at which a running service is
   reached by its clients (its own CLI, other plugins, agents on the box). The
   vision constrains the *guarantees* of this endpoint, not its mechanism.
@@ -190,7 +189,7 @@ resource fencing, or existing standalone-service defaults.
   **per-session, per-machine identifier**, never a stable identity a downstream
   system may adopt as if it were the repo's name.
 - **Install contract** — the uniform deploy/version/footprint agreement every
-  independent runtime installation owner follows, so services deploy, update, and are audited the same
+  runtime plugin follows, so services deploy, update, and are audited the same
   way. See [`docs/install-contract.md`](../../docs/install-contract.md).
 - **Marketplace-scoped installation** — the ownership boundary that lets
   independently versioned marketplaces ship same-named plugin ecosystems to one
@@ -219,20 +218,6 @@ resource fencing, or existing standalone-service defaults.
   a central container through its existing deployment-manager lifecycle.
 
 ## Features
-
-### connector-only-plugin-payloads
-
-Copilot plugin payloads contain knowledge, capability declarations and bounded
-client adapters, not backend service implementations or their deployment inputs.
-Applications, command implementations and services remain independently
-distributable and usable without Copilot or a plugin registry. Plugin delivery
-and removal do not install, update or uninstall those components.
-
-A plugin's name, implementation language or client entrypoint does not require
-it to self-provision or adopt a legacy payload-local bootstrap model. Explicitly
-declared adapter contracts remain validated as connectors and backends evolve.
-Required capability, compatibility and missing-backend outcomes stay honest;
-the separation does not make an unavailable service appear ready.
 
 ### compiler-free-first-party-execution
 
@@ -432,8 +417,8 @@ A service's declared availability is realized by the host's native lifecycle
 facility through one coherent cross-platform contract. A user-session service
 starts with that user; a managed user service adds restart and logout-survival
 where declared; a system service adds pre-login or system-identity availability.
-For standalone host installation this supervision belongs to the service's
-independent installation owner, which keeps its authorized daemon alive with **no
+For standalone host installation this supervision is the plugin's **own** — a
+plugin brings up and keeps alive **its own daemon** with **no
 installer/configurator control-plane in the loop**. An optional control-plane
 may observe and true-up daemons across the set, but a daemon's standalone
 existence and liveness never depend on it running. Windows, Linux, and macOS
@@ -452,7 +437,7 @@ platform facility may realize different tiers when its privilege and
 availability properties differ. Installation does not escalate merely because
 a more privileged mechanism is available, and routine updates never introduce a
 new privilege boundary. Container management is a consumer-selected deployment
-of the same portable service contract, not a dependency of a component's
+of the same portable service contract, not a dependency of the plugin's
 standalone host installation.
 
 ### self-provisioning-runtime
@@ -522,19 +507,21 @@ unsettled-effect fences remain independent, and unrelated marketplace ownership
 stays independent.
 
 ### delegated-heavy-companion-runtime
-An explicitly configured **optional companion capability** has an independent
-installation owner or an explicitly selected trusted deployment supervisor.
-Its connector contributes an attributed capability contract; it does not contribute
+An explicitly
+configured **optional companion capability** whose dependency footprint is too
+heavy or invasive for ordinary plugin first-use and session-start paths may
+delegate runtime materialization to an already-running trusted supervisor. The
+plugin contributes an attributed declarative contract; it does not contribute
 an arbitrary installer command, package-manager flags, credentials, or physical
-runtime placement. The selected deployment owner builds, validates, atomically publishes,
+runtime placement. The supervisor alone builds, validates, atomically publishes,
 selects, rolls back, and retires immutable companion runtime generations.
 
-This capability never becomes an ambient dependency of the plugin. Without
-explicit capability configuration and its selected deployment owner, the contribution
+This exception never becomes an ambient dependency of the plugin. Without
+explicit capability configuration and the owning supervisor, the contribution
 is inert and the capability is honestly unavailable; an agent-facing command
 cannot install it as a fallback. The plugin's remaining lightweight surfaces
-continue to work independently where meaningful. A normal application or
-service follows the same independent installation contract; delegation is an
+continue to work independently where meaningful. A normal runtime plugin or
+service still follows the independent installation contract; delegation is an
 explicit capability boundary, not a plugin-driven installation fallback.
 On a host that adopts the integrated coordination profile, an optional heavy
 environment is instead a selectable closure of the coordinated release. That
@@ -594,15 +581,20 @@ merely *reduces* skew when convenient; it is never a **precondition for
 correctness**. The suite is correct **while** skewed.
 
 ### uniform-deploy-contract
-Independently installed services share one deploy/update/version footprint (the
+All service-bearing plugins share one deploy/update/version footprint (the
 install contract), so a user — or an automated fleet — reasons about, audits, and
-upgrades every service the same way. That uniformity is guaranteed **by
-construction, not by convention**: canonical installation and assembly owners
-realize the shared mechanics, with component-specific needs declared through
-their supported configuration. Connector payloads do not carry another installer
-or service implementation. Fixes to shared mechanics reach independent
-components through their release and installation owners, without requiring
-each plugin to reproduce or redistribute them.
+upgrades every plugin service the same way. That uniformity is guaranteed **by
+construction, not by convention**: a single shared, vendored template realizes
+the install/update entrypoint's actual mechanics identically for every adopting
+plugin, rather than each plugin hand-maintaining its own copy that merely
+resembles its siblings. A plugin expresses its own install/update behavior only
+through the template's defined configuration points — what runtime to
+provision, what to check, what to register — never by forking the template's
+control flow or re-deriving its mechanics in a bespoke script. A fix or
+hardening to the shared mechanics (an atomicity guarantee, a concurrency-safety
+fix, a new validation step) reaches every adopter the same way the template
+itself is kept in sync, rather than depending on each plugin separately
+noticing and re-deriving it.
 
 ### install-adopt-boundary
 Two lifecycle scopes, never crossed. **Install/update deployment** touches only
@@ -1169,10 +1161,6 @@ an incomplete change, the same way an undocumented behavior change is.
 
 ## Non-Goals / Boundaries
 
-- **No plugin-owned backend distribution or self-provisioning.** A connector
-  does not carry service payloads or become their installer, updater or
-  supervisor. Bounded self-contained extension behavior is not a second backend
-  implementation hidden inside the plugin.
 - **No shared-infrastructure dependency.** The suite does **not** assume — and a
   plugin service **must not** require — an external reverse proxy, tunnel broker,
   service mesh, load balancer, or centralized service registry in order to be

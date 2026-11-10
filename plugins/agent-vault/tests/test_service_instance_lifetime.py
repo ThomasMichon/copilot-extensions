@@ -55,7 +55,7 @@ async def no_pipe(*args):
 service.VaultService = Vault
 service.send_command = lambda *_args: None
 service.resolve_kpdb = lambda **kwargs: None
-service.resolve_context = lambda: types.SimpleNamespace(kpdb=None, group=None, vault_name="", port=0, sources={"port": "default"})
+service.resolve_context = lambda: types.SimpleNamespace(kpdb=None, group=None, vault_name="")
 service.get_registry = lambda: types.SimpleNamespace(run_startup=startup)
 service.configured_tcp_port = lambda: 0
 service.start_pipe_server = no_pipe

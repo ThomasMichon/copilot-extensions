@@ -1262,7 +1262,7 @@ def test_run_launch_delegates_to_relocated_script_on_windows(monkeypatch, tmp_pa
     # (--worktree-id), never re-issuing --new (which would create a SECOND
     # worktree by re-triggering creation inside the script's own resolve).
     assert "--new" not in argv
-    assert argv[-3:] == ["--worktree-id", "resolved-id-1234", "--first-launch"]
+    assert argv[-2:] == ["--worktree-id", "resolved-id-1234"]
 
 
 def test_run_launch_relocated_script_uses_base_flag_for_anchor_mode(

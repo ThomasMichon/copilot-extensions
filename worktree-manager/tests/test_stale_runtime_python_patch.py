@@ -28,7 +28,6 @@ Two guards per platform, mirroring test_launch_passthrough.py:
 from __future__ import annotations
 
 import json
-import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -170,51 +169,3 @@ def test_sh_launcher_still_has_the_patch():
     text = _LAUNCH_SH.read_text(encoding="utf-8")
     assert '"${CMD_ARRAY[$_i]}" == "--runtime-python"' in text
     assert 'CMD_ARRAY[$_next]="$PYTHON"' in text
-
-
-@pytest.mark.skipif(_PWSH is None, reason="pwsh/powershell not available")
-def test_actual_ps1_patch_refreshes_admission_only_fallback(tmp_path):
-    source = _LAUNCH_PS1.read_text(encoding="utf-8")
-    start = source.index("if ($plan.cmd) {", source.index("# Patch a stale"))
-    patch = source[start:source.index("# Apply environment variables", start)]
-    command = [
-        r"C:\retired\python.exe", "-m", "agent_worktrees.launch_seed_exec",
-        "--record", r"C:\state\wt-a.yaml", "--admission-only", "--preserve-seed-id", "original-a",
-        "--", "copilot",
-    ]
-    fresh = r"C:\current\python.exe"
-    script = tmp_path / "admission-patch.ps1"
-    script.write_text(
-        "param([string]$CommandJson, [string]$VenvPython)\n"
-        "$plan = [pscustomobject]@{cmd=@($CommandJson | ConvertFrom-Json);seed_pending=$false}\n"
-        "function Write-SetupLog { param($Message,$Level) }\n"
-        + patch + "\nConvertTo-Json -Compress -InputObject @($plan.cmd)\n",
-        encoding="utf-8",
-    )
-    result = subprocess.run(
-        [_PWSH, "-NoProfile", "-File", str(script), json.dumps(command), fresh],
-        capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    assert result.returncode == 0, result.stderr
-    assert json.loads(result.stdout) == [fresh, *command[1:]]
-
-
-@pytest.mark.skipif(_BASH is None, reason="bash not available")
-def test_actual_sh_patch_refreshes_admission_only_fallback():
-    source = _LAUNCH_SH.read_text(encoding="utf-8")
-    start = source.index('    if [[ "${CMD_ARRAY[1]:-}" == "-m"', source.index('PYTHON="$_REFRESHED_PYTHON"'))
-    patch = source[start:source.index("    _HEADED_SHELL_INDEX=0", start)]
-    command = [
-        "/retired/python", "-m", "agent_worktrees.launch_seed_exec",
-        "--record", "/state/wt-a.yaml", "--admission-only", "--preserve-seed-id", "original-a",
-        "--", "copilot",
-    ]
-    result = subprocess.run(
-        [_BASH, "-c", 'CMD_ARRAY=("$@")\nPYTHON=/current/python\n_PENDING_NEW_SEED=0\n'
-         + patch + '\nprintf "%s\\n" "${CMD_ARRAY[@]}"\n', "_", *command],
-        capture_output=True, text=True, timeout=20,
-        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-    )
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.splitlines() == ["/current/python", *command[1:]]

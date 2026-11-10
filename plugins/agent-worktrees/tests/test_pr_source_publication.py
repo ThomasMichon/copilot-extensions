@@ -96,69 +96,6 @@ def test_publishes_only_source_and_preserves_user_branch_and_hook(publication):
     assert "source.txt" in files and "a.txt" not in files and "b.txt" not in files
 
 
-def test_delegated_probes_and_transport_release_clone_lock_for_another_worktree(
-    publication, monkeypatch, tmp_path,
-):
-    from concurrent.futures import ThreadPoolExecutor
-
-    p = publication
-    other = tmp_path / "other-source"
-    git_ops.git("worktree", "add", "--detach", str(other), "HEAD", cwd=p.workspace)
-    original_probe, original_push = source.observed_ref, git_ops.push
-    phases = []
-    def acquire():
-        with pr_publish.publish_lock(str(other), acquire_timeout=1):
-            return True
-    with ThreadPoolExecutor(max_workers=1) as pool:
-        def probe(*args, **kwargs):
-            assert pool.submit(acquire).result(timeout=3)
-            phases.append("probe")
-            return original_probe(*args, **kwargs)
-        def transport(*args, **kwargs):
-            assert pool.submit(acquire).result(timeout=3)
-            phases.append("transport")
-            return original_push(*args, **kwargs)
-        monkeypatch.setattr(source, "observed_ref", probe)
-        monkeypatch.setattr(git_ops, "push", transport)
-        value = publish(p)
-    assert value["ok"] and remote_head(p) == p.head, value
-    assert "probe" in phases and "transport" in phases
-
-
-@pytest.mark.parametrize("drift", ["source", "caller"])
-def test_final_local_admission_rechecks_source_and_caller_after_transport_preparation(
-    publication, monkeypatch, drift,
-):
-    from agent_worktrees import tracking
-
-    p = publication
-    original_push, original_settings = pr_publish.push_checked, pr_publish._transport_settings
-    preparing = [False]
-    moved = []
-    def push(*args, **kwargs):
-        preparing[0] = True
-        try:
-            return original_push(*args, **kwargs)
-        finally:
-            preparing[0] = False
-    def settings(*args, **kwargs):
-        result = original_settings(*args, **kwargs)
-        if preparing[0] and not moved:
-            moved.append(drift)
-            if drift == "source":
-                git_ops.git("commit", "--allow-empty", "-qm", "source moved before transport", cwd=p.workspace)
-            else:
-                record = tracking.load_record_by_id(p.wid)
-                record.status = "finalized"
-                tracking.save_record(record)
-        return result
-    monkeypatch.setattr(pr_publish, "push_checked", push)
-    monkeypatch.setattr(pr_publish, "_transport_settings", settings)
-    value = publish(p)
-    assert moved and not value["ok"] and not remote_head(p), value
-    assert "HEAD differs" in value["error"] if drift == "source" else "managed workspace" in value["error"]
-
-
 def test_real_pre_push_refusal_preserves_remote(publication):
     p = publication
     hook = p.workspace / ".git" / "hooks" / "pre-push"

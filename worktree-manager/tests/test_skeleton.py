@@ -4,8 +4,6 @@ programmatic, non-agentic, out-of-plugin entry point.
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from worktree_manager import __version__
@@ -45,58 +43,6 @@ def test_bare_run_prints_observed_status(monkeypatch, capsys):
     assert "you are here" not in out
     assert "Build-out roadmap" not in out
     assert "setup" not in out
-
-
-@pytest.mark.parametrize(
-    "stdin,stdout,stderr,interactive",
-    [
-        (True, True, False, True),
-        (True, False, True, True),
-        (False, True, True, False),
-        (True, False, False, False),
-        (None, True, True, False),
-        ("broken", True, False, False),
-        (True, "broken", False, False),
-        (True, None, None, False),
-    ],
-)
-def test_bare_entry_requires_input_and_output_terminal(
-    monkeypatch, stdin, stdout, stderr, interactive,
-):
-    calls = []
-
-    def stream(value):
-        if value is None:
-            return None
-        if value == "broken":
-            def fail():
-                raise OSError("closed")
-            return SimpleNamespace(isatty=fail)
-        return SimpleNamespace(isatty=lambda: value)
-
-    monkeypatch.setattr(entrypoint.sys, "stdin", stream(stdin))
-    monkeypatch.setattr(entrypoint.sys, "stdout", stream(stdout))
-    monkeypatch.setattr(entrypoint.sys, "stderr", stream(stderr))
-    monkeypatch.setattr(entrypoint, "_print_intro", lambda: calls.append("text"))
-    monkeypatch.setattr(
-        entrypoint, "_run_production_picker",
-        lambda project, **kwargs: calls.append((project, kwargs)) or 19,
-    )
-    assert main([]) == (19 if interactive else 0)
-    assert calls == ([("", {"front_door": True})] if interactive else ["text"])
-
-
-def test_explicit_entry_never_uses_implicit_front_door(monkeypatch, capsys):
-    monkeypatch.setattr(entrypoint.sys, "stdin", SimpleNamespace(isatty=lambda: True))
-    calls = []
-    monkeypatch.setattr(
-        entrypoint, "_cmd_picker", lambda args: calls.append(args) or 17,
-    )
-    assert main(["--version"]) == 0
-    assert main(["--help"]) == 0
-    assert main(["picker", "example", "--json"]) == 17
-    assert main(["--project", "example"]) == 17
-    assert calls == [["example", "--json"], ["example"]]
 
 
 def test_project_only_invocation_launches_picker(monkeypatch):

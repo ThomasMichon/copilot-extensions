@@ -24,7 +24,6 @@ jobs:
     outputs:
       source_sha: ${{ steps.admit.outputs.source_sha }}
       packet: ${{ steps.admit.outputs.packet }}
-      native: ${{ steps.admit.outputs.native }}
     steps:
       - name: Require original and rerun owner on default-branch control
         env:
@@ -84,7 +83,7 @@ jobs:
           --system pytest pytest-timeout pytest-asyncio pyyaml packaging
       - name: Prepare pinned native caller prerequisites only on this disposable runner
         id: native
-        if: needs.admit.outputs.native == 'true'
+        if: needs.admit.outputs.packet == 'native-worktrees-embody'
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:RUNNER_TEMP "winqual-native-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
@@ -117,7 +116,7 @@ jobs:
           }
           "COPILOT_DRIVER_HEADED_MUX_E2E=1" >> $env:GITHUB_ENV
       - name: Execute typed selection through canonical bounded owners
-        if: ${{ success() || (failure() && needs.admit.outputs.native == 'true' && steps.native.outcome == 'failure') }}
+        if: ${{ success() || (failure() && needs.admit.outputs.packet == 'native-worktrees-embody' && steps.native.outcome == 'failure') }}
         env:
           UV_DEFAULT_INDEX: ${{ needs.admit.outputs.packet == 'native-worktrees-embody' && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
           WINDOWS_QUALIFICATION_NATIVE_PREPARATION: ${{ steps.native.outcome }}
@@ -126,12 +125,12 @@ jobs:
           --candidate candidate --output evidence
       - name: Sanitize native evidence independently after worker interruption
         id: sanitize
-        if: always() && needs.admit.outputs.native == 'true'
+        if: always() && needs.admit.outputs.packet == 'native-worktrees-embody'
         env:
           UV_DEFAULT_INDEX: ${{ needs.admit.outputs.packet == 'native-worktrees-embody' && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
         run: python control/tools/windows_qualification_worker.py sanitize --output evidence
       - name: Retain request-bound evidence even after failure
-        if: ${{ always() && (needs.admit.outputs.native != 'true' || steps.sanitize.outcome == 'success') }}
+        if: ${{ always() && (needs.admit.outputs.packet != 'native-worktrees-embody' || steps.sanitize.outcome == 'success') }}
         uses: actions/upload-artifact@v4
         with:
           name: winqual-${{ inputs.request_id }}-${{ github.run_attempt }}

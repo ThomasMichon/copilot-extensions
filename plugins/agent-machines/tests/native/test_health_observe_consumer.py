@@ -116,27 +116,6 @@ def roundtrip(tmp_path, monkeypatch, body):
     assert sample["domains"]["local_listener"]["state"] == "stale"
     assert sample["domains"]["local_listener"]["observed_state"] == "ok"
     assert older["carrier_receipt"] == "not-observed"
-    before = {path.name: path.read_bytes() for path in store.iterdir()}
-    chart = tmp_path / "composed.svg"
-    report = call([
-        "report", "--store-dir", str(store), "--now", (now + timedelta(hours=2)).isoformat(),
-        "--chart", str(chart),
-    ])
-    assert report["health"] == {"state": "available", "view": older}
-    assert report["coverage"]["accepted_records"] == 0
-    assert all(hour["state"] == "no-observation" for hour in report["hours"])
-    assert "observed ok;" in chart.read_text(encoding="utf-8")
-    assert "input-supplied-not-verified" in chart.read_text(encoding="utf-8")
-    assert {path.name: path.read_bytes() for path in store.iterdir()} == before
-    unsafe_chart = store / "unrelated.svg"
-    refused = subprocess.run(
-        [sys.executable, "-I", "-m", "agent_machines", "health", "report",
-         "--store-dir", str(store), "--chart", str(unsafe_chart)],
-        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
-    )
-    assert refused.returncode == 2, refused.stderr
-    assert not unsafe_chart.exists()
-    assert {path.name: path.read_bytes() for path in store.iterdir()} == before
 
 
 def test_native_http_observation_to_normal_slot_and_age_qualified_reader(tmp_path, monkeypatch):

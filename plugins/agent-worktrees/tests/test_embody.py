@@ -126,7 +126,7 @@ class TestMuxNewSession:
         monkeypatch.setattr(subprocess, "run", lambda *a, **k: R())
         out = sessions.mux_new_session("id", "/w", ["copilot"], None, mux="tmux")
         assert out["ok"] is False
-        assert out["new_pane"] is None and "uncertain" in out["error"]
+        assert "duplicate session" in out["error"]
 
 
 # -- cmd_embody control flow ------------------------------------------------
@@ -421,69 +421,6 @@ class TestCmdEmbody:
         assert out["seed_delivery"] == "native-startup" and out["seed_deferred"] is True
         assert out["seed_reason"] == "native-startup-pending"
         assert out["seeded"] is False and out["seed_submitted"] is False
-
-    @pytest.mark.parametrize("resume_target,preserved_seed,refused", [
-        (None, None, False),
-        ("original-history", None, False),
-        ("original-history", "a" * 32, False),
-        ("original-history", None, True),
-    ])
-    def test_seedless_cold_launch_uses_admission_owner_without_claiming_resume_intent(
-        self, monkeypatch, capfd, tmp_path, resume_target, preserved_seed, refused,
-    ):
-        from agent_worktrees import launch_seed_exec, launch_seed_state
-
-        _stub_config(monkeypatch)
-        monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda r: "wtAdmission")
-        monkeypatch.setattr(m.cfg, "tracking_dir", lambda: tmp_path)
-        path = tmp_path / "wtAdmission.yaml"
-        path.write_text("x")
-        record = type("Rec", (), {"worktree_path": "/w/wtAdmission"})()
-        monkeypatch.setattr(m.tracking, "load_record", lambda p: record)
-        monkeypatch.setattr(sessions, "has_mux_session", lambda w: False)
-        monkeypatch.setattr(embody_resume, "resume_target", lambda *a, **k: resume_target)
-        monkeypatch.setattr(embody_resume, "live_head_refusal", lambda *a: None)
-        pending = (
-            launch_seed_state.LaunchSeed(preserved_seed, "resume", "retained intent", 1)
-            if preserved_seed else None
-        )
-
-        def peek(selected, *, read_only):
-            assert selected == path and read_only
-            return pending
-
-        monkeypatch.setattr(launch_seed_state, "peek", peek)
-        monkeypatch.setattr(launch_seed_state, "take", lambda *a, **k: pytest.fail("no seed claim"))
-        monkeypatch.setattr(
-            launch_seed_exec, "copied_setup_command", lambda *a: pytest.fail("no copy-only fallback"),
-        )
-        observed = []
-
-        def prepare(command, selected, **kwargs):
-            observed.append(("prepare", command, selected, kwargs))
-            if refused:
-                raise OSError("admission preparation refused")
-            return ["admitted", *command]
-
-        def spawn(wt, wd, command, env):
-            observed.append(("spawn", command))
-            return {"ok": True, "session": "wt-wtAdmission", "new_pane": "%5"}
-
-        monkeypatch.setattr(launch_seed_exec, "deferred_command", prepare)
-        monkeypatch.setattr(sessions, "mux_new_session", spawn)
-        rc = m.cmd_embody(_ns(worktree_id="wtAdmission"))
-        result = json.loads(capfd.readouterr().out)
-        command = ["copilot", *([f"--resume={resume_target}"] if resume_target else [])]
-        assert observed[0] == ("prepare", command, path, {
-            "admission_only": True, "preserve_seed_id": preserved_seed,
-            "environment": {}, "mux": True,
-        })
-        if refused:
-            assert rc == 3 and "admission preparation refused" in result["error"]
-            assert len(observed) == 1
-        else:
-            assert rc == 0 and result["resume_session"] == resume_target
-            assert observed[1:] == [("spawn", ["admitted", *command])]
 
     @pytest.mark.parametrize("copy_fails", [False, True])
     def test_cold_launch_copies_setup_before_mux_without_taking_seed_ownership(
@@ -881,7 +818,6 @@ class TestCmdEmbody:
 
         monkeypatch.setattr(m, "_create_worktree_core", _create)
         monkeypatch.setattr(sessions, "has_mux_session", lambda w: True)
-        monkeypatch.setattr(sessions, "mux_copilot_pane", lambda w: "%1")
 
         rc = m.cmd_embody(_ns(new=True, recovery=True))
 
@@ -1440,10 +1376,7 @@ class TestCmdEmbody:
         assert rc == 0
         out = json.loads(capfd.readouterr().out)
         assert out["created"] is True and out["resume_session"] == "head-1"
-        command = spawned["cmd"]
-        assert command[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
-        assert "--admission-only" in command[:command.index("--")]
-        assert command[command.index("--") + 1:] == ["copilot", "--resume=head-1"]
+        assert spawned["cmd"] == ["copilot", "--resume=head-1"]
 
     @pytest.mark.parametrize("state, why", [
         ("live", "already running"),  # a bare-terminal Copilot on the same conversation
@@ -1483,10 +1416,7 @@ class TestCmdEmbody:
         monkeypatch.setattr(sessions, "mux_new_session", _spawn)
         assert m.cmd_embody(_ns(worktree_id="wtR")) == 0
         assert loads["n"] >= 2
-        command = spawned["cmd"]
-        assert command[1:3] == ["-m", "agent_worktrees.launch_seed_exec"]
-        assert "--admission-only" in command[:command.index("--")]
-        assert command[command.index("--") + 1:] == ["copilot", "--resume=fresh-head"]
+        assert spawned["cmd"] == ["copilot", "--resume=fresh-head"]
         assert json.loads(capfd.readouterr().out)["resume_session"] == "fresh-head"
 
 

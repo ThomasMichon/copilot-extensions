@@ -1,7 +1,0 @@
-{
-  "schema": "process-telemetry.hourly-reporting",
-  "version": 1,
-  "service": "agent-dispatch",
-  "operation": "telemetry-hourly",
-  "metrics": ["task-lifecycle", "operation-duration"]
-}

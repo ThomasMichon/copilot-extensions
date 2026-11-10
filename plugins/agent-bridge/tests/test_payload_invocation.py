@@ -274,8 +274,6 @@ assert os.path.samefile(sys.executable, os.environ["EXPECTED_RUNTIME_PYTHON"])
 assert os.path.samefile(sys.prefix, os.environ["EXPECTED_RUNTIME_SLOT"])
 assert os.path.samefile(os.environ["AGENT_BRIDGE_INSTALL_DIR"],
                         os.environ["EXPECTED_RUNTIME_ROOT"])
-assert os.path.samefile(os.environ["AGENT_RT_ROOT"],
-                        os.environ["EXPECTED_RUNTIME_ROOT"])
 if os.environ.get("PROBE_REAL_CARRIER"):
     from agent_bridge.carrier import cmd_carrier_stdio
     cmd_carrier_stdio()
@@ -522,37 +520,6 @@ def test_generated_windows_prompt_stdin(
         job.terminate_and_wait(2)
         process.wait(timeout=2)
         job.close()
-
-
-@pytest.mark.parametrize("surface", ["payload", "management"])
-@pytest.mark.parametrize("previous", [None, "caller-owned-runtime"])
-@pytest.mark.skipif(os.name != "nt", reason="PowerShell caller environment")
-def test_windows_entrypoint_restores_callers_runtime_root(
-    windows_payload_runtime, surface: str, previous: str | None,
-) -> None:
-    plugin, legacy_bin, base_env = windows_payload_runtime
-    environment = dict(base_env)
-    if previous is None:
-        environment.pop("AGENT_RT_ROOT", None)
-    else:
-        environment["AGENT_RT_ROOT"] = previous
-    shim = (plugin / "bin" if surface == "payload" else legacy_bin) / "agent-bridge.ps1"
-    expected = "$null" if previous is None else f"'{previous}'"
-    script = (
-        f"& '{str(shim).replace(chr(39), chr(39) * 2)}' send example --prompt-file -; "
-        "$code = $LASTEXITCODE; "
-        f"if ($env:AGENT_RT_ROOT -cne {expected}) {{ throw 'runtime root leaked into caller' }}; "
-        "exit $code"
-    )
-    host = shutil.which("pwsh") or shutil.which("powershell")
-    assert host is not None
-    result = subprocess.run(
-        [host, "-NoProfile", "-NonInteractive", "-Command", script],
-        input=b"fixture prompt", capture_output=True, env=environment, timeout=20,
-        **no_window_kwargs(),
-    )
-    assert result.returncode == 17, result.stderr
-    assert result.stdout == b"fixture prompt"
 
 
 @pytest.mark.portfolio_tier("T3")

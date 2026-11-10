@@ -716,10 +716,6 @@ another health database or an executable found on PATH. It is caller-contained
 and bounded to one 60-second selection/observation/cleanup budget, reserving five
 seconds for settlement. A refused, interrupted, changed, unsupported or
 not-ready result cannot pass. A fully observed empty required set can pass.
-The caller-owned observation qualifies readiness inputs only, not a repair
-plan or every unrelated file in an enabled payload. Its digest cannot authorize
-an installer apply. Required-owner qualification and inventory completeness
-remain mandatory; an unavailable enabled contribution is not silently optional.
 Failures distinguish profile selection, runtime selection, observation and
 profile revalidation. A budget exhaustion names that stage rather than implying
 that a qualified runtime lacks support; raw child arguments and output are not

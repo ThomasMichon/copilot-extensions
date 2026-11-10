@@ -1,7 +1,7 @@
 """Manager-owned contracts for plugin-contributed Picker surfaces.
 
 Plugins contribute static JSON manifests in ``pivots/*.json`` inside their own
-active payload. The Worktree Manager discovers and validates those files
+installed payload. The Worktree Manager discovers and validates those files
 directly; contributors never import the Manager and never need to copy a file
 into Manager-owned state.
 """
@@ -15,12 +15,15 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
-from plugin_activation import resolve_active_plugins
 from .configuration_preview import validate_preview_actions
 from .form_drafts import parse_draft
 from .form_requests import validate_request_placement
 
-from .harness_state import build_projects
+from .harness_state import (
+    build_projects,
+    repo_plugin_enablement,
+    user_enabled_plugins,
+)
 if TYPE_CHECKING:
     from .production_picker.picker_tui.pivot_create_action import CreateAction
 
@@ -521,6 +524,18 @@ def parse_manifest(
     )
 
 
+def _enabled_keys(project: str | None, home_dir: Path | None) -> set[str]:
+    enabled = {
+        item.qualified: item.enabled
+        for item in user_enabled_plugins(home_dir)
+    }
+    if project:
+        match = next((p for p in build_projects(home_dir) if p.name == project), None)
+        if match and match.repo:
+            enabled.update(repo_plugin_enablement(match.repo.path))
+    return {name for name, value in enabled.items() if value}
+
+
 def _probe_commands(
     contribution: PluginContribution,
 ) -> tuple[PluginContribution, list[str]]:
@@ -604,13 +619,6 @@ def _legacy_pivots_dir(home_dir: Path | None) -> Path:
     return home / ".agent-worktrees" / "pivots"
 
 
-@dataclass(frozen=True)
-class _ManifestSource:
-    path: Path
-    marketplace: str
-    plugin: str
-
-
 def discover_contracts(
     *,
     project: str | None = None,
@@ -618,35 +626,15 @@ def discover_contracts(
     plugins_root: str | os.PathLike[str] | None = None,
 ) -> ContractReport:
     root = installed_plugins_dir(plugins_root, home_dir=home_dir)
+    enabled = _enabled_keys(project, home_dir)
     contributions: list[PluginContribution] = []
     findings: list[ContractFinding] = []
     seen_labels: dict[str, PluginContribution] = {}
     home_contributions: list[PluginContribution] = []
-    enabled_payloads: dict[str, list[_ManifestSource]] = {}
-    checkout = None
-    if project:
-        match = next((p for p in build_projects(home_dir) if p.name == project), None)
-        if match and match.anchor:
-            checkout = Path(match.anchor)
-    activation = resolve_active_plugins(
-        home=home_dir or Path(os.environ.get("USERPROFILE") or os.path.expanduser("~")),
-        include_projects=False,
-        project_root=checkout,
-    )
-    enabled = activation.decisions.keys()
-    for finding in activation.findings:
-        plugin, _, marketplace = (finding.owner or "").partition("@")
-        findings.append(ContractFinding(
-            code=f"activation-{finding.reason}",
-            severity="info" if finding.status == "advisory" else "warning",
-            marketplace=marketplace,
-            plugin=plugin,
-            source_path=str(finding.entry),
-            detail=finding.detail or finding.target or finding.reason,
-        ))
+    enabled_payloads: dict[str, list[Path]] = {}
 
     try:
-        cached = sorted(root.glob("*/*/pivots/*.json"))
+        manifests = sorted(root.glob("*/*/pivots/*.json"))
     except OSError as exc:
         findings.append(ContractFinding(
             code="registry-unreadable",
@@ -656,13 +644,9 @@ def discover_contracts(
             source_path=str(root),
             detail=str(exc),
         ))
-        cached = []
+        manifests = []
 
-    manifests: list[_ManifestSource] = []
-    overridden = plugins_root is not None or any(
-        os.environ.get(key) for key in (PLUGINS_ROOT_ENV, "AGENT_WORKTREES_PLUGINS_DIR")
-    )
-    for path in cached:
+    for path in manifests:
         marketplace = path.parents[2].name
         plugin = path.parents[1].name
         qualified = f"{plugin}@{marketplace}"
@@ -677,38 +661,7 @@ def discover_contracts(
                 + (f" for project {project}" if project else " user-global"),
             ))
             continue
-        if overridden:
-            manifests.append(_ManifestSource(path, marketplace, plugin))
-    for qualified, active in activation.active.items():
-        if qualified not in enabled:
-            continue
-        selected = active.root_for_scope("project:current") if checkout else None
-        selected = selected or active.root_for_scope("global")
-        if selected is None:
-            continue
-        if overridden and not any(
-            item.root == selected and item.kind == "directory" for item in active.live_roots
-        ):
-            continue
-        manifests = [
-            item for item in manifests
-            if (item.marketplace, item.plugin) != (active.marketplace, active.name)
-        ]
-        try:
-            manifests.extend(
-                _ManifestSource(path, active.marketplace, active.name)
-                for path in sorted((selected / "pivots").glob("*.json"))
-            )
-        except OSError as exc:
-            findings.append(ContractFinding(
-                code="registry-unreadable", severity="error",
-                marketplace=active.marketplace, plugin=active.name,
-                source_path=str(selected / "pivots"), detail=str(exc),
-            ))
-
-    for source in manifests:
-        path, marketplace, plugin = source.path, source.marketplace, source.plugin
-        enabled_payloads.setdefault(path.name, []).append(source)
+        enabled_payloads.setdefault(path.name, []).append(path)
         try:
             raw = json.loads(path.read_text("utf-8"))
             if not isinstance(raw, Mapping):
@@ -856,14 +809,14 @@ def discover_contracts(
             continue
         if len(owners) == 1:
             try:
-                if legacy.read_bytes() != owners[0].path.read_bytes():
+                if legacy.read_bytes() != owners[0].read_bytes():
                     findings.append(ContractFinding(
                         code="stale-legacy-dropin",
                         severity="info",
-                        marketplace=owners[0].marketplace,
-                        plugin=owners[0].plugin,
+                        marketplace=owners[0].parents[2].name,
+                        plugin=owners[0].parents[1].name,
                         source_path=str(legacy),
-                        detail=f"legacy Picker copy differs from {owners[0].path}",
+                        detail=f"legacy Picker copy differs from {owners[0]}",
                     ))
             except OSError as exc:
                 findings.append(ContractFinding(

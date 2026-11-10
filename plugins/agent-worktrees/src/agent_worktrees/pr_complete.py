@@ -33,8 +33,6 @@ keeps working.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-
 from pathlib import Path
 import subprocess
 import tempfile
@@ -243,8 +241,7 @@ def _branch_fully_merged(
 
 
 def complete_worktree(
-    worktree_id: str, config: Config, *, dry_run: bool = False,
-    validate_source: Callable[[], None] | None = None,
+    worktree_id: str, config: Config, *, dry_run: bool = False
 ) -> dict:
     """Reconcile ``worktree_id`` onto the updated default branch after a merge.
 
@@ -256,43 +253,15 @@ def complete_worktree(
       upstream, dropping the redundant local commits (no replay).
     - ``rebased``        -- the branch carried genuinely-new commits; rebased onto
       upstream (already-merged commits drop, new ones preserved).
-    - ``error``          -- a blocker or unconfirmed completion; ``error``
-      explains and any accumulated recovery ref is retained. An observation
-      failure after history mutation does not promise an unchanged branch.
+    - ``error``          -- a blocker (dirty tree, detached HEAD, conflict, …);
+      ``error`` field explains, the branch is left untouched.
     """
-    base: dict = {"success": False, "worktree_id": worktree_id}
-    try:
-        return _complete_worktree(
-            worktree_id, config, base, dry_run=dry_run, validate_source=validate_source,
-        )
-    except Exception as exc:
-        return {**base, "success": False, "action": "error",
-                "error": (
-                    f"Source reconciliation is unconfirmed: {exc}. "
-                    "Inspect retained Git state before retrying."
-                )}
-
-
-def _complete_worktree(
-    worktree_id: str, config: Config, base: dict, *, dry_run: bool,
-    validate_source: Callable[[], None] | None,
-) -> dict:
     repo = config.default_repo
     remote = repo.remote
     upstream = f"{remote}/{repo.default_branch}"
     worktree_path = tracking.resolve_worktree_path(worktree_id, repo.worktree_root)
-    base["upstream"] = upstream
+    base: dict = {"success": False, "worktree_id": worktree_id, "upstream": upstream}
 
-    def admission_error():
-        if validate_source is not None:
-            try:
-                validate_source()
-            except (OSError, ValueError, RuntimeError, git_ops.GitError, subprocess.SubprocessError) as exc:
-                return {**base, "action": "error", "error": str(exc)}
-        return None
-
-    if refusal := admission_error():
-        return refusal
     if not Path(worktree_path).exists():
         return {**base, "action": "error",
                 "error": f"Worktree path not found: {worktree_path}"}
@@ -318,8 +287,6 @@ def _complete_worktree(
 
     if not git_ops.ref_exists(upstream, cwd=worktree_path):
         return {**base, "action": "error", "error": f"Upstream {upstream} not found after fetch."}
-    if refusal := admission_error():
-        return refusal
 
     mb = git_ops.git("merge-base", upstream, branch, cwd=worktree_path, check=False)
     if mb.returncode != 0:
@@ -329,8 +296,6 @@ def _complete_worktree(
     ahead = git_ops._rev_count(f"{merge_base}..{branch}", cwd=worktree_path)
     behind = git_ops._rev_count(f"{branch}..{upstream}", cwd=worktree_path)
     base.update(ahead=ahead, behind=behind)
-    if refusal := admission_error():
-        return refusal
 
     # No local commits: a plain fast-forward (or already current).
     if ahead == 0:
@@ -340,8 +305,6 @@ def _complete_worktree(
         if dry_run:
             return {**base, "success": True, "action": "fast-forwarded",
                     "message": f"Would fast-forward {branch} to {upstream} ({behind} behind)."}
-        if refusal := admission_error():
-            return refusal
         if not git_ops.merge_ff(upstream, cwd=worktree_path):
             return {**base, "action": "error",
                     "error": f"Fast-forward of {branch} to {upstream} failed."}
@@ -358,8 +321,6 @@ def _complete_worktree(
     )
     merged_pr_head = merged_pr[0] if merged_pr else None
     post_merge_commits = merged_pr[1] if merged_pr else 0
-    if refusal := admission_error():
-        return refusal
 
     if dry_run:
         if merged_pr_head:
@@ -385,8 +346,6 @@ def _complete_worktree(
 
     # Back up the pre-reconcile tip so any dropped commit stays recoverable,
     # whichever path is taken below.
-    if refusal := admission_error():
-        return refusal
     pre_result = git_ops.git(
         "rev-parse", branch, cwd=worktree_path, check=False,
     )
@@ -413,8 +372,6 @@ def _complete_worktree(
                 )}
 
     base["backup_ref"] = backup_ref
-    if refusal := admission_error():
-        return refusal
 
     # A tracked merged PR gives us the exact boundary between the squashed PR
     # commits and later local work. Rebase only the latter; replaying the former
@@ -500,8 +457,6 @@ def _complete_worktree(
                 "error": (f"Rebase of {branch} onto {upstream} hit a conflict and "
                           "was aborted; the branch is unchanged. Resolve by hand "
                           f"(git rebase {upstream}), then retry.")}
-    if refusal := admission_error():
-        return refusal
     reset = git_ops.git("reset", "--hard", upstream, cwd=worktree_path, check=False)
     if reset.returncode != 0:
         return {**base, "action": "error",

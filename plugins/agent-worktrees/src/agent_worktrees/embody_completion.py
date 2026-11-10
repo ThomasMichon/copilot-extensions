@@ -80,21 +80,6 @@ def prepare_startup_seed(
     )
 
 
-def prepare_mux_command(
-    command: list[str], record_path: Path, *, admission_only: bool,
-    environment: dict[str, str],
-) -> list[str]:
-    """Keep cold seedless admission separate from existing prompt owners."""
-    if not admission_only:
-        return launch_seed_exec.copied_setup_command(command, record_path)
-    pending = launch_seed_state.peek(record_path, read_only=True)
-    return launch_seed_exec.deferred_command(
-        command, record_path, admission_only=True,
-        preserve_seed_id=pending.seed_id if pending else None,
-        environment=environment, mux=True,
-    )
-
-
 def complete_launch(
     args, *, wt_id, work_dir, record, acquisition, deferred, explicit_seed, seed,
     prepared_context, resume_target, driver, selection, result, cfg, sessions,

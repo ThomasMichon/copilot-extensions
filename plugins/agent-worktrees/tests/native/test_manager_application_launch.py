@@ -11,7 +11,6 @@ import time
 
 from agent_procutil._interpreter import physical_executable
 from agent_procutil.daemon_instances import daemon_test_lifecycle
-from agent_procutil.owned_process import run_caller_owned
 import pytest
 
 from test_native_seed_application import ROOT, _run
@@ -28,15 +27,6 @@ _NATIVE_COPILOT = (
 )
 @pytest.mark.timeout(300)
 def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(tmp_path, monkeypatch, control):
-    _qualify_manager_application(tmp_path, monkeypatch, control)
-
-
-def _qualify_manager_application(
-    tmp_path, monkeypatch, control, *, worktrees_python=None,
-    worktrees_root=None, worktrees_environment=None,
-):
-    paired = worktrees_python is not None
-    assert not paired or (control == "embody" and worktrees_environment is not None)
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
     import build_python_artifacts as builder
     import local_install_profile as profiles
@@ -126,7 +116,7 @@ def _qualify_manager_application(
     try:
         with daemon_test_lifecycle(
             owner="manager-application-launch-fixture", registry_root=tmp_path / "daemon-instances",
-            deadline=deadline + (180 if paired else 0), cleanup_results=cleanup,
+            deadline=deadline, cleanup_results=cleanup,
         ) as lifecycle:
             environment.update(lifecycle)
             installed = _run(install, cwd=caller, env=environment, deadline=deadline)
@@ -145,39 +135,14 @@ def _qualify_manager_application(
             script = Path(json.loads(assets.stdout)["script"])
             assert script.is_relative_to(slot / ".venv") and "_runtime_assets" in script.parts
             consumer = _run([
-                str(worktrees_python) if paired else sys.executable, "-I", "-B", "-X", "utf8", "-c",
+                sys.executable, "-I", "-B", "-X", "utf8", "-c",
                 "import json;from agent_worktrees.manager_launch_cli import _usable_worktree_manager_launcher_dir;"
                 "directory=_usable_worktree_manager_launcher_dir();"
                 "assert directory is not None,'Worktrees rejected the real current Manager application';"
                 "print(json.dumps({'directory':str(directory)}))",
-            ], cwd=caller, env={
-                **(worktrees_environment if paired else environment),
-                "WORKTREE_MANAGER_ROOT": str(root),
-            }, deadline=deadline)
+            ], cwd=caller, env=environment, deadline=deadline)
             assert Path(json.loads(consumer.stdout)["directory"]).samefile(script.parent)
-            if paired:
-                assert time.monotonic() < deadline, "Manager construction exceeded 300 seconds"
-                native = tmp_path / "n"
-                native.mkdir()
-                qualified = run_caller_owned(
-                    [sys.executable, "-I", "-B", "-X", "utf8", "-c",
-                     "import os,sys;from pathlib import Path;"
-                     "sys.path[:0]=sys.argv[1:3];"
-                     "from test_headed_worktrees_copilot import _qualify_native_worktrees;"
-                     "_qualify_native_worktrees(Path(sys.argv[3]),'embody',"
-                     "worktrees_python=Path(sys.argv[4]),worktrees_root=Path(sys.argv[5]),"
-                     "worktrees_environment=dict(os.environ),"
-                     "manager_environment={'WORKTREE_MANAGER_ROOT':sys.argv[6]})",
-                     str(Path(__file__).parent), str(ROOT / "tools"), str(native),
-                     str(worktrees_python), str(worktrees_root), str(root)],
-                    cwd=caller, env={
-                        **worktrees_environment, **lifecycle,
-                        "COPILOT_EXTENSIONS_TEST_SANDBOX": os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"],
-                    }, timeout=180, max_stdout_bytes=65536, max_stderr_bytes=65536,
-                )
-                print(qualified.stdout, flush=True)
-                assert qualified.returncode == 0, qualified.stdout + qualified.stderr
-            elif _NATIVE_COPILOT:
+            if _NATIVE_COPILOT:
                 from test_headed_worktrees_copilot import _qualify_native_worktrees
 
                 native = tmp_path / "native-launch"

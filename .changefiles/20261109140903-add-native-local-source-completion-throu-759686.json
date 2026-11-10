@@ -1,9 +1,0 @@
-{
-  "comment": "Add native local source completion through the selected Worktrees owner with preview and unknown-outcome preservation",
-  "changes": [
-    {
-      "plugin": "agent-pull-requests",
-      "type": "patch"
-    }
-  ]
-}

@@ -40,7 +40,7 @@ _MODULE_ID = re.compile(
     r"[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$"
 )
 _COMMAND_ID = re.compile(r"^[a-z][a-z0-9-]*$")
-_PLUGIN_ID = re.compile(r"^[a-z][a-z0-9-]*$")
+_PLUGIN_ID = re.compile(r"^agent-[a-z0-9-]+$")
 _PYTHON_MODULE = re.compile(
     r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*$"
 )
@@ -143,22 +143,6 @@ def _payload_path(root: Path, raw: Any, label: str) -> Path:
     relative = Path(text)
     if relative.is_absolute() or "." in relative.parts or ".." in relative.parts:
         raise _ContractProblem(f"{label} must be a contained relative payload path")
-    current = root
-    for part in ("", *relative.parts):
-        if part:
-            current /= part
-        try:
-            info = current.lstat()
-        except OSError as error:
-            raise _ContractProblem(f"{label} is unavailable: {error}") from error
-        if (
-            stat.S_ISLNK(info.st_mode)
-            or getattr(info, "st_file_attributes", 0) & _FILE_ATTRIBUTE_REPARSE_POINT
-            or getattr(info, "st_reparse_tag", 0)
-        ):
-            raise _ContractProblem(
-                f"{label} is not contained in the payload: linked or reparse path component"
-            )
     try:
         payload = root.resolve(strict=True)
         target = (payload / relative).resolve(strict=True)

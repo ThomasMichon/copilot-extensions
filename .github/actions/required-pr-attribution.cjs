@@ -239,111 +239,8 @@ function snapshot(pr, peers) {
   })).digest("hex");
 }
 
-function ownedCheck(check, context) {
-  const repositoryUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
-  const runPrefix = repositoryUrl + "/actions/runs/";
-  const canonicalCheckUrl = Number.isSafeInteger(check.id) && check.id > 0 &&
-    check.details_url === `${repositoryUrl}/runs/${check.id}`;
-  return check.name === CONTEXT && check.app?.slug === "github-actions" &&
-    /^source-metadata:[a-f0-9]{64}(?::unverified)?(?::superseded)?$/.test(check.external_id || "") &&
-    typeof check.details_url === "string" && (canonicalCheckUrl ||
-      (check.details_url.startsWith(runPrefix) && /^[0-9]+$/.test(check.details_url.slice(runPrefix.length))));
-}
-
-async function reconcilePR(github, context, number, budget) {
-  const initial = await currentPR(github, context, number, budget);
-  if (initial.state !== "open" || initial.base.ref !== "dev") {
-    throw new Error("Scoped source refresh requires a current open dev pull request.");
-  }
-  const observed = await headPolicy(github, context, number, initial.head.sha, budget);
-  if (observed.pr.head.sha !== initial.head.sha || observed.pr.state !== "open" ||
-      observed.pr.base.ref !== "dev") throw new Error("Scoped pull request metadata changed; retry the check.");
-  const ownedRuns = async () => (await paginate(budget, github, github.rest.checks.listForRef, {
-    ...context.repo, ref: initial.head.sha, check_name: CONTEXT, filter: "all", per_page: 100,
-  })).filter((check) => ownedCheck(check, context));
-  const owned = await ownedRuns();
-  // Every attempted rewrite needs a reserved failure write, even if its response is lost.
-  budget.protectPending(owned.length);
-  const attempted = [];
-  let created;
-  let stable = false;
-  const output = {
-    title: "Required source attribution",
-    summary: observed.error ? `${observed.error}\n\n${REPAIR}` : "Required source metadata check completed.",
-  };
-  const failure = {
-    title: "Required source attribution",
-    summary: "Source metadata changed or could not be verified; this result is superseded.",
-  };
-  try {
-    if ((await headPolicy(github, context, number, initial.head.sha, budget)).snapshot !== observed.snapshot) {
-      throw new Error("Scoped pull request metadata changed; retry the check.");
-    }
-    created = await invoke(budget, () => github.rest.checks.create({
-      ...context.repo, name: CONTEXT, head_sha: initial.head.sha,
-      external_id: observed.snapshot, status: "in_progress",
-      details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-      output: { title: output.title, summary: "Validating current source metadata." },
-    }));
-    for (const check of owned) {
-      attempted.push(check.id);
-      await invoke(budget, () => github.rest.checks.update({
-        ...context.repo, check_run_id: check.id, external_id: observed.snapshot,
-        status: "completed", conclusion: observed.error ? "failure" : "success", output,
-      }));
-    }
-    if ((await headPolicy(github, context, number, initial.head.sha, budget)).snapshot !== observed.snapshot) {
-      throw new Error("Scoped pull request metadata changed; retry the check.");
-    }
-    await invoke(budget, () => github.rest.checks.update({
-      ...context.repo, check_run_id: created.data.id, status: "completed",
-      conclusion: observed.error ? "failure" : "success", output,
-    }));
-    const expected = new Set([...owned.map((check) => check.id), created.data.id]);
-    const confirmed = await ownedRuns();
-    if (confirmed.length !== expected.size || confirmed.some((check) =>
-      !expected.has(check.id) || check.external_id !== observed.snapshot ||
-      check.status !== "completed" || check.conclusion !== (observed.error ? "failure" : "success"))) {
-      throw new Error("Owned source check series changed during reconciliation; retry the check.");
-    }
-    stable = (await headPolicy(github, context, number, initial.head.sha, budget)).snapshot === observed.snapshot;
-    if (!stable) throw new Error("Scoped pull request metadata changed; retry the check.");
-  } finally {
-    try {
-      if (!stable) {
-        const failures = [];
-        const cleanup = async (operation) => {
-          try { await invoke(budget, operation, true); } catch (error) { failures.push(error); }
-        };
-        await cleanup(() => github.rest.checks.create({
-          ...context.repo, name: CONTEXT, head_sha: initial.head.sha,
-          external_id: observed.snapshot + ":superseded", status: "completed", conclusion: "failure",
-          details_url: `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
-          output: failure,
-        }));
-        for (const id of [...attempted, ...(created ? [created.data.id] : [])]) {
-          await cleanup(() => github.rest.checks.update({
-            ...context.repo, check_run_id: id, status: "completed", conclusion: "failure",
-            external_id: observed.snapshot + ":superseded", output: failure,
-          }));
-        }
-        if (failures.length) throw new AggregateError(failures, "Scoped source refresh failure fencing is incomplete.");
-      }
-    } finally { budget.release(); }
-  }
-}
-
-async function backfill({ github, context, core, head, pullRequest, requestLimit = 950,
+async function backfill({ github, context, core, head, requestLimit = 950,
   pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
-  if (pullRequest !== undefined) {
-    if (!/^[1-9][0-9]*$/.test(String(pullRequest)) || !Number.isSafeInteger(Number(pullRequest)) ||
-        head !== undefined || context.payload.inputs?.promotion_sha || context.payload.inputs?.promotion_run) {
-      throw new Error("Invalid or conflicting scoped pull request metadata.");
-    }
-    await reconcilePR(github, context, Number(pullRequest), new RefreshBudget(requestLimit));
-    core.info("Selected dev pull request source metadata checks reconciled.");
-    return;
-  }
   if (head !== undefined && (typeof head !== "string" || !/^[a-f0-9]{40}$/.test(head))) {
     throw new Error("Invalid departed head metadata.");
   }
@@ -395,7 +292,7 @@ async function refreshPR(github, context, listed, pause, budget, head) {
       const { data } = await invoke(budget, () => github.rest.checks.listForRef({
         ...context.repo, ref: pr.head.sha, check_name: CONTEXT, per_page: 100,
       }));
-      const latest = data.check_runs.filter((check) => ownedCheck(check, context))
+      const latest = data.check_runs.filter((check) => check.app?.slug === "github-actions")
         .sort((a, b) => b.id - a.id)[0];
       if (latest?.external_id === externalId && latest.status === "completed" &&
           latest.conclusion === (observed.error ? "failure" : "success")) {

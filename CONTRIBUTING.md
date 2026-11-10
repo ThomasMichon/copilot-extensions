@@ -105,14 +105,6 @@ GitHub attaches check results to commits, not individual PRs. Multiple open
 description is valid. Publish a distinct head commit for each PR before retrying.
 When a peer moves, closes, or retargets away from `dev`, its departure refreshes
 the remaining PRs on the old head; they need no unrelated description edit.
-If a direct refresh's superseded failure remains after valid metadata is stable,
-an authorized workflow dispatcher can run `workflow-lockdown-guard.yml` on `main`
-with only `pull_request_number=<number>`. This reevaluates that open `dev` PR
-and reconciles only this owner's direct check series, not workflow jobs or
-independent same-name producers. Do not combine it with promotion inputs or omit
-the selector for a scoped repair: omission retains the existing global refresh.
-This route becomes available only after its source is promoted to `main`;
-a successful read-only metadata job alone does not repair historical direct checks.
 
 **PRs target `dev`, not `main`.** `main` is regenerated wholesale by a CI
 promotion pipeline (`.github/workflows/validate-and-promote.yml`,

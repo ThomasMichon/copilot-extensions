@@ -1226,37 +1226,8 @@ Refresh publication starts pending, rereads metadata before and after completing
 its result, and supersedes any changed/unverifiable snapshot with a failure
 before a bounded retry. A delayed refresh must not leave a stale successful
 result after a concurrent description or metadata edit.
-Batch/departure refreshes do not rewrite completed conclusions: superseding
-failure uses a new check, and only an unfinished original is closed out directly.
-
-An authorized manual dispatch can instead supply `pull_request_number` alone
-to reconcile one current open `dev` PR. It uses the existing trusted default
-checkout and refresh job's checks-write permission; the native metadata jobs
-stay read-only. The trusted inline script rejects selector/promotion mixing
-before loading the checked-out helper, including an older promotion snapshot
-whose helper does not understand the selector.
-No initial global PR listing occurs, although an incomplete/unavailable commit
-association response still requires the authoritative full census described
-above. Writes remain scoped to the selected head.
-The repair paginates all check runs and recognizes its direct series by the
-`github-actions` app, exact `source-attribution` name, `source-metadata:` digest
-namespace (including legacy unverified/superseded suffixes), and this repository's
-Actions-run URL or provider-normalized `/runs/<check-id>` URL matching that
-exact check ID. Workflow-backed jobs and other same-name producers remain
-untouched; this is producer scoping, not cryptographic publisher authentication.
-After a stable snapshot it reevaluates every owned historical run, including
-completed superseded failures, to the actual current decision and publishes a
-fresh result. A final paginated owned-series census detects new or overwritten
-results from concurrent departure refreshes; a stable PR alone cannot prove
-the whole direct series was reconciled. Invalid descriptions and shared heads
-remain failures.
-Cleanup requests are reserved for every attempted rewrite before mutation.
-Racing metadata, lost write responses and budget exhaustion fail the operation,
-publish a superseding failure and fail-close attempted rewrites, including
-completed successes. Failed cleanup remains an explicit unknown, never success.
-This is a scoped owner repair, not permission to ignore unsuccessful required
-checks or mutate checks from another producer. Without the selector, the
-existing global refresh behavior is unchanged.
+Completed check conclusions are not rewritten: superseding failure uses a new
+check, and only an unfinished original is closed out directly.
 
 **Activation is separate from implementation merge.** After promotion to
 `main`, verify a real source-check failure and a body-only repair from the
@@ -1965,36 +1936,8 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > consumer's own top-level `libs/*`), but a lib consumed *solely* through a
 > `uv`-editable canonical-reference pointer (no local copy at all) is
 > invisible to it. `python tools/check-version-bump.py --list` additionally
-> names those pointer-only consumers and expands canonical sibling-library
-> dependencies transitively, including shared edges and cycles. A nested
-> library change therefore requires changefiles for indirect consumers too;
-> malformed or symlinked reachable manifests fail closed rather than hiding
-> consumers. Check both before assuming you've found every plugin a shared-lib
-> change reaches.
->
-> **Library-only bump intents also require consumer coverage.** The presence
-> guard expands new or changed library bump entries in top-level changefiles
-> through the same map, even without a library source edit. Unchanged baseline
-> entries, release-note-only edits and removed intents do not create new
-> obligations. Consumer coverage still requires this PR's own newly added
-> changefiles, not coincidental pending entries from an earlier PR. Intent and
-> coverage reads use the resolved Git revisions, not checkout contents. PR
-> dependency discovery uses the prospective target/head integration tree, so
-> consumers or edges added on the target after a branch forked are included and
-> target-side removals do not create spurious obligations. Git merge plumbing
-> computes that tree without changing the checkout or index; conflicting inputs
-> require reconciliation. Direct consumer seeds, nested library edges and
-> packaged-source declarations still use the shared parsers. The retired
-> standalone version diagnostic retains its literal-head comparison. Git symlink
-> modes are rejected even when the checkout contains a regular file.
->
-> New or changed library release intents and consumer coverage require fresh
-> changefile filenames: do not edit an old file to add a library/type intent or
-> recycle a filename already used in the target branch's history. Promotion
-> excludes previously consumed filenames regardless of edited contents. Use
-> `tools/changefile.py add` for a new identity; a rename to a previously unused
-> filename also creates a new release identity. Complete Git history is required
-> to verify freshness, including identities integrated after a PR forked.
+> names those pointer-only consumers — check both before assuming you've
+> found every plugin a shared-lib change reaches.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

@@ -201,13 +201,3 @@ def test_native_read_contract_matches_actual_guard_semantics(tmp_path, monkeypat
                 monkeypatch.setattr(guard, helper, forbidden)
         for tool in ("view", "rg", "glob"):
             assert guard.decide({"toolName": tool, "cwd": str(tmp_path), "toolArgs": {"path": "test"}}, env={}, home=tmp_path) is None
-
-
-def test_native_write_contract_matches_actual_target_and_map_readers():
-    import hashlib
-
-    policy = json.loads((_SCRIPTS / "hook-read-policy.json").read_text("utf-8"))
-    assert set(policy["nativeWriteDependencies"]) == {"tool_call_forms.py", "guarded_anchor_map.py"}
-    for name, digest in policy["nativeWriteDependencies"].items():
-        text = (_SCRIPTS / name).read_text(encoding="utf-8-sig")
-        assert hashlib.sha256(text.encode("utf-8")).hexdigest() == digest, "Run tools/render-hook-read-policy.py after helper changes"

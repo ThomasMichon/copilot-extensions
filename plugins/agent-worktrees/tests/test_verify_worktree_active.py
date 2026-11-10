@@ -85,7 +85,7 @@ def test_dedupes_and_sorts_session_ids():
     assert v.probes_ok is True
 
 
-def test_degrades_when_reclaim_raises(caplog):
+def test_degrades_when_reclaim_raises():
     """A reclaim hiccup never crashes the verify; mux liveness still counts."""
     with patch("agent_worktrees.sessions.mux_status_many",
                return_value={"aaaa": sessions.MuxInfo(exists=True, clients=0)}), \
@@ -99,10 +99,9 @@ def test_degrades_when_reclaim_raises(caplog):
     # narrower than the aggregate `probes_ok` above, which also goes False
     # here purely because of the UNRELATED reclaim failure.
     assert v.mux_probe_ok is True
-    assert "Could not verify registered Copilot bindings: boom" in caplog.text
 
 
-def test_degrades_when_mux_raises(caplog):
+def test_degrades_when_mux_raises():
     with patch("agent_worktrees.sessions.mux_status_many",
                side_effect=OSError("blocked")), \
          patch("agent_worktrees.reclaim.resolve_bound_copilots",
@@ -112,7 +111,6 @@ def test_degrades_when_mux_raises(caplog):
     assert v.source == "lock" and v.bare is True
     assert v.probes_ok is False  # the mux probe raised
     assert v.mux_probe_ok is False  # the mux probe itself is what raised here
-    assert "Could not verify worktree mux presence: blocked" in caplog.text
 
 
 def test_verification_passes_only_the_authoritative_session_registry():

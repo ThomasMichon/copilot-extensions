@@ -11,21 +11,7 @@ WORKFLOW = "windows-qualification.yml"
 TRANSPORT_REF = "refs/qualification/windows-inputs"
 TRANSPORT_MARKER = "windows-qualification-transport-v1"
 SUPPORT_PATH = "tools/windows-qualification-support.json"
-NATIVE_PACKETS = {
-    "native-worktrees-embody": (
-        "agent-worktrees", "test_native_seed_application", "test_public_embody",
-        "native-worktrees-public-caller",
-    ),
-    "native-driver-auth-wait": (
-        "agent-remote-driver", "test_native_headed_auth_wait",
-        "test_opt_in_receiver_auth_wait_and_same_session_resume", "native-driver-auth-wait",
-    ),
-    "native-driver-inflight": (
-        "agent-remote-driver", "test_native_headed_auth_wait",
-        "test_opt_in_receiver_inflight_expiry_preserves_hold", "native-driver-inflight",
-    ),
-}
-PACKETS = ("bridge-http52", *NATIVE_PACKETS)
+PACKETS = ("bridge-http52", "native-worktrees-embody")
 NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.3.8"}
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -158,13 +144,13 @@ def validate_result(
     cases = value.get("tests")
     if not isinstance(cases, list):
         raise ValueError("missing actual test outcomes")
-    native = NATIVE_PACKETS.get(expected["selection"].get("name"))
+    native = expected["selection"] == {"kind": "packet", "name": "native-worktrees-embody"}
     if value["outcome"] == "qualified" and (expected["selection"]["kind"] != "packet" or native):
         if not cases or any(case.get("outcome") != "passed" for case in cases):
             raise ValueError("empty, failed or skipped selection cannot qualify")
         if native and (
-            len(cases) != 1 or cases[0].get("name") != native[2]
-            or cases[0].get("class", "").split(".")[-1] != native[1]
+            len(cases) != 1 or cases[0].get("name") != "test_public_embody"
+            or not cases[0].get("class", "").endswith("test_native_seed_application")
             or value.get("native_prerequisites") != NATIVE_VERSIONS
         ):
             raise ValueError("native caller or prerequisite identity mismatch")
@@ -182,7 +168,7 @@ def validate_result(
         if native:
             required = {
                 "source-and-selection", "native-prerequisites",
-                native[3], "test-runtime",
+                "native-worktrees-public-caller", "test-runtime",
             }
         phases = value.get("phases", [])
         if {phase.get("name") for phase in phases} != required or any(

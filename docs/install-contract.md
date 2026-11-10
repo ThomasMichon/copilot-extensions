@@ -1543,21 +1543,12 @@ binstubs, and any long-running service stay on the **old** version. Its
 CLI emits it and we cannot change it, so a runtime plugin can read "updated"
 while its actual runtime has not moved.
 
-The requirements below describe the **legacy plugin-owned runtime adapter
-contract** for consumers that explicitly declare it. A Python project, console
-script or `agent-*` name is not itself an adoption declaration. Independent
-applications and services have their own installation owners; their Copilot
-connectors do not need to acquire a legacy self-provisioning payload.
-The [service-model target](../visions/plugin-services/README.md#connector-only-plugin-payloads)
-separates backend implementations and installation inputs from plugin delivery.
-Existing declared adapters retain their source, hook, activation and
-materialized-byte contracts until their separately governed migration.
+Consequence — a rule for every plugin in this repo:
 
-For a plugin that adopts this legacy contract:
-
-- A plugin that ships **only** skills, hooks, extensions and/or agents needs no installer:
+- A plugin that ships **only** skills, hooks, and/or agents needs no installer:
   `copilot plugin update` fully deploys it.
-- A plugin-managed runtime that adopts this contract **must** ship:
+- A plugin that ships a **runtime** — anything beyond skills/hooks/agents: a
+  venv, command, or long-running service — **must** ship:
   1. matching `scripts/install.{ps1,sh}` or `scripts/init.{ps1,sh}` entrypoints
      implementing this contract, and
   2. an **install skill** an agent can trigger to deploy/refresh that runtime
@@ -1581,7 +1572,7 @@ For a plugin that adopts this legacy contract:
      their catalog and payload dispatcher must share the same fail-closed
      activation gate.
 
-Within this payload-local contract, each command belongs to its implementing payload. Skills consume
+Every agent-facing command belongs to its implementing payload. Skills consume
 the owning plugin's exact catalog `argv`; they do not hardcode another plugin's
 path or discover a same-named command through `PATH`. The command glossary is
 static invocation context, not a snapshot of live worktrees, sessions, leases,

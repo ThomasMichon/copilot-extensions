@@ -373,7 +373,6 @@ def _cmd_installation_repair(args: argparse.Namespace) -> int:
                 expected_plan_digest=args.expected_plan_digest,
                 readiness_timeout=args.readiness_timeout, installer_timeout=args.installer_timeout,
                 confirm_restart=args.confirm_restart,
-                readiness_only=enclosing,
             )
         result["callerOwnedReadiness"] = enclosing
     except (RepairAdmissionError, ValueError) as error:

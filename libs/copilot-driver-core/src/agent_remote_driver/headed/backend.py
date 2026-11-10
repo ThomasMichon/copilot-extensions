@@ -28,6 +28,7 @@ class HeadedBackend:
     def __init__(
         self, owner: NativeOwner, *, session_id: str, nonce: str,
         startup_prompt: str | None = None,
+        auth_wait=None,
     ) -> None:
         if (
             not isinstance(session_id, str) or not 1 <= len(session_id) <= 256
@@ -40,6 +41,11 @@ class HeadedBackend:
         if startup_prompt is not None and not isinstance(startup_prompt, str):
             raise ValueError("The original native startup prompt must be text")
         self._startup_prompt = startup_prompt
+        self._auth_wait = auth_wait
+        self.auth_snapshot: dict | None = None
+        self._auth_frozen = asyncio.Event()
+        self._stream_closed = asyncio.Event()
+        self.auth_stopping = False
         self.stdout = asyncio.StreamReader(limit=1_000_000)
         self.stdin = self
         self.bound = asyncio.Event()
@@ -86,7 +92,33 @@ class HeadedBackend:
             "version": 1, "port": self._server.sockets[0].getsockname()[1],
             "sessionId": self._session_id, "nonce": self._nonce,
             **({"startupPrompt": self._startup_prompt} if self._startup_prompt is not None else {}),
+            **({"authWait": {"incarnation": self._auth_wait.incarnation}}
+               if self._auth_wait is not None else {}),
         }
+
+    async def freeze_auth(self) -> None:
+        """Stop controlled sends before retiring the exact native process."""
+        self.auth_stopping = True
+        if self._auth_wait is None or self._writer is None:
+            return
+        self.write(json.dumps({
+            "contract": "copilot-driver.headed-auth-freeze", "version": 1,
+            "incarnation": self._auth_wait.incarnation,
+        }).encode() + b"\n")
+        try:
+            await asyncio.wait_for(self.drain(), .25)
+            await asyncio.wait_for(self._auth_frozen.wait(), .25)
+        except (OSError, asyncio.TimeoutError):
+            self._auth_wait.preserve_hold("native-freeze-unconfirmed")
+
+    async def finish_auth_stop(self) -> None:
+        """Drain the old incarnation before making its recovery decision."""
+        if self._admitted:
+            try:
+                await asyncio.wait_for(self._stream_closed.wait(), 1)
+            except asyncio.TimeoutError:
+                self._auth_wait.preserve_hold("native-observation-incomplete")
+        self._auth_wait.stopped(self.auth_snapshot)
 
     async def serve(self) -> None:
         guard = admit_daemon_instance(
@@ -137,6 +169,29 @@ class HeadedBackend:
             self.native_pid = hello["nativePid"]
             self.bound.set()
             while line := await reader.readline():
+                if self._auth_wait is not None:
+                    value = json.loads(line)
+                    if isinstance(value, dict) and value.get("contract") == "copilot-driver.headed-auth-state":
+                        snapshot = value.get("state")
+                        if (
+                            type(value.get("version")) is not int or value.get("version") != 1
+                            or value.get("incarnation") != self._auth_wait.incarnation
+                            or not isinstance(snapshot, dict)
+                            or set(snapshot) != {
+                                "controlled", "closed", "pending", "sending", "outstanding", "waiting",
+                            }
+                            or any(type(item) is not bool for item in snapshot.values())
+                        ):
+                            self._auth_wait.preserve_hold("native-state-invalid")
+                            return
+                        self.auth_snapshot = snapshot
+                        if not snapshot["controlled"] or snapshot["closed"]:
+                            self._auth_wait.preserve_hold("native-control-lost")
+                        if snapshot["waiting"]:
+                            self._auth_frozen.set()
+                            if any(snapshot[key] for key in ("pending", "sending", "outstanding")):
+                                self._auth_wait.preserve_hold("native-operation-unsettled")
+                        continue
                 self.stdout.feed_data(line)
         except (OSError, ValueError, asyncio.TimeoutError):
             pass
@@ -145,6 +200,9 @@ class HeadedBackend:
                 self._writer = None
                 self.bound.clear()
                 self.lost.set()
+                if self._auth_wait is not None and not self.auth_stopping:
+                    self._auth_wait.preserve_hold("native-connection-lost")
+                self._stream_closed.set()
             writer.close()
             try:
                 await asyncio.wait_for(writer.wait_closed(), 1)
@@ -159,7 +217,6 @@ class HeadedBackend:
         self._closed = True
         if self._server is not None:
             self._server.close()
-            await self._server.wait_closed()
         tasks = set(self._connections)
         if self._monitor is not None:
             tasks.add(self._monitor)
@@ -168,6 +225,8 @@ class HeadedBackend:
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
+        if self._server is not None:
+            await self._server.wait_closed()
         if self._guard is not None:
             self._guard.close()
             self._guard = None

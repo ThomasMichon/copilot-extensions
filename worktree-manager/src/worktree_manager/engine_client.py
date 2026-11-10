@@ -642,7 +642,6 @@ def resolve_launch_plan(
 
     args = ["resolve", "--json"]
     require_staging = bool(seed) or bool(defer_new_seed)
-    retained_seed_plans = bool(worktree_id and not require_staging and not bare_resume and not target_machine)
     if require_staging:
         args += ["--stage-launch-seed", "--require-native-seed"]
     if base:
@@ -672,12 +671,8 @@ def resolve_launch_plan(
                 if target_machine and seed and timeout is not None else timeout
             ),
             stream_progress=True,
-            environment={
-                **os.environ,
-                **({"AGENT_WORKTREES_DEFER_PROJECTIONS": "1"} if defer_projections else {}),
-                **({"AGENT_WORKTREES_RETAINED_SEED_PLANS": "1"} if retained_seed_plans else {}),
-            } if defer_projections or retained_seed_plans else None,
-            engine_command=engine_base_command() if defer_projections or retained_seed_plans else None,
+            environment={**os.environ, "AGENT_WORKTREES_DEFER_PROJECTIONS": "1"} if defer_projections else None,
+            engine_command=engine_base_command() if defer_projections else None,
         )
     except EngineError as e:
         detail = _engine_error_detail(e)

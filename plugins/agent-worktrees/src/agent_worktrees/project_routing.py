@@ -88,7 +88,7 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
     ):
         return True
     if command == "pr-watch" and len(args_list) > 1 and args_list[1] in (
-        "snapshot", "status", "threads", "diff", "deliver", "inventory",
+        "snapshot", "status", "threads", "diff", "deliver",
     ):
         return True
     if args_list[:2] == ["pr-watch", "checks"] and all(

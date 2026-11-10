@@ -93,7 +93,6 @@ item in this umbrella.
 | Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 | Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
-| First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
 
 ## Context
 
@@ -791,13 +790,6 @@ legacy Picker's terminal-mirroring call site) now lives solely in
 worktree-manager.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
-- [ ] #542 Manager first-run front door: review and deliver the
-      [bounded entry/setup-home sequence](phase-4-first-run-front-door.md).
-      Preserve #356/#8545 repository setup, native Configuration/readiness
-      writers and the full original acceptance matrix; an F1 navigation flow
-      is not completion of F2/F3 or the parent issue. F1 source flow is
-      accepted in #11837; F2 owner-adapter reconciliation, F3 and
-      release/native/installed acceptance remain open.
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
       trigger; a stale/incompatible `worktree-manager` stub can never capture the
@@ -2535,11 +2527,6 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
 
 ## Validation Plan
 
-- [ ] Qualify the [#542 first-run front-door matrix](phase-4-first-run-front-door.md#validation-and-promotion-gates):
-  real no-project navigation/diagnostic flow, TTY/text routing, source-safe
-  owner handoffs, recovery and original empty/partial/provisioned acceptance.
-  Preserve independent native/installed gates; a plan merge is not implementation.
-
 - [ ] G1: Resolve EVERY directly retained #4096 original
   confirmation-OR-force/accepted-disposition and validation/continuing Coordination
   clause at its finite tier, preserving delivered class repair, independent axes and
@@ -2900,35 +2887,6 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
-
-### 2026-11-10 - First-run F1 source accepted; F2 owner composition next
-
-- #11837 merged after exact-head approval, resolved scope/timeout findings and
-  all required checks. The [Phase 4 acceptance record](phase-4-first-run-front-door.md#f1-acceptance-and-next-slice)
-  retains source/consumer proof and names F2 adapter reconciliation next.
-  #542 and the full matrix stay open; no release or installed rollout is claimed.
-
-### 2026-11-10 - First-run F1 source flow and contained consumer proof
-
-- The [Phase 4 source record](phase-4-first-run-front-door.md#f1-source-implementation-and-validation)
-  records the genuine no-project Setup / Doctor flow, strict fresh selection,
-  real read-only child receipts and focused validation. F2/F3, review/CI,
-  native/installed qualification and #542 remain open; no rollout or writer
-  takeover is claimed.
-
-### 2026-11-10 - Bounded first-run front-door design reservation
-
-- `patient-knob` claims only the Manager-owned #542 entry/no-project
-  presentation and existing-owner composition slice. Its public reservation
-  preserves first-repository setup/trust, knowledge/authentication writers,
-  provider-policy, runtime construction and all existing native/rollout owners.
-- The production pending-binding screen already paints before discovery, but
-  ordinary absent-engine and no-project states currently become binding errors.
-  Keep the nonempty project bootstrap contract; do not substitute a fake source.
-- The linked Phase 4 proposal sequences an independently useful real
-  navigation/diagnostic flow before complete missing-source action composition
-  and original-matrix qualification. No production code, live service probe,
-  installation, source-claim transfer or parent completion is claimed.
 
 ### 2026-11-09 - Truthful Knowledge readiness and explicit Reload retry
 

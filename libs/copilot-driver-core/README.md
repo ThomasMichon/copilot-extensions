@@ -148,6 +148,72 @@ second direct SDK sender; Bridge keeps its own durable handoff and
 consumption authority. Restoration after a previous controller remains
 unqualified, not an automatic re-hook.
 
+### Opt-in headed source-authorization receiver
+
+The Python `headed.launcher.run_headed(..., auth_wait=...)` entrypoint adds
+`copilot-driver.headed-auth-wait`, version 1. Its absence preserves legacy
+one-shot behavior. The compact CLI, application and existing callers do not
+enable this receiver. This is provider implementation, **not native Copilot
+history/UI qualification or deployment authority**.
+
+The explicit configuration has exactly `source_owner`, `source_revision`
+(nonempty immutable owner/configuration bindings), `lease_revision` (positive
+integer), `budget_seconds` and `expires_at` (Unix wall time). The receiving
+caller owns verification of the actual source and must supply no more than
+its remaining authorization. Budgets must be finite, positive and at most
+3600 seconds. Either wall expiry or monotonic budget exhaustion stops the
+native process, so clock rollback cannot extend the monotonic grant. Stop
+begins up to one second early to reserve the bounded SDK-freeze exchange;
+sub-second grants stop immediately.
+An accepted replacement wakes the deadline watcher. A grant already inside
+the stop reserve closes authorization synchronously and cannot start a new
+native incarnation, including renewal of a stopped session.
+Native input and other irreversible broker-control holds do not expire a
+still-valid source grant or retire its native CLI. Active source renewal can
+preserve that CLI without clearing its hold; recovery after actual source
+expiry or revocation still refuses while the control hold remains.
+No credentials are read, copied or accepted by the receiver.
+
+The private host-state file's `auth_wait` member declares the **running**
+contract/version, loopback `port`, random `nonce`, `session_id`, receiving
+`incarnation`, `source_owner`, `source_revision`, `lease_revision`, `phase`
+and irreversible `hold`. A caller must select this exact live declaration;
+a missing endpoint/declaration or unsupported contract is unsupported, never
+permission to fall back to a raw SDK send or a version-based guess.
+The nonce belongs only in the private control transport, not logs or reports.
+
+One bounded JSON-line request per connection supplies exactly `contract`,
+`version`, `nonce`, `session_id`, `incarnation`, `source_owner`,
+`source_revision` and `operation`: `status`, `revoke` or `renew`.
+`renew` additionally requires `lease_revision`, `budget_seconds` and
+`expires_at`. Unknown fields/operations, obsolete bindings and non-increasing
+lease revisions are refused. Replies have `ok` and either current status or
+`auth-wait-request-refused`; refusal has no send/restart fallback.
+Renewal during an active grant can replace its remaining finite budget.
+Once expired/revoked, renewal is refused until exact owned stop and old
+observation-stream drain finish.
+
+Expiry first freezes adapter sends and captures pending/sending/native-input
+state, then terminates and settles the retained Windows Job or Linux private
+process group, including ordinary inherited descendants. It does not kill a
+shared mux, remove Job limits or resolve a process by name. Other platforms
+are explicitly unsupported. Linux retains the caller's pane descriptors in
+a private session; productive terminal behavior still needs native qualification.
+Processes that deliberately escape a POSIX group are outside that containment
+contract; no unqualified host-wide descendant cleanup is attempted.
+
+A confirmed idle, controlled stop enters `auth_wait`; a fresh source grant
+then creates a new receiving incarnation and cold-starts `--resume` with the
+same durable session ID. Original `-i`/`--interactive` input is removed,
+positional launch input is refused, no request is buffered/replayed, and the
+old endpoint binding cannot act on the new incarnation. Previous Host/client
+connections close; callers must select the new private declaration, not
+replay an uncertain send. Actual native history restoration remains unqualified.
+Missing/invalid observation, native input, closed/uncontrolled state,
+pending/sending/outstanding work, connection loss or cleanup uncertainty
+cannot be cleared by a lease. These remain held or terminally unavailable.
+Ordinary lost-controller recovery remains unsupported.
+
 See the [ACP WS boundary](../../plugins/agent-remote-driver/docs/session-host-websocket.md).
 The compact dependency-free receiving archive supports TCP only. Tests stay
 with the application and Bridge consumers; the canonical receiving-policy

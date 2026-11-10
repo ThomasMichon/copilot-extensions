@@ -220,7 +220,7 @@ def execute(
 def register_commands(
     sub: argparse._SubParsersAction[argparse.ArgumentParser],
     handler: Callable[[argparse.Namespace], int],
-) -> argparse._SubParsersAction[argparse.ArgumentParser]:
+) -> None:
     telemetry = sub.add_parser(
         "telemetry", help="Configuration-only telemetry operations", allow_abbrev=False,
     )
@@ -240,7 +240,6 @@ def register_commands(
     )
     retained.add_argument("--json", action="store_true", help="Output is always JSON")
     retained.set_defaults(func=handler)
-    return commands
 
 
 def _capabilities(_args: argparse.Namespace) -> int:

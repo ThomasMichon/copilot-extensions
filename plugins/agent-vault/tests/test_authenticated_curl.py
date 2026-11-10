@@ -38,25 +38,6 @@ def binding(scheme: str = "bearer") -> HttpBinding:
     return HttpBinding(destination("https://api.example.test/v1/"), "API/service", scheme)
 
 
-@pytest.mark.parametrize("message,visible", [
-    ("AGENT_VAULT_PORT environment override: port must be an integer from 1 to 65535", True),
-    ("delivered configuration has no matching qualified owner", True),
-    (f"invalid configuration containing {SECRET}", False),
-])
-def test_configuration_failure_is_distinct_and_never_opens_credentials(
-    monkeypatch: pytest.MonkeyPatch, message: str, visible: bool,
-) -> None:
-    monkeypatch.setattr(config, "resolve_context", Mock(side_effect=RuntimeError(message)))
-    read = Mock(side_effect=AssertionError("credential read is forbidden"))
-    monkeypatch.setattr(http, "read_credential", read)
-    with pytest.raises(BindingError, match="Vault configuration failed") as failure:
-        http._credential(binding(), "password", False)
-    assert (message in str(failure.value)) is visible
-    assert SECRET not in str(failure.value)
-    assert "unlock" not in str(failure.value)
-    read.assert_not_called()
-
-
 def document(path: Path, **updates: object) -> Path:
     item = {
         "url_prefix": "https://api.example.test/v1/",
