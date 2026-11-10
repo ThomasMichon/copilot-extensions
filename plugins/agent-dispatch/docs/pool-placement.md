@@ -67,7 +67,12 @@ startup-fenced or retired holds no lane, and reconciliation drops the wait of
 any waiter that can no longer start (the resume request and its wake choice
 are retained). As with an immediate start, a recovery started without a wake
 holds its lane until the owner affirms it or its startup deadline expires, and a
-later wake request for that recovery is still delivered.
+later wake request for that recovery is still delivered. While the bound pool
+is disabled (absent from the published catalog) or the catalog is not ready,
+reactivation starts and every cold-body restart route, including one whose
+recovery was already admitted, are deferred rather than started. A renewed
+intentional suspension withdraws any outstanding resume request and its wake
+choice, even after a detached wake has already re-taken the lane.
 A body that never parked keeps its own lane and resumes
 without waiting. Immutable per-reservation pool bindings
 retain older attempts even when the task's current assignment advances.

@@ -21,17 +21,22 @@ def recovery_assignment(conn: sqlite3.Connection, task_id: str) -> sqlite3.Row |
 
 
 def pause_recovery(conn: sqlite3.Connection, task_id: str) -> None:
-    """A renewed intentional wait fences an older recovery without erasing debt."""
-    changed = conn.execute(
+    """A renewed intentional wait fences an older recovery without erasing debt.
+
+    Any outstanding resume intent of a pool-assigned task is withdrawn, even one
+    that no longer waits for a lane (a detached wake may have re-taken it), so
+    reconciliation never starts a recovery the owner did not ask for again.
+    """
+    assigned = conn.execute(
         "UPDATE task_pool_assignments SET recovery_revision=recovery_revision+1,"
         " recovery_requested_at=NULL, recovery_wake_id=NULL, recovery_hold_started_at=NULL"
         " WHERE task_id=? AND recovery_requested_at IS NOT NULL", (task_id,),
     ).rowcount
-    changed += conn.execute(
+    assigned += conn.execute(
         "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL,"
-        " lane_wait_wake=NULL WHERE task_id=? AND lane_wait_since IS NOT NULL", (task_id,),
+        " lane_wait_wake=NULL WHERE task_id=? AND assignment_released=0", (task_id,),
     ).rowcount
-    if changed:
+    if assigned:
         conn.execute("UPDATE tasks SET resume_requested=0 WHERE id=?", (task_id,))
 
 
@@ -169,11 +174,11 @@ def _wait_for_lane(
     catalog = getattr(owner, "_pool_catalog_from_conn", None)
     if catalog is None:
         return False
-    pool = next((d for d in catalog(conn, now=ts).definitions if d.identity == identity), None)
-    if pool is None:
-        return False
+    pool = _eligible_pool(catalog(conn, now=ts), identity)
     since = assignment["lane_wait_since"]
-    if pool_lane_load(
+    # A disabled pool or an unavailable catalog defers the start; it never
+    # restarts intentionally suspended work outside its pool's authority.
+    if pool is not None and pool_lane_load(
         conn, identity, ahead_of=(ts if since is None else since, task.id),
         cutoff=pool.max_concurrent,
     ) < pool.max_concurrent:
@@ -187,7 +192,10 @@ def _wait_for_lane(
         conn.execute("UPDATE tasks SET resume_requested=1, updated_at=? WHERE id=?", (ts, task.id))
         owner._audit(
             conn, task.id, ts=ts, from_status=Status.SUSPENDED, to_status=Status.SUSPENDED,
-            worker=task.owner, note="pool recovery waiting for a free lane",
+            worker=task.owner, note=(
+                "pool recovery waiting for a free lane" if pool is not None
+                else "pool recovery waiting for its pool to be available"
+            ),
         )
     else:
         conn.execute(
@@ -295,6 +303,13 @@ def recovery_wake(conn: sqlite3.Connection, task: Task, wake_id: str) -> bool:
     )
 
 
+def _eligible_pool(snapshot: Any, identity: tuple[Any, ...]) -> Any:
+    """The bound pool's definition only while the catalog is ready to vouch for it."""
+    if not snapshot.ready:
+        return None
+    return next((d for d in snapshot.definitions if d.identity == identity), None)
+
+
 def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
     """Refuse restarting a parked pool body while its bound pool is full.
 
@@ -302,7 +317,9 @@ def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
     restarts a cold body (legacy supervisor resume, detached-run completion or
     other non-recovery wakes). The lane is the reservation's immutable pool
     binding, so adopted accounting-only bindings are admitted too. A
-    reactivation already admitted by recovery reconciliation is not rechecked.
+    reactivation already admitted by recovery reconciliation skips the lane
+    count, but every route defers while the bound pool is disabled or the
+    catalog cannot vouch for it.
     The refusal is send-unresolved, so wake drains defer without spending an
     attempt and the legacy resume route retries later.
     """
@@ -318,17 +335,15 @@ def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
         ).fetchone()
         if binding is None:
             return
+        identity = (binding["registration_id"], binding["machine"], binding["env"])
+        pool = _eligible_pool(catalog(probe, now=owner._now(None)), identity)
+        if pool is None:
+            raise PoolLaneUnavailable("cold pool body's pool is disabled or its catalog unavailable")
         admitted = probe.execute(
             "SELECT 1 FROM task_pool_assignments WHERE reservation_key=? AND assignment_released=0"
             " AND recovery_requested_at IS NOT NULL", (row["key"],),
         ).fetchone()
         if admitted is not None:
-            return
-        identity = (binding["registration_id"], binding["machine"], binding["env"])
-        pool = next(
-            (d for d in catalog(probe, now=owner._now(None)).definitions if d.identity == identity), None,
-        )
-        if pool is None:
             return
         load = pool_lane_load(
             probe, identity, cutoff=pool.max_concurrent,
