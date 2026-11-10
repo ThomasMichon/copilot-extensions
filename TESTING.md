@@ -150,6 +150,18 @@ qualify; missing, skipped, foreign or extra cases do not. Evidence sanitization
 and interruption handling are the same as the Worktrees packet. This does not
 qualify other callers, pending-work retirement or positive-renewal activation.
 
+`submit --packet native-driver-inflight` separately selects
+`test_opt_in_receiver_inflight_expiry_preserves_hold` from the same
+candidate-supplied fixture. Its private model response stays blocked while
+the source grant expires. The exact native processes must retire, interrupted
+input must not succeed or replay, and the receiver must retain a hold that
+refuses renewal. It uses the same pins, public preparation, source checks,
+120/180-second functional/test bounds and 300/420-second group/plugin limits,
+without a configured feed. Passing the steady recovery packet does not qualify
+this negative case, all pending-work sources or productive enablement.
+The protected admission owner derives native preparation and sanitization
+from its known packet registry, never a caller-supplied flag or name prefix.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
