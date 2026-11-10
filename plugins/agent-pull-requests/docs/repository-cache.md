@@ -147,6 +147,11 @@ Projection batches contain at most 32 normalized results, not full raw snapshots
 each batch commits its current facts and corresponding events atomically.
 Recorded observation times conservatively identify the cycle start rather than
 overstating freshness after a delayed batch.
+Existing unrelated legacy waits are serviced before repository acquisition,
+under the same cycle custody and concurrency bound; qualified waiting work
+precedes configured-only work. Reentry retains the last native facts but marks
+them `selection_reentry_unconfirmed` until a bounded read refreshes them.
+Selection entry does not publish an old terminal summary as new current evidence.
 
 Initial membership and unknown-to-known evidence use baseline events. Later
 members use entry events; semantic facts produce change or confirmed terminal

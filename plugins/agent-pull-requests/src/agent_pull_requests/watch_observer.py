@@ -102,9 +102,18 @@ class ReplayObserver:
 
     def _observe(
         self, *, expires_at: int, checkpoint: Callable[[], None] | None,
+        _legacy_only: bool = False,
     ) -> dict:
         authority = {"expires_at": expires_at, "checkpoint": checkpoint}
         observed_at = int(self.store.clock())
+        legacy = None
+        if self.repositories is not None and not _legacy_only:
+            # New repository acquisition must not consume existing legacy wait deadlines.
+            legacy = self._observe(
+                expires_at=expires_at, checkpoint=checkpoint, _legacy_only=True,
+            )
+            if legacy["status"] != "observed":
+                return legacy
         result = self.store.sweep_timeouts(**authority)
         if result["status"] == "uncertain":
             return result
@@ -117,7 +126,7 @@ class ReplayObserver:
             (binding.account, binding.repo) for binding in self.bindings.values()
             if binding.repository_identity is not None
         }
-        if self.repositories is not None:
+        if self.repositories is not None and not _legacy_only:
             for binding in self.bindings.values():
                 if binding.repository_identity is None:
                     continue
@@ -145,17 +154,21 @@ class ReplayObserver:
         waiting = {}
         for target in self.store.observation_targets(**authority):
             scope = (target.account, target.repo)
+            if _legacy_only and scope in configured or (
+                self.repositories is not None and not _legacy_only and scope not in configured
+            ):
+                continue
             if scope not in configured or scope in qualified:
                 waiting[(target.account, target.repo, target.number)] = target
         selected_targets = {}
-        if self.repositories is not None:
+        if self.repositories is not None and not _legacy_only:
             keys = sorted(key for key in repository_targets if key not in waiting)
             if keys:
                 start = self._repository_cursor % len(keys)
                 selected = (keys[start:] + keys[:start])[:_MAX_REPOSITORY_READS]
                 selected_targets = {key: repository_targets[key] for key in selected}
                 self._repository_cursor = (start + len(selected)) % len(keys)
-        combined = {**selected_targets, **waiting}
+        combined = {**waiting, **selected_targets}
         targets = iter(combined.values())
         observed = unbound = 0
         unavailable = sum(scan["outcome"] == "unavailable" for scan in inventories.values())
@@ -229,13 +242,14 @@ class ReplayObserver:
             stopped.set()
             readers.shutdown(wait=True, cancel_futures=True)
         self.store.check_current(expires_at, checkpoint)
-        if self.repositories is not None and (snapshots or not projected):
+        if self.repositories is not None and not _legacy_only and (snapshots or not projected):
             self.repositories.apply_facts(
                 inventories, snapshots, observed_at=observed_at, **authority,
             )
         return {
-            "status": "observed", "observed": observed,
-            "unavailable": unavailable, "unbound": unbound,
+            "status": "observed", "observed": observed + (legacy["observed"] if legacy else 0),
+            "unavailable": unavailable + (legacy["unavailable"] if legacy else 0),
+            "unbound": unbound + (legacy["unbound"] if legacy else 0),
         }
 
     def _read(

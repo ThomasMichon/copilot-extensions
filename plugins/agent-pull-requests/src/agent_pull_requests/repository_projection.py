@@ -160,8 +160,10 @@ class RepositoryProjection:
                         known[number] = pull
                         _event(state, key, number, "baseline" if initial else "entry", None, now)
                     elif not known[number]["member"]:
-                        known[number].update(member=True, departed_at=None)
-                        _event(state, key, number, "entry", known[number]["facts"], now)
+                        known[number].update(
+                            member=True, departed_at=None, error="selection_reentry_unconfirmed",
+                        )
+                        _event(state, key, number, "entry", None, now)
                 for number, pull in known.items():
                     if scan["outcome"] == "complete" and number not in scan["numbers"] and pull["member"]:
                         pull.update(member=False, departed_at=now)

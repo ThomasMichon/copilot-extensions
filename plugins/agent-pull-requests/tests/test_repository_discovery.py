@@ -440,3 +440,68 @@ def test_shared_configured_wait_outside_rotation_updates_current_facts_and_event
     assert result["pulls"][0]["facts"]["head_sha"] == "fresh"
     assert len([event for event in document(store)["events"]
                 if event["number"] == 33 and event["kind"] == "change"]) == 1
+
+
+def test_existing_legacy_deadline_is_not_consumed_by_new_repository_acquisition(tmp_path, monkeypatch):
+    from agent_pull_requests.watch_contract import PRSnapshot
+    store, identities, bindings = selected(tmp_path)
+    identity = identities[0]
+    now = [100.0]
+    store.clock = lambda: now[0]
+    scope = ConsumerScope("legacy", "legacy", "other/repo")
+    store.execute(scope, "register", {
+        "request_id": "short", "issued_at": 100, "deadline_at": 105,
+        "number": 7, "until": ("merged",),
+    }, **authority(store))
+    order = []
+    def inventory(*_args, **_kwargs):
+        order.append("inventory")
+        now[0] += 10
+        return {"outcome": "complete", "numbers": [7], "pages": 2, "error": ""}
+    def fetch(repo, number, command, **kwargs):
+        order.append(repo)
+        return snapshot(identity) if repo == identity.repo else PRSnapshot(
+            pr_state="closed", merged=True, head_sha="legacy",
+        )
+    monkeypatch.setattr(observation, "fetch_inventory", inventory)
+    monkeypatch.setattr(observation, "fetch_snapshot", fetch)
+    legacy = NativeObservationBinding("legacy", "other/repo", sys.executable)
+    owner = ReplayObserver(store, bindings=(bindings[0], legacy))
+    owner.cycle(expires_at=160)
+    event = store.execute(scope, "pending", {}, **authority(store))["events"][0]
+    assert not event["timed_out"] and event["transitions"] == ["merged"]
+    assert order.index("other/repo") < order.index("inventory")
+
+
+def test_reentry_outside_rotation_preserves_last_terminal_facts_as_explicitly_unconfirmed(
+    tmp_path, monkeypatch,
+):
+    store, identities, bindings = selected(tmp_path)
+    identity = identities[0]
+    projection = RepositoryProjection(store, identities[:1])
+    projection.apply(
+        {identity.key: {"outcome": "complete", "numbers": [33], "pages": 2, "error": ""}},
+        {(identity.key, identity.repo, 33): snapshot(identity, 33)}, **authority(store),
+    )
+    projection.apply(
+        {identity.key: {"outcome": "complete", "numbers": [], "pages": 1, "error": ""}},
+        {(identity.key, identity.repo, 33): snapshot(identity, 33, pr_state="closed")},
+        **authority(store),
+    )
+    monkeypatch.setattr(observation, "fetch_inventory", lambda *_a, **_kw: {
+        "outcome": "complete", "numbers": list(range(1, 34)), "pages": 2, "error": "",
+    })
+    monkeypatch.setattr(observation, "fetch_snapshot", lambda _repo, number, *_a, **_kw: (
+        snapshot(identity, number, head_sha="reopened")
+    ))
+    owner = ReplayObserver(store, bindings=(bindings[0],))
+    owner.cycle(**authority(store))
+    result = owner.repositories.query(identity.key, number=33, **authority(store))["pulls"][0]
+    assert result["member"] and result["facts"]["pr_state"] == "closed"
+    assert result["error"] == "selection_reentry_unconfirmed"
+    entries = [event for event in document(store)["events"]
+               if event["number"] == 33 and event["kind"] == "entry"]
+    assert len(entries) == 1 and entries[0]["facts"] is None
+    owner.cycle(**authority(store))
+    result = owner.repositories.query(identity.key, number=33, **authority(store))["pulls"][0]
+    assert result["facts"]["pr_state"] == "open" and not result["error"]
