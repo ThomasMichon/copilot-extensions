@@ -192,6 +192,11 @@ def test_native_receiving_continuity_preserves_original_results_and_current_cons
             execution_spaces.require_record_mutation(tracking.load_record(ledger), fixture.config)
         assert _snapshot(fixture.home) == before
         if damage == "missing-location":
+            fresh = tracking.load_record(ledger)
+            fresh.title = "must not persist without location authority"
+            with pytest.raises(ValueError):
+                tracking.save_record(fresh)
+            assert ledger.read_bytes() == saved_ledger
             with pytest.raises(ValueError, match="stale checkout location"):
                 tracking.save_record(fixture.record)
             assert ledger.read_bytes() == saved_ledger

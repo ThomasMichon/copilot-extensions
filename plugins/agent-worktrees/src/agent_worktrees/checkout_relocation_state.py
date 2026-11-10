@@ -121,6 +121,12 @@ def preserve(record, current, ledger: Path) -> None:
         data is not None or getattr(current, "receiving_allocation_present", False)
     ) and record.worktree_path != current.worktree_path:
         raise ValueError("stale checkout location; reload the relocated worktree record")
+    if data is None and getattr(current, "receiving_allocation_present", False):
+        receipt = getattr(current, "receiving_allocation", None)
+        original = receipt.get("identity") if isinstance(receipt, dict) else None
+        path = original.get("path") if isinstance(original, dict) else None
+        if isinstance(path, str) and path != current.worktree_path:
+            raise ValueError("receiving current-location journal is missing; preserve the original record")
 
 
 def require_previous_owner(data: dict) -> None:
