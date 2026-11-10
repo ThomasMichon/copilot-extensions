@@ -116,6 +116,58 @@ async def test_cancel_during_drain_does_not_forget_published_receipt():
         assert not peer._pending
 
 
+@pytest.mark.parametrize("overflow", [False, True])
+async def test_published_receipt_releases_receive_credit_but_keeps_cleanup_ownership(
+    monkeypatch, overflow,
+):
+    from agent_mcp import custody_wire
+
+    monkeypatch.setattr(custody_wire, "MAX_PENDING", 1)
+    calls = []
+    second_started, release = asyncio.Event(), asyncio.Event()
+
+    async def handler(operation, data):
+        calls.append(operation)
+        if operation == "second":
+            second_started.set()
+        return data
+
+    async with connected(handler) as (peer, remotes, _):
+        while not remotes:
+            await asyncio.sleep(0)
+        remote = remotes[0]
+        original = remote.writer.drain
+
+        async def blocked():
+            await release.wait()
+            await original()
+
+        remote.writer.drain = blocked
+        second = None
+        try:
+            assert await asyncio.wait_for(peer.request("first", value=1), 1) == {"value": 1}
+            assert len(remote._tasks) == 1 and not next(iter(remote._tasks)).done()
+            second = asyncio.create_task(peer.request("second", value=2))
+            await asyncio.wait_for(second_started.wait(), 1)
+            assert len(remote._tasks) == 2
+            if overflow:
+                peer.writer.write(
+                    b'{"sequence":3,"operation":"overflow","data":{}}\n',
+                )
+                await peer.writer.drain()
+                with pytest.raises(ConnectionError, match="unknown"):
+                    await asyncio.wait_for(second, 1)
+            else:
+                release.set()
+                assert await asyncio.wait_for(second, 1) == {"value": 2}
+                assert not peer._closed and not remote._closed
+            assert calls == ["first", "second"]
+        finally:
+            release.set()
+            if second is not None:
+                await asyncio.gather(second, return_exceptions=True)
+
+
 async def test_invalid_outgoing_frame_does_not_consume_a_sequence():
     async with connected(echo) as (peer, remotes, _):
         with pytest.raises(ValueError):

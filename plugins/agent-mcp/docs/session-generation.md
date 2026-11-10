@@ -219,6 +219,11 @@ settlement to custody. The accepted record and quiescence wait remain until
 the settlement receipt is confirmed. Coalescing that receipt with the next
 input therefore cannot expose custody capacity before the backend can admit it.
 
+The private wire's receive window releases at receipt publication, not at a
+later drain completion or task done callback. Published-but-draining tasks
+remain owned for connection cleanup; a following uncredited frame is still
+refused before dispatch. Receive admission and cleanup ownership are separate.
+
 The watcher compares the last successfully adopted slot and endpoint
 publication identity. Republishing a different backend from the same
 immutable slot still migrates existing sessions. Admission verifies that

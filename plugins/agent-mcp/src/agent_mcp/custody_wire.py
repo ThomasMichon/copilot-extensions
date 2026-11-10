@@ -21,6 +21,7 @@ class Peer:
         self._received = 0
         self._pending = {}
         self._tasks = set()
+        self._receiving = set()
         self._write_lock = asyncio.Lock()
         self._credits = asyncio.Semaphore(MAX_PENDING)
         self._closed = False
@@ -42,6 +43,9 @@ class Peer:
         async with self._write_lock:
             self._check_open()
             self.writer.write(wire)
+            if "receipt" in packet:
+                # The peer can reuse this slot before drain or task callbacks run.
+                self._receiving.discard(asyncio.current_task())
             await self.writer.drain()
 
     def _settled(self, future) -> None:
@@ -97,6 +101,7 @@ class Peer:
 
     def _finished(self, task) -> None:
         self._tasks.discard(task)
+        self._receiving.discard(task)
         if not task.cancelled() and task.exception() is not None:
             self._closed = True
             self.writer.close()
@@ -141,11 +146,12 @@ class Peer:
                     or not isinstance(packet["data"], dict)
                 ):
                     raise ValueError("invalid or out-of-order custody frame")
-                if len(self._tasks) >= MAX_PENDING:
+                if len(self._receiving) >= MAX_PENDING:
                     raise ValueError("custody peer exceeded its outstanding operation budget")
                 self._received = packet["sequence"]
                 task = asyncio.create_task(self._dispatch(packet))
                 self._tasks.add(task)
+                self._receiving.add(task)
                 task.add_done_callback(self._finished)
         finally:
             self._closed = True
