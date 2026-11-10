@@ -18,7 +18,6 @@ from . import update_events as _events, update_options, update_runtime_plan, upd
 from . import update_auth_context as _auth
 from . import worktree_identity
 from .installer_run import InstallerLaunchError
-from .reconcile_freshness import check_runtime_freshness
 from .update_integration import PROJECT_INTEGRATION_CAPABILITY as PROJECT_INTEGRATION_CAPABILITY, run_selected
 from .update_runtime import describe_copilot_spawn_error as _describe_copilot_spawn_error
 from .update_runtime import (  # noqa: F401 - compatibility seams used by the plan collector
@@ -28,6 +27,13 @@ from .update_runtime import (
     _invocation_update_context as _invocation_update_context,
     _project_update_context as _project_update_context,
 )
+
+
+def check_runtime_freshness(plugin: str, payload: Path, root: Path, *, expected: dict | None = None):
+    from .reconcile_freshness import check_runtime_freshness as check
+
+    return check(plugin, payload, root, expected=expected)
+
 
 def _core():
     from . import __main__ as core
