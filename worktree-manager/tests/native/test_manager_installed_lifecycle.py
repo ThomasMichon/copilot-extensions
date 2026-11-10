@@ -397,6 +397,8 @@ class _Witness:
         if key not in self.screens:
             # Match the existing native ConPTY fixture's fixed dimensions.
             screen = pyte.Screen(100, 30)
+            # Observe private status queries without generating terminal input.
+            screen.report_device_status = lambda *_args, **_kwargs: None
             self.screens[key] = [console, screen, pyte.ByteStream(screen), 0]
         state = self.screens[key]
         data = bytes(console.output)
@@ -1476,6 +1478,23 @@ def test_lifecycle_prompt_paste_requires_the_actual_terminal_mode(mode):
         with pytest.raises(RuntimeError, match="has not enabled bracketed paste"):
             _paste_prompt(console, PROMPTS[0])
         assert sent == []
+
+
+@pytest.mark.parametrize("query", [b"\x1b[6n", b"\x1b[?6n"])
+def test_lifecycle_passive_renderer_accepts_status_queries_without_sending_input(tmp_path, query):
+    from types import SimpleNamespace
+
+    sent = []
+    witness = _Witness(tmp_path, {}, None, None, None, None)
+    console = SimpleNamespace(
+        output=bytearray(b"\x1b[2J\x1b[H" + PROMPTS[0].encode() + query[:3]),
+        send=sent.append,
+    )
+    assert PROMPTS[0] in witness.rendered(console)
+    console.output.extend(query[3:] + b"\r\nInteractive")
+    current = witness.rendered(console)
+    assert PROMPTS[0] in current and "Interactive" in current
+    assert sent == []
 
 
 @pytest.mark.parametrize("attached", [True, False])

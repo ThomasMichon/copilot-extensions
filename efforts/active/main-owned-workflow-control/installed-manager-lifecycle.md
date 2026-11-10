@@ -382,3 +382,20 @@ paste-mode and attachment-readiness controls after the latter addition.
 The real native dialog accepted the exact seed through the same fixture helper
 with no options selected. Lint, size and all 13 installation contracts passed.
 These are source/consumer checks, not installed lifecycle acceptance.
+
+### 2026-11-10 - Create and hosted owner proof passed; passive viewer refused a query
+
+Run 42796260636 at `1f30361b6f80f3bed8894820431e43c4fc1c1746`
+created the actual Git worktree, completed one provider-backed conversation,
+captured the exact reply from its real pane and identified the lock-bound
+parent plus its owned extension host. It then launched a second Manager and
+selected Open. During attachment observation, the passive VT decoder raised
+on a private device-status query before a further turn could be verified.
+Open/detach/normal exit/Resume acceptance remains unproved.
+
+The owned observer now accepts normal and private status queries without
+sending input or inventing a terminal acknowledgement. It still renders and
+requires the actual prompt frame. All six focused query/current-frame/
+attachment controls passed, including split queries and proof that no input
+was sent. No UI, provider, process-owner, history, cleanup or deadline
+assertion changed.

@@ -713,6 +713,8 @@ appear in the current rendered dialog before confirmation. The test-only
 it never supplies UI state or input acknowledgements. Open/Resume waits for
 the current actual CLI prompt frame before sending another turn. No retry
 or deadline increase compensates for dropped input.
+Normal and private device-status queries are inert in this passive observer;
+they never generate input or replace the real terminal's responses.
 Completed turns require durable conversation history and the reply in the
 terminal stream or the actual bound private pane's rendered capture. Removing
 escape sequences from a redraw stream is not itself a rendered-screen witness.
