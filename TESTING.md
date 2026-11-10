@@ -353,12 +353,31 @@ arguments, batch-over-single precedence, the 128-call bound and a later
 protected/foreign member defeating an earlier safe write. The separate
 structured packet covers the direct-plus-entry alias union, JSON arguments,
 deduplication and 128-entry/target limits, with late protected/foreign/nested
-targets, incomplete entries and patch fallback. It also compares structured
+targets, incomplete entries and fragmentary patch fallback. It also compares structured
 writes with the real original policy in legacy and selected-cell fixtures.
 The disjoint positive and protected write-name packets cover each original
 non-patch write alias, its protected-state target, JSON/structured arguments
 and heterogeneous batches. Real-policy comparisons in legacy and selected-cell scopes run in
 their own packet, retaining the same child/item/group limits.
+Disjoint patch-positive, protected, fallback and real-policy packets cover
+object/JSON/freeform input, every original Add/Update/Delete/Move header,
+CRLF, all-field/direct/structured union and mixed native batches. They retain
+both move endpoints, byte-exact whole-event fallback and real protected-state
+denials in legacy and selected-cell contexts. Exact 131072/131073-character
+field and 128/129-target boundaries, combined-union overflow, malformed,
+fragmentary, targetless, non-object JSON, foreign/nested/anchor and protected
+freeform cases run without changing the existing child/item/group limits.
+The commented-JSON regression preserves strict-original/freeform behavior
+when a permissive shell decoder would otherwise discard a protected header.
+Fixture-only phase markers report shell command entry, script entry,
+membership, native proof and policy entry on a native-write child timeout;
+they use the already-captured stderr pipe instead of opening a file per stage.
+Only complete, recognized marker lines are removed from successful stderr;
+genuine errors, blank lines, malformed markers and truncated output remain.
+Registered entries assert that membership-marker opening precedes marker JSON
+decoding, so a similarly shaped content reader cannot stand in for that stage.
+They never retry the child, extend its ten-second bound or classify the
+unobserved stalled phase as a known flake.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
