@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-machines"
-version = "0.3.121-dev1"
+version = "0.3.122-dev1"
 description = "Portable machine setup and restore for Copilot CLI."
 readme = "README.md"
 license = "MIT"
@@ -73,7 +73,7 @@ agent-machines = "agent_machines.__main__:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_machines = ["installation-repair-v1.json"]
+agent_machines = ["installation-repair-v1.json", "health-collection-v1.json"]
 
 [tool.ruff]
 target-version = "py310"
