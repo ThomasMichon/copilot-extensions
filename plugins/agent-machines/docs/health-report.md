@@ -172,8 +172,8 @@ outside the store as the explicit record input. Current-hour collection runs
 only the selected local listener check; an explicit older hour within the
 168-hour window exports retained services only, never present-time probes.
 Run the two explicit commands to obtain current health and previous-hour
-telemetry; automatic two-target execution and native periodic enrollment are
-not implemented. An early/current-hour export from the separate report command
+telemetry, or use the separately approved one-shot operation below.
+Native periodic enrollment is not implemented. An early/current-hour export from the separate report command
 remains its existing bounded snapshot, not a complete-hour total.
 
 Collection holds a nonblocking OS-backed run lock, uses a 45-second admission
@@ -208,6 +208,91 @@ evidence-free export, even when the response contains a valid contribution
 wrapper. This rule is also enforced for directly supplied record candidates.
 Components without evidence remain unknown; a fresh envelope does not refresh
 their source ages. Supplied input remains unverified, not an attested probe.
+
+## Policy-approved one-shot collection
+
+```text
+agent-machines health run --store-dir <absolute-v2-store>
+agent-machines health run --store-dir <absolute-v2-store> --apply --expect-policy <policy-token>
+```
+
+Without `--apply`, this reads only the selected store identity and exact local
+policy. It returns an `agent-machines.health.run` v1 plan and `policy_token`;
+no observation, export, admission lock, slot write, provisioning or job
+registration occurs. The token binds the canonical store path, filesystem
+identity, exact policy bytes (including publisher/continuity), and collection
+operation v1. It deliberately does not bind the hour or slot revision.
+Missing, wrong or changed approval refuses before effects; a token without
+`--apply` also refuses. Keep this local policy and approval outside synchronized
+report data. They authorize neither service changes nor carrier writes.
+Both payload entry points select an already provisioned runtime read-only for
+`health run`, including apply. A missing runtime refuses with the existing
+launcher failure status before calling an installer, stamping diagnostics or
+creating runtime/store state; use the normal setup owner separately.
+
+Apply holds one existing admission lock and one 45-second parent budget for
+two independent targets: current-hour listener health first, then the preceding
+complete hour's selected service exports. Empty selections are explicitly
+`not-requested`, not permission to enumerate providers. Both candidates pass
+through the same policy/revision planner, mutation lock and atomic writer as
+manual record; no intermediate candidate file is created. Policy approval and
+the frozen hour/deadline are rechecked under each mutation lock. Lock waiting,
+collection and native settlement share the remaining parent budget.
+
+The closed `targets` results retain absolute `hour`, `component`, `requested`,
+`collection`, `transaction`, `applied`, `changed` and bounded `reason`.
+The top-level `qualification` distinguishes an on-time response from a timeout,
+hour/policy change or unconfirmed effect. A second target's failure cannot
+erase or relabel the first commit. A late successful write retains its actual
+applied/changed facts with timeout qualification, never an on-time success.
+Exit 0 means preview or an on-time completed run; exit 2 retains partial/failed
+results on stdout, or a bounded pre-execution/output error on stderr.
+Collected service rows still retain their independent unsupported/unavailable
+coverage: a completed staging transaction is not healthy service evidence.
+
+Unknown write outcomes stop the invocation without replaying the target.
+Apply sets the existing admission fence before each transaction too; an unknown
+write leaves that byte at one after releasing the native lock. Subsequent
+invocations refuse rather than automatically retry a potentially committed
+write. Reconcile the exact returned hour and transaction through the original
+owner before any explicit store recovery; there is no automatic fence reset.
+Unconfirmed exporter cleanup preserves the existing native owner's callback
+and admission custody. Neither outcome rolls back earlier confirmed slots.
+In-process Python callers receive the original `OwnedCleanupError` with a
+bounded `health_run_result` attribute, retaining access to `retry_cleanup()`.
+The CLI emits that partial result and exits 2; a process exit does not clear
+its durable fence. Interrupted commits are marked unknown before entering the
+writer and preserve the fence even when a `KeyboardInterrupt` escapes.
+Python interruption errors also carry `health_run_result`; the CLI emits it
+for a keyboard interruption rather than claiming no write happened.
+This includes interruption during final post-admission validation: confirmed
+commits retain their facts. Any outstanding original cleanup owner still
+propagates, with the interruption as its cause. Cancellation before planning
+propagates unchanged instead of inventing a partial operation result.
+
+Independently installed callers must first qualify the exact selected Machines
+runtime's packaged `agent_machines/health-collection-v1.json` declaration:
+
+```json
+{"schema":"agent-machines.health.collection","version":1,"operations":["preview","apply"]}
+```
+
+This declaration is separate from the package version and from service-export
+metadata. Missing, changed or unsupported metadata is unavailable support,
+never permission to trial a new command, resolve PATH, provision or update.
+Runtime replacement/rollback invalidates the selection and requires fresh
+qualification. This provider declaration prepares that seam; it does not
+implement or enroll a native scheduler caller.
+
+The focused one-shot controls cover pure preview/approval, empty selections,
+mutation-time policy/revision drift, shared lock budget, partial outcomes,
+late commits and unconfirmed native cleanup. The opt-in collection consumer
+packet exercises a real fixture-owned listener and retained Dispatch data
+through both slots and the ordinary reread/report/chart, plus a failed second
+export preserving the confirmed first transaction. Required actor-free CI
+substitutes native/storage owners and starts none of those actors. Installed
+adoption, Linux/Windows job qualification, carrier behavior and activation
+remain separate gates.
 Listener-only recollection replaces only `local_listener`; retained SSH,
 session and other unselected domains keep their exact evidence and source
 timestamps. The record boundary also refuses changes to those domains.
