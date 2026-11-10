@@ -166,21 +166,22 @@ class SpawnHistoryMixin:
                 # own evidence may place it, and conflicting evidence places none.
                 hosts = reservation_hosts(row, task)
                 machine = next(iter(hosts)) if len(hosts) == 1 else None
-                candidates = [
-                    pool for pool in definitions
-                    if task is not None and machine is not None
-                    and normalize_host(pool.machine) == machine and _permits(pool, task)
-                ]
                 # Pool filters judge the workspace the body actually occupies.
                 matches = [
-                    pool for pool in candidates
-                    if not row["worktree"] or _permits(pool, task, worktree=row["worktree"])
+                    pool for pool in definitions
+                    if task is not None and machine is not None
+                    and normalize_host(pool.machine) == machine
+                    and _permits(pool, task, worktree=row["worktree"])
                 ]
                 if not catalog.ready:
                     unresolved["catalog_not_ready"].append(row["key"])
                 elif len(hosts) != 1:
                     unresolved["machine_conflict" if hosts else "machine_unrecorded"].append(row["key"])
-                elif candidates and not matches:
+                elif not matches and row["worktree"] and any(
+                    normalize_host(pool.machine) == machine and _permits(pool, task)
+                    for pool in definitions
+                ):
+                    # Only the recorded workspace keeps an otherwise eligible pool.
                     unresolved["workspace_conflict"].append(row["key"])
                 elif len(matches) == 1 and not row["worktree"]:
                     # A bound row must publish into its recorded workspace; a

@@ -496,6 +496,7 @@ def exhaust_recovery(owner: Any, conn: sqlite3.Connection, task: Task,
 
 def reconcile_recoveries(owner: Any, *, now: float | None = None) -> int:
     """Share the coordinator's existing suspended-monitor cadence, not a new timer."""
+    from .queue_execution_custody import PoolLaneUnavailable
     ts = owner._now(now)
     changed = 0
     with owner._connect() as conn:
@@ -521,6 +522,8 @@ def reconcile_recoveries(owner: Any, *, now: float | None = None) -> int:
                     changed += not lane_waiting(conn, task.id)
                     continue
                 _current(conn, task, assignment)
+            except PoolLaneUnavailable:
+                continue
             except TaskError as exc:
                 if assignment["recovery_requested_at"] is None:
                     # A waiter that cannot start must not keep holding its pool's lane;

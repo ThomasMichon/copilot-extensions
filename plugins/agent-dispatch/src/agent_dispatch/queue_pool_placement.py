@@ -442,6 +442,9 @@ def require_pool_workspace(
     )
     if conflict is not None:
         raise TaskError(conflict)
+    _require_bound_filters(
+        conn, task, worktree, (assignment.registration_id, assignment.machine, assignment.env),
+    )
 
 
 def _require_accounting_workspace(
@@ -466,6 +469,29 @@ def _require_accounting_workspace(
     )
     if conflict is not None:
         raise TaskError(conflict)
+    _require_bound_filters(
+        conn, task, worktree, (bound["registration_id"], bound["machine"], bound["env"]),
+    )
+
+
+def _require_bound_filters(
+    conn: sqlite3.Connection, task: Task, worktree: str | None, identity: tuple[str, str, str],
+) -> None:
+    """The bound pool's own permit/reject filters must accept the workspace."""
+    from .queue_pool_catalog import QueuePoolCatalogMixin
+    definition = next((
+        value
+        for row in conn.execute(
+            "SELECT * FROM pool_publication_scopes WHERE machine = ? AND env = ?", identity[1:],
+        )
+        for value in QueuePoolCatalogMixin._pool_scope_from_row(row).definitions
+        if value.identity == identity
+    ), None)
+    if definition is None:
+        from .queue_execution_custody import PoolLaneUnavailable
+        raise PoolLaneUnavailable("pool workspace's bound pool is disabled or unavailable")
+    if not _permits(definition, task, worktree=worktree):
+        raise TaskError("pool workspace is refused by its bound pool filters")
 
 
 def reservation_hosts(

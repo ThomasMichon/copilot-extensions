@@ -573,3 +573,35 @@ def test_adopt_legacy_applies_pool_filters_to_the_recorded_workspace(queue):
     assert result["unresolved"]["workspace_conflict"] == [reservation.key]
     with queue._connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 0
+
+
+def test_adopted_binding_applies_its_pool_filters_to_later_workspaces(queue):
+    from agent_dispatch.registrar import Filters
+    from tests.test_pool_placement import pool, publish
+
+    launching = queue.create("launching")
+    reservation, _ = queue.reserve_spawn(launching.id)
+    queue.record_spawn_worktree(reservation.key, "allowed", execution_machine="host-a")
+    publish(queue, pool(filters=Filters(reject={"worktree": frozenset({"blocked"})})))
+    assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
+    with pytest.raises(TaskError, match="bound pool filters"):
+        queue.record_spawn_worktree(reservation.key, "blocked", execution_machine="host-a")
+    with pytest.raises(TaskError, match="bound pool filters"):
+        queue.record_spawn(
+            reservation.key, worktree="blocked", session_handle="local-body:launch",
+            startup_complete=True, startup_revision=1,
+        )
+    current = queue.get_reservation(reservation.key)
+    assert (current.state, current.worktree) == ("reserving", "allowed")
+
+
+def test_adopt_legacy_judges_eligibility_in_the_recorded_workspace(queue):
+    from tests.test_pool_placement import place, pool, publish, task
+
+    required = task(queue, requires=["worktree:existing"])
+    reservation, _ = queue.reserve_spawn(required.id)
+    queue.record_spawn_worktree(reservation.key, "existing", execution_machine="host-a")
+    publish(queue, pool(capacity=3))
+    result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")
+    assert result["adopted"] == 1 and result["unresolved"] == {}
+    place(queue, task(queue))
