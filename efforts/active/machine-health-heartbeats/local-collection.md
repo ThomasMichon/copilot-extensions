@@ -148,6 +148,79 @@ Native scheduler IgnoreNew/single-unit behavior is defense in depth, not the
 only overlap check. Run admission and the existing short slot mutation lock have
 one documented acquisition order and bounded/nonblocking contention.
 
+## Adopted one-shot operation
+
+**Agent-recommended amendment: review before implementation.** The explicit
+one-hour candidate flow does not itself authorize recurring local writes.
+Add an optional one-shot operation inside the same health owner:
+
+```text
+agent-machines health run --store-dir <absolute-v2-store>
+agent-machines health run --store-dir <absolute-v2-store> --apply --expect-policy <approval-token>
+```
+
+Without `--apply`, return a bounded local plan and policy approval token.
+Read the explicitly selected store/policy only: no admission lock, observation,
+export, slot write, runtime provisioning or schedule registration. The token
+binds the canonical store and its filesystem identity, publisher/continuity,
+the exact local policy and the operation contract, not one hour's candidate
+or target revision. This deliberately permits a later explicitly adopted job
+to repeat the same approved operation while the local policy and store identity
+remain unchanged. A supplied token without `--apply`, a missing/mismatched
+token or a changed store/policy refuses before observation or export.
+
+`--apply` is the explicit request to collect and stage under that local policy.
+It is not authority from report data or a synchronized policy. No setup hook
+adds it to an action, and a native job may carry it only after its separate
+enrollment approval. Keep the existing manual `health collect` candidate and
+`health record` exact-preview/confirmation contracts unchanged.
+
+One apply invocation freezes its current UTC hour and 45-second parent budget,
+acquires one existing run-admission lock, then attempts at most two targets:
+current health first, and the preceding complete hour's selected service
+telemetry second. An empty component selection is an explicit not-requested
+target, not permission to enumerate providers. Collection retains the same
+source-hour and unselected-component rules as the manual flow.
+
+Stage each candidate through the existing health transaction owner, reusing
+its input/policy/previous-revision validation, mutation lock and atomic write.
+An internal in-memory entry may avoid a second persistent candidate file, but
+must share that same planner/writer rather than duplicate its checks.
+Revalidate the approved policy at each commit under the mutation lock.
+Hold run admission before taking the short mutation lock; constrain lock
+acquisition, each collector, settlement and the final response to the remaining
+parent budget, never a new per-target 45 seconds. Continue to refuse unknown
+native cleanup and preserve the existing admission fence.
+
+Report the two targets independently with a closed schema: absolute hour,
+requested component, collection outcome, transaction outcome and
+`applied`/`changed` facts. A later target's export or storage failure cannot
+erase an earlier confirmed commit or relabel it as rolled back.
+An unknown write outcome retains its exact target and forbids automatic replay.
+A successful but late write reports its actual committed/unknown fact together
+with timeout qualification; it must not claim an on-time successful run.
+Hour changes stop further probes/exports rather than move the frozen targets.
+Missing targets remain gaps, not fabricated uptime or zero telemetry.
+
+Before any independently installed caller uses this operation, require
+`agent-machines.health.collection` v1 support from its selected executable
+runtime. That declaration covers policy preview and adopted one-shot apply;
+it is separate from the package version and from service-export declarations.
+Expand this provider before preparing a scheduler caller. Missing/unsupported
+declarations mean unavailable support, never trial execution of a new command.
+Runtime replacement invalidates selection and requires requalification;
+unsupported rollback preserves read-only/manual flows where supported without
+silently invoking an update action or adopting a new writer.
+
+Prove preview purity, approval/store/policy drift, selected-empty targets,
+partial outcomes, mutation-time revision conflicts, timeout/hour changes and
+unconfirmed settlement with focused controls. The real consumer lane exercises
+one invocation with fixture-owned listener and retained service data through
+both committed slots and the normal reread/report/chart, plus injected second
+target failure preserving the first. Keep native subprocess/storage matrices
+outside required actor-free unit CI. Installed capability/mixed-version and
+platform job qualification remain separate enrollment gates.
+
 ## Native job, later and explicitly enrolled
 
 Prepare definitions separately from registering/enabling them. Use a limited
