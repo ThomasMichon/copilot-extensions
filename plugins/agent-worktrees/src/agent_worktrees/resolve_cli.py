@@ -18,7 +18,7 @@ from .launch_trace import append_launch_event
 from .execution_spaces import ExecutionSpaceError, registry_for_config
 from .resume_seed import (
     RETAINED_HANDOFF_WARNING, cold_start_error, plain_live_open,
-    preserve_unconfirmed_seed, seed_for_attempt,
+    preserve_unconfirmed_seed, preserved_seed_selection_error, seed_for_attempt,
 )
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
@@ -310,6 +310,7 @@ def add_parsers(sub) -> None:
         help="Require atomically fenced native launch-seed staging",
     )
     parser.add_argument("--seed-id", default=None, help="Execute this already-staged launch intent")
+    parser.add_argument("--preserve-seed-id", default=None, help="Open without delivering this retained intent")
     parser.add_argument("--launch-attempt-id", default=None, help="Correlate a confirmed Manager launch attempt")
     parser.add_argument(
         "--require-launch-attempt", action="store_true",
@@ -425,6 +426,8 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         ))
     ):
         return output._json_error("Native resume requires an existing unseeded --worktree-id and --no-resume", exit_code=3)
+    if error := preserved_seed_selection_error(args):
+        return output._json_error(error, exit_code=3)
     if (
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
@@ -939,6 +942,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     }
     if selection.assignment is not None:
         launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+    if retain_seed and staged_seed is not None:
+        launch["seed_preserved_id"] = staged_seed.seed_id
+        launch["seed_preservation_version"] = 1
     if getattr(state.args, "dry_run", False):
         launch["preview"] = True
         if warning := getattr(selection, "warning", ""):

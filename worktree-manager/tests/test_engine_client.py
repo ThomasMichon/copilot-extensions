@@ -951,6 +951,24 @@ def test_resolve_resume_parses_plan(monkeypatch):
     assert plan.post_exit is True
 
 
+def test_resolve_retained_hint_keeps_selected_engine(monkeypatch):
+    seen = []
+
+    def handler(cmd, kw):
+        seen.append(cmd)
+        assert cmd[0] == "/selected/engine"
+        assert kw["env"]["AGENT_WORKTREES_RETAINED_SEED_PLANS"] == "1"
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    ec.set_engine_command(["/selected/engine"])
+    monkeypatch.setattr(
+        ec, "installed_engine_command", lambda *a, **k: pytest.fail("selected engine was bypassed"),
+    )
+    assert ec.resolve_launch_plan("demo", worktree_id="wt-a").is_exec
+    assert len(seen) == 1
+
+
 def test_resolve_new_sends_new_flag(monkeypatch):
     def handler(cmd, kw):
         assert "--new" in cmd and "--worktree-id" not in cmd

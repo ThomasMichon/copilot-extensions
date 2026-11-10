@@ -1138,7 +1138,7 @@ Write-SetupLog "Runtime selected for launch: $VenvPython"
 # that's actually still on disk.
 if ($plan.cmd) {
     $planCmd = @($plan.cmd)
-    if ($plan.seed_pending -and $planCmd.Count -ge 3 -and
+    if ($planCmd.Count -ge 3 -and
         $planCmd[1] -eq '-m' -and $planCmd[2] -eq 'agent_worktrees.launch_seed_exec') {
         $planCmd[0] = $VenvPython
     }
@@ -2395,7 +2395,7 @@ if (-not $noMux) {
         # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
         Invoke-AwMuxCompanionBindSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath -Created
-        if (-not $plan.seed_pending) {
+        if (-not $plan.seed_pending -and -not $plan.seed_preserved_id) {
             Invoke-SeedDeliverySafe $plan.worktree_id
         }
         if ($nested) {

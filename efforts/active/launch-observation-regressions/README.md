@@ -151,6 +151,24 @@ replacement and rollout remain with their existing owners.
 - Ruff F/E9 and the install contract pass. No installation or first-provision
   behavior changed; fresh native caller fixtures cover the existing admission
   boundary rather than a new installer clean-room scenario.
+- Disposable Windows exercised the published planner source: 140 passed and
+  the existing POSIX-only case skipped, with clean native cleanup. The strict
+  qualification packet therefore remains incomplete, not qualified.
+- Local shell delegation re-resolves a plan, so preserving intent only inside
+  its first command was insufficient: a replacement could become a new delivery.
+  Carry the retained identity through both resolves and final preparation.
+  Qualify preserved plans through an optional caller hint so older Managers keep
+  the safe refusal, and refuse unsupported explicit selectors before effects.
+- Both launchers must skip legacy prompt delivery for a preserved plan and
+  refresh recognized admission-only module commands after runtime selection,
+  just as they already refresh prompt-delivery commands.
+- The corrected Worktrees packet passed 17 focused cases with clean containment
+  and cleanup. The Manager packet passed 179 cases but exposed five failures
+  where adding an environment hint changed selected-engine resolution.
+  Pinning the already-selected command fixes that class; all 116 engine-client
+  cases then passed with clean cleanup, including an explicit wrong-engine
+  refusal control. Final native qualification of the complete corrected source
+  and versioned preservation declaration remains pending.
 
 ### 2026-11-09 - Native scope review corrections
 - Review identified creation-namespace drift and a scrubbed teammate flag that

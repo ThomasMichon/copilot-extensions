@@ -686,6 +686,9 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     }
     if selection.assignment is not None:
         plan["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+    if retain_seed and staged_seed is not None:
+        plan["seed_preserved_id"] = staged_seed.seed_id
+        plan["seed_preservation_version"] = 1
     _emit_plan(plan)
     return 0
 
