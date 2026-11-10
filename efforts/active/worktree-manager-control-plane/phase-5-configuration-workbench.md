@@ -58,6 +58,10 @@ post-input preview contract; do not rebuild the shell from this older checklist.
 The [bounded local knowledge-registration proposal](phase-5-local-knowledge-registration.md)
 defines a separate owner operation before the existing bind-only action, under
 #1419 Track 3. It does not claim creation, authentication, pairing or receiving.
+The [knowledge provider-preflight proposal](phase-5-knowledge-provider-preflight.md)
+defines the shared non-mutating registration/provider/account and server-policy
+observation under #1419 KO3. Authentication acquisition, rejected-push recovery
+and protection writes remain separate.
 
 ## Plan
 
