@@ -1232,7 +1232,9 @@ failure uses a new check, and only an unfinished original is closed out directly
 An authorized manual dispatch can instead supply `pull_request_number` alone
 to reconcile one current open `dev` PR. It uses the existing trusted default
 checkout and refresh job's checks-write permission; the native metadata jobs
-stay read-only. The selector cannot be combined with promotion inputs.
+stay read-only. The trusted inline script rejects selector/promotion mixing
+before loading the checked-out helper, including an older promotion snapshot
+whose helper does not understand the selector.
 No initial global PR listing occurs, although an incomplete/unavailable commit
 association response still requires the authoritative full census described
 above. Writes remain scoped to the selected head.
@@ -1243,7 +1245,10 @@ Actions-run URL. Workflow-backed jobs and other same-name producers remain
 untouched; this is producer scoping, not cryptographic publisher authentication.
 After a stable snapshot it reevaluates every owned historical run, including
 completed superseded failures, to the actual current decision and publishes a
-fresh result. Invalid descriptions and shared heads remain failures.
+fresh result. A final paginated owned-series census detects new or overwritten
+results from concurrent departure refreshes; a stable PR alone cannot prove
+the whole direct series was reconciled. Invalid descriptions and shared heads
+remain failures.
 Cleanup requests are reserved for every attempted rewrite before mutation.
 Racing metadata, lost write responses and budget exhaustion fail the operation,
 publish a superseding failure and fail-close attempted rewrites, including

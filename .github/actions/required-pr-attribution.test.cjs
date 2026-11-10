@@ -371,6 +371,74 @@ test("scoped cleanup continues after an unknown failure and never reports succes
   assert.deepEqual(output.messages, []);
 });
 
+test("overlapping departure refresh cannot leave an undetected superseded failure", async () => {
+  const values = [{ ...pr(marker), number: 1 }];
+  const { github, created } = headFixture(values);
+  const update = github.rest.checks.update;
+  let departed = false;
+  github.rest.checks.update = async (check) => {
+    const result = await update(check);
+    if (!departed && check.conclusion === "success") {
+      departed = true;
+      const create = github.rest.checks.create;
+      let rejoined = false;
+      github.rest.checks.create = async (run) => {
+        const result = await create(run);
+        // Simulate the departing peer's transient rejoin after its pending result.
+        if (run.status === "in_progress" && !rejoined) {
+          rejoined = true;
+          values.push({ ...pr(marker), number: 2, head: { ...values[0].head } });
+        }
+        return result;
+      };
+      values[0].body = "";
+      await gate.departed({
+        github, context: { ...context, payload: {
+          action: "closed", pull_request: { ...pr(marker), number: 3, head: { sha: "a".repeat(40) } },
+        } }, core: core(), pause: async () => {},
+      });
+      github.rest.checks.create = create;
+      values.splice(1);
+      values[0].body = marker;
+    }
+    return result;
+  };
+  // Departure selectors require a canonical SHA; use it for the scoped PR too.
+  values[0].head.sha = "a".repeat(40);
+  const output = core();
+  await assert.rejects(gate.backfill({ github, context, core: output, pullRequest: 1 }),
+    /Owned source check series changed/);
+  assert.ok(departed);
+  assert.ok(created.some((check) => check.external_id.endsWith(":superseded")));
+  assert.equal(created.at(-1).conclusion, "failure");
+  assert.deepEqual(output.messages, []);
+});
+
+test("trusted dispatch rejects mixed inputs before requiring a legacy global-only helper", async () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+  const workflow = fs.readFileSync(path.join(__dirname, "../workflows/workflow-lockdown-guard.yml"), "utf8");
+  const script = workflow.match(
+    /- name: Refresh current dev source metadata checks[\s\S]*?script: \|\n((?: {12}[^\n]*\n?)+)/,
+  )[1].replace(/^ {12}/gm, "");
+  const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+  const run = new AsyncFunction("require", "github", "context", "core", "process", script);
+  let loaded = 0;
+  let globalWrites = 0;
+  const legacyRequire = () => {
+    loaded++;
+    // The old helper ignores the extra selector argument and refreshes all heads.
+    return { backfill: async () => { globalWrites++; } };
+  };
+  for (const inputs of [{ promotion_sha: "a".repeat(40) }, { promotion_run: "1-1" }]) {
+    await assert.rejects(run(legacyRequire, {}, { payload: { inputs } }, core(), {
+      env: { SOURCE_PULL_REQUEST: "1" },
+    }), /cannot be combined with promotion inputs/);
+  }
+  assert.equal(loaded, 0);
+  assert.equal(globalWrites, 0);
+});
+
 test("scoped refresh rejects invalid selectors and promotion mixing before any API call", async () => {
   for (const pullRequest of ["", "0", "-1", "1.5", "01", "9007199254740992", "x"]) {
     await assert.rejects(gate.backfill({ github: {}, context, core: core(), pullRequest }), /Invalid or conflicting/);

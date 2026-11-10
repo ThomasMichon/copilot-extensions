@@ -505,6 +505,10 @@ jobs:
         with:
           retries: 0
           script: |
+            if (process.env.SOURCE_PULL_REQUEST &&
+                (context.payload.inputs?.promotion_sha || context.payload.inputs?.promotion_run)) {
+              throw new Error("Scoped source repair cannot be combined with promotion inputs.");
+            }
             await require("./.github/actions/required-pr-attribution.cjs").backfill({
               github, context, core, pullRequest: process.env.SOURCE_PULL_REQUEST || undefined,
             });

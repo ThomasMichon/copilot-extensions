@@ -255,10 +255,10 @@ async function reconcilePR(github, context, number, budget) {
   const observed = await headPolicy(github, context, number, initial.head.sha, budget);
   if (observed.pr.head.sha !== initial.head.sha || observed.pr.state !== "open" ||
       observed.pr.base.ref !== "dev") throw new Error("Scoped pull request metadata changed; retry the check.");
-  const checks = await paginate(budget, github, github.rest.checks.listForRef, {
+  const ownedRuns = async () => (await paginate(budget, github, github.rest.checks.listForRef, {
     ...context.repo, ref: initial.head.sha, check_name: CONTEXT, filter: "all", per_page: 100,
-  });
-  const owned = checks.filter((check) => ownedCheck(check, context));
+  })).filter((check) => ownedCheck(check, context));
+  const owned = await ownedRuns();
   // Every attempted rewrite needs a reserved failure write, even if its response is lost.
   budget.protectPending(owned.length);
   const attempted = [];
@@ -296,6 +296,13 @@ async function reconcilePR(github, context, number, budget) {
       ...context.repo, check_run_id: created.data.id, status: "completed",
       conclusion: observed.error ? "failure" : "success", output,
     }));
+    const expected = new Set([...owned.map((check) => check.id), created.data.id]);
+    const confirmed = await ownedRuns();
+    if (confirmed.length !== expected.size || confirmed.some((check) =>
+      !expected.has(check.id) || check.external_id !== observed.snapshot ||
+      check.status !== "completed" || check.conclusion !== (observed.error ? "failure" : "success"))) {
+      throw new Error("Owned source check series changed during reconciliation; retry the check.");
+    }
     stable = (await headPolicy(github, context, number, initial.head.sha, budget)).snapshot === observed.snapshot;
     if (!stable) throw new Error("Scoped pull request metadata changed; retry the check.");
   } finally {

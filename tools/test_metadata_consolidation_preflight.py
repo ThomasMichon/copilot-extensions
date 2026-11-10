@@ -136,6 +136,10 @@ def test_source_keeps_job_permissions_and_promotion_consumer(metadata_snapshot, 
     expected = deepcopy(original["jobs"]["refresh-source-attribution"])
     expected["steps"][-1]["env"] = {"SOURCE_PULL_REQUEST": "${{ inputs.pull_request_number }}"}
     expected["steps"][-1]["with"]["script"] = (
+        'if (process.env.SOURCE_PULL_REQUEST &&\n'
+        '    (context.payload.inputs?.promotion_sha || context.payload.inputs?.promotion_run)) {\n'
+        '  throw new Error("Scoped source repair cannot be combined with promotion inputs.");\n'
+        '}\n'
         'await require("./.github/actions/required-pr-attribution.cjs").backfill({\n'
         '  github, context, core, pullRequest: process.env.SOURCE_PULL_REQUEST || undefined,\n'
         '});\n'
