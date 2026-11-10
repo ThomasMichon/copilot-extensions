@@ -39,6 +39,7 @@ _FIELDS = frozenset(
         "include_missing",
         "bootstrap",
         "passive",
+        "refresh_id",
     }
 )
 
@@ -67,6 +68,15 @@ def request_selection(payload: dict) -> tuple[str, dict]:
     Selection(**selection)
     if selection["worktree_id"] is not None and selection["codename"] is not None:
         raise ProjectionError("current-roster selectors are mutually exclusive")
+    if "refresh_id" in payload:
+        refresh_id = payload["refresh_id"]
+        if (
+            not isinstance(refresh_id, str) or len(refresh_id) != 32
+            or any(c not in "0123456789abcdef" for c in refresh_id)
+            or selection["worktree_id"] is None
+            or payload.get("passive") is True or payload.get("bootstrap") is True
+        ):
+            raise ProjectionError("point refresh requires an exact selection and a valid request ID")
     return project, selection
 
 
@@ -165,6 +175,9 @@ class WorktreesRuntime:
         from .owner_observation_native_intake import NativeIntake
 
         self.native_observations = NativeIntake(self)
+        from .worktrees_refresh import RefreshRequests
+
+        self.refreshes = RefreshRequests()
 
     @property
     def _read_elected(self):
@@ -211,6 +224,7 @@ class WorktreesRuntime:
                 # A (re)elected resident proves freshness only by its own publishes.
                 self._refreshed.clear()
                 self._changed_pending.clear()
+                self.refreshes.clear()
             self.feed.activate()
             self.agendas.activate()
             self.observations.activate()
@@ -225,6 +239,7 @@ class WorktreesRuntime:
             self._admitting = False
             self._reason = reason
             self._changed_pending.clear()
+            self.refreshes.clear()
         self.feed.close(reason)
         self.native_observations.close_admission()
         self.agendas.close(reason)
@@ -234,11 +249,12 @@ class WorktreesRuntime:
 
     def health(self) -> dict:
         from .worktrees_feed import BOOTSTRAP_CAPABILITY, FEED_CAPABILITY
+        from .worktrees_refresh import CAPABILITY as REFRESH_CAPABILITY
 
         with self._lock:
             result = {
                 "capabilities": [
-                    CAPABILITY, FEED_CAPABILITY, BOOTSTRAP_CAPABILITY,
+                    CAPABILITY, FEED_CAPABILITY, BOOTSTRAP_CAPABILITY, REFRESH_CAPABILITY,
                     observations.CAPABILITY, "picker-bootstrap-v1",
                     "worktree-agendas-v1",
                     "worktree-agendas-v2",
@@ -396,6 +412,18 @@ class WorktreesRuntime:
                 self._record_demand_locked(project)
             publication_error = self._publication_errors.get(project)
             refreshed_at = self._refreshed.get(project)
+            refresh_receipt = None
+            if "refresh_id" in payload:
+                try:
+                    refresh_receipt = self.refreshes.request(
+                        project, Selection(**selection), payload["refresh_id"],
+                    )
+                except ProjectionError as exc:
+                    return self._failure(getattr(exc, "code", "invalid-request"), str(exc))
+                if refresh_receipt is None:
+                    if self._wake is not None:
+                        self._wake.set()
+                    return self._failure("unready", "requested point refresh is awaiting publication")
         try:
             result = self.store.read(
                 project, **selection, contract_version=payload["contract_version"],
@@ -409,6 +437,14 @@ class WorktreesRuntime:
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
         result = {"ok": True, "contract_version": payload["contract_version"], **result}
+        if refresh_receipt is not None:
+            from .worktrees_refresh import receipt_matches
+
+            if not receipt_matches(refresh_receipt, result):
+                return self._failure(
+                    "refresh-unavailable", "Point-refresh receipt does not match the selected record",
+                )
+            result["point_refresh"] = refresh_receipt
         if payload["contract_version"] == observations.VERSION:
             result["project"] = project
         if publication_error is not None:
@@ -471,6 +507,7 @@ class WorktreesRuntime:
     def publish(
         self, project: str, rows, *, observed_at: float, record_heads=None,
         collected_from: float | None = None,
+        refresh_requests=(),
     ) -> None:
         project = _identity(project, name="project")
         started = self._now()
@@ -512,6 +549,8 @@ class WorktreesRuntime:
                 self._unready_demand.discard(project)
                 self._refreshed[project] = started
                 self._changed_pending.pop(project, None)
+                if refresh_requests:
+                    self.refreshes.complete(project, refresh_requests, read=self.store.read)
         self.feed.changed(project)
 
     def note_changed(self, path: str | None) -> None:

@@ -725,6 +725,9 @@ def _launch(
         )
     argv, receipt, child_environment = prepared.argv, prepared.receipt, prepared.environment
     try:
+        from .session_shell import startup_command
+
+        argv = startup_command(argv, record_path=record_path)
         if os.name != "nt" and not invoke and not admission_only and execution is None:
             if child_environment is not None:
                 os.execvpe(argv[0], argv, child_environment)
@@ -736,7 +739,10 @@ def _launch(
             **({"env": child_environment} if child_environment is not None else {}),
             **({} if _interactive_console() else no_window_kwargs()),
         )
-    except OSError as exc:
+    except (OSError, ValueError) as exc:
+        from .sessions_pane_args import _cleanup_startup_command
+
+        _cleanup_startup_command(argv)
         restored = launch_seed_state.restore(record_path, receipt) if receipt else None
         print(f"Could not start Copilot command: {exc}; seed restoration: {restored}", file=sys.stderr)
         return 3

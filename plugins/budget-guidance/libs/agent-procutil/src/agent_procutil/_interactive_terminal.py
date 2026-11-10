@@ -8,6 +8,7 @@ import select
 import signal
 import subprocess
 import sys
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -19,6 +20,7 @@ _BOOTSTRAP = (
     "from agent_procutil._interactive_session import main;main()"
 )
 _BUFFER = 1024 * 1024
+_TERMINAL_OWNER = threading.Lock()
 
 
 def _above_stdio(fd):
@@ -84,11 +86,22 @@ def _ignore(signum):
 
 class _Terminal:
     def __init__(self, stdio):
-        import termios
-
         self.fd = None
+        self._claimed = False
         if "tty" not in stdio:
             return
+        if not _TERMINAL_OWNER.acquire(blocking=False):
+            raise RuntimeError("The caller terminal already has an interactive owner")
+        self._claimed = True
+        try:
+            self._open(stdio)
+        except BaseException:
+            self._release()
+            raise
+
+    def _open(self, stdio):
+        import termios
+
         try:
             fd = os.open("/dev/tty", os.O_RDWR | os.O_NOCTTY | os.O_NONBLOCK)
         except OSError as error:
@@ -157,6 +170,13 @@ class _Terminal:
     def close(self):
         if self.fd is not None:
             os.close(self.fd)
+            self.fd = None
+        self._release()
+
+    def _release(self):
+        if self._claimed:
+            self._claimed = False
+            _TERMINAL_OWNER.release()
 
 
 def _stdio():
@@ -277,12 +297,16 @@ def _relay(events, control, master, terminal, output):
             signal.signal(signal.SIGWINCH, previous)
 
 
-def _drain(master, terminal, output):
+def _drain(master, terminal, output, *, deadline=None):
     if master is None:
         return
-    deadline = time.monotonic() + 2
+    quiet_deadline = time.monotonic() + 2
+    poller = select.poll()
+    poller.register(terminal.fd, select.POLLOUT)
     finished = False
     while output or not finished:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise TimeoutError("interactive terminal cleanup deadline expired")
         if not finished and len(output) < _BUFFER:
             data = _read_pty(master, min(65536, _BUFFER - len(output)))
             if data:
@@ -291,14 +315,15 @@ def _drain(master, terminal, output):
                 finished = True
         if not output:
             continue
-        remaining = deadline - time.monotonic()
-        if remaining <= 0 or not select.select([], [terminal.fd], [], remaining)[1]:
+        limit = quiet_deadline if deadline is None else min(quiet_deadline, deadline)
+        remaining = limit - time.monotonic()
+        if remaining <= 0 or not poller.poll(max(1, int(remaining * 1000))):
             raise TimeoutError("interactive terminal output did not drain")
         try:
             count = os.write(terminal.fd, output[:65536])
             del output[:count]
             if count:
-                deadline = time.monotonic() + 2
+                quiet_deadline = time.monotonic() + 2
         except BlockingIOError:
             pass
 

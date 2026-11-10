@@ -280,7 +280,11 @@ def test_terminal_tail_has_an_idle_deadline_not_a_total_output_deadline(monkeypa
     monkeypatch.setattr(terminal, "os", SimpleNamespace(write=write))
     monkeypatch.setattr(
         terminal, "select",
-        SimpleNamespace(select=lambda _read, writable, _error, _timeout: ([], writable, [])),
+        SimpleNamespace(
+            POLLOUT=4, poll=lambda: SimpleNamespace(
+                register=lambda *_args: None, poll=lambda _timeout: [(19, 4)],
+            ),
+        ),
     )
     output = bytearray()
     if progress:

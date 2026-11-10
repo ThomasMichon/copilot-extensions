@@ -935,6 +935,42 @@ The `interactive_completion=true` selector in the manual
 `installation-context-acceptance.yml` lane runs this focused packet on Linux,
 macOS and Windows; it does not widen required unit-only PR CI.
 
+## Opt-in asynchronous foreground custody
+
+`async_foreground.require_foreground_custody()` checks the Linux pidfd,
+main-thread and default-SIGCHLD requirements before native creation.
+`await AsyncForegroundProcess.start(argv, cwd=..., env=..., before_exec=...)`
+uses the existing private-session guardian, PTY and caller-lifetime pipe.
+The original native command stays gated until its actual PID/pidfd is retained
+and the optional synchronous admission callback succeeds. `pid` is the native
+child, not the guardian. Redirected streams remain inherited.
+An overlapping terminal-backed start in the same process refuses before taking
+another mode snapshot; ownership remains held through restoration and close.
+Readiness and output drainage accept valid descriptors above the `select()` range.
+
+`wait()` returns the native exit status only after whole-session settlement and
+terminal restoration. `terminate()` closes the original lifetime channel and
+awaits that same cleanup. Cancelled waiters do not cancel the retained cleanup;
+callers still explicitly terminate their owned foreground scope on unwind.
+Failed settlement raises `OwnedCleanupError` retaining the original guardian,
+provider resources and bounded retry, not permission to signal a numeric PID.
+Confirmation or output-drain failure still restores caller terminal modes while
+retaining unresolved custody and descriptors; a restoration failure is preserved
+in the cleanup error chain. Retry output drainage honors the caller's absolute
+deadline even while bytes continue progressing.
+Managed detachment outside the private session keeps the existing exemption.
+
+The guardian's opt-in receipt reports **settlement**, not early acceptance of a
+whole-scope stop. `retirement_started` therefore remains false until the receipt
+and an independent whole-session confirmation. Root pidfd signalling, scheduling
+cleanup or writing a pipe cannot mark SDK EOF as expected. An earlier unexplained
+observation must stay irreversible; this provider alone is not proof of auth-wait
+recovery. The Driver's POSIX source-auth receiver remains unsupported until its
+actual expiry, renewal and same-session flow is independently qualified.
+Windows and macOS refuse this new API; existing `run_interactive` behavior is
+unchanged. Abrupt caller death still triggers the existing guardian, while an
+uncatchable signal cannot restore the caller's terminal modes.
+
 ## Caller-owned native execution with streaming limits
 
 An ordinary synchronous caller that also needs caller-death cleanup uses the

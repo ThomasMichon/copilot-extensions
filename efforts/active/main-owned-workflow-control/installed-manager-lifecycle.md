@@ -47,10 +47,18 @@ installed or frozen-candidate release evidence.
 
 ## Ownership and scope
 
-- Campaign driver owns this CI/promotion requirement, plan and review.
+- Campaign driver owns this CI/promotion requirement, plan, review and the new
+  `worktree-manager/tests/native/test_manager_installed_lifecycle.py` witness.
+  It consumes existing qualified helpers without taking their edit ownership.
+- The accepted required-readiness contributor owns only the new
+  `worktree-manager/tests/native/manager_installed_readiness_profile.py` and
+  `worktree-manager/tests/test_installed_readiness_profile.py` input/control
+  modules. Actual runtime discovery, installation and execution remain in the
+  shared lifecycle witness, not a second fixture or promotion job.
 - The existing #11377 qualification coordinator retains native installation,
-  TTY fixture source and its open Main-activation PR. Agree exact extension
-  files before implementation; this proposal does not supersede that work.
+  TTY fixture source and its open Main-activation PR. Agree actual overlapping
+  helper/runner/result edits before touching those files; independent new-file
+  work does not wait for that entire PR to merge. This does not supersede it.
 - #3336 retains the promotion transaction and independently governed Main
   controller; #7529 retains configured-feed construction and its wider matrix.
 - Existing launcher, path resolver, launch-admission, Copilot driver and
@@ -70,10 +78,13 @@ The following implementation decomposition is **agent-recommended**.
 
 ### Phase 1 - Review and accept existing-owner seams
 
-- [ ] Review the release-vision extension and this linked parent amendment
-  before implementation.
-- [ ] Agree the native lifecycle fixture and release-result integration seams
-  with #11377 and #3336; preserve their active PRs and existing source custody.
+- [x] Review the release-vision extension and this linked parent amendment
+  before implementation. #11739 merged after current-head Copilot approval,
+  correction of the exception-list finding and required green CI.
+- [ ] Agree actual overlapping native-helper and release-result integration
+  seams with #11377 and #3336; preserve their active PRs and source custody.
+  Proceed independently on the assigned new witness/profile files rather than
+  make Main-PR completion or a blanket acknowledgement a prerequisite.
 - [ ] Select the representative generic harness and its complete declared suite
   installation recipe from canonical owners. Enumerate what is installed and
   enabled; a manually assembled Manager/engine pair cannot be called a suite
@@ -174,3 +185,665 @@ frozen-candidate gate seams. Coordination was posted on #6237 and #11377.
 No native or workflow implementation is claimed; exact extension ownership
 and reviewed intent precede those edits. Existing TTY activation remains
 with its current coordinator, and all broader campaign gates remain open.
+
+### 2026-11-09 - Reviewed lifecycle contract accepted
+
+#11739 merged at `6c5be356d7a66bd10c9895d1270b607e312cff09`.
+The [dated acceptance record](journal/2026/11.09-installed-manager-lifecycle.md)
+retains the review, qualification limits and next existing-owner seam.
+Only the reviewed-intent item closes; native lifecycle implementation,
+suite closure and actual candidate enforcement remain unproved.
+
+### 2026-11-09 - Independent file split instead of whole-PR blocking
+
+Following the operator's coordination direction, the Campaign driver traced
+the owned Main PR's publishing controller across machines and posted the exact
+source split on its PR thread. Direct peer delivery was not acknowledged;
+the existing session and control transaction were preserved.
+The required-readiness contributor accepted the two new companion/control
+paths above. The Campaign driver reserved the distinct lifecycle witness.
+Shared helper/runner/result edits still require concrete overlap coordination;
+neither this split nor the open Main PR establishes executed lifecycle proof.
+
+### 2026-11-10 - Isolated the deferred Windows argument boundary
+
+The second disposable native run (42766907684, candidate
+`5dbe28a88ea64d482c7513f748a551a65887a605`) passed the repaired quoted-process
+census and created the actual private PSMux session, then the pinned CLI
+rejected its command before inference. Direct tests against that exact pinned
+CLI accepted the configured flags and both directory spellings; those inputs
+were not removed or weakened.
+
+A separate private argv witness reproduced PowerShell's `-File` conversion
+of `-C=<drive>:\...` into two arguments. The ordinary startup manifest and
+full pane-manifest route preserved it. The deferred seed owner can reach a
+later canonical setup spawn after mux serialization, leaving that final
+boundary unprotected. The fix reuses the existing copied shell and one-shot
+manifest at that spawn, retaining the original admission and seed ownership.
+No provider mock, policy, budget or native-session identity was changed.
+
+Focused source validation passed 254 shell/seed controls with 16 platform
+skips, followed by both native final-spawn success/failure variants. Lint,
+install-contract and module-size checks passed. These controls are not the
+installed Manager lifecycle result: draft #11864 remains unqualified until
+the exact updated source completes the disposable native witness. Authentic
+selected-suite installation, ordinary upgrade and frozen-candidate mandatory
+enforcement remain open under this parent.
+
+### 2026-11-10 - Real CLI startup reached, conversation assertion unresolved
+
+Disposable run 42772527770 tested the exact repaired source
+`f179ee7789f0209bec48840c884d2ace01de54cb`. The native CLI started and rendered
+the seeded prompt instead of rejecting its argv. Qualification still failed
+at the first completed-conversation assertion. Recent terminal evidence includes
+missing enabled payload warnings and redraw-fragmented reply text; it does not
+identify which history/rendering predicate failed. No lifecycle phase is
+credited from that output.
+
+A separate private ConPTY probe of the same pinned CLI completed one actual
+loopback request, persisted the user/assistant turn and normal exit. That is a
+diagnostic without installed Manager, mux or plugin closure, not acceptance.
+The lifecycle witness now retains bounded history counts and prompt/reply/turn
+predicates separately from its terminal-reply predicate on failure. Its
+original completion, identity, terminal and cleanup assertions remain intact.
+Resolve the measured predicate and missing payload closure before treating
+another native attempt as qualified; do not infer a fix by removing the
+terminal check or extending its timeout.
+
+All five focused diagnostic controls passed, including absent, unfinished
+and completed-but-unmatched history. The same native case will retain these
+observations on its next exact-source attempt; its pass criteria are unchanged.
+
+### 2026-11-10 - Measured a terminal-stream false negative
+
+Run 42775388223 at `26a4adf7615409d8936af5cadfee1b700262c5d7`
+retained one actual history with 11 events: the exact prompt and reply were
+present and one assistant turn had ended. The raw-stream terminal predicate
+alone was false. A PSMux redraw stream is not a rendered screen: stripping
+escape sequences does not apply cursor edits or recover text reused by a
+later frame.
+
+The witness now falls back to the real private mux's bounded `capture-pane`
+view, only after completed history matches. It resolves and verifies that
+history's actual worktree/head/session binding before targeting the pane.
+Rendered reply, native process identity, normal exit and same-conversation
+Resume/Open assertions remain required. This is not a callback, terminal
+assertion removal or a timeout extension. Missing enabled payload warnings
+remain a separate unresolved fixture-closure observation, not an accepted
+degraded installation.
+
+### 2026-11-10 - A later run stopped before completed history
+
+Run 42776996317 at `9756e5cc5ae89fa0280046ac5913fff142be69bc`
+retained one history with six events and the expected prompt, but no reply or
+assistant turn end. The rendered-pane fallback was therefore not reached.
+This is a distinct unfinished-turn failure, not another raw-stream false
+negative. The owned witness now retains bounded event-type counts and the
+private provider's request count without request content. All 14 source
+controls passed; native qualification and the missing enabled-payload closure
+remain open. No assertion, deadline, plugin policy or installed receipt changed.
+
+### 2026-11-10 - Inference completed; pane read lacked explicit private scope
+
+Run 42780390102 at `cb6a005bf0aadec6050b9c887de046cdc167b952`
+recorded one actual provider request and one history with eleven events,
+including the exact reply and assistant turn end. The pane fallback reached
+the command-safety boundary and correctly refused an adapter command without
+an explicit private socket/namespace. A subsequent diagnostic-file sharing
+error during cleanup did not turn that refusal into qualification.
+
+The owned witness now passes the selected real PSMux binary and its verified
+private namespace directly. The guard remains enabled. Separately, lifecycle
+preparation stages the exact candidate's two observed native launch companions
+through the canonical marketplace materializer, outside the two already
+selected runtime payloads. Catalogue/manifests and existing runtime bytes and
+receipts are checked; activation and runtime installation scope are unchanged.
+These are fixture repairs, not evidence that missing payloads caused inference
+to stall. Native positive qualification, actual suite installation and required
+frozen-candidate enforcement remain open.
+
+Two local complete-catalogue materialization probes exceeded their fixed
+180-second control deadline, first during pointer scanning and then during
+unrelated runtime materialization. Passing the extractor's pointer candidates
+removed the redundant pointer scan, but did not make whole-suite preparation
+appropriate for this core witness. The implementation therefore stages only
+the two observed payload-only launch companions and reports that limited scope.
+It does not raise deadlines or credit either timed-out probe as qualification.
+
+The narrowed source selection passed all 21 controls in 114.95 seconds,
+including an actual Git candidate archive and canonical companion
+materialization under the unchanged control deadline. The controls verify
+byte-preserved runtime payloads/receipts, catalogue and manifest mismatches,
+unsafe paths, absent companions and unexpected runtime companions, plus
+command-safety admission of the explicit private-pane read. This is lightweight
+source-consumer evidence, not the installed native lifecycle result.
+
+### 2026-11-10 - Private pane proof passed; native owner count is ambiguous
+
+Run 42784466120 at `3f5ec453b093ff1960175e153285e8a62c38d7a7`
+recorded one actual request, one completed history with the exact reply and a
+successful real private-pane capture. The retained companion inventory
+confirms unchanged selected runtime payloads/receipts and its deliberately
+limited scope. Other missing-catalogue-payload warnings are still visible;
+the installation closure is not accepted.
+
+The next assertion found two live Job-owned processes using the exact pinned
+Copilot executable. Their executable identity alone does not establish whether
+these are two independent CLI sessions or a runtime helper/owner relationship.
+The witness continues to refuse the ambiguous count. Failure-only diagnostics
+now retain each pinned candidate's parent PID and allowlisted CLI flag names,
+plus the completed history's lock PIDs, without raw argument values. All three
+focused diagnostic controls passed, including unavailable metadata preserving
+the original duplicate-owner refusal. No native-owner assertion changed.
+
+### 2026-11-10 - Reproduced the extension host, not a second conversation
+
+Run 42786590873 at `bb360d3e3abb51df12678042e8c020d09f415e2d`
+retained one lock-bound interactive process and a later-born direct child using
+the same executable, without recognized CLI flags. A private same-version
+Git-folder probe reproduced the child only after plugin discovery was enabled.
+Its sole argument is `extension_bootstrap.mjs`, an ordinary file within the
+private fixture. The parent alone holds the actual conversation lock.
+
+The witness now distinguishes that positively identified extension host from a
+second conversation owner. It still refuses unknown children, foreign ancestry,
+older children, a helper claiming a conversation lock, additional owners and an
+orphaned helper. Native handles and Job custody are unchanged. All eleven focused
+controls passed. The actual pinned CLI probe selected the original parent and
+proved normal exit left no native processes before fixture cleanup. This is
+lightweight consumer evidence, not installed Manager acceptance; the next exact
+native run must prove the same role binding through Manager Create/Open/Resume.
+
+### 2026-11-10 - A fresh run stopped at dialog prompt observation
+
+Run 42790346307 at `179a2541da52792a4193e0091185a1f14321b7e2`
+timed out before Create, while observing the New dialog's entered prompt.
+The retained raw fragment lacked its leading character. There is no native
+conversation or hosted extension-role result from this attempt.
+
+The owned witness now renders the actual fixed-size ConPTY stream incrementally
+and checks the current dialog, rather than a concatenated redraw history.
+Failure evidence includes that rendered screen. A private real-dialog
+preflight also failed the rendered prompt check once; later focus/model
+observations accepted the exact prompt with both key-burst and paste input.
+The cause of the earlier missing prefix remains unproved. The witness uses
+the supported, explicitly enabled bracketed-paste operation for atomic seed
+entry and still requires the exact current prompt and subsequent durable CLI
+history. It does not claim to qualify rapid key-burst input or repair that
+production behavior. No input retry, acknowledgement injection or timeout
+extension is introduced.
+
+Open/Resume also waits for the actual CLI prompt frame before another turn,
+instead of sending keys as soon as the menu action is dispatched. The existing
+UI and overall deadlines remain unchanged. The new renderer is a test-only
+dependency; its exact pin passed the canonical seven-day seasoning check.
+All 36 source controls passed, followed by all seven focused current-screen,
+paste-mode and attachment-readiness controls after the latter addition.
+The real native dialog accepted the exact seed through the same fixture helper
+with no options selected. Lint, size and all 13 installation contracts passed.
+These are source/consumer checks, not installed lifecycle acceptance.
+
+### 2026-11-10 - Create and hosted owner proof passed; passive viewer refused a query
+
+Run 42796260636 at `1f30361b6f80f3bed8894820431e43c4fc1c1746`
+created the actual Git worktree, completed one provider-backed conversation,
+captured the exact reply from its real pane and identified the lock-bound
+parent plus its owned extension host. It then launched a second Manager and
+selected Open. During attachment observation, the passive VT decoder raised
+on a private device-status query before a further turn could be verified.
+Open/detach/normal exit/Resume acceptance remains unproved.
+
+The owned observer now accepts normal and private status queries without
+sending input or inventing a terminal acknowledgement. It still renders and
+requires the actual prompt frame. All six focused query/current-frame/
+attachment controls passed, including split queries and proof that no input
+was sent. No UI, provider, process-owner, history, cleanup or deadline
+assertion changed.
+
+### 2026-11-10 - Active Open, detach and normal exit passed; discovery was advisory
+
+Run 42799090979 at `1627fabf579eb3c3bb00ba797196501821da1e3d`
+completed three actual provider-backed turns in one conversation. Active
+Open preserved the original native owner, detaching the first view preserved
+work, and normal Copilot/Manager exit left no native CLI owner. The fresh
+Manager then offered Open rather than Resume; its advisory `HOST(?)` state
+and lack of Stop identify the conservative unknown-observation branch, not
+proof that a mux terminal remained alive.
+
+The existing UI contract reserves Resume for proven stopped worktrees and
+provides per-row Refresh for an on-demand live observation/cache update.
+The witness now drives that ordinary UI operation once before Resume.
+It checks unchanged worktree/head/session identity immediately after exit,
+requires the actual Refresh highlight before Enter, and still requires the
+stopped row and real Resume action afterward. No cache, liveness, PID or
+session-ID data is injected or rewritten by the fixture.
+
+All seven focused safe-action/current-frame/query controls passed, including
+wrong-highlight and still-unknown refusals. A real native production action
+menu selected Refresh through the same controller. That component check is
+not installed liveness or Resume acceptance. All original deadlines and
+broader suite/promotion holds remain unchanged.
+
+The exit proof now also checks zero from the pinned native Copilot handle,
+not only the pane/Manager wrapper, whose success can conceal a nonzero child
+exit. The earlier run observed the normal exit command, owner termination
+and clean wrapper returns; it did not retain the native exit code directly.
+All nine focused native-exit/live-discovery/current-frame controls passed,
+including rejection of a nonzero native code behind a successful wrapper.
+
+### 2026-11-10 - Live Refresh still reports a process after native exit
+
+Run 42807975718 at `9d1a05b24a7169b267f882db9a541169a278de29`
+again completed the first three turns, active Open and detach preservation.
+This time the native Copilot handle also proved exit code zero, with no
+native CLI owner remaining and unchanged tracking identity before Refresh.
+The real UI Refresh executed and changed advisory `HOST(?)` into `PROC`,
+but the row remained Active. The fixture correctly refused to continue
+to Resume rather than asserting absence or changing the menu's policy.
+
+The retained evidence does not yet identify which bound-process or execution
+field keeps the row live. Timeout diagnostics now read the private selected
+installed engine's current classified rows before teardown and retain a
+bounded projection of liveness flags, PID identities and execution-binding
+state. They do not request Refresh or print credential-bearing binding
+values. Foreign engine/worktree reads refuse; unconfirmed diagnostic-process
+cleanup remains a hard failure. All seven focused projection/privacy/custody/
+discovery controls passed. This is diagnostic work, not a liveness fix or
+Resume acceptance.
+
+### 2026-11-10 - Retaining bound-live hint and dropped Refresh request identified
+
+Run 42811263198 at `749673de7fa7a81ba853d765b1a7d4d4aebd52a5`
+again proved normal native exit zero and unchanged identity, then failed
+stopped-state discovery after the real UI Refresh. The pre-teardown installed
+engine capture identifies `session_bound_live=true`; mux presence and attachment
+are false, clients are zero, and no `session_lock_live` field is emitted.
+This identifies the retaining hint, not a remaining native owner or a
+particular process identity.
+
+The source trace finds that Manager requests a current-roster point read with
+`refresh=True`. The engine routes it to `worktrees_client.emit_current` before
+the legacy refresh helper. That reader validates `--refresh` but omits it from
+the resident request, losing the requested bound/mux reconciliation. A repair
+must preserve resident authority and prove the requested observation/publication
+boundary; caller-side legacy scans, forced flags, TTL waits and substituting
+Open for Resume are not acceptance.
+
+The exact finding and repair-ownership request are recorded on #11377
+(comment 6766917141). The fleet coordinator identified a potentially overlapping
+current-roster publication owner, who received a bounded seam query. Active
+overlapping hunks and the separately held idle-project policy must be reconciled
+before editing that surface. No engine, shared native helper, runner/result or
+Main controller change is included here. Draft #11864 remains unqualified;
+full suite/Machines, authentic update and mandatory candidate enforcement
+remain open.
+
+The identified current-roster owner subsequently confirmed no active overlapping
+hunks or pending repair. The campaign driver is implementing the isolated
+resident-side explicit-refresh request and publication barrier under the normal
+Dev review gates, without taking the idle-project policy or Main controller.
+
+The correction negotiates `worktrees-refresh-v1` with the actual authenticated
+resident, queues a bounded point request and accepts only its same-generation
+reconciliation/publication receipt. The producer uses the existing refresh
+helper with strict observation failures and registered-session scoping; neither
+caller scans nor cached mux receipts can replace its observed absence.
+Ambiguous selectors reject only their request, not the project's publications.
+Ordinary/passive/feed reads and the separate `--fresh` behavior are preserved.
+
+The six-file source regression selection passed 265 controls after correcting
+a test-thread event race, with three nominal CLI timing cases deselected only
+after retaining their actual failures. The final ambiguity/point-refresh
+selection passed all nine cases. Lint, module size and all 13 install contracts
+passed. The authenticated transport/producer controls are a simple integration
+check, not installed or frozen-candidate acceptance.
+
+The three unchanged two-second, 1,100-row CLI feed cases failed in the broader
+packet and again in a diagnostic-only import-profile run. The latter completed
+their first snapshots at 2.187, 3.063 and 3.688 seconds; none qualifies the
+nominal bound. The profile identifies startup before first health along the
+existing config/control import path. The optional Refresh import is lazy and
+not on that ordinary path. These failures remain explicitly linked to the open
+nominal-performance gaps #7935/#7936/#7946, not waived or reported as passes.
+No scaled timing run, host repair or production deadline change was performed.
+Clean-room and live external validation of this correction still require the
+next exact-source isolated installed-lifecycle run.
+
+### 2026-11-10 - Stopped discovery and Resume reached; owner check ran before binding
+
+Run 42819736352 at `dd25d9c1beb2556514abdebf4b5c4b8da19ca18e`
+passed normal native exit, unchanged identity, stopped discovery and the real
+Resume selection. The resumed CLI reached its prompt with one interactive
+parent and two owned extension-bootstrap children, but its history had no
+active lock at the instant the witness tried to identify the bound owner.
+The strict duplicate-owner check refused; no fourth turn or complete lifecycle
+acceptance is claimed.
+
+The witness now sends the resumed prompt after its existing actual-prompt
+readiness check, then identifies the replacement through the same completed
+history/rendered-reply/lock-bound single-owner postcondition used by the
+fresh conversation. The replacement must differ from the original native
+incarnation, and unchanged history plus all four provider-backed prompts
+remain mandatory. No helper exclusion or duplicate-owner refusal is weakened.
+All 21 focused resumed-turn, native-role, duplicate-owner, exit, UI-readiness
+and Refresh controls passed. Native and cleanup budgets are unchanged;
+another exact-source installed run is required.
+
+### 2026-11-10 - Historical core pass retained; review corrections reopen qualification
+
+Run 42821962997, attempt 1, passed the original installed-core witness at
+`6cdb0e16d1b0c81455989c67dbcf24848f6efbb9`
+(tree `7f68391b5f52c514372a06ed50ad075a5f1a604b`).
+Its JUnit contains exactly one selected test, zero failures/errors/skips and
+459.878 seconds; its receipt measures 443.407 seconds within the unchanged
+case budget. Installed Manager/engine origins and bytes (302/691 modules),
+actual Create/Open/detach/exit/Resume in a different native incarnation,
+four provider-backed turns, unusable-entry refusal and settled cleanup passed.
+This is historical installed-core evidence, not full-suite/update or promotion
+acceptance, and not qualification of the subsequently corrected candidate.
+
+Current-head Copilot review 5842652647 identified four blocking corrections:
+inconclusive process queries could certify absence; the witness did not require
+persisted assistant replies; failed Refresh could stall ordinary publication;
+and an unchanged managed observation could reactivate the next publication.
+The source correction reuses strict tri-state native liveness, refuses uncertain
+Bridge-lock evidence, isolates observation failures to terminal request errors
+while retaining hard cleanup failures, and suppresses superseded managed cache
+entries across later publications while accepting newer observations.
+The witness now requires each exact persisted reply and all four assistant
+messages in the final resumed history.
+
+All 452 focused Worktrees/legacy regressions passed, with the three previously
+recorded nominal timing cases still separately excluded and not credited.
+All 55 lifecycle source controls passed, including rendered-but-unpersisted
+reply refusals. The corrected candidate must earn another exact-source
+installed result and current-head review before merge. The parent campaign,
+complete suite/Machines, authentic update and mandatory candidate/Main gates
+remain open.
+
+### 2026-11-10 - Stricter native pass retained; legacy discovery/write corrections
+
+Run 42831416101, attempt 1, passed at
+`d130f9c038e4bbf3f7b3c545d5da96e4547fedfe`
+(tree `1ac29533d46254d40d94da59b6b01a4c423870f3`).
+JUnit records exactly one test with zero failures/errors/skips and 428.719
+seconds; the lifecycle receipt measures 407.328 seconds. This run also enforces
+all four exact persisted assistant replies. Candidate origins/bytes, the real
+Create/Open/detach/exit/Resume flow, unusable-entry refusal and owned cleanup
+passed. This remains installed-core evidence for that candidate only.
+
+Review 5843274168 confirms the prior four corrections, but its body identifies
+two further Medium issues despite its "No open issues" banner: best-effort
+backfill can hide an unreadable workspace, and best-effort stamps can skip
+persistence while an in-memory row is acknowledged. Both are treated as
+blocking, not excused by the banner or absence of inline threads.
+
+The sanctioned backfill implementation was extracted in a separate
+behavior-preserving commit, retaining its facade, compatibility helpers and
+single-sweep guard, and tightening only its own module ceiling. Strict discovery
+now refuses incomplete or unattributable candidate metadata. Strict point
+reconciliation probes outside the record lock, rechecks a fresh record fence
+under the canonical required-sidecar lock, saves registry/liveness together and
+rereads the actual mapping before returning the confirmed record for publication.
+Legacy best-effort callers remain unchanged.
+
+The combined regression selection passed 469 controls, with explicit backfill
+scope in the larger sessions file and the three already recorded nominal timing
+cases excluded; this is not a full-plugin pass. Real tracking-file controls
+cover unreadable workspace data, actual thread-held lock contention, a no-op
+writer, reload between publications and successful new requests after fault
+removal. The changed candidate still requires exact-source native
+requalification and fresh current-head review. All broader campaign gates remain
+open.
+
+### 2026-11-10 - Confirmed-persistence pass retained; bind Refresh to its selection
+
+Run 42841168402, attempt 1, passed at
+`cf1a02310ab16e7d9510c5475926fe7db9817d33`
+(tree `86ede778df4313afd2c511359224a9356072beca`).
+JUnit records one selected test, zero failures/errors/skips and 443.431 seconds;
+the complete lifecycle receipt measures 426.578 seconds. Installed origins and
+candidate bytes are verified across 302 Manager and 693 engine modules.
+Create, same-owner Open, detach, normal exit, same-conversation Resume in a
+different native incarnation, all four persisted replies, unusable-entry
+refusal and settled cleanup pass. This qualifies that installed-core candidate,
+not the subsequent correction or the broader campaign.
+
+Review 5844439919 identifies two further High findings in its body despite
+another "No open issues" banner. Filtering before response selection could
+return a suffix match different from the producer's unfiltered exact match.
+Also, best-effort tracking enumeration could omit an unreadable record and
+acknowledge a refresh that processed nothing. Both remain merge blockers until
+the changed candidate earns its own review and native qualification.
+
+The correction retains each request's full immutable selection and uses the
+canonical SelectionIndex over the producer's current record/filter facts.
+Publication and refresh share those facts. No readable selection refuses
+success. Each applied request identifies the actually reconciled worktree ID,
+creation nonce and path; completion, subsequent server reads and client
+validation require exactly one matching returned record. Reusing an ID with
+different filters refuses rather than reusing another selection's receipt.
+This repairs the new, unreleased optional capability within this PR; it does
+not add another endpoint, caller scan or liveness authority.
+
+All 200 tests in the affected producer, runtime, client and projection files
+pass. These include real best-effort tracking enumeration with a denied file
+read and malformed YAML, status/platform/checkout exact-ID versus suffix
+collisions, filter-changing request reuse, and changed/empty record selection
+before and after completion. Lint, module ceilings and all 13 install contracts
+pass. The three separately recorded nominal feed-timing failures are outside
+this selection, not passed or waived. Exact-source installed requalification,
+fresh current-head review, required CI and all parent acceptance gates remain
+open.
+
+### 2026-11-10 - Selection-bound native pass; require single-process conversation binding
+
+Run 42851885922, attempt 1, passed at
+`62ed94ba9c7692686c985dca0a547a410b29093a`
+(tree `379215893bb7e4edc999971ea380af11d108e9fd`).
+JUnit records one selected test, zero failures/errors/skips and 422.196 seconds;
+the complete lifecycle receipt measures 407.219 seconds. Installed origins and
+candidate bytes are verified across 302 Manager and 693 engine modules.
+Create/Open/detach/normal exit/same-conversation Resume, all four persisted
+replies, unusable-entry refusal and settled cleanup pass. This remains
+installed-core evidence for that candidate only.
+
+Review 5845313738 emits a negative summary referencing omitted Refresh and
+conversation-owner findings, but provides no detailed findings or new inline
+comments. Its "No open issues" banner is not treated as an accepted review.
+The prior Refresh scenario is covered by the canonical full-selection and
+exact-identity correction. Direct examination confirms another witness gap:
+the single-native-process branch did not require that process's PID in the
+verified conversation's lock set. It now applies that requirement even without
+an extension host; bound, unbound and missing-history cases have focused controls.
+
+The owned branch was rebased onto current `dev`. The only content conflict was
+between independently added archive-selection and Refresh tests; both blocks
+were retained. All 205 affected Worktrees tests pass, including the upstream
+archive-selection cases.
+
+The first lifecycle source packet hit its original 180-second real-archive
+control limit during a redundant complete-source extraction. The companion
+staging pass now uses the canonical Git/archive reader for the complete
+catalogue and all plugin manifests plus the two selected companion trees.
+Canonical extraction/materialization, catalogue validation and retained runtime
+hash/receipt checks remain unchanged. The real control proves that unselected
+runtime source trees are not extracted. All 58 lifecycle source controls now
+pass in 86.66 seconds; no deadline was increased or failed attempt credited.
+
+The rebased, stricter candidate still requires exact-source installed
+qualification, a fresh actual review and required CI. No complete-suite,
+authentic-update, mandatory frozen-candidate or Main-adoption gate is closed.
+
+### 2026-11-10 - Strict owner-binding native pass; reject malformed raw registries
+
+Run 42857279887, attempt 1, passed at
+`86d8f360d0b874f1e2e6ddbe2b895b864870072e`
+(tree `7ebb4e982a7f37bd1a0aaebf29d3ad0004b0c30b`).
+JUnit records one selected test, zero failures/errors/skips and 348.862 seconds;
+the complete lifecycle receipt measures 339.735 seconds. Installed origins and
+exact candidate bytes are verified across 303 Manager and 697 engine modules.
+The complete real flow, stricter conversation-owner binding, all four persisted
+replies, refusal and settled cleanup pass. Required CI passed; a metadata-parser
+npm configuration timeout also passed its single job-only retry under unchanged
+limits. This is installed-core evidence for that candidate, not broader suite,
+update or publication enforcement.
+
+After the full post-push wait expired, an actual current-head Copilot review
+5845864973 arrived during the explicit re-request. Its body recommends changes:
+malformed session metadata can become an empty registry before strict Refresh
+checks the native owner. There are no new inline comments; the negative body
+remains blocking despite its "No open issues" banner.
+
+Five real tracking-file controls reproduced successful acknowledgements for a
+non-list registry, a discarded entry, coerced null/numeric IDs and a partially
+discarded registry. Strict reconciliation now validates raw registry structure
+and every session identity before the existing parser, on each initial,
+locked-fence and persistence-confirmation read. Malformed metadata refuses
+before absence stamps or receipts; legacy best-effort parsing is unchanged.
+The valid indexed-empty, valid registered-session and unindexed discovery paths
+remain covered, as does malformed metadata introduced during observation.
+
+All 213 tests in the affected producer/runtime/client/projection files pass in
+58.06 seconds, including successful unindexed discovery. The changed candidate
+still requires exact-source installed
+requalification, fresh actual review and required CI. No prior native pass
+qualifies this correction, and no parent acceptance gate is closed.
+
+The same class-level check also found that strict unindexed discovery could
+silently skip a record with no checkout path or compare an unqualified relative
+path. It now refuses that unattributable input before discovery; legacy
+best-effort callers keep their previous behavior. The final combined packet
+passes 222 controls in 53.36 seconds, selecting only backfill cases from the
+larger sessions file (152 unrelated cases deselected), alongside the complete
+four affected Worktrees files. Both missing and relative tracked paths have
+focused refusal controls. No installed run was dispatched for the intermediate
+raw-registry-only commit; the combined candidate must qualify as one unit.
+
+### 2026-11-10 - Preserve backfilled registries against stale full-record writers
+
+Reviews 5845986009 and 5846264600 surface High comment 4527926377: registry
+initialization did not advance `lifecycle_revision`, so the canonical stale-write
+merge could later accept an older `sessions=None` snapshot and erase a discovered
+Resume target. The finding still applied to `4ebc8fade813d7e410462a3ace80b74a8add32c0`.
+Its installed run 42864326611 was cancelled after that blocking feedback was
+identified; qualification was cancelled and the evidence-retention step failed.
+No native qualification is credited to that run.
+
+Three regressions reproduced the failures: both strict and best-effort backfill
+lost the discovered target after a real stale save with an unrelated title
+change, and strict reconciliation acknowledged a concurrent lifecycle revision
+change. Both refresh paths now use the canonical revision helper when initializing
+the registry, including relation-revision updates for discovered sessions. Strict
+reconciliation also includes the lifecycle revision in its observation fence.
+Liveness-only refreshes do not create another lifecycle revision.
+
+All 237 selected controls pass in 63.98 seconds: complete producer/runtime/client/
+projection files, backfill-scoped sessions tests and strict native-observation
+reclaim tests (224 unrelated cases deselected). These include real YAML and
+stale-writer merge behavior, retained Resume identity, unchanged unrelated edits,
+idempotent later liveness refresh and concurrent-revision refusal. Fresh
+exact-source installed qualification, actual review and required CI remain
+mandatory; all parent acceptance gates remain open.
+
+### 2026-11-10 - Atomic legacy initialization and observable dialog focus
+
+Exact-source run 42869501687 at
+`5aae3a4938d042e62d12739a73883e13148eab16` failed before Create:
+the New dialog never rendered the entered prompt. JUnit records one test, one
+failure, zero errors/skips and 291.325 seconds. No lifecycle pass is credited.
+The terminal shows an empty prompt field; it does not establish the precise
+event ordering that lost input. The controller's byte-count focus waits could
+accept unrelated redraws, so they were not evidence that the field was ready.
+
+The witness now observes the rendered Create highlight before Tab, the empty
+prompt field's drawn caret before paste, and the Create highlight after accepting
+the prompt. Existing exact prompt/history assertions remain. The same waits keep
+their original 30-second limits and the case keeps its original 720-second
+budget. Bounded input-style diagnostics distinguish unknown focus, stale frames
+and unrelated redraws. All 65 lifecycle source controls pass, including the new
+rendered-focus positive and refusal cases; installed proof remains required.
+
+Current-head review 5846807016 confirms the previous lifecycle-revision finding
+resolved, but raises High comment 4528558342 on the best-effort path: an
+interleaved initializer can reach the same next revision as a stale backfill,
+allowing that stale save to overwrite the winner. Three real-file regressions
+reproduce concurrent registration, competing refresh initialization and a replaced
+incarnation receiving liveness stamps.
+
+Legacy initialization now reloads uncached under the canonical required-sidecar
+record lock, checks the incarnation, and initializes only a still-unindexed
+current record. It otherwise retains the winning registry and revision without
+writing. Only lifecycle fields are adopted into the caller, preserving unrelated
+snapshot/CAS pairing. A replaced incarnation stops before liveness stamps.
+The final backend packet passes 240 selected controls in 54.97 seconds, with the
+same 224 unrelated sessions/reclaim cases deselected. Fresh combined-head native
+qualification, actual review and required CI remain mandatory.
+
+### 2026-11-10 - Palette-independent focus and request-local parsing failures
+
+Exact-source run 42879412714 at
+`0d8a9b0789f3f01c53325d36c6f5775e97f92310` failed before Create:
+one test, one failure, zero errors/skips and 289.282 seconds. Its bounded
+input diagnostics show Create already highlighted with foreground `1a1a1a`
+and background `ffaf00`, while Cancel retained its rest style. The observer
+incorrectly required the foreground to be literal black. It now recognizes the
+selected orange1 background independently of ANSI foreground remapping, requires
+a uniform Create foreground distinct from Cancel, and rejects Cancel, dual-button
+and partial highlights. All 30 focused palette/focus controls pass.
+
+Actual current-head review 5847618117 resolves the atomic-initialization finding
+but names Windows path mismatches and malformed-YAML publication failures in
+its body. Both remain blocking until corrected-candidate acceptance.
+Legacy workspace matching now uses lexical Windows/POSIX path semantics rather
+than case-sensitive string prefixes, preserving child-path boundaries and POSIX
+case sensitivity. Strict tracking reads translate malformed YAML and typed
+record-parsing errors into request-local unavailability; hard cleanup errors
+are not caught or weakened.
+
+The contained targeted packet passes 63 controls in 45.79 seconds, including
+16 strict/default Windows/POSIX path cases and eight actual YAML-file races
+after selection or during observation. The latter cover malformed YAML,
+invalid typed fields, missing keys and non-finite numeric conversion; they
+require terminal rejection, no receipt, unchanged corrupted bytes, continued
+ordinary publication and no implicit retry. All 227 tests in the complete
+producer/runtime/client/projection packet pass in 86.75 seconds. Scoped lint,
+module limits and all 13 installation contracts pass.
+
+Two lifecycle source attempts using the OS-default temporary venue timed out
+in candidate-archive hashing/materialization under the existing 180-second test
+deadline. Neither is a pass. Restoring this task's established scratch venue,
+used by the previous successful packet, passes all 88 lifecycle source controls
+in 106.60 seconds under unchanged limits, including the archive boundary.
+New exact-head installed qualification, fresh actual review and required CI
+remain mandatory. No parent suite/update/promotion gate closes.
+
+### 2026-11-10 - Preserve legacy identity through receipt publication
+
+Exact-source run 42888702165 at
+`1453fad0ef029d5012ff4c7904426174e0245ae0` failed earlier at initial Manager
+readiness: one test, one failure, zero errors/skips and 228.228 seconds.
+The screen remained in loading/knowledge-check setup with the host's default
+identity, not the registered project binding. Direct installed preflight reads
+had confirmed the intended project/machine and ready knowledge binding.
+The launch trace reaches `picker_live_sources_prepared`, but not
+`picker_live_loader_started`, before the original 30-second readiness boundary.
+This identifies the stalled interval, not its root cause. No readiness predicate
+or deadline is weakened, and no lifecycle pass is credited.
+
+Actual review 5848403116 flags a legacy-record receipt identity mismatch in its
+body despite the "No open issues" banner. Two real-file regressions reproduce
+terminal unavailability after an otherwise successful refresh of indexed and
+unindexed records lacking `creation_nonce`: receipt construction used the
+record's empty string, while canonical publication omits that field and the
+reader interprets it as null.
+
+The producer now derives receipt identity through the same canonical selection
+row and identity helper used by publication/completion, retaining absence rather
+than inventing a nonce. The new tests require a successful matching receipt,
+unchanged absent nonce on disk and canonical omission in the row. All 229 tests
+in the complete producer/runtime/client/projection packet pass in 54.16 seconds.
+Scoped lint, module limits and diff checks pass. The unchanged observer's 88
+source controls remain passing; this changed engine candidate still requires
+exact-source installed qualification, fresh actual review and required CI.
+The earlier startup stall remains a failed result, not an accepted flake.

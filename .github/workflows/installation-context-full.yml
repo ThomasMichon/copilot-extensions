@@ -49,6 +49,7 @@ on:
           - manager-uninstall
           - komodo-recovery
           - manager-suite
+          - manager-lifecycle
           - worktrees-git-probes
           - related-knowledge
           - registration-inspection
@@ -1257,6 +1258,147 @@ jobs:
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"
       UV_PYTHON: "3.12"
     steps: *bridge-bootstrap-steps
+  manager-lifecycle-windows:
+    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-lifecycle'
+    name: Installed-core Manager lifecycle (isolated Windows)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      UV_PYTHON: "3.12"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+        with:
+          version: "0.12.6"
+      - name: Prepare pinned native lifecycle prerequisites
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "manager-lifecycle-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $null = New-Item -ItemType Directory -Path $root
+          $pins = @(
+            @{
+              Name = 'copilot'; Variable = 'COPILOT_NATIVE_TEST_EXECUTABLE'
+              Url = 'https://github.com/github/copilot-cli/releases/download/v1.0.105/copilot-win32-x64.zip'
+              Hash = '34e16e9cf47de0e1534920171d6f39fa246638bddbb6ece820870b382bcc061a'
+            },
+            @{
+              Name = 'psmux'; Variable = 'PSMUX_TEST_BIN'
+              Url = 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip'
+              Hash = '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe'
+            }
+          )
+          foreach ($pin in $pins) {
+            $archive = Join-Path $root "$($pin.Name).zip"
+            & ".\tools\download_pinned_native.ps1" -Uri "$($pin.Url)" -OutFile "$archive" -TimeoutSeconds 120
+            if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $pin.Hash) {
+              throw 'Pinned lifecycle prerequisite archive digest mismatch'
+            }
+            $destination = Join-Path $root $pin.Name
+            Expand-Archive -LiteralPath $archive -DestinationPath $destination
+            $binaries = @(Get-ChildItem -LiteralPath $destination -Filter "$($pin.Name).exe" -Recurse -File)
+            if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned lifecycle executable' }
+            "$($pin.Variable)=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+            $binaries[0].DirectoryName >> $env:GITHUB_PATH
+          }
+          "COPILOT_DRIVER_HEADED_MUX_E2E=1" >> $env:GITHUB_ENV
+      - name: Qualify installed-core lifecycle at this exact source
+        id: lifecycle
+        shell: python
+        env:
+          REQUESTED_SOURCE: ${{ inputs.source_sha }}
+        run: |
+          import json, math, os, re, sys
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
+          sys.path.insert(0, "libs/agent-procutil/src")
+          from agent_procutil.owned_process import run_caller_owned
+
+          def execute(arguments, timeout=30):
+              result = run_caller_owned(
+                  arguments, timeout=timeout,
+                  max_stdout_bytes=4*1024*1024, max_stderr_bytes=4*1024*1024,
+              )
+              print(result.stdout, end="", flush=True)
+              print(result.stderr, end="", file=sys.stderr, flush=True)
+              result.check_returncode()
+              return result.stdout.strip()
+
+          expected = os.environ["GITHUB_SHA"]
+          assert re.fullmatch(r"[0-9a-f]{40}", expected)
+          assert not os.environ.get("REQUESTED_SOURCE") or os.environ["REQUESTED_SOURCE"] == expected
+          assert execute(["git", "rev-parse", "HEAD"]) == expected
+          tree = execute(["git", "rev-parse", "HEAD^{tree}"])
+          receipt = Path("worktree-manager/runtime-source.json")
+          source = json.loads(receipt.read_text())["source_commit"] if receipt.is_file() else expected
+          reports = Path(os.environ["RUNNER_TEMP"]) / "manager-lifecycle-evidence"
+          execute([
+              sys.executable, "tools/run-plugin-tests.py", "worktree-manager",
+              "--test-file", "tests/native/test_manager_installed_lifecycle.py",
+              "-k", "test_installed_manager_creates_resumes_and_opens_one_real_cli",
+              "--allow-explicit-tiers", "--timeout", "900",
+              "--plugin-timeout", "900", "--test-timeout", "900",
+              "--junit-dir", str(reports),
+          ], timeout=1200)
+          cases, evidence = [], []
+          for report in reports.rglob("*.xml"):
+              assert report.is_file() and not report.is_symlink() and report.stat().st_size <= 1024*1024
+              document = ET.parse(report)
+              cases.extend(document.iter("testcase"))
+              evidence.extend(
+                  item.attrib["value"] for item in document.iter("property")
+                  if item.get("name") == "installed-manager-lifecycle"
+              )
+          assert len(cases) == 1
+          case = cases[0]
+          assert case.get("name") == "test_installed_manager_creates_resumes_and_opens_one_real_cli"
+          assert not any(case.find(name) is not None for name in ("failure", "error", "skipped"))
+          assert len(evidence) == 1
+
+          def unique(pairs):
+              result = {}
+              for key, value in pairs:
+                  assert key not in result, "duplicate lifecycle field"
+                  result[key] = value
+              return result
+
+          data = json.loads(evidence[0], object_pairs_hook=unique)
+          assert data["profile"] == "installed-core"
+          identity = data["identity"]
+          assert identity["candidate_commit"] == expected and identity["candidate_tree"] == tree
+          assert identity["source_commit"] == source
+          for key, value in (("run_id", "GITHUB_RUN_ID"), ("run_attempt", "GITHUB_RUN_ATTEMPT")):
+              assert type(identity[key]) is int and identity[key] == int(os.environ[value])
+          for key in ("create", "open_existing", "detach_preserved", "normal_exit", "resume_continued", "launch_refusal"):
+              assert data[key] is True, key
+          for key in ("manager", "engine"):
+              installed = data["installation"][key]
+              assert installed["source_commit"] == source
+              assert installed["origins_verified"] is True and installed["candidate_bytes_verified"] is True
+          for key in ("native_before_open", "native_after_resume"):
+              assert isinstance(data[key], list) and len(data[key]) == 2
+              assert all(type(value) is int and value > 0 for value in data[key])
+          assert data["native_before_open"] != data["native_after_resume"]
+          assert type(data["elapsed_seconds"]) in (int, float)
+          assert math.isfinite(data["elapsed_seconds"]) and 0 <= data["elapsed_seconds"] <= 720
+          assert all(isinstance(data[key], str) and data[key] for key in ("worktree", "conversation"))
+          print("Installed-core lifecycle qualified; complete-suite, upgrade and promotion gates remain separate.")
+      - name: Retain installed-core lifecycle evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manager-lifecycle-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/manager-lifecycle-evidence
+          if-no-files-found: error
+          retention-days: 2
+
   manager-suite-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-suite'
     name: Manager whole-suite replacement (Windows, ${{ matrix.mode }})
