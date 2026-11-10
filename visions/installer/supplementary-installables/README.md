@@ -81,17 +81,23 @@ second installation authority. Neither a Python rewrite nor immediate native
 support for every ecosystem should be required. Package-manager differences must
 not erase provenance, compatibility, readiness or reversible removal.
 
-### installed-command-first-use
+### installation-aware-tool-guidance
 
 A declared runtime-backed command should resolve an eligible installed
-application. When required code is absent, its first-use entry should invoke
-the same owning installation handler, establish readiness and then invoke the
-tool. Concurrent callers should converge on the same addressed installation.
+application or report its absence with the supported independent installation
+path. Commands, hooks and skill readiness checks should not implicitly install,
+update, repair or stamp runtimes.
 
-Skills should lead agents through these declared commands and installation
-entries, never substitute execution from a checkout or mutable plugin payload.
-Provisioning should precede the requested operation rather than replaying a
-possibly completed business action after an arbitrary command failure.
+When a task requires a missing runtime, the authorized user or agent should
+invoke that independent installer as a distinct installation action, establish
+readiness and then invoke the installed tool. Bulk updates and these explicit
+installations should use the same owning handler; concurrent installation
+requests should converge on the same addressed installation.
+
+Skills should make this boundary discoverable, never substitute execution from
+a checkout or mutable plugin payload. Installation should precede an unstarted
+operation rather than replay a possibly completed business action after an
+arbitrary command failure.
 
 ## Behaviors
 
