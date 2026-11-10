@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import errno
 import hashlib
 import importlib.util
@@ -148,8 +148,24 @@ def prepare_retained_generation(slot: Path) -> None:
     bootstrap = slot / ".runtime-bootstrap"
     if not os.path.lexists(bootstrap):
         return
-    if state_path(bootstrap / "runtime_launcher.py", private=True) is None:
+    launcher = bootstrap / "runtime_launcher.py"
+    original = state_path(launcher)
+    if original is None:
         raise PublicationProofError("Retained runtime launcher is missing")
+    protected = original
+    if os.name != "nt" and original.mode & 0o022:
+        fd = os.open(launcher, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        try:
+            if state_fd(fd) != original:
+                raise PublicationProofError("Retained runtime launcher changed before protection")
+            os.fchmod(fd, stat.S_IMODE(original.mode) & ~0o022)
+            protected = state_fd(fd)
+            if protected != replace(original, mode=original.mode & ~0o022):
+                raise PublicationProofError("Retained runtime launcher changed during protection")
+        finally:
+            os.close(fd)
+    if state_path(launcher, private=True) != protected:
+        raise PublicationProofError("Retained runtime launcher changed after protection")
     path = bootstrap / "runtime-generation"
     before = state_path(path, private=True)
     if before is None:

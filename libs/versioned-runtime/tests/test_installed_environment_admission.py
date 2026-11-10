@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import venv
@@ -192,8 +193,21 @@ def test_completed_legacy_slot_is_not_backfilled_by_completion_reuse(installed):
     assert {path: path.read_bytes() for path in before} == before
 
 
+def test_group_writable_bootstrap_is_protected_before_completion(installed):
+    root, slot, _site = installed
+    launcher = _bootstrap(slot) / "runtime_launcher.py"
+    original = launcher.read_bytes()
+    launcher.chmod(0o664)
+    runtime.mark_complete(root, "2.0", payload_hash="same")
+    assert _retained_reader().runtime_identity(slot)
+    assert launcher.read_bytes() == original
+    if os.name != "nt":
+        assert stat.S_IMODE(launcher.stat().st_mode) == 0o644
+
+
 @pytest.mark.timeout(60)
-def test_real_constructed_environment_launches_with_its_published_identity(tmp_path):
+@pytest.mark.parametrize("publisher", ["plugin", "embedded-toolkit"])
+def test_real_constructed_environment_launches_with_its_published_identity(tmp_path, publisher):
     root = tmp_path / "runtime"
     slot = runtime.slot(root, "2.0")
     environment = slot / ".venv"
@@ -203,6 +217,11 @@ def test_real_constructed_environment_launches_with_its_published_identity(tmp_p
     owner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(owner)
     owner._runtime_component("versioned_runtime_construction").retain_helpers(slot, complete=False)
+    if publisher == "embedded-toolkit":
+        source = source.parent / "_runtime_admission/libs/versioned-runtime/versioned_runtime.py"
+        spec = importlib.util.spec_from_file_location("_embedded_completion_owner", source)
+        owner = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(owner)
     site = environment / (
         "Lib/site-packages" if os.name == "nt"
         else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
