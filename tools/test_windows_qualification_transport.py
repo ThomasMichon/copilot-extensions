@@ -151,7 +151,8 @@ def test_rejected_push_retains_original_diagnostic_and_does_not_retry(tmp_path):
     assert git(root, "ls-remote", "--refs", str(remote)) == ""
 
 
-def test_competing_append_rebuilds_fast_forward_without_force(tmp_path):
+@pytest.mark.parametrize("remove_history", [False, True])
+def test_competing_append_rebuilds_fast_forward_without_force(tmp_path, remove_history):
     root = repository(tmp_path / "source")
     remote = tmp_path / "remote.git"
     git(root, "init", "--bare", str(remote))
@@ -168,8 +169,18 @@ def test_competing_append_rebuilds_fast_forward_without_force(tmp_path):
         if "push" in argv and not raced:
             raced = True
             Transport(root, str(remote)).append(first, lambda state: None)
-        return command(argv, **kwargs)
-    envelope = Transport(root, str(remote), run=racing_run).append(second, lambda state: None)
+        result = command(argv, **kwargs)
+        if "fetch" in argv and raced and remove_history:
+            git(remote, "update-ref", "-d", TRANSPORT_REF)
+        return result
+    transport = Transport(root, str(remote), run=racing_run)
+    if remove_history:
+        with pytest.raises(ValueError, match="Original transport history"):
+            transport.append(second, lambda state: None)
+        assert sum("push" in argv for argv in argv_seen) == 1
+        assert git(root, "ls-remote", "--refs", str(remote)) == ""
+        return
+    envelope = transport.append(second, lambda state: None)
     git(root, "merge-base", "--is-ancestor", first, envelope)
     assert sum("push" in argv for argv in argv_seen) == 2
     assert not any("--force" in argv or any(arg.startswith("+") for arg in argv) for argv in argv_seen)
@@ -215,8 +226,9 @@ def test_only_exact_contention_rejection_permits_recovery(observed):
 
 
 @pytest.mark.parametrize("lost", [False, True])
+@pytest.mark.parametrize("first_ref", [False, True])
 def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
-    tmp_path, monkeypatch, lost,
+    tmp_path, monkeypatch, lost, first_ref,
 ):
     from test_windows_qualification import fake_client
     client, directory, state = fake_client(tmp_path, monkeypatch)
@@ -224,7 +236,8 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
     remote = tmp_path / "remote.git"
     git(root, "init", "--bare", str(remote))
     first = git(root, "rev-parse", "HEAD")
-    Transport(root, str(remote)).append(first, lambda value: None)
+    if not first_ref:
+        Transport(root, str(remote)).append(first, lambda value: None)
     (root / "source.txt").write_text("candidate", encoding="utf-8")
     git(root, "commit", "-am", "Candidate")
     candidate = git(root, "rev-parse", "HEAD")
@@ -242,6 +255,8 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
             pushes.append(argv)
             raced = True
             # A different valid envelope advances the one shared ref.
+            if first_ref:
+                Transport(root, str(remote)).append(first, lambda value: None)
             tree = git(root, "rev-parse", first + "^{tree}")
             previous = git(root, "ls-remote", str(remote), TRANSPORT_REF).split()[0]
             body = git(root, "show", "-s", "--format=%B", previous)
@@ -283,8 +298,9 @@ def test_interrupted_reconciliation_recovers_known_rejection_not_unknown_effect(
 
 
 @pytest.mark.parametrize("mutation", ["delete", "rewrite", "contended-rewrite"])
+@pytest.mark.parametrize("first_ref", [False, True])
 def test_recovery_keeps_original_history_across_append_reads_and_retries(
-    tmp_path, monkeypatch, mutation,
+    tmp_path, monkeypatch, mutation, first_ref,
 ):
     from test_windows_qualification import fake_client
     client, directory, state = fake_client(tmp_path, monkeypatch)
@@ -292,7 +308,8 @@ def test_recovery_keeps_original_history_across_append_reads_and_retries(
     remote = tmp_path / "remote.git"
     git(root, "init", "--bare", str(remote))
     first = git(root, "rev-parse", "HEAD")
-    previous = Transport(root, str(remote)).append(first, lambda value: None)
+    competing = Transport(root, str(remote)).append(first, lambda value: None)
+    previous = None if first_ref else competing
     (root / "source.txt").write_text("candidate", encoding="utf-8")
     git(root, "commit", "-am", "Candidate")
     candidate = git(root, "rev-parse", "HEAD")
@@ -304,9 +321,9 @@ def test_recovery_keeps_original_history_across_append_reads_and_retries(
             cwd=root, data=canonical({"format": TRANSPORT_MARKER, "candidate": source}) + "\n",
         ).stdout.strip()
 
-    original = envelope(candidate, [previous, candidate])
+    original = envelope(candidate, ([previous] if previous else []) + [candidate])
     rewritten = envelope(first, [first])
-    assert rewritten != previous
+    assert rewritten != competing
     if mutation != "delete":
         git(remote, "fetch", "--no-tags", "--no-write-fetch-head", str(root), rewritten)
     state["request"].update(source_sha=candidate, envelope_sha=None)

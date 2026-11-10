@@ -564,12 +564,15 @@ def test_new_transport_attempt_cannot_inherit_old_rejection(tmp_path, monkeypatc
     assert saved["request"] == original["request"]
 
 
-@pytest.mark.parametrize("changed", ["candidate", "missing-history", "rewritten-history"])
+@pytest.mark.parametrize("changed", [
+    "candidate", "missing-history", "missing-first-history", "rewritten-history",
+])
 def test_known_rejection_does_not_replace_mismatched_original_or_shared_history(
     tmp_path, monkeypatch, changed,
 ):
     client, directory, state = fake_client(tmp_path, monkeypatch)
-    envelope, previous = "e" * 40, "d" * 40
+    envelope = "e" * 40
+    previous = None if changed == "missing-first-history" else "d" * 40
     state.update(
         phase="transport-attempt", envelope_sha=envelope, previous_tip=previous,
         transport_failure={"returncode": 1, "stderr": "", "stdout": (
@@ -581,11 +584,11 @@ def test_known_rejection_does_not_replace_mismatched_original_or_shared_history(
     effects = []
     client.transport = SimpleNamespace(
         scoped_credentials=lambda owner: None,
-        tip=lambda: None if changed == "missing-history" else "f" * 40,
+        tip=lambda: None if changed in {"missing-history", "missing-first-history"} else "f" * 40,
         validate_tip=lambda envelope: None,
         git=lambda *args, **kwargs: SimpleNamespace(
             returncode=1,
-            stdout=previous + " " + (
+            stdout=(previous + " " if previous else "") + (
                 "a" * 40 if changed == "candidate" else state["request"]["source_sha"]
             ),
         ),

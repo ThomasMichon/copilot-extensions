@@ -147,14 +147,16 @@ class Transport:
         sha(candidate)
         if required_history is not None:
             sha(required_history)
+        history = required_history
         tree = self.git("rev-parse", candidate + "^{tree}").stdout.strip()
         for _ in range(4):
             previous = self.tip()
-            if required_history and (not previous or self.git(
-                "merge-base", "--is-ancestor", required_history, previous, check=False,
+            if history and (not previous or self.git(
+                "merge-base", "--is-ancestor", history, previous, check=False,
             ).returncode):
                 raise ValueError("Original transport history is unavailable or changed")
             if previous:
+                history = history or previous
                 self.validate_tip(previous)
                 if self.git("merge-base", "--is-ancestor", candidate, previous, check=False).returncode == 0:
                     persist({"envelope_sha": previous, "phase": "transport-confirmed"})
@@ -192,6 +194,7 @@ class Transport:
             if actual != previous and rejected_attempt({
                 "envelope_sha": envelope, "previous_tip": previous, "transport_failure": failure,
             }):
+                history = history or actual
                 continue
             persist({"envelope_sha": envelope, "phase": "transport-unknown"})
             raise RuntimeError(

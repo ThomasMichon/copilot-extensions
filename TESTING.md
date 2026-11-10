@@ -163,6 +163,8 @@ attempt's identity and diagnostic. An absent or uncertain effect is not
 permission for automatic replay, even when the shared ref has advanced.
 Recovery carries the original history requirement into every append read
 and contention retry; a deleted or rewritten ref is not a new transport.
+For first-ref contention, the observed competing tip becomes that requirement;
+recovery never treats a missing competing tip as permission to recreate it.
 
 The client emits a request ID before effects and stores its state under the
 current worktree's Git metadata (`windows-qualification/<id>`). `status` and

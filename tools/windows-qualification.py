@@ -253,11 +253,11 @@ class Client:
                 if parents != expected:
                     raise ValueError("rejected transport ancestry differs from original request")
                 previous = state.get("previous_tip")
-                if previous and (not tip or self.transport.git(
+                if not tip or previous and self.transport.git(
                     "merge-base", "--is-ancestor", previous, tip, check=False,
-                ).returncode):
+                ).returncode:
                     raise ValueError("shared transport history changed; refusing replacement")
-                self.append_transport(directory, state, required_history=previous)
+                self.append_transport(directory, state, required_history=previous or tip)
             else:
                 self.transport.validate_tip(envelope)
                 state["request"]["envelope_sha"] = envelope
