@@ -582,8 +582,10 @@ inventories. Point-of-use execution and mutation admission remain separate.
 
 Worktree Manager's [Repositories Configuration section](docs/repositories-configuration.md)
 uses the native read/preview/apply CLI to inspect registration, routes, state
-binding and tracked pairs. Its only editable setting is the machine-local
-future-launch Copilot login preference; it does not log in or launch agents.
+binding and tracked pairs. It edits the machine-local future-launch Copilot
+login preference and offers separately confirmed remote-checkout acquisition,
+local knowledge registration and binding actions. It does not log in, execute
+downloaded setup code or launch agents.
 
 The standalone [repository authentication inspection](docs/repository-authentication.md)
 separately observes an explicitly configured GitHub account and repository API
