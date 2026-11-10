@@ -5020,6 +5020,18 @@ Windows uses the public embedding stop event; Linux exercises CLI SIGTERM.
 Windows passive-reader rename sharing is tested at the actual file boundary.
 These controls do not qualify a live provider, built container or fleet
 placement, and do not close the remaining production-performance/update gates.
+The same standalone lane discovers `services/pr/tests/test_local_foreground.py`,
+`test_local_lifetime.py` and `test_local_recovery.py`. They select the independent
+Linux `repository-local/v1` profile with no running Core/Gateway: both synthetic
+providers populate before subscriptions, actual packaged CLI processes query
+and consume continuing events, and original-root restart preserves each
+consumer's original IDs and ACK. Separate embedded foreground controls hold
+exact native/disk cleanup and inject post-replacement persistence uncertainty.
+These process fixtures remain in the manual standalone lane, not required
+unit-only PR CI. Use a short private runner scratch root: the selected Unix
+socket is an absolute child of its dedicated state root and is limited to
+100 encoded bytes. The local runtime is Linux-only; strict typing separately
+analyzes both Linux and Windows.
 The focused observer/service tests additionally exercise a four-read admission
 bound, rolling progress past a blocked target, distinct subscriber identities,
 real native-child completion order and retained writer custody until every
