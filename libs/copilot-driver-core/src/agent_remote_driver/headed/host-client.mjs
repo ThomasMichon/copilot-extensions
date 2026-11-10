@@ -218,6 +218,10 @@ export function createHeadedSession(native, { binding, cwd, nativePid }) {
       }
       await controlled();
       await readyForInput();
+      if (native.sessionId !== binding.sessionId) {
+        fail();
+        throw unavailable();
+      }
       let result;
       try {
         result = await request("copilot-driver/native-send", {

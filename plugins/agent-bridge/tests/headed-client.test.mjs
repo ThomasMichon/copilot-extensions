@@ -117,7 +117,7 @@ async function fixture(run, {
     ...(portable ? { pluginRoot, bridgePluginRoot, expectedSessionId: native.sessionId } : {}),
   });
   try {
-    await run({ client, sends, methods, state, declaration, plugins, statusRead,
+    await run({ client, native: readonly, sends, methods, state, declaration, plugins, statusRead,
       observer: (...args) => observer(...args),
       connections: () => connections });
   } finally {
@@ -164,6 +164,23 @@ test("Bridge waits for the original seed observation without waiting for its tur
     observer({ type: "user.message", data: { content: "original seed" }, id: "later-human" });
     await assert.rejects(client.send({ prompt: "revoked" }), /no replay/);
     assert.equal(sends.length, 1);
+  }, { startupPrompt: "original seed" });
+});
+
+test("native identity changes during readiness permanently hold dispatch to the old conversation", async () => {
+  await fixture(async ({ client, native, sends, statusRead, observer, connections }) => {
+    const original = native.sessionId;
+    const operation = client.send({ prompt: "must not reach the old conversation" });
+    const refused = assert.rejects(operation, /no replay/);
+    await statusRead;
+    native.sessionId = "different-native";
+    observer({ type: "user.message", data: { content: "original seed" }, id: "startup" });
+    await refused;
+    assert.equal(sends.length, 0);
+    native.sessionId = original;
+    await assert.rejects(client.send({ prompt: "must remain held" }), /no replay/);
+    assert.equal(sends.length, 0);
+    assert.equal(connections(), 1);
   }, { startupPrompt: "original seed" });
 });
 
