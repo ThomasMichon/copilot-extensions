@@ -151,7 +151,7 @@ def test_standing_policy_is_optional_and_retained_from_the_configured_owner(monk
     )
     assert module.configured_writer("policy:factory", "local")["standing"] is standing
     admission = replace(admission, standing=None)
-    assert module.configured_writer("policy:factory", "local")["standing"] is None
+    assert "standing" not in module.configured_writer("policy:factory", "local")
     with pytest.raises(ValueError, match="configured owner"):
         replace(admission, standing={"machine": "host"})
     with pytest.raises(ValueError, match="absolute policy"):

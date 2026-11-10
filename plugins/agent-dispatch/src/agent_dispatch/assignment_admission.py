@@ -71,8 +71,11 @@ def configured_writer(spec: str | None, authority: str | None):
         raise ValueError("relationship admission factory did not return independent admission owners")
     from .assignment_relationship_owner import WorktreeRelationshipWriter
 
-    return WorktreeRelationshipWriter.selected(
-        admit_workspace=admission.admit_workspace,
-        admit_request=admission.admit_request,
-        standing=admission.standing,
-    )
+    selection = {
+        "admit_workspace": admission.admit_workspace,
+        "admit_request": admission.admit_request,
+    }
+    # Without standing policy, retain the original two-owner selection exactly.
+    if admission.standing is not None:
+        selection["standing"] = admission.standing
+    return WorktreeRelationshipWriter.selected(**selection)
