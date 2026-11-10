@@ -479,6 +479,51 @@ def test_vault_uninstall_stop_pins_native_identity_through_signal_and_wait(
         process.communicate(timeout=10)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows canonical daemon command admission")
+@pytest.mark.parametrize("fault", [
+    "none", "command", "source", "cache", "foreign-image", "foreign-base", "trailing-argument",
+])
+def test_vault_uninstall_admits_only_the_canonical_same_process_daemon(tmp_path, fault):
+    from agent_procutil._daemon_instance_child import _BOOTSTRAP
+    from agent_vault.launch import _SERVICE_BOOTSTRAP
+
+    root = tmp_path / "runtime"
+    slot = root / "versions" / "1.0"
+    venv.EnvBuilder(with_pip=False).create(slot)
+    package = slot / "Lib/site-packages"
+    command = [
+        str(Path(sys._base_executable)),
+        "-X", "pycache_prefix=" + str(root / "cache/python" / ("installed-" + "a" * 64)),
+        "-c", _BOOTSTRAP, str(package), "-c", _SERVICE_BOOTSTRAP, str(package),
+        "--foreground", "--persistent", "--configuration-root", str(tmp_path),
+    ]
+    image = str(Path(sys._base_executable))
+    if fault == "command":
+        command[7] = "import time; time.sleep(20)"
+    elif fault == "source":
+        command[8] = str(tmp_path)
+    elif fault == "cache":
+        command[2] = "pycache_prefix=" + str(tmp_path / "foreign-cache")
+    elif fault == "foreign-image":
+        image = str(Path(os.environ["SystemRoot"]) / "System32/cmd.exe")
+    elif fault == "foreign-base":
+        (slot / "pyvenv.cfg").write_text(f"home = {tmp_path}\n", encoding="utf-8")
+    elif fault == "trailing-argument":
+        command.append("--unexpected")
+    result = subprocess.run(
+        [
+            sys.executable, "-I", "-S", "-B", "-X", "utf8",
+            str(REPO / "plugins/agent-vault/scripts/vault-uninstall-process.py"),
+        ],
+        input=json.dumps({
+            "root": str(root), "image": image, "command": subprocess.list2cmdline(command),
+        }),
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) is (fault == "none")
+
+
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("shell", ("ps1", "sh"))
 def test_runtime_code_absent_and_retained_bytes_unchanged(

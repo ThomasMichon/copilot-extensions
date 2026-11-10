@@ -1727,6 +1727,39 @@ function Test-VaultUninstallRedirectorChild {
     }
 }
 
+function Test-VaultUninstallBootstrappedProcess {
+    param($Row, [string]$Root)
+    $python = Get-FiniteUninstallPython -InstallRoot $InstallDir
+    if (-not $python) { throw 'Vault uninstall requires an external Python for native process observations.' }
+    $request = @{
+        root = $Root; image = [string]$Row.ExecutablePath; command = [string]$Row.CommandLine
+    } | ConvertTo-Json -Compress
+    $nativeError = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList @(
+        '-I', '-S', '-B', '-X', 'utf8', (Join-Path $PSScriptRoot 'vault-uninstall-process.py')
+    ) -InputText $request -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Vault canonical daemon observation failed: $nativeError" }
+    $admitted = ($output | Out-String) | ConvertFrom-Json -ErrorAction Stop
+    if ($admitted -isnot [bool]) { throw 'Vault canonical daemon observation is invalid.' }
+    if (-not $admitted -or $Row.CreationDate -isnot [DateTime]) { return $false }
+    $owner = Invoke-CimMethod -InputObject $Row -MethodName GetOwnerSid -ErrorAction Stop
+    if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+        return $false
+    }
+    $process = [Diagnostics.Process]::GetProcessById([int]$Row.ProcessId)
+    try {
+        [void]$process.Handle
+        $birth = $process.StartTime.ToUniversalTime().ToFileTimeUtc()
+        $captured = $Row.CreationDate.ToUniversalTime().ToFileTimeUtc()
+        $images = @(Get-VaultUninstallPathInfo @($process.Path, $Row.ExecutablePath))
+        return -not $process.HasExited -and
+            $birth - ($birth % 10) -eq $captured - ($captured % 10) -and
+            $images[0].path -ieq $images[1].path -and $images[0].identity -ceq $images[1].identity
+    } finally {
+        $process.Dispose()
+    }
+}
+
 function Get-VaultUninstallProcesses {
     Invoke-FiniteRuntimeUninstall -InstallRoot $InstallDir -Check
     if ('..' -in ($InstallDir -split '[\\/]')) { throw 'Refusing traversal in uninstall root' }
@@ -1758,7 +1791,17 @@ function Get-VaultUninstallProcesses {
     }
     $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     $owned = @()
+    $bootstrapped = @($rows | Where-Object {
+        $_.ExecutablePath -and $_.CommandLine -cmatch 'agent_procutil\._daemon_instance_child' -and
+        $_.CommandLine -cmatch 'agent_vault\.service'
+    })
+    if ($bootstrapped.Count -gt 16) { throw 'Vault canonical daemon inventory exceeds its bound.' }
+    foreach ($row in $bootstrapped) {
+        if (Test-VaultUninstallBootstrappedProcess -Row $row -Root $root) { $owned += $row }
+    }
+    $canonicalIds = @($owned | ForEach-Object { [int]$_.ProcessId })
     foreach ($row in $rows) {
+        if ([int]$row.ProcessId -in $canonicalIds) { continue }
         if (-not $row.ExecutablePath -or -not ([string]$row.ExecutablePath).StartsWith(
                 $root + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
         if ([string]$row.CommandLine -notmatch '(?i)(?:^|\s)-m\s+agent_vault\.service(?:\s+--foreground)?(?:\s+--persistent)?\s*$') {
