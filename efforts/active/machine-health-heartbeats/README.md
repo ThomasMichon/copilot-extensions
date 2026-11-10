@@ -1254,3 +1254,11 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   deadline/storage/cleanup, installed adoption, carrier and explicit activation
   remain unqualified. No registration, installed runtime change or carrier
   effect was performed; the parent remains Active.
+- Review corrections keep the 45-second collection budget inside the reviewed
+  60-second outer containment ceiling: Windows uses 60 seconds; Linux uses
+  55 seconds before stop plus five seconds for settlement. Linux WorkingDirectory
+  now uses directive-specific literal path rendering rather than command quotes,
+  retaining dollar/backslash/quote characters and escaping percent specifiers.
+  Edge whitespace refuses instead of silently selecting a different directory.
+  The focused post-correction preparation/composition packet passed all 36
+  cases; required source pins and documentation were refreshed together.

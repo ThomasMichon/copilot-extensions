@@ -32,7 +32,7 @@ def test_windows_definition_is_inert_limited_utc_and_contains_the_normal_policy_
     assert text("t:Settings/t:Enabled") == text("t:Triggers/t:TimeTrigger/t:Enabled") == "false"
     assert text("t:Settings/t:StartWhenAvailable") == "true"
     assert text("t:Settings/t:MultipleInstancesPolicy") == "IgnoreNew"
-    assert text("t:Settings/t:ExecutionTimeLimit") == "PT45S"
+    assert text("t:Settings/t:ExecutionTimeLimit") == "PT1M"
     assert text("t:Triggers/t:TimeTrigger/t:StartBoundary").endswith("T00:00:15Z")
     assert text("t:Triggers/t:TimeTrigger/t:Repetition/t:Interval") == "PT1H"
     assert text("t:Actions/t:Exec/t:Command") == r"C:\Windows\System32\conhost.exe"
@@ -55,11 +55,23 @@ def test_linux_units_escape_command_expansions_and_do_not_retry_or_enable_linger
     timer = result["artifacts"]["agent-machines-health.timer"]
     assert '"/example/$$tools%%/payload \\"one\\"/bin/agent-machines"' in service
     assert '"--store-dir" "/example/data $$home%%/store"' in service
-    assert 'WorkingDirectory="/example/$tools%%/payload \\"one\\""' in service
+    assert 'WorkingDirectory=/example/$tools%%/payload "one"\n' in service
+    assert "TimeoutStartSec=55s\nTimeoutStopSec=5s\n" in service
     assert "KillMode=control-group\nRestart=no\n" in service
     assert "OnCalendar=*-*-* *:00:15 UTC\nPersistent=true\n" in timer
     assert "OnBootSec" not in timer and "OnUnitActiveSec" not in timer
     assert not result["registered"] and not result["enabled"]
+
+
+def test_linux_working_directory_preserves_literal_characters_without_exec_quoting():
+    payload = '/example/a $b%/literal\\quote"'
+    result = jobs.prepare(platform="linux", payload=payload, store="/example/store", policy_token="a" * 64)
+    service = result["artifacts"]["agent-machines-health.service"]
+    directory = next(line for line in service.splitlines() if line.startswith("WorkingDirectory="))
+    assert directory == "WorkingDirectory=" + payload.replace("%", "%%")
+    for invalid in ("/example/payload ", "/example/payload\\", "/example/../payload"):
+        with pytest.raises(jobs.JobError, match="invalid-job-path"):
+            jobs.prepare(platform="linux", payload=invalid, store="/example/store", policy_token="a" * 64)
 
 
 @pytest.mark.parametrize("changes", [

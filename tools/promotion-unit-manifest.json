@@ -4762,9 +4762,9 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "a48be65a97ffcfabbdbc82ba6ee96d4a1f9ce1f394ef7d9be916368fdb474447",
+        "tools/promotion_unit_tests/test_health_composition.py": "8a0b8e0079d69d58f32b5d06bc7f43f3f975fbd9e8468665ac5e1f21a0daf3b3",
         "plugins/agent-machines/src/agent_machines/cli_health.py": "4ac76d8c71ee23b8c1136cdee2d1ec888093833f7aa4796f7a4840efaaa606ab",
-        "plugins/agent-machines/src/agent_machines/health_jobs.py": "6fdaf4a50924bd92077cfacb0376d591458991acdb424c95943fe4358316f65a",
+        "plugins/agent-machines/src/agent_machines/health_jobs.py": "9c881f8b2fd78363a505c7a54278c29c4ee86288ebbaa7f946f92487f8709a4e",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "9317a16c7d6d70cce4afb93b5e9fb692d2a0dc25d8b5c19797ad5d0e00bb1149",

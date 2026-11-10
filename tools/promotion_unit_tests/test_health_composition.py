@@ -86,6 +86,7 @@ def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners
     assert root.find("t:Principals/t:Principal/t:LogonType", nodes).text == "InteractiveToken"
     assert root.find("t:Principals/t:Principal/t:RunLevel", nodes).text == "LeastPrivilege"
     assert root.find("t:Settings/t:MultipleInstancesPolicy", nodes).text == "IgnoreNew"
+    assert root.find("t:Settings/t:ExecutionTimeLimit", nodes).text == "PT1M"
     arguments = root.find("t:Actions/t:Exec/t:Arguments", nodes).text
     assert "--headless" in arguments and 'health run --store-dir "C:\\Example Data\\store"' in arguments
     assert f"--apply --expect-policy {token}" in arguments
@@ -94,6 +95,8 @@ def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners
         policy_token=token,
     )
     assert '"/example/payload $$one%%/bin/agent-machines"' in linux["artifacts"]["agent-machines-health.service"]
+    assert "WorkingDirectory=/example/payload $one%%\n" in linux["artifacts"]["agent-machines-health.service"]
+    assert "TimeoutStartSec=55s\nTimeoutStopSec=5s\n" in linux["artifacts"]["agent-machines-health.service"]
     assert "OnCalendar=*-*-* *:00:15 UTC\nPersistent=true" in linux["artifacts"]["agent-machines-health.timer"]
     for result in (windows, linux):
         assert not result["registered"] and not result["enabled"]

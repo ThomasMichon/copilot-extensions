@@ -318,10 +318,15 @@ macOS is unsupported.
 The Windows proposal uses the explicitly named interactive account at
 LeastPrivilege, an hourly UTC repetition at 15 seconds after the boundary,
 IgnoreNew overlap handling, late-start coalescing, no restart policy, a
-45-second task limit and the existing headless `conhost` launch shape.
+60-second outer task limit and the existing headless `conhost` launch shape.
 Both task and trigger are disabled. The Linux proposal contains a systemd-user
 oneshot and hourly UTC persistent timer, no retries, control-group cleanup and
-45-second start/five-second stop limits. Returned unit text is not an installed
+55-second start/five-second stop limits, retaining the same 60-second outer
+containment bound. WorkingDirectory uses literal directive-specific path
+rendering and percent-specifier escaping, not ExecStart argument quoting.
+Paths with parent traversal, edge whitespace or a trailing continuation
+backslash refuse rather than silently changing the directory.
+Returned unit text is not an installed
 or enabled unit. Neither definition depends on the update watchdog.
 
 The action calls the owning payload's normal `health run --apply` entry with
@@ -329,7 +334,8 @@ the previewed policy token. Selection and capability qualification happen again
 at invocation, and normal collection revalidates the token at each mutation.
 A changed policy refuses; a late invocation only targets current health and the
 preceding complete service hour, never replays every missed hour.
-The enclosing scheduler budget includes launcher overhead; native timing and
+The enclosing scheduler budget leaves startup/settlement headroom around the
+unchanged 45-second collection budget, including Linux stop time; native timing and
 termination behavior are **not qualified by rendering these definitions**.
 
 `registered: false`, `enabled: false` and

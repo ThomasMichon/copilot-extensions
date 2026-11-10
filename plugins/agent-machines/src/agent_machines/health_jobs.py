@@ -22,9 +22,15 @@ def _text(value: str) -> str:
     return value
 
 
-def _systemd(value: str, *, command=True) -> str:
+def _systemd(value: str) -> str:
     value = _text(value).replace("\\", "\\\\").replace('"', '\\"').replace("%", "%%")
-    return '"' + (value.replace("$", "$$") if command else value) + '"'
+    return '"' + value.replace("$", "$$") + '"'
+
+
+def _systemd_directory(value: str) -> str:
+    if _text(value) != value.strip() or value.endswith("\\"):
+        raise JobError("invalid-job-path")
+    return value.replace("%", "%%")
 
 
 def prepare(
@@ -39,6 +45,8 @@ def prepare(
     path_type = PureWindowsPath if platform == "win32" else PurePosixPath
     if not all(path_type(_text(value)).is_absolute() for value in (payload, store)):
         raise JobError("absolute-job-path-required")
+    if any(".." in path_type(value).parts for value in (payload, store)):
+        raise JobError("invalid-job-path")
     arguments = ["health", "run", "--store-dir", store, "--apply", "--expect-policy", policy_token]
     if platform == "win32":
         if (
@@ -72,7 +80,7 @@ def prepare(
             ("MultipleInstancesPolicy", "IgnoreNew"),
             ("DisallowStartIfOnBatteries", "false"), ("StopIfGoingOnBatteries", "false"),
             ("StartWhenAvailable", "true"), ("RunOnlyIfNetworkAvailable", "false"),
-            ("Enabled", "false"), ("WakeToRun", "false"), ("ExecutionTimeLimit", "PT45S"),
+            ("Enabled", "false"), ("WakeToRun", "false"), ("ExecutionTimeLimit", "PT1M"),
         ):
             element(settings, key, value)
         action = element(element(task, "Actions", Context="Author"), "Exec")
@@ -92,8 +100,8 @@ def prepare(
             f"{NAME}.service": (
                 "[Unit]\nDescription=Bounded local machine health collection\n\n"
                 "[Service]\nType=oneshot\n"
-                f"ExecStart={command}\nWorkingDirectory={_systemd(payload, command=False)}\n"
-                "TimeoutStartSec=45s\nTimeoutStopSec=5s\nKillMode=control-group\n"
+                f"ExecStart={command}\nWorkingDirectory={_systemd_directory(payload)}\n"
+                "TimeoutStartSec=55s\nTimeoutStopSec=5s\nKillMode=control-group\n"
                 "Restart=no\n"
             ),
             f"{NAME}.timer": (
