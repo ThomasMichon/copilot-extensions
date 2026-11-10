@@ -75,6 +75,10 @@ authenticated inventory when every live native server is covered elsewhere.
 An unreachable or unregistered live server, unsupported process mode or changing
 inventory remains unknown. Listings share one absence-coverage
 snapshot within their finite budget; live positive rows use their own reads.
+Native process classification accepts paired double-quotes around the same
+supported `-L` and command tokens as their ordinary Windows argument spelling.
+Unknown options, malformed quoting and ambiguous server forms still refuse
+classification; quoting support does not reduce census or registration coverage.
 Selected-namespace absence uses qualified registration identities while still
 covering every native server. The legacy name-only inventory API retains its
 ambiguity refusal for duplicate logical names across namespaces.

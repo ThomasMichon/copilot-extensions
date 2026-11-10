@@ -1,0 +1,21 @@
+{
+  "comment": "Accept paired-quoted native PSMux process commands without weakening liveness coverage.",
+  "changes": [
+    {
+      "plugin": "libs/copilot-driver-core",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
