@@ -240,10 +240,16 @@ test("current description is reread and body-only repairs change the verdict", a
 function headFixture(values) {
   const created = [];
   const github = {
-    paginate: paged(async (_method, options) => structuredClone(values.filter((value) =>
-      value.state === "open" && value.base.ref === "dev" &&
-      (!options.commit_sha || value.head.sha === options.commit_sha),
-    ))),
+    paginate: paged(async (method, options) => {
+      if (method === github.rest.checks.listForRef) {
+        assert.equal(options.filter, "all");
+        return (await github.rest.checks.listForRef(options)).data.check_runs;
+      }
+      return structuredClone(values.filter((value) =>
+        value.state === "open" && value.base.ref === "dev" &&
+        (!options.commit_sha || value.head.sha === options.commit_sha),
+      ));
+    }),
     rest: {
       repos: { listPullRequestsAssociatedWithCommit() {} },
       pulls: { list() {}, get: async ({ pull_number }) => ({
@@ -251,12 +257,12 @@ function headFixture(values) {
       }) },
       checks: {
         listForRef: async ({ ref }) => ({ data: { check_runs: created
-          .map((check, index) => ({ ...check, id: index + 1, app: { slug: "github-actions" } }))
+          .map((check, index) => ({ id: index + 1, app: { slug: "github-actions" }, ...check }))
           .filter((check) => check.head_sha === ref) } }),
         create: async (check) => { created.push(check); return { data: { id: created.length } }; },
         get: async ({ check_run_id }) => ({ data: created[check_run_id - 1] }),
         update: async (check) => {
-          assert.notEqual(created[check.check_run_id - 1].status, "completed");
+          assert.ok(created[check.check_run_id - 1]);
           Object.assign(created[check.check_run_id - 1], check);
         },
       },
@@ -264,6 +270,121 @@ function headFixture(values) {
   };
   return { github, created };
 }
+
+test("scoped refresh repairs all historical owned runs without touching other producers or heads", async () => {
+  const values = [{ ...pr(marker), number: 1 }, { ...pr(marker), number: 2, head: { sha: "other-head" } }];
+  const { github, created } = headFixture(values);
+  const owned = {
+    name: "source-attribution", head_sha: "head", status: "completed", conclusion: "failure",
+    external_id: "source-metadata:" + "a".repeat(64) + ":superseded",
+    details_url: "https://github.com/owner/repo/actions/runs/99",
+  };
+  // Cross the API page boundary and include both unfinished and superseding results.
+  for (let index = 0; index < 101; index++) created.push({ ...owned });
+  created[0].status = "in_progress";
+  created.push(
+    { ...owned, head_sha: "other-head" },
+    { ...owned, external_id: "independent-producer" },
+    { ...owned, external_id: null },
+    { ...owned, app: { slug: "other-app" } },
+    { ...owned, details_url: "https://github.com/another/repo/actions/runs/99" },
+    { ...owned, details_url: owned.details_url + "/jobs/1" },
+  );
+  const independent = structuredClone(created.slice(101));
+  const paginate = github.paginate;
+  github.paginate = paged(async (method, options) => {
+    assert.notEqual(method, github.rest.pulls.list, "normal scoped repair never starts a global PR census");
+    return paginate(method, options);
+  });
+  await gate.backfill({ github, context, core: core(), pullRequest: "1" });
+  assert.ok(created.slice(0, 101).every((check) => check.status === "completed" &&
+    check.conclusion === "success" && !check.external_id.endsWith(":superseded")));
+  assert.deepEqual(created.slice(101, -1), independent);
+  assert.equal(created.at(-1).conclusion, "success");
+});
+
+test("scoped refresh preserves current invalid metadata and same-head collision failures", async () => {
+  for (const peer of [false, true]) {
+    const values = [{ ...pr(peer ? marker : ""), number: 1 }];
+    if (peer) values.push({ ...pr(marker), number: 2 });
+    const { github, created } = headFixture(values);
+    await gate.backfill({ github, context, core: core(), pause: async () => {} });
+    await gate.backfill({ github, context, core: core(), pullRequest: 1 });
+    assert.ok(created.every((check) => check.conclusion === "failure"));
+    assert.match(created.at(-1).output.summary, peer ? /Multiple open dev/ : /Missing source attribution/);
+  }
+});
+
+test("scoped rewrites fail closed on metadata races, unknown write outcomes and exhausted budgets", async () => {
+  for (const stage of ["before", "rewrite", "complete", "head", "unknown", "budget"]) {
+    const values = [{ ...pr(marker), number: 1 }];
+    const { github, created } = headFixture(values);
+    await gate.backfill({ github, context, core: core(), pause: async () => {} });
+    let changed = false;
+    const update = github.rest.checks.update;
+    const paginate = github.paginate;
+    let snapshots = 0;
+    github.paginate = paged(async (method, options) => {
+      if (method === github.rest.repos.listPullRequestsAssociatedWithCommit &&
+          ++snapshots === 2 && stage === "before") values[0].body = "";
+      return paginate(method, options);
+    });
+    github.rest.checks.update = async (check) => {
+      const result = await update(check);
+      if (!changed && check.conclusion === "success" &&
+          (["rewrite", "head", "unknown"].includes(stage) || (stage === "complete" && check.check_run_id > 1))) {
+        changed = true;
+        if (stage === "unknown") throw new Error("response lost after write");
+        if (stage === "head") values[0].head = { sha: "moved-head" };
+        else values.push({ ...pr(marker), number: 2 });
+      }
+      return result;
+    };
+    await assert.rejects(gate.backfill({
+      github, context, core: core(), pullRequest: 1, ...(stage === "budget" ? { requestLimit: 12 } : {}),
+    }), /metadata changed|response lost|request budget/);
+    assert.equal(created.at(-1).conclusion, "failure");
+    assert.ok(created.at(-1).external_id.endsWith(":superseded"));
+    if (stage !== "before") assert.ok(created.every((check) =>
+      check.status === "completed" && check.conclusion === "failure"));
+    assert.ok(created.every((check) => check.head_sha === "head"));
+  }
+});
+
+test("scoped cleanup continues after an unknown failure and never reports successful repair", async () => {
+  const values = [{ ...pr(marker), number: 1 }];
+  const { github, created } = headFixture(values);
+  await gate.backfill({ github, context, core: core(), pause: async () => {} });
+  const update = github.rest.checks.update;
+  github.rest.checks.update = async (check) => {
+    if (check.check_run_id === 1 && check.conclusion === "failure") throw new Error("cleanup response unknown");
+    const result = await update(check);
+    if (check.conclusion === "success") values[0].body = "";
+    return result;
+  };
+  const output = core();
+  await assert.rejects(gate.backfill({ github, context, core: output, pullRequest: 1 }),
+    /failure fencing is incomplete/);
+  assert.equal(created[0].conclusion, "success", "an unconfirmed rewrite is not claimed repaired");
+  assert.equal(created[1].conclusion, "failure", "other pending results are still fail-closed");
+  assert.equal(created.at(-1).conclusion, "failure", "the superseding failure still blocks the gate");
+  assert.deepEqual(output.messages, []);
+});
+
+test("scoped refresh rejects invalid selectors and promotion mixing before any API call", async () => {
+  for (const pullRequest of ["", "0", "-1", "1.5", "01", "9007199254740992", "x"]) {
+    await assert.rejects(gate.backfill({ github: {}, context, core: core(), pullRequest }), /Invalid or conflicting/);
+  }
+  for (const options of [
+    { head: "a".repeat(40) },
+    { context: { ...context, payload: { inputs: { promotion_sha: "a".repeat(40) } } } },
+    { context: { ...context, payload: { inputs: { promotion_run: "1-1" } } } },
+  ]) {
+    await assert.rejects(gate.backfill({
+      github: {}, context, core: core(), pullRequest: 1, ...options,
+    }), /Invalid or conflicting/);
+  }
+});
 
 test("native checks fail shared heads regardless of individual source decisions", async () => {
   for (const peer of [pr(marker), pr(""), pr("malformed source"), pr("", [{ name: "attribution-exempt" }])]) {

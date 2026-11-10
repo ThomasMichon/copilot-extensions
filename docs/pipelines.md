@@ -1226,8 +1226,31 @@ Refresh publication starts pending, rereads metadata before and after completing
 its result, and supersedes any changed/unverifiable snapshot with a failure
 before a bounded retry. A delayed refresh must not leave a stale successful
 result after a concurrent description or metadata edit.
-Completed check conclusions are not rewritten: superseding failure uses a new
-check, and only an unfinished original is closed out directly.
+Batch/departure refreshes do not rewrite completed conclusions: superseding
+failure uses a new check, and only an unfinished original is closed out directly.
+
+An authorized manual dispatch can instead supply `pull_request_number` alone
+to reconcile one current open `dev` PR. It uses the existing trusted default
+checkout and refresh job's checks-write permission; the native metadata jobs
+stay read-only. The selector cannot be combined with promotion inputs.
+No initial global PR listing occurs, although an incomplete/unavailable commit
+association response still requires the authoritative full census described
+above. Writes remain scoped to the selected head.
+The repair paginates all check runs and recognizes its direct series by the
+`github-actions` app, exact `source-attribution` name, `source-metadata:` digest
+namespace (including legacy unverified/superseded suffixes), and this repository's
+Actions-run URL. Workflow-backed jobs and other same-name producers remain
+untouched; this is producer scoping, not cryptographic publisher authentication.
+After a stable snapshot it reevaluates every owned historical run, including
+completed superseded failures, to the actual current decision and publishes a
+fresh result. Invalid descriptions and shared heads remain failures.
+Cleanup requests are reserved for every attempted rewrite before mutation.
+Racing metadata, lost write responses and budget exhaustion fail the operation,
+publish a superseding failure and fail-close attempted rewrites, including
+completed successes. Failed cleanup remains an explicit unknown, never success.
+This is a scoped owner repair, not permission to ignore unsuccessful required
+checks or mutate checks from another producer. Without the selector, the
+existing global refresh behavior is unchanged.
 
 **Activation is separate from implementation merge.** After promotion to
 `main`, verify a real source-check failure and a body-only repair from the
