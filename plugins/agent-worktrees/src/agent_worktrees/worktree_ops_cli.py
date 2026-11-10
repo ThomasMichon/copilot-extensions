@@ -161,16 +161,15 @@ def add_parsers(sub) -> None:
         dest="owner_ref",
         help="Qualified ref (machine/project/worktree_id[#session]) of "
         "the worktree that owns this one as an outbound resource. "
-        "Usually injected by `run` via AGENT_WORKTREES_OWNER_REF; "
-        "the flag is the low-level primitive for scripts/tools "
-        "that already know both sides.",
+        "Defaults to the calling worktree resolved from CWD; "
+        "pass explicitly when the command runs from another directory.",
     )
     p.add_argument(
         "--no-owner",
         action="store_true",
         dest="no_owner",
         help="Create a deliberately top-level worktree: do NOT inherit "
-        "an owner from AGENT_WORKTREES_OWNER_REF or the CWD, or a "
+        "an owner from the CWD, or a "
         "parent session from COPILOT_AGENT_SESSION_ID, so no parent's "
         "finalize or terminal-cleanup gate is held on it (Ph6).",
     )
@@ -352,11 +351,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     owner_ref = (
         None
         if (is_system or no_owner)
-        else (
-            getattr(args, "owner_ref", None)
-            or os.environ.get("AGENT_WORKTREES_OWNER_REF")
-            or None
-        )
+        else getattr(args, "owner_ref", None)
     )
     dispatch_fields = {
         "task_id": getattr(args, "dispatch_task_id", None),
@@ -477,6 +472,12 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 def _resolve_owner_ref() -> str | None:
     """Build this worktree's qualified owner ref from the current context."""
+    from . import create_destination
+
+    cwd = _core()._INVOCATION_CWD or Path.cwd()
+    cwd_project = create_destination._cwd_project(cwd)
+    if cwd_project and cwd_project != cfg.project_name():
+        return create_destination._origin(cwd, None, standalone=False)[2]
     try:
         config = cfg.load_config()
     except Exception:
@@ -673,6 +674,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         run_config = cfg.load_config()
         parsed_owner = tracking.parse_claim_ref(owner_ref)
+        if parsed_owner is not None and parsed_owner.is_qualified:
+            if parsed_owner.project != run_config.repo_name:
+                run_config = cfg.load_project_config(parsed_owner.project)
     except (OSError, RuntimeError, ValueError) as exc:
         output.err(f"run: cannot resolve owner: {exc}")
         return 1
@@ -703,9 +707,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not readiness.ready:
         output.err(f"run: {readiness.code}: {readiness.error}")
         return 3
-
-    child_env = dict(os.environ)
-    child_env["AGENT_WORKTREES_OWNER_REF"] = owner_ref
 
     owner_path = None
     pending_ref = ""
@@ -801,7 +802,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         proc = subprocess.run(
             cmd_str,
             shell=True,
-            env=child_env,
             stdout=subprocess.PIPE,
             text=True,
         )

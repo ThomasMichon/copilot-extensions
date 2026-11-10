@@ -1007,7 +1007,7 @@ def test_build_env_reuses_launch_policy_for_hooks_and_ownership(monkeypatch):
     monkeypatch.setattr(cfg, "load_config", forbidden)
     env = m._build_env(None, work_dir="/w/wt-a", config=config)
     assert env["AGENT_WORKTREES_HOOKS"] == "1"
-    assert env["AGENT_WORKTREES_OWNER_REF"] == "host/target/wt-a"
+    assert "AGENT_WORKTREES_OWNER_REF" not in env
 
 
 def test_repo_session_env_templates_values(monkeypatch):

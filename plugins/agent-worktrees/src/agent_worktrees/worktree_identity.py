@@ -207,12 +207,20 @@ def reference_machine(
     from .execution_spaces import current_execution_context
 
     try:
-        record = tracking.load_record(cfg.tracking_dir() / f"{worktree_id}.yaml")
+        record = tracking.load_record(cfg.tracking_dir(project) / f"{worktree_id}.yaml")
     except FileNotFoundError:
         return current_execution_context(config).execution_machine
     if record.repo != project:
         raise ValueError("owner record conflicts with the receiving project")
     return record.execution_machine
+
+
+def reference_owner(
+    config: cfg.Config, worktree_id: str, project: str, session_id: str | None = None,
+) -> str:
+    """Format ownership from the receiving project's retained execution identity."""
+    machine = reference_machine(config, worktree_id, project=project)
+    return tracking.format_claim_ref(machine, project, worktree_id, session_id)
 
 
 def _infer_worktree_id_from_worktree_root(config: cfg.Config | None, cwd: Path) -> str | None:

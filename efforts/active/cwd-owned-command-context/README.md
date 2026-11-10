@@ -12,10 +12,11 @@ runtime-root state, or track each remaining case.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent PRs against `dev`
 - **Created:** 2026-11-09
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** agent-fabric `derive-dont-duplicate`,
   `trusted-cooperation-with-economical-evidence`
 - **Umbrella issue:** #11883
+- **Sub-issues:** #11891 (runtime/state), #11892 (identity), #11893 (carriers)
 
 ## Guiding Intent
 
@@ -68,28 +69,29 @@ is included. Required review, CI and merge gates remain intact.
 ## Plan
 
 ### Phase 1 - Reviewed design
-- [ ] Land this proposal through normal review.
+- [x] Land this proposal through normal review (#11884).
 
 ### Phase 2 - Remove inherited owner references
-- [ ] Remove launch writers and replace readers with CWD or explicit arguments.
-- [ ] Preserve managed caller checks against the resolved worktree head.
-- [ ] Update affected documentation and focused regression tests.
+- [x] Remove launch writers and replace readers with CWD or explicit arguments.
+- [x] Preserve managed caller checks against the resolved worktree head.
+- [x] Update affected documentation and focused regression tests.
 - [ ] Deliver the implementation through reviewed merge.
 
 ### Phase 3 - Environment audit
-- [ ] Inventory non-test environment inputs across plugins, libraries and tools.
+- [x] Inventory non-test environment inputs across plugins, libraries and tools.
 - [ ] Post a per-variable classification table on #11883: test/diagnostic,
   legitimate host input, or leaking identity/owner/runtime state.
-- [ ] Fix category-three cases through reviewed PRs or transfer each to a
-  linked tracked issue with concrete evidence and acceptance criteria.
+- [x] Deferred to `#11891, #11892, #11893`: Fix category-three cases through
+  reviewed PRs or transfer each to a linked tracked issue with concrete evidence
+  and acceptance criteria.
 
 ## Validation Plan
 
-- [ ] Prove owner references no longer select ownership through the environment.
-- [ ] Cover detached child identity, valid current head, stale/non-head callers,
+- [x] Prove owner references no longer select ownership through the environment.
+- [x] Cover detached child identity, valid current head, stale/non-head callers,
   explicit caller context and missing managed context.
-- [ ] Run affected tests through bounded test supervision and Python lint.
-- [ ] Run relevant install-contract and documentation checks.
+- [x] Run affected tests through bounded test supervision and Python lint.
+- [x] Run relevant install-contract and documentation checks.
 - [ ] Audit the final public diff and live issue/PR surfaces for private data.
 - [ ] Verify reviewed implementation merges and finalized source worktrees;
   report source delivery separately from release or rollout.
@@ -110,3 +112,17 @@ legitimate host inputs are not removed merely because they are variables.
 - No existing canonical effort was bound to this work.
 - Target adoption supports a target-owned effort. This is the canonical
   upstream plan; private operational details remain outside this repository.
+- Proposal #11884 merged after current-head Copilot approval and green CI.
+  Phase 2 now removes the inherited identity paths; phase 3 inventories other
+  environment inputs independently.
+- Bounded regression packets: Worktrees 287 passed before the cross-project
+  origin fix; its affected 112-case owner/claim packet passed afterward.
+  Bridge 289/290 initially passed; the remaining fixture was corrected and its
+  26-case file passed. Codespaces 120, Dispatch diagnostics 49 and shared
+  supervisor 5 passed. Ruff, install contract (13 plugins) and documentation
+  consistency (24 plugins) passed.
+- The source-linked audit classifies 537 inputs: 43 test/diagnostic, 374
+  operational/host inputs and 120 migration candidates. Each migration input is
+  checklist-tracked in #11891 (53), #11892 (32) or #11893 (35), with preservation
+  and actual-boundary regression criteria. #11785 retains the narrower
+  credential-client symptom. No live rollout is authorized.
