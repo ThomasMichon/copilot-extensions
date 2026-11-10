@@ -401,7 +401,7 @@ def test_worktrees_controller_requires_live_fixed_uninstall_stack(
     "none", "finite-callback", "self-stage", "sparse-census", "cache",
     "forged-owner", "stale-owner", "wrong-action", "wrong-root", "changed-source",
     "witness-mismatch", "reused-native", "foreign-controller", "additional-consumer",
-    "late-source", "late-request",
+    "late-source", "late-request", "missing-native-check",
 ))
 def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch, mutation):
     home = tmp_path / "home"
@@ -469,7 +469,9 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
         return [
             sys.executable, "-I", "-S", "-B", "-X", "utf8", str(source / "scripts/installer_driver.py"),
             "--payload", str(source), "--root", str(root), "--shell", shell,
-            "--plugin", "agent-vault", "--action", "uninstall", *(["--" + role] if role else []),
+            "--plugin", "agent-vault", "--action", "uninstall",
+            *(["--check-native"] if role == "remove-broker" else []),
+            *(["--" + role] if role else []),
         ]
 
     def powershell(source):
@@ -517,6 +519,8 @@ def test_vault_controller_requires_the_live_native_request(tmp_path, monkeypatch
         shim[5] = "not-the-scoped-fixture"
     elif mutation == "foreign-controller":
         actors[2][1][:] = [sys.executable, "-m", "agent_vault"]
+    elif mutation == "missing-native-check":
+        inspector.remove("--check-native")
     rows = [
         {"pid": pid, "ppid": actors[index + 1][0] if index + 1 < len(actors) else 0,
          "image": argv[0], "command": subprocess.list2cmdline(argv),

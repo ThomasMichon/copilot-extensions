@@ -466,7 +466,7 @@ try {
             index = 7
             while index < len(arguments):
                 flag = arguments[index]
-                if flag in {"--participant", "--remove-broker"}:
+                if flag in {"--participant", "--check-native", "--remove-broker"}:
                     if flag in options:
                         raise UninstallRefused("Duplicate native Vault controller")
                     options[flag] = True
@@ -488,6 +488,8 @@ try {
             }
             if role:
                 expected["--" + role] = True
+            if role == "remove-broker":
+                expected["--check-native"] = True
             if (not source.is_absolute() or ".." in source.parts or options != expected
                     or Path(arguments[6]) != source / "scripts/installer_driver.py"
                     or len(native_options) != len(set(native_options))
