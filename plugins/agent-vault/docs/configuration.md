@@ -326,6 +326,14 @@ discovery or the strictly validated client `port`. An explicit start argument
 or selected client port takes precedence; an invalid bind default refuses
 before launching a daemon. Launchers needing ephemeral startup should use this
 separate default rather than injecting an unqualified client port of `0`.
+The selected executable advertises support as `daemon-bind-default-v1` in
+`invocation-contract --json`. A launcher requiring this behavior must inspect
+that runtime's capability before migrating; older runtimes ignore the new
+environment default and are not compatible providers. Deploy the provider
+first, then the launcher. Roll back the launcher and provider together, or
+refuse a missing capability instead of silently reverting to a fixed listener.
+Daemon children still use the existing `--tcp-port` argument, including an
+explicit `0`; no new daemon-side protocol or live-service metadata is required.
 
 `AGENT_VAULT_PINNED_CONTEXT` uses the strict `identity_context.py` parser and
 installation identity; it additionally requires `AGENT_VAULT_CACHE=1` and an
