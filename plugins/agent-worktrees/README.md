@@ -436,6 +436,12 @@ trace phases. This protects these native entrypoints, not every installer or lau
 publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
 owns the policy schema and decision semantics.
 
+On Windows, an unprovisioned command honors an existing `payload-dir` selection
+and rechecks it under the provision lock. Without a saved selection, a
+payload-local command uses its adjacent `scripts\install.ps1` before installed-plugin
+discovery, so relocating an intact payload does not require a saved pointer.
+Global shims without an adjacent plugin manifest retain installed-plugin discovery.
+
 Cell installers also check before self-staging and runtime-input writes. The
 Python lifecycle repeats admission at entry, under the existing genesis/install
 locks, on candidate handover and in helper callbacks, including when invoked
@@ -508,6 +514,9 @@ stderr instead of hiding the cause behind a JSON parser error.
 The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
+
+The Windows first-use relay preserves empty stderr lines as whitespace, not
+exception type names, while retaining nonempty diagnostics and failure status.
 
 Structured installs capture the payload and canonical development libraries
 in one staging tree, preserving their relative dependency paths. Packaged
