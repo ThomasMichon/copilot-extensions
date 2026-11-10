@@ -1793,6 +1793,19 @@ and stderr, the unchanged native nonzero result and unaffected unscoped
 passthrough controls. This proves stream delivery, not installed full-update
 success or native publication settlement.
 
+MCP's separate explicit physical-generation packet is
+`python tools/run-plugin-tests.py agent-mcp --test-file tests/test_generation_handover.py --allow-explicit-tiers --timeout 240 --plugin-timeout 260 --test-timeout 180`.
+It constructs private immutable source runtimes using the installer engine,
+then exercises a prestarted keeper and the internal launcher's real startup.
+The original conduit and upstream survive a physical backend change,
+authenticated outgoing retirement and supported rollback. Two clients share
+one keeper; actual interpreter prefix, module path, backend PID, mutation and
+initialization counts are asserted. Native Windows and POSIX source runs pass.
+The fixture uses contained,
+leased instance ownership and exact cleanup, not host credentials, installed
+services, desktop observation or a production-lifetime claim. It is not part
+of required unit-only CI and does not activate the ordinary forwarder.
+
 The optional `update_diagnostics` lane also runs MCP's focused
 `test_source_install_transactions.py -k footprint_routes` controls and
 `test_source_build.py` operational-identity and

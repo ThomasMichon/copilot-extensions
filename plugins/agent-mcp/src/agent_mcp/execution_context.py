@@ -91,14 +91,23 @@ def request_fields(handle, bridge) -> dict:
 
     if incoming.launch_generation() is None:
         return {}  # unmanaged development retains its existing peer contract
-    peer = incoming._ping(handle).get("execution_context")
+    return fields_for_peer(
+        load_config(bridge, repository_root=Path.cwd()), incoming._ping(handle),
+    )
+
+
+def fields_for_peer(cfg, reply) -> dict:
+    """Bind this caller's complete context to an already authenticated peer."""
+    peer = reply.get("execution_context") if isinstance(reply, dict) else None
     if not isinstance(peer, dict) or peer.get("contract") != _CONTRACT:
         raise SharingUnavailable("serving peer cannot qualify caller execution context")
     key = peer.get("key")
     if not isinstance(key, str) or len(key) != 64:
         raise SharingUnavailable("serving peer has an invalid execution context")
     try:
-        digest = _identity(load_config(bridge, repository_root=Path.cwd()), key)
+        if len(bytes.fromhex(key)) != 32:
+            raise ValueError("invalid context key length")
+        digest = _identity(cfg, key)
     except (ValueError, TypeError) as exc:
         raise SharingUnavailable("caller execution context cannot be qualified") from exc
     return {"execution_context": {"contract": _CONTRACT, "digest": digest}}
