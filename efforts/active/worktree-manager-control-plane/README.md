@@ -2491,6 +2491,11 @@ explicit final numeric canonical remains OPEN even if this tracking lands.)_
 
 #### #5913 - Existing generic New to the same owned session
 
+The [New-venue composition proposal](phase-8-new-venue-creation.md) refines the
+captured-command/real-terminal handoff, provider target/custody and compatibility
+qualification before either manifest is enabled. Its finite planning claimant
+is `patient-knob`; no implementation or live acceptance is claimed.
+
 - [ ] **P5913-1:** Credit shipped generic row-independent `create_action`
   prompting/execution/refresh. Add actual CodeSpace AND Container provider
   declarations and explicit repository/spec input without requiring an
@@ -2923,6 +2928,14 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-10 - New-venue composition researched before provider wiring
+
+The [bounded #5913 proposal](phase-8-new-venue-creation.md) records the actual
+captured-create/real-terminal Open seam and provider allocation/result
+differences. `patient-knob` claims only research and reviewed planning.
+No New manifest, provider command, session or resource was created or changed;
+all P5913/V5913/G5913 gates and existing custodians remain unchanged.
 
 ### 2026-11-10 - Optional Sync producer source accepted
 
