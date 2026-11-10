@@ -267,7 +267,7 @@ def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight
                     "In-flight native work did not preserve a hold after source expiry", timeout=3,
                 )
                 assert time.monotonic() - shortened_at < 3 and _retired(original)
-                assert stopped["auth_wait"]["hold"] == "native-control-unconfirmed"
+                assert stopped["auth_wait"]["hold"] == "native-operation-unsettled"
                 assert stopped["auth_wait"]["incarnation"] == binding["incarnation"]
                 assert not (await _auth(
                     binding, "renew", lease_revision=3,
