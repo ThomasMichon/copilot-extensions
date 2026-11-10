@@ -11,20 +11,24 @@ from pathlib import Path
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
+    from . import local_client
+    local_client.add_commands(commands)
     for operation in ("provision", "serve"):
         command = commands.add_parser(operation)
         command.add_argument("--config", type=Path, required=True)
     health = commands.add_parser("ready", help="Read bounded-age passive local readiness")
     health.add_argument("--status", type=Path, required=True)
     args = parser.parse_args(argv)
+    if args.command in local_client.COMMANDS:
+        return local_client.run(args)
     try:
         from .hosting import ready, run
 
         if args.command == "ready":
             return 0 if ready(args.status) else 1
-        from .config import load_config
+        from .local_config import load_service_config
 
-        config = load_config(args.config)
+        config = load_service_config(args.config)
         if args.command == "provision":
             native = config.root / "watch-subscriptions.json"
             if native.exists() or native.is_symlink():

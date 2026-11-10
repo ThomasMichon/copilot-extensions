@@ -95,7 +95,7 @@ class ForgeScope:
     authentication: str
 
     def __post_init__(self) -> None:
-        require(self.provider in ("github", "azure-devops"), "unsupported-forge")
+        require(self.provider in ("github", "gitea", "azure-devops"), "unsupported-forge")
         base = text(self.api_base, 2048)
         try:
             parsed = urlsplit(base)
@@ -114,7 +114,7 @@ class ForgeScope:
                 and not any(c in repository for c in "\\?#%"), "invalid-forge-repository")
         require(self.permission == "observe", "unsupported-forge-permission")
         require(self.authentication in ("basic", "bearer")
-                and (self.provider != "github" or self.authentication == "bearer"),
+                and (self.provider not in ("github", "gitea") or self.authentication == "bearer"),
                 "unsupported-forge-authentication")
 
     @classmethod

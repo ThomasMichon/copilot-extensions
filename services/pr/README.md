@@ -1,5 +1,10 @@
 # Standalone PR watch service
 
+For the explicit independent Unix HTTP repository-cache/continuing-event profile,
+see [local operation](LOCAL.md). It uses the same foreground host and writer,
+without requiring Core/Gateway ingress or service credential enrollment.
+The connector profile below retains its existing defaults.
+
 `agent-pull-requests-service` hosts the existing PR replay store, Gateway handler,
 connector and native observation cycle. It runs without Copilot, marketplace
 hooks or an interactive client session. It is not a deployment controller,
