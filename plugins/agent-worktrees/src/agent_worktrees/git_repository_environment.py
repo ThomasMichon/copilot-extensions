@@ -3,6 +3,24 @@
 from __future__ import annotations
 
 import os
+from contextlib import contextmanager
+from contextvars import ContextVar
+
+_identity_scoped = ContextVar("git_repository_identity_scoped", default=False)
+
+
+def identity_scoped() -> bool:
+    return _identity_scoped.get()
+
+
+@contextmanager
+def repository_identity_scope():
+    """Keep nested Git helpers on their supplied cwd without global env mutation."""
+    token = _identity_scoped.set(True)
+    try:
+        yield
+    finally:
+        _identity_scoped.reset(token)
 
 from . import env_scrub
 

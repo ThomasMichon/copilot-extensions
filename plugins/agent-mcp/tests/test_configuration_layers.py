@@ -264,7 +264,7 @@ def test_slot_retained_resolver_qualifies_legacy_owner(tmp_path, monkeypatch, ne
 
     def run(argv, **kwargs):
         assert argv == [
-            str(python), "-I", "-X", "utf8", "-m", "agent_worktrees",
+            str(python), "-I", "-X", "utf8", "-B", "-m", "agent_worktrees",
             "state-root", "--configuration", "--json",
         ]
         assert kwargs["cwd"] == base

@@ -28,6 +28,7 @@ from .git_repository_environment import (
     _NO_HOOKS_PATH as _NO_HOOKS_PATH,
     _REPOSITORY_CONTEXT_ENV as _REPOSITORY_CONTEXT_ENV,
     repository_identity_env as repository_identity_env,
+    identity_scoped,
 )
 from .git_errors import GitError, _redact_args as _redact_args
 from .repos_registry_reader import RepositoryResolutionError
@@ -142,7 +143,7 @@ def git(
         raise push_timeout.ObservationUnavailable("bounded observation is Windows-only")
     prefix = ["-c", f"core.hooksPath={_NO_HOOKS_PATH}"] if no_hooks else []
     cmd = ["git", *prefix, *args]
-    env = repository_identity_env() if isolated_repository else os.environ.copy()
+    env = repository_identity_env() if isolated_repository or identity_scoped() else os.environ.copy()
     from .update_auth_context import repository_environment, run_acquisition
     env = repository_environment(env)
     env = env_scrub.scrub_python_runtime_env({**env, "GIT_TERMINAL_PROMPT": "0"})
