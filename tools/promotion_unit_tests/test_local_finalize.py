@@ -91,10 +91,14 @@ def test_local_completion_requires_fresh_clean_containment(api, state):
             return SimpleNamespace(returncode=1 if state == "unknown-status" else 0,
                                    stdout="?? unfinished\n" if state == "dirty" else "")
         if args[0] == "rev-parse":
+            default = args[-1] == "refs/heads/main^{commit}"
+            assert kwargs["cwd"] == ("anchor" if default else "checkout")
             return SimpleNamespace(
-                returncode=0, stdout=commits[0] if state == "unknown-ref" else "\n".join(commits),
+                returncode=0,
+                stdout="" if state == "unknown-ref" and default else commits[int(default)],
             )
         assert args == ("merge-base", "--is-ancestor", *commits)
+        assert kwargs["cwd"] == "anchor"
         return SimpleNamespace(returncode=1 if state == "new-commit" else 0, stdout="")
 
     git_ops.git = git

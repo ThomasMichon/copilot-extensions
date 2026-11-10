@@ -5450,8 +5450,8 @@
         "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
         "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
-        "tools/promotion_unit_tests/test_local_finalize.py": "2f957220c8396ca9d7219b7d192e78a0252b36f8fb1a17b4de793a8a87391fda",
-        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "cc0e80636ea74141f651ffc18cc983169d9dac0b0fde9fc68221872e7d442f80"
+        "tools/promotion_unit_tests/test_local_finalize.py": "e39579e004e14bd6cab0d2c63bb03bc2e1fc85a3fb9ac024c0674bd2e5eb3b8a",
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "68cc6da1e4a71ad588989ff332716ff801a0eb6ca963c1f81a7c8800cfda5d3f"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_run.py",

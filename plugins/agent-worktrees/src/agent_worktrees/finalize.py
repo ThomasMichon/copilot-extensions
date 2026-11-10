@@ -1394,11 +1394,13 @@ def validate_and_finalize(
                 # forever (#7723).
                 renamed_branch_to_clean = current_ref
 
-        # Check if the worktree is unused (0 commits, clean tree)
-        ahead_commits = git_ops.get_commits_ahead(
-            effective_ref, upstream, cwd=worktree_path)
-        is_clean = git_ops.is_clean(cwd=worktree_path)
-        if len(ahead_commits) == 0 and is_clean:
+        # Local containment was proved in the registered anchor, not this checkout's store.
+        if local_only:
+            print(f"Verified: checkout content is contained in {upstream} in the registered anchor.")
+        elif (
+            len(git_ops.get_commits_ahead(effective_ref, upstream, cwd=worktree_path)) == 0
+            and git_ops.is_clean(cwd=worktree_path)
+        ):
             print("No commits and clean tree -- finalizing unused worktree.")
             # Fall through to cleanup
         elif not _is_content_on_upstream(effective_ref, upstream, cwd=worktree_path):
@@ -1668,8 +1670,9 @@ def validate_and_finalize(
             if reason := preservation_reason(worktree_path):
                 raise ValueError(reason)
 
-            print(f"Removing branch {branch}...")
-            if preserve_tracked_branch:
+            if local_only and branch == repo.default_branch:
+                output.info(f"Preserving declared local default branch {branch}.")
+            elif preserve_tracked_branch:
                 output.warn(
                     f"Preserving branch {branch} instead of deleting it -- "
                     f"it was flagged above as a stale tracked ref with "
@@ -1680,10 +1683,14 @@ def validate_and_finalize(
                     f"warning about it. Remove it manually once rescued or "
                     f"confirmed disposable."
                 )
-            elif not git_ops.delete_branch(branch, cwd=anchor):
-                output.warn(f"Could not delete branch {branch} (may already be gone).")
+            else:
+                print(f"Removing branch {branch}...")
+                if not git_ops.delete_branch(branch, cwd=anchor):
+                    output.warn(f"Could not delete branch {branch} (may already be gone).")
 
-            if renamed_branch_to_clean:
+            if renamed_branch_to_clean and not (
+                local_only and renamed_branch_to_clean == repo.default_branch
+            ):
                 print(f"Removing validated renamed branch {renamed_branch_to_clean}...")
                 if not git_ops.delete_branch(renamed_branch_to_clean, cwd=anchor):
                     output.warn(

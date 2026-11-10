@@ -11,7 +11,7 @@ import threading
 import pytest
 
 from agent_worktrees import config as cfg, finalize, tracking, worktree_creation
-from conftest import _published_seed_environment, _seed_directory
+from conftest import _published_seed_environment, _repair_copied_worktree, _seed_directory
 
 
 def _git(*args, cwd):
@@ -72,7 +72,10 @@ def environment(tmp_path, monkeypatch, git_only_mux, checkout_seed):
         root = tmp_path / f"{project}.worktrees"
         worktree_id = f"pair-{project}"
         checkout = root / worktree_id
-        _git("worktree", "repair", str(checkout), cwd=anchor)
+        _repair_copied_worktree(
+            checkout_seed / project, checkout_seed / f"{project}.worktrees" / worktree_id,
+            anchor, checkout,
+        )
         directory = cfg.project_dir(project)
         directory.mkdir(parents=True)
         document = {
@@ -113,6 +116,13 @@ def environment(tmp_path, monkeypatch, git_only_mux, checkout_seed):
 def _finalize(record, configurations, monkeypatch):
     monkeypatch.setattr(cfg, "tracking_dir", lambda: record.yaml_path.parent)
     return finalize.validate_and_finalize(record.worktree_id, configurations[record.repo])
+
+
+def test_local_pair_fixture_uses_private_git_store(environment):
+    records, configurations = environment
+    for project, record in records.items():
+        common = _git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=record.worktree_path)
+        assert Path(common).resolve() == (Path(configurations[project].default_repo.anchor) / ".git").resolve()
 
 
 @pytest.mark.parametrize("operation", ["settle", "remove", "finalize"])

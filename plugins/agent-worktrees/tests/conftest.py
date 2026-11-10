@@ -689,6 +689,23 @@ def _pr_repo_seed(tmp_path_factory):
         return seed
 
 
+def _repair_copied_worktree(seed_anchor: Path, seed_checkout: Path, anchor: Path, checkout: Path) -> None:
+    """Keep copied linked checkouts in their private store before native repair."""
+    git_file = checkout / ".git"
+    original_admin = Path(git_file.read_text(encoding="utf-8").removeprefix("gitdir: ").strip())
+    if not original_admin.is_absolute():
+        original_admin = seed_checkout / original_admin
+    relative_admin = original_admin.resolve().relative_to((seed_anchor / ".git").resolve())
+    copied_admin = anchor / ".git" / relative_admin
+    assert copied_admin.is_dir()
+    # Older Git repair keeps a valid seed pointer when both copies still exist.
+    # Retarget this private copy before Git repairs its remaining linked paths.
+    git_file.write_text(f"gitdir: {copied_admin.as_posix()}\n", encoding="utf-8", newline="\n")
+    _pr_git("worktree", "repair", str(checkout), cwd=anchor)
+    common = _pr_git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=checkout)
+    assert Path(common).resolve() == (anchor / ".git").resolve()
+
+
 def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
     """Copy private Git stores and repair the relocated administrative links."""
     shutil.copytree(
@@ -700,17 +717,7 @@ def _copy_pr_repo(seed: Path, tmp_path: Path, monkeypatch):
     tracking_d = tmp_path / "tracking"
     worktree_id = "test-wt-20260618-aaaa"
     wt_path = wt_root / worktree_id
-    git_file = wt_path / ".git"
-    original_admin = Path(git_file.read_text(encoding="utf-8").removeprefix("gitdir: ").strip())
-    if not original_admin.is_absolute():
-        original_admin = seed / "worktrees" / worktree_id / original_admin
-    relative_admin = original_admin.resolve().relative_to((seed / "anchor/.git").resolve())
-    copied_admin = anchor / ".git" / relative_admin
-    assert copied_admin.is_dir()
-    # Older Git repair keeps a valid seed pointer when both copies still exist.
-    # Retarget this private copy before Git repairs its remaining linked paths.
-    git_file.write_text(f"gitdir: {copied_admin.as_posix()}\n", encoding="utf-8", newline="\n")
-    _pr_git("worktree", "repair", str(wt_path), cwd=anchor)
+    _repair_copied_worktree(seed / "anchor", seed / "worktrees" / worktree_id, anchor, wt_path)
     _pr_git("remote", "set-url", "origin", str(remote_dir), cwd=anchor)
     if (tmp_path / "fork.git").is_dir():
         _pr_git("remote", "set-url", "fork", str(tmp_path / "fork.git"), cwd=anchor)

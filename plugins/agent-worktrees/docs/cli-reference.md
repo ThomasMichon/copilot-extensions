@@ -668,6 +668,9 @@ that the actual clean checkout commit is contained in the declared local
 default branch (`refs/heads/<default>`). It neither fetches nor rewrites refs,
 merges local work, or invents an `origin`. Missing or unreadable refs,
 uncontained commits and dirty content refuse finalization.
+The default ref and ancestry are verified in the registered anchor's Git store,
+not a separate checkout's store. Cleanup preserves the declared local default
+branch even when it was the finalized checkout's branch.
 Checks ignore inherited Git repository selectors and enumerate untracked files
 explicitly, regardless of `status.showUntrackedFiles`; failed status reads refuse.
 

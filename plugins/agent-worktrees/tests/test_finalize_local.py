@@ -110,6 +110,33 @@ def test_local_finalization_refuses_hidden_untracked_files(local_repo):
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "active"
 
 
+@pytest.mark.parametrize("tracked_default", [False, True])
+def test_local_finalization_preserves_declared_default_branch(local_repo, monkeypatch, tracked_default):
+    config, wid, checkout = local_repo
+    repo = config.default_repo
+    _git("switch", "-c", "anchor-alternate", cwd=repo.anchor)
+    _git("switch", repo.default_branch, cwd=checkout)
+    if tracked_default:
+        record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+        record.branch = repo.default_branch
+        tracking.save_record(record)
+    monkeypatch.setattr(finalize, "_has_live_session", lambda record: False)
+    monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda path: None)
+
+    assert finalize.validate_and_finalize(wid, config)
+    assert git_ops.ref_exists(f"refs/heads/{repo.default_branch}", cwd=repo.anchor)
+    assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
+
+
+def test_local_finalization_uses_registered_anchor_store(local_repo, foreign_repo):
+    config, wid, _ = local_repo
+    before = _git("show-ref", cwd=config.default_repo.anchor)
+    assert finalize_local.content_error(
+        config.default_repo, str(foreign_repo), f"worktree/{wid}", "refs/heads/master",
+    ) is not None
+    assert _git("show-ref", cwd=config.default_repo.anchor) == before
+
+
 @pytest.mark.parametrize("state", ["dirty", "uncontained", "missing-default", "pr-required"])
 def test_finalize_local_refuses_unproved_content(local_repo, state):
     config, wid, checkout = local_repo

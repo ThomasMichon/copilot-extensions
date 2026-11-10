@@ -26,6 +26,14 @@ def resolve_upstream(repo, *, pr_mode: bool) -> tuple[str, bool]:
     return f"refs/heads/{repo.default_branch}", True
 
 
+def _commit(ref: str, cwd: str) -> str | None:
+    result = git_ops.git(
+        "rev-parse", "--verify", "--end-of-options", f"{ref}^{{commit}}", cwd=cwd, check=False,
+    )
+    value = result.stdout.strip()
+    return value if result.returncode == 0 and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value) else None
+
+
 @repository_identity_scope()
 def content_error(repo, worktree_path: str, branch: str, upstream: str) -> str | None:
     """Recheck actual clean checkout containment without moving any reference."""
@@ -41,17 +49,12 @@ def content_error(repo, worktree_path: str, branch: str, upstream: str) -> str |
         if status.returncode != 0 or status.stdout.strip():
             return "Local-only finalization requires verified clean content, including untracked files."
     current = "HEAD" if exists else f"refs/heads/{branch}"
-    result = git_ops.git(
-        "rev-parse", "--revs-only", "--end-of-options",
-        f"{current}^{{commit}}", f"{upstream}^{{commit}}", cwd=cwd, check=False,
-    )
-    commits = result.stdout.splitlines()
-    if result.returncode != 0 or len(commits) != 2 or not all(
-        re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", commit) for commit in commits
-    ):
+    current_commit = _commit(current, cwd)
+    default_commit = _commit(upstream, repo.anchor)
+    if current_commit is None or default_commit is None:
         return "Cannot verify checkout and declared local default branch commits; finalization refused."
     contained = git_ops.git(
-        "merge-base", "--is-ancestor", *commits, cwd=cwd, check=False,
+        "merge-base", "--is-ancestor", current_commit, default_commit, cwd=repo.anchor, check=False,
     )
     if contained.returncode != 0:
         return f"Unmerged local work: checkout is not contained in {upstream}; finalization refused."
