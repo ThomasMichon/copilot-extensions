@@ -16,7 +16,7 @@ from agent_procutil.owned_budget import OwnedExecutionBudget
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 import yaml
 
-from . import config as cfg, project_state, repos
+from . import config as cfg, inrepo_config_source, project_state, repos
 from .git_repository_environment import repository_identity_env
 from .repos_configuration import target
 from .repos_configuration_sources import ConfigurationError, defaults, identity, mapping, resource_name
@@ -111,6 +111,8 @@ def _selection(project: str, name: str, path: str, branch: str, account: str, bu
     registry = repos.read_registry(strict=True)
     if project not in registry.repos:
         raise ConfigurationError("context-not-registered", "The selected harness is not canonically registered.")
+    if registry.repos[project].repo_class != "worktree":
+        raise ConfigurationError("context-not-worktree", "Knowledge registration requires a worktree-class harness.")
     inspection = inspect_project(project, "")
     if not eligible(inspection):
         raise ConfigurationError("knowledge-registration-unavailable", "Registration requires an unbound stateless harness.")
@@ -149,7 +151,8 @@ def _token(selected: dict) -> str:
 
 def preview(project: str, name: str, path: str, branch: str, account: str = "") -> dict:
     budget = OwnedExecutionBudget.from_timeout(18, cleanup_reserve=2)
-    selected, _ = _selection(project, name, path, branch, account, budget)
+    with inrepo_config_source.resolution_budget(deadline=budget.execution_deadline):
+        selected, _ = _selection(project, name, path, branch, account, budget)
     return {
         "version": 1, "token": _token(selected), "target": selected["target"],
         "scope": "machine-local", "operation": "set",
@@ -177,7 +180,10 @@ def apply(project: str, name: str, path: str, branch: str, account: str, token: 
     budget = OwnedExecutionBudget.from_timeout(26, cleanup_reserve=2)
     attempted = committed = False
     try:
-        with registry_lock(repos._repos_yaml_path(), budget=budget):
+        with (
+            inrepo_config_source.resolution_budget(deadline=budget.execution_deadline),
+            registry_lock(repos._repos_yaml_path(), budget=budget),
+        ):
             selected, registry = _selection(project, name, path, branch, account, budget)
             if not hmac.compare_digest(token, _token(selected)):
                 raise ConfigurationError("preview-conflict", "Registration inputs changed; refresh and preview again.")

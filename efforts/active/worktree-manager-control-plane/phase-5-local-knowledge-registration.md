@@ -48,8 +48,9 @@ harness/binding inputs and the local Git identity inspected below.
 Preview and catalog are bounded reads with no lock/state-directory creation,
 network call, credential inspection or Git configuration write:
 
-1. Require a native stateless harness that needs an external knowledge binding
-   and is currently unbound. Preserve a valid local or inherited choice.
+1. Require a canonically registered worktree-class native stateless harness
+   that needs an external knowledge binding and is currently unbound. Preserve
+   a valid local or inherited choice.
    Malformed/unreadable binding or composition is an explicit refusal.
 2. Resolve and validate the chosen path as an actual local Git root, including
    direct and converted-clone bare anchors. Refuse a descendant, linked task worktree,
@@ -78,6 +79,9 @@ Use the existing guarded managed-write boundary for derived protection maps.
 Withdraw prepared views before persistence and refresh their actual coverage
 afterward. Bound every publication-authority, registry and publication lock by
 the same remaining execution deadline, preserving the cleanup reserve.
+Committed-policy inspection, revalidation and guard-fact construction use that
+deadline too; neither an independent probe budget nor an earlier cached snapshot
+may replace it.
 
 Return the actual persisted registration and the supported next step: refresh
 and select the existing binding action. Do not bind automatically or report
@@ -225,3 +229,32 @@ Only the changed registry-transaction source record is refreshed in the positive
 unit manifest. Node inventory, effects, coverage declarations and budgets remain
 unchanged. Required exact-source unit CI and review still qualify the pushed
 revision independently.
+
+## Second-review corrections
+
+The next review confirms all five original findings are resolved and identifies
+two remaining gaps. Catalog availability and native preview/apply now require
+the binding owner's exact worktree context class. The existing policy-resolution
+scope accepts an optional absolute deadline, narrows an enclosing scope without
+extending it, and isolates operation-local snapshots. Both native operations
+and budgeted guard-fact construction pass their remaining deadline through
+that scope; existing callers without the option keep their previous behavior.
+
+The focused packet passes all 43 cases, including three unsupported context
+classes, nested deadline/snapshot restoration and real caller-owned slow-policy
+processes before and after registration persistence. Four earlier policy-fixture
+failures occurred while staging LF files under inherited Windows conversion
+settings. A fixture-local Git option now preserves the exact supplied bytes;
+the failed packet is not counted as a pass and no host Git setting changes.
+
+The affected shared packet passes 191 cases, with one Windows-unavailable FIFO
+control skipped. It includes the full guard producer, native registration
+controls and existing policy-budget/snapshot controls. Only the changed
+policy-resolution source record is additionally refreshed in the positive unit
+manifest; no node, effect, coverage or budget declaration changes.
+
+The real Manager registration form additionally passes against this updated
+native owner: Cancel performs no registration, Confirm persists it, and refresh
+retains the unbound state. Scoped F/E9 lint, documentation consistency and all
+13 install contracts pass. Review and exact-head CI remain pending; these
+source results do not authorize or qualify an installed runtime update.

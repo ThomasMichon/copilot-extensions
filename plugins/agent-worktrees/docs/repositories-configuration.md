@@ -91,7 +91,7 @@ unselected registrations and metadata cannot change through shared mappings.
 
 ## Register an existing local knowledge checkout
 
-For a canonically registered, unbound stateless harness, the native catalog
+For a canonically registered, worktree-class, unbound stateless harness, the native catalog
 offers **Register an existing local knowledge checkout**. Supply a new name,
 an absolute existing Git anchor, the intended default branch and an optional
 nonsecret repository-account mapping. The branch and account are registration
@@ -132,9 +132,13 @@ nonzero with `status: incomplete` and `registration_committed: true`; affected
 views remain unavailable. An uncertain write reports a null committed result.
 Inspect actual registration and publication before retrying.
 
-The apply budget bounds publication-authority, registry and guard-publication
-lock acquisition as well as local Git reads. The shared owners accept this
-optional budget without changing their existing callers' default behavior.
+Preview and apply each share their native deadline across local Git reads and
+committed-configuration probes, including policy revalidation and guard-fact
+publication. The apply budget also bounds publication-authority, registry and
+guard-publication lock acquisition. An enclosing policy scope cannot extend
+that deadline or supply an earlier snapshot instead of a fresh revalidation.
+The shared owners accept this optional budget without changing their existing
+callers' default behavior.
 
 The executing catalog supplies a dedicated optional row/marker for this
 operation. Older providers omit it, so a newer manifest does not emit the new

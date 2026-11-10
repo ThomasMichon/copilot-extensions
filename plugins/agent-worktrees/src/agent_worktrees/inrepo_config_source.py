@@ -52,17 +52,26 @@ _shared_snapshots: contextvars.ContextVar[
 
 
 @contextlib.contextmanager
-def resolution_budget(seconds: float | None = None, *, reuse_snapshots: bool = False):
+def resolution_budget(
+    seconds: float | None = None, *, reuse_snapshots: bool = False, deadline: float | None = None,
+):
     """Share one probe budget across every committed-config resolution in this
-    block. Nested blocks keep the outermost deadline.
+    block. Nested blocks keep the outermost deadline unless an explicit
+    absolute deadline narrows it for an enclosing operation.
 
     One config load may reuse committed answers across its own overlay/base
     reads. The scope ends before a later policy revalidation or source fetch.
     """
-    if _shared_deadline.get() is not None:
+    outer = _shared_deadline.get()
+    if outer is not None and deadline is None:
         yield
         return
-    token = _shared_deadline.set(time.monotonic() + (_RESOLUTION_BUDGET if seconds is None else seconds))
+    selected = time.monotonic() + (_RESOLUTION_BUDGET if seconds is None else seconds)
+    if deadline is not None:
+        selected = min(selected, deadline)
+    if outer is not None:
+        selected = min(selected, outer)
+    token = _shared_deadline.set(selected)
     snapshots = _shared_snapshots.set({} if reuse_snapshots else None)
     try:
         yield

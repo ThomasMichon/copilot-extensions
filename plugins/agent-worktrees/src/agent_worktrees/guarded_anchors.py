@@ -327,7 +327,13 @@ def _refresh_locked(
                 "source_project": prior_projects.get(caller),
                 "inventory_authority": "unavailable", "generation": generation,
             }))
-            snapshot = build_snapshot(caller, root, generation, prior_projects.get(caller))
+            if budget is None:
+                snapshot = build_snapshot(caller, root, generation, prior_projects.get(caller))
+            else:
+                from .inrepo_config_source import resolution_budget
+
+                with resolution_budget(deadline=budget.execution_deadline):
+                    snapshot = build_snapshot(caller, root, generation, prior_projects.get(caller))
             if budget is not None:
                 remaining_timeout(budget, float("inf"))
             encoded = json.dumps(snapshot, ensure_ascii=False, allow_nan=False)

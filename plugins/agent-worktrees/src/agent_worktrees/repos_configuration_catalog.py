@@ -302,6 +302,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
 
     if (
         composition_error is None and project in registry.repos
+        and registry.repos[project].repo_class == "worktree"
         and binding_names_supported(project, project) and eligible(inspection)
     ):
         rows.insert(0, action_row(project))

@@ -17,6 +17,7 @@ def anchor(tmp_path):
     def git(*args, **kwargs):
         return git_ops.git(
             "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+            "-c", "core.autocrlf=false",
             *args, cwd=tmp_path, **kwargs,
         )
 
@@ -36,6 +37,21 @@ def resolve(path):
     return source.load_inrepo_config_from_committed_ref(
         path, (Path("missing.yaml"), Path("config.yaml"), Path("later.yaml")),
     )
+
+
+def test_operation_deadline_narrows_outer_scope_without_reusing_earlier_snapshots():
+    with source.resolution_budget(30, reuse_snapshots=True):
+        outer = source._shared_deadline.get()
+        snapshots = source._shared_snapshots.get()
+        assert outer is not None and snapshots is not None
+        deadline = outer - 10
+        with source.resolution_budget(deadline=deadline):
+            assert source._shared_deadline.get() == deadline
+            assert source._shared_snapshots.get() is None
+            with source.resolution_budget(deadline=outer + 10):
+                assert source._shared_deadline.get() == deadline
+        assert source._shared_deadline.get() == outer
+        assert source._shared_snapshots.get() is snapshots
 
 
 def test_real_batch_preserves_utf8_crlf_and_missing_candidates(anchor, monkeypatch):
