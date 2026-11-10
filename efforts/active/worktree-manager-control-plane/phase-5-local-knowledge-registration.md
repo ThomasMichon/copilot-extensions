@@ -1,6 +1,6 @@
 # Phase 5 - Confirmed local knowledge registration
 
-- **Status:** Contract reviewed in #11920; source implementation qualified; publication and retained parent gates remain open.
+- **Status:** Source merged in #11929 after the #11920 contract review; retained parent and receiving gates remain open.
 - **Parent:** [Configuration workbench](phase-5-configuration-workbench.md).
 - **Coordination:** #1419 Track 3; bounded source slice `shiny-actuator`.
 - **Vision:** [Knowledge selection](../../../visions/installer/configurator/README.md#knowledge-selection-and-portable-defaults).
@@ -140,7 +140,7 @@ operation; preferences, inspection and existing binding remain usable.
 - [x] Prove ordinary registration still pins when appropriate; new/old
   provider/manifest/Manager and supported rollback paths retain their promised
   behavior. Keep genuine failure/cleanup outcomes and fixed aggregate budgets.
-- [ ] Run required source checks, review and CI before merge. Record native
+- [x] Run required source checks, review and CI before merge. Record native
   fixtures, first-touch private-home evidence, installed UI and separately
   authorized receiving independently.
 
