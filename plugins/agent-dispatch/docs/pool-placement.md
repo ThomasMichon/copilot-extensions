@@ -61,7 +61,11 @@ reactivations count against the pool only while their body is still cold (a
 wake that re-takes the lane clears the wait, and the body is then counted once
 as a reservation), so they take freed lanes before fresh
 placements, and they start in request order when recovery reconciliation
-finds a free lane. A body that never parked keeps its own lane and resumes
+finds a free lane. That start wakes the owner only if a request for the
+reactivation asked for a wake. A waiter whose body is release-requested,
+startup-fenced or retired holds no lane, and reconciliation drops the wait of
+any waiter that can no longer start (the resume request itself is retained).
+A body that never parked keeps its own lane and resumes
 without waiting. Immutable per-reservation pool bindings
 retain older attempts even when the task's current assignment advances.
 Unresolved launch/resume/delivery sends consume the slot of their recorded

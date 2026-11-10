@@ -854,3 +854,43 @@ def test_lane_blocked_wake_does_not_starve_a_runnable_wake(q: TaskQueue) -> None
     [blocked] = q.list_run_waiter_wakes(blocked_id)
     assert blocked.status == "pending" and blocked.attempts == 0 and blocked.not_before > 100
     assert q.get_reservation(blocked_key).state == SpawnState.COLD
+
+
+def test_lane_waiter_resumed_without_wake_starts_without_waking(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    q.resume(task_id, "host-a/worktree", wake_requested=False, now=103)
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    _cold(q, running.key)
+    assert reconcile_recoveries(q, now=110) == 1
+    assert q.pool_startup(task_id).recovery_requested_at == 110
+    assert q.list_wakes(task_id) == []
+
+
+def _parked_waiter_behind_running(q: TaskQueue) -> tuple[str, str, str]:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    request(q, task_id)
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    return task_id, key, running.key
+
+
+def test_lane_waiter_that_can_no_longer_start_releases_its_lane(q: TaskQueue) -> None:
+    task_id, key, running_key = _parked_waiter_behind_running(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET cooling_token='cooling' WHERE key=?", (key,))
+    _cold(q, running_key)
+    reconcile_recoveries(q, now=110)
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    assert q.list_wakes(task_id) == []
+    place(q, task(q))
+
+
+def test_lane_waiter_with_retired_conversation_holds_no_lane(q: TaskQueue) -> None:
+    _, key, running_key = _parked_waiter_behind_running(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET conversation_retired=1 WHERE key=?", (key,))
+    _cold(q, running_key)
+    place(q, task(q))

@@ -42,6 +42,7 @@ def migrate_pool_startup(conn: sqlite3.Connection) -> None:
         "recovery_hold_started_at": "REAL",
         "lane_wait_since": "REAL",
         "lane_wait_message": "TEXT",
+        "lane_wait_wake": "INTEGER NOT NULL DEFAULT 0",
     }
     for name, declaration in additions.items():
         if name not in columns:

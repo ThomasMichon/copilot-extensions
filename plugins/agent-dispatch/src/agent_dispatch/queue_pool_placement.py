@@ -270,6 +270,7 @@ def pool_lane_load(
         "SELECT a.task_id, a.lane_wait_since FROM task_pool_assignments a"
         " JOIN tasks t ON t.id = a.task_id"
         " JOIN spawn_reservations s ON s.key = a.reservation_key AND s.state = ?"
+        " AND s.release_requested = 0 AND s.startup_fenced = 0 AND s.conversation_retired = 0"
         " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?"
         " AND a.assignment_released = 0 AND a.lane_wait_since IS NOT NULL"
         " AND a.recovery_requested_at IS NULL AND t.status = ? AND t.resume_requested = 1"

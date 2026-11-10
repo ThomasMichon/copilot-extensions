@@ -152,9 +152,13 @@ def _enqueue(owner: Any, conn: sqlite3.Connection, task: Task, ts: float, revisi
 
 def _wait_for_lane(
     owner: Any, conn: sqlite3.Connection, task: Task, assignment: sqlite3.Row,
-    ts: float, message: str | None,
+    ts: float, message: str | None, wake_requested: bool,
 ) -> bool:
-    """Park a reactivation in request order until its pool has a free lane."""
+    """Park a reactivation in request order until its pool has a free lane.
+
+    The caller's wake choice is retained, so a start that frees up later wakes
+    the owner only if some request for this reactivation asked for a wake.
+    """
     from .queue_pool_placement import pool_lane_load
     own = conn.execute(
         "SELECT state FROM spawn_reservations WHERE key=?", (assignment["reservation_key"],),
@@ -176,17 +180,19 @@ def _wait_for_lane(
         return False
     if since is None:
         conn.execute(
-            "UPDATE task_pool_assignments SET lane_wait_since=?, lane_wait_message=? WHERE task_id=?",
-            (ts, message, task.id),
+            "UPDATE task_pool_assignments SET lane_wait_since=?, lane_wait_message=?, lane_wait_wake=?"
+            " WHERE task_id=?", (ts, message, int(wake_requested), task.id),
         )
         conn.execute("UPDATE tasks SET resume_requested=1, updated_at=? WHERE id=?", (ts, task.id))
         owner._audit(
             conn, task.id, ts=ts, from_status=Status.SUSPENDED, to_status=Status.SUSPENDED,
             worker=task.owner, note="pool recovery waiting for a free lane",
         )
-    elif message is not None:
+    else:
         conn.execute(
-            "UPDATE task_pool_assignments SET lane_wait_message=? WHERE task_id=?", (message, task.id),
+            "UPDATE task_pool_assignments SET lane_wait_message=COALESCE(?, lane_wait_message),"
+            " lane_wait_wake=MAX(lane_wait_wake, ?) WHERE task_id=?",
+            (message, int(wake_requested), task.id),
         )
     return True
 
@@ -223,7 +229,7 @@ def request_recovery(
             raise TaskError("pool recovery deadline expired before the requested wake")
         _enqueue(owner, conn, task, ts, assignment["recovery_revision"], message)
         return owner._fetch(conn, task.id)
-    if _wait_for_lane(owner, conn, task, assignment, ts, message):
+    if _wait_for_lane(owner, conn, task, assignment, ts, message, wake_requested):
         return owner._fetch(conn, task.id)
     if message is None:
         message = assignment["lane_wait_message"]
@@ -434,12 +440,23 @@ def reconcile_recoveries(owner: Any, *, now: float | None = None) -> int:
             task = owner._fetch(conn, assignment["task_id"])
             try:
                 if assignment["recovery_requested_at"] is None:
-                    request_recovery(owner, conn, task, ts=ts, wake_requested=True)
+                    request_recovery(
+                        owner, conn, task, ts=ts,
+                        wake_requested=(
+                            assignment["lane_wait_since"] is None
+                            or bool(assignment["lane_wait_wake"])
+                        ),
+                    )
                     changed += not lane_waiting(conn, task.id)
                     continue
                 _current(conn, task, assignment)
             except TaskError as exc:
                 if assignment["recovery_requested_at"] is None:
+                    # A waiter that cannot start must not keep holding its pool's lane.
+                    changed += conn.execute(
+                        "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL"
+                        " WHERE task_id=? AND lane_wait_since IS NOT NULL", (task.id,),
+                    ).rowcount
                     detail = f"legacy suspended recovery retained: {exc}"
                     if assignment["outcome_detail"] != detail:
                         reservation = conn.execute(
