@@ -4760,7 +4760,21 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[corruption-ps1]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[corruption-sh]",
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-ps1]",
-        "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
+        "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[local]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[remote]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[unknown]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_upstream_requires_positive_remote_free_observation[pr-required]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[contained]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[new-commit]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[unknown-ref]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[dirty]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[remote-added]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_local_completion_requires_fresh_clean_containment[unknown-status]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[present]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[missing]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[unknown]",
+        "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
         "tools/promotion_unit_tests/test_health_composition.py": "a92aa05dc88c500de54daddb66fd4ff0484ba3abb4d15a38194315a04a3c4da2",
@@ -5443,7 +5457,9 @@
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
         "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
         "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
-        "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab"
+        "plugins/agent-machines/src/agent_machines/health_collect.py": "856c65d53b5146b9d80c4eeb81df7c350b3a18e1dbc844c2d2d3d9a3d18adcab",
+        "tools/promotion_unit_tests/test_local_finalize.py": "9ccbe15278f853bd3e4280c150c86d6f4816159591b24660eb24ab2ba10d7edb",
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py": "9fea9450ace2ee3461166bf5d6efcd9058414609f46e3c4614bb92e077486fbe"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_run.py",
@@ -5739,7 +5755,9 @@
         "plugins/agent-bridge/src/agent_bridge/live_question_validation.py",
         "plugins/agent-bridge/src/agent_bridge/mux_question_forms.py",
         "tools/materialize_payload_invocation.py",
-        "libs/payload-invocation/generate.py"
+        "libs/payload-invocation/generate.py",
+        "plugins/agent-worktrees/src/agent_worktrees/finalize_local.py",
+        "plugins/agent-worktrees/src/agent_worktrees/git_repository_environment.py"
     ],
     "max_seconds": 300
 }
