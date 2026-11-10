@@ -771,7 +771,6 @@ async def run_host(
     finally:
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
         try:
             if websocket is not None:
                 await websocket.close(drain=True)
@@ -779,16 +778,20 @@ async def run_host(
             try:
                 await host.close()
             finally:
-                # Reap within the loop, even if a transport failed to close.
-                if child.returncode is None:
-                    try:
-                        child.kill()
-                    except ProcessLookupError:
-                        pass
-                    try:
-                        await child.wait()
-                    except ProcessLookupError:
-                        pass
+                try:
+                    # The server task may await clients that only host.close() releases.
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                finally:
+                    # Reap within the loop, even if a transport failed to close.
+                    if child.returncode is None:
+                        try:
+                            child.kill()
+                        except ProcessLookupError:
+                            pass
+                        try:
+                            await child.wait()
+                        except ProcessLookupError:
+                            pass
 
 
 def _boot_id() -> str:
