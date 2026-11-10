@@ -34,6 +34,10 @@ class ReservationAccountability:
             )
         }
 
+    def send_unresolved(self, row: sqlite3.Row) -> bool:
+        """Whether a launch, resume or wake send to this row awaits its outcome."""
+        return self.transport.accountable({**dict(row), "native_session_id": self.receipts.get(row["key"])})
+
     def accountable(self, row: sqlite3.Row) -> bool:
         if row["state"] in SpawnState.ACTIVE or row["native_release_pending"]:
             return True

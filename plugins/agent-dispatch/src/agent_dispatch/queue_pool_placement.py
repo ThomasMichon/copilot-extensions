@@ -209,9 +209,10 @@ def _execution_excluded(
     )
 
 
-def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
+def _permits(pool: PoolInstanceDefinition, task: Task, *, worktree: str | None = None) -> bool:
+    """Whether ``pool`` may run ``task``, in ``worktree`` when one is recorded."""
     capabilities = pool.filters.permit.get("capabilities", frozenset())
-    worktree = task.target_worktree or task.affinity.get("worktree")
+    worktree = worktree or task.target_worktree or task.affinity.get("worktree")
     hard = _routing_requirements(
         task, machine=pool.machine, env=pool.env, registration_id=pool.registration_id,
         capabilities=capabilities, worktree=worktree,
@@ -245,6 +246,65 @@ def _permits(pool: PoolInstanceDefinition, task: Task) -> bool:
     return pool.filters.permits(attrs)
 
 
+def pool_lane_load(
+    conn: sqlite3.Connection, identity: tuple[str, str, str], *,
+    accounting: ReservationAccountability | None = None,
+    ahead_of: tuple[float, str] | None = None,
+    cutoff: int | None = None,
+    exclude_key: str | None = None,
+    exclude_waiter: str | None = None,
+) -> int:
+    """Lanes held by running bodies plus suspended reactivations waiting for one.
+
+    A cold (parked) body holds no lane until its reactivation is in flight or a
+    wake send to it is unresolved. Waiting reactivations take freed lanes before
+    fresh placements, in the order they asked; ``ahead_of`` counts only the
+    waiters before that one. Classification stops once the load reaches
+    ``cutoff``, so a saturated pool never classifies its remaining history.
+    A waiter counts only while its reservation is still cold; once its body
+    runs, the reservation itself holds the lane.
+    A body asking for its own lane omits only its waking reservation
+    (``exclude_key``) and its own waiter entry (``exclude_waiter``); older
+    accountable attempts of the same task still count.
+    """
+    waiting = conn.execute(
+        "SELECT a.task_id, a.lane_wait_since FROM task_pool_assignments a"
+        " JOIN tasks t ON t.id = a.task_id"
+        " JOIN spawn_reservations s ON s.key = a.reservation_key AND s.state = ?"
+        " AND s.release_requested = 0 AND s.startup_fenced = 0 AND s.conversation_retired = 0"
+        " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?"
+        " AND a.assignment_released = 0 AND a.lane_wait_since IS NOT NULL"
+        " AND a.recovery_requested_at IS NULL AND t.status = ? AND t.resume_requested = 1"
+        " AND t.hold_reason IS NULL AND t.awaiting_steer = 0",
+        (SpawnState.COLD, *identity, Status.SUSPENDED),
+    ).fetchall()
+    load = sum(
+        1 for row in waiting
+        if row["task_id"] != exclude_waiter
+        and (ahead_of is None or (row["lane_wait_since"], row["task_id"]) < ahead_of)
+    )
+    if cutoff is not None and load >= cutoff:
+        return load
+    accounting = accounting or ReservationAccountability(conn)
+    for row in conn.execute(
+        "SELECT s.*, t.recovery_requested_at AS lane_recovery_requested_at"
+        " FROM pool_reservation_bindings a"
+        " JOIN spawn_reservations s ON s.key = a.reservation_key"
+        " LEFT JOIN task_pool_assignments t ON t.reservation_key = s.key AND t.assignment_released = 0"
+        " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
+        identity,
+    ):
+        if exclude_key is not None and row["key"] == exclude_key:
+            continue
+        if row["state"] == SpawnState.COLD and row["lane_recovery_requested_at"] is None:
+            load += accounting.send_unresolved(row)
+        else:
+            load += accounting.accountable(row)
+        if cutoff is not None and load >= cutoff:
+            return load
+    return load
+
+
 def select_pool(
     conn: sqlite3.Connection, task: Task, definitions: tuple[PoolInstanceDefinition, ...],
     *, execution_machine: str | None = None,
@@ -276,18 +336,9 @@ def select_pool(
     for pool in candidates:
         if not _permits(pool, task):
             continue
-        reservations = conn.execute(
-            "SELECT s.* FROM pool_reservation_bindings a"
-            " JOIN spawn_reservations s ON s.key = a.reservation_key"
-            " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?",
-            pool.identity,
-        ).fetchall()
-        count = 0
-        for row in reservations:
-            count += accounting.accountable(row)
-            if count >= pool.max_concurrent:
-                break
-        if count < pool.max_concurrent:
+        if pool_lane_load(
+            conn, pool.identity, accounting=accounting, cutoff=pool.max_concurrent,
+        ) < pool.max_concurrent:
             return pool
     if retained is not None:
         raise TaskError("retained pool assignment is waiting for capacity")
@@ -362,10 +413,12 @@ def record_pool_claim(
 
 def require_pool_workspace(
     conn: sqlite3.Connection, task: Task, worktree: str, execution_machine: object,
-    *, driver: object,
+    *, driver: object, reservation_key: str | None = None,
 ) -> None:
     assignment = pool_assignment(conn, task.id)
     if assignment is None:
+        if reservation_key is not None:
+            _require_accounting_workspace(conn, task, reservation_key, worktree, execution_machine)
         return
     if driver not in {"cli", "ordinary-bridge"}:
         raise TaskError("pool workspace requires a qualified startup driver")
@@ -376,25 +429,123 @@ def require_pool_workspace(
         or not machine_matches(task.target_machine, assignment.machine)
     ):
         raise TaskError("pool workspace requires its recorded execution machine")
-    if task.target_worktree is not None and task.target_worktree != worktree:
-        raise TaskError("pool workspace conflicts with the task target worktree")
     binding = conn.execute(
         "SELECT capabilities FROM pool_reservation_bindings WHERE reservation_key = ?",
         (assignment.reservation_key,),
     ).fetchone()
     if binding is None or binding["capabilities"] is None:
         raise TaskError("pool workspace capability binding requires reconciliation")
-    capabilities = frozenset(json.loads(binding["capabilities"]))
-    if _routing_requirements(
-        task, machine=assignment.machine, env=assignment.env,
-        registration_id=assignment.registration_id, capabilities=capabilities, worktree=worktree,
-    ) is None:
-        raise TaskError("pool workspace conflicts with current task requirements")
-    if _execution_excluded(
-        task, machine=assignment.machine, env=assignment.env,
-        registration_id=assignment.registration_id, capabilities=capabilities, worktree=worktree,
+    conflict = bound_workspace_conflict(
+        task, worktree, execution_machine, machine=assignment.machine, env=assignment.env,
+        registration_id=assignment.registration_id,
+        capabilities=frozenset(json.loads(binding["capabilities"])),
+    )
+    if conflict is not None:
+        raise TaskError(conflict)
+    _require_bound_filters(
+        conn, task, worktree, (assignment.registration_id, assignment.machine, assignment.env),
+    )
+
+
+def _require_accounting_workspace(
+    conn: sqlite3.Connection, task: Task, reservation_key: str, worktree: str | None,
+    execution_machine: object,
+) -> None:
+    # An accounting-only (adopted) binding has no assignment; its immutable
+    # binding still decides where the body may record or publish a workspace.
+    bound = conn.execute(
+        "SELECT * FROM pool_reservation_bindings WHERE reservation_key = ?", (reservation_key,),
+    ).fetchone()
+    if bound is None:
+        return
+    row = conn.execute("SELECT * FROM spawn_reservations WHERE key = ?", (reservation_key,)).fetchone()
+    hosts = reservation_hosts(row, task, execution_machine, worktree=worktree)
+    if len(hosts) != 1:
+        raise TaskError("pool workspace requires its recorded execution machine")
+    conflict = bound_workspace_conflict(
+        task, worktree, next(iter(hosts)), machine=bound["machine"], env=bound["env"],
+        registration_id=bound["registration_id"],
+        capabilities=frozenset(json.loads(bound["capabilities"] or "[]")),
+    )
+    if conflict is not None:
+        raise TaskError(conflict)
+    _require_bound_filters(
+        conn, task, worktree, (bound["registration_id"], bound["machine"], bound["env"]),
+    )
+
+
+def _require_bound_filters(
+    conn: sqlite3.Connection, task: Task, worktree: str | None, identity: tuple[str, str, str],
+) -> None:
+    """The bound pool's own permit/reject filters must accept the workspace."""
+    from .queue_pool_catalog import QueuePoolCatalogMixin
+    definition = next((
+        value
+        for row in conn.execute(
+            "SELECT * FROM pool_publication_scopes WHERE machine = ? AND env = ?", identity[1:],
+        )
+        for value in QueuePoolCatalogMixin._pool_scope_from_row(row).definitions
+        if value.identity == identity
+    ), None)
+    if definition is None:
+        from .queue_execution_custody import PoolLaneUnavailable
+        raise PoolLaneUnavailable("pool workspace's bound pool is disabled or unavailable")
+    if not _permits(definition, task, worktree=worktree):
+        raise TaskError("pool workspace is refused by its bound pool filters")
+
+
+def reservation_hosts(
+    row: sqlite3.Row, task: Task | None, execution_machine: object = None,
+    *, worktree: str | None = None,
+) -> set[str]:
+    """Normalized hosts the reservation's own evidence names for its body.
+
+    The recorded execution machine (or a fleet-body handle's host) is
+    authoritative; a body without either ran where its reservation was created.
+    The owner's host counts when that owner is this body's worktree. Several
+    hosts mean conflicting evidence; none means the host is unknown.
+    """
+    from .bridge_remote import normalize_host
+    hosts: set[str] = set()
+    recorded = execution_machine or row["execution_machine"]
+    if isinstance(recorded, str) and recorded.strip():
+        hosts.add(normalize_host(recorded))
+    handle = row["session_handle"] or ""
+    if handle.startswith("fleet-body:") and handle.split(":")[1]:
+        hosts.add(normalize_host(handle.split(":")[1]))
+    if not hosts and isinstance(row["creating_host"], str) and row["creating_host"].strip():
+        hosts.add(normalize_host(row["creating_host"]))
+    owner_host, separator, owner_worktree = (task.owner or "").partition("/") if task else ("", "", "")
+    if separator and owner_host and owner_worktree == (worktree or row["worktree"]):
+        hosts.add(normalize_host(owner_host))
+    return hosts
+
+
+def bound_workspace_conflict(
+    task: Task, worktree: str | None, execution_machine: object, *,
+    machine: str, env: str, registration_id: str, capabilities: frozenset[str],
+) -> str | None:
+    """Why a recorded workspace cannot run in a bound pool under current task routing."""
+    from .bridge_remote import normalize_host
+    if (
+        isinstance(execution_machine, str) and execution_machine.strip()
+        and normalize_host(execution_machine) != normalize_host(machine)
+        or not machine_matches(task.target_machine, machine)
     ):
-        raise TaskError("pool workspace is excluded by current task routing")
+        return "pool workspace requires its recorded execution machine"
+    if task.target_worktree is not None and task.target_worktree != worktree:
+        return "pool workspace conflicts with the task target worktree"
+    if _routing_requirements(
+        task, machine=machine, env=env, registration_id=registration_id,
+        capabilities=capabilities, worktree=worktree,
+    ) is None:
+        return "pool workspace conflicts with current task requirements"
+    if _execution_excluded(
+        task, machine=machine, env=env, registration_id=registration_id,
+        capabilities=capabilities, worktree=worktree,
+    ):
+        return "pool workspace is excluded by current task routing"
+    return None
 
 
 def pool_native_publication(
@@ -411,6 +562,7 @@ def pool_native_publication(
     if not releasing:
         require_pool_workspace(
             conn, task, row["worktree"], row["execution_machine"], driver=row["driver"],
+            reservation_key=row["key"],
         )
     from .ordinary_native_bindings import native_binding_evidence, reservation_native_identity
     candidate = {**dict(row), "session_handle": session_handle, "conversation_retired": 0}

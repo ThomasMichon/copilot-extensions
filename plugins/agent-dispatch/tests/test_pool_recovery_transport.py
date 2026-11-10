@@ -20,6 +20,42 @@ api = controls.api
 ordinary = controls.ordinary
 
 
+@pytest.mark.parametrize("operation", ["resume", "steer"])
+@pytest.mark.parametrize("cold", [False, True])
+def test_disabled_pool_retains_the_first_recovery_request(q, operation, cold):
+    from tests.test_pool_placement import pool
+    from tests.test_pool_suspended_recovery import _cold, _disable_pools, suspended
+
+    task_id, key, _ = suspended(q)
+    if cold:
+        _cold(q, key)
+    _disable_pools(q)
+    if operation == "resume":
+        q.resume(task_id, "host-a/worktree", wake_requested=True, wake_message="resume", now=103)
+    else:
+        q.submit_steer(task_id, fields={"answer": "continue"}, wake_requested=True, now=103)
+        assert q.steer_log(task_id)[0]["fields"] == {"answer": "continue"}
+    assert q.get(task_id).status == Status.SUSPENDED and q.get(task_id).resume_requested
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    assert q.list_wakes(task_id) == []
+    assert reconcile_recoveries(q, now=104) == 0
+    with q._connect() as conn:
+        waiting = conn.execute(
+            "SELECT lane_wait_since, lane_wait_wake FROM task_pool_assignments WHERE task_id=?",
+            (task_id,),
+        ).fetchone()
+    assert tuple(waiting) == (103, 1)
+    [scope] = q.pool_catalog_snapshot().scopes
+    q.publish_pool_catalog_scope(
+        scope.machine, scope.env, scope.publisher_id, generation=scope.generation,
+        expected_revision=scope.revision, registration_revision=q.pool_registration_revision(),
+        expected_cohort_revision=1, input_revision="enabled", definitions=(pool(),),
+    )
+    assert reconcile_recoveries(q, now=105) == 1
+    assert q.pool_startup(task_id).recovery_requested_at == 105
+    assert len(q.list_wakes(task_id)) == 1
+
+
 def recoverable(o: SimpleNamespace) -> tuple[str, str, int]:
     result = controls.launch(o)
     task_id, key = o.task["id"], o.placed["reservation"]["key"]
