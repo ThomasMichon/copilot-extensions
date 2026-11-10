@@ -229,3 +229,27 @@ installed Manager lifecycle result: draft #11864 remains unqualified until
 the exact updated source completes the disposable native witness. Authentic
 selected-suite installation, ordinary upgrade and frozen-candidate mandatory
 enforcement remain open under this parent.
+
+### 2026-11-10 - Real CLI startup reached, conversation assertion unresolved
+
+Disposable run 42772527770 tested the exact repaired source
+`f179ee7789f0209bec48840c884d2ace01de54cb`. The native CLI started and rendered
+the seeded prompt instead of rejecting its argv. Qualification still failed
+at the first completed-conversation assertion. Recent terminal evidence includes
+missing enabled payload warnings and redraw-fragmented reply text; it does not
+identify which history/rendering predicate failed. No lifecycle phase is
+credited from that output.
+
+A separate private ConPTY probe of the same pinned CLI completed one actual
+loopback request, persisted the user/assistant turn and normal exit. That is a
+diagnostic without installed Manager, mux or plugin closure, not acceptance.
+The lifecycle witness now retains bounded history counts and prompt/reply/turn
+predicates separately from its terminal-reply predicate on failure. Its
+original completion, identity, terminal and cleanup assertions remain intact.
+Resolve the measured predicate and missing payload closure before treating
+another native attempt as qualified; do not infer a fix by removing the
+terminal check or extending its timeout.
+
+All five focused diagnostic controls passed, including absent, unfinished
+and completed-but-unmatched history. The same native case will retain these
+observations on its next exact-source attempt; its pass criteria are unchanged.

@@ -110,6 +110,7 @@ def _capture_failure(root, record_property):
                 "lifecycle-bootstrap.custody.json",
                 "lifecycle-launch.jsonl",
                 "lifecycle-processes.jsonl",
+                "lifecycle-conversation.json",
             ):
                 for path in (root / "diagnostics").glob(pattern):
                     text = (
@@ -326,6 +327,7 @@ class _Witness:
         self.consoles = []
         self.native_handles = {}
         self.history = None
+        self.turn_observation = None
         self.stack = ExitStack()
 
     def wait(self, check, label, timeout=30):
@@ -464,14 +466,32 @@ class _Witness:
                 )
             )
             matches = []
+            histories = []
             for path in paths:
                 events = _events(path, Path(self.env["COPILOT_HOME"]))
                 texts = [e["data"]["content"] for e in events if e["type"] == "user.message"]
+                turn_ends = sum(e["type"] == "assistant.turn_end" for e in events)
+                histories.append({
+                    "session": path.parent.name,
+                    "events": len(events),
+                    "prompt_seen": prompt in texts,
+                    "turn_ends": turn_ends,
+                    "reply_seen": any(
+                        e["type"] == "assistant.message"
+                        and e["data"].get("content") == f"LIFECYCLE_REPLY_{number}"
+                        for e in events
+                    ),
+                })
                 if (
                     prompt in texts
-                    and sum(e["type"] == "assistant.turn_end" for e in events) >= number
+                    and turn_ends >= number
                 ):
                     matches.append(path)
+            self.turn_observation = {
+                "turn": number,
+                "histories": histories,
+                "reply_in_terminal": f"LIFECYCLE_REPLY_{number}" in installed._visible(console.output),
+            }
             if len(matches) > 1:
                 raise RuntimeError("One Manager operation produced multiple conversations")
             if not matches or f"LIFECYCLE_REPLY_{number}" not in installed._visible(
@@ -562,6 +582,15 @@ class _Witness:
             failure = cleanup_error
             raise
         finally:
+            if self.turn_observation is not None:
+                try:
+                    (self.root / "diagnostics" / "lifecycle-conversation.json").write_text(
+                        json.dumps(self.turn_observation), encoding="utf-8",
+                    )
+                except OSError as write_error:
+                    if failure is None:
+                        raise
+                    failure.add_note(f"Conversation diagnostic write: {write_error}")
             for index, console in enumerate(self.consoles):
                 try:
                     (self.root / "diagnostics" / f"lifecycle-{index}.terminal.txt").write_bytes(
@@ -803,6 +832,45 @@ def test_lifecycle_diagnostics_retain_the_constructor_refusal(tmp_path):
     assert len(records) == 1
     evidence = json.loads(records[0][1])
     assert "controlled constructor refusal" in evidence["install-engine.stderr.txt"]["text"]
+
+
+@pytest.mark.parametrize("phase", ["missing-history", "unfinished", "rendering-only"])
+def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(tmp_path, phase):
+    from types import SimpleNamespace
+
+    (tmp_path / "diagnostics").mkdir()
+    home = tmp_path / "copilot-home"
+    history = home / "session-state" / "fixture-session" / "events.jsonl"
+    if phase != "missing-history":
+        history.parent.mkdir(parents=True)
+        events = [{"type": "user.message", "data": {"content": PROMPTS[0]}}]
+        if phase == "rendering-only":
+            events += [
+                {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+                {"type": "assistant.turn_end", "data": {}},
+            ]
+        history.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
+    witness = _Witness(tmp_path, {"COPILOT_HOME": str(home)}, None, None, None, None)
+    witness._diagnose_bootstrap = lambda: None
+
+    def wait(check, *_args, **_kwargs):
+        assert check() is None
+        raise TimeoutError("fixture unfinished turn")
+
+    witness.wait = wait
+    records = []
+    with pytest.raises(TimeoutError, match="fixture unfinished turn"):
+        with _capture_failure(tmp_path, lambda _name, value: records.append(json.loads(value))), witness:
+            witness.turn(PROMPTS[0], 1, SimpleNamespace(output=b"cursor redraw"))
+    observed = json.loads(records[0]["lifecycle-conversation.json"]["text"])
+    assert observed["reply_in_terminal"] is False
+    if phase == "missing-history":
+        assert observed["histories"] == []
+    else:
+        (row,) = observed["histories"]
+        assert row["prompt_seen"] is True
+        assert row["turn_ends"] == (1 if phase == "rendering-only" else 0)
+        assert row["reply_seen"] is (phase == "rendering-only")
 
 
 def test_lifecycle_diagnostic_write_cannot_mask_unsettled_custody(tmp_path):
