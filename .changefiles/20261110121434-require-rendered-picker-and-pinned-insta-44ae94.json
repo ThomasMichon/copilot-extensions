@@ -1,0 +1,9 @@
+{
+  "comment": "Require rendered Picker and pinned installed process together within the existing native readiness window",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
