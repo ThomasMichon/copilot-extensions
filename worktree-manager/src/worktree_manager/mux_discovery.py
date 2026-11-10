@@ -10,6 +10,7 @@ from datetime import datetime
 from pathlib import PureWindowsPath
 
 from agent_procutil import no_window_kwargs
+from agent_remote_driver.mux_observation import observe_psmux
 
 from .mux_child_process import run as run_mux_child
 from .mux_mapping_registry import MuxMappingRegistry
@@ -25,6 +26,20 @@ def passive_cli_supported(binary: str) -> bool:
 
 def confirm_creation_cli(payload: dict) -> dict:
     """Confirm the actual launch pane; psmux's session_path may remain HOME."""
+    if not passive_cli_supported(payload["mux_bin"]):
+        observed = observe_psmux(payload["mux_session"], timeout=2)
+        if observed.status != "present":
+            return {"applied": False, "reason": "enumeration-unavailable"}
+        if observed.incarnation != payload["session_incarnation"]:
+            return {"applied": False, "reason": "stale-incarnation"}
+        matches = [p for p in observed.panes if p.pane_id == payload["panes"][0]["pane_id"]]
+        if len(matches) != 1 or matches[0].dead or not matches[0].path:
+            return {"applied": False, "reason": "cli-unconfirmed"}
+        if os.path.normcase(os.path.realpath(matches[0].path)) != os.path.normcase(
+            os.path.realpath(payload["worktree_path"])
+        ):
+            return {"applied": False, "reason": "unattributed-path"}
+        return {"applied": True}
     try:
         probe = run_mux_child(
             [payload["mux_bin"], "list-panes", "-s", "-t", "=" + payload["mux_session"], "-F",
@@ -189,7 +204,11 @@ def _is_empty_tmux_listing(binary: str, result: subprocess.CompletedProcess[str]
 def legacy_session_presence(binary: str, session: str, probe) -> bool | None:
     """Classify a bounded legacy probe without turning failures into retirement."""
     if not passive_cli_supported(binary):
-        return None
+        observation = observe_psmux(session)
+        return (
+            observation.status == "present"
+            if observation.status in {"present", "absent"} else None
+        )
     try:
         result = probe()
         stdout = result.stdout.decode(errors="replace") if isinstance(result.stdout, bytes) else result.stdout
@@ -217,7 +236,23 @@ def confirm_native_session(
         LOG.warning("Refusing malformed native mux identity for %s", name)
         return {"applied": False, "reason": "session-unconfirmed"}
     if not passive_cli_supported(payload["mux_bin"]):
-        return {"applied": False, "reason": "enumeration-unavailable"}
+        observed = observe_psmux(name, timeout=min(timeout_s, 5))
+        if observed.status != "present":
+            return {
+                "applied": False,
+                "reason": "session-absent" if observed.status == "absent" else "enumeration-unavailable",
+            }
+        if observed.incarnation != payload["session_incarnation"]:
+            return {"applied": False, "reason": "stale-incarnation"}
+        expected = os.path.normcase(os.path.realpath(payload["worktree_path"]))
+        if require_worktree_path and not any(
+            p.path and os.path.normcase(os.path.realpath(p.path)) == expected
+            for p in observed.panes
+        ):
+            return {"applied": False, "reason": "unattributed-path"}
+        if observed.clients is None or (connected_only and observed.clients <= 0):
+            return {"applied": False, "reason": "not-connected"}
+        return {"applied": True, "attached_clients": observed.clients}
     try:
         probe = run_mux_child(
             [payload["mux_bin"], "list-panes", "-a", "-F",

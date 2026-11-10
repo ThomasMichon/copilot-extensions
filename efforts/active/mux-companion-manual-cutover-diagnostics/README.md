@@ -803,6 +803,8 @@ topology, native chrome, manual/head, app-input, relay or rollout acceptance.
 
 ## Journal
 
+- [2026-11-08 - PR record, cross-version process and snapshot codec controls](sidecar-pr-state.md#2026-11-08---actual-record-cross-version-process-and-snapshot-codec-controls)
+- [2026-11-08 - PR narrow rendering and blocked-read dismissal controls](sidecar-pr-state.md#2026-11-08---narrow-rendering-and-blocked-read-dismissal-controls)
 - [2026-11-06 - R2 PR-association consumer merged](sidecar-pr-state.md#2026-11-06---r2-consumer-source-merged)
 - [2026-11-06 - R1 PR-association provider merged](sidecar-pr-state.md#2026-11-06---r1-provider-source-merged)
 - [2026-11-05 - Optional expected-head Recovery consumer](journal/2026/11.05-companion-expected-head-display.md)

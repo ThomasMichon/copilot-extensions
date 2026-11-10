@@ -269,8 +269,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
     repositories_runtime = repository_map.RepositoryMapRuntime(
         status_monitor_runtime._aw_runtime_home()
     )
-    worktrees_runtime = WorktreesRuntime.for_monitor(wake_event, handover.read_admitted, installation_context)
-    resident_push.bind(wake_event, segment_cache)
+    worktrees_runtime = WorktreesRuntime.for_monitor(wake_event, handover.read_admitted, installation_context, interval=interval)
+    resident_push.bind(wake_event, segment_cache, changed=worktrees_runtime.note_changed)
     published: dict[tuple[str, str], str] = {}
     incarnations: dict[str, str] = {}
     session_projects: dict[str, str] = {}
@@ -313,8 +313,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
         )
 
     def _decide(kind: str, payload: dict, deadline: float) -> dict | None:
-        if kind in {"preToolUse", "postToolUse", "nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "sessionStart", "sessionEnd"} and not getattr(hook_client, "_managed_session_admitted", lambda _: False)(payload):
-            return None if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"} else {}
+        if kind in {"preToolUse", "postToolUse", "nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation", "sessionStart", "sessionEnd"} and not getattr(hook_client, "_managed_session_admitted", lambda _: False)(payload):
+            return None if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"} else {}
         if admission_closed and core.git_ops._windows_observation():
             if kind == "snapshot":
                 return {"segment": segment_cache.pending_segment_for_path(core._hook_payload_cwd(payload))}
@@ -357,7 +357,7 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     provisioning_start_event=provisioning_start_event,
                 )
                 lifecycle_completed = True
-                targets = hook_policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else hook_policy.mutation_targets(payload) if kind in {"postToolUse", "nativeToolMutation", "shellToolMutation"} else None
+                targets = hook_policy.native_batch_targets(payload, include_shell=kind == "mixedToolBatchMutation") if kind in {"nativeToolBatchMutation", "mixedToolBatchMutation"} else hook_policy.mutation_targets(payload) if kind in {"postToolUse", "nativeToolMutation", "shellToolMutation"} else None
                 if _kind_wakes_sweep(kind, targets):
                     # Mutations and explicit wake kinds bypass the backstop.
                     # Read-only calls do not wake recomputation.
@@ -882,7 +882,8 @@ def cmd_status_monitor(args: argparse.Namespace) -> int:
                     my_prefix,
                     ctx_done,
                     interval=interval,
-                    picker_projects=external_projects,
+                    picker_projects=external_projects | worktrees_runtime.take_changed_projects(
+                        resident_push.project_resolver(session_projects, segment_cache)),
                     catalog_observer=reconciler.observe_mux,
                     pane_observer=pane_reconciler.observe,
                     segment_cache=segment_cache,

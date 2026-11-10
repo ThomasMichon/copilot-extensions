@@ -3251,6 +3251,9 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                         logging.getLogger(__name__).warning("Record retirement deferred; record retained: %s", exc)
                         return False
                     path.unlink(missing_ok=True)
+                    # The failed save may not have announced anything; the
+                    # resident must still republish this record's removal.
+                    save_notifications.worktree_changed(record.worktree_path)
                     return True
 
             # Paired -> "finalized" (a sibling-detection signal, #957/#220);

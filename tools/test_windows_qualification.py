@@ -5,11 +5,18 @@ from __future__ import annotations
 import copy
 import base64
 from contextlib import nullcontext
+from email.utils import formatdate
 import importlib.util
 import json
 import os
+import re
+import shlex
+import shutil
 import subprocess
 import sys
+import threading
+import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -135,8 +142,17 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
     assert "--allow-host-state" not in argv
 
 
-@pytest.mark.parametrize("mismatch", [False, True])
-def test_native_prerequisites_check_disposable_binaries_and_actual_version(tmp_path, monkeypatch, mismatch):
+@pytest.mark.parametrize("mismatch,mux_output,failure", [
+    (False, "tmux 3.3.8\r\npsmux 3.3.8 (66cf613 2026-08-18)\r\n", None),
+    (True, "psmux 3.3.8", "copilot"),
+    (False, "tmux 3.3.8\npsmux 3.3.9", "psmux"),
+    (False, "tmux 3.3.8", "psmux"),
+    (False, "psmux 3.3.8\npsmux 3.3.8", "psmux"),
+    (False, "psmux 3.3.8-1", "psmux"),
+])
+def test_native_prerequisites_check_disposable_binaries_and_actual_version(
+    tmp_path, monkeypatch, mismatch, mux_output, failure,
+):
     runner = tmp_path / "runner"
     runner.mkdir()
     copilot, mux = runner / "copilot.exe", runner / "psmux.exe"
@@ -157,11 +173,11 @@ def test_native_prerequisites_check_disposable_binaries_and_actual_version(tmp_p
         calls.append((argv, timeout))
         return SimpleNamespace(stdout=(
             "GitHub Copilot CLI 1.0.105-1." if mismatch else "GitHub Copilot CLI 1.0.105."
-        ) if argv[0] == str(copilot) else "psmux 3.3.8")
-    if mismatch:
-        with pytest.raises(ValueError, match="version mismatch"):
+        ) if argv[0] == str(copilot) else mux_output)
+    if failure:
+        with pytest.raises(ValueError, match=f"{failure} native prerequisite version mismatch"):
             worker.native_prerequisites(owned)
-        assert len(calls) == 1
+        assert len(calls) == (1 if failure == "copilot" else 2)
     else:
         assert worker.native_prerequisites(owned) == contract.NATIVE_VERSIONS
         assert calls == [([str(copilot), "--version"], 30), ([str(mux), "-V"], 30)]
@@ -241,6 +257,39 @@ def test_execution_preserves_actual_collection_failure_and_skip_outcomes(
         assert actual["incomplete_reason"] == "empty-selection"
 
 
+def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_path, monkeypatch):
+    import agent_procutil.owned_process as owned_process
+    from agent_procutil.owned_process import run_caller_owned
+
+    root = tmp_path / "candidate"
+    test = root / "plugins/sample/tests/test_sample.py"
+    test.parent.mkdir(parents=True)
+    test.touch()
+    output = tmp_path / "evidence"
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+
+    def run(argv, **kwargs):
+        (output / "junit").mkdir()
+        (output / "junit/actual.xml").write_text(
+            '<testsuite><testcase name="real"><failure/></testcase></testsuite>',
+            encoding="utf-8",
+        )
+        return run_caller_owned(
+            [sys.executable, "-c", "import sys;print(chr(0x2014));sys.exit(1)"],
+            **kwargs,
+        )
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    monkeypatch.setattr(worker, "Transport", lambda *args: SimpleNamespace(
+        git=lambda *args: SimpleNamespace(stdout="b" * 40),
+    ))
+    actual = worker.execute(root, request(), output)
+    assert actual["outcome"] == "failed"
+    assert actual["error"] == "selected command failed (1)"
+    assert actual["tests"][0]["outcome"] == "failed"
+    assert (output / "phase-2.stdout.log").read_text("utf-8") == "\u2014\n"
+
+
 def result():
     return {
         "version": 1, "request": request(), "run_id": 42, "run_attempt": 1,
@@ -296,12 +345,14 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation)
 
 
 @pytest.mark.parametrize("prerequisites", [True, False])
+@pytest.mark.parametrize("preparation", ["success", "failure", "cancelled", "skipped", "unrecognized"])
 def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
-    tmp_path, monkeypatch, prerequisites,
+    tmp_path, monkeypatch, prerequisites, preparation,
 ):
     root, output = tmp_path / "candidate", tmp_path / "evidence"
     root.mkdir()
     monkeypatch.setenv("UV_DEFAULT_INDEX", "https://feed.example.invalid/pypi/simple/")
+    monkeypatch.setenv("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", preparation)
     monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
     monkeypatch.setattr(worker, "Transport", lambda *args: SimpleNamespace(
         git=lambda *args: SimpleNamespace(stdout="b" * 40),
@@ -331,8 +382,19 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
     value = request()
     value["selection"] = {"kind": "packet", "name": "native-worktrees-embody"}
     actual = worker.execute(root, value, output)
-    assert actual["outcome"] == ("qualified" if prerequisites else "failed")
-    assert bool(calls) is prerequisites
+    qualified = prerequisites and preparation == "success"
+    assert actual["outcome"] == ("qualified" if qualified else "failed")
+    assert bool(calls) is qualified
+    if preparation != "success":
+        assert actual["phases"][-1]["name"] == "native-prerequisites"
+        assert actual["phases"][-1]["status"] == "failed"
+        assert actual["tests"] == []
+        status = preparation if preparation != "unrecognized" else "unknown"
+        assert actual["error"].endswith(f"({status})")
+        contract.validate_result(
+            actual, value, run_id=actual["run_id"], control_sha=actual["control_sha"],
+            run_attempt=actual["run_attempt"],
+        )
     for path in output.rglob("*"):
         if path.is_file():
             assert "feed.example.invalid" not in path.read_text("utf-8")
@@ -578,7 +640,7 @@ def test_tool_entry_uses_candidate_environment_schema_not_controller_schema(tmp_
     }.items():
         monkeypatch.setenv(name, content)
     monkeypatch.setattr(sys, "path", sys.path.copy())
-    monkeypatch.delitem(sys.modules, "plugin_test_environment")
+    monkeypatch.delitem(sys.modules, "plugin_test_environment", raising=False)
     monkeypatch.setattr(sys, "argv", [
         str(worker.__file__), "tools", "--candidate", str(root), "--output", str(tmp_path / "out"),
     ])
@@ -656,7 +718,10 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     "Execute typed selection through canonical bounded owners",
                     "Sanitize native evidence independently after worker interruption",
                 }
-                assert set(step["env"]) == {"UV_DEFAULT_INDEX"}
+                assert set(step["env"]) == (
+                    {"UV_DEFAULT_INDEX"} if step["name"].startswith("Sanitize") else
+                    {"UV_DEFAULT_INDEX", "WINDOWS_QUALIFICATION_NATIVE_PREPARATION"}
+                )
                 assert step["env"]["UV_DEFAULT_INDEX"] == (
                     "${{ needs.admit.outputs.packet == 'native-worktrees-embody' && "
                     "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
@@ -665,3 +730,94 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     assert step["if"] == (
                         "always() && needs.admit.outputs.packet == 'native-worktrees-embody'"
                     )
+    promotion = yaml.safe_load(
+        (Path(__file__).resolve().parents[1] / ".github/workflows/validate-and-promote.yml").read_text("utf-8"),
+    )
+    steps = promotion["jobs"]["native-resume-windows"]["steps"]
+    helper = next(step for step in steps if step.get("with", {}).get("path") == "native-control")
+    assert helper["with"]["ref"] == "${{ github.workflow_sha }}"
+    assert helper["with"]["persist-credentials"] is False
+    assert helper["with"]["sparse-checkout"] == "tools/download_pinned_native.ps1"
+    acquire = next(step for step in steps if "download_pinned_native.ps1" in step.get("run", ""))
+    assert r'.\native-control\tools\download_pinned_native.ps1' in acquire["run"]
+
+
+@pytest.mark.parametrize("workflow", ["windows-qualification", "validate-and-promote"])
+@pytest.mark.parametrize("responses,body_delay,budget,retry_after,expected_attempts", [
+    ((504, 504, 200), 0, 120, None, 3), ((504, 504, 504), 0, 120, None, 3),
+    ((404,), 0, 120, None, 1), ((200,), 2, 1, None, 1), ((504,), 0, 1, None, 1),
+    ((429,), 0, 4, "15", 1), ((429,), 0, 4, "date", 1),
+    # Resetting the timer per attempt would reach the final 200 instead.
+    ((504, 504, 200), 2, 7, None, 2),
+])
+@pytest.mark.portfolio_tier("T2")
+def test_pinned_native_download_retries_only_transient_failures(
+    tmp_path, workflow, responses, body_delay, budget, retry_after, expected_attempts,
+):
+    from windows_qualification_transport import command
+    pwsh = shutil.which("pwsh")
+    if pwsh is None:
+        pytest.skip("PowerShell 7 is unavailable")
+    source = Path(__file__).resolve().parents[1] / f".github/workflows/{workflow}.yml"
+    definition = yaml.safe_load(source.read_text("utf-8"))
+    job = "windows" if workflow == "windows-qualification" else "native-resume-windows"
+    step = next(step for step in definition["jobs"][job]["steps"]
+                if "download_pinned_native.ps1" in step.get("run", ""))
+    script = re.sub(r"`[ \t]*\r?\n", " ", step["run"])
+    line = next(line.strip() for line in script.splitlines()
+                if "download_pinned_native.ps1" in line)
+    argv = shlex.split(line, comments=True)
+    helper = source.parents[2] / "tools/download_pinned_native.ps1"
+    argv[argv.index("-OutFile") + 1] = str(tmp_path / "native archive.zip")
+    argv[argv.index("-TimeoutSeconds") + 1] = str(budget)
+    attempts = []
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            status = responses[min(len(attempts), len(responses) - 1)]
+            attempts.append(status)
+            body = b"pinned archive" if status == 200 else b"download unavailable"
+            self.send_response(status)
+            self.send_header("Content-Length", str(len(body)))
+            if retry_after:
+                self.send_header(
+                    "Retry-After", formatdate(time.time() + 15, usegmt=True)
+                    if retry_after == "date" else retry_after,
+                )
+            self.end_headers()
+            time.sleep(body_delay)
+            try:
+                self.wfile.write(body)
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+
+        def log_message(self, *args):
+            pass
+
+    class Server(ThreadingHTTPServer):
+        daemon_threads = False
+
+    server = Server(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    archive = tmp_path / "native archive.zip"
+    try:
+        argv[argv.index("-Uri") + 1] = f"http://127.0.0.1:{server.server_port}/archive"
+        started = time.monotonic()
+        actual = command([
+            pwsh, "-NoProfile", "-File", str(helper), *argv[2:],
+        ], cwd=tmp_path, check=False)
+        elapsed = time.monotonic() - started
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert attempts == list(responses[:expected_attempts])
+    if budget < 120:
+        assert elapsed < budget + 10, "acquisition exceeded its budget and PowerShell startup allowance"
+    assert (actual.returncode == 0) is (responses[-1] == 200 and not body_delay)
+    if actual.returncode == 0:
+        assert archive.read_bytes() == b"pinned archive"
+    else:
+        assert not archive.exists()

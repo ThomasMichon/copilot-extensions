@@ -5,12 +5,13 @@
 .DESCRIPTION
     Canonical installer for the agent-vault runtime. Creates the runtime at
     ~/.agent-vault/ (.venv + state), deploys ~/.local/bin/agent-vault.ps1 and
-    agent-vault.cmd binstubs, and registers a windowless Scheduled Task named
-    AgentVault that runs the persistent daemon at logon unless -NoService is
-    specified.
+    agent-vault.cmd binstubs. Scheduling is opt-in through the native global
+    configuration's windows_scheduled_task policy; on-demand startup remains
+    available without Task Scheduler.
 
 .PARAMETER Action
-    install (default) | update | status | start | stop | uninstall.
+    install (default) | update | status | start | stop | uninstall | schedule.
+    schedule reconciles native task policy; absent removes only the owned task.
 
 .PARAMETER InstallDir
     Override the runtime install directory (default: ~/.agent-vault).
@@ -29,7 +30,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision', 'schedule')]
     [string]$Action = 'install',
 
     [Alias('install-dir')]
@@ -40,6 +41,9 @@ param(
 
     [switch]$Purge,
     [switch]$Force,
+
+    [ValidateSet('base', 'ssh')]
+    [string]$Profile,
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the filesystem or scheduled task.
@@ -56,17 +60,59 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
-if ($Action -in @('install', 'update', 'stamp', 'provision', 'start')) {
-    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
+if (-not $Profile -and $env:AGENT_VAULT_INSTALL_PROFILE) {
+    if ($env:AGENT_VAULT_INSTALL_PROFILE -cnotin @('base', 'ssh')) {
+        throw 'Unsupported Vault installation profile'
+    }
+    $Profile = $env:AGENT_VAULT_INSTALL_PROFILE
+}
+if ($Profile) {
+    if ($Profile -cnotin @('base', 'ssh')) { throw 'Unsupported Vault installation profile' }
+    if ($Action -notin @('install', 'update', 'stamp', 'provision')) {
+        throw 'Vault dependency selection requires install, update, stamp or provision'
+    }
+    $env:AGENT_VAULT_INSTALL_PROFILE = $Profile
+}
+
+# Retain the native selector before activation, driver handoff or self-staging
+# can move the filesystem cwd. This also applies to task-only schedule actions.
+if ($env:AGENT_VAULT_CONFIG) {
+    $vaultConfigLocation = Get-Location
+    if ($vaultConfigLocation.Provider.Name -cne 'FileSystem') {
+        throw 'Vault configuration requires a filesystem invocation directory'
+    }
+    $vaultConfigProvider = $null
+    $vaultConfigDrive = $null
+    $vaultConfigPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+        $env:AGENT_VAULT_CONFIG, [ref]$vaultConfigProvider, [ref]$vaultConfigDrive
+    )
+    if ($vaultConfigProvider.Name -cne 'FileSystem') {
+        throw 'Vault configuration selector must name a filesystem path'
+    }
+    $env:AGENT_VAULT_CONFIG = $vaultConfigPath
+}
+
+if ($Action -in @('install', 'update', 'stamp', 'provision', 'start', 'schedule')) {
+    if ((Get-Location).Provider.Name -cne 'FileSystem') {
+        throw 'Vault project selection requires a filesystem invocation directory'
+    }
     $activationProject = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
         $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
     } else { (Get-Location).ProviderPath }
+    $activationProject = (Resolve-Path -LiteralPath $activationProject -ErrorAction Stop).ProviderPath
+    if (-not (Test-Path -LiteralPath $activationProject -PathType Container)) {
+        throw 'Vault project selection must name an available directory'
+    }
+    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $activationProject
+}
+
+if ($Action -in @('install', 'update', 'stamp', 'provision', 'start')) {
+    . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
     $activation = Get-VaultRuntimeActivation -Project $activationProject
     if ($activation.state -ceq 'configuration-empty') {
         Write-Output "[SKIP] $($activation.detail)"
         exit 0
     }
-    $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT = $activationProject
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -458,7 +504,7 @@ function Get-VersionedCurrent {
        venv or a fresh box). Used as the gc keep + rollback target. #>
     if (-not $VersionedRuntime) { return '' }
     $vr = Join-Path $PSScriptRoot 'versioned_runtime.py'
-    $py = if (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
+    $py = if ($script:RuntimeProfile) { Get-BootstrapPython } elseif (Test-Path $LinkPython) { $LinkPython } elseif (Test-Path $VenvPython) { $VenvPython } else { $null }
     if (-not $py) { return '' }
     $out = & $py $vr --root $InstallDir --link-name '.venv' current 2>$null
     return ("$out").Trim()
@@ -570,7 +616,19 @@ function Ensure-UvIndex {
 # the recorded footprint is, because the same installer is invoked from the
 # same place.
 # === install-contract:v4 marker/toss helpers (#935) ===
+function Test-VaultRuntimeProfilePresent {
+    try {
+        [void][IO.File]::GetAttributes((Join-Path $InstallDir 'runtime-profile.json'))
+        return $true
+    } catch [IO.FileNotFoundException] {
+        return $false
+    } catch [IO.DirectoryNotFoundException] {
+        return $false
+    }
+}
+
 function Get-BootstrapPython {
+    if ($script:RuntimeProfilePython) { return $script:RuntimeProfilePython }
     <# Construction supervision must run outside the candidate being built.
        Probe a native launcher, then real PATH interpreters (not Store aliases). #>
     $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -586,6 +644,17 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
+    if ($script:RuntimeProfile) {
+        $py = Get-BootstrapPython
+        $result = Invoke-Hidden -FilePath $py -ArgList @(
+            '-I', '-B', (Get-RuntimeProfileHelper),
+            '--root', $InstallDir, 'fingerprint'
+        )
+        if ($LASTEXITCODE -ne 0 -or $result.Trim() -cnotmatch '^[0-9a-f]{64}$') {
+            throw 'Vault dependency-profile fingerprint is unavailable'
+        }
+        return $result.Trim()
+    }
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
     try {
@@ -615,6 +684,7 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    if ($script:RuntimeProfile) { $vr = Get-RuntimeProfileHelper }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
         -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
@@ -627,6 +697,13 @@ function Invoke-VersionedMarkComplete {
     $actualHash = Get-PayloadHash
     if ($PayloadHash -and $PayloadHash -ne $actualHash) {
         throw 'Payload changed during construction; completion refused'
+    }
+    if ($script:SourceRuntimeIdentity -and -not $script:RuntimeProfile) {
+        [void](Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'runtime_source_target.py'),
+            '--root', $InstallDir, '--record-slot', $SrcVersion, '--payload-hash', $actualHash
+        ))
+        if ($LASTEXITCODE -ne 0) { throw 'Vault source-profile completion evidence failed' }
     }
     Complete-RuntimeConstruction -PayloadHash $actualHash -RetainHelpers
     return $true
@@ -825,6 +902,55 @@ function Materialize-SnapshotInstallerEngine {
     }
 }
 
+function Copy-VaultSnapshotInputs {
+    param([Parameter(Mandatory)][string]$Destination)
+    [void][IO.Directory]::CreateDirectory($Destination)
+    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests', 'snapshot-provenance.json')
+    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
+        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $Destination $_.Name) -Recurse -Force
+    }
+    Materialize-SnapshotLibs -SnapshotDir $Destination
+    Materialize-SnapshotInstallerEngine -SnapshotDir $Destination
+}
+
+function Get-RuntimeProfileHelper {
+    if ($script:RuntimeProfileHelper) { return $script:RuntimeProfileHelper }
+    $sourceSnapshot = $null
+    if ($script:SourceRuntimeIdentity) {
+        $sourceSnapshot = Publish-SourceSnapshot
+    }
+    if ($sourceSnapshot -and -not (Test-Path -LiteralPath (Join-Path $sourceSnapshot 'snapshot-provenance.json'))) {
+        $snapshot = $sourceSnapshot
+    } else {
+        $snapshot = Join-Path $InstallDir ('.profile-inputs-' + [Guid]::NewGuid().ToString('N'))
+        $directory = [IO.Directory]::CreateDirectory($snapshot)
+        $script:RuntimeProfileInputs = @{ Path = $directory.FullName; Created = $directory.CreationTimeUtc }
+        if ($sourceSnapshot) {
+            Get-ChildItem -LiteralPath $sourceSnapshot -Force | Where-Object {
+                $_.Name -cne 'snapshot-provenance.json'
+            } | ForEach-Object {
+                Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapshot $_.Name) -Recurse -Force
+            }
+        } else {
+            Copy-VaultSnapshotInputs -Destination $snapshot
+        }
+    }
+    $script:RuntimeProfileHelper = Join-Path $snapshot 'scripts\runtime_profile.py'
+    return $script:RuntimeProfileHelper
+}
+
+function Remove-RuntimeProfileInputs {
+    if (-not $script:RuntimeProfileInputs) { return }
+    $path = $script:RuntimeProfileInputs.Path
+    $item = Get-Item -LiteralPath $path -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or
+        $item.CreationTimeUtc -ne $script:RuntimeProfileInputs.Created) {
+        throw 'Vault profile input custody changed; preserving construction inputs'
+    }
+    Remove-Item -LiteralPath $path -Recurse -Force -ErrorAction Stop
+    $script:RuntimeProfileInputs = $null
+}
+
 function Test-RuntimeHealthy {
     $nativeError = ''
     [void](Invoke-Hidden -FilePath $VenvPython -ArgList @('-I', '-m', 'agent_vault', '--help') -ErrorOutput ([ref]$nativeError))
@@ -869,16 +995,18 @@ function Install-Runtime {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
     }
+    if ($script:RuntimeProfile) { $env:AGENT_VAULT_INSTALL_UV = $uvPath }
 
     foreach ($dir in @($InstallDir, $LocalBin)) {
         if (-not (Test-Path $dir)) { New-Item -ItemType Directory -Path $dir -Force | Out-Null }
     }
     Write-Ok "Directories: $InstallDir"
 
+    $prevVersion = Get-VersionedCurrent
     [void](Invoke-VersionedSlotClean)
     if ($script:RuntimeConstructionReuse) {
         if (-not (Invoke-VersionedMarkComplete)) { throw 'Retained runtime completion failed' }
-        if ($script:SourceRuntimeIdentity) {
+        if ($script:SourceRuntimeIdentity -or $script:RuntimeProfile) {
             if (-not (Test-RuntimeHealthy)) { throw 'Retained runtime slot failed its health gate; not activating' }
             Assert-SourceRuntime
             Write-Binstubs
@@ -888,8 +1016,9 @@ function Install-Runtime {
                 ([IO.File]::ReadAllText($selected)).Trim() -ne $SrcVersion) {
                 if (-not (Invoke-VersionedActivate)) { throw 'Source runtime activation failed' }
             }
-            Publish-SourcePayload
+            if ($script:SourceRuntimeIdentity) { Publish-SourcePayload }
             Write-VaultDeployManifest
+            Complete-RuntimeInstallation -KeepPrev $prevVersion
         }
         return
     }
@@ -982,6 +1111,11 @@ function Install-Runtime {
     else { Assert-SourceRuntime }
     Write-VaultDeployManifest
 
+    Complete-RuntimeInstallation -KeepPrev $prevVersion
+}
+
+function Complete-RuntimeInstallation {
+    param([string]$KeepPrev)
     $prevEAP = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     & $LinkPython -I -c 'import agent_vault' 2>$null
@@ -992,7 +1126,7 @@ function Install-Runtime {
 
     # Versioned layout: prune old slots, keeping current + the previous-good (the
     # slot a not-yet-restarted daemon may still run from) + live-pid-pinned.
-    if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $prevVersion }
+    if ($VersionedRuntime) { Invoke-VersionedGc -KeepPrev $KeepPrev }
 
     if (Test-KeePassXCCli) {
         Write-Ok 'Prerequisite: keepassxc-cli found'
@@ -1008,18 +1142,121 @@ function Install-Runtime {
     }
 }
 
+function Get-WindowsScheduledTaskPolicy {
+    # Scheduling is machine deployment policy, not portable vault selection.
+    $path = if ($env:AGENT_VAULT_CONFIG) { $env:AGENT_VAULT_CONFIG } else {
+        $appData = if ($env:APPDATA) { $env:APPDATA } else { Join-Path $env:USERPROFILE 'AppData\Roaming' }
+        Join-Path $appData 'agent-vault\config.json'
+    }
+    $policy = 'preserve'
+    if (Test-Path -LiteralPath $path) {
+        $data = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json -ErrorAction Stop
+        if ($data -isnot [pscustomobject]) { throw 'Vault configuration must be an object' }
+        if ($data.PSObject.Properties['windows_scheduled_task']) {
+            $policy = $data.windows_scheduled_task
+        }
+    }
+    if ($policy -isnot [string] -or $policy -cnotin @('preserve', 'enabled', 'absent')) {
+        throw 'windows_scheduled_task must be preserve, enabled or absent'
+    }
+    return $policy
+}
+
+function Assert-OwnedVaultTask {
+    param($Task)
+    if (@($Task.Actions).Count -ne 1) { throw 'Refusing ambiguous Vault task actions' }
+    $taskAction = @($Task.Actions)[0]
+    $launcher = [regex]::Escape((Join-Path $InstallDir 'service.ps1'))
+    $executor = [string]$taskAction.Execute
+    $arguments = [string]$taskAction.Arguments
+    # -File terminates shell options; later -File tokens are only script input.
+    $shell = '(?:"(?:[^"]*\\)?(?:pwsh|powershell)\.exe"|(?:[^\s"]*\\)?(?:pwsh|powershell)\.exe)'
+    if ((Split-Path -Leaf $executor) -ieq 'conhost.exe') {
+        if ($arguments -notmatch "^\s*--headless\s+$shell\s+(?<shellArguments>.*)$") {
+            throw 'Refusing foreign Vault scheduled task'
+        }
+        $arguments = $Matches.shellArguments
+    } elseif ((Split-Path -Leaf $executor) -notin @('pwsh.exe', 'powershell.exe')) {
+        throw 'Refusing foreign Vault scheduled task'
+    }
+    $options = '(?:(?:-NoProfile|-NonInteractive|-NoLogo)\s+|-ExecutionPolicy\s+Bypass\s+|-WindowStyle\s+Hidden\s+)*'
+    $operand = "`"$launcher`""
+    if ((Join-Path $InstallDir 'service.ps1') -notmatch '\s') { $operand += "|$launcher" }
+    if ($arguments -notmatch "^\s*$options-File\s+(?:$operand)\s*$") {
+        throw 'Refusing foreign Vault scheduled task'
+    }
+}
+
+function Get-SchedulingPolicyTask {
+    param([string]$Policy)
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+        if ($Policy -eq 'preserve') { return $null }
+        throw 'Cannot reconcile Vault scheduling: ScheduledTasks module unavailable'
+    }
+    try {
+        return (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop)
+    } catch {
+        if (($_.FullyQualifiedErrorId -split ',')[0] -ceq 'CmdletizationQuery_NotFound_TaskName') {
+            return $null
+        }
+        throw
+    }
+}
+
 function Register-AgentVaultTask {
-    if ($NoService) {
+    if ($NoService -and $Action -ne 'schedule') {
         Write-Skip 'agent-vault service skipped (-NoService): this host is a client only'
         return
     }
-    if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
-        Write-Skip 'ScheduledTasks module unavailable -- skipping service'
-        return
+    $policy = Get-WindowsScheduledTaskPolicy
+    $existing = Get-SchedulingPolicyTask -Policy $policy
+    if ($policy -eq 'absent') {
+        if ($existing) {
+            Assert-OwnedVaultTask -Task $existing
+            if ($existing.State -eq 'Disabled') {
+                throw 'Disabled Vault task retains a startup hold; clear that intent explicitly before task retirement'
+            }
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+        }
+        Write-Ok 'Vault scheduling absent; service and state preserved'
+        if ($Action -eq 'schedule') { return }
+    }
+    if ($existing) {
+        if ($policy -eq 'enabled') { Assert-OwnedVaultTask -Task $existing }
+        if ($existing.State -eq 'Disabled') {
+            Write-Skip 'Vault scheduled task is disabled; startup hold preserved'
+            return
+        }
+    }
+    if ($Action -eq 'schedule' -and $policy -eq 'preserve') { return }
+    if ($Action -eq 'schedule' -and $policy -eq 'enabled') {
+        if ($NoService) { throw 'Client-only NoService intent excludes scheduling opt-in' }
+        . (Join-Path $PSScriptRoot 'runtime-activation.ps1')
+        $project = if ($env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT) {
+            $env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT
+        } else { (Get-Location).ProviderPath }
+        $activation = Get-VaultRuntimeActivation -Project $project
+        if ($activation.state -ceq 'configuration-empty') {
+            throw 'Vault runtime is inactive; scheduling does not enable the service'
+        }
+        $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+        if (-not (Test-Path -LiteralPath $resolver)) { throw 'Vault runtime resolver is unavailable' }
+        $previousRoot = $env:AGENT_RT_ROOT
+        try {
+            $env:AGENT_RT_ROOT = $InstallDir
+            $AgentRtPy = $null
+            . $resolver
+            if (-not $AgentRtPy) { throw 'Vault selected runtime is unavailable' }
+            $LinkPython = $AgentRtPy
+        } finally { $env:AGENT_RT_ROOT = $previousRoot }
     }
     if (-not (Test-Path $LinkPython)) {
+        if ($Action -eq 'schedule') { throw 'Vault selected runtime is unavailable' }
         Write-Warn 'agent-vault venv not found -- skipping scheduled task'
         return
+    }
+    if ($policy -eq 'enabled' -and -not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
+        throw 'Vault scheduling explicitly enabled but ScheduledTasks module unavailable'
     }
 
     # #1836: the launcher itself resolves the active slot via the canonical
@@ -1074,6 +1311,15 @@ if ([Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and -not `$_pyt
         '\\?\UNC\' + `$_pythonCache.Substring(2)
     } else { '\\?\' + `$_pythonCache }
 }
+# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
+`$_mintedCache = `$_pythonCache
+try {
+    `$_selectedCache = & `$_py -I -B -X ('pycache_prefix=' + `$_pythonCache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" `$_root 2>`$null
+    if (`$LASTEXITCODE -eq 0 -and @(`$_selectedCache).Count -eq 1) {
+        `$_selectedCache = [string](`$_selectedCache | ConvertFrom-Json)
+        if (`$_selectedCache) { `$_pythonCache = `$_selectedCache }
+    }
+} catch {}
 `$_supportsContext = & `$_py -I -B -c "import importlib.util; print(int(importlib.util.find_spec('agent_vault.service_arguments') is not None))"
 if (`$LASTEXITCODE -ne 0) { throw 'Vault service argument capability could not be read' }
 `$_serviceArguments = @('--foreground', '--persistent')
@@ -1081,50 +1327,53 @@ if (([string]`$_supportsContext).Trim() -ceq '1') {
     `$_serviceArguments += @('--configuration-root', '$($serviceConfigurationRoot -replace "'","''")')
 }
 & `$_py -X "pycache_prefix=`$_pythonCache" -m agent_vault.service @_serviceArguments @args
-exit `$LASTEXITCODE
+`$_exitCode = `$LASTEXITCODE
+if (`$_pythonCache -eq `$_mintedCache) { try { [IO.Directory]::Delete(`$_mintedCache, `$true) } catch {} }
+exit `$_exitCode
 "@, [Text.UTF8Encoding]::new($true))
-    $action = New-ScheduledTaskAction `
-        -Execute 'conhost.exe' `
-        -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `
-        -WorkingDirectory $InstallDir
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-    $trigger.Delay = 'PT15S'
-    $settings = New-ScheduledTaskSettingsSet `
-        -AllowStartIfOnBatteries `
-        -DontStopIfGoingOnBatteries `
-        -StartWhenAvailable `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) `
-        -MultipleInstances IgnoreNew `
-        -RestartCount 3 `
-        -RestartInterval (New-TimeSpan -Minutes 1)
+    if ($policy -eq 'enabled') {
+        $desiredTaskAction = New-ScheduledTaskAction `
+            -Execute 'conhost.exe' `
+            -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$TaskLauncher`"" `
+            -WorkingDirectory $InstallDir
+        $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
+        $trigger.Delay = 'PT15S'
+        $settings = New-ScheduledTaskSettingsSet `
+            -AllowStartIfOnBatteries `
+            -DontStopIfGoingOnBatteries `
+            -StartWhenAvailable `
+            -ExecutionTimeLimit ([TimeSpan]::Zero) `
+            -MultipleInstances IgnoreNew `
+            -RestartCount 3 `
+            -RestartInterval (New-TimeSpan -Minutes 1)
 
-    # Register-ONCE model (#1836), same as agent-bridge/agent-dispatch: the
-    # launcher path/working directory are stable across ordinary updates (the
-    # launcher body above is what resolves the active slot, dynamically, at
-    # every run), so a task whose Action already matches is already correct --
-    # re-registering (Set-ScheduledTask) is reserved for a genuine definition
-    # migration (e.g. an install-dir move), not every install/update.
-    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($existing) {
-        $existingAction = $existing.Actions | Select-Object -First 1
-        $matchesDesired = $existingAction -and
-            $existingAction.Execute -eq $action.Execute -and
-            $existingAction.Arguments -eq $action.Arguments -and
-            $existingAction.WorkingDirectory -eq $action.WorkingDirectory
-        if ($matchesDesired) {
-            Write-Ok "Scheduled task already correct ($TaskName, at logon, 15s delay) -- left registered as-is"
+        # Register-ONCE model (#1836): update the stable launcher above on every
+        # runtime cutover; change the task definition only on an explicit opt-in.
+        $existing = Get-SchedulingPolicyTask -Policy $policy
+        if ($existing) {
+            $existingAction = $existing.Actions | Select-Object -First 1
+            $matchesDesired = $existingAction -and
+                $existingAction.Execute -eq $desiredTaskAction.Execute -and
+                $existingAction.Arguments -eq $desiredTaskAction.Arguments -and
+                $existingAction.WorkingDirectory -eq $desiredTaskAction.WorkingDirectory
+            if ($matchesDesired) {
+                Write-Ok "Scheduled task already correct ($TaskName, at logon, 15s delay) -- left registered as-is"
+            } else {
+                Set-ScheduledTask -TaskName $TaskName -Action $desiredTaskAction -Trigger $trigger -Settings $settings | Out-Null
+                Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
+            }
         } else {
-            Set-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger -Settings $settings | Out-Null
-            Write-Ok "Scheduled task updated ($TaskName, at logon, 15s delay)"
+            Register-ScheduledTask -TaskName $TaskName `
+                -Action $desiredTaskAction -Trigger $trigger -Settings $settings `
+                -Description 'agent-vault -- local KeePassXC-backed secret store.' | Out-Null
+            Write-Ok "Scheduled task registered ($TaskName, at logon, 15s delay)"
         }
-    } else {
-        Register-ScheduledTask -TaskName $TaskName `
-            -Action $action -Trigger $trigger -Settings $settings `
-            -Description 'agent-vault -- local KeePassXC-backed secret store.' | Out-Null
-        Write-Ok "Scheduled task registered ($TaskName, at logon, 15s delay)"
-    }
 
-    Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        if ($Action -ne 'schedule') {
+            Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+        }
+    }
+    if ($Action -eq 'schedule') { return }
 
     # IgnoreNew may leave the predecessor's task running. The selected owner
     # starts its successor independently and verifies its generation, not merely
@@ -1168,13 +1417,7 @@ function Invoke-Stamp {
     }
     $snapTmp = "$snapDir.tmp-$PID"
     if (Test-Path $snapTmp) { Remove-Item $snapTmp -Recurse -Force -ErrorAction SilentlyContinue }
-    New-Item -ItemType Directory -Path $snapTmp -Force | Out-Null
-    $exclude = @('.git', '__pycache__', '.venv', 'node_modules', 'build', 'dist', '.pytest_cache', '.mypy_cache', 'tests')
-    Get-ChildItem -LiteralPath $PluginDir -Force | Where-Object { $exclude -notcontains $_.Name } | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination (Join-Path $snapTmp $_.Name) -Recurse -Force
-    }
-    Materialize-SnapshotLibs -SnapshotDir $snapTmp
-    Materialize-SnapshotInstallerEngine -SnapshotDir $snapTmp
+    Copy-VaultSnapshotInputs -Destination $snapTmp
     Write-Binstubs -SnapshotSourcePath $snapTmp
     if (Test-Path $snapDir) { Remove-Item $snapDir -Recurse -Force -ErrorAction SilentlyContinue }
     Move-Item -LiteralPath $snapTmp -Destination $snapDir -Force
@@ -1200,8 +1443,13 @@ function Invoke-Update {
 }
 
 function Invoke-Start {
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $task = if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    }
     if ($task) {
+        if ($task.State -eq 'Disabled') {
+            throw 'Vault scheduled task is disabled; refusing direct-start fallback'
+        }
         Start-ScheduledTask -TaskName $TaskName
         Write-Ok 'agent-vault service started (Scheduled Task)'
         return
@@ -1212,7 +1460,8 @@ function Invoke-Start {
     # SAME idempotent, health-gated user-mode ensure path the CLI's own
     # `agent-vault start` uses (cmd_start -> ensure_service/start_service in
     # cli.py) -- no PowerShell-side process-spawning logic duplicated here.
-    if (-not (Test-Path $LinkPython)) {
+    $startPython = Get-ActiveVaultPython
+    if (-not $startPython -or -not (Test-Path -LiteralPath $startPython)) {
         Write-Fail "agent-vault runtime not installed -- run: install.ps1 -Action install"
         exit 1
     }
@@ -1225,7 +1474,7 @@ function Invoke-Start {
     try {
         [IO.Directory]::SetCurrentDirectory($project)
         $ErrorActionPreference = 'Continue'
-        & $LinkPython -m agent_vault start
+        & $startPython -m agent_vault start
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousPreference
@@ -1233,6 +1482,20 @@ function Invoke-Start {
         [IO.Directory]::SetCurrentDirectory($previousDirectory)
     }
     exit $code
+}
+
+function Get-ActiveVaultPython {
+    $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+    if (-not (Test-Path -LiteralPath $resolver)) { return $LinkPython }
+    $previousRoot = $env:AGENT_RT_ROOT
+    try {
+        $env:AGENT_RT_ROOT = $InstallDir
+        $AgentRtPy = $null
+        . $resolver -TraceMode read-only
+        return $AgentRtPy
+    } finally {
+        $env:AGENT_RT_ROOT = $previousRoot
+    }
 }
 
 function Invoke-Stop {
@@ -1280,10 +1543,11 @@ function Invoke-Status {
     if (Test-KeePassXCCli) { Write-Ok 'Prerequisite: keepassxc-cli found' }
     else { Write-Warn 'Prerequisite missing: keepassxc-cli (KeePassXC)' }
 
-    if (Test-Path $LinkPython) {
+    $statusPython = Get-ActiveVaultPython
+    if ($statusPython -and (Test-Path -LiteralPath $statusPython)) {
         $prevEAP = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
-        $ping = & $LinkPython -m agent_vault.service --ping 2>$null
+        $ping = & $statusPython -m agent_vault.service --ping 2>$null
         $pingCode = $LASTEXITCODE
         $ErrorActionPreference = $prevEAP
         if ($pingCode -eq 0 -and $ping) { Write-Ok ($ping | Out-String).Trim() }
@@ -1381,13 +1645,7 @@ function Get-VaultUninstallProcesses {
     }
     $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
-        if (@($task.Actions).Count -ne 1) { throw 'Refusing ambiguous Vault task actions' }
-        foreach ($taskAction in $task.Actions) {
-            if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
-                -not ([string]$taskAction.Arguments).Contains((Join-Path $root 'service.ps1'))) {
-                throw 'Refusing foreign Vault scheduled task'
-            }
-        }
+        Assert-OwnedVaultTask -Task $task
     }
     $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     $owned = @()
@@ -1519,8 +1777,21 @@ $ScriptDir = $PSScriptRoot
 . (Join-Path $ScriptDir 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $SourceRuntimeIdentity = $null
+$RuntimeProfile = ''
+$RuntimeProfilePython = ''
+$RuntimeProfileHelper = ''
+$RuntimeProfileInputs = $null
+$installFailure = $null
+$profilePresent = $false
+if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+    $profilePresent = Test-VaultRuntimeProfilePresent
+}
+if ($Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
+    $RuntimeProfilePython = Resolve-NativeBootstrapPython -MinimumMinor 11 -Action $Action -Root $InstallDir
+    if (-not $RuntimeProfilePython) { throw 'Vault dependency profiles require an existing Python 3.11+ bootstrap interpreter' }
+}
 if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-SourceRuntime }
-$needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision')) -or
+$needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision', 'schedule')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
@@ -1528,10 +1799,40 @@ if ($needsInstallLock -and -not (Enter-InstallLock)) {
 }
 
 try {
+    if ($script:SourceRuntimeIdentity -and (Test-Path Env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET)) {
+        [void](Invoke-Hidden -FilePath (Get-BootstrapPython) -ArgList @(
+            '-I', '-B', (Join-Path $ScriptDir 'runtime_source_target.py'),
+            '--root', $InstallDir, '--check-target'
+        ))
+        if ($LASTEXITCODE -ne 0) { throw 'Vault source target changed before installation' }
+    }
+    if ($Action -in @('install', 'update', 'provision', 'stamp')) {
+        $profilePresent = Test-VaultRuntimeProfilePresent
+    }
+    if ($Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
+        if (-not $RuntimeProfilePython) {
+            $RuntimeProfilePython = Resolve-NativeBootstrapPython -MinimumMinor 11 -Action $Action -Root $InstallDir
+        }
+        $py = Get-BootstrapPython
+        if (-not $py) { throw 'Vault dependency selection requires a bootstrap Python interpreter' }
+        $arguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_profile.py'),
+            '--root', $InstallDir, 'select')
+        if (-not $DryRun) { $arguments += '--persist' }
+        if ($Profile) { $arguments += @('--profile', $Profile) }
+        $selected = Invoke-Hidden -FilePath $py -ArgList $arguments
+        if ($LASTEXITCODE -ne 0) { throw 'Vault dependency selection failed' }
+        $selected = $selected | ConvertFrom-Json
+        $RuntimeProfile = $selected.profile
+        $SrcVersion = $selected.runtime_version
+        $VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
+        $VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+        $LinkDir = $VenvDir
+        $LinkPython = $VenvPython
+    }
     if ($Action -in @('install', 'update', 'provision', 'stamp')) { Assert-SourceRuntime }
     if ($Action -in @('install', 'update', 'provision') -and -not $DryRun) {
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
     }
     switch ($Action) {
         'install'   { Invoke-Install }
@@ -1542,12 +1843,20 @@ try {
         'uninstall' { Invoke-Uninstall }
         'stamp'     { Invoke-Stamp }
         'provision' { Invoke-Install }
+        'schedule'  { Register-AgentVaultTask }
     }
+} catch {
+    $installFailure = $_
+    throw
 } finally {
     try {
         if (Test-Path -LiteralPath 'Function:\Stop-RuntimeConstruction') {
             Stop-RuntimeConstruction
         }
+        Remove-RuntimeProfileInputs
+    } catch {
+        if (-not $installFailure) { throw }
+        Write-Warn "Vault construction inputs retained after settlement/cleanup refusal: $($_.Exception.Message)"
     } finally {
         Exit-InstallLock
     }

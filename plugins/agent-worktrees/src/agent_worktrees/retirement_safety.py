@@ -82,4 +82,8 @@ def delete_retired_pair(
         return False
     sibling_path.unlink(missing_ok=True)
     path.unlink(missing_ok=True)
+    # Both removals must reach the resident; the save above announced only
+    # ``record``'s path (delivered once the record holds release).
+    tracking.save_notifications.worktree_changed(record.worktree_path)
+    tracking.save_notifications.worktree_changed(sibling.worktree_path)
     return True

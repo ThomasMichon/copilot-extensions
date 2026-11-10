@@ -185,6 +185,7 @@ def _conclude(record_path: Path, repo, **over):
         owner=over.get("owner", "dispatcher"),
         policy=over.get("policy", tc.DISPOSABLE_CLI_POLICY),
         reservation_key=over.get("reservation_key"),
+        creation_nonce=over.get("creation_nonce"),
     )
 
 
@@ -371,6 +372,35 @@ def test_dispatch_attempt_policy_concludes_exact_acp_allocation(
     )
 
 
+@pytest.mark.parametrize("supplied, dispatch, expected", [
+    ("exact", False, ("primed", "managed-gc-candidate")),
+    ("other", False, ("skipped", "creation-nonce-mismatch")),
+    (None, False, ("skipped", "creation-identity-missing")),
+    ("exact", True, ("skipped", "dispatch-provenance-present")),
+])
+def test_bridge_creation_policy_requires_exact_creation_nonce(
+    tmp_path, monkeypatch, _worker_seed, supplied, dispatch, expected
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.origin = "delegate"
+    assert record.creation_nonce
+    supplied = {"exact": record.creation_nonce}.get(supplied, supplied)
+    if dispatch:
+        record.dispatch_attempt = tracking.DispatchAttempt(
+            task_id="task-1", reservation_key="dispatch-task:task-1:1", attempt=1,
+            driver="dispatcher", supervisor="supervisor-1", creator_machine=record.machine,
+        )
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path, repo, policy=tc.BRIDGE_CREATION_POLICY, creation_nonce=supplied,
+    )
+
+    assert (result["action"], result.get("reason")) == expected
+
+
 def test_dispatch_attempt_policy_releases_own_stale_session_claim(
     tmp_path, monkeypatch, _worker_seed
 ):
@@ -422,6 +452,31 @@ def test_dispatch_attempt_policy_releases_own_stale_session_claim(
     assert record.live_resources == []
     released = next(c for c in record.resources if c.ref == session_ref)
     assert released.state == "released"
+
+
+def test_bridge_creation_policy_releases_own_stale_session_claim(
+    tmp_path, monkeypatch, _worker_seed
+):
+    repo, record_path, _worktree = _worker(tmp_path, monkeypatch, _worker_seed)
+    record = tracking.load_record(record_path)
+    record.interface = "acp"
+    record.origin = "delegate"
+    session_ref = tracking.format_claim_ref(
+        record.machine, "demo", record.worktree_id, session="session-exact",
+    )
+    record.resources = [tracking.ResourceClaim(
+        kind="session", ref=session_ref, created_at="2026-09-21T12:24:04",
+        state="active", note="live Copilot session",
+    )]
+    tracking.save_record(record, record_path)
+
+    result = _conclude(
+        record_path, repo, policy=tc.BRIDGE_CREATION_POLICY,
+        creation_nonce=record.creation_nonce,
+    )
+
+    assert result["action"] == "primed"
+    assert tracking.load_record(record_path).live_resources == []
 
 
 def test_dispatch_attempt_policy_releases_only_the_concluding_session_claim(

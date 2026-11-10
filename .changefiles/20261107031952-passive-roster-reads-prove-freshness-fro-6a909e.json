@@ -1,0 +1,9 @@
+{
+  "comment": "Passive roster reads prove freshness from the resident's last publish and fail closed to stale; state-change events republish the changed project; delegate finalization requires proven-fresh host rosters",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

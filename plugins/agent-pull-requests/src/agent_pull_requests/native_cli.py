@@ -109,9 +109,35 @@ def _read(args: argparse.Namespace, prefix: list[str]) -> tuple[int, dict]:
 def run(
     args: argparse.Namespace, *, prefix_factory: Callable[[], list[str]] | None = None,
 ) -> int:
+    if args.command == "diff":
+        from .native_diff import run as diff_run
+        return diff_run(args, prefix_factory)
+    if args.command == "threads":
+        from .native_threads import run as threads_run
+        return threads_run(args, prefix_factory)
+    if args.command == "complete":
+        from .native_source_complete import run as complete_run
+        return complete_run(args, prefix_factory)
+    if args.command == "cancel-creation":
+        from .native_creation_cancel import run as cancellation_run
+        code, payload = cancellation_run(args, prefix_factory)
+        if args.json or not payload.get("error"):
+            print(json.dumps(payload, indent=2, sort_keys=True))
+        else:
+            print(f"agent-pull-requests: {payload['error']}", file=sys.stderr)
+            diagnostic = payload["frontend"].get("diagnostic")
+            if diagnostic and diagnostic != payload["error"]:
+                print(f"agent-pull-requests: {diagnostic}", file=sys.stderr)
+        return code
     try:
         launch = prefix_factory() if prefix_factory is not None else [command_path(args.worktrees_command)]
-        if args.command in ("author-capabilities", "update", "push"):
+        if args.command in ("resolve-thread", "reopen-thread"):
+            from .native_thread_resolution import run as resolution_run
+            code, payload = resolution_run(args, launch)
+        elif args.command == "nudge":
+            from .native_reviewer_request import run as nudge_run
+            code, payload = nudge_run(args, launch)
+        elif args.command in ("author-capabilities", "update", "push", "ready"):
             from .native_author import run as author_run
             code, payload = author_run(args, launch)
         else:
@@ -121,6 +147,15 @@ def run(
             )
     except (ValueError, RuntimeError, OSError, subprocess.SubprocessError) as exc:
         code, payload = 1, {"error": str(exc), "repo": args.repo}
+        if args.command == "ready":
+            from .native_author import readiness_failure
+            payload = readiness_failure(args.repo, args.number, str(exc))
+        elif args.command == "nudge":
+            from .native_reviewer_request import failure
+            payload = failure(args.repo, args.number, str(exc))
+        elif args.command in ("resolve-thread", "reopen-thread"):
+            from .native_thread_resolution import failure
+            payload = failure(args, str(exc))
     if args.json:
         print(json.dumps(payload, indent=2, sort_keys=True))
     elif payload.get("error"):

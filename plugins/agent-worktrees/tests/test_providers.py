@@ -3094,24 +3094,26 @@ class TestCreatePRAutoOpen:
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
 
-        def _boom(name):
-            raise AssertionError("provider should not be called with open_pr=False")
-
-        monkeypatch.setattr("agent_worktrees.providers.get_provider", _boom)
+        fake = _FakeProvider()
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda _: fake)
         res = pr_ops.create_pr(wid, config, title="Add feature", open_pr=False)
         assert res["success"] is True
         assert "pr_opened" not in res
         assert res["pr_open_skipped"] == "--no-open"
+        assert fake.creates == 0
 
     def test_provider_failure_is_non_fatal(self, pr_repo, monkeypatch):
         config, wid, _wt, _ = pr_repo
         config = self._enable_open(config)
         monkeypatch.setenv("EXT_TOKEN", "tok")
 
-        def _fail(name):
+        fake = _FakeProvider()
+
+        def _fail(scope, *, token=None):
             raise ProviderError("gitea exploded")
 
-        monkeypatch.setattr("agent_worktrees.providers.get_provider", _fail)
+        monkeypatch.setattr(fake, "create_pull", _fail)
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda _: fake)
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is True  # branch still pushed
         assert res["pr_opened"] is False
@@ -3236,7 +3238,7 @@ class TestAutoOpenDefault:
         assert _parse_pr({"auto_open": True}).auto_open is True
 
     def test_create_pr_skips_provider_by_default(self, pr_repo, monkeypatch):
-        # Default config (no auto_open) must NOT attempt to open a PR.
+        # Local authority resolution for reservation is not a forge create.
         import dataclasses
         config, wid, _wt, _ = pr_repo
         repo = config.repos["ext"]
@@ -3246,14 +3248,13 @@ class TestAutoOpenDefault:
             config, repos={"ext": dataclasses.replace(repo, pr=pr)}
         )
 
-        def _boom(name):
-            raise AssertionError("provider must not be called when auto_open is default-off")
-
-        monkeypatch.setattr("agent_worktrees.providers.get_provider", _boom)
+        fake = _FakeProvider()
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda _: fake)
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is True
         assert "pr_opened" not in res
         assert "pr_open_error" not in res
+        assert fake.creates == 0
 
 
 class TestHeadSchemeConfig:
@@ -3668,13 +3669,12 @@ class TestRerunAutoOpen:
     def test_auto_open_off_says_so(self, pr_repo, monkeypatch):
         config, wid, _wt_path, _ = pr_repo  # pr.auto_open is off here
 
-        def _boom(name):
-            raise AssertionError("no provider call when auto-open is off")
-
-        monkeypatch.setattr("agent_worktrees.providers.get_provider", _boom)
+        fake = _FakeProvider()
+        monkeypatch.setattr("agent_worktrees.providers.get_provider", lambda _: fake)
         res = pr_ops.create_pr(wid, config, title="Add feature")
         assert res["success"] is True and "pr_opened" not in res
         assert res["pr_open_skipped"] == "pr.auto_open is off"
+        assert fake.creates == 0
 
     def test_rerun_after_external_merge_opens_fresh_pr(self, pr_repo, monkeypatch):
         # #1336: a feature branch whose PR merged externally (auto-merge), with

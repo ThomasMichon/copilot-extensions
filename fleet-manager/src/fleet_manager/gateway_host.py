@@ -37,7 +37,7 @@ def read_runtime_file(path: Path) -> bytes:
             raise PlanError("Gateway runtime evidence is not an ordinary file")
         if os.name == "nt":
             windows_private(path, descriptor=stream.fileno())
-        elif opened.st_uid != os.getuid() or opened.st_mode & 0o077:
+        elif opened.st_uid != os.geteuid() or opened.st_mode & 0o077:
             raise PlanError("Gateway runtime evidence is not private")
         content = stream.read(MAX_BYTES + 1)
         after, named = os.fstat(stream.fileno()), _file_stat(path)

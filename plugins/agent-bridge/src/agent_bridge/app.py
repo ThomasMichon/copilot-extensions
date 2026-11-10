@@ -921,7 +921,11 @@ async def _lifespan(app: FastAPI):
             _sr_confirmations, _sr_poll,
         )
 
-    yield
+    app.state.status_runtime.start()
+    try:
+        yield
+    finally:
+        await app.state.status_runtime.close()
 
     app.state.shutting_down = True
     # Shutdown: retract our routing-table claim so clients fall back (or follow

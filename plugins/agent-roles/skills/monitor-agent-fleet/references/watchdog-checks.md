@@ -24,6 +24,12 @@ agent's budget, never restarts, stops, deploys or merges, and never treats
 silence as authority. A monitor that waits on its own question has become the
 problem it watches for.
 
+Hold work to the original acceptance gate, not a stricter one. An installed
+payload version does not prove which runtime is serving, but a monitor that
+requires more than the original request did, such as payload and running
+service versions being equal, has added its own prerequisite. Withdraw that
+hold and record the withdrawal.
+
 ## Inspect per agent, from persisted state
 
 Read each agent's persisted records, not its live context window: its status
@@ -49,6 +55,20 @@ observation. For each agent record:
 Healthy is one compact log line, not a report or a message. Unreadable state is
 `unknown`, never healthy; report the gap once after the charter's count of
 consecutive unknown observations.
+
+A liveness label such as running or stalled does not prove a wedged process or
+a visible unanswered prompt, and the monitor usually cannot see an interactive
+question or permission form. When no available reader settles it, batch those
+agents into one request for operator terminal attention, each with its last
+observed delta, and handle any reported question through
+[parked questions](pending-input.md). Do not rerun an unavailable question
+reader or its fallback every cycle.
+
+When the charter records a model requirement, verify the selected model from
+the runtime's context or usage metadata before reporting a discrepancy or
+withholding a steer. With a synthetic or fusion model, per-turn model-change
+notices and per-call usage can name a constituent model while the selected
+model is unchanged.
 
 ## Anti-pattern signals and steers
 

@@ -2501,6 +2501,15 @@ def _cmd_status_write(
     # flagged in review: `create` acquires them allocation-lock-then-record-
     # lock via `create_new_record`'s own `save_record`).
     peek = tracking.load_record(yaml_path)
+    # Republish the effective agenda policy for the post-tool reminder hooks,
+    # so a running session picks up an `agendas.default` change on its next
+    # disposition write rather than only at session start/resume.
+    try:
+        from . import session_context as _session_context
+
+        _session_context.publish_agenda_policy(config, peek)
+    except Exception:
+        pass
     if not peek.codename:
         try:
             codename_tracking.ensure_codename(
@@ -3057,7 +3066,7 @@ def _monitor_sweep(
     roster_failure=None,
 ) -> int:
     """One coalescing pass over the Step 4 served-session union."""
-    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
+    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, resident_push as _resident_push, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
     from .worktrees_producer import publish_project_rosters
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
@@ -3086,18 +3095,16 @@ def _monitor_sweep(
     stale_sessions: list[str] = []
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
-        if live is None:
-            if sessions._is_psmux(mux_bin) and roster_publisher is not None:
-                # Publish independent facts without discovering, pruning or painting panes.
-                publish_project_rosters(
-                    picker_projects or set(), interval=interval, project_lock=project_lock,
-                    lifecycle_priority=lifecycle_priority, governance=governance,
-                    segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
-                    roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
-                )
-            if roster_failure is not None and not sessions._is_psmux(mux_bin):
-                roster_failure(RuntimeError("mux-session enumeration unavailable"))
-            return -1
+        observed = _smr.publish_mux_observation(
+            mux_bin, live, catalog_observer, lambda: publish_project_rosters(
+                picker_projects or set(), interval=interval, project_lock=project_lock,
+                lifecycle_priority=lifecycle_priority, governance=governance,
+                segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
+                roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
+            ) if roster_publisher is not None else None, roster_failure,
+        )
+        if observed is not None:
+            return observed
         from .status_monitor_discovery import discover_connected_worktrees
 
         registry.update(discover_connected_worktrees(
@@ -3114,6 +3121,7 @@ def _monitor_sweep(
         observed_sessions |= unmanaged_live_wt
     if stale_sessions:
         _status_monitor_recheck(governance, "pre-mutation:prune-registry")
+        _resident_push.notify_ended(registry, stale_sessions, live)
         _monitor_prune_registry_sessions(reg_dir, registry, stale_sessions, ctx_done, incarnations, published)
     if mux_bin:
         served = [(s, p) for s, p in registry.items() if s in unmanaged_live_wt and p]
@@ -4087,20 +4095,23 @@ class _ResidentHookPolicy:
         except Exception:
             pass
         try:
+            forwarded = getattr(module, "forwarded_env", None)
             text = module.decide(
-                payload, home=Path.home(), tracking_record=found, deadline=deadline
+                payload, env=forwarded(payload) if callable(forwarded) else None,
+                home=Path.home(), tracking_record=found, deadline=deadline
             )
         except Exception:
             return {}
         return {"additionalContext": text} if text else {}
 
-    def native_batch_targets(self, payload: dict) -> list[str] | None:
+    def native_batch_targets(self, payload: dict, *, include_shell: bool = False) -> list[str] | None:
         from .hook_ipc import HookUnavailable
 
-        forms = self._module("tool_call_forms.py")
-        if forms is None:
+        if (forms := self._module("tool_call_forms.py")) is None:
             raise HookUnavailable
         try:
+            if include_shell:
+                return forms.mixed_mutation_targets(payload, allowed_tools=_HOOK_WRITE_TOOLS | _HOOK_SHELL_TOOLS | {"view", "rg", "glob"}, classify=self.mutation_targets)
             return forms.native_mutation_targets(payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload))
         except ValueError as exc:
             raise HookUnavailable from exc
@@ -4146,10 +4157,11 @@ def _resident_hook_decision(
     if kind == "preToolUse":
         return policy.pre(payload)
 
-    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")
-        if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
-            kind != "nativeToolBatchMutation" and (
+        batch = kind in {"nativeToolBatchMutation", "mixedToolBatchMutation"}
+        if (batch and "toolCalls" not in payload) or (
+            not batch and (
                 not isinstance(tool, str) or tool.lower() not in (
                     _HOOK_SHELL_TOOLS if kind == "shellToolMutation" else _HOOK_WRITE_TOOLS
                 )
@@ -4159,7 +4171,7 @@ def _resident_hook_decision(
             from .hook_ipc import HookUnavailable
 
             raise HookUnavailable
-        targets = policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else policy.mutation_targets(payload)
+        targets = policy.native_batch_targets(payload, include_shell=kind == "mixedToolBatchMutation") if batch else policy.mutation_targets(payload)
         if targets is None:
             segment_cache.invalidate_all()
         else:
@@ -5274,8 +5286,7 @@ def _current_session_ids() -> set[str]:
 # ── Lazy dispatch (agent-cli-lazy-dispatch effort, Phase 1) ────────────────
 # Command -> (module, handler); modules expose add_parsers/register_cli. Regenerate by importing
 # agent_worktrees.__main__ once (pays the full cost, offline), then for each
-# add_parsers-owning module, building a throwaway
-# `argparse.ArgumentParser().add_subparsers()` and calling that module's own
+# parser module, building throwaway argparse subparsers and calling its own
 # `add_parsers(sub)` to see which command names land in `sub.choices`;
 # Cross-check COMMAND_MAP module/name; exclude inline build_parser parsers
 # (activity, activity-log, stage-update,
@@ -5342,6 +5353,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'handoff-head-observation': ('handoff_head_observation', 'cmd_observation'),
     'history-digest': ('session_metadata_cli', 'cmd_history_digest'),
     'hygiene': ('maintenance_cli', 'cmd_hygiene'),
+    'python-cache': ('python_cache_prune', 'cmd_python_cache'),
     'install': ('installation_cli', 'cmd_install'),
     'install-status': ('context_cli', 'cmd_install_status'),
     'installer-readiness': ('context_cli', 'cmd_installer_readiness'),
@@ -5457,16 +5469,12 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 from .cli_cluster_free import CLUSTER_FREE_MODULES as _CLUSTER_FREE_MODULES
 
 
-def _dispatch_lazy(command: str, args_list: list[str]) -> int:
-    """Fast-path dispatch for a module-delegated subcommand.
+def _dispatch_lazy(command: str, args_list: list[str], *, commands: dict | None = None) -> int:
+    """Dispatch through the shared owner with the command's original parser.
 
-    Thin wrapper around the shared ``lazy_cli_dispatch`` mechanism
-    (agent-cli-lazy-dispatch effort Phase 2's own first adopter, extracted
-    from this exact function): imports and registers only the ONE module
-    that owns `command`'s parser and handler (per _LAZY_DISPATCH_TABLE),
-    instead of build_parser()'s full eager surface. The resulting
-    parser/help text for this one subcommand is identical to what
-    build_parser() would have produced for it.
+    Only the selected module is registered, not build_parser()'s eager
+    surface. An explicit handler map lets an optional source embedding
+    retain the same parser, dispatch table and cluster-loading behavior.
     """
     return _shared_dispatch_lazy(
         command, args_list,
@@ -5482,7 +5490,7 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
         # surface, or a test that monkeypatches COMMAND_MAP[command] to
         # intercept dispatch, gets the override it expects instead of
         # silently bypassing it).
-        command_map=globals().get("COMMAND_MAP"),
+        command_map=commands if commands is not None else globals().get("COMMAND_MAP"),
         register_cli_modules=frozenset({"pane_lifecycle"}),
     )
 
@@ -6119,6 +6127,7 @@ def _load_full_command_surface() -> None:
         "backfill-sessions": cmd_backfill_sessions,
         "doctor": cmd_doctor,
         "hygiene": cmd_hygiene,
+        "python-cache": __import__(f"{__package__}.python_cache_prune", fromlist=["cmd_python_cache"]).cmd_python_cache,
         "list-sessions": cmd_list_sessions,
         "handoff-head-observation": handoff_head_observation.cmd_observation,
         "head-session": cmd_head_session,
@@ -6284,7 +6293,7 @@ def _print_boot_provenance() -> None:
 
 # git collaboration surfaces are componentized into git_cli.py.
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, publication: object | None = None) -> int:
     global _INVOCATION_CWD
     try:
         _INVOCATION_CWD = Path.cwd()
@@ -6293,6 +6302,9 @@ def main(argv: list[str] | None = None) -> int:
 
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
+    if publication is not None:
+        from .pr_selected_publication import dispatch
+        return dispatch(args_list, publication)
 
     if args_list and args_list[0] in {"__source-setup", "__source-start"}:
         parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -6461,7 +6473,7 @@ def main(argv: list[str] | None = None) -> int:
     # Explicit one-shot reads need no deferred lifecycle helpers.
     if args_list[0] == "pr-watch":
         from . import pr_cli
-        if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads")
+        if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads", "diff")
                 and "/" in args_list[2] and not args_list[2].startswith("-")):
             _ensure_cluster_loaded()
         try:

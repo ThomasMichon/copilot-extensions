@@ -168,6 +168,101 @@ def test_worktree_change_rejects_bad_generation_payload_deadline_and_closed_owne
         server.close()
 
 
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("network")
+@pytest.mark.parametrize("kind", ["readHookDemand", "nativeToolMutation", "worktreeChanged"])
+def test_notification_receiver_keeps_real_state_lock_bound(tmp_path, kind):
+    calls, waits = [], []
+    lock = threading.Lock()
+
+    class ObservedLock:
+        def acquire(self, *, timeout):
+            waits.append(timeout)
+            return lock.acquire(timeout=timeout)
+
+        def release(self):
+            lock.release()
+
+    server = HookIpcServer(
+        lambda *args: pytest.fail("notification invoked policy"),
+        read_demand_lock=ObservedLock(),
+        read_demand_admitted=lambda: calls.append("admitted") or True,
+        native_mutation_decide=lambda *args: calls.append("mutation") or {},
+        worktree_changed=lambda cwd: calls.append("changed"),
+    )
+    lock.acquire()
+    server.start()
+    try:
+        request = {
+            "version": 1, "token": server.token, "kind": kind,
+            "hook_generation": server.generation, "deadline": time.time() + 1,
+        }
+        if kind != "readHookDemand":
+            request["payload"] = {"cwd": str(tmp_path)}
+            if kind == "nativeToolMutation":
+                request["payload"].update(toolName="edit", toolArgs={"path": "source.py"})
+        with socket.create_connection(server.server.server_address, timeout=1) as conn:
+            conn.sendall(json.dumps(request).encode() + b"\n")
+            conn.shutdown(socket.SHUT_WR)
+            assert conn.recv(1) == b""
+        assert waits == [0.05]
+        assert calls == []
+        assert not server.has_recent_hook_demand()
+    finally:
+        lock.release()
+        server.close()
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("network")
+@pytest.mark.parametrize("kind", ["readHookDemand", "nativeToolMutation", "worktreeChanged"])
+def test_notification_receiver_rechecks_deadline_after_state_lock(tmp_path, monkeypatch, kind):
+    calls, waits = [], []
+    lock = threading.Lock()
+    wall = [time.time()]
+
+    class ExpiringLock:
+        def acquire(self, *, timeout):
+            waits.append(timeout)
+            acquired = lock.acquire(timeout=timeout)
+            if acquired:
+                wall[0] += 2
+            return acquired
+
+        def release(self):
+            lock.release()
+
+    server = HookIpcServer(
+        lambda *args: pytest.fail("notification invoked policy"),
+        read_demand_lock=ExpiringLock(),
+        read_demand_admitted=lambda: calls.append("admitted") or True,
+        native_mutation_decide=lambda *args: calls.append("mutation") or {},
+        worktree_changed=lambda cwd: calls.append("changed"),
+    )
+    monkeypatch.setattr(hook_ipc, "time", SimpleNamespace(
+        time=lambda: wall[0], monotonic=time.monotonic,
+    ))
+    server.start()
+    try:
+        request = {
+            "version": 1, "token": server.token, "kind": kind,
+            "hook_generation": server.generation, "deadline": wall[0] + 1,
+        }
+        if kind != "readHookDemand":
+            request["payload"] = {"cwd": str(tmp_path)}
+            if kind == "nativeToolMutation":
+                request["payload"].update(toolName="edit", toolArgs={"path": "source.py"})
+        with socket.create_connection(server.server.server_address, timeout=1) as conn:
+            conn.sendall(json.dumps(request).encode() + b"\n")
+            conn.shutdown(socket.SHUT_WR)
+            assert conn.recv(1) == b""
+        assert waits == [0.05]
+        assert calls == []
+        assert not server.has_recent_hook_demand()
+    finally:
+        server.close()
+
+
 def test_worktree_change_does_not_dial_a_legacy_or_unqualified_peer(tmp_path, monkeypatch):
     lock = tmp_path / "owner.lock"
     endpoint = {
@@ -410,7 +505,7 @@ def test_read_demand_rejects_stale_malformed_and_unadmitted_notifications():
         server.close()
 
 
-@pytest.mark.parametrize("kind", ["nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"])
+@pytest.mark.parametrize("kind", ["nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"])
 def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
     calls = []
     server = HookIpcServer(
@@ -422,12 +517,13 @@ def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
         assert hook_ipc.NATIVE_MUTATION_CAPABILITY in server.capabilities()
         assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY in server.capabilities()
         assert hook_ipc.SHELL_MUTATION_CAPABILITY in server.capabilities()
+        assert hook_ipc.MIXED_BATCH_MUTATION_CAPABILITY in server.capabilities()
         request = {
             "version": 1, "token": server.token, "kind": kind,
             "hook_generation": server.generation, "deadline": time.time() + 1,
             "payload": (
                 {"toolCalls": [{"name": "edit", "args": {"path": "one"}}]}
-                if kind == "nativeToolBatchMutation"
+                if kind in {"nativeToolBatchMutation", "mixedToolBatchMutation"}
                 else {"toolName": "powershell", "toolArgs": '{"command":"git commit -m test"}'}
                 if kind == "shellToolMutation"
                 else {"toolName": "edit", "toolArgs": {"path": "one"}}
@@ -461,6 +557,7 @@ def test_native_mutation_wire_is_generation_bound_and_send_only(kind):
         assert hook_ipc.NATIVE_MUTATION_CAPABILITY not in server.capabilities()
         assert hook_ipc.NATIVE_BATCH_MUTATION_CAPABILITY not in server.capabilities()
         assert hook_ipc.SHELL_MUTATION_CAPABILITY not in server.capabilities()
+        assert hook_ipc.MIXED_BATCH_MUTATION_CAPABILITY not in server.capabilities()
         send()
         assert len(calls) == 1
     finally:

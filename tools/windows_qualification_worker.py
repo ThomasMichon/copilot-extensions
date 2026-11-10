@@ -104,7 +104,10 @@ def native_prerequisites(owned) -> dict:
             raise ValueError(f"{name} prerequisite is not a disposable runner binary")
         reported = owned([str(binary), flag], 30).stdout
         version = NATIVE_VERSIONS[name]
-        if re.findall(r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", reported) != [version]:
+        pattern = r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?"
+        if name == "psmux":
+            pattern = rf"(?m)^psmux[ \t]+({pattern})(?=\s|$)"
+        if re.findall(pattern, reported) != [version]:
             raise ValueError(f"{name} native prerequisite version mismatch")
         versions[name] = version
     return versions
@@ -207,6 +210,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                 max_stdout_bytes=8 * 1024 * 1024, max_stderr_bytes=2 * 1024 * 1024,
                 env={
                     **os.environ,
+                    "PYTHONIOENCODING": "utf-8",
                     "PYTHONPATH": os.pathsep.join((
                         str(root / "libs/agent-procutil/src"), str(root / "tools"),
                     )),
@@ -264,8 +268,14 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                 "--candidate", str(root), "--output", str(output),
             ], 720, allow_empty=True))
         elif native:
+            def prepare_native():
+                preparation = os.environ.get("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", "success")
+                if preparation != "success":
+                    status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
+                    raise ValueError(f"Pinned native prerequisite acquisition did not succeed ({status})")
+                return native_prerequisites(owned)
             result["native_prerequisites"] = phase(
-                "native-prerequisites", lambda: native_prerequisites(owned),
+                "native-prerequisites", prepare_native,
             )
             phase("native-worktrees-public-caller", lambda: owned(native_command(root, output), 1800))
         else:

@@ -103,7 +103,7 @@ class ConfigDropinRegistryReport:
         }
 
 
-_LAST_KNOWN: dict[tuple[str, str], dict[str, ConfigDropin]] = {}
+_LAST_KNOWN: dict[tuple[str, str] | tuple[str, str, bool], dict[str, ConfigDropin]] = {}
 _WARNING_TRACKER = WarningTracker()
 
 
@@ -318,6 +318,12 @@ def _validate_repo_fragment(repo: object, *, location: str) -> str | None:
         error = _validate_codename(repo["codename"], location=f"{location}.codename")
         if error:
             return error
+    if "agendas" in repo:
+        from .config import agenda_policy_error
+
+        error = agenda_policy_error(repo["agendas"])
+        if error:
+            return f"{location}.{error}"
     return None
 
 
@@ -469,6 +475,12 @@ def _validate_config(raw: object) -> str | None:
     for name in ("headless", "auto_fast_forward"):
         if name in raw and not isinstance(raw[name], bool):
             return f"{name} must be a boolean"
+    if "agendas" in raw:
+        from .config import agenda_policy_error
+
+        error = agenda_policy_error(raw["agendas"])
+        if error:
+            return error
     return None
 
 
@@ -478,6 +490,7 @@ def _validated_yaml(
     *,
     entry_class: str,
     owner: str | None = None,
+    strict: bool = False,
 ) -> EntryDecision[ConfigDropin]:
     canonical, verdict = _regular_file(
         entry, target, entry_class=entry_class, owner=owner
@@ -486,7 +499,10 @@ def _validated_yaml(
         return verdict
     canonical = cast(Path, canonical)
     try:
-        raw = yaml.safe_load(canonical.read_text(encoding="utf-8"))
+        if strict:
+            from .repos_registry_reader import _UniqueRegistryLoader
+        raw = yaml.load(canonical.read_text(encoding="utf-8"),
+                        Loader=_UniqueRegistryLoader if strict else yaml.SafeLoader)
     except UnicodeDecodeError as exc:
         return EntryDecision.inactive(
             _finding(
@@ -550,6 +566,7 @@ def _managed_decision(
     *,
     project_name: str,
     activation_resolver: Callable[[], ActivationReport],
+    strict: bool = False,
 ) -> EntryDecision[ConfigDropin]:
     if (
         not isinstance(data, dict)
@@ -620,6 +637,8 @@ def _managed_decision(
             )
         )
     if source_decision is None or source_decision.status is EntryStatus.INACTIVE:
+        if strict and source_decision is not None:
+            raise ValueError("configured plugin policy is unavailable")
         reason = "not-enabled"
         detail = "plugin is not enabled globally or for this project"
         if source_decision is not None and source_decision.findings:
@@ -726,6 +745,7 @@ def _managed_decision(
         canonical_target,
         entry_class="managed-plugin",
         owner=source,
+        **({"strict": True} if strict else {}),
     )
     if (
         decision.status is EntryStatus.ACTIVE
@@ -828,6 +848,7 @@ def scan_config_dropin_registry(
     project_name: str = "",
     previous: Mapping[str, ConfigDropin] | None = None,
     activation_report: ActivationReport | None = None,
+    strict: bool = False,
 ) -> ConfigDropinRegistryReport:
     """Scan and reconcile one project's machine-local config fragments."""
     root = Path(directory)
@@ -844,7 +865,7 @@ def scan_config_dropin_registry(
         key = str(entry)
         if entry.suffix.lower() in {".yaml", ".yml"}:
             entry_classes[key] = "operator"
-            return _validated_yaml(entry, entry, entry_class="operator")
+            return _validated_yaml(entry, entry, entry_class="operator", **({"strict": True} if strict else {}))
         if entry.suffix.lower() != ".json":
             entry_classes[key] = "unknown"
             return EntryDecision.inactive(
@@ -857,7 +878,11 @@ def scan_config_dropin_registry(
             )
         entry_classes[key] = "managed-plugin"
         try:
-            data = json.loads(entry.read_text(encoding="utf-8"))
+            text = entry.read_text(encoding="utf-8")
+            if strict:
+                from .repos_registry_reader import _UniqueRegistryLoader
+                yaml.load(text, Loader=_UniqueRegistryLoader)
+            data = json.loads(text)
         except UnicodeDecodeError as exc:
             return EntryDecision.inactive(
                 _finding(
@@ -867,7 +892,7 @@ def scan_config_dropin_registry(
                     detail=f"pointer is not valid UTF-8: {exc}",
                 )
             )
-        except json.JSONDecodeError as exc:
+        except (json.JSONDecodeError, yaml.YAMLError) as exc:
             return EntryDecision.inactive(
                 _finding(
                     entry,
@@ -881,13 +906,14 @@ def scan_config_dropin_registry(
             data,
             project_name=project_name,
             activation_resolver=current_activation,
+            **({"strict": True} if strict else {}),
         )
 
     snapshot = scan_directory(root, classify, registry=REGISTRY_NAME)
     snapshot = _withdraw_confirmed_disappearances(snapshot)
     snapshot = _add_registry_remedies(snapshot, root, entry_classes)
 
-    cache_key = (_root_identity(root), project_name)
+    cache_key = (_root_identity(root), project_name, True) if strict else (_root_identity(root), project_name)
     prior = dict(previous) if previous is not None else dict(
         _LAST_KNOWN.get(cache_key, {})
     )

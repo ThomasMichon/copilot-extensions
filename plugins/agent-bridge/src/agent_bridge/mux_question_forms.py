@@ -107,16 +107,41 @@ def parse_form(screen: str, *, typed: str = "") -> Form | None:
     return Form(question, tuple(options), cursor, other, typed)
 
 
+def stable_screen(screen: str) -> str:
+    """Exclude only the native pending clock and greeting's blinking eyes."""
+    lines = screen.splitlines(keepends=True)
+    headers = [i for i, line in enumerate(lines) if line.strip() == HEADER]
+    if len(headers) != 1:
+        return screen
+    for index in range(headers[0]):
+        lines[index] = re.sub(
+            r"^(│ +█ )(?:▘▝|╴╶)( █ +Check for mistakes\.)", r"\1<eyes>\2", lines[index],
+        )
+    for index in range(headers[0] - 1, -1, -1):
+        text = lines[index].rstrip("\r\n")
+        if not text.strip() or set(text.strip()) == {"─"}:
+            continue
+        match = re.fullmatch(
+            r"([ \t]*○ Asking user Waiting for response)(?: *(?:[0-9]+m )?[0-9]+s)?[ \t]*",
+            text,
+        )
+        if match:
+            lines[index] = match[1] + " <elapsed>" + lines[index][len(text):]
+        break
+    return "".join(lines)
+
+
 def completion_echo(before: str, after: str, form: Form, answer: str) -> bool:
     """Require a newly rendered matching answer, never an old success echo."""
     marker = "Asked user " + " ".join(form.question[:-1])
     expected = form.question[-1] + " " + answer
+    header = re.compile(re.escape(marker) + r"(?: {2,}(?:[0-9]+m )?[0-9]+s)?")
 
     def matching_echoes(screen: str) -> int:
         lines = screen.splitlines()
         count = 0
         for index, line in enumerate(lines[:-1]):
-            if line.strip().removeprefix("●").strip() != marker:
+            if not header.fullmatch(line.strip().removeprefix("●").strip()):
                 continue
             content = lines[index + 1].strip().removeprefix("└").strip()
             if content == expected:

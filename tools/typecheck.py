@@ -23,6 +23,7 @@ sys.path.insert(0, str(ROOT / "tools"))
 sys.path.insert(0, str(ROOT / "libs" / "installer-engine"))
 from tools._admission_protocol import acquire as acquire_environment  # noqa: E402
 from tools.cache_directory_paths import ordinary_cache_root  # noqa: E402
+from tools import plugin_test_resources  # noqa: E402
 from tools.typecheck_source_views import (  # noqa: E402
     GUARD_ENTRY, GUARD_MODULE, INSTALLATION_ENTRY, SourceView, SourceViewError,
     _write_view, guard_alias_view, installation_view,
@@ -535,7 +536,7 @@ def environment_path(
         contents
         + f"\n{sys.version_info[:2]!r}\n{sys.platform}".encode("ascii")
     ).hexdigest()
-    path = root / ".test-venvs" / "typecheck" / sys.platform / digest[:20]
+    path = plugin_test_resources.resource_path(root) / "typecheck" / sys.platform / digest[:20]
     return ordinary_cache_root(path), digest
 
 
@@ -551,6 +552,7 @@ def prepare(root: Path, project: Project) -> None:
         raise TypecheckError("uv is required for --prepare")
     contents = requirements_bytes(root, project)
     path, digest = environment_path(root, project, captured_lock=contents)
+    plugin_test_resources.resource_root(root)
     path.mkdir(parents=True, exist_ok=True)
     lease = acquire_environment(0, path)
     try:

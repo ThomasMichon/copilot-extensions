@@ -78,6 +78,67 @@ counts, and retries do not prove successful acquisition. Other connectors
 using this shared session remain explicitly unclassified until their own
 request owners opt in; this is not provider-wide semantic accounting.
 
+The built-in Azure DevOps connector classifies WIQL/saved-query execution and
+PR listings as `identity_page`, full work-item batches as `item_body`, ID/date,
+repository and account probes as `metadata`, and work-item comments/PR threads
+as `comment_page`. Continuations and failed responses retain their purpose.
+PR listings also return descriptions, even during ID-only path discovery:
+request purpose is not an exclusive payload-content category.
+The existing buffered `paginate_continuation` helper accepts an optional local
+`on_page(ApiResult)` callback after each non-304 JSON result, before requesting
+the next page. Azure DevOps observes PR records there, so later HTTP/JSON failure
+does not erase already-parsed work. The default list return, request order and
+provider protocol stay unchanged; the callback is not an acquisition commit.
+
+`acquisition_by_source[source]` separately counts parsed records at the built-in
+GitHub connector's existing issue-list, targeted-item and comment parsers:
+
+| Field | Meaning |
+|-------|---------|
+| `identity_records` | Object records in issue-list arrays, including PRs, duplicates and records later rejected by semantic validation. Not unique identities or admitted items. |
+| `item_body_records` | Issue-list or targeted-item objects containing a string or null `body`. A listing can supply both an identity record and an item body; a later targeted fetch counts that body again. |
+| `comment_body_records` | Objects containing a string or null `body` in comment arrays, including duplicate records later rejected. |
+
+Counts describe successful JSON parsing of the expected list/object shape,
+before scope, revision, pagination-completeness and identity admission checks.
+Missing or nontext/non-null body fields do not count as bodies; nonobject array
+members do not count as records. Empty strings and null bodies count as returned
+bodies, not absent traffic. A truncated page contributes its returned records
+even if the acquisition subsequently refuses; no manifest or coverage is implied.
+HTTP retries, 304s, failed statuses and JSON parse failures add no parsed records.
+Already-parsed earlier pages remain counted if a later request fails.
+Resuming a saved acquisition plan does not recount its saved identities or bodies;
+only new provider responses enter these counters.
+
+An empty parsed page creates a source entry with zeros. A missing source entry
+means no participating parser was observed in this invocation, **not zero
+provider work**. Other connectors/transports are not qualified by these counts.
+Nested runs keep separate observations. These additive version-1 fields do not
+add requests or alter provider validation, checkpoints, journals or coverage.
+Consumers read field presence from the actual result: an older producer without
+`acquisition_by_source` is unmeasured, not measured zero. Existing readers may
+ignore the optional mapping; no new invocation or required capability is added.
+
+Azure DevOps uses the same counters under its `ado:<org>/<project>:workitems`
+and `:pulls` child sources. WIQL/saved-query `workItems` objects and relation
+`target` objects count as identity records before union/deduplication. PR-list
+objects likewise count before deduplication and timestamp filtering. Work-item
+full-batch objects count once as bodies when their `fields` contain at least one
+string/null `System.Description`, `Microsoft.VSTS.TCM.ReproSteps` or
+`Microsoft.VSTS.Common.AcceptanceCriteria`; ID/date metadata probes do not count.
+PR descriptions use the string/null `description` field. Work-item comments
+use `text`, and comments nested in PR threads use `content`. Missing/nontext
+fields do not count as bodies. Multiple body fields in one work item still
+count as one record, not one body per field.
+
+These are returned records, including duplicates, subsequently filtered bodies
+and parsed comment objects on a page later refused for malformed members.
+Query records do not imply unique IDs; body counts do not imply admitted
+documents, durable progress or snapshot completeness. Already-parsed pages
+remain visible when later acquisition fails; failed HTTP responses do not
+count their error payloads as acquired bodies. No configured queries means no
+participating parser observation, not an observed empty source.
+
 `http: null` means this transport was not observed in the round, **not zero
 provider traffic**. External providers and other transports remain unmeasured.
 An empty purpose mapping likewise means no classified shared-session boundary
@@ -146,6 +207,15 @@ It also checks purpose totals, closed-label refusal and unchanged POST/
 continuation request payloads.
 `tests/test_hinted_crawl.py` checks real hosted identity acquisition and worker
 serialization of the nested counts.
+The existing GitHub connector, hints and polling tests also qualify parsed
+record counts through synthetic HTTP, including listing bodies, comment pages,
+rejected duplicates, source/nested-scope separation, 304/unmeasured distinction
+and interrupted acquisition followed by journal resume.
+The Azure DevOps connector tests additionally distinguish the full selected
+query scan and metadata probes from changed work-item bodies, account/repository
+metadata from embedded PR descriptions, duplicate records from admitted entries,
+and parsed partial comments from refused acquisitions. This is synthetic
+transport coverage, not live-provider or durable Azure DevOps page adoption.
 
 ## Native round qualification
 
@@ -192,6 +262,13 @@ and verifies fresh replacement text and absence of deleted old hits. Actual FTS
 unindexed-row metadata must fall from one to zero; searchability alone could
 come from fallback scanning. The helper also refuses unknown or incomplete
 post-update coverage before the existing owner can publish it as current.
+
+The existing opt-in `tests/test_native_github_poll_matrix.py` additionally
+requires exact parsed identity/item/comment counts in its ten unchanged rounds.
+Its cross-size comparison includes these counts alongside HTTP purposes and
+engine work. Overlap includes embedded listing bodies, interrupted acquisition
+retains parsed work, resume omits saved-plan records, truncated pages do not
+imply admitted work, and foreign-account refusal remains unobserved.
 
 The broader acceptance matrix remains open: existing-store preparation,
 bounded consolidation over many rounds, hosted pagination/body accounting,

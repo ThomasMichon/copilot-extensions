@@ -1,0 +1,9 @@
+{
+  "comment": "Add finite model-facing delivery waits and fresh read-only pending-input observations without waiting for turn completion.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

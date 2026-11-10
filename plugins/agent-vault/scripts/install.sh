@@ -25,6 +25,7 @@ _parse_arguments() {
     NO_SERVICE=0
     PURGE=0
     DRY_RUN=0
+    PROFILE="${AGENT_VAULT_INSTALL_PROFILE:-}"
     INSTALL_DIR=""
     FORCE="${AGENT_VAULT_ALLOW_DOWNGRADE:-0}"
     [[ "$FORCE" == "1" ]] && FORCE=1 || FORCE=0
@@ -35,11 +36,20 @@ _parse_arguments() {
             --force) FORCE=1; shift ;;
             --dry-run) DRY_RUN=1; shift ;;
             --install-dir) INSTALL_DIR="${2:?--install-dir requires a directory}"; shift 2 ;;
+            --profile) PROFILE="${2:?--profile requires base or ssh}"; shift 2 ;;
             *) _fail "Unknown option: $1"; exit 2 ;;
         esac
     done
 }
 _parse_arguments "$@"
+if [[ -n "$PROFILE" ]]; then
+    case "$PROFILE" in base|ssh) ;; *) _fail 'Unsupported Vault installation profile'; exit 2 ;; esac
+    case "$ACTION" in
+        install|update|stamp|provision) ;;
+        *) _fail 'Vault dependency selection requires install, update, stamp or provision'; exit 2 ;;
+    esac
+    export AGENT_VAULT_INSTALL_PROFILE="$PROFILE"
+fi
 
 case "$ACTION" in
     install|update|stamp|provision|start)
@@ -334,6 +344,7 @@ _versioned_current() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || { echo ""; return 0; }
     local vr="$SCRIPT_DIR/versioned_runtime.py"
     local py="$LINK_DIR/bin/python"
+    if [[ -n "${RUNTIME_PROFILE:-}" ]]; then py="$(_bootstrap_python)" || return 1; fi
     [[ -x "$py" ]] || py="$VENV_DIR/bin/python"
     [[ -x "$py" ]] || { echo ""; return 0; }
     "$py" "$vr" --root "$INSTALL_DIR" --link-name ".venv" current 2>/dev/null || echo ""
@@ -357,6 +368,17 @@ _versioned_gc() {
 _bootstrap_python() {
     # Keep construction supervision outside the candidate being built.
     local __c
+    if [[ -n "${PROFILE:-}" || -e "$INSTALL_DIR/runtime-profile.json" || -L "$INSTALL_DIR/runtime-profile.json" ]]; then
+        for __c in python3 python python3.13 python3.12 python3.11; do
+            if command -v "$__c" >/dev/null 2>&1 &&
+                "$__c" -I -S -B -c 'import sys; assert sys.version_info >= (3, 11)' 2>/dev/null; then
+                command -v "$__c"
+                return 0
+            fi
+        done
+        printf '%s\n' 'Vault dependency profiles require an existing Python 3.11+ bootstrap interpreter' >&2
+        return 1
+    fi
     for __c in python3 python; do
         if command -v "$__c" >/dev/null 2>&1; then command -v "$__c"; return 0; fi
     done
@@ -364,6 +386,13 @@ _bootstrap_python() {
 }
 
 _payload_hash() {
+    if [[ -n "${RUNTIME_PROFILE:-}" ]]; then
+        local profile_python
+        profile_python="$(_bootstrap_python)" || return 1
+        "$profile_python" -I -B "$SCRIPT_DIR/runtime_profile.py" \
+            --root "$INSTALL_DIR" fingerprint
+        return $?
+    fi
     # Cheap payload fingerprint for the completion marker (#935): sha256 of
     # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
     # changed the payload WITHOUT bumping the version. Fails on any error.
@@ -404,6 +433,7 @@ _versioned_slot_clean() {
         helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
+    if [[ -n "${RUNTIME_PROFILE:-}" ]]; then vr="$SCRIPT_DIR/runtime_profile.py"; fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
         "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
     _assert_source_runtime
@@ -416,6 +446,12 @@ _versioned_mark_complete() {
     if [[ -n "${1:-}" && "$1" != "$actual_hash" ]]; then
         printf '%s\n' 'Payload changed during construction; completion refused' >&2
         return 1
+    fi
+    if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" && -z "${RUNTIME_PROFILE:-}" ]]; then
+        local py
+        py="$(_bootstrap_python)" || return 1
+        "$py" -I -B "$SCRIPT_DIR/runtime_source_target.py" --root "$INSTALL_DIR" \
+            --record-slot "$SRC_VERSION" --payload-hash "$actual_hash" || return 1
     fi
     _runtime_construction_complete "$actual_hash"
 }
@@ -432,18 +468,31 @@ _write_runtime_manifest() {
             _assert_source_runtime || return 1
             local fields py
             py="$(_bootstrap_python)" || return 1
-            fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
-                --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-vault \
-                --expected-runtime-version "$SRC_VERSION" \
-                --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" --format shell-fields)" || return 1
+            if [[ -n "${RUNTIME_PROFILE:-}" ]]; then
+                fields="$("$py" -I -B "$SCRIPT_DIR/runtime_profile.py" \
+                    --root "$INSTALL_DIR" fields)" || return 1
+            else
+                fields="$("$py" -I -B "$SCRIPT_DIR/versioned_runtime_source.py" \
+                    --payload "$PLUGIN_DIR" --package-version "$PACKAGE_VERSION" --plugin agent-vault \
+                    --expected-runtime-version "$SOURCE_RUNTIME_VERSION" \
+                    --expected-source-identity "$SOURCE_RUNTIME_IDENTITY" --format shell-fields)" || return 1
+                fields="$fields, \"runtime_profile\": \"base\""
+            fi
             write_deploy_manifest agent-vault agent-vault "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" \
                 "$fields" "$SOURCE_MANIFEST_ORIGIN" "$PACKAGE_VERSION"
         ) || return 1
         return 0
     fi
     _assert_source_runtime || return 1
+    local fields=""
+    if [[ -n "${RUNTIME_PROFILE:-}" ]]; then
+        local py
+        py="$(_bootstrap_python)" || return 1
+        fields="$("$py" -I -B "$SCRIPT_DIR/runtime_profile.py" \
+            --root "$INSTALL_DIR" fields)" || return 1
+    fi
     write_deploy_manifest agent-vault agent-vault "$INSTALL_DIR" "$PLUGIN_DIR" "$VENV_DIR" \
-        "" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
+        "$fields" "${COPILOT_PLUGIN_STAGED_FROM:-$PLUGIN_DIR}" "$PACKAGE_VERSION"
 }
 
 # === install-contract:v4 source-kind -- keep byte-identical across plugins ===
@@ -666,15 +715,18 @@ _ensure_runtime() {
         exit 1
     fi
     have_uv=1
+    if [[ -n "${RUNTIME_PROFILE:-}" ]]; then export AGENT_VAULT_INSTALL_UV="$uv_cmd"; fi
 
     mkdir -p "$INSTALL_DIR" "$LOCAL_BIN" || {
         _fail "Vault runtime directories cannot be prepared: $INSTALL_DIR"; return 1;
     }
     _ok "Directories: $INSTALL_DIR"
 
+    local prev_version=""
+    [[ "$VERSIONED_RUNTIME" != 1 ]] || prev_version="$(_versioned_current)"
     _versioned_slot_clean || return 1
     if [[ "$_RUNTIME_CONSTRUCTION_REUSE" == 1 ]]; then
-        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" || -n "${RUNTIME_PROFILE:-}" ]]; then
             _test_runtime_healthy || return 1
             _deploy_binstub || return 1
             _write_askpass || return 1
@@ -682,8 +734,9 @@ _ensure_runtime() {
             if [[ ! -f "$INSTALL_DIR/current-version" || "$(cat "$INSTALL_DIR/current-version")" != "$SRC_VERSION" ]]; then
                 _versioned_activate || return 1
             fi
-            _stamp_source_payload || return 1
+            if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" ]]; then _stamp_source_payload || return 1; fi
             _write_runtime_manifest || return 1
+            _finalize_runtime "$prev_version" || return 1
         fi
         return 0
     fi
@@ -768,6 +821,11 @@ _ensure_runtime() {
         _assert_source_runtime || return 1
     fi
     _write_runtime_manifest || return 1
+    _finalize_runtime "$prev_version"
+}
+
+_finalize_runtime() {
+    local prev_version="$1"
     _check_keepassxc
 
     if "$LINK_PYTHON" -I -c 'import agent_vault' 2>/dev/null; then
@@ -842,6 +900,8 @@ _install_service() {
             AGENT_VAULT_INSTALLATION_ID="$INSTALLATION_ID" \
             "$LINK_PYTHON" -X "pycache_prefix=$INSTALL_DIR/cache/python/unsealed-$cache_id" -m agent_vault.service --export-handoff 2>/dev/null
         )" || handoff_json=""
+        # One-shot child has exited; drop the cache namespace it minted.
+        rm -rf -- "$INSTALL_DIR/cache/python/unsealed-$cache_id" 2>/dev/null || true
     fi
 
     service_configuration="$("$LINK_PYTHON" -I -B -X utf8 -c \
@@ -1242,6 +1302,7 @@ _enter_install_lock() {
 . "$SCRIPT_DIR/source-runtime.sh"
 PACKAGE_VERSION="$SRC_VERSION"
 SOURCE_RUNTIME_IDENTITY=""
+RUNTIME_PROFILE=""
 case "$ACTION" in
     install|update|provision|stamp) _initialize_source_runtime || exit 1 ;;
 esac
@@ -1259,12 +1320,35 @@ case "$ACTION:${DRY_RUN:-0}" in
 esac
 
 case "$ACTION" in
+    install|update|provision|stamp)
+        if [[ -n "${SOURCE_RUNTIME_IDENTITY:-}" && -n "${COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET+x}" ]]; then
+            target_python="$(_bootstrap_python)" || exit 1
+            "$target_python" -I -B "$SCRIPT_DIR/runtime_source_target.py" \
+                --root "$INSTALL_DIR" --check-target || exit 1
+        fi
+        if [[ -n "$PROFILE" || -e "$INSTALL_DIR/runtime-profile.json" || -L "$INSTALL_DIR/runtime-profile.json" ]]; then
+            profile_python="$(_bootstrap_python)" || exit 1
+            profile_arguments=(--root "$INSTALL_DIR" select)
+            [[ "$DRY_RUN" == 1 ]] || profile_arguments+=(--persist)
+            [[ -z "$PROFILE" ]] || profile_arguments+=(--profile "$PROFILE")
+            selected="$("$profile_python" -I -B "$SCRIPT_DIR/runtime_profile.py" "${profile_arguments[@]}")" || exit 1
+            selected="$("$profile_python" -I -c 'import json,sys
+d=json.loads(sys.argv[1]); print(d["profile"]); print(d["runtime_version"])' "$selected")" || exit 1
+            RUNTIME_PROFILE="${selected%%$'\n'*}"
+            SRC_VERSION="${selected#*$'\n'}"
+            VENV_DIR="$INSTALL_DIR/versions/$SRC_VERSION"
+            VENV_PYTHON="$VENV_DIR/bin/python"
+            LINK_PYTHON="$VENV_PYTHON"
+        fi
+        ;;
+esac
+case "$ACTION" in
     install|update|provision|stamp) _assert_source_runtime || exit 1 ;;
 esac
 case "$ACTION:${DRY_RUN:-0}" in
     install:0|update:0|provision:0)
         . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"
         ;;
 esac
 case "$ACTION" in

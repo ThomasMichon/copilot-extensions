@@ -6,6 +6,8 @@ from collections.abc import Iterator
 
 import httpx
 
+from agent_index.indexing.work_counts import measure_reindex
+from agent_index.sources.good_citizen_http import GoodCitizenSession
 from agent_index.sources.github import GitHubConnector
 
 
@@ -85,7 +87,18 @@ def test_github_connector_paginates_and_parses_entries(monkeypatch) -> None:
         transport=httpx.MockTransport(handler),
         min_interval_s=0,
     )
-    entries = connector.discover()
+
+    @measure_reindex
+    def run():
+        return {"entries": connector.discover()}
+
+    result = run()
+    entries = result["entries"]
+    assert result["work_counts"]["acquisition_by_source"] == {
+        "github:acme/widgets": {
+            "identity_records": 2, "item_body_records": 2, "comment_body_records": 2,
+        },
+    }
 
     assert {entry.path for entry in entries} == {"issues/1.md", "pulls/2.md"}
     assert {entry.language for entry in entries} == {"issue", "pull_request"}
@@ -112,8 +125,19 @@ def test_github_connector_uses_etags_and_skips_304() -> None:
         min_interval_s=0,
     )
 
-    assert connector.discover() == []
-    assert connector.discover() == []
+    @measure_reindex
+    def run():
+        return {"entries": connector.discover()}
+
+    fresh = run()
+    cached = run()
+    assert fresh["entries"] == cached["entries"] == []
+    assert fresh["work_counts"]["acquisition_by_source"] == {
+        "github:acme/widgets": {
+            "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
+        },
+    }
+    assert cached["work_counts"]["acquisition_by_source"] == {}
     assert seen_if_none_match == [None, '"cached"']
 
 
@@ -149,3 +173,49 @@ def test_github_connector_sleeps_for_rate_limit_and_retry_after(monkeypatch) -> 
     assert calls == 3
     assert any(delay > 0 for delay in sleeps)
     assert 3 in sleeps
+
+
+def test_record_counts_are_source_local_and_require_parser_observations():
+    def handler(request):
+        if request.url.path.endswith("/issues"):
+            return _json_response(200, [
+                {"number": 1, "body": None}, {"number": 1, "body": ""},
+                {"number": 2}, {"number": 3, "body": 42}, "not an item",
+            ])
+        return _json_response(200, [])
+
+    providers = [
+        GitHubConnector(
+            source, token="fixture", min_interval_s=0, transport=httpx.MockTransport(handler),
+        )
+        for source in ("github:acme/first", "github:acme/second")
+    ]
+    session = GoodCitizenSession(
+        base_url="https://example.test", min_interval_s=0,
+        transport=httpx.MockTransport(lambda _: _json_response(200, [{"body": "unclassified"}])),
+    )
+
+    @measure_reindex
+    def inner():
+        providers[1].list_paths()
+        return {}
+
+    @measure_reindex
+    def run():
+        session.get_json("/items")
+        providers[0].list_paths()
+        assert set(inner()["work_counts"]["acquisition_by_source"]) == {"github:acme/second"}
+        return {}
+
+    try:
+        counts = run()["work_counts"]
+        assert counts["acquisition_by_source"] == {
+            "github:acme/first": {
+                "identity_records": 4, "item_body_records": 2, "comment_body_records": 0,
+            },
+        }
+        assert counts["http_by_purpose"]["unclassified"]["json_results"] == 1
+    finally:
+        for provider in providers:
+            provider._client.close()
+        session.client.close()

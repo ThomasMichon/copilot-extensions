@@ -1,0 +1,9 @@
+{
+  "comment": "Filter Azure DevOps work-item metadata before fetching unchanged bodies",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

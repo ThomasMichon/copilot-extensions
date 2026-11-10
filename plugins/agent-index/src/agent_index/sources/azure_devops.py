@@ -12,7 +12,7 @@ from datetime import datetime, timedelta, timezone
 from html import unescape
 from html.parser import HTMLParser
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 from urllib.parse import quote
 
 import httpx
@@ -181,18 +181,56 @@ class AzureDevOpsConnector:
         for chunk in _chunks(ids, self._batch_size):
             if cancel_check:
                 cancel_check()
+            if since_dt:
+                chunk = self._work_item_ids_in_window(chunk, since_dt)
+                if not chunk:
+                    continue
+                if cancel_check:
+                    cancel_check()
             result = self._http.post_json(
                 self._project_path("_apis", "wit", "workitemsbatch"),
                 params={"api-version": _DEFAULT_API_VERSION},
                 json={"ids": chunk, "$expand": "all"},
+                purpose="item_body",
             )
+            self._observe_records(result.data, kind="workitems")
             for item in _values(result.data):
                 if isinstance(item, dict):
                     if since_dt and not self._work_item_in_window(item, since_dt):
                         continue
-                    comments = self._work_item_comments(item.get("id"))
+                    comments = self._work_item_comments(item.get("id"), cancel_check=cancel_check)
                     entries.append(self._work_item_entry(item, comments))
         return entries
+
+    def _work_item_ids_in_window(self, ids: list[int], since: datetime) -> list[int]:
+        result = self._http.post_json(
+            self._project_path("_apis", "wit", "workitemsbatch"),
+            params={"api-version": _DEFAULT_API_VERSION},
+            json={
+                "ids": ids,
+                "fields": ["System.Id", "System.ChangedDate"],
+                "errorPolicy": "fail",
+            },
+            purpose="metadata",
+        )
+        expected = set(ids)
+        seen: set[int] = set()
+        changed: set[int] = set()
+        for item in _values(result.data):
+            item_id = item.get("id") if isinstance(item, dict) else None
+            if type(item_id) is not int or item_id not in expected or item_id in seen:
+                raise ValueError("Azure DevOps work-item metadata has invalid identities")
+            fields = item.get("fields")
+            stamp = fields.get("System.ChangedDate") if isinstance(fields, dict) else None
+            changed_at = _parse_datetime(stamp) if isinstance(stamp, str) else None
+            if changed_at is None:
+                raise ValueError("Azure DevOps work-item metadata has no valid ChangedDate")
+            seen.add(item_id)
+            if changed_at >= since:
+                changed.add(item_id)
+        if seen != expected:
+            raise ValueError("Azure DevOps work-item metadata batch is incomplete")
+        return [item_id for item_id in ids if item_id in changed]
 
     def _work_item_ids(self) -> list[int]:
         if not self._work_item_queries:
@@ -201,8 +239,60 @@ class AzureDevOpsConnector:
         ids: list[int] = []
         for query in self._work_item_queries:
             result = self._run_work_item_query(query)
+            if isinstance(result.data, dict):
+                self._observe_records(result.data.get("workItems"), kind="query")
+                relations = result.data.get("workItemRelations")
+                if isinstance(relations, list):
+                    self._observe_records([
+                        relation.get("target") for relation in relations if isinstance(relation, dict)
+                    ], kind="query")
             ids.extend(_work_item_ids_from_result(result.data))
         return list(dict.fromkeys(ids))
+
+    def _observe_records(
+        self, records: Any, *,
+        kind: Literal["query", "workitems", "pulls", "workitem_comments", "pull_comments"],
+    ) -> None:
+        from agent_index.indexing.work_counts import observe_acquisition
+
+        if kind in {"workitems", "pulls", "pull_comments"} and isinstance(records, dict):
+            records = records.get("value")
+        if not isinstance(records, list):
+            return
+        if kind == "pull_comments":
+            records = [
+                comment for thread in records if isinstance(thread, dict)
+                and isinstance(thread.get("comments"), list) for comment in thread["comments"]
+            ]
+        is_pull = kind in {"pulls", "pull_comments"}
+        counts = observe_acquisition(self._pulls_source if is_pull else self._workitems_source)
+        if counts is None:
+            return
+        for record in records:
+            if not isinstance(record, dict):
+                continue
+            if kind in {"query", "pulls"}:
+                counts.identity_records += 1
+            if kind == "query":
+                continue
+            if kind == "workitems":
+                fields = record.get("fields")
+                body = isinstance(fields, dict) and any(
+                    key in fields and (fields[key] is None or isinstance(fields[key], str))
+                    for key in (
+                        "System.Description", "Microsoft.VSTS.TCM.ReproSteps",
+                        "Microsoft.VSTS.Common.AcceptanceCriteria",
+                    )
+                )
+            else:
+                key = {"pulls": "description", "workitem_comments": "text",
+                       "pull_comments": "content"}[kind]
+                body = key in record and (record[key] is None or isinstance(record[key], str))
+            if body:
+                if kind in {"workitem_comments", "pull_comments"}:
+                    counts.comment_body_records += 1
+                else:
+                    counts.item_body_records += 1
 
     def _run_work_item_query(self, query: dict[str, Any]) -> Any:
         if wiql := query.get("wiql"):
@@ -210,6 +300,7 @@ class AzureDevOpsConnector:
                 self._project_path("_apis", "wit", "wiql"),
                 params={"api-version": _DEFAULT_API_VERSION},
                 json={"query": wiql},
+                purpose="identity_page",
             )
             return result
 
@@ -217,24 +308,50 @@ class AzureDevOpsConnector:
         return self._http.get_json(
             self._project_path("_apis", "wit", "wiql", saved_query_id),
             params={"api-version": _DEFAULT_API_VERSION},
+            purpose="identity_page",
         )
 
-    def _work_item_comments(self, work_item_id: Any) -> list[dict[str, Any]]:
+    def _work_item_comments(
+        self, work_item_id: Any, *, cancel_check: Callable[[], None] | None = None,
+    ) -> list[dict[str, Any]]:
         if work_item_id is None:
             return []
-        try:
-            result = self._http.get_json(
-                self._project_path("_apis", "wit", "workItems", str(work_item_id), "comments"),
-                params={"api-version": _DEFAULT_COMMENT_API_VERSION},
-            )
-        except httpx.HTTPStatusError as exc:
-            if exc.response.status_code == httpx.codes.NOT_FOUND:
-                return []
-            raise
-        if isinstance(result.data, dict):
-            comments = result.data.get("comments") or result.data.get("value") or []
-            return [comment for comment in comments if isinstance(comment, dict)]
-        return []
+        comments: list[dict[str, Any]] = []
+        continuation: str | None = None
+        seen_tokens: set[str] = set()
+        while True:
+            if cancel_check:
+                cancel_check()
+            try:
+                result = self._http.get_json(
+                    self._project_path("_apis", "wit", "workItems", str(work_item_id), "comments"),
+                    params={
+                        "api-version": _DEFAULT_COMMENT_API_VERSION,
+                        "continuationToken": continuation,
+                    },
+                    purpose="comment_page",
+                )
+            except httpx.HTTPStatusError as exc:
+                if exc.response.status_code == httpx.codes.NOT_FOUND and continuation is None:
+                    return []
+                raise
+            data = result.data
+            if not isinstance(data, dict):
+                raise ValueError("Azure DevOps work-item comment page is not an object")
+            page = data.get("comments") if "comments" in data else data.get("value")
+            self._observe_records(page, kind="workitem_comments")
+            if not isinstance(page, list) or any(not isinstance(item, dict) for item in page):
+                raise ValueError("Azure DevOps work-item comment page has invalid comments")
+            comments.extend(page)
+            next_token = data.get("continuationToken")
+            if next_token is None or next_token == "":
+                if data.get("nextPage"):
+                    raise ValueError("Azure DevOps work-item comments have no continuation token")
+                return comments
+            if not isinstance(next_token, str) or next_token in seen_tokens:
+                raise ValueError("Azure DevOps work-item comment continuation made no progress")
+            seen_tokens.add(next_token)
+            continuation = next_token
 
     def _discover_pull_requests(
         self,
@@ -272,6 +389,8 @@ class AzureDevOpsConnector:
             for result in self._http.paginate_continuation(
                 self._project_path("_apis", "git", "pullrequests"),
                 params=params,
+                purpose="identity_page",
+                on_page=lambda page: self._observe_records(page.data, kind="pulls"),
             ):
                 for item in _values(result.data):
                     if not isinstance(item, dict):
@@ -312,6 +431,7 @@ class AzureDevOpsConnector:
         result = self._http.get_json(
             self._project_path("_apis", "git", "repositories"),
             params={"api-version": _DEFAULT_API_VERSION},
+            purpose="metadata",
         )
         for item in _values(result.data):
             if not isinstance(item, dict):
@@ -339,6 +459,7 @@ class AzureDevOpsConnector:
         result = self._http.get_json(
             self._org_path("_apis", "connectionData"),
             params={"api-version": _DEFAULT_API_VERSION},
+            purpose="metadata",
         )
         user = result.data.get("authenticatedUser") if isinstance(result.data, dict) else None
         user_id = user.get("id") if isinstance(user, dict) else None
@@ -365,11 +486,13 @@ class AzureDevOpsConnector:
                     "threads",
                 ),
                 params={"api-version": _DEFAULT_API_VERSION},
+                purpose="comment_page",
             )
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code == httpx.codes.NOT_FOUND:
                 return []
             raise
+        self._observe_records(result.data, kind="pull_comments")
         comments: list[dict[str, Any]] = []
         for thread in _values(result.data):
             if not isinstance(thread, dict):

@@ -93,6 +93,13 @@ claims, or perform an adopter pilot. Review and source merge grant none of
 those effects. Fixture qualification in later source phases must use isolated,
 authorized resources and the existing runner/lease/cleanup boundaries.
 
+Normal pinned release-dependency acquisition, read-only dependency-code
+inspection and the repository's existing isolated native CI are in scope.
+This does not authorize upstream repository changes, issues or PR/discussion
+participation, shared-host backend startup/query/reaping, or real-target
+effects. The earlier dependency-fetch validation hold was superseded; normal
+review, required checks and accepted Main publication remain mandatory.
+
 ## Plan
 
 ### Phase 1 — First complete ordinary relocation flow
@@ -107,6 +114,26 @@ authorized resources and the existing runner/lease/cleanup boundaries.
 - [x] Record precise supported/unsupported cases and hand the qualified source
   result to separately authorized adoption. Hold widening for initial pilot
   feedback; source approval itself never starts that pilot.
+
+### Phase 1b — Qualified owner observation and receiving continuity
+
+The [scoped prerequisite proposal](receiving-continuity.md) preserves the
+old-final-first ordering. It is agent-recommended realization of the original
+request, not a new migration or runtime-effect grant.
+
+- [ ] Obtain a qualified non-mutating native mux-ownership observation through
+  its existing owner; unavailable evidence remains a hold, not inactive proof.
+- [x] Complete the independent pure planning/refusal source boundary without action
+  probes, original-proof recovery or mutation leases. Its local qualification
+  is not native inactivity proof. #11706 is reviewed and merged; ordinary
+  accepted Main qualification/publication remains separately observed.
+- [ ] Qualify explicit source-owned receiving-proof inspection/reconciliation
+  separately from read-only planning, preserving the original operation.
+- [ ] Support the first clean, sessionless, unpaired concluded receiving
+  allocation with settled origin responsibility and an owner-serialized
+  current-location revision; immutable allocation provenance stays unchanged.
+- [ ] Prove the complete native consumer and interrupted/refused paths before
+  source merge/release or separately authorized adopter practice.
 
 ### Phase 2 — Broader inactive continuity
 - [ ] Incorporate generic first-flow feedback; support inactive WIP with exact
@@ -156,6 +183,10 @@ effects remain separate gates. Phase 1 source implementation is admitted;
 adopter pilot feedback gates subsequent widening.
 
 ## Journal
+
+[2026-11-08 — Owner observation and receiving proof](journal/2026/11.08%20Owner%20observation%20and%20receiving%20proof.md)
+records the source-confirmed boundary and current prerequisite proposal.
+Earlier inline entries below remain historical source evidence.
 
 ### 2026-11-05 — Planning and coordination
 - Rechecked public issue/PR title searches; no relocation claimant found.
@@ -805,3 +836,27 @@ adopter pilot feedback gates subsequent widening.
 - Ordinary Dev CI and automatic Main native qualification, attestation and
   publication remain separate from this source merge. No installed selection,
   allocation default, shared service or real retained worktree was changed.
+
+### 2026-11-09 — Pure refusal source merged; release acceptance remains separate
+- Reconciled normal pinned dependency acquisition and isolated native CI as
+  permitted validation, without requesting an upstream contribution or any
+  shared-host/real-target operation. The previous fetch-scope hold is cleared,
+  not replaced with a skipped gate or artifact workaround.
+- [#11706](https://github.com/ThomasMichon/copilot-extensions/pull/11706) merged
+  at `5f481011e3c682b417fe8816acda87317ad9f29f`
+  (`2026-11-09T20:36:00Z`). Actual Copilot approval `5832301655` is bound to
+  reviewed head `6f089865ad5e642054c0f1e8b840fe0d47d234be`; required checks
+  passed and the inline thread was resolved. The configured Maintainer
+  exception concerns only the additional CODEOWNER vote, not review or CI.
+- The exact-source packet passed 14 controls: passive native CLI refusal with
+  unchanged state/file identity and forbidden-invocation poison, canonical
+  lifecycle marker location, strict Git-timeout refusal and retained strict
+  recovery-fixture routing. No new cross-volume fixture, positive native
+  inactivity proof or real move is claimed.
+- Resolved only the independent pure-refusal source leaf after re-reading this
+  effort. The ordinary automatic Main qualification/publication is still
+  observed separately. Native complete-owner proof, original receiving
+  continuity, wider inactive categories and adopter pilot/cohort remain open.
+- Retain this Active effort, #10879, its source workspace and ownership for
+  subsequent acceptance reconciliation. No installation, runtime/service
+  change, allocation-default update or real checkout movement follows.

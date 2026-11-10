@@ -137,6 +137,25 @@
       "applyTo": "**",
       "customizationKind": "instructions",
       "deliveryMode": "selector",
+      "destination": ".github/instructions/customizing-copilot/session-guidance-writers.instructions.md",
+      "fallback": {
+        "destination": ".github/copilot/context-fallbacks/customizing-copilot/session-guidance-writers.md",
+        "renderedBytes": 2037,
+        "renderedSha256": "f703f73878b8ab05810ebf0cb152b54c452efa2d5352060c3c1239e3c9880d6b"
+      },
+      "plugin": "customizing-copilot@copilot-extensions",
+      "pluginVersion": "0.1.0-dev97",
+      "renderedBytes": 1503,
+      "renderedSha256": "51bb0d6b220f27d9352019d6c6489b055f3e6a79944e9cd754307660d91fcc19",
+      "sourceId": "session-guidance-writers",
+      "template": "instructions/session-guidance-writers.instructions.md",
+      "templateBytes": 1234,
+      "templateSha256": "e0c5f42329ebdb53000e1fed2b66f447f89ac0419d1847d952f566cf02aa9b0c"
+    },
+    {
+      "applyTo": "**",
+      "customizationKind": "instructions",
+      "deliveryMode": "selector",
       "destination": ".github/instructions/efforts/completion-gate.instructions.md",
       "fallback": {
         "destination": ".github/copilot/context-fallbacks/efforts/completion-gate.md",

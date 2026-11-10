@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import importlib.util
+import shutil
 import sys
 from pathlib import Path
 
@@ -64,6 +66,52 @@ def test_build_with_pending_changefile_reports_hypothetical_version(isolated: Pa
 def test_build_unknown_plugin_raises(isolated: Path):
     with pytest.raises(FileNotFoundError):
         preview_release.build("does-not-exist", isolated / "work")
+
+
+@pytest.mark.parametrize("initial", ["absent", "stale", "conflict"])
+def test_preview_generates_invocation_outputs_before_publication(isolated, monkeypatch, initial):
+    plugin = _plugin(isolated, "sample", "1.0.0")
+    scripts = plugin / "scripts"
+    scripts.mkdir()
+    for name in ("install.sh", "install.ps1", "resolve-runtime.sh", "resolve-runtime.ps1"):
+        (scripts / name).write_bytes(b"# synthetic installer input\n")
+    tooling = Path(__file__).resolve().parents[1] / "libs/payload-invocation"
+    templates = isolated / "libs/payload-invocation/templates"
+    shutil.copytree(tooling / "templates", templates)
+    data = {
+        "schema": "copilot-extensions.payload-invocation", "version": 1,
+        "command": "sample", "module": "sample.cli", "purpose": "Sample command",
+        "runtimeRoot": ".sample", "noSelfProvisionEnv": "SAMPLE_NO_PROVISION",
+    }
+    if initial == "conflict":
+        data["outputDir"] = "scripts/emit-command-catalog.sh"
+    (plugin / "payload-invocation.json").write_text(json.dumps(data), encoding="utf-8")
+    if initial == "stale":
+        (plugin / "bin").mkdir()
+        (plugin / "bin/sample.ps1").write_bytes(b"# stale generated shim\n")
+    before = {path.relative_to(isolated): path.read_bytes()
+              for path in isolated.rglob("*") if path.is_file()}
+    monkeypatch.setattr(preview_release, "_git_head", lambda: "a" * 40)
+    work = isolated.parent / "preview"
+    if initial == "conflict":
+        with pytest.raises(RuntimeError, match="generated output path conflict"):
+            preview_release.build("sample", work)
+        assert not (work / "sample/PREVIEW.json").exists()
+    else:
+        destination = preview_release.build("sample", work)
+        spec = importlib.util.spec_from_file_location("_preview_expected_invocation", tooling / "generate.py")
+        assert spec and spec.loader
+        generator = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(generator)
+        expected = generator.expected_files(
+            destination / "payload-invocation.json", canonical_root=isolated,
+        )
+        for path, content in expected.items():
+            assert path.read_bytes() == (content.encode("utf-8") if isinstance(content, str) else content)
+        manifest = json.loads((destination / "PREVIEW.json").read_text())
+        assert manifest["payload_invocation_materialize_log"]
+    assert before == {path.relative_to(isolated): path.read_bytes()
+                      for path in isolated.rglob("*") if path.is_file()}
 
 
 def test_build_ignores_a_local_dev_venv_in_the_plugin_source(isolated: Path):
@@ -175,6 +223,12 @@ class _FakeMaterializeMain:
         return []
 
     def materialize_launch_wrapper_assets_into(
+        self, *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
+    ) -> list[str]:
+        assert canonical_root == self._canonical_root
+        return []
+
+    def materialize_payload_invocation_into(
         self, *, source_consumer_dir: Path, dest_consumer_dir: Path, canonical_root: Path
     ) -> list[str]:
         assert canonical_root == self._canonical_root

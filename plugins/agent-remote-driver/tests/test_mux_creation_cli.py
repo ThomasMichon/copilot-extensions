@@ -110,6 +110,67 @@ def test_admitted_join_does_not_query_or_prepare_another_native_command(monkeypa
     ) is None
 
 
+def test_dispatched_creation_waits_for_partial_rendezvous_without_replay(monkeypatch):
+    class Child:
+        returncode = None
+        waits = 0
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def wait(self, timeout=None):
+            self.waits += 1
+            if self.waits < 3:
+                raise subprocess.TimeoutExpired("synthetic mux", timeout)
+            self.returncode = 0
+
+        def kill(self):
+            pytest.fail("A publishing server must retain its creation client")
+
+    child = Child()
+    starts = []
+    releases = []
+
+    def start(argv, **kwargs):
+        starts.append(argv)
+        return child
+
+    def present(*args, **kwargs):
+        if child.waits == 1:
+            raise mux.ObservationUnavailable("publishing")
+        return True
+
+    monkeypatch.setattr(mux.subprocess, "Popen", start)
+    monkeypatch.setattr(mux, "has_session", present)
+    argv = ["psmux.exe", "new-session", "-d", "-s", "wt-fixture"]
+    result = mux.run_session(argv, "wt-fixture", lambda: releases.append(True))
+    assert result.returncode == 0
+    assert starts == [argv] and releases == [True] and child.waits == 3
+
+
+def test_unknown_presence_cannot_admit_creation_after_acquiring_the_gate(monkeypatch):
+    class Lease:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def acquire(self):
+            pass
+
+        def release(self):
+            pass
+
+    def unknown():
+        raise mux.ObservationUnavailable("unconfirmed native session")
+
+    monkeypatch.setattr(mux, "SingleInstance", Lease)
+    with pytest.raises(mux.ObservationUnavailable):
+        with mux.session_gate("wt-fixture", exists=unknown, enabled=True):
+            pytest.fail("Unknown presence admitted another creation")
+
+
 @pytest.mark.parametrize("invalid", [
     "duplicate", "oversized", "version", "target", "command", "nul", "extra", "type",
 ])

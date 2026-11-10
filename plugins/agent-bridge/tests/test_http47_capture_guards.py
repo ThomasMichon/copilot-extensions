@@ -387,7 +387,8 @@ def test_http47_capture_reproducible_real_commit_preserves_history(repository, m
         item in current["fixtures"]
         for item in previous["fixtures"] if item["path"] not in outputs
     )
-    assert all(item in current["provenance"] for item in previous["provenance"])
+    current_provenance = {evidence.encode(item) for item in current["provenance"]}
+    assert all(evidence.encode(item) in current_provenance for item in previous["provenance"])
     assert updated["contracts"][1:] == old["contracts"][1:]
     checked = subprocess.run(
         [sys.executable, str(root / "tools/check-agent-bridge-contracts.py")],

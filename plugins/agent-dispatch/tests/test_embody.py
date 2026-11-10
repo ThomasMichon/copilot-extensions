@@ -146,6 +146,138 @@ def test_conclude_dispatch_attempt_requests_exact_managed_removal(monkeypatch):
     assert result["action"] == "removed"
 
 
+def _nonce_conclusion_cli(monkeypatch, *outcomes):
+    calls = []
+    replies = iter(outcomes)
+    monkeypatch.setattr(embody, "resolve_worktree", lambda *_a, **_k: {
+        "project": "widgets", "path": "/fixture/wt-review",
+    })
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(
+        embody.subprocess, "run",
+        lambda cmd, **_kwargs: calls.append(cmd) or next(replies),
+    )
+    result = embody.conclude_dispatch_attempt(
+        "wt-review", None, "dispatch-task:task-1:1", owner="ordinary-bridge",
+        project="widgets", worktree_path="/fixture/wt-review", creation_nonce="nonce-a",
+    )
+    return result, [cmd[6:10] for cmd in calls]
+
+
+def test_conclude_dispatch_attempt_proves_bridge_creation_by_nonce(monkeypatch):
+    result, proofs = _nonce_conclusion_cli(
+        monkeypatch,
+        _completed('{"action":"skipped","reason":"dispatch-provenance-missing"}'),
+        _completed('{"action":"removed","managed_gc_eligible":false}'),
+    )
+
+    assert proofs == [
+        ["--policy", "dispatch-attempt", "--reservation", "dispatch-task:task-1:1"],
+        ["--policy", "bridge-creation", "--creation-nonce", "nonce-a"],
+    ]
+    assert result["action"] == "removed"
+
+
+def test_conclude_dispatch_attempt_keeps_dispatch_proof_for_preallocated_worker(monkeypatch):
+    result, proofs = _nonce_conclusion_cli(
+        monkeypatch, _completed('{"action":"removed","managed_gc_eligible":false}'),
+    )
+
+    assert proofs == [["--policy", "dispatch-attempt", "--reservation", "dispatch-task:task-1:1"]]
+    assert result["action"] == "removed"
+
+
+def test_conclude_dispatch_attempt_preserves_on_runtime_without_bridge_creation(monkeypatch):
+    result, proofs = _nonce_conclusion_cli(
+        monkeypatch,
+        _completed('{"action":"skipped","reason":"dispatch-provenance-missing"}'),
+        _completed("", returncode=2, stderr="usage: " + "x" * 400 + "\nerror: argument --policy: invalid choice: 'bridge-creation'"),
+    )
+
+    assert len(proofs) == 2
+    assert result == {
+        "action": "skipped", "reason": "dispatch-provenance-missing",
+        "bridge_creation": "unsupported-runtime",
+    }
+
+
+def _conclusion_retry_cli(monkeypatch, rows, record=('{"ok": false}', 1)):
+    calls = []
+
+    def run(cmd, **_kwargs):
+        calls.append(cmd)
+        if "list" in cmd:
+            return _completed(json.dumps({"worktrees": rows}))
+        if "record" in cmd:
+            if isinstance(record, BaseException):
+                raise record
+            return _completed(record[0], returncode=record[1])
+        return _completed('{"action":"already-primed","managed_gc_eligible":false}')
+
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(embody.subprocess, "run", run)
+    monkeypatch.setattr(embody.worktree_record.subprocess, "run", run)
+    return calls
+
+
+def test_conclude_dispatch_attempt_retry_reaches_idempotent_conclusion(monkeypatch):
+    calls = _conclusion_retry_cli(monkeypatch, [
+        {"id": "wt-review", "repo": "widgets", "path": "/fixture/wt-review", "status": "complete"},
+    ])
+
+    result = embody.conclude_dispatch_attempt(
+        "wt-review", "session-review", "dispatch-task:task-1:1",
+        project="widgets", worktree_path="/fixture/wt-review",
+    )
+
+    assert "conclude-disposable" in calls[-1]
+    assert result["action"] == "already-primed"
+
+
+@pytest.mark.parametrize("record", [
+    ('{"version": 1, "ok": false, "code": "record-missing"}', 1),
+    subprocess.TimeoutExpired(["agent-worktrees", "record"], 5),
+    ("not json", 0),
+], ids=["confirmed-missing", "lookup-timeout", "malformed"])
+def test_conclude_dispatch_attempt_preserves_workspace_without_identity_row(monkeypatch, record):
+    # Absence is project-scoped at best, while the owner's conclusion searches
+    # every project, so a missing row never proves the expected identity.
+    calls = _conclusion_retry_cli(monkeypatch, [], record=record)
+
+    with pytest.raises(embody.DisposableConclusionError, match="workspace preserved"):
+        embody.conclude_dispatch_attempt(
+            "wt-review", "session-review", "dispatch-task:task-1:1",
+            project="widgets", worktree_path="/fixture/wt-review",
+        )
+    assert not any("conclude-disposable" in cmd for cmd in calls)
+
+
+def test_conclude_dispatch_attempt_terminal_row_still_checks_identity(monkeypatch):
+    calls = _conclusion_retry_cli(monkeypatch, [
+        {"id": "wt-review", "repo": "widgets", "path": "/elsewhere", "status": "complete"},
+    ])
+
+    with pytest.raises(embody.DisposableConclusionError, match="identity changed"):
+        embody.conclude_dispatch_attempt(
+            "wt-review", "session-review", "dispatch-task:task-1:1",
+            project="widgets", worktree_path="/fixture/wt-review",
+        )
+    assert not any("conclude-disposable" in cmd for cmd in calls)
+
+
+def test_resolve_worktree_still_rejects_terminal_rows_for_reuse(monkeypatch):
+    _conclusion_retry_cli(monkeypatch, [
+        {"id": "wt-review", "repo": "widgets", "path": "/fixture/wt-review", "status": "complete"},
+    ])
+
+    with pytest.raises(embody.WorktreeNotFound, match="terminal"):
+        embody.resolve_worktree("wt-review", project="widgets")
+
+
 def test_conclude_disposable_worker_preservation_skip_is_returned(monkeypatch):
     monkeypatch.setattr(
         embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]

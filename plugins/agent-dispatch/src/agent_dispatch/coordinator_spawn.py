@@ -177,6 +177,13 @@ class RecordConclusionBody(ReservationDetailBody):
     claimant_machine: str | None = None
 
 
+class RearmClaimHeldConclusionBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_detail: str
+    claimant_machine: str | None = None
+
+
 class RearmSpawnBody(BaseModel):
     permitted: bool = False
     reason: str | None = None
@@ -191,6 +198,15 @@ class AuthorizeFreshBody(BaseModel):
     permitted: bool = False
     confirmed_no_live_holder: bool = False
     reason: str
+
+
+class FenceHistoryBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    before: float
+    apply: bool = False
+    permitted: bool = False
+    confirmed_no_live_holder: bool = False
+    reason: str = ""
 
 
 def _reservation_dict(res: SpawnReservation) -> dict:
@@ -225,6 +241,18 @@ def register_spawn_routes(
             from .acquisition_receipts import verify_recovery_bridge
             verify_recovery_bridge()
             return queue.authorize_fresh_acquisition(task_id, **body.model_dump())
+        except TaskError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(503, detail="recovery bridge readiness unavailable") from exc
+
+    @app.post("/spawn-reservations/history/fence", dependencies=[Depends(control_auth)])
+    def fence_history(body: FenceHistoryBody) -> dict:
+        try:
+            if body.apply:
+                from .acquisition_receipts import verify_recovery_bridge
+                verify_recovery_bridge()
+            return queue.fence_legacy_history(**body.model_dump())
         except TaskError as exc:
             raise HTTPException(409, detail=str(exc)) from exc
         except (OSError, subprocess.TimeoutExpired) as exc:
@@ -686,6 +714,18 @@ def register_spawn_routes(
             "reservation": _reservation_dict(reservation),
         }
         bus.publish({"type": "spawn.conclusion_claimed", **result})
+        return result
+
+    @app.post("/spawn-reservations/{key}/conclusion/rearm-claim-held")
+    def rearm_claim_held_conclusion(key: str, body: RearmClaimHeldConclusionBody) -> dict:
+        result = _reservation_guard(
+            lambda: queue.rearm_claim_held_conclusion(
+                key,
+                expected_detail=body.expected_detail,
+                claimant_machine=body.claimant_machine,
+            )
+        )
+        bus.publish({"type": "spawn.conclusion", "reservation": result})
         return result
 
     @app.post("/spawn-reservations/{key}/conclusion/validate")

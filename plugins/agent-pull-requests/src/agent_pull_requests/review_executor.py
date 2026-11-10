@@ -16,6 +16,14 @@ class ReviewCandidateChanged(RuntimeError):
     """Current source/discussion evidence no longer matches selected intent."""
 
 
+def _check_review(context, operation: dict, action: dict, current: dict) -> None:
+    check = getattr(context, "check_review", None)
+    if check is None:
+        context.review_check(operation, action, current, context=context)
+    else:
+        check(operation, action, current)
+
+
 def _threads(values):
     if not isinstance(values, list):
         raise ValueError("current discussions must be a complete list")
@@ -291,42 +299,56 @@ def execute_review(
                     continue
                 actual = _check_candidate(current, operation, baseline)
                 _check_selected_ownership(action, actual, scope["principal_id"])
-                context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
-                context.check()
-                result["stage"] = "intent_fence"
-                begun = store.begin_review_action(
-                    operation_id, scope, action["id"], expires_at=expires_at, checkpoint=checkpoint,
-                )
-                if not begun["new_attempt"]:
-                    result["status"] = "unknown"
-                    break
-                operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
-                # Persistence and credential renewal may change eligibility.
-                current = context.read_state()
-                if tracking is not None:
-                    tracking.check_target(current)
-                actual = _check_candidate(current, operation, baseline)
-                _check_selected_ownership(action, actual, scope["principal_id"])
-                context.review_check(copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current), context=context)
-                context.check()
-                result["stage"] = "effect"
-                result["entered_writes"] += 1
-                native = context.perform(copy.deepcopy(operation), copy.deepcopy(action))
-                result["stage"] = "receipt"
-                receipt = tracking.response_receipt(native, action) if tracking is not None else native.receipt
-                recorded = store.record_review_receipt(
-                    operation_id, scope, action["id"], begun["action"]["attempt_id"], receipt,
-                    expires_at=expires_at, checkpoint=checkpoint, confirm=native.confirmed,
-                )
-                if recorded["state"] != "confirmed":
-                    result["status"] = "unknown"
-                    break
-                result["stage"] = "readback"
-                operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
-                current = context.read_state()
-                if tracking is not None:
-                    tracking.check_target(current)
-                _check_candidate(current, operation, baseline)
+                policy_check = context.review_check
+
+                def checked_policy(selected_operation, selected_action, fresh, *, context):
+                    # The native transport can observe fresher inputs after connecting.
+                    if tracking is not None:
+                        tracking.check_target(fresh)
+                    actual = _check_candidate(fresh, operation, baseline)
+                    _check_selected_ownership(action, actual, scope["principal_id"])
+                    return policy_check(selected_operation, selected_action, fresh, context=context)
+
+                context.review_check = checked_policy
+                try:
+                    _check_review(context, copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current))
+                    context.check()
+                    result["stage"] = "intent_fence"
+                    begun = store.begin_review_action(
+                        operation_id, scope, action["id"], expires_at=expires_at, checkpoint=checkpoint,
+                    )
+                    if not begun["new_attempt"]:
+                        result["status"] = "unknown"
+                        break
+                    operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
+                    # Persistence and credential renewal may change eligibility.
+                    current = context.read_state()
+                    if tracking is not None:
+                        tracking.check_target(current)
+                    actual = _check_candidate(current, operation, baseline)
+                    _check_selected_ownership(action, actual, scope["principal_id"])
+                    _check_review(context, copy.deepcopy(operation), copy.deepcopy(action), copy.deepcopy(current))
+                    context.check()
+                    result["stage"] = "effect"
+                    result["entered_writes"] += 1
+                    native = context.perform(copy.deepcopy(operation), copy.deepcopy(action))
+                    result["stage"] = "receipt"
+                    receipt = tracking.response_receipt(native, action) if tracking is not None else native.receipt
+                    recorded = store.record_review_receipt(
+                        operation_id, scope, action["id"], begun["action"]["attempt_id"], receipt,
+                        expires_at=expires_at, checkpoint=checkpoint, confirm=native.confirmed,
+                    )
+                    if recorded["state"] != "confirmed":
+                        result["status"] = "unknown"
+                        break
+                    result["stage"] = "readback"
+                    operation = store.inspect_review(operation_id, scope, expires_at=expires_at, checkpoint=checkpoint)
+                    current = context.read_state()
+                    if tracking is not None:
+                        tracking.check_target(current)
+                    _check_candidate(current, operation, baseline)
+                finally:
+                    context.review_check = policy_check
         else:
             result["status"] = "complete"
     except PermissionError:

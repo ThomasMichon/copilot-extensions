@@ -22,6 +22,7 @@ NATIVE_BATCH_MUTATION_CAPABILITY = "native-hook-batch-mutation-v1"
 SHELL_MUTATION_CAPABILITY = "shell-hook-mutation-v1"
 WORKTREE_CHANGE_CAPABILITY = "worktree-change-v1"
 WORKTREE_CHANGE_KIND = "worktreeChanged"
+MIXED_BATCH_MUTATION_CAPABILITY = "mixed-hook-batch-mutation-v1"
 _CAPABILITIES = [
     "session-lifecycle-v1", "session-start-source-v1", "session-end-source-v1",
 ]
@@ -97,7 +98,7 @@ class _Handler(socketserver.StreamRequestHandler):
                 if owner is not None and len(raw) <= 2048 and raw.endswith(b"\n"):
                     owner._on_read_demand(request)
                 return
-            if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
+            if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"}:
                 owner = self.server.owner
                 if owner is not None and len(raw) <= 65536 and raw.endswith(b"\n"):
                     owner._on_native_mutation(request)
@@ -202,7 +203,10 @@ class HookIpcServer:
             *([READ_DEMAND_CAPABILITY] if self._read_demand_admitted is not None else []),
             *([WORKTREE_CHANGE_CAPABILITY] if self._worktree_changed is not None else []),
             *(
-                [NATIVE_MUTATION_CAPABILITY, NATIVE_BATCH_MUTATION_CAPABILITY, SHELL_MUTATION_CAPABILITY]
+                [
+                    NATIVE_MUTATION_CAPABILITY, NATIVE_BATCH_MUTATION_CAPABILITY,
+                    SHELL_MUTATION_CAPABILITY, MIXED_BATCH_MUTATION_CAPABILITY,
+                ]
                 if self._native_mutation_decide is not None else []
             ),
         ]
@@ -281,7 +285,7 @@ class HookIpcServer:
             return
         try:
             with self._active_handlers_lock:
-                if self.server.admission_closed or (
+                if self.server.admission_closed or deadline <= time.time() or (
                     self._read_demand_admitted is not None and not self._read_demand_admitted()
                 ):
                     return

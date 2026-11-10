@@ -785,6 +785,12 @@ def cmd_start(args):
     return 1
 
 
+def cmd_source_start(args):
+    from .source_start import command
+
+    return command(args)
+
+
 def cmd_stop(args):
     resp = send_command({"action": "stop"})
     if resp and resp.get("ok"):
@@ -1680,9 +1686,9 @@ def _main(argv: list[str] | None = None):
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=ssh_key_install_command)
 
-    from .batch_reads import add_commands as add_read_commands
-
-    add_read_commands(sub, cmd_get)
+    from . import authenticated_curl, batch_reads
+    batch_reads.add_commands(sub, cmd_get)
+    authenticated_curl.add_commands(sub)
 
     p = sub.add_parser("has", help="Check if an entry exists")
     p.add_argument("entry", help="Entry path")
@@ -1703,6 +1709,9 @@ def _main(argv: list[str] | None = None):
 
     p = sub.add_parser("start", help="Start the vault service")
     p.set_defaults(func=cmd_start)
+
+    p = sub.add_parser("__source-start", help=argparse.SUPPRESS, allow_abbrev=False)
+    p.set_defaults(func=cmd_source_start)
 
     p = sub.add_parser("stop", help="Stop the vault service")
     p.set_defaults(func=cmd_stop)

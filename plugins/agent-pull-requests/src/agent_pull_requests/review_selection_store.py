@@ -51,6 +51,11 @@ class ReviewSelectionStore:
 
     @staticmethod
     def _previous(document: dict, original: dict) -> dict | None:
+        from .terminal_retention import require_live
+        require_live(
+            document, original["scope"], operation_id=original["operation_id"],
+            generation_id=original["generation_id"],
+        )
         if document.get("review_selection_version") != 1:
             raise ReplayStoreInvalid("pre-approval selection requires explicit storage adoption")
         previous = next(
@@ -75,6 +80,33 @@ class ReviewSelectionStore:
             expires_at=expires_at, checkpoint=checkpoint, persist=False,
         )
 
+    def inspect(
+        self, operation_id: str, scope: dict, *, expires_at: int,
+        checkpoint: Callable[[], None] | None = None,
+    ) -> dict:
+        """Read retained preparation without treating it as execution-admitted."""
+        from .review_workspace import _scope
+
+        review_intent.text(operation_id, 128)
+        scope = _scope(scope)
+
+        def inspect(document: dict) -> dict:
+            from .terminal_retention import require_live
+            require_live(document, scope, operation_id=operation_id)
+            if document.get("review_selection_version") != 1:
+                raise ReplayStoreInvalid("pre-approval selection requires explicit storage adoption")
+            operation = next(
+                (row for row in document["reviews"]
+                 if row["intent"]["operation_id"] == operation_id), None,
+            )
+            if operation is None or operation["intent"]["scope"] != scope:
+                raise ValueError("review operation missing or outside selected scope")
+            return operation
+
+        return self.owner._review_transaction(
+            inspect, expires_at=expires_at, checkpoint=checkpoint, persist=False,
+        )
+
     @staticmethod
     def _prepared(original: dict, prepared: dict) -> dict:
         prepared = review_intent.intent(prepared, versions=(2,))
@@ -94,6 +126,7 @@ class ReviewSelectionStore:
         operation = review_intent.new_operation(
             prepared, created_at=self.owner.clock(),
             receipt_bytes=document["capacities"]["receipt_bytes"],
+            mappings=document.get("review_comment_mapping_version") == 1,
         )
         operation["selection"] = {"input_id": _digest(original), "stage": "prepared"}
         operation["reserved_bytes"] += len(review_intent.encoded(operation["selection"])) + 32

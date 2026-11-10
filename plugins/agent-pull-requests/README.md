@@ -11,6 +11,16 @@ commands into a separate, API-first surface:
 
 - `agent-worktrees` remains unchanged and fully supported.
 - `status`, `create`, `merge`, and `wait` are all implemented.
+- Native [on-demand thread reads](docs/cli-reference.md#native-threads)
+  reuse the existing configured Worktrees provider owner without a target checkout.
+- Native [unified-diff reads](docs/cli-reference.md#native-diff) use that same
+  target-qualified owner, preserving unsupported and unknown evidence.
+- Optional [selected ADO thread resolution](docs/author-operations.md#selected-native-thread-resolution)
+  uses exact candidate/thread expectations and the existing consumed-operation
+  ledger; read-only reports and legacy bulk syntax remain unchanged.
+- Optional [existing-owner HTTP reports](docs/watch-gateway.md#optional-existing-owner-report-reads)
+  preserve those native bodies and exits through the admitted Gateway; source
+  host injection is not installed HTTP adoption or principal-bound review evidence.
 
 ## Installation
 
@@ -140,6 +150,8 @@ credentials or imply that a running service has adopted the protocol.
 The [workspace tool/CLI façade](docs/workspace-tools.md) uses those same owners,
 with exact retained-source reads and explicit unavailable unbound execution.
 Source declarations do not register operational tools or prepare/fetch a workspace.
+An optional [tracked comment/review embedding](docs/tracked-publication.md)
+uses the same retained selections and outcomes; ordinary CLI publication is unchanged.
 
 ```text
 agent-pull-requests status --repo <owner/repo> --number <n> [--json]
@@ -156,7 +168,8 @@ the timeout elapses (exit code `3`).
 
 ### Explicit native provider commands
 
-Azure DevOps author-side creation, source publication and metadata-only repair
+Azure DevOps author-side creation, source publication, metadata-only repair and
+explicit draft readiness
 use the [capability-directed author workflow](docs/author-operations.md).
 Those operations keep source admission and target policy in Worktrees; source
 support is distinct from release and installed-consumer qualification.
@@ -201,6 +214,11 @@ pending auto-completion is not reported as a completed merge. `--auto`,
 `--squash`, `--merge`, `--rebase` and `--delete-branch` are refused before mutation rather
 than silently overriding repository policy. Use the central consent workflow
 for a target whose profile does not allow `--now`.
+
+The native-only [unpublished creation cancellation](docs/creation-cancellation.md)
+command uses exact worktree/creation/revision selection and actual operator
+approval. It delegates to the existing Worktrees owner without closing a remote
+PR, posting a comment or releasing source/claim custody.
 
 Each native snapshot read has a 60-second deadline; capability probes retain
 their 20-second deadline and mutations retain a 90-second deadline and bounded
@@ -587,11 +605,26 @@ authenticated health exchange with fresh runtime and native-birth checks,
 closing the reference on any refusal or observed exit. These are
 evidence boundaries, not permission to promote or retire an owner.
 
+Running-slot capture checks completion and selected metadata together, then
+rechecks the loaded module set without importing new code after attestation.
+Local native-identity validation does not invent a health exchange or claim
+readiness. Actual health and passive-launch callbacks retain fresh checks on
+both sides; none of these paths caches a proof or extends the 120-second cutover
+budget.
+
 The internal `WatchJournal` records random transaction authorization, exact
 instances, prior marker/manifest/route bytes and the completed target separately
 from ZDD's breadcrumb. Journal writes require custody of the installation's
-canonical guard, including inside borrowed orchestrator callbacks. Recorded
-drain/release/read-ready phases authorize bounded control intent; they are not
+canonical guard, including inside borrowed orchestrator callbacks.
+Journal reads return their freshly validated target and instances for that
+action, without retaining them as authority for a later read. An owned journal
+must still match its guarded document before two distinct runtime reads may
+overlap; both finish, including on failure, before the action proceeds.
+An existing canonical validation scope keeps serial reads and its shared
+changed-file observations. Manifest publication revalidates before and after
+the write while its metadata locks
+remain held; archive validation follows the actual archive read.
+Recorded drain/release/read-ready phases authorize bounded control intent; they are not
 proof that control or native writer transfer succeeded. Commit requires coherent
 target selection and an exact effect-free read-ready writer. Its durable commit
 precedes effect authorization and changes recovery to forward-only, even if the

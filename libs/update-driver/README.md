@@ -46,7 +46,9 @@ of independently owned service daemons. There is no Task, COM or UAC fallback.
 
 The private executor shim places generated Python bytecode beneath the existing
 driver root's `cache/python`, outside the invoking runtime's immutable slot.
-Its pinned product invocation and installation custody remain unchanged.
+It skips `site` initialization: the shim uses only the standard library and
+explicitly located participant/procutil modules. The pinned product invocation,
+its normal interpreter behavior and installation custody remain unchanged.
 
 New Windows queue directories are created atomically with the actual process
 TokenUser as owner and protected, inheritable FullControl for that account,
@@ -91,6 +93,8 @@ creation, not an implicit permission migration or a read-only status side effect
   `context_keys` declares the adapter-approved, credential-free environment
   projection from `RequestSpec.context`: before product startup, the runner
   clears every declared key and restores only the request's saved values.
+  The declaration permits at most 128 names, including absent keys that must
+  be cleared; the request still retains at most 64 context values.
   This happens before module import and project routing, not just inside an
   eventual command handler. Absent keys cannot leak from the caller that
   happened to start the shared worker. The declaration participates in request
@@ -130,6 +134,11 @@ creation, not an implicit permission migration or a read-only status side effect
   versions, or bound worker-launch fan-out. The opt-in changes no journal schema.
   Existing unsettled global fences refuse admission with `InterruptedError`;
   a detached caller cannot receive an apparently healthy receipt behind one.
+- `run_explicit(spec, *, runner, root=None)` takes execution custody without
+  waiting and runs only its own newly admitted request. An active custodian or
+  ordinary pending work is busy; a running row found under acquired custody is
+  unsettled and raises `InterruptedError`. It leaves that row unchanged for
+  explicit recovery and never replays another request.
 - `status(request_id=None, *, root=None)` reads one Request or a tuple.
   Missing state is empty; status does not mkdir, initialize, repair, or recover
   a database. Unknown schema and malformed records fail explicitly.
@@ -188,29 +197,54 @@ plugins in the same cell share it. The legacy installation has a separate
 per-user selection. The installation owner still validates its own receipts.
 
 The switch waits for installation custody and pending work, refuses unsettled
-execution, and records the selection atomically in queue schema 5. This schema
+execution, and records the selection atomically in queue schema 6. This schema
 is introduced only on an explicit switch and makes older queue clients refuse
-rather than ignore the selection. Capable adapters tag requests with the chosen
-authority; a legacy submission that raced the switch cannot execute under it.
-Unrelated request backends remain independent in a capable driver.
+rather than ignore the selection. Existing schema-5 standalone selections stay
+readable; a schema-5 project selection requires a capability-verified upgrade,
+even when the selected project is unchanged. An already-admitted project
+request may read that legacy selection only under its matching live borrowed
+custody; new submissions remain blocked. Previously accepted unstamped native
+requests may finish under an unchanged schema-5 standalone selection, while
+schema 6 continues to reject unstamped late writers. Upgrading affects the
+shared queue, so the callback must qualify all clients that will continue to
+use it.
+
+Capable adapters tag requests with the chosen authority; a legacy submission
+that raced the switch cannot execute under it. The capable queue also fences
+its native Worktrees, plugin and Manager installation/provisioning writers in
+project mode, and stamps their standalone admission while holding the same
+authority lock. For native cell roots it resolves the physical installation
+and rechecks the cell receipt; shared legacy writers must satisfy both global
+and any supplied cell selection. Unrelated request backends and independent
+cell roots remain independent. The exported
+`QUEUED_NATIVE_WRITER_CAPABILITY` describes this queue boundary only: it is
+not proof that an unqueued writer, old Picker, scheduler or shared legacy
+installation is covered.
 
 `change_authority` requires a trusted `verify_capabilities(deadline)` callback.
 It must check the actual selected Worktrees, Manager and worker providers and
 prove that every direct writer, retained old Picker and automatic scheduler
-which can bypass the queue is either capable or settled. A version, downloaded
-payload, or unconditional success is not that proof. The callback owns bounded
+which can bypass the queue is either capable or settled. It must also coordinate
+global authority when a cell-managed portfolio shares a legacy runtime. A
+version, downloaded payload, queue capability, or unconditional success is not
+that proof. The callback owns bounded
 probe cleanup and must honor the monotonic deadline; a late result cannot
-publish a mode. Schema 5 alone cannot fence a process that bypasses the queue.
+publish a mode. Schema 6 alone cannot fence a process that bypasses the queue.
 No public mode-switch command is supplied by this primitive.
 
 An interrupted first switch leaves a guard that makes capable clients refuse
 until the switch is retried under the same checks. If an already-prevalidated
 legacy writer committed a never-started suite request after that guard, a
 capability-verified retry terminally refuses that request instead of letting it
-strand the queue. Unrelated pending work remains pending and must settle before
-the initial schema upgrade. A missing guard or database, malformed selection,
-or uncertain execution refuses rather than restoring legacy mode. Neither
-inspection nor switching starts an update or a service.
+strand the queue. A pending row with any execution evidence remains an
+unresolved fence, is never replayed or terminally refused, and uses the
+existing restart-confirmed or explicitly authorized repair recovery. Waiters
+on that row or queued behind it receive the fence without needing a worker
+handle or timeout. Unrelated pending work remains pending and must settle
+before the initial schema upgrade.
+A missing guard or database, malformed selection, or uncertain execution refuses
+rather than restoring legacy mode. Neither inspection nor switching starts an
+update or a service.
 
 ### Automatic-update KillSwitch and explicit/manual admission
 

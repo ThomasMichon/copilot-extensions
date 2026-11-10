@@ -272,7 +272,7 @@ def test_separate_explicit_actions_get_separate_attempts(private_root):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("option", ["Anchor repo", "Bare", "AHP", "Local model"])
+@pytest.mark.parametrize("option", ["Anchor repo", "AHP", "Local model"])
 def test_refused_confirmation_is_durable_but_keeps_original_composer(
     private_root, monkeypatch, option,
 ):
@@ -444,14 +444,14 @@ def test_removed_confirmation_owner_never_launches(private_root, monkeypatch):
 
 
 def test_new_decision_option_fidelity():
-    labels = ["Anchor repo", "Bare", "No Mux", "AHP", "Local model"]
+    labels = ["Anchor repo", "No Mux", "AHP", "Local model"]
     result = confirmation.new_decision({
         "target": ("selected", "POSIX"),
         "opts": [{"label": label, "on": True} for label in labels],
     }, "normalized execution", is_local=False)
     assert result == {
         "action": "new", "machine": "selected", "env": "POSIX", "is_local": False,
-        "options": dict.fromkeys(["anchor", "bare", "no_mux", "ahp", "local_model"], True)
+        "options": dict.fromkeys(["anchor", "no_mux", "ahp", "local_model"], True)
         | {"seed_prompt": "normalized execution"},
     }
 

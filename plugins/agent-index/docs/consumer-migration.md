@@ -49,6 +49,25 @@ Retirement of a legacy consumer naming scheme is a separate migration under
 the existing source-ownership guards, not an unrestricted pre-index callback.
 Custom sources must remain declared/registered during the compatibility window.
 
+`run_reindex` and `run_worker` own the data-directory writer context across the
+whole operation. Consumers with push-ingest or deletion endpoints must also
+use `indexing.source_ownership.source_writer(config.data_dir)` around state
+loading, acquisition/chunking, mutations and checkpoint publication. Acquire
+inside the executing worker/thread, not in an asynchronous service monitor.
+Default contention raises `SourcePipelineBusy`; `wait=True` supports a caller's
+`cancel_check` callback. Unrelated sources in the same directory serialize
+because checkpoint publication replaces one shared JSON file. Search does not
+acquire this writer lock.
+
+Adopt the expanded engine/provider first, then migrate every consumer writer.
+Old immutable workers and old endpoint implementations do not participate
+automatically. Defer conflicting new writer admission until the existing owner
+safely finishes, or use an owner-approved isolated target. A new lock does not
+authorize expiring/killing an incumbent, resetting cursors or vetoing incoming
+service readiness. Preserve the supported old pair and pending-journal recovery
+through the upgrade/rollback window; mere package-version agreement is not
+proof that all actual writers have joined.
+
 ### Source retirement and background maintenance
 
 The default configured crawl selection is authoritative for source retirement.
@@ -68,6 +87,18 @@ crawl keys preserve cursors even when a stale stored generation shares a name.
 This is not a pre-index mutation callback or a replacement pipeline.
 Failed full runs do not advance `last_full_reindex`, collect stale generations
 or compact as though reconciliation had completed.
+
+External stale-generation collectors can call
+`run_source_gc(config, multi_store, policy=..., dry_run=False, compact=False)`.
+It acquires ownership before loading state and holds it through saved state,
+requested compaction and final FTS preparation when a real purge occurs.
+When compaction runs, its store statistics are returned in the optional
+`compaction` result field; dry runs, zero-deletion results and calls without
+compaction omit that field. Dry runs
+publish no checkpoint, path-index schema or maintenance. Existing low-level
+`gc_stale_sources`/`gc_unconfigured_sources` calls remain available to owners
+already holding `source_writer` across their own state load/save; locking only
+the deletion helper does not protect the shared JSON checkpoint.
 
 Consumers with their own coalescing cluster maintainer should pass a config
 copy with `cluster_enabled=False` to indexing, leaving the retrieval/background

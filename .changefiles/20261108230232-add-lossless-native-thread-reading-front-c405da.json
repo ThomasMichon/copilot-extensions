@@ -1,0 +1,13 @@
+{
+  "comment": "Add lossless native thread-reading frontend and qualify existing checkout-free provider owner",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

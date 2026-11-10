@@ -858,7 +858,7 @@ if ($Action -eq 'uninstall') {
 Assert-SourceRuntime
 if ($Action -in @('install', 'init', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 

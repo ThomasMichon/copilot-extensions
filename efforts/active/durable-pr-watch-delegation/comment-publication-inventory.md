@@ -12,6 +12,7 @@ Paths below are relative to the repository root.
 |---|---|---|
 | Tracked PR comments | `plugins/agent-worktrees/src/agent_worktrees/pr_state_cli.py` -> `pr_reviewer_ops.pr_comment` -> provider `post_comment` | Legacy-compatible opaque body; no shared preparation or retained public comment/write identity |
 | Tracked PR review bodies | `pr_state_cli.py` -> `pr_reviewer_ops.pr_review` -> provider `submit_review` | Legacy-compatible; bodyless native actions remain bodyless |
+| Explicit selected tracked comments/reviews | Existing Worktrees parser/handler -> optional `TrackedPublication` -> `WorkspaceTools` selection/submission/inspection | Optional source embedding with exact trusted tracked/native mapping, committed preview and separate exact submission; not ordinary command or installed adoption |
 | GitHub general comments and review bodies | `providers/github.py`: `gh pr comment` and `gh pr review` | Existing provider; empty error string is not a native identity/version receipt |
 | Gitea general comments and review bodies | `providers/gitea.py`: issue-comment POST and pull-review POST | Existing provider; response identity is not retained by this interface |
 | ADO general comments and review text | `providers/azure_devops.py`: new thread POST; review text is a separate comment before the selected vote | Existing provider; preserve the two effects and their partial outcomes, never invent a comment for a bodyless vote |
@@ -26,6 +27,10 @@ Paths below are relative to the repository root.
 This is the bounded inventory of the current Worktrees/PR-owner source paths,
 not a census of independently installed tools or external forge clients.
 Unqualified and unsupported entries remain open C2/C4 obligations.
+The [tracked-consumer refinement](tracked-comment-consumers.md) records the
+confirmed error-string/no-selection gap in the legacy path. The optional
+[tracked source embedding](../../../plugins/agent-pull-requests/docs/tracked-publication.md)
+composes the existing selected-operation owner without changing those defaults.
 
 ## Explicit preapproved-body composition
 

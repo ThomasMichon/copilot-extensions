@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify mux pane targets by session and recognize native elapsed-time completion annotations",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

@@ -232,6 +232,27 @@ foreign discovery, stale receipts, missing rows, live controls and a
 non-replying peer. This closes only a warm source consumer checkpoint;
 cold/directory/POSIX/recovery, installed, composed and throughput gates remain.
 
+### Prepared Windows mixed-batch post-tool migration
+
+The same bounded prepared legacy/cell entry now admits complete batches of
+original shell aliases, native writes and read tools. It reuses original strict
+event normalization, native targets and single-shell classification behind
+the separately advertised `mixed-hook-batch-mutation-v1` capability. The receiver
+validates every call before effects; there is no supported-prefix invalidation.
+Native-only batch and single-shell support cannot imply this new capability.
+Read-only batches renew demand without mutation wake; shell mutations and
+aggregate overflow remain conservative. Reminders and late guidance stay once
+per outer event. See the [mixed-batch contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#windows-mixed-batch-consumer).
+
+Real registered Windows controls must compose original publishers and receiver
+for both prepared modes, including targeted writes beside read-only shells,
+conservative shell writes, missing/old/wrong-generation/closed discovery,
+wire bounds and a non-replying peer. Malformed/unknown shapes retain the
+original route, with no silent partial evaluation. The original notification
+deadlines, no-reply/no-retry and refresh backstop are unchanged. This finite
+checkpoint does not close cold/directory/POSIX, pre/start/end, optional boot,
+installed composition or whole-hook throughput acceptance.
+
 ### First additive producer contract
 
 The next finite consumer is the Windows read-event path (`view`, `rg`, `glob`).
@@ -261,7 +282,7 @@ evaluation. The existing IPC owner advertises `read-hook-demand-v1` and its own
 process generation before a prepared Windows reader sends a notification.
 That compact message renews only the original recent-tool idle grace; it
 cannot classify mutations, run policy/advice, wake recomputation or start a
-resident. The shell reads no reply and shares a 50 ms connect/write wait;
+resident. The shell reads no reply and shares a 100 ms allocation/connect/write wait;
 unsupported discovery skips it, and uncertain delivery never causes replay.
 The [optional read-demand contract](../../../plugins/agent-worktrees/docs/worktree-observations.md#optional-read-demand)
 defines wire bounds, source selection, live admission and upgrade/rollback.

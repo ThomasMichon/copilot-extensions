@@ -170,11 +170,25 @@ Coverage is explicit, never inferred:
   published the project, or predates the demand-free read and rejects it, the
   host returns its saved roster and the row carries `availability`
   (`status: "advisory"`) and
-  `projection.observed_at`: saved rows that may be stale. A host with no saved
+  `projection.observed_at`: saved rows that may be stale. A resident answer
+  carries `projection.freshness` (`refreshed_age_s`, `bound_s`); when the
+  resident has not republished the project within that bound (for example its
+  demand lapsed, or its sweep loop stalled), the row is labeled
+  `availability.status: "stale"`. A host with no saved
   roster, or an older runtime that rejects `--passive` as an unrecognized
-  argument, becomes a `reachable: false` gap. A saved roster never proves a
-  delegate's caller gone or terminal: a caller missing from it is `unknown`,
-  and the delegate is not finalizable (`host-roster-advisory`). Every child
+  argument, becomes a `reachable: false` gap. A saved or stale roster never
+  proves a delegate's caller gone or terminal: a caller missing from it is
+  `unknown`, and the delegate is not finalizable (`host-roster-advisory`). A
+  resident roster's proof also expires while the fleet probes later hosts:
+  local time elapsed since its own probe started counts against `bound_s`.
+  Any reachable roster the fleet cannot prove current when it evaluates the
+  hosts -- an older resident's unlabeled reply, or a fresh one that expired
+  while later hosts were probed -- is labeled `availability.status: "stale"`
+  in the JSON row (an existing `advisory` or `stale` label is kept), so a
+  consumer never reads it as current. The
+  human view never prints a plain count for a roster it cannot prove current:
+  a saved roster is suffixed `(saved roster)`, and any other unproven one is
+  suffixed `(stale roster)`. Every child
   also runs with stdin closed and `AGENT_WORKTREES_NO_SELFPROVISION=1`, so a
   host without a usable runtime reports a gap instead of provisioning one.
 - **Local deadline only.** `--timeout` bounds the SSH connect and the local
@@ -628,7 +642,7 @@ continue to work unchanged.
 | `worktree-lineage` | Project-agnostic, bounded graph of one authoritative worktree's sessions, transitions, handoffs, controllers, normalized reciprocal presentation, projection health, and explicit terminal/fork/cycle/missing-session findings (JSON) |
 | `fleet` | Aggregate one project's `list --json` across every reachable machine × environment -- one SSH/local process per target, never per-worktree. `--json` returns host rows (`machine` / `env` / `reachable` / `worktrees`) and annotates delegate edges with `caller_state`, `delegate_finalizable`, and reverse `delegates` lists. Covers the selected project only; see [Fleet worktree inventory](#fleet-worktree-inventory) for liveness and coverage rules. |
 | `reconcile` | Force-refresh PR state for every tracked worktree (including `finalized`) out of band, so `list` stays a pure file read |
-| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot. Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, `ambiguous`, or `unknown`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. Only a host's current roster can prove that; a saved, stale, or unlabeled one leaves the delegate blocked (`host-roster-advisory`). `--execute` finalizes every currently eligible delegate through the owning host. |
+| `delegates` | Focused cross-machine delegate/caller query built on the fleet snapshot, read passively like `fleet` (`list --passive --all` per host). Dry-run by default: reports every `caller_worktree` delegate plus whether its host is `resolved`, `gone`, `unreachable`, `ambiguous`, or `unknown`, and whether the delegate became finalizable because the host is `finalized` / `complete(d)` / gone. Only a host's current roster can prove that; a saved, stale, or unlabeled one leaves the delegate blocked (`host-roster-advisory`). `--execute` finalizes every currently eligible delegate through the owning host, re-checking the caller roster's freshness immediately before each one. |
 | `conclude-session` / `link-succession` | Project-agnostic write primitives for explicit session conclusion and exact-token handoff succession links (JSON) |
 | `resolve-handoff-successor` | Sanctioned repair for a terminal (`kind` managed, status finalized/complete/completed) worktree whose real handoff successor session ran to completion but was never `register-session`'d (a crash/race in that step), leaving `pending_handoffs`/`resolved_head_session` permanently wedged. `--token` names the still-`pending` handoff and `--successor` the NOT-yet-tracked session id; refuses unless the successor is a real, non-live, non-detached local session (`sessions.validate_session_id`) whose recorded cwd matches the worktree's `worktree_path` and whose transcript's first turn is itself a handoff-seed prompt with real turns beyond it (the same class-G evidence bar `repairing-worktrees` documents). On success it retroactively registers the successor, links the handoff, and immediately concludes it so the worktree lands back in the terminal shape gc already expects -- the sanctioned alternative to hand-editing tracking YAML |
 | `conclude-disposable` | Project-agnostic, exact-id terminal conclusion for an explicitly disposable worker, regardless of CLI/ACP tracking metadata. Requires `--policy disposable-cli` (historical wire spelling) and `--owner`; preserves live sessions, all dirty work (including generated local overlays), local commits, follow-ups, claims, pairs, and open PRs. A clean branch with zero commits ahead of upstream may remain behind without being rewritten, then the command marks the record managed/final without changing its effective interface. `--remove` immediately runs the conservative managed-GC verdict for only that exact id, with fresh lifecycle/liveness checks; an already-removed id is idempotent success. |
@@ -858,21 +872,10 @@ On Windows, the session-start hook selects the first non-WindowsApps `python`
 on PATH that reports Python 3.10 or newer, falling back to the first such
 `python` when none does; the floor then reports `unsupported-interpreter`.
 
-On Windows, the cold hook checks the shared bootstrap killswitch before entering
-the canonical ownership lifecycle with its existing Python interpreter and one
-native installer child. It passes that interpreter to the installer, avoiding
-redundant bootstrap-shell startup and interpreter discovery while keeping both
-installer ownership checks. Explicit installation contexts never enter this
-legacy path. The standalone bootstrap script remains the no-Python/deployed-copy
-fallback; it forwards the supplied interpreter through both ownership admission
-and the staged installer, including paths containing spaces. Stamp diagnostics
-use UTF-8 and stay on stderr, not in session guidance. The lifecycle owner
-enforces the cold stamp's ten-second child deadline, stopping the installer
-tree before releasing its ownership lease rather than killing the owner from
-the hook.
-The stamp copies the same source tree
-through native filesystem APIs; runtime provisioning remains deferred to first
-tool use.
+The session-start compatibility bootstrap does not stamp or provision a missing
+runtime. Explicit setup or the first tool invocation owns installation instead;
+the Windows first-use dispatcher reports its provisioning progress on stderr and
+respects the selected update authority.
 
 ### Terminal identity
 
@@ -1067,9 +1070,12 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `set-pr` | Record PR metadata (`--url`, `--number`) when the PR was opened out of band by a provider sub-agent |
 | `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state and supported native gate evidence. `--repo <slug> --pr <n> --json` reads an explicit target through the same one-shot observation as `pr-watch snapshot`. Tracked mode prints the effective actor `flow:` and flags pull-forward once merged; `--no-live` stays offline. |
 | `pr-nudge` | Ask this repo's bound automated reviewer (`pr.reviewer`, e.g. GitHub Copilot) to (re-)review the active PR. Nothing to nudge (unconfigured/unsupported) is reported, not an error; a successful request is async -- poll `pr-status`/`pr-watch` for a fresh verdict |
+| `pr-author-nudge --repo <target> --number <positive-number> --json` | Explicit target-qualified native reviewer request; optional `reviewer-request` author capability, initially enabled GitHub only. Preserves claimant and target policy; distinct from tracked `pr-nudge`. See [native author operations](../../agent-pull-requests/docs/author-operations.md#reviewer-requests-are-not-verdicts) for no-op, acceptance and unknown-result semantics |
+| `pr-thread-resolve --repo <target> --number <positive-number> --thread <native-id> --expected-candidate <fingerprint> --expected-thread <fingerprint> --operation-id <key> --json` | Optional ADO-only selected discussion closure. Preserves claimant/target policy and uses the existing consumed-before-write ledger; never calls legacy bulk resolution. See [selected native resolution](../../agent-pull-requests/docs/author-operations.md#selected-native-thread-resolution) for evidence, permission and unknown-outcome semantics |
+| `pr-thread-reopen --repo <target> --number <positive-number> --thread <native-id> --expected-candidate <fingerprint> --expected-thread <fingerprint> --operation-id <key> --json` | Optional ADO-only resolved-to-active discussion transition through the same admission, permission and consumed-ledger owners. See [selected native reopening](../../agent-pull-requests/docs/author-operations.md#selected-native-thread-reopening) for original-outcome recovery and unchanged legacy behavior |
 | `pr bar` | Check a PR against its merge bar, clause by clause, on one head: `ci_green`, `review_on_head` (the reviewer's latest review is on the head; `--reviewer`, default Copilot's), `review_findings_zero` (that review reports no open or previously missed findings, and agrees with the threads), `threads_unresolved_zero` (outdated threads are closed), `human_reviews_answered` (people only; an app reviewer is not one), `mergeable`, `merge_policy` (the repo's own policy through the shared classifier: no hold label, not a draft or WIP title, no outstanding change request (any reviewer's latest verdict, an app's too, or the provider's own review decision; a provider-required review is pending unless the provider affirms this actor may bypass it), and an approval on the head where the policy requires one -- resolved for the acting identity's role; an actor demoted by live authority needs a person's approval on the head). Every list is read to its last page; an unreadable page or an empty check list is `unknown`, never met, and a head that moves mid-read makes every clause `unknown` (mergeability the provider is still computing is not a change: the latest answer stands). The read is the repo provider's `PRProvider.get_bar_snapshot` (GitHub reads it today; a provider without one reads every clause `unknown`). `pr bar [<owner/name> <n> \| <n> \| <worktree-id>] [--reviewer <login>] [--json]`; exit 0 met (or merged), 10 pending, 11 failed, 12 unknown |
 | `pr rounds` | Is a PR's review/fix loop converging? One round per head the reviewer reviewed (its latest review in effect there), measured by the open plus previously missed findings it reported; a review stating no count is unmeasured, never zero. `done` when the latest round measured zero on the current head (a clean review of an older head is `continue`); `plateau` when none of the last `--plateau-passes` rounds (default 3) improved on the best before them; `round_cap` after `--max-rounds` (default 6); else `continue` ("round N of M"). Reads through the same `PRProvider.get_bar_snapshot` as `pr bar`, and fails closed the same way: no head, a head that moves or a PR that changes mid-read is `unknown`, never a stop or a go. `pr rounds [<owner/name> <n> \| <n> \| <worktree-id>] [--reviewer <login>] [--max-rounds N] [--plateau-passes N] [--json]`; exit 0 continue or done, 20 plateau, 21 round cap, 12 unknown |
-| `pr-watch` | `snapshot/status <repo> <pr> --json` reads configured native gate evidence once; `threads` reads discussion bodies and reply fingerprints on demand. `wait <repo> <pr> [--until …]` blocks for transitions with an opaque cursor; `cursor <repo> <pr>` captures the baseline. `subscribe/stop/ownerstatus` use the existing shared subscription owner. See [repository-configured observation](pr-observation.md) for native requirements and ownership. |
+| `pr-watch` | `snapshot/status <repo> <pr> --json` reads configured native gate evidence once; `threads` reads discussion bodies and reply fingerprints on demand; `diff` reads a unified diff without tracked reconciliation or invented completeness/candidate evidence. `wait <repo> <pr> [--until …]` blocks for transitions with an opaque cursor; `cursor <repo> <pr>` captures the baseline. `subscribe/stop/ownerstatus` use the existing shared subscription owner. See [repository-configured observation](pr-observation.md) for native requirements and ownership. |
 | `pr-watch checks` | Built-in `lenses`, `record-self-review`, `verify-self-review` and `scope-report` for an explicit repository/workspace. `export-config` writes read/check policy; optional `--include-author` also preserves author policy without self-merge/bypass grants. Workers use the delivered file through `--config`. Configured checks also gate publication mandatorily. See [publication checks](pr-publication-checks.md). |
 | `pr-watch reply/requeue` | Explicit, bounded ADO discussion replies or recovery of an existing build-policy evaluation; no new pipeline, approval or attestation. See [remediation](pr-remediation.md) for freshness, evidence, deduplication and reconciliation requirements. |
 | `pr-merge` | Signal **merge consent** on an approved PR (applies the bound `automerge_label`); the review gate merges when satisfied. `--all` / `--loop` for sweeps |
@@ -1078,7 +1084,7 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `pr-comment` | Post a general (non-verdict) comment on the active tracked PR: `pr-comment <body>` |
 | `pr-review` | Publish a review verdict on the active tracked PR: `--approve` / `--request-changes` / `--comment`, with an optional `--body` |
 | `attribution-audit` | Config-only check: flags this repo's `pr.head_pattern` for the branch-name leak class (embeds `{machine}` while `pr.source_attribution` isn't `true`; `{worktree_id}` is never flagged -- it isn't part of `pr_head_name`'s rendering contract, so it can't actually leak). Plain mode prints findings and exits 1 if any are found (0 if none); `--json` exits 0 whenever it can report findings (empty or not). A configuration-load failure exits 1 in both modes |
-| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external PR tool without provider access. Optional `--tag` supplies an adopter-owned label; `--omit-source` honors anonymous publication. Ordinary `--json` retains `version`, `marker`, `body`, `attributed`. The separate `--comment-origin` mode emits compact `agent-worktrees.comment-origin/v1` data, with `--visibility public` (default) or `internal`; it does not compose or publish a comment. Runs from a managed source worktree; leaves files and remote objects unchanged. See the worktree skill's `pr-attribution.md` reference. |
+| `attribution-prepare` | Emit a source marker, or prepare a UTF-8 `--body-file`, for an external PR tool without provider access. Optional `--tag` supplies an adopter-owned label; `--omit-source` honors anonymous publication. Ordinary `--json` retains `version`, `marker`, `body`, `attributed`. Separate `--comment-origin` emits compact origin data; its optional `--capabilities` discovery and exact `--source-root` plus absolute `--config` support independent consumers without borrowing their CWD. Existing calls keep their CWD-based behavior. No comment composition or publication occurs. See [compact comment-origin](../skills/worktree/references/pr-attribution.md#compact-comment-origin-producer) for the actual contracts, privacy and rollback rules. |
 | `identity-vault status/setup/verify` | Local optional shared-key setup for an already configured agent-vault database and independently running service; no project is required. `--vault-argv` supplies exact vault catalog argv as JSON; optional `--vault-context` supplies its owning validated receipt, not worktrees' context. Setup requires a running service and persists non-secret installation-scoped source selection after population and a fresh cache-loader/encryption probe. Status is read-only; verify exercises the persisted normal reader. `--prompt` is explicit; first-owner creation requires both `--initialize-owner --confirm-first-owner`. See [identity-vault](identity-vault.md). |
 | `pr` | Namespace grouping the `pr-*` verbs |
 
@@ -1087,6 +1093,11 @@ network-free configuration queries. `get pr-profile` reports the configured
 base disposition (`direct` | `pr-human-merge` | `pr-agent-merge` |
 `pr-self-merge`); use live `pr-status` for the acting identity's effective
 profile when `pr.roles` or live merge authority can change which verbs apply.
+
+An optional [tracked comment/review Python embedding](../../agent-pull-requests/docs/tracked-publication.md)
+can bind these same parsers/handlers to an already selected workspace owner.
+It adds no CLI flags or automatic host enrollment; ordinary `pr-comment` and
+`pr-review` syntax, output and provider semantics remain unchanged.
 
 After a recorded PR squash-merges, `pr-complete` verifies its original head
 against reachable upstream commits and replays only later local commits.
@@ -1231,6 +1242,34 @@ demand (the request carries `passive: true`, which the resident honors by
 neither renewing scan demand nor waking its producer for an unpublished
 project); otherwise the saved roster labeled `availability.status: "advisory"`
 with its `projection.observed_at`, or a JSON error (exit 1) when none is saved.
+A resident's passive answer adds `projection.freshness`: the age of that
+resident's last successful publication of the project (`refreshed_age_s`,
+`null` if it has not published it since election) and its bound (`bound_s`,
+the larger of 45 seconds and three monitor intervals). The age is measured
+when the read is served, so a stalled sweep loop ages out rather than vouching
+for an old roster, and it counts from when the resident began collecting that
+publication's facts, so a stalled collection cannot publish an old roster at
+age zero; an unpublished-since-election or overdue roster is labeled
+`availability.status: "stale"`. Worktree state-change notifications (every
+tracking-record save, such as create, resume, status and finalize, and every
+retirement removal) and mux lifecycle changes (a managed-mux session's live or
+attached-client change, or a registered session vanishing from the mux listing)
+wake the resident and republish the affected project on the next sweep without
+renewing its demand.
+These events reuse the existing push wake, whose single flag coalesces a burst
+into at most one immediate follow-up sweep. Changed paths are deduplicated, up
+to 256 per sweep; an overflow or an unresolvable path republishes every project
+the resident has published rather than growing a queue. A changed project stays
+queued until a publication succeeds, for at most three sweeps, so a transient
+mux-listing failure or deferral does not lose the event; after that it ages to
+stale like any other unrefreshed roster. Resolving a path uses
+only in-memory caches and the projects registry (no Git or subprocess). Each
+affected project is then published at most once per sweep through the same
+sequential, project-locked path as a demand-driven publication, with the same
+cost and governance re-check before each project. While the resident drains or
+is superseded, it drops events and refuses publications; a successor vouches
+only for its own publications, so a project whose event was dropped at cutover
+reads stale until it is republished.
 A resident that predates the marker rejects it as an invalid request; the
 passive read then also returns the labeled saved roster, never a demand read. It
 cannot be combined with `--follow`, `--glance` or `--refresh`, and the feed
@@ -1270,10 +1309,18 @@ explicit legacy/detail host rows as `delegates` (the delegate worktree ids plus
 their own finalizable/not-finalizable verdicts); current rows omit that graph.
 `fleet` and `delegates` accept a host's roster as proof that a caller is gone
 or terminal only when it is a current publication (`projection.quality:
-"current"` with no `availability` label). A saved, stale, or unlabeled roster
+"current"` with no `availability` label) whose `projection.freshness` proves a
+republish within its bound: finite, non-negative `refreshed_age_s` plus the
+local time elapsed since that host's probe started no greater than `bound_s`.
+The resident measures its age when it answers, and the fleet probes hosts one
+after another, so a slow later host can expire an earlier host's proof before
+the delegates are judged. A saved, stale, unproven, or unlabeled roster
 (for example from an older runtime) leaves a missing caller `unknown` and never
 authorizes finalization (`delegate_finalizable: false`, reason
-`host-roster-advisory`).
+`host-roster-advisory`). `delegates --execute` repeats that check immediately
+before each finalization, so a caller roster that has outlived its bound since
+the snapshot leaves the remaining delegates unfinalized (an `errors` entry with
+reason `host-roster-advisory`).
 
 When a worktree record carries profile-assignment history, the ordinary
 `list --json` row includes `current_profile_assignment`: the bound assignment
@@ -1538,6 +1585,63 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   only the number collected, not an unbounded list of worktree IDs. Disable entirely with
   `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
 
+### Python bytecode caches (`python-cache prune`)
+
+Plugin launchers pass `-X pycache_prefix=<runtime-root>/cache/python/<namespace>`.
+A runtime with valid install evidence (`.install-complete.json` plus package
+`RECORD`s) reuses one sealed `installed-<digest>` namespace. Without that
+evidence a launcher mints a one-off `unsealed-<id>` namespace. Launchers that
+wait for their child delete the namespace they minted afterwards. Detached
+daemons and `exec`-style launchers cannot, so some `unsealed-*` directories
+still accumulate. `python-cache prune` reclaims them:
+
+```bash
+agent-worktrees python-cache prune                    # dry run: report eligible dirs/bytes
+agent-worktrees python-cache prune --json             # same, machine-readable
+agent-worktrees python-cache prune --apply            # remove eligible dirs
+agent-worktrees python-cache prune --root ~/.agent-vault --apply
+agent-worktrees python-cache prune --apply --allow-age-only   # Windows/macOS: accept age as liveness evidence
+```
+
+By default it inspects `cache/python` under each of this account's plugin runtime
+roots (`~/.agent-*`, `~/.worktree-manager`, `~/.budget-guidance`,
+`~/.copilot-extensions/*`). `--root` (repeatable) names a runtime root instead.
+It is conservative and fails closed:
+
+- It is a dry run unless `--apply` is given.
+- It considers only `unsealed-*` directories directly under the cache root.
+  `installed-*` and every other name are never touched.
+- A candidate is skipped (`non-bytecode-content`) unless its whole tree holds
+  only directories and `.pyc` files.
+- A candidate containing any symlink, junction or other reparse point is
+  skipped (`reparse-point`). Links are never followed. A cache root whose
+  `cache/python`, `cache` or runtime-root component is itself a link is
+  reported as `cache-root-linked-or-not-directory` and not scanned.
+- A candidate whose newest entry was modified within the grace period is
+  skipped. A live process still writing bytecode keeps it fresh.
+  `--min-age-hours` defaults to 1, must be a finite number, and must be at
+  least 1 with `--apply`.
+- Liveness evidence is reported as `liveness`. On Linux every process
+  environment and command line is scanned, and a candidate named there is
+  kept (`referenced-by-live-process`). The mode is `process-scan` when every
+  process was read, `incomplete` when some were unreadable (for example
+  another account's processes), `unavailable` on platforms without a process
+  scan (Windows, macOS), and `unknown` when the scan itself failed.
+- Only `process-scan` proves a candidate unused. Under `incomplete` or
+  `unavailable` every candidate is kept (`liveness-unproven`) unless
+  `--allow-age-only` accepts the grace period as the only liveness evidence
+  (reported as `age_only_allowed`). Under `unknown` every candidate is kept
+  (`liveness-unknown`); `--allow-age-only` does not override it.
+- Each candidate is re-inventoried immediately before removal. Removal is
+  anchored to the inventoried directories (directory handles on POSIX,
+  non-delete-sharing guard handles on Windows). If any directory was replaced
+  in the meantime the candidate becomes `error` (`changed-during-removal`).
+  Any I/O error, including on the cache root itself, marks an `error` entry,
+  leaves the rest in place, and makes the command exit 1.
+  Default discovery skips absent cache paths, but reports inaccessible caches
+  through the same error entries rather than silently omitting them.
+- `python-cache` needs no project, so it runs from any directory.
+
 ## Installation & Config
 
 | Subcommand | Description |
@@ -1769,6 +1873,33 @@ to the effort after release.
 | `launch-update automatic\|bootstrap\|reconcile\|staged` | Submit fixed native maintenance to the shared installation driver (JSON result) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
+
+### Scoped GitHub passthrough (`repos gh`)
+
+`repos gh <repo> -- <gh arguments...>` runs GitHub CLI with the repository's
+resolved account. Keep using this scoped entry rather than switching to an
+ambient `gh` account when a shell argument fails.
+
+**Windows PowerShell with a `.ps1` entry:** quote comma-joined values such as
+`--json 'number,title'` and `--label 'bug,triaged'`. PowerShell evaluates an
+unquoted literal `number,title` as an array before the script starts; forwarding
+`@args` cannot recover the lost grouping. This differs from a native `gh.exe`
+invocation and can also break a command that combines `--json` with a correctly
+quoted, spaced `--search` value.
+
+```powershell
+$aw = '<agent-worktrees catalog argv[0]>'
+$repo = 'example-owner/example-repo'
+& $aw repos gh $repo -- issue list --repo $repo --json 'number,title' --search 'bug in:title'
+
+$fields = 'number,title'
+& $aw repos gh $repo -- issue list --repo $repo --json $fields
+```
+
+Both a quoted literal and a string variable preserve the comma list through the
+PowerShell script boundary. Quote spaced values normally as well. This guidance
+does not claim that a native Windows shim is installed or repair arguments
+after PowerShell has already split them.
 
 ### Bulk account resolution (`repos account list --json --with-resolutions`)
 
@@ -2214,6 +2345,17 @@ the current directory's resolved worktree when omitted (matching most
 other subcommands); a caller that cannot be resolved either way fails
 loudly rather than logging a `worktree_id: null` entry invisible to
 `activity --worktree-id <id>`.
+
+**Disk growth under `~/.agent-*/cache/python`.** Thousands of `unsealed-*`
+directories there usually come from a launcher that ran without valid install
+evidence, or from a detached or `exec`-style launcher that cannot clean up
+after its child. A persistently empty `installed-*` set for a runtime suggests
+its install evidence is missing or invalid. Reinstalling or updating that
+runtime restores reuse. Run `agent-worktrees python-cache prune` (dry run) to
+size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
+process scan exists, add `--allow-age-only` once no affected runtime is
+running). See
+[Python bytecode caches](#python-bytecode-caches-python-cache-prune).
 
 ### Handoff trace (Tier C)
 

@@ -301,14 +301,28 @@ def runtime_builder(monkeypatch):
         def make_release_tree(self, base_dir, files):
             events.append(("sdist", base_dir, files))
 
+    class InstallLibActor:
+        pass
+
+    class MissingWheelCommand(Exception):
+        pass
+
+    class DistributionActor:
+        def get_command_class(self, _name):
+            raise MissingWheelCommand()
+
     # Only setuptools' superclass actors are replaced; the resource decisions run unchanged.
-    for name in ("setuptools", "setuptools.command"):
+    for name in ("setuptools", "setuptools.command", "distutils"):
         package = ModuleType(name)
         package.__path__ = []
+        if name == "setuptools":
+            package.Distribution = DistributionActor
         monkeypatch.setitem(sys.modules, name, package)
     for name, attribute, actor in (
         ("setuptools.command.build_py", "build_py", BuildPyActor),
         ("setuptools.command.sdist", "sdist", SdistActor),
+        ("setuptools.command.install_lib", "install_lib", InstallLibActor),
+        ("distutils.errors", "DistutilsModuleError", MissingWheelCommand),
     ):
         module = ModuleType(name)
         setattr(module, attribute, actor)

@@ -163,7 +163,7 @@ def spawn_instance(argv, *, instance: DaemonInstanceSpec, popen=None, **kwargs):
     environment.update(instance_environment(receipt))
     try:
         process = (popen or subprocess.Popen)(command, env=environment, **kwargs)
-    except OSError:
+    except (OSError, ValueError):
         cancel_instance_reservation(receipt, creation_refused=True)
         raise
     from ._daemon_instance_identity import created_process_identity
@@ -252,11 +252,12 @@ def cleanup_instance(
 
 def reconcile_instances(
     *, registry_root: Path | None = None, limit: int = 128, max_seconds: float = 5,
+    terminate: bool = False, runtime_root: Path | None = None,
 ) -> list[InstanceCleanupResult]:
-    """Bounded explicit installer backstop; never called by import or discovery."""
+    """Bounded backstop; live instances stay held unless termination is explicitly requested."""
     from ._daemon_instance_store import reconcile
 
-    return reconcile(registry_root, limit, max_seconds)
+    return reconcile(registry_root, limit, max_seconds, terminate=terminate, runtime_root=runtime_root)
 
 
 def daemon_entrypoint(service: str, *, source, runtime_root=None, purpose: Purpose | None = None):
@@ -349,6 +350,8 @@ if __name__ == "__main__":
     parser.add_argument("--registry-root", type=Path)
     parser.add_argument("--limit", type=int, default=128)
     parser.add_argument("--max-seconds", type=float, default=5)
+    parser.add_argument("--runtime-root", type=Path)
+    parser.add_argument("--terminate", action="store_true")
     args = parser.parse_args()
     if args.command == "inspect":
         print(json.dumps(inspect_instances(args.registry_root)))
@@ -356,6 +359,6 @@ if __name__ == "__main__":
         print(json.dumps([
             dataclasses.asdict(result) for result in reconcile_instances(
                 registry_root=args.registry_root, limit=args.limit,
-                max_seconds=args.max_seconds,
+                max_seconds=args.max_seconds, terminate=args.terminate, runtime_root=args.runtime_root,
             )
         ]))

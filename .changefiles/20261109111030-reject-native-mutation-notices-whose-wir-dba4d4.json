@@ -1,0 +1,9 @@
+{
+  "comment": "Reject native mutation notices whose wire deadline expires during receiver state-lock admission.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

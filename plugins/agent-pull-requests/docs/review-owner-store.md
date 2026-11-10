@@ -34,6 +34,10 @@ Every replay transaction preserves review data; every review transaction
 preserves current replay data. Source restart reads both from this same file.
 There is no automatic downgrade or receipt deletion.
 
+The optional [terminal-retention embedding](terminal-retention.md) expands this
+same owner with terminal intent and epoch-aware admission fencing. It is
+explicitly selected/adopted, not enabled by these baseline review operations.
+
 ## Selected intent and data transitions
 
 `admit_review(selected, expires_at=..., checkpoint=...)` accepts a version-1
@@ -153,6 +157,93 @@ activates neither. A separately selected
 can expose the adopted contract; data adoption alone advertises no capability
 or installed/provider qualification. Rollback cannot remove
 the extension or downgrade a file with unresolved v2 records.
+
+### Acquired comment observation
+
+The source-library function
+`review_comment_observation.observe_prepared_comment(store, cache, operation_id,
+scope, action_id, generation_id, expires_at=..., checkpoint=...)` joins an
+admitted original action to one immutable generation in the existing
+`GenerationCache`. The authenticated embedding supplies the actual scope and
+both existing owners; cache root, namespace and service binding must agree.
+This adds no workspace request, CLI operation, storage extension or acquisition.
+
+The body-free `agent-pull-requests.prepared-comment-observation/v1` result
+preserves original prepared identity, body hash, action state and native receipt.
+Only a confirmed prepared comment/reply/owned-edit can correlate. Original
+native thread/comment IDs select the cached object, never equal text or a GUID
+search. Complete usable discussion evidence must contain that live text
+comment under the original native author, with exact prepared content and
+consistent selected reply/edit targets. Missing evidence is `unavailable`;
+later native deletion or actor/type/parent/content divergence is `conflict`.
+Neither changes the retained original confirmation or unknown state.
+
+The result names the selected generation, its retained discussion observation
+interval, completeness/error count and source revision. A selected object's
+digest identifies that normalized current observation, **not an original native
+write/version receipt**. Old cached evidence is not refreshed to wall-clock time.
+The read does not acquire, send, reconcile unknown writes, ACK, advance handled
+positions or feed interest-specific echo. Original-version feedback remains
+with its existing owner. See the
+[reviewed correlation contract](../../../efforts/active/durable-pr-watch-delegation/comment-observation-correlation.md)
+for the separately unfinished receiver, provider and installed qualification.
+
+### Optional retained acquired-comment metadata
+
+`CommentMappingStore(existing_store).adopt(lifecycle_checkpoint=...,
+expires_at=..., checkpoint=...)` explicitly adds
+`review_comment_mapping_version: 1` to an already prepared-review and
+conversation-capable owner. The existing lifecycle owner must exclude old
+strict file readers; they refuse the extension before replacement. Adoption
+does not enable a host or downgrade old data.
+
+Eligible existing and newly retained prepared actions receive one nullable
+`comment_observations` slot under their enclosing review operation. Logical
+and write identity, native scope/actor/target and original confirmation remain
+in the existing intent/receipt, not copied into another mapping database.
+Each acquired slot is at most 2 KiB; its maximum growth is reserved separately
+from native receipt growth within the existing review capacity. Existing
+operation/action limits still apply. Adoption either funds all existing slots
+or refuses unchanged. Legacy and bodyless actions receive no slots.
+
+An actual acquisition embedding may explicitly select
+`ConversationStore.observe_workspace(..., comment_mappings=True)` after
+successful cache publication. It reuses the normalized read-only join inside
+the same admitted journal/envelope transaction. Discussion normalization and
+native-ID indexing occur once per acquired generation; repeated targets also
+reuse one object digest. Bounded existing-operation/action lookup follows.
+No provider query or background loop is added.
+Default acquisition remains unchanged. An embedding may explicitly construct
+`WorkspaceOperations(..., conversations=True, prepared_reviews=True,
+comment_mappings=True)` to select this projection in actual load/sync after
+confirmed cache publication. Selection never adopts storage. Missing adoption
+keeps baseline acquisition available without mapping; the transaction rechecks
+adoption before persisting selected metadata.
+
+Slots retain only generation identity, original discussion interval and
+completeness/error count, correlation outcome/reason and an available
+normalized object digest. Stale/rejected journal observations cannot change
+them; older or overlapping discussion evidence cannot replace a known newer
+slot. Repeating the same evidence reconciles idempotently. Changed native
+objects with independently valid newer section timestamps can replace a
+positive slot with explicit unavailability even when duplicate IDs or malformed
+objects make the join unusable; the timestamps do not certify its contents.
+Changed native
+attempt/receipt state invalidates its prior slot, rather than combining old
+correlation with a new receipt. No mapping-only update advances conversation,
+attention, echo, handled or ACK state. Cache publication is still a separate
+commit; uncertainty never authorizes another forge write.
+
+`CommentMappingStore.read(operation_id, scope, action_id, expires_at=...)`
+returns body-free retained evidence through the same scoped owner without a
+cache/body dependency. Missing slots remain null. Native confirmation and
+unknown outcomes are unchanged; a normalized object digest is not original
+native-version proof. The optional workspace
+[`retained-comment` reader](workspace-tools.md#retained-acquired-comment-reader)
+exposes this metadata only through its separately negotiated contract and
+explicit executing-owner selection. Baseline workspace inspection still omits
+the new storage metadata. Normal host handoff and provider/installed acceptance
+remain separate.
 
 ## Optional pre-approval selection retention
 

@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING
 
 from agent_index.store.source_layout import selected_layout
 from agent_index.indexing.work_counts import current_counts, measure_reindex
+from agent_index.indexing.source_ownership import own_reindex
 
 # UTF-8 stdio so human-facing status glyphs render safely (Rule B, #769).
 _utf8_sys = __import__("sys")
@@ -281,6 +282,7 @@ def _connector_kwargs(spec: SourceSpec) -> dict[str, object]:
 
 
 @measure_reindex
+@own_reindex
 def run_reindex(
     *,
     full: bool = False,

@@ -137,7 +137,7 @@ def human_output_entrypoint(consumer: Path) -> Path:
     )
 
 
-def human_output_declaration(script: Path) -> dict:
+def human_output_declaration(script: Path, *, initializer_sha256: str | None = None) -> dict:
     helper = script.parent / HUMAN_HELPER
     text = script.read_text(encoding="utf-8")
     if text.count(HUMAN_SOURCE_LINE) != 1:
@@ -151,15 +151,22 @@ def human_output_declaration(script: Path) -> dict:
         # replacement for PowerShell's signature/execution-policy enforcement.
         return hashlib.sha256(path.read_bytes().replace(b"\r\n", b"\n")).hexdigest()
 
+    if initializer_sha256 is not None and (
+        not isinstance(initializer_sha256, str)
+        or re.fullmatch(r"[0-9a-f]{64}", initializer_sha256) is None
+    ):
+        raise ValueError(f"{script}: invalid human-output initializer digest")
     return {
         "version": 1, "encoding": "utf-8", "entrypoint": script.name,
         "entrypoint_sha256": digest(script), "initializer": HUMAN_HELPER,
-        "initializer_sha256": digest(helper),
+        "initializer_sha256": digest(helper) if initializer_sha256 is None else initializer_sha256,
     }
 
 
-def human_output_json(script: Path) -> str:
-    return json.dumps(human_output_declaration(script), indent=2) + "\n"
+def human_output_json(script: Path, *, initializer_sha256: str | None = None) -> str:
+    return json.dumps(
+        human_output_declaration(script, initializer_sha256=initializer_sha256), indent=2,
+    ) + "\n"
 
 
 def native_executable_config(canonical_dir: Path) -> str | None:

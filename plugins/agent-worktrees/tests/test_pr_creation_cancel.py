@@ -4,15 +4,20 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+from contextlib import redirect_stdout
 from dataclasses import replace
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
+from agent_procutil.owned_process import run_caller_owned
 from agent_worktrees import __main__ as cli
 from agent_worktrees import config as cfg
 from agent_worktrees import finalize, finalize_open_pr_gate, git_ops, pr_creation_cancel
+from agent_worktrees import output
 from agent_worktrees import pr_creation_state as state
 from agent_worktrees import pr_ops, pr_publish, providers, tracking
 from agent_worktrees.providers import github_head_absence
@@ -360,7 +365,7 @@ def test_parser_preserves_strict_rejection(options):
 
 
 @pytest.mark.parametrize("gate", ["none", "dirty", "child", "other-pr"])
-def test_ordinary_finalization_keeps_all_other_gates(reservation, gate):
+def test_ordinary_finalization_keeps_all_other_gates(reservation, gate, git_only_mux):
     config, wid, wt, _remote, path, _record, _provider = reservation
     assert cancel(reservation)["success"]
     git_ops.git("reset", "--hard", "origin/master", cwd=str(wt))
@@ -411,3 +416,146 @@ def test_status_declares_runtime_contract_and_exact_attempt(reservation):
     assert result["pr_id"] == reservation[5].pr.pr_id
     assert result["pr_revision"] == reservation[5].pr.pr_revision
     assert result["prs"][0]["creation"]["phase"] == "reserved"
+
+
+@pytest.fixture
+def native_cancellation(reservation, monkeypatch, tmp_path):
+    monkeypatch.syspath_prepend(str(Path(__file__).parents[2] / "agent-pull-requests" / "src"))
+    from agent_pull_requests import __main__ as frontend, native_creation_cancel
+
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        with output.capture_json_output() as capture, redirect_stdout(StringIO()):
+            code = cli.main(argv[1:])
+        return subprocess.CompletedProcess(argv, code, capture.getvalue(), "")
+    monkeypatch.setattr(native_creation_cancel, "run_command", run)
+    monkeypatch.setattr(frontend, "_WATCH_INVOCATION", None)
+    monkeypatch.setattr(cli.front_door_cli, "resolve_invocation_project", lambda *a: True)
+    selector = tmp_path / "selected-worktrees-command"
+    selector.touch()
+    record = reservation[5]
+    args = [
+        "cancel-creation", "--worktree", reservation[1], "--creation", record.pr.pr_id,
+        "--expected-revision", str(record.pr.pr_revision),
+        "--reason", "Contribution declined", "--confirm",
+        "--worktrees-command", str(selector), "--json",
+    ]
+    return frontend, args, calls
+
+
+def test_native_actual_creation_owner_receipt_recovery_and_source_custody(
+    reservation, native_cancellation, capsys, monkeypatch,
+):
+    frontend, args, calls = native_cancellation
+    config, _wid, wt, _remote, path, record, provider = reservation
+    record.prs.append(replace(record.pr, pr_id="other-attempt", branch="pr/other", creation={}))
+    record.resources.append(tracking.ResourceClaim(
+        kind="worktree", ref="test/ext/child", state="active", created_at=tracking._now_iso(),
+    ))
+    tracking.save_record(record)
+    source, before = source_snapshot(wt), tracking.load_record(path)
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "native-test-session")
+    code = frontend.main(args)
+    first = json.loads(capsys.readouterr().out)
+    assert code == 0, first
+    assert first["frontend"]["cancellation_status"] == "confirmed"
+    assert first["already_cancelled"] is False
+    saved = path.read_bytes()
+    provider.confirm_no_pull_by_head_v1 = lambda *a, **k: pytest.fail("re-observed recovered receipt")
+    assert frontend.main(args) == 0
+    recovered = json.loads(capsys.readouterr().out)
+    assert recovered["already_cancelled"] is True
+    assert recovered["frontend"]["cancellation_status"] == "confirmed"
+    assert path.read_bytes() == saved and source_snapshot(wt) == source
+    current = tracking.load_record(path)
+    selected = current.prs[0]
+    assert state.cancelled(selected)
+    assert selected.creation["reason"] == "Contribution declined"
+    assert selected.creation["revision"] == str(before.prs[0].pr_revision)
+    assert selected.creation["actor"] == "native-test-session"
+    assert current.prs[1] == before.prs[1] and current.resources == before.resources
+    assert current.active_pr().pr_id == "other-attempt"
+    assert not finalize._pr_finalize_precondition(
+        current, config.default_repo, str(wt), config.default_repo.anchor,
+    )[0]
+    assert [call[1] for call in calls] == ["pr-status", "pr-abandon"] * 2
+    assert all(f"--expected-revision={before.prs[0].pr_revision}" in call for call in calls[1::2])
+
+
+@pytest.mark.parametrize("failure", ["published", "uncertain", "race", "save", "saved-response-lost"])
+def test_native_actual_owner_failure_retains_uncertainty_without_replay(
+    reservation, native_cancellation, monkeypatch, capsys, failure,
+):
+    frontend, args, calls = native_cancellation
+    path = reservation[4]
+    if failure in ("published", "uncertain"):
+        changed = tracking.load_record(path)
+        if failure == "published":
+            changed.pr.number, changed.pr.state = 7, "open"
+        else:
+            changed.pr.creation = {**changed.pr.creation, "phase": "publishing"}
+        tracking.save_record(changed)
+    elif failure == "race":
+        original = pr_creation_cancel._absence
+        def race(*args):
+            original(*args)
+            changed = tracking.load_record(path)
+            changed.pr.pr_revision += 1
+            tracking.save_record(changed)
+        monkeypatch.setattr(pr_creation_cancel, "_absence", race)
+    elif failure == "save":
+        def fail(*args):
+            raise OSError("test-owned persistence failure")
+        monkeypatch.setattr(tracking, "save_record", fail)
+    else:
+        from agent_pull_requests import native_creation_cancel
+        run = native_creation_cancel.run_command
+        def lose_after_save(argv, **kwargs):
+            response = run(argv, **kwargs)
+            if argv[1] == "pr-abandon":
+                assert state.cancelled(tracking.load_record(path).pr)
+                raise OSError("saved response lost")
+            return response
+        monkeypatch.setattr(native_creation_cancel, "run_command", lose_after_save)
+    before, source = path.read_bytes(), source_snapshot(reservation[2])
+    assert frontend.main(args) == 1
+    value = json.loads(capsys.readouterr().out)
+    assert value["frontend"]["cancellation_status"] == "unknown"
+    assert [call[1] for call in calls] == ["pr-status", "pr-abandon"]
+    assert source_snapshot(reservation[2]) == source
+    current = tracking.load_record(path)
+    if failure == "saved-response-lost":
+        assert state.cancelled(current.pr)
+    elif failure == "race":
+        assert current.pr.pr_revision == reservation[5].pr.pr_revision + 1
+        assert current.pr.state == "creating"
+    else:
+        assert path.read_bytes() == before
+
+
+def test_old_no_confirm_caller_on_current_owner_keeps_legacy_warning(
+    reservation,
+):
+    code = (
+        "import sys\n"
+        "from pathlib import Path\n"
+        "from types import SimpleNamespace\n"
+        "from agent_worktrees import __main__ as cli, config as cfg, tracking\n"
+        "from agent_worktrees.pr_state_cli import cmd_pr_abandon\n"
+        "cfg.load_config = lambda *a: SimpleNamespace()\n"
+        "cfg.tracking_dir = lambda *a: Path(sys.argv[1])\n"
+        "def forbidden(*a): raise AssertionError('unconfirmed record read')\n"
+        "tracking.load_record = forbidden\n"
+        "args = cli.build_parser().parse_args(sys.argv[2:])\n"
+        "raise SystemExit(cmd_pr_abandon(args))\n"
+    )
+    before = reservation[4].read_bytes()
+    result = run_caller_owned([
+        sys.executable, "-c", code, str(reservation[4].parent),
+        "pr-abandon", reservation[1], "--reason", "Retain contribution", "--json",
+    ], timeout=15, max_stdout_bytes=65_536, max_stderr_bytes=65_536)
+    assert result.returncode == 1, result.stderr
+    value = json.loads(result.stdout)
+    assert value["needs_confirm"] and "confirm" in value["error"]
+    assert reservation[4].read_bytes() == before

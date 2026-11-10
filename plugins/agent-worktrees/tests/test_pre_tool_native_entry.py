@@ -1,10 +1,12 @@
 """Opt-in native pre-entry contract; the legacy Python entry remains supported."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 import pytest
@@ -16,7 +18,7 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error", "malformed-response", "case-flag", "case-payload", "keys-shadow-response", "read-no-management", "active-no-management", "write-cwd", "write-cwd-fallback"])
+@pytest.mark.parametrize("case", ["read", "guard-drift", "missing-contract", "write", "context", "active", "invalid-flag", "future-flag-contract", "array-flag", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract", "non-utf8-environment", "old-client", "empty-policy", "array-response", "invalid-decision-response", "invalid-context-response", "policy-error", "malformed-response", "case-flag", "case-payload", "keys-shadow-response", "read-compatibility-home", "active-compatibility-home", "write-cwd", "write-cwd-fallback"])
 @pytest.mark.parametrize("native_shell", ["powershell.exe", "pwsh"])
 def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_path):
     shell = shutil.which(native_shell)
@@ -26,10 +28,20 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     for name in (
-        "pre-tool-hook.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1", "hook_policy_process.py",
+        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json", "versioned_runtime_native.ps1", "hook_policy_process.py",
         "statelessness_guard.py", "guarded_anchor_map.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
+    contract = json.loads((scripts / "hook-read-policy.json").read_text(encoding="utf-8"))
+    for guard in contract["guards"]:
+        text = (scripts / guard).read_text(encoding="utf-8").replace("\r\n", "\n")
+        contract["guards"][guard] = hashlib.sha256(text.encode("utf-8")).hexdigest()
+    (scripts / "hook-read-policy.json").write_text(json.dumps(contract), encoding="utf-8")
+    (scripts / "managed-session.ps1").write_text(
+        (SCRIPTS / "managed-session.ps1").read_text(encoding="utf-8")
+        + "\nfunction Test-ManagedWorktreesSession { return $true }\n",
+        encoding="utf-8",
+    )
     observed = tmp_path / "python-ran"
     (scripts / "hook_client.py").write_text(
         "import json,sys\nfrom pathlib import Path\n"
@@ -47,11 +59,11 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     env.update(HOME=str(home), USERPROFILE=str(home),
                PRETOOL_KILLSWITCH_STATE_FILE=str(flag),
                PATH=str(interpreter.parent) + os.pathsep + env.get("PATH", ""))
-    if case in {"read-no-management", "active-no-management"}:
+    if case in {"read-compatibility-home", "active-compatibility-home"}:
         flag = home / ".copilot-extensions" / "killSwitches" / "pretool-killswitch.json"
         flag.parent.mkdir(parents=True)
         env.pop("PRETOOL_KILLSWITCH_STATE_FILE")
-        if case == "active-no-management":
+        if case == "active-compatibility-home":
             flag.write_text('{"active":true}', encoding="utf-8")
     if case in {"write-cwd", "write-cwd-fallback"}:
         cwd_marker = tmp_path / "policy-cwd"
@@ -116,7 +128,7 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
             encoding="utf-8",
         )
     payload = {"toolName": "view" if case in {
-        "read", "read-no-management", "guard-drift", "missing-contract", "context", "active", "invalid-flag",
+        "read", "read-compatibility-home", "guard-drift", "missing-contract", "context", "active", "invalid-flag",
         "future-flag-contract", "array-contract-id", "empty-contract-id", "drive-relative-flag", "root-relative-flag", "array-contract",
     } else "edit", "toolArgs": {"path": "non-ascii-\u00e9.txt"}}
     if case == "case-payload":
@@ -130,18 +142,16 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
             "[void]$ExecutionContext.SessionState.Path.SetLocation($LiteralPath) }; "
             + command
         )
-    if case in {"read-no-management", "active-no-management"}:
+    if case in {"read-compatibility-home", "active-compatibility-home"}:
         shutil.copytree(scripts, home / ".agent-worktrees" / "bin")
         command = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]["powershell"]
         command = (
-            "function global:Set-Location { throw 'unexpected cwd repair' }; "
-            "function global:Join-Path { throw 'unexpected Management path join' }; "
-            "function global:Test-Path { throw 'unexpected Management path test' }; " + command
+            "function global:Set-Location { throw 'unexpected cwd repair' }; " + command
         )
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command],
         input=original, capture_output=True, text=True, encoding="utf-8", env=env,
-        cwd=home, timeout=20, creationflags=subprocess.CREATE_NO_WINDOW,
+        cwd=home, timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
     )
     assert result.returncode == 0, result.stderr
     if case == "policy-error":
@@ -149,7 +159,7 @@ def test_native_entry_keeps_uncertain_input_on_python(case, native_shell, tmp_pa
     if case == "malformed-response":
         assert "private-native-response-text" not in result.stderr
         assert "private-native-response-text" not in result.stdout
-    python_required = case not in {"read", "active", "context", "read-no-management", "active-no-management"}
+    python_required = case not in {"read", "active", "context", "read-compatibility-home", "active-compatibility-home"}
     assert observed.exists() is python_required, (result.stdout, result.stderr)
     if python_required:
         assert json.loads(observed.read_text(encoding="utf-8")) == payload
@@ -188,8 +198,13 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("pre-tool-hook.ps1", "hook_policy_process.py", "resolve-runtime.ps1"):
+    for name in ("pre-tool-hook.ps1", "managed-session.ps1", "hook_policy_process.py", "resolve-runtime.ps1"):
         shutil.copyfile(SCRIPTS / name, scripts / name)
+    (scripts / "managed-session.ps1").write_text(
+        (SCRIPTS / "managed-session.ps1").read_text(encoding="utf-8")
+        + "\nfunction Test-ManagedWorktreesSession { return $true }\n",
+        encoding="utf-8",
+    )
     shutil.copytree(SCRIPTS / "installation-context", scripts / "installation-context")
     shutil.copyfile(SCRIPTS.parent / "plugin.json", payload / "plugin.json")
     observed = tmp_path / "policy-ran"
@@ -212,7 +227,7 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
          "-PayloadRoot", str(payload), "-PayloadVersion", "1.0.0",
          "-PayloadOrigin", "explicit", "-ExpectedNamespaceGeneration", "0",
          "-ExpectedInstallGeneration", "0", "-DurableHome", str(durable)],
-        capture_output=True, text=True, encoding="utf-8", timeout=30,
+        capture_output=True, text=True, encoding="utf-8", timeout=10,
         env={**os.environ, "PATH": str(interpreter.parent) + os.pathsep + os.environ.get("PATH", "")},
         **flags,
     )
@@ -224,7 +239,7 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     for target in (runtime, ambient):
         created = subprocess.run(
             [str(interpreter), "-m", "venv", "--without-pip", str(target)],
-            capture_output=True, text=True, timeout=30, **flags,
+            capture_output=True, text=True, timeout=10, **flags,
         )
         assert created.returncode == 0, (created.stdout, created.stderr)
     site = runtime / "Lib" / "site-packages"
@@ -261,7 +276,7 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     result = subprocess.run(
         [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", str(scripts / "pre-tool-hook.ps1")],
         input=json.dumps({"toolName": "view", "toolArgs": {"path": "fixture.txt"}}),
-        capture_output=True, text=True, encoding="utf-8", env=env, cwd=home, timeout=25, **flags,
+        capture_output=True, text=True, encoding="utf-8", env=env, cwd=home, timeout=10, **flags,
     )
     assert result.returncode == 0, result.stderr
     reply = json.loads(result.stdout)
@@ -273,3 +288,82 @@ def test_native_entry_selects_validated_cell_runtime(native_shell, invalid_conte
     else:
         assert reply == {"additionalContext": "validated cell policy"}, result.stderr
         assert Path(observed.read_text()).is_relative_to(runtime)
+
+
+def test_ps7_pre_tool_json_engine_parity_and_first_use(tmp_path, capsys):
+    shell = shutil.which("pwsh")
+    if shell is None:
+        pytest.skip("pwsh is unavailable")
+    inputs = [
+        json.dumps({
+            "toolName": "edit", "toolArgs": {
+                "array": [{}, [], None, True, False, 42, 1.25, "\u00e9\u4e2d\U0001f680"],
+                "integer": 9223372036854775807, "iso": "2026-01-02T03:04:05Z",
+                "text": "quote'\"\\\n\t",
+            },
+        }),
+        '{"__type":null,"nested":{"__type":"ordinary-data","value":42}}',
+        r'{"epoch":"\/Date(0)\/","offset":"\/Date(0+0500)\/"}',
+        '{"small":1e-100,"big":1.234567890123456789e30,'
+        '"long":0.12345678901234567890123456789}',
+        '{"A":1,"a":2,"":3,"value":1,"value":2}',
+    ]
+    managed = str(SCRIPTS / "managed-session.ps1").replace("'", "''")
+    pre_tool = str(SCRIPTS / "pre-tool-hook.ps1").replace("'", "''")
+    script = tmp_path / "json-comparison.ps1"
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false,$true)\n"
+        f". '{managed}'\n"
+        f"$ast=[Management.Automation.Language.Parser]::ParseFile('{pre_tool}',[ref]$null,[ref]$null)\n"
+        "$definition=$ast.Find({ param($node) "
+        "$node -is [Management.Automation.Language.FunctionDefinitionAst] -and "
+        "$node.Name -eq 'ConvertFrom-PreToolJson' },$false)\n"
+        ". ([scriptblock]::Create($definition.Extent.Text))\n"
+        "$inputs=[Console]::In.ReadToEnd().Split(\"`n\")\n"
+        "$null=ConvertFrom-ManagedWorktreesJson '{}'\n"
+        "$clock=[Diagnostics.Stopwatch]::StartNew()\n"
+        "$first=if($env:JSON_VARIANT -eq 'cmdlet') { "
+        "ConvertFrom-Json -InputObject $inputs[0] -AsHashtable -ErrorAction Stop "
+        "} else { ConvertFrom-ManagedWorktreesJson $inputs[0] }\n"
+        "$clock.Stop()\n"
+        "[Console]::Error.WriteLine(('decode_seconds='+$clock.Elapsed.TotalSeconds))\n"
+        + r"""
+function ConvertFrom-Json { throw 'Pre-tool JSON requested cmdlet initialization' }
+foreach ($raw in $inputs) {
+    $actual=ConvertFrom-PreToolJson $raw
+    $reference=Microsoft.PowerShell.Utility\ConvertFrom-Json -InputObject $raw -AsHashtable -ErrorAction Stop
+    [Console]::Out.WriteLine((ConvertTo-PreparedWorktreesJson -InputObject $actual -Depth 100))
+    [Console]::Out.WriteLine((ConvertTo-PreparedWorktreesJson -InputObject $reference -Depth 100))
+}
+foreach ($raw in @('[]','{"value":','{}{}')) {
+    $actualRejected=$false
+    $referenceRejected=$false
+    try { $null=ConvertFrom-PreToolJson $raw } catch { $actualRejected=$true }
+    try { $null=ConvertFrom-ManagedWorktreesJson $raw } catch { $referenceRejected=$true }
+    if (-not $actualRejected -or -not $referenceRejected) { throw 'Malformed JSON was accepted' }
+}
+""",
+        encoding="utf-8",
+    )
+    samples = []
+    for variant in ("cmdlet", "native", "cmdlet"):
+        started = time.perf_counter()
+        result = subprocess.run(
+            [shell, "-NoProfile", "-NonInteractive", "-File", str(script)],
+            input="\n".join(inputs), text=True, encoding="utf-8", capture_output=True,
+            timeout=10, creationflags=subprocess.CREATE_NO_WINDOW,
+            env={**os.environ, "JSON_VARIANT": variant},
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == 0, result.stderr
+        assert result.stderr.startswith("decode_seconds="), result.stderr
+        rows = [json.loads(line) for line in result.stdout.splitlines()]
+        assert len(rows) == len(inputs) * 2
+        assert rows[::2] == rows[1::2]
+        samples.append({
+            "variant": variant, "process_seconds": elapsed,
+            "decode_seconds": float(result.stderr.removeprefix("decode_seconds=")),
+        })
+    with capsys.disabled():
+        print(json.dumps({"ps7_pre_tool_json_first_use": samples}))

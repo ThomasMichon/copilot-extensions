@@ -59,9 +59,12 @@ delegated-agent facade.
 | Rebuild a damaged relay log | No CLI verb; the watchdog may trigger it internally | Authenticated `POST .../resync` | Event log is rebuilt from downstream replay and delivery cursors reset |
 | Message a represented interactive session | `send <live-handle>`; optional `--wait-reply` | `POST /api/v1/live-sessions/{id}/messages` | Immediate admission receipt; SDK acceptance and consumption are distinct; optional bounded post-consumption reply evidence requires HTTP protocol 39 |
 | Observe a busy represented peer | `read <live-handle> --message-id N --json` | `GET .../result` plus `GET .../messages/{id}/receipt` | Bounded activity, pending inbox metadata, recent output, and a cursor-neutral message receipt (HTTP protocol 39) |
+| Wait for represented delivery, not turn end | `send <live-handle> --wait --wait-timeout 120` | `POST .../delivery`, capability `live_delivery_observation: 1` | Exact consumption, fresh pending question/permission/mute observation, or accepted timeout; no reply required |
+| Re-observe the same delivery | `delivery-receipt <original-session-id> <message-id> [--timeout 120]` | `POST .../messages/{id}/delivery`, same capability | Receipt plus current delivery attention without another prompt or cursor movement |
 | Admit an exact live CLI prompt | `send <exact-session-id> --live-exact` with the exact expected session, key, sender and stdin prompt | `POST .../messages/keyed-exact/v1`, capability `live_keyed_receipt: 1` | Original live inbox receipt; no alias, ACP, queue or native replacement |
 | Observe an exact keyed live CLI prompt | Same binding with `--live-receipt-only` | `POST .../messages/keyed-receipt/v1`, same capability | Read-only retained receipt; a miss is unproven, not permission to send |
 | Notify one exact live CLI native | `send <exact-session-id> --live-exact-notify --kind notify`, same exact binding | `POST .../messages/exact-notify/v1`, capability `live_exact_notify: 1` | Informational inbox admission only; no alias, work-bearing prompt, ACP or replacement |
+| Subscribe to selected-agent status | `BridgeClient.status_*` methods | `/api/v1/status`, capability `host_status_feed: 1` | [Bounded metadata feed, explicit acknowledgement and one coalesced existing-inbox notice](host-status-feed.md); shared host carrier streams, not per-agent polling |
 
 Against older daemons, receipt-only sends retain legacy outcomes without
 receipt evidence. Explicit reply waiting refuses before submitting a message
@@ -84,6 +87,57 @@ but cannot overwrite an idle boundary already observed after consumption.
 Migration retains historical SDK-acceptance evidence without inventing
 consumption or classifying old acknowledged history as newly pending work.
 Newly admitted inputs carry explicit consumption-tracking provenance.
+
+### Model-facing delivery and pending input
+
+`send --wait` is an explicit, finite **delivery** wait for a represented live
+session. It is mutually exclusive with `--no-wait` and `--wait-reply`.
+`--wait-timeout` accepts 0 through 600 seconds, default 120. Ordinary sends still
+return admission immediately; `--wait-reply` retains its existing separate
+post-consumption reply contract. Prepared plugin-startup readiness and fenced
+native/receipt-only send modes cannot be combined with `--wait`.
+
+The `live_delivery_observation: 1` capability is selected against the running
+daemon and pinned endpoint before the new request. An older daemon or supported
+rollback refuses before admission; there is no legacy-send fallback. The first
+local provider does not support qualified remote `--wait`: that combination
+refuses before sending, rather than silently waiting on another daemon.
+Existing qualified remote admission and `--wait-reply` are unchanged.
+
+JSON send output retains its ordinary receipt/outcome and adds
+`delivery_observation`, containing `receipt`, `attention` and an `outcome` of
+`consumed`, `blocked`, `timeout`, `detached` or `unavailable`. `consumed` is
+attributed root `user.message` evidence: the input became model-facing agent-loop
+input, not merely SDK-accepted pending text. It is **not** proof of network
+transmission, model understanding, an answer or task completion. No unsupported
+SDK callback hook is registered. Consumption settles the wait even if a later
+question is pending; monotonic receipt facts do not regress with attention.
+
+The extension publishes metadata-only current root question/permission
+categories and inbox mute state, process-fenced to the native registration.
+Pending requests never become remotely answerable through this API.
+Snapshots expire after 15 seconds and are lost on daemon restart. A missing,
+stale or different-incarnation snapshot means `attention.state: unknown`,
+not ready. An extension joining mid-turn does not infer that an unseen older
+question is absent; root idle establishes a complete observation. Partial
+observations can still positively report a pending request. Tool/model-turn
+completion alone does not clear unrelated pending input.
+
+Publication uses the existing two-second inbox timer: meaningful changes
+publish on its next tick, unchanged snapshots refresh at most once per six
+seconds, and optional capability discovery is cached for 30 seconds. Event
+callbacks do bounded in-memory bookkeeping only; no transcript read, native
+RPC, subprocess or network I/O runs on the callback. A delivery waiter reads
+only its local exact receipt at most four times per second while attached.
+It never waits on or polls remote transcript files.
+
+Accepted `blocked` and timeout results exit successfully and retain the original
+message ID. Inspect it with `delivery-receipt`; **do not resend** to obtain a
+later stage. That read has a zero-second default timeout and never admits a
+message. Retirement can make current evidence unavailable without revoking an
+already-returned admission fact. Extension payload installation does not reload
+an existing session's code; fresh observations require its normally authorized
+extension load/reload, not a session replacement.
 
 ### Exact live CLI inbox admission and observation
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Revalidate exact reviewed candidate and owned targets on fresher native dispatch policy reads",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

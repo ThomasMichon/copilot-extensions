@@ -1,0 +1,9 @@
+{
+  "comment": "Include scoped daemon reconciliation in exported session-host bundles.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

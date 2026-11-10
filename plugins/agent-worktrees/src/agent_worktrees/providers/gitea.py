@@ -94,6 +94,7 @@ class GiteaProvider:
         token: str,
         *,
         payload: dict | None = None,
+        preserve_line_endings: bool = False,
     ) -> tuple[int, str]:
         """Run curl; return (http_status, body_text)."""
         args = [
@@ -104,7 +105,7 @@ class GiteaProvider:
         ]
         if payload is not None:
             args += ["-H", "Content-Type: application/json", "-d", json.dumps(payload)]
-        proc = run_cli(args)
+        proc = run_cli(args, **({"preserve_line_endings": True} if preserve_line_endings else {}))
         if proc.returncode != 0:
             raise ProviderError(
                 f"curl failed talking to Gitea ({url}): "
@@ -1045,25 +1046,13 @@ class GiteaProvider:
         )
 
     def get_diff(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        preserve_line_endings: bool = False,
     ) -> PRDiff:
         """Return the PR's current unified diff via Gitea's ``.diff`` endpoint."""
-        if not token:
-            return PRDiff(
-                supported=False,
-                error="Gitea provider needs a token to read a PR diff.",
-            )
-        try:
-            status, body = self._curl(
-                "GET", self._api(api_base, f"/repos/{repo}/pulls/{number}.diff"), token,
-            )
-        except ProviderError as exc:
-            return PRDiff(supported=True, error=str(exc))
-        if status != 200:
-            return PRDiff(
-                supported=True, error=f"gitea diff GET returned HTTP {status}"
-            )
-        return PRDiff(diff=body)
+        from .gitea_diff import get_diff
+        return get_diff(self, repo, number, api_base=api_base, token=token,
+                        preserve_line_endings=preserve_line_endings)
 
     def post_comment(
         self, repo: str, number: int, body: str, *, api_base: str = "",

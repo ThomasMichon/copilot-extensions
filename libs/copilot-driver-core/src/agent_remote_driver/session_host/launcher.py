@@ -262,12 +262,47 @@ def launch_session_host(
     own stdout/stderr to ``os.devnull`` once ready
     (``_detach_stdio_from_frontend``), so output after that point is never
     coupled to this frontend process's lifetime.
+
+    Without ``state_dir`` the host's records live in a labeled scratch
+    directory (``scratch-owner.json`` breadcrumb). A launch that fails before
+    spawning, or whose host is confirmed to have exited, removes that
+    directory; any other outcome keeps it because a live host or a later
+    authority read may still need it.
     """
-    sd = (
-        Path(os.path.abspath(state_dir))
-        if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
-    )
+    # Frontend-only helper; the compact host archive does not carry it.
+    from .launcher_scratch import launch_state
+
+    with launch_state(state_dir, session_id, acquisition_launch) as (sd, phase):
+        return _launch_in(
+            sd, child_argv, cwd=cwd, env=env, ready_timeout=ready_timeout, nonce=nonce,
+            session_id=session_id, host_version=host_version,
+            unexpected_reap_seconds=unexpected_reap_seconds,
+            active_reap_seconds=active_reap_seconds, acquisition_launch=acquisition_launch,
+            host_entrypoint=host_entrypoint, policy_context=policy_context,
+            lifetime_policy=lifetime_policy, phase=phase,
+        )
+
+
+def _launch_in(
+    sd: Path,
+    child_argv: list[str],
+    *,
+    cwd: str | None,
+    env: dict[str, str] | None,
+    ready_timeout: float,
+    nonce: str,
+    session_id: str,
+    host_version: str,
+    unexpected_reap_seconds: float,
+    active_reap_seconds: float,
+    acquisition_launch: LaunchOwner | None,
+    host_entrypoint: str,
+    policy_context: str | None,
+    lifetime_policy: str,
+    phase: dict[str, bool],
+) -> HostHandle:
     from agent_procutil._daemon_instance_store import _root
+    from .launcher_scratch import observe_exit, tracked_creation
 
     _root(sd, create=True)
     state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
@@ -353,11 +388,13 @@ def launch_session_host(
         child_env[_STARTUP_ENV] = startup.context
 
     spawn_options = host_spawn_kwargs()
+
     try:
         if acquisition_launch is not None:
             acquisition_launch.begin_host()
         proc = spawn_instance(
             host_argv,
+            popen=tracked_creation(phase),
             instance=DaemonInstanceSpec(
                 "agent-bridge-session-host", sd, Path(__file__).resolve(),
             ),
@@ -387,6 +424,7 @@ def launch_session_host(
     deadline = time.time() + ready_timeout
     while True:
         if proc.poll() is not None:
+            observe_exit(phase, proc)
             if startup is not None:
                 startup.close()
             # The process has exited, but the OS pipe may still hold bytes

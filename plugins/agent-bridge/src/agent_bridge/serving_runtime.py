@@ -11,6 +11,7 @@ from zdd.private_protocol import PrivateIPCError, Refusal
 from .auth import BearerAuthMiddleware
 from .db import Database
 from .runtime_restore import RestoredRuntime
+from .app_routes import configure_serving_app
 
 
 class CandidateServing:
@@ -22,8 +23,6 @@ class CandidateServing:
     """
 
     def __init__(self, app: FastAPI, runtime: RestoredRuntime) -> None:
-        from .app_routes import configure_serving_app
-
         if (
             runtime.roster is None or not runtime.roster.ready()
             or (runtime.sessions is not None and runtime.sessions.sessions)
@@ -49,7 +48,10 @@ class CandidateServing:
             else self._target.state.live_event_store
         )
         app.state.live_questions = self._target.state.live_questions
+        app.state.live_delivery_state = self._target.state.live_delivery_state
         app.state.mux_questions = self._target.state.mux_questions
+        from .status_runtime import StatusRuntime
+        app.state.status_runtime = StatusRuntime(app)
         self._target.state = app.state
         self._target.middleware_stack = self._target.build_middleware_stack()
         self._stack = self._target.middleware_stack
@@ -88,6 +90,7 @@ class CandidateServing:
             raise PrivateIPCError(Refusal.AUTHORITY)
         self._db.start_writer()
         self._writer = self._db._writer_thread
+        self._app.state.status_runtime.start()
         self.verify()
 
     def verify(self) -> None:
@@ -141,3 +144,4 @@ class CandidateServing:
         self._app._serving_target = self._target
         self.active = True
         state.ready = True
+        state.status_runtime.wake.set()

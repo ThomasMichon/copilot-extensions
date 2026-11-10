@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify Companion PR panel narrow rendering and blocked-read dismissal",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

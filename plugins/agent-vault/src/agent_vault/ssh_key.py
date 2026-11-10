@@ -16,7 +16,7 @@ FAILURE_HINTS = {
     "entry_missing": "Synchronize the existing SSH key entry; ordinary preparation never initializes it.",
     "malformed_key": "Existing SSH key record is invalid; inspect it without replacing or rotating it.",
     "confirmation_required": "Initial SSH key creation requires both explicit initialization flags.",
-    "crypto_unavailable": "Install agent-vault[ssh] in the owning runtime and retry.",
+    "crypto_unavailable": "Select the owning Vault runtime's SSH installation profile and retry.",
 }
 MAX_RECORD_BYTES = 16384
 

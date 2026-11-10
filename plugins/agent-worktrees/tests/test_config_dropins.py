@@ -715,3 +715,17 @@ def test_doctor_apply_daemon_health_flag_reaches_report(monkeypatch, tmp_path, c
     payload = json.loads(capfd.readouterr().out)
     assert seen["apply"] is True
     assert payload["daemon_health"]["mode"] == "apply"
+
+
+def test_agendas_dropin_validation():
+    assert dropins._validate_config({"agendas": {"default": "expected"}}) is None
+    assert dropins._validate_config({"agendas": {"default": False}}) is None
+    error = dropins._validate_config({"agendas": {"default": "sometimes"}})
+    assert error == "agendas.default must be one of off, expected (got 'sometimes')"
+    nested = dropins._validate_config(
+        {"repos": {"sample": {"agendas": {"default": "sometimes"}}}}
+    )
+    assert nested == "repos.sample.agendas.default must be one of off, expected (got 'sometimes')"
+    assert dropins._validate_config(
+        {"repos": {"sample": {"agendas": {"default": "expected"}}}}
+    ) is None

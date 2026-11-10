@@ -1,0 +1,9 @@
+{
+  "comment": "Negotiate optional body-free active and compact terminal comment mapping reads without changing baseline contracts",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

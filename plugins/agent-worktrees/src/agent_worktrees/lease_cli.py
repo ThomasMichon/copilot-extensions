@@ -37,7 +37,9 @@ from .lease_store import (
     GitLeaseStore,
     LeaseConflict,
     LeaseLost,
-    LeaseSnapshot,
+    ProviderEffectConflict,
+    ResourceSnapshot,
+    ServiceCustodyConflict,
 )
 
 
@@ -67,7 +69,7 @@ def _with_disposition(context: dict[str, str], disposition: str | None) -> dict[
     return obligations.with_disposition(context, disposition)
 
 
-def _print(snapshot: LeaseSnapshot | None, *, pretty: bool) -> None:
+def _print(snapshot: ResourceSnapshot | None, *, pretty: bool) -> None:
     data: object = {"state": "absent"} if snapshot is None else snapshot.to_dict()
     print(json.dumps(data, indent=2 if pretty else None, sort_keys=True))
 
@@ -117,10 +119,10 @@ def _run(args: argparse.Namespace) -> int:
         ), pretty=args.pretty)
         return 0
     if command in {"inspect", "status"}:
-        _print(store.inspect(args.kind, args.resource), pretty=args.pretty)
+        _print(store.inspect_resource(args.kind, args.resource), pretty=args.pretty)
         return 0
     if command == "list":
-        data = [snapshot.to_dict() for snapshot in store.list(kind=args.kind)]
+        data = [snapshot.to_dict() for snapshot in store.list_resources(kind=args.kind)]
         print(json.dumps(data, indent=2 if args.pretty else None, sort_keys=True))
         return 0
     raise AssertionError(f"unhandled lease command {command}")
@@ -206,6 +208,26 @@ def run_lease(argv: list[str]) -> int:
         return _run(args)
     except LeaseConflict as exc:
         print(f"lease conflict: {exc}", file=sys.stderr)
+        return 3
+    except ServiceCustodyConflict as exc:
+        print(
+            json.dumps({
+                "code": "service_custody_conflict",
+                "error": str(exc),
+                "resource": exc.snapshot.to_dict(),
+            }, sort_keys=True),
+            file=sys.stderr,
+        )
+        return 3
+    except ProviderEffectConflict as exc:
+        print(
+            json.dumps({
+                "code": "provider_effect_conflict",
+                "error": str(exc),
+                "resource": exc.snapshot.to_dict(),
+            }, sort_keys=True),
+            file=sys.stderr,
+        )
         return 3
     except LeaseLost as exc:
         print(f"lease lost: {exc}", file=sys.stderr)

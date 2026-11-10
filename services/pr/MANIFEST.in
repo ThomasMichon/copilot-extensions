@@ -1,2 +1,4 @@
 include container/Dockerfile
 include container/role-bindings.example.json
+include _build_runtime_resource.py
+include packaged-assets.json

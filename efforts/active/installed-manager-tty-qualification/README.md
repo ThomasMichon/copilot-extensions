@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed proposal, then implementation PRs against `dev`
 - **Created:** 2026-11-07
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [release qualification](../../../visions/release-pipeline/README.md#configured-feed-construction-and-first-launch), [fresh-machine behavior](../../../visions/clean-room-validation/README.md#fresh-machine-fidelity), [authoritative replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #11377
 - **Related owners:** #3336 release control; #7529 configured-feed construction; #5579 installed launcher chain
@@ -24,10 +24,12 @@ qualification, not a return of the general integration portfolio to unit CI.
 | Qualification coordinator | Plan, integration, validation and PR ownership | Managed source `threaded-ledger` |
 | Native witness contributor | Isolated installation and real terminal consumer witness | Same source branch; coordinator-mediated assignment |
 | Promotion contributor | Existing release-lane integration and evidence admission | Same source branch; coordinator-mediated assignment |
+| Main activation coordinator | Workflow-only controller preparation and reviewed adoption | Managed source `quiet-sprocket`; same PR owner |
 
 ## Coordination
 
-- **Topology:** one source worktree; contributors have disjoint edit ownership.
+- **Topology:** one Dev implementation worktree and a separate workflow-only Main
+  activation worktree; Dev contributors have disjoint edit ownership.
 - **Host (owns PRs):** Qualification coordinator; contributors do not commit,
   rebase or publish independently.
 - **Delegates:** Native witness contributor owns the selected native fixture;
@@ -71,50 +73,50 @@ The following realization details are **agent-recommended**.
 
 ### Phase 1 - Review the consumer and gate contract
 
-- [ ] Identify the existing actual-install/native-terminal fixture owners and
+- [x] Identify the existing actual-install/native-terminal fixture owners and
   supported Windows qualification lane; agree exact implementation file ownership.
-- [ ] Review this proposal and the narrowly extended installed-entry vision
+- [x] Review this proposal and the narrowly extended installed-entry vision
   before implementation.
 
 ### Phase 2 - Prove actual installed terminal readiness
 
-- [ ] Install the candidate through its authentic installation owner into fresh,
+- [x] Install the candidate through its authentic installation owner into fresh,
   isolated state with a representative generic adopted harness repository.
-- [ ] Invoke that repository's generated binstub through the supported Windows
+- [x] Invoke that repository's generated binstub through the supported Windows
   terminal path, reaching the installed Manager rather than a source import
   or a substituted direct module invocation.
-- [ ] Assert real visible TUI readiness and input response, then close the
+- [x] Assert real visible TUI readiness and input response, then close the
   fixture through its owner and verify bounded descendant cleanup.
-- [ ] Add a falsifying control where installation succeeds but installed launch
+- [x] Add a falsifying control where installation succeeds but installed launch
   fails; the witness must fail without retries or improvised repair hiding it.
 
 ### Phase 3 - Enforce the result before promotion
 
 - [ ] Reuse the supported native qualification lane with evidence bound to the
   frozen candidate, installation inputs and actual terminal consumer.
-- [ ] Refuse promotion for failed, timed-out, missing, skipped, incomplete or
+- [x] Refuse promotion for failed, timed-out, missing, skipped, incomplete or
   stale qualification; cover these decisions with bounded in-process tests.
-- [ ] Document invocation, input/evidence identity and failure ownership; retain
+- [x] Document invocation, input/evidence identity and failure ownership; retain
   the existing unit coverage, source integrity and publication gates.
 - [ ] Validate and land the implementation through normal review, and verify
   actual gate activation without claiming an unperformed host rollout.
 
 ## Validation Plan
 
-- [ ] The actual installer constructs a fresh fixture; it does not reuse the
+- [x] The actual installer constructs a fresh fixture; it does not reuse the
   operator's selected runtime, caches as installation state, or private repository.
-- [ ] The exact generated project binstub launches the installed Manager under
+- [x] The exact generated project binstub launches the installed Manager under
   a real supported Windows TTY and the observed UI responds to a test input.
-- [ ] Positive and install-success/launch-failure controls exercise the actual
+- [x] Positive and install-success/launch-failure controls exercise the actual
   consumer; process existence, `--version`, mount callbacks or synthetic ready
   files cannot satisfy the TTY assertion.
-- [ ] Timeout, cancellation and failure retain diagnostics and settle only
+- [x] Timeout, cancellation and failure retain diagnostics and settle only
   fixture-owned resources without altering host daemons, sessions or selections.
-- [ ] Gate decision tests reject stale candidate identities and every missing
+- [x] Gate decision tests reject stale candidate identities and every missing
   or non-success result; the live/native witness is not reclassified as unit proof.
 - [ ] A supported promotion run or the existing owner's equivalent exact-candidate
   qualification demonstrates that this gate actually blocks publication.
-- [ ] Source review, required CI and installation-contract checks pass; any
+- [x] Source review, required CI and installation-contract checks pass; any
   unavailable validation tier or actual infrastructure blocker is explicit.
 
 ## Proposal
@@ -132,3 +134,482 @@ inventory; unsupported execution must not be reported as a successful gate.
   harness repository, binstub invocation, TTY readiness and blocking promotion.
 - Claimed #11377; existing construction, native qualification and release-control
   owners remain authoritative. No implementation or live rollout is claimed.
+
+### 2026-11-07 - Reviewed contract and implementation assignments
+
+- Proposal #11380 merged after current-head approval and required CI.
+- The native witness contributor owns
+  `worktree-manager/tests/native/test_manager_installed_tty.py` and the bounded
+  `tools/run-manager-runtime-acceptance.py` contract extension. Existing real
+  installation, source-origin and ConPTY cleanup owners are reused.
+- The promotion contributor owns the installed-TTY job in
+  `.github/workflows/validate-and-promote.yml` and focused gate wiring tests.
+  The existing frozen-candidate import and disposable Windows lane are reused.
+- The independently governed Main controller preserves its workflow bytes;
+  ordinary Dev promotion cannot activate this workflow change. After reviewed
+  implementation, a separate lawful workflow-only Main PR and actual gate
+  execution remain required. No gate activation is yet claimed.
+
+### 2026-11-07 - Gate decisions validated; native installation still pending
+
+- The coordinator independently ran the bounded canonical tool packet:
+  installed-Manager gate, release-controller contract, promotion lifecycle and
+  merge-wait tests. All 138 tests and 60 subtests passed.
+- The first genuine fixture installation failed before TTY startup because its
+  nested temporary root exceeded the Windows path budget with immutable runtime
+  generations. The fixture and workflow use a shorter owned root; no production
+  path policy, package feed or timeout was changed to conceal the failure.
+- The real installed terminal positive and negative controls are still required.
+  Unit decisions, source wiring and artifact paths do not establish that result.
+- The workflow-only Main candidate retains independently governed control bytes.
+  Its exact-controller merge-wait tests passed all 42 cases, and release-tool
+  compatibility passed for active and prepared inputs. Publication-boundary
+  validation exposed a coupled fixture missing the new native dependency.
+  The corrected fixture retains legacy expectations and explicitly rejects
+  failed, cancelled, skipped, missing, unknown and incomplete native results.
+  The coordinator independently re-ran all 25 exact-controller boundary cases
+  successfully. These fixture results are not live gate activation.
+
+### 2026-11-07 - Hosted validation candidate prepared
+
+- The installed-TTY contract uses one shared 720-second bound, including
+  30 seconds for cleanup. Production inactivity limits, the native capability
+  deadline and other acceptance contracts are unchanged.
+- Genuine local construction completed Manager installation and inventoried
+  3,757 canonical slot entries. Engine became healthy, but helper publication
+  refused the fixture's marketplace ownership layout. The fixture now uses
+  the exact candidate marketplace declaration; native TTY acceptance is still
+  unproven.
+- The coordinator independently passed both receipt regressions through the
+  isolated plugin runner, plus scoped lint, version and installation checks.
+- Local fixture diagnostics and custody receipts were retained outside the
+  checkout. All original fixture processes were absent and owned Jobs settled
+  before canonical cleanup removed only the two fixture roots.
+- The actual installed-project-binstub selector will run on the supported
+  owner-only hosted Windows lane against a published draft implementation
+  commit. That functional run does not replace the final frozen-candidate
+  promotion gate or its separately reviewed Main-controller activation.
+
+### 2026-11-07 - Hosted engine refusal retained as failure
+
+- The owner-only hosted request admitted the exact published source but failed
+  during engine installation before any TTY readiness assertion. Manager
+  installation succeeded; both installation process Jobs settled.
+- The original failure artifact truncated the nested installer error twice,
+  leaving the engine cause unknown. The fixture now preserves bounded causal
+  stderr and xunit2-compatible evidence without changing installation policy,
+  seed versions or deadlines.
+- The coordinator independently passed all four receipt/diagnostic regressions.
+  The same actual consumer selector must run on the new published head; no
+  native pass or live gate activation is inferred from this diagnostic repair.
+
+### 2026-11-07 - Cold helper-publication handoff corrected
+
+- Both hosted attempts failed before TTY startup: the Python installer held an
+  admitted lifecycle lease, but its helper-publication child received no ticket.
+  Existing callback fixtures supplied the ticket explicitly, masking cold
+  installation. The new regression starts without an inherited ticket.
+- Helper publication now forwards the same validated borrowed lease into its
+  child environment. It creates no new authority, leaves the parent environment
+  unchanged and does not preselect runtime generations or bypass ownership.
+- The isolated source-pin and cold-callback packet passed all seven cases.
+  Eight native legacy authority-refusal cases passed separately, preserving
+  owner, stale-owner, governance and token checks. Larger exploratory packets
+  reached their existing group deadline; no full-suite pass is claimed.
+- Scoped Python lint and all 13 runtime installation contracts passed.
+  The updated source must still pass the genuine hosted install-to-TTY positive
+  and falsifying controls before review and Main-controller activation.
+
+### 2026-11-07 - Retained-source fixture path corrected
+
+- The next hosted run passed both installers, then stopped before TTY startup
+  because the witness looked for the engine source receipt inside its runtime
+  slot. The installation owner actually retains it under
+  `snapshots/<source-runtime-version>/runtime-source.json`.
+- The native witness now follows that existing retained-source contract.
+  Exact receipt equality and source-byte validation remain required; no
+  missing receipt is fabricated or copied into place.
+- The coordinator independently passed the focused fixture regression through
+  the canonical isolated runner, covering the real snapshot path, mismatched
+  identity and missing receipt. Scoped lint and whitespace checks passed.
+  Genuine installed-binstub terminal acceptance and final frozen-candidate
+  gate activation remain pending.
+
+### 2026-11-07 - Registration failure diagnostics retained
+
+- The corrected source receipt check passed in the next hosted attempt.
+  Project registration then exited nonzero before any TTY assertion.
+- Registration reports command failures on stdout, but the witness exposed only
+  stderr and its initial polling counts. The actual refusal was therefore
+  unknown, not evidence of a particular registration-policy defect.
+- The witness now retains both streams, final output counts, argv, fixture
+  environment and child-custody diagnostics. Registration arguments, source
+  validation, deadlines and acceptance assertions are unchanged.
+- The coordinator independently passed the focused failure-diagnostic
+  regression through the canonical isolated runner. Scoped lint and whitespace
+  checks passed. A new exact-head hosted run must expose the original refusal.
+
+### 2026-11-07 - Representative harness adoption corrected
+
+- Complete diagnostics exposed a valid production refusal: the fixture had
+  declared `expose_agent: false`, making it a source-only project ineligible
+  for managed adoption. `--no-agent` does not waive that policy.
+- The representative fixture now positively declares an eligible harness and
+  retains `--no-agent`, with no launch or headless intent. Production policy,
+  installation isolation and the actual generated-binstub consumer are unchanged.
+- The coordinator independently passed the focused real-policy regression,
+  including rejection of the source-only declaration, through the canonical
+  isolated runner. Scoped lint and whitespace checks passed.
+- The next exact-head hosted run still owes installed TTY/input/exit and
+  falsifying-control evidence. None of the earlier failures establishes it.
+
+### 2026-11-07 - Native CMD binstub invocation corrected
+
+- The eligible harness registered successfully, and the generated project
+  binstub's ownership check passed. Its first ConPTY invocation then failed
+  because the fixture supplied embedded escaped quotes to CMD's command parser.
+- CMD now invokes the same generated binstub with `call` and normal path
+  encoding. This does not replace the installed consumer with a module import.
+- The coordinator independently passed the real CMD/ConPTY regression through
+  the canonical isolated runner: a spaced binstub path produced the expected
+  output and exit code, and the owned Job was empty. Scoped lint and whitespace
+  checks passed.
+- Actual installed Picker rendering, input response and the falsifying control
+  must still pass on the next published candidate before review and activation.
+
+### 2026-11-07 - First actual installed consumer qualification passed
+
+- The supported owner-only hosted Windows lane passed the actual installed
+  project-binstub TTY test on source
+  `6fd7331c8db742e5365953973543bdf158d1cb68`, run 42434959858, attempt 1.
+  The typed result qualified the exact requested and actual source, and its
+  canonical-test and runtime phases passed. The actual test took 146.909 seconds.
+- This test performed fresh installation, generated CMD and PowerShell
+  project-binstub invocation, native terminal rendering/input/exit observations
+  and the install-success/launch-failure falsifying control. Receipt-only and
+  diagnostic fixtures are not the basis of this result.
+- The source PR moved out of draft. Dev had advanced during qualification;
+  reconciliation preserved the newer adjacent effort-index state. The resulting
+  source head still owes exact-head qualification, review and required CI.
+- Phase 2's implemented consumer contract is proved. Phase 3, final frozen
+  candidate execution, independently governed Main activation and any authorized
+  operator installation remain open. This effort is not Done.
+
+### 2026-11-07 - Blocking cleanup and Git-context review findings fixed
+
+- Source review identified two High-severity fixture defects: an unreaped
+  process-tree error could be converted into ordinary failure before an outer
+  sandbox removed the retained tree, and inherited Git context could redirect
+  private fixture operations into the caller's repository or index.
+- The acceptance runner now writes bounded failure evidence and re-raises the
+  original unreaped-process exception. Diagnostic or report-write failures cannot
+  mask it, and the falsifying-control path preserves the same exception.
+- Candidate inspection and private harness operations use the existing
+  repository-identity environment scrubber, preserving fixture HOME while
+  removing inherited Git repository and configuration selectors.
+- The coordinator independently passed all three focused regressions through
+  the canonical isolated runner: nested-owner retention, original exception
+  identity despite report failures, and real private Git/index isolation.
+  Scoped lint and whitespace checks passed.
+- These fixes still require current-head native qualification and a passing
+  source review before merge. Main activation and actual frozen-candidate
+  publication remain separate obligations.
+
+### 2026-11-07 - Negative control distinguishes launch rejection from cleanup failure
+
+- The review-fixed source `eb57a2414ad5867bc5e944419fd4777feb34f7d7`
+  passed real hosted native qualification in run 42438047426, attempt 1
+  (actual test 143.850 seconds), and required unit/guard CI passed.
+- Fresh review resolved the first two findings but identified a remaining
+  High-severity case: generic cleanup or infrastructure exceptions could be
+  credited as the negative control's expected launch failure.
+- The negative control now accepts only a dedicated rejection with a nonzero
+  controlled consumer exit and documented rejection text, after successful
+  terminal cleanup. Job accounting and terminal teardown failures retain
+  uncertain custody through the existing unreaped-process exception contract.
+- The coordinator independently passed all five focused regressions through
+  the canonical isolated runner, including actual cleanup exception types,
+  nested-owner retention, expected rejection and bounded native CMD invocation.
+  Scoped lint and whitespace checks passed.
+- Current-head native qualification, fresh review and required CI remain
+  necessary. No Main-controller activation or operator update is claimed.
+
+### 2026-11-07 - Qualified source implementation merged; Main activation next
+
+- Source PR #11398 merged as
+  `c0f2173cd30c5af3532ad4b75f2c3bbdf856e6ff` after exact-head native
+  qualification of `72b76c864b191e7a81cf34d49aeb19934cd167cb`.
+  Hosted run 42439662356, attempt 1 qualified the exact requested/actual
+  source; the real test took 195.898 seconds.
+- Current-head Copilot review 5816193369 had no open findings. Its remaining
+  exact-head-native validation request was satisfied before merge. The latest
+  required unit, guard, lint, source-attribution and workflow checks passed.
+- A description update legitimately retriggered same-head CI. The first merge
+  attempt was refused while that newest required check was expected; the
+  coordinator waited for run 42440169515 to pass before normal managed merge.
+  No CI bypass or raw provider merge was used.
+- The source workspace pulled forward onto the confirmed squash merge.
+  Its native, failure-retention, isolation and bounded gate-decision validation
+  items are resolved; the effort remains Active for actual release enforcement.
+- Next stretch: reviewed workflow-only Main adoption, then an actual frozen
+  candidate run proving the installed-TTY gate participates in publication.
+  The prepared Main controller reconciled without conflict and passed its
+  25 publication-boundary and 42 merge-wait cases. Prepared tests and source
+  merge are not Main activation, released deployment or an operator update.
+
+### 2026-11-09 - Actions context validation fixed before Main activation
+
+- GitHub rejected the Dev workflow and the prepared Main controller because
+  job-level environment expressions cannot reference `runner.temp`.
+  The earlier unit and controller tests did not detect this Actions schema error.
+- The installed-TTY job now resolves its short temporary root in the invoking
+  step and persists that same root for the existing receipt and artifact steps.
+  Candidate identities, deadlines, native controls and promotion decisions
+  are unchanged.
+- The coordinator independently passed 41 installed-Manager gate tests,
+  25 exact-controller publication-boundary tests and 42 merge-wait tests.
+  Scoped Python lint and whitespace checks passed.
+- Checksum-verified actionlint 1.7.12 rejects the previous Main workflow with
+  the same invalid context and accepts both corrected workflow copies.
+  Shellcheck and pyflakes were disabled for this Actions-context check.
+- Both corrections still require normal publication, current-head review and
+  required CI. Main activation and actual frozen-candidate release evidence
+  remain open; this effort is not Done.
+- Dev advanced while the correction was being prepared. PR #11484 already
+  landed the same parser fix, using one early initialization step. The
+  follow-up preserves that implementation and #11563's bounded pinned
+  PSMux acquisition rather than publishing a redundant workflow correction.
+  The stronger forbidden-context regressions remain, adapted to the
+  canonical early initializer. Main still lacks the installed-TTY gate.
+- The latest release attempt, run 42630958288, failed during artifact
+  attestation because no Sigstore verifier could initialize. The existing
+  watchdog report #11691 retains that failure; no attestation policy was
+  weakened and no release retry is claimed as a fix.
+
+### 2026-11-09 - Native monitor fixture blocked workflow-only Main adoption
+
+- PR #11693 merged as `14b9295cbccab2c708566fb7b6f1647d1a37bb96`
+  after current-head Copilot approval and all required checks passed.
+  The source workspace pulled forward and this effort was reread.
+  The actual Main gate and frozen-candidate completion items remain open.
+- Rebased Main PR #11478 passed Actions parsing, but its existing
+  native monitor lane failed on both Linux and Windows in run 42636151633.
+  The failure precedes installation: adding marketplace metadata changed
+  the frozen fixture's payload fingerprint.
+- Main's release source vendors dependencies beneath the plugin, so the
+  common frozen package root can equal the fixture repository root.
+  Dev's sibling-library layout had hidden that collision. The fixture now
+  retains source beneath a dedicated child of the repository, keeping Git
+  and marketplace metadata outside both dependency layouts.
+- The source correction retains real Git provenance and pre/post payload
+  fingerprint equality. Focused cases exercise both layouts. It must land
+  through Dev and normal release before the workflow-only Main PR can use it;
+  no non-workflow source is inserted directly into Main.
+- Both focused real-Git layout regressions passed through canonical test
+  containment. Scoped Ruff, whitespace and all 13 installation-contract
+  checks passed. The existing actual Windows installer case is still under
+  validation; no native pass is claimed by those two regression cases.
+- Two local invocations used the generic 300-second group limit and timed
+  out during construction, with owned cleanup completed. The native lane
+  already declares 900-second test, group and plugin bounds. Validation
+  now uses that existing profile, not a changed timeout or production policy.
+- Draft fixture PR #11696 qualified source
+  `13aff99a06c99178983152ee5f4c46de8ba7608e`: hosted native run
+  42641072850 passed on Linux and Windows. The local actual installer
+  case passed in 416.32 seconds; canonical preparation and verified cleanup
+  completed in 521.31 seconds. The PR is now out of draft.
+- Current-head review found a second consumer of the moved fixture:
+  the native source-preparation copy helper only accepted the old layouts.
+  The helper now normalizes the source child while retaining its original
+  recursive-destination refusal. Focused layout and recursion cases cover
+  old and nested, vendored and separate-library inputs. All nine focused
+  fixture, copy and recursion cases passed through canonical containment;
+  scoped Ruff and whitespace checks passed. Updated publication and fresh
+  current-head review remain required.
+- A complete shared-fixture call-site check also found the native seed runtime
+  deriving its source root by parent depth. It now resolves the real Git root
+  with its existing bounded process owner and uses the same normalization
+  helper, preserving the original runtime-only copy exclusions.
+  Nine copy, exclusion and recursion controls passed with the native consumer
+  module imported through canonical containment; scoped Ruff and whitespace
+  checks passed. No additional shared-fixture consumer assumes the old root.
+- Fresh review identified the remaining provenance dependency: normalization
+  must recreate the fixture marketplace catalog outside copied package inputs,
+  with its plugin source pointing at the normalized checkout location.
+  The shared helper now supplies that generic catalog and the layout controls
+  resolve its source to the actual copied plugin.
+- The canonical focused packet passed all ten cases, including fresh runtime
+  construction and the real no-seed native backend consumer. Test execution
+  took 281.93 seconds; preparation and verified cleanup completed in
+  395.14 seconds. This closes the observed catalog gap without weakening
+  provenance checks or substituting a source import for installation.
+  Fresh review, required CI, normal release and Main activation remain open.
+
+### 2026-11-09 - Native fixture correction merged; release enforcement still open
+
+- PR #11696 merged as `214b8996f69412c883710363c33f215646ae32bf`
+  after final-head approval on
+  `d4fd82ead47fe00fa90f8af69e2ec9088c431889` and required CI run
+  42647183791 passed. The fixed review thread was explicitly resolved after
+  actual-consumer validation; the stale overview entry was not treated as an
+  unfixed defect or a reason to bypass review.
+- The source workspace pulled forward onto the provider-confirmed merge,
+  preserving a backup after the automatic squash-range rebase conflicted.
+  The merged fixture and dependent-consumer files were verified equal before
+  dropping only the already-merged range.
+- The next stretch remains normal release of this fixture correction, then
+  refreshed workflow-only Main adoption in #11478 and actual frozen-candidate
+  installed-TTY/receipt/artifact enforcement. This effort is still Active;
+  neither a Main activation nor an operator update has occurred.
+
+### 2026-11-09 - GitHub event brownout blocks trusted release admission
+
+- Automatic release run 42648954729 qualified fixture source
+  `214b8996f69412c883710363c33f215646ae32bf`, published its immutable source
+  assets and completed raw readback. Generated candidate PR #11701 remains
+  open at `22349bdc4c2ab49e24340bd78482870139ddafe3`; no Main merge is claimed.
+- The checkout-free merge job 129278627899 reached its existing eight-minute
+  limit waiting for required checks to register. Trusted admission run
+  42651457621 had `startup_failure` with no checks, not a test failure.
+- GitHub's run page identifies a scheduled public-repository
+  `pull_request_target` protection brownout ending at 18:00 UTC on
+  2026-11-09. No Actions event policy or other security setting is changed.
+- After that external window, recheck all current identities and policy,
+  recover the existing trusted admission run, then resume only the existing
+  merge job under the source-owned controller recovery contract. Do not repeat
+  full qualification, open a duplicate candidate or use a manual/admin merge.
+  The original qualified assets and publication obligation remain retained.
+- Main activation #11478, actual frozen-candidate installed-TTY enforcement
+  and any separately authorized operator rollout remain open.
+
+### 2026-11-09 - Required admission recovered; provider outage blocks merge recovery
+
+- The post-brownout check confirmed candidate #11701 and Main remained at
+  their exact recorded identities. GitHub refused to retry startup-failed
+  run 42651457621 because it contained no jobs.
+- A metadata-only edit of the same PR triggered trusted admission run
+  42671190452. Its first attempt encountered an internal server error.
+  One normal rerun executed the required `main source gate` successfully
+  in job 129348612232. Live required-check readback reported `SUCCESS`
+  and the unchanged candidate was `CLEAN`.
+- Only the existing canceled merge job 129278627899 was resumed. The
+  resulting release-run attempt 2 failed before any merge job started,
+  with GitHub internal-server correlation
+  `2f134c59-1289-4d98-8837-c2196269a315`. Provider readback still showed
+  #11701 open and Main unchanged; no merge or release completion is claimed.
+- GitHub Status identifies incident `tp8cghg7tlc4`, an Actions major outage
+  beginning at 18:12 UTC. Workflow retries are held for provider recovery.
+  Required checks, original qualification ownership, immutable published
+  assets and the existing candidate remain preserved. No security policy,
+  source generation or merge authority was changed.
+
+### 2026-11-09 - Explicit retirement and one fresh normal qualification
+
+- GitHub reported Actions operational after mitigation, but both supported
+  recovery paths for the outage-damaged run refused execution: the original
+  merge-job ID could not be rerun and failed-jobs recovery reported that the
+  workflow run could not be retried.
+- The operator explicitly authorized retirement of #11701 and one fresh
+  normal qualification. Exact head, author, Main and retained source assets
+  were rechecked before closing. Readback confirms `CLOSED`, `mergedAt=null`,
+  branch still at `22349bdc4c2ab49e24340bd78482870139ddafe3`, and all 27
+  assets retained in source release 439342400. This was not a merge.
+- Current Dev `c81a63f07c1f868b555973f4b1c94e57a3de103f` contains the fixture
+  correction and has green CI run 42686720445.
+- One explicit normal dispatch of the trusted Main controller created run
+  42688223747 at 19:57 UTC, with publication requested through the existing
+  `push=true` input. No second generation was dispatched. Qualification,
+  actual fixture release, Main activation and final installed-TTY enforcement
+  remain open until their provider evidence is observed.
+- A normal automatic controller run, 42688134895, started at 19:56:27 UTC
+  between the inventory read and the manual dispatch. The manual request
+  remained serialized behind it and executed no jobs.
+- The automatic run checked out the approved Dev head
+  `c81a63f07c1f868b555973f4b1c94e57a3de103f` and passed source units,
+  Windows Resume, artifact construction and attestation. The coordinator
+  adopted that existing qualification and canceled only the unstarted manual
+  request. Readback confirms run 42688223747 `cancelled` with zero jobs.
+  Exactly one actual qualification proceeds; no other owner's run was canceled.
+
+### 2026-11-09 - Fixture release confirmed; Main activation refreshed
+
+- Normal controller run 42688134895 completed successfully. Its generated
+  release PR #11717 merged at 20:12:39 UTC as
+  `c5d09c6315519dd8f549f7f35785c60800ef8e4e`.
+  Main's authoritative release record names validated Dev
+  `c81a63f07c1f868b555973f4b1c94e57a3de103f`, which contains the fixture
+  correction. The pipeline is unpaused.
+- The workflow-only Main activation branch in #11478 rebased onto that
+  confirmed release as `fad40a1dc55146534b7558594f3cdeb5976d3673`.
+  Its diff remains one workflow file. The unchanged workflow bytes passed
+  the current released source's 25 exact publication-boundary and 42
+  merge-wait tests; the existing owned PR was updated with its exact lease.
+- Phase 3 and the frozen-candidate validation item remain open. Fresh
+  current-head Main review and native checks precede activation; actual
+  installed-Manager TTY/receipt/artifact enforcement must then be observed.
+  No gate activation or operator rollout is claimed.
+
+### 2026-11-09 - Current-baseline sparse candidate materialization
+
+- Main subsequently advanced to a broader runtime baseline. The workflow-only
+  activation PR was refreshed to `38383557eb748a00510d925d59677a964d1aa7b8`.
+  Earlier native results remain historical, not qualification of this new head.
+- The owner-only Windows lane executed that exact head in run 42709189534.
+  Preparation failed before installation: the sparse candidate archive omitted
+  `plugins/agent-containers/setup.py`, an explicit build resource now required
+  by the canonical Invocation admission toolkit. This was not a TTY failure
+  or a provider outage, and it does not qualify the candidate.
+- The fixture now retains that one resource from the same Git archive as its
+  other candidate inputs. A focused regression exercises the actual sparse
+  archive and canonical Invocation materialization, verifies the generated
+  toolkit's inventory and resource bytes, and confirms refusal when the
+  required resource is removed. It does not duplicate unrelated payload scans.
+  Strict refusal, negative-control classification, installed-TTY work deadlines
+  and cleanup are unchanged.
+- This is a below-altitude fixture-input correction, not a new installer or
+  admission policy. No adopter-facing command or configuration changed; the
+  existing qualification documentation remains accurate. Actual current-head
+  installed TTY qualification and frozen-candidate gate activation remain open.
+- Focused contained validation passed all six selected cases, including real
+  archive/Invocation materialization, missing-resource refusal and the residual
+  negative-control, Git-environment and unconfirmed-cleanup controls
+  (76.23 seconds test execution). Ruff and all 13 installation-contract checks
+  passed. The wider first draft of the regression exceeded its preparation
+  budget while scanning unrelated payloads; the narrowed test preserves the
+  real failing boundary without duplicating complete installation.
+- Windows source validation uses the existing contained runner because the
+  Linux-only devcontainer lane is unavailable on this host. Fresh installed
+  construction and real TTY interaction are still owed through the supported
+  owner-only disposable Windows lane. This local preparation test is not a
+  substitute for those or for the post-activation frozen-candidate proof.
+- Published Dev PR #11771 at
+  `44c6a116be96346b8cf48838aa7c9bf8a461cad5`; required CI passed and Copilot's
+  review reported no open issues, with actual Windows qualification still
+  pending.
+- Owner-only run 42715623014 tested that exact source. The new sparse
+  materialization regression passed in 11.789 seconds. Both fresh runtimes
+  constructed and project registration succeeded, but the terminal witness
+  failed before its readiness assertion (138.600 seconds for the whole case).
+  Retained output shows the project bootstrap and Manager UI with the current
+  uppercase `WORKTREES` tab; the old case-sensitive `Worktrees` predicate
+  never recognized it. The observed root exit remains a failure, not a pass.
+- The readiness predicate now accepts the tab's display casing while still
+  requiring an alternate-screen terminal and the named project bootstrap.
+  Focused controls reject missing-project, missing-terminal and startup-only
+  output. Input response, installed-process attribution, successful interactive
+  exit and strict negative-control classification remain mandatory. A new
+  exact-head full native result is required; rendered output alone is not
+  qualification.
+- The changed-head run 42717974211 recognized the rendered UI, then failed
+  during descendant image attribution with Windows error 31. Pinned process
+  handles may outlive short-lived startup helpers. Image queries now skip
+  only handles confirmed exited, including an exit racing the query; an image
+  error on a live process still propagates. The installed Manager must still
+  be identified through a live pinned handle before input is sent.
+- Four focused contained attribution/readiness/negative-control cases passed
+  in 0.62 seconds. These verify that live image-query errors are not swallowed
+  and that only confirmed exits are ignored. This in-process selection used
+  the existing containment owner with a 120-second aggregate bound; the base
+  interpreter lacks pytest-timeout, so its native timeout markers were not
+  exercised. Full native qualification still uses the canonical managed
+  environment and unchanged installed-TTY deadlines.

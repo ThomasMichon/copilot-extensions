@@ -6,6 +6,7 @@ import copy
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -39,7 +40,7 @@ def _missing_refusals(text: str) -> set[str]:
     return set(REFUSALS) - rows
 
 
-def _validate_unobserved_example(example: dict) -> None:
+def _validate_unobserved_example(example: dict[str, Any]) -> None:
     """Check only this synthetic unobserved fixture, not operational state."""
     assert example["example_only"] is True
     assert example["example_format_version"] == 1
@@ -108,7 +109,9 @@ def test_skill_frontmatter_layout_and_discoverability() -> None:
     assert f"skills/{SKILL.name}/SKILL.md" in _read(PLUGIN / "README.md")
 
 
-@pytest.mark.parametrize("name", ["review-pull-requests", "monitor-agent-fleet", "triage-issue-backlog"])
+@pytest.mark.parametrize("name", [
+    "review-pull-requests", "monitor-agent-fleet", "triage-issue-backlog", "managing-agent-topology",
+])
 def test_all_links_resolve_and_every_companion_is_reachable(name: str) -> None:
     skill = PLUGIN / "skills" / name
     linked: set[Path] = set()

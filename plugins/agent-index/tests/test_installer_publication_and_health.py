@@ -233,6 +233,7 @@ function Write-Step {{ param($m) }}
 function Get-ActivationRole {{ return '{role}' }}
 function Get-MachineRole {{ return '{machine_role}' }}
 function Write-ServiceFiles {{ }}
+function Test-IndexStartAllowed {{ param($Name); $true }}
 {function("Invoke-WithEnvFile", "ps1")}
 {function("Get-VerTuple", "ps1")}
 {function("Test-VersionLt", "ps1")}

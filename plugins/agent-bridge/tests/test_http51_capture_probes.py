@@ -10,12 +10,70 @@ from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlsplit
 
 import pytest
+import test_host_status as host_status
+import test_host_status_remote as host_status_remote
+import test_live_questions as live_question_controls
+import test_runtime_serving as serving_controls
+import test_live_inbox_runtime as inbox_controls
+import test_native_send_admission as native_controls
 from fastapi.testclient import TestClient
+
+host_status_api = host_status.api
+host_status_provider = host_status_remote.provider
+api = live_question_controls.api
+captured = serving_controls.captured
+installation = inbox_controls.installation
+serving = inbox_controls.serving
+native_send = native_controls.native_send
+
+
+def test_host_status_coalesced_flow(host_status_api, tmp_db):
+    host_status.test_real_http_inbox_consumer_gets_one_notice_and_consumption_is_not_ack(host_status_api, tmp_db)
+
+
+def test_host_status_shared_host_stream(tmp_db):
+    host_status_remote.test_two_watchers_and_two_aliases_share_one_stream_and_resume_after_restart(tmp_db)
+
+
+def test_host_status_prior_and_rollback_refusal(host_status_provider):
+    for capability in (None, False, 0, 2, "1"):
+        host_status_remote.test_prior_missing_invalid_and_rollback_provider_refuse_before_stream(
+            host_status_provider, capability,
+        )
+
+
+def test_host_status_legacy_timeout_compatibility(host_status_api, monkeypatch):
+    host_status.test_status_runtime_handles_distinct_legacy_asyncio_timeout(host_status_api, monkeypatch)
 
 import bridge_http52_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
+from test_live_delivery_state import (
+    delivery_api as delivery_api,
+    test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row
+    as test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row,
+    test_consumption_releases_wait_without_turn_end_or_reply
+    as test_consumption_releases_wait_without_turn_end_or_reply,
+    test_missing_partial_stale_or_reincarnated_observer_is_unknown
+    as test_missing_partial_stale_or_reincarnated_observer_is_unknown,
+    test_receipt_loss_after_admission_cannot_be_reported_as_refused
+    as test_receipt_loss_after_admission_cannot_be_reported_as_refused,
+    test_invalid_wait_refuses_before_admission as test_invalid_wait_refuses_before_admission,
+    test_combined_reply_or_startup_wait_is_refused_before_admission
+    as test_combined_reply_or_startup_wait_is_refused_before_admission,
+    test_current_client_refuses_unsupported_provider_before_send
+    as test_current_client_refuses_unsupported_provider_before_send,
+    test_invalid_cli_timeout_is_parser_error_before_client_creation
+    as test_invalid_cli_timeout_is_parser_error_before_client_creation,
+    test_observation_rejects_duplicate_categories as test_observation_rejects_duplicate_categories,
+    test_real_cli_parser_send_and_existing_receipt_share_one_http_ledger
+    as test_real_cli_parser_send_and_existing_receipt_share_one_http_ledger,
+    test_module_cli_observes_over_loopback_without_starting_service
+    as test_module_cli_observes_over_loopback_without_starting_service,
+    test_extension_pending_snapshot_and_capability_wire
+    as test_extension_pending_snapshot_and_capability_wire,
+)
 from test_mux_questions import (
     mux_api as mux_api,
     test_http_choice_and_freeform_are_verified_audited_and_single_use
@@ -40,6 +98,12 @@ from test_mux_questions import (
     as test_ambiguous_rendering_never_parses_as_an_answerable_form,
     test_completion_requires_a_new_exact_answer_echo_not_old_history
     as test_completion_requires_a_new_exact_answer_echo_not_old_history,
+    test_completion_accepts_only_right_aligned_native_duration_annotations
+    as test_completion_accepts_only_right_aligned_native_duration_annotations,
+    test_only_known_native_decorations_are_volatile
+    as test_only_known_native_decorations_are_volatile,
+    test_http_clock_ticks_preserve_the_same_one_use_inspected_screen
+    as test_http_clock_ticks_preserve_the_same_one_use_inspected_screen,
 )
 from test_mux_question_client import (
     test_backend_uses_selected_owner_and_exact_confirmed_native_pane
@@ -54,12 +118,10 @@ from test_db_adoption import (
     as test_mux_storage_requires_writable_preparation_before_passive_adoption,
 )
 from test_runtime_serving import (
-    captured as captured,
     test_foreground_serves_real_authenticated_routes_only_after_fenced_commit
     as test_foreground_serves_real_authenticated_routes_only_after_fenced_commit,
 )
 from test_live_questions import (
-    api as api,
     test_live_question_provider_advertises_actual_capability
     as test_live_question_provider_advertises_actual_capability,
     test_passive_native_correlation_is_exact_and_charged_to_its_budget
@@ -92,10 +154,7 @@ from agent_bridge.client import BridgeClient
 from agent_bridge.events import EventLog
 from agent_bridge.session_manager import Session
 from agent_bridge.transport import SpawnTarget
-from test_live_inbox_runtime import (
-    installation as installation, serving as serving,
-)
-from test_native_send_admission import _command, native_send as native_send
+from test_native_send_admission import _command
 from test_native_send_admission import (
     test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race
     as test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race,

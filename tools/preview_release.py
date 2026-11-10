@@ -3,7 +3,7 @@
 would look like if promoted right now, without touching any real repo state
 or the operator's installed Copilot plugins.
 
-This composes five generators built earlier in this effort:
+This composes the existing candidate materializers:
 
 * the same generalized file-pointer expansion ``materialize_main.py``
   performs (e.g. a mirrored Markdown doc under ``plugins/<plugin>/docs/``),
@@ -21,6 +21,7 @@ This composes five generators built earlier in this effort:
   non-editable fallback install stays self-contained.
 * ``accumulate_bumps.py``'s pure ``compute()`` (never ``apply()``) reports the
   version the plugin *would* get if its pending changefiles were consumed now.
+* the canonical Invocation producer generates declared shims and helpers.
 
 The output is a plain directory (a copy of ``plugins/<plugin>``) plus a
 ``PREVIEW.json`` manifest recording the hypothetical version, the source
@@ -130,6 +131,13 @@ def _materialize_launch_wrapper_assets_into_preview(dest: Path, plugin: str) -> 
     )
 
 
+def _materialize_payload_invocation_into_preview(dest: Path, plugin: str) -> list[str]:
+    mm = _load_materialize_main()
+    return mm.materialize_payload_invocation_into(
+        source_consumer_dir=PLUGINS_DIR / plugin, dest_consumer_dir=dest, canonical_root=REPO,
+    )
+
+
 def _retired_pointer_log(dest: Path) -> list[str]:
     """``dest`` is a SINGLE plugin's own directory (``workdir/plugin``), not
     a whole-repo root -- use the plugin-scoped finder, not
@@ -160,6 +168,9 @@ def build(plugin: str, workdir: Path) -> Path:
     uv_editable_log = _materialize_uv_editable_refs_into_preview(dest, plugin)
     installer_engine_log = _materialize_installer_engine_refs_into_preview(dest, plugin)
     launch_wrapper_log = _materialize_launch_wrapper_assets_into_preview(dest, plugin)
+    invocation_log = _materialize_payload_invocation_into_preview(dest, plugin)
+    if any(line.startswith("SKIP ") for line in invocation_log):
+        raise RuntimeError("\n".join(invocation_log))
 
     grouped = {p: t for p, t in acc.pending_bumps().items() if p == plugin}
     computed = acc.compute(grouped) if grouped else {}
@@ -181,6 +192,7 @@ def build(plugin: str, workdir: Path) -> Path:
         "vendored_uv_editable_refs_materialize_log": uv_editable_log,
         "vendored_installer_engine_materialize_log": installer_engine_log,
         "vendored_launch_wrapper_assets_materialize_log": launch_wrapper_log,
+        "payload_invocation_materialize_log": invocation_log,
     }
     (dest / "PREVIEW.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return dest

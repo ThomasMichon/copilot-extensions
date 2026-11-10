@@ -28,6 +28,22 @@ idempotent without mistaking another build's healthy ping for currentness.
 Replacement compares immutable build identities, not numerical version order.
 The installer's separate explicit-downgrade policy is unchanged.
 
+Generation detection supports both direct `versions/<slot>` environments and
+wheel-application `versions/<slot>/.venv` environments. Both read the same slot's
+build-generation marker and obey its current-version selection; a nested
+environment is not a development invocation.
+
+The wheel-application installer calls the hidden `__source-start` receiver.
+It requires the executing package inside its physical, selected, completed
+application environment and a matching Vault home, then honors ordinary
+`enabled: true` activation. Inactive configuration returns exit 2 without
+starting a service. Active startup uses the existing selected-generation ensure
+operation, never ordinary `start` or an incumbent's healthy ping. Failed
+credential-work readiness or changed selection returns exit 1; success returns
+0 only after rechecking the selected completed slot. It does not configure
+scheduling, unlock a database, select optional dependencies or retire a peer.
+Older runtimes reject this callback rather than falling back to ordinary start.
+
 CLI service launches, the Windows task launcher and the existing POSIX service
 unit keep enabled Python bytecode in the owning home's `cache/python`, outside
 immutable slots. Late private-handoff imports follow that same policy; Python

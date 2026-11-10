@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from http.client import HTTPException
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import Request
@@ -17,6 +18,10 @@ from .base import ProviderError
 
 STATUSES = ("fixed", "wontFix", "byDesign", "closed", "pending")
 STATUS_VALUES = {"fixed": 2, "wontFix": 3, "closed": 4, "byDesign": 5, "pending": 6}
+
+
+class AdoWriteRejected(ProviderError):
+    """The selected status request was authoritatively rejected, not lost."""
 
 
 def positive(value, label):
@@ -47,7 +52,8 @@ def thread_fingerprint(thread):
             or type(thread.get("isDeleted", False)) is not bool
             or thread.get("isDeleted") is True or not instant(thread.get("lastUpdatedDate"))):
         raise RemediationError("Thread freshness evidence is unavailable")
-    if thread.get("status") not in ("active", "fixed", "wontFix", "closed", "byDesign", "pending",
+    if type(thread.get("status")) not in (int, str) or thread.get("status") not in (
+                                    "active", "fixed", "wontFix", "closed", "byDesign", "pending",
                                     1, 2, 3, 4, 5, 6):
         raise RemediationError("Thread status evidence is unavailable")
     seen = set()
@@ -78,7 +84,7 @@ def thread_fingerprint(thread):
 
 
 class AdoMutator(AdoReader):
-    def _write(self, method, url, payload):
+    def _write(self, method, url, payload, *, authoritative_rejection=False):
         remaining = self.deadline - self.clock()
         if remaining <= 0:
             raise ProviderError("ADO remediation budget exhausted; outcome must be reconciled")
@@ -90,8 +96,15 @@ class AdoMutator(AdoReader):
                 if response.status not in (200, 201):
                     raise ProviderError("ADO remediation returned an unexpected HTTP status; reconcile outcome")
                 body = response.read(MAX_RESPONSE_BYTES + 1)
-        except (HTTPError, URLError, OSError, TimeoutError) as exc:
+        except HTTPError as exc:
+            if (authoritative_rejection and self.clock() < self.deadline
+                    and exc.code in (400, 401, 403, 404, 405, 409, 410, 412, 422)):
+                raise AdoWriteRejected(f"Native status request rejected with HTTP {exc.code}") from None
             raise ProviderError("ADO remediation write outcome is unknown; no automatic retry") from exc
+        except (HTTPException, URLError, OSError, TimeoutError) as exc:
+            raise ProviderError("ADO remediation write outcome is unknown; no automatic retry") from exc
+        if authoritative_rejection and self.clock() >= self.deadline:
+            raise ProviderError("ADO remediation response arrived after its deadline; reconcile outcome")
         if len(body) > MAX_RESPONSE_BYTES:
             raise ProviderError("ADO remediation response exceeds its byte limit; reconcile outcome")
         try:
@@ -120,12 +133,18 @@ class AdoMutator(AdoReader):
             "parentCommentId": parent, "content": text, "commentType": 1,
         })
 
-    def thread_status(self, thread, status):
+    def thread_status(self, thread, status, *, authoritative_rejection=False):
         positive(thread, "Thread identity")
         if status not in STATUSES:
             raise RemediationError("Unsupported native thread status")
         return self._write("PATCH", self.base + f"/threads/{thread}?api-version=7.1",
-                           {"status": status})
+                           {"status": status}, authoritative_rejection=authoritative_rejection)
+
+    def reopen_thread(self, thread, *, authoritative_rejection=False):
+        """Reopen only a selected discussion without expanding legacy status choices."""
+        positive(thread, "Thread identity")
+        return self._write("PATCH", self.base + f"/threads/{thread}?api-version=7.1",
+                           {"status": "active"}, authoritative_rejection=authoritative_rejection)
 
 
 class Remediator:
@@ -140,17 +159,21 @@ class Remediator:
         if parsed.username or parsed.password:
             raise RemediationError("Endpoint must not contain credentials")
 
-    def active(self):
+    def target(self) -> tuple[dict, str, str]:
         pr = self.reader.pr()
         project = validate_target(pr, self.provider, self.repo)
-        if str(pr.get("status", "")).casefold() != "active":
-            raise RemediationError("PR is not active")
         repository = pr.get("repository") or {}
         if not project.get("id") or not repository.get("id"):
             raise RemediationError("Canonical project/repository identity is unavailable")
         target = digest([self.endpoint, str(project["id"]).casefold(),
                          str(repository["id"]).casefold(), self.number])
         return pr, target, project["id"]
+
+    def active(self):
+        pr, target, project = self.target()
+        if str(pr.get("status", "")).casefold() != "active":
+            raise RemediationError("PR is not active")
+        return pr, target, project
 
     def ledger(self, target):
         return Ledger(target, state_dir=self.state_dir)

@@ -391,13 +391,28 @@ def test_native_repositories_ui_real_cli_cancel_set_reset_and_concurrent_ordinar
     asyncio.run(run())
 
 
+@pytest.fixture
+def readiness_engine(monkeypatch, tmp_path):
+    from worktree_manager import engine_client, resident_picker
+
+    monkeypatch.setattr(context, "_project", "sample")
+    monkeypatch.setattr(context, "_bootstrap", None)
+    monkeypatch.setattr(resident_picker, "root_for", lambda _project: None)
+    scalars = {
+        "config-dir": str(tmp_path / "config"), "repo-dir": str(tmp_path / "repo"),
+        "install-dir": str(tmp_path / "install"), "machine": "anomalous-potato",
+    }
+    monkeypatch.setattr(engine_client, "get_value", lambda _project, key, **_kwargs: scalars.get(key, ""))
+
+
 @pytest.mark.parametrize("observation", [
     {"version": 1, "ready": False, "code": "knowledge_binding_required"},
+    {"version": 1, "ready": False, "code": "state_root_resolution_failed"},
     {"version": 1, "ready": True, "code": "state_root_resolution_failed"},
     {"error": "owner read failed"},
 ])
 @pytest.mark.parametrize("live", [False, True])
-def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypatch, observation, live):
+def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypatch, observation, live, readiness_engine):
     from worktree_manager import engine_client, resident_picker
     from worktree_manager.production_picker import runner
     from worktree_manager.production_picker.picker_tui import data_local, data_ssh
@@ -437,7 +452,17 @@ def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypat
             await _wait(pilot, lambda: getattr(engine, "_knowledge_readiness", {}).get("code") not in (None, "loading"))
             assert calls == [("sample", ["coordination-readiness"], {"timeout": 20, "allow_nonzero": True})]
             assert engine._knowledge_readiness["ready"] is not True
-            assert "KB" in engine.button_set() and "N" in engine.button_set()
+            needs_configuration = observation.get("ready") is False and observation.get("code") in {
+                "knowledge_binding_required", "state_root_resolution_failed",
+            }
+            assert ("KB" in engine.button_set()) is needs_configuration
+            assert "N" in engine.button_set()
+            if needs_configuration:
+                label = (
+                    "Inspect knowledge" if observation["code"] == "state_root_resolution_failed"
+                    else "Configure knowledge"
+                )
+                assert label in engine.new_worktree_row(118, False, 0).plain
             text = "\n".join(row.text.plain for row in engine.build_body(118))
             assert "Knowledge" in text
             engine._open_knowledge_configuration()
@@ -451,8 +476,67 @@ def test_worktrees_readiness_is_async_visible_and_never_runs_a_binding(monkeypat
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("next_ready", [False, True])
-def test_readiness_refresh_keeps_button_identity_until_observation_completes(monkeypatch, next_ready):
+@pytest.mark.parametrize("failure", [
+    {"error": "fixture readiness read failed"},
+    TimeoutError("fixture readiness timeout"),
+], ids=["invalid-response", "timeout"])
+def test_unknown_readiness_is_not_missing_setup_and_reload_retries(monkeypatch, failure, readiness_engine):
+    entered, release = threading.Event(), threading.Event()
+    source = _fixture_source()
+    reads = []
+    monkeypatch.setattr(
+        "worktree_manager.engine_client.run_json", lambda *_args, **_kwargs: {},
+    )
+
+    def read():
+        reads.append("read")
+        if len(reads) == 1:
+            entered.set()
+            if not release.wait(5):
+                raise TimeoutError("fixture release expired")
+            if isinstance(failure, Exception):
+                raise failure
+            return failure
+        return {"version": 1, "ready": True, "code": "ready"}
+
+    source.knowledge_readiness = read
+
+    async def run():
+        app = PickerApp(source, live=False, mock_mode=True)
+        async with app.run_test(size=(118, 40)) as pilot:
+            engine = app.query_one(PickerScreen)
+            await _wait_for_initial_setup(pilot, engine)
+            await _wait(pilot, entered.is_set)
+            engine.machine_idx = engine.local_index()
+            engine.sel = ("BTN", 0)
+            engine.btn_idx = engine.button_set().index("SY")
+            try:
+                assert engine._knowledge_readiness["code"] == "loading"
+                assert "KB" not in engine.button_set()
+            finally:
+                release.set()
+            await _wait(pilot, lambda: engine._knowledge_readiness.get("code") == "unavailable")
+            assert engine._knowledge_readiness["ready"] is None
+            assert "KB" not in engine.button_set()
+            assert engine.active_button() == "SY"
+            notice = engine.query_one("#nf-notices").render().plain
+            assert "press r to retry" in notice.lower()
+            assert "binding is required" not in notice.lower()
+            await pilot.pause()
+            assert reads == ["read"], "render ticks must not poll readiness"
+            monkeypatch.setattr(engine, "_poll_orphan_state", lambda **_kwargs: None)
+            await pilot.press("r")
+            await _wait(pilot, lambda: engine._knowledge_readiness.get("ready") is True)
+            assert reads == ["read", "read"]
+            assert "KB" not in engine.button_set()
+            await pilot.pause()
+            assert "Knowledge" not in engine.query_one("#nf-notices").render().plain
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("next_ready", [False, True, None])
+def test_readiness_refresh_keeps_button_identity_until_observation_completes(monkeypatch, next_ready, readiness_engine):
     entered, release = threading.Event(), threading.Event()
     reads = []
     source = _fixture_source()
@@ -465,6 +549,8 @@ def test_readiness_refresh_keeps_button_identity_until_observation_completes(mon
             if not release.wait(10):
                 raise RuntimeError("readiness fixture release expired")
             ready = next_ready
+        if ready is None:
+            return {"error": "fixture readiness read failed"}
         return {"version": 1, "ready": ready, "code": "ready" if ready else "knowledge_binding_required",
                 "observation": len(reads)}
 
@@ -490,9 +576,12 @@ def test_readiness_refresh_keeps_button_identity_until_observation_completes(mon
                 assert engine.active_button() == "SY"
             finally:
                 release.set()
-            await _wait(pilot, lambda: engine._knowledge_readiness.get("observation") == 2)
-            assert engine.active_button() == ("SY" if next_ready else "N")
-            assert ("KB" in engine.button_set()) is not next_ready
+            await _wait(pilot, lambda: (
+                engine._knowledge_readiness.get("code") == "unavailable" if next_ready is None
+                else engine._knowledge_readiness.get("observation") == 2
+            ))
+            assert engine.active_button() == ("N" if next_ready is False else "SY")
+            assert ("KB" in engine.button_set()) is (next_ready is False)
 
     asyncio.run(run())
 

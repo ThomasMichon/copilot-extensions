@@ -557,20 +557,13 @@ def _cmd_embody(args: argparse.Namespace, target: dict) -> int:
             return output._json_error(refusal, exit_code=3)
         if refusal := agent_policy.json_refusal(work_dir):
             return refusal
-        from .launch_seed_exec import copied_setup_command, deferred_command
+        from .launch_seed_exec import copied_setup_command
 
         try:
-            record_path = cfg.tracking_dir() / f"{wt_id}.yaml"
-            command = embody_resume.with_resume(launch_cmd, resume_target)
-            if not seed and not acquisition and not deferred:
-                pending = launch_seed_state.peek(record_path, read_only=True)
-                mux_command = deferred_command(
-                    command, record_path, admission_only=True,
-                    preserve_seed_id=pending.seed_id if pending else None,
-                    environment=env, mux=True,
-                )
-            else:
-                mux_command = copied_setup_command(command, record_path)
+            mux_command = copied_setup_command(
+                embody_resume.with_resume(launch_cmd, resume_target),
+                cfg.tracking_dir() / f"{wt_id}.yaml",
+            )
         except (OSError, ValueError) as exc:
             return output._json_error(f"Could not prepare launch-owned setup: {exc}", exit_code=3)
         target.update(launch_attempted=True, resume_session=resume_target)

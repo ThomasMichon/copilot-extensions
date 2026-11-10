@@ -171,9 +171,11 @@ def create_worktree(
 def resolve_worktree(
     worktree_id: str, *, project: str | None = None,
     timeout: float | None = None, task_id: str | None = None,
+    allow_terminal: bool = False,
 ) -> dict[str, str | None]:
     """Resolve a tracked worktree id to its current path. ``task_id``
-    additionally rejects a reassigned worktree (see :mod:`agent_dispatch.worktree_attribution`)."""
+    additionally rejects a reassigned worktree (see :mod:`agent_dispatch.worktree_attribution`).
+    ``allow_terminal`` admits a terminal row for identity checks only, never reuse."""
     exe_prefix = _agent_worktrees_launch_prefix()
     if exe_prefix is None:
         raise EmbodyUnavailable("agent-worktrees CLI not found on PATH")
@@ -204,7 +206,7 @@ def resolve_worktree(
             env=agent_worktrees_environment())
         if row is None:
             raise
-    if row.get("status") in _TERMINAL_WORKTREE_STATUSES:
+    if not allow_terminal and row.get("status") in _TERMINAL_WORKTREE_STATUSES:
         raise WorktreeNotFound(f"worktree is terminal and cannot be reused: {worktree_id}")
     if task_id and (owner := worktree_attribution.foreign_task_id(row, task_id)):
         raise WorktreeNotFound(f"worktree now owned by {owner!r}, not {task_id!r}")
@@ -312,17 +314,8 @@ def conclude_disposable_worker(
     and session identities verbatim. It owns both the disposable verdict and
     exact-ID managed teardown; preservation skips never remove anything.
     """
-    args = [
-        "conclude-disposable",
-        "--worktree",
-        worktree,
-        "--policy",
-        "disposable-cli",
-        "--owner",
-        owner,
-        "--remove",
-        "--json",
-    ]
+    args = ["conclude-disposable", "--worktree", worktree, "--policy", "disposable-cli",
+            "--owner", owner, "--remove", "--json"]
     if session:
         args += ["--session", session]
 
@@ -362,42 +355,58 @@ def conclude_dispatch_attempt(
     timeout: float = 30.0,
     project: str | None = None,
     worktree_path: str | None = None,
+    creation_nonce: str | None = None,
 ) -> dict:
-    """Safely conclude one provenance-verified dispatch-created worktree."""
-    args = [
-        "conclude-disposable",
-        "--worktree",
-        worktree,
-        "--policy",
-        "dispatch-attempt",
-        "--reservation",
-        reservation_key,
-        "--owner",
-        owner,
-        "--remove",
-        "--json",
-    ]
-    if session:
-        args += ["--session", session]
+    """Safely conclude one dispatch-created (or Bridge-created, by nonce) worktree.
+
+    Dispatch provenance is always tried first, so a preallocated worker that
+    Bridge merely targeted keeps its exact reservation proof. Only a record
+    without dispatch provenance falls back to Bridge's retained creation
+    nonce; a runtime without that policy preserves the workspace."""
+    def conclude(*proof: str) -> dict:
+        args = ["conclude-disposable", "--worktree", worktree, *proof,
+                "--owner", owner, "--remove", "--json", *(["--session", session] if session else [])]
+        return _run_dispatch_conclusion(
+            worktree, args, timeout=timeout, project=project, worktree_path=worktree_path)
+
+    payload = conclude("--policy", "dispatch-attempt", "--reservation", reservation_key)
+    if not creation_nonce or payload.get("reason") != "dispatch-provenance-missing":
+        return payload
+    try:
+        return conclude("--policy", "bridge-creation", "--creation-nonce", creation_nonce)
+    except _UnsupportedConclusionPolicy:
+        return {**payload, "bridge_creation": "unsupported-runtime"}
+
+
+class _UnsupportedConclusionPolicy(DisposableConclusionError):
+    """The installed agent-worktrees runtime predates a conclusion policy."""
+
+
+def _run_dispatch_conclusion(
+    worktree: str, args: list[str], *, timeout: float,
+    project: str | None, worktree_path: str | None,
+) -> dict:
     prefix = _agent_worktrees_launch_prefix()
     if prefix is None:
         raise DisposableConclusionError("agent-worktrees CLI not found on this host")
     if not project or not worktree_path:
         raise DisposableConclusionError("allocation provenance unavailable; workspace preserved")
+    # A deferred removal leaves the record primed (terminal); retries must still
+    # reach the idempotent conclusion after re-proving the same identity. A
+    # missing or unreadable row never proves identity, so it preserves.
     try:
-        actual = resolve_worktree(worktree, project=project, timeout=timeout)
+        actual = resolve_worktree(
+            worktree, project=project, timeout=timeout, allow_terminal=True,
+        )
     except EmbodyUnavailable as exc:
-        raise DisposableConclusionError("allocation owner unavailable; workspace preserved") from exc
+        raise DisposableConclusionError(
+            "allocation owner unavailable; workspace preserved"
+        ) from exc
     if actual.get("project") != project or actual.get("path") != worktree_path:
         raise DisposableConclusionError("allocation identity changed; workspace preserved")
     result = subprocess.run(  # noqa: S603 -- fixed argv, launcher resolved locally
-        [*prefix, "--project", project, *args],
-        check=False,
-        capture_output=True,
-        text=True,
-        timeout=timeout,
-        env=agent_worktrees_environment(),
-        **no_window_kwargs(),
+        [*prefix, "--project", project, *args], check=False, capture_output=True, text=True,
+        timeout=timeout, env=agent_worktrees_environment(), **no_window_kwargs(),
     )
     try:
         payload = json.loads(result.stdout or "{}")
@@ -406,10 +415,13 @@ def conclude_dispatch_attempt(
             (result.stderr or "").strip()[:300]
             or "agent-worktrees returned invalid dispatch conclusion output"
         ) from exc
+    stderr = (result.stderr or "").strip()
+    if result.returncode == 2 and ("invalid choice" in stderr or "unrecognized arguments" in stderr):
+        raise _UnsupportedConclusionPolicy(stderr[-300:])
     if result.returncode != 0 or not isinstance(payload, dict) or payload.get("error"):
         detail = payload.get("error") if isinstance(payload, dict) else None
         raise DisposableConclusionError(
-            str(detail or (result.stderr or "").strip() or "dispatch conclusion failed")[:300]
+            str(detail or stderr or "dispatch conclusion failed")[:300]
         )
     return payload
 

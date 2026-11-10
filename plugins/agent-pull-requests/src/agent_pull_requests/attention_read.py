@@ -33,11 +33,16 @@ def _feedback_index(document: dict) -> tuple[dict, dict, set[PRKey]]:
         for interest in value["interests"]:
             captures[(key, interest["consumer"], interest["role"])].append(value)
     operations = {value["intent"]["operation_id"]: value for value in document["reviews"]}
+    from .terminal_recovery import binding
+    operations.update(
+        (value["operation_id"], binding(value))
+        for value in document.get("terminal_recovery", {}).get("operations", [])
+    )
     unbound = {
         conversation_key(value["intent"]["scope"], document["namespace"])
         for operation_id, value in operations.items()
         if operation_id not in captured_operations
-        and any(action["state"] != "unattempted" for action in value["actions"])
+        and any(action["state"] in ("unknown", "confirmed") for action in value["actions"])
     }
     return captures, operations, unbound
 
@@ -58,7 +63,7 @@ def _feedback_reason(
     for capture in captures.values():
         operation = operations[capture["operation_id"]]
         actions = operation["actions"]
-        if all(value["state"] == "unattempted" for value in actions):
+        if all(value["state"] in ("unattempted", "retired") for value in actions):
             continue
         if any(value["state"] != "confirmed" for value in actions):
             return "feedback-reconciliation-pending"
@@ -134,7 +139,7 @@ class AttentionReader:
             not isinstance(workspace, WorkspaceOperations)
             or not callable(workspace.attention_owner)
             or not callable(workspace.feedback_owner)
-            or not callable(workspace.write_context)
+            or not workspace.write_available
             or not workspace.conversations
             or type(historical) is not bool
             or any(type(value) is not int or not 1 <= value <= 86400
@@ -160,8 +165,7 @@ class AttentionReader:
                 or conversation_key({**self.workspace.scope, "number": 1}, self.store.namespace) != self._scope
                 or not all(callable(value) for value in (
                 self.workspace.attention_owner, self.workspace.feedback_owner,
-                self.workspace.write_context,
-                )) or not self.workspace.conversations
+                )) or not self.workspace.write_available or not self.workspace.conversations
             ):
                 raise AttentionUnavailable("attention owners unavailable")
 

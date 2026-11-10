@@ -1,0 +1,25 @@
+{
+  "comment": "Preserve Windows wheel resources at deep build paths",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "fleet-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

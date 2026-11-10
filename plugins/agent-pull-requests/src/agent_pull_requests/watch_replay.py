@@ -55,6 +55,7 @@ class ObservationTarget:
     repo: str
     number: int
     registration_ids: frozenset[str]
+    retention_epoch: tuple[str, int] | None = None
 
 
 def _timestamp(value: object) -> float:

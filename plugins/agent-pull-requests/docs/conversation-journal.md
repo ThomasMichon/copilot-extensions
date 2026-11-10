@@ -36,8 +36,13 @@ normalization and feedback baselines remain with their current owners.
 
 Reads report the current summary, high/low water, a bounded event page, next
 position and continuation. The logical event window is 24 hours; old events
-are inaccessible, and the next meaningful observation removes aged metadata
-from the persisted suffix. A count/age gap, future cursor or different epoch
+are inaccessible, and the next admitted observation removes aged metadata
+from the persisted suffix. An unchanged poll also expires that suffix,
+retaining only the most recent event as its durable cursor anchor when all
+events have aged out. That expired anchor remains inaccessible to event reads.
+Neither expiry nor evidence refresh allocates a new event or advances a cursor;
+stale observations and cursor conflicts leave the journal unchanged.
+A count/age gap, future cursor or different epoch
 returns `resync_required` with no replacement `next` cursor. `after: null`
 explicitly requests a current snapshot. Neither reading a position nor
 receiving a snapshot acknowledges delivery, completes a review or advances
@@ -50,10 +55,12 @@ abandonment from disappearance. An explicit complete reopen creates a new
 epoch and retains one compact previous terminal summary. Old cursors require
 resynchronization.
 
-**This is not global terminal compaction.** Existing body-bearing review
+**The baseline journal is not global terminal compaction.** Existing body-bearing review
 generations, materializations, submission intents, unknown receipts and pending
 watch delivery are untouched. Coordinated cache/outbox/payload retention and
-terminal notification transactions remain open work. No secure-erasure,
+terminal notification transactions require the explicit
+[terminal-intent embedding](terminal-retention.md); physical compaction remains
+open work. No secure-erasure,
 zero-fill or TRIM operation is introduced.
 
 ## Explicit storage and serving adoption

@@ -63,6 +63,75 @@ def spare(pool):
     return slot
 
 
+@pytest.mark.parametrize("status", ["present", "absent", "unknown"])
+def test_psmux_warm_observation_never_executes_cli_or_retires_unknown(pool, monkeypatch, status):
+    from agent_remote_driver.mux_observation_types import Observation, ObservationUnavailable
+
+    value, calls = pool
+    slot = spare(pool)
+    value.mux = "psmux.exe"
+    value.mux_args = ["-L", "selected-fixture"]
+    monkeypatch.setenv("COPILOT_DRIVER_PSMUX_NAMESPACE", "foreign")
+    monkeypatch.setattr(value, "_alive", lambda slot: warm.WarmPickerPool._alive(value, slot))
+    monkeypatch.setattr(value, "_incarnation", lambda slot: warm.WarmPickerPool._incarnation(value, slot))
+    observations = []
+
+    def observe(name, **kwargs):
+        observations.append((name, kwargs))
+        return Observation(status, incarnation="$1:123" if status == "present" else "")
+
+    monkeypatch.setattr(warm.mux_discovery, "observe_psmux", observe)
+    if status == "unknown":
+        with pytest.raises(ObservationUnavailable):
+            value._alive(slot)
+        value.close()
+        assert slot.directory.exists() and slot in value._slots
+    else:
+        assert value._alive(slot) is (status == "present")
+        assert value._incarnation(slot) == ("$1:123" if status == "present" else None)
+    assert not calls
+    assert observations and all(
+        name == slot.session and kwargs["namespace"] == "selected-fixture"
+        for name, kwargs in observations
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows mux creation environment")
+def test_windows_spare_creation_uses_home_without_inherited_pane_nesting(pool, monkeypatch):
+    from pathlib import Path
+    from worktree_manager import manager_config
+
+    value, _ = pool
+    value.mux = "psmux.exe"
+    value._mux_resolved = True
+    monkeypatch.setenv("PSMUX_CLAUDE_TEAMMATE_MODE", "1")
+    monkeypatch.setenv("SAFE_VALUE", "kept")
+    value.environment.update({
+        "TMUX": "parent", "TMUX_PANE": "%1", "PSMUX_SESSION": "parent",
+        "PSMUX_TARGET_SESSION": "parent", "PSMUX_CLAUDE_TEAMMATE_MODE": "1",
+        "SAFE_VALUE": "kept",
+    })
+    monkeypatch.setattr(manager_config, "automatic_maintenance_enabled", lambda: True)
+    captured = []
+    monkeypatch.setattr(
+        warm.subprocess, "run",
+        lambda argv, **kwargs: captured.append((argv, kwargs)) or subprocess.CompletedProcess(argv, 0),
+    )
+    value._spawn()
+    _, kwargs = captured[0]
+    assert kwargs["cwd"] == str(Path.home())
+    assert kwargs["env"]["SAFE_VALUE"] == "kept"
+    assert not {"TMUX", "TMUX_PANE", "PSMUX_SESSION", "PSMUX_TARGET_SESSION",
+                "PSMUX_CLAUDE_TEAMMATE_MODE"} & kwargs["env"].keys()
+    slot = value._slots[0]
+    (slot.directory / "ready.json").write_text("{}")
+    slot.context = warm.invocation_context(
+        kwargs["env"], manager_root=value.directory.parent.parent,
+    )
+    assert slot.context == request()["context"]
+    assert value.acquire(request())["available"]
+
+
 def request():
     return {
         "manager_runtime": warm.runtime_identity(), "engine": ["qualified-engine"],
@@ -468,7 +537,7 @@ def test_engine_and_manager_launch_context_contracts_match(monkeypatch):
     pane_environment = {
         **environment, "TERM": "tmux-256color", "TERM_PROGRAM": "tmux",
         "TERM_PROGRAM_VERSION": "fixture-version", "TMUX": "fixture-transport",
-        "TMUX_PANE": "%1",
+        "TMUX_PANE": "%1", "PSMUX_CLAUDE_TEAMMATE_MODE": "1",
         "CE_TERMINAL_LAUNCH": "per-terminal-request",
     }
     assert module.invocation_context(pane_environment) == module.invocation_context(environment)

@@ -150,6 +150,79 @@ def _request_receiver(passive, installation, journal, operation):
     return child.stdout.readline().strip()
 
 
+@pytest.mark.parametrize("damage", ["target", "predecessor", "journal"])
+def test_owned_journal_joins_fresh_distinct_runtime_reads_before_returning(cell, monkeypatch, damage):
+    from contextvars import ContextVar
+    import threading
+
+    installation, predecessor, target = cell
+    marker = ContextVar("journal-read-marker", default=None)
+    inherited = object()
+    marker.set(inherited)
+    rendezvous = threading.Barrier(2, timeout=5)
+    lock = threading.Lock()
+    active = peak = 0
+    reads = []
+    finished = []
+    validate = api.validate_runtime_slot_completion
+
+    def tracked(**arguments):
+        nonlocal active, peak
+        assert marker.get() is inherited
+        with lock:
+            reads.append(arguments["runtime_version"])
+            active += 1
+            peak = max(peak, active)
+        try:
+            rendezvous.wait()
+            return validate(**arguments)
+        finally:
+            with lock:
+                active -= 1
+                finished.append(arguments["runtime_version"])
+
+    with installation.transaction(timeout=1, environment={}) as guard:
+        journal = _begin(cell, guard)
+        path = installation.run_root / "watch-owner-transaction.json"
+        monkeypatch.setattr(api, "validate_runtime_slot_completion", tracked)
+        document, actual, instances = journal._current_evidence()
+        assert actual == target and instances["predecessor"] == predecessor
+        assert sorted(reads) == [predecessor.runtime.runtime_version, target.runtime_version]
+        assert peak == 2 and active == 0 and sorted(finished) == sorted(reads)
+        if damage == "journal":
+            _mutate(path, lambda value: value.update(revision=value["revision"] + 1))
+            with pytest.raises(PermissionError, match="journal changed"):
+                journal._current()
+            assert len(reads) == 2
+        else:
+            runtime = target if damage == "target" else predecessor.runtime
+            snapshot = installation.plugin_root / "snapshots" / runtime.snapshot_id / "entry.py"
+            snapshot.write_bytes(b"changed after the previous journal read")
+            before = path.read_bytes()
+            with pytest.raises(api.InstallationContextError):
+                journal._current()
+            assert len(reads) == 4 and path.read_bytes() == before
+        assert active == 0 and sorted(finished) == sorted(reads)
+        assert journal._document == document
+
+
+def test_nested_canonical_scope_retains_both_owned_slot_observations(cell):
+    installation, predecessor, target = cell
+    with installation.transaction(timeout=1, environment={}) as guard:
+        journal = _begin(cell, guard)
+
+        @api._validation_scope
+        def verify():
+            journal._current()
+            for runtime in (target, predecessor.runtime):
+                path = runtime.runtime_root / api.RUNTIME_SLOT_OWNERSHIP_FILE
+                _mutate(path, lambda value: value.update(annotation="changed after journal read"))
+                with pytest.raises(api.InstallationContextError, match="changed after it was validated"):
+                    api.read_json(path)
+
+        verify()
+
+
 def test_cold_commit_and_recovery_are_metadata_only(cell):
     installation, _, target = cell
     with installation.transaction(timeout=1, environment={}) as guard:

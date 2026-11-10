@@ -665,6 +665,192 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
     assert result.stdout == "True", result.stdout + result.stderr
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered pre-tool consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["read", "write", "revoked", "cold-read", "cold-write", "read-batch"])
+def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypatch, shell, case):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    workspace = fixture_linked_worktree(tmp_path, anchor)[0]
+    session = tmp_path / ".copilot" / "session-state" / "pre-tool"
+    session.mkdir(parents=True)
+    payload = {
+        "sessionId": "pre-tool", "cwd": str(workspace),
+        "toolName": "view" if case in {"read", "cold-read", "read-batch"} else "edit",
+        "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
+    }
+    if case == "read-batch":
+        payload["toolCalls"] = [{"name": "edit", "args": payload["toolArgs"]}]
+    if not case.startswith("cold-"):
+        assert module.admitted(payload, home=tmp_path)
+    plugin = tmp_path / "payload"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    if case.startswith("cold-"):
+        shutil.copytree(SCRIPTS, scripts, dirs_exist_ok=True)
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+        "pr_supersede_guard.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    observed = tmp_path / "policy-input"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n",
+        encoding="utf-8",
+    )
+    shutil.copyfile(SCRIPTS / "hook_policy_process.py", scripts / "hook_policy_process_original.py")
+    (scripts / "hook_policy_process.py").write_text(
+        "import base64,json,sys\nfrom pathlib import Path\n"
+        + "# Re-export the real admission helper's caller-lifetime watcher without executing policy on import.\n"
+        + "from hook_policy_process_original import _watch_caller\n"
+        + "if __name__ == '__main__':\n"
+        + f"    with Path({str(observed)!r}).open('xb') as output: output.write(base64.b64decode(sys.stdin.readline()))\n"
+        + "    print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+        encoding="utf-8",
+    )
+    if case == "revoked":
+        (registry / "projects.yaml").write_text("projects: {}\n", encoding="utf-8")
+    env = environment(tmp_path, workspace)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin)
+    env.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    raw = json.dumps(payload, ensure_ascii=False, indent=2)
+    if case.startswith("cold-"):
+        assert not (registry / "cache").exists()
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+        input=raw.encode("utf-8"), capture_output=True, timeout=10,
+        cwd=workspace, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stderr == b""
+    if case.startswith("cold-"):
+        assert (session / "agent-worktrees" / "managed-session.json").is_file()
+    if case in {"write", "cold-write", "read-batch"}:
+        assert observed.read_bytes() == raw.encode("utf-8")
+        assert json.loads(result.stdout) == {
+            "permissionDecision": "deny", "permissionDecisionReason": "fixture policy",
+        }
+    else:
+        assert not observed.exists()
+        assert result.stdout == b""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered prepared-cell pre-tool consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["view", "rg", "glob", "guard-drift", "incomplete", "receipt", "write", "read-batch"])
+def test_registered_prepared_cell_membership_read_requires_complete_native_proof(tmp_path, monkeypatch, shell, case):
+    from types import SimpleNamespace
+    import test_registry_paths as fixtures
+
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
+        pytest.skip(f"{shell} is unavailable")
+    native_run = subprocess.run
+    monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+        run=lambda *args, **kwargs: native_run(
+            *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
+        ),
+    ))
+    anchor, legacy = fixture_project(tmp_path)
+    workspace = fixture_linked_worktree(tmp_path, anchor)[0]
+    plugin = fixtures._payload(tmp_path, "selected")
+    scripts = plugin / "scripts"
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "managed_session.py",
+        "execution_platform.py", "managed_project_identity.py", "remote_identity.py",
+        "guarded_anchor_map.py", "hook_policy_process.py", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    context, registry = fixtures._stamp(
+        tmp_path / "durable", plugin, marketplace="selected", repository="example/selected",
+    )
+    for name in ("projects.yaml", "repos.yaml"):
+        (registry / name).write_text((legacy / name).read_text())
+    fixtures._select(monkeypatch, context, plugin)
+    session = tmp_path / ".copilot" / "session-state" / "pre-cell"
+    session.mkdir(parents=True)
+    event = {
+        "sessionId": "pre-cell", "cwd": str(workspace),
+        "toolName": case if case in {"view", "rg", "glob"} else "edit" if case == "write" else "view",
+        "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
+    }
+    if case == "read-batch":
+        event["toolCalls"] = [{"name": "edit", "args": event["toolArgs"]}]
+    assert load("managed_session").admitted(event, home=tmp_path)
+    marker = session / "agent-worktrees" / "managed-session.json"
+    if case == "incomplete":
+        value = json.loads(marker.read_text())
+        value.pop("installation")
+        marker.write_text(json.dumps(value))
+    elif case == "receipt":
+        context.write_text(context.read_text() + "\n")
+    elif case == "guard-drift":
+        with (scripts / "anchor_write_guard.py").open("a", encoding="utf-8") as output:
+            output.write("\n# changed guard implementation\n")
+    membership = tmp_path / "membership-interpreter"
+    validation = tmp_path / "context-validator"
+    policy = tmp_path / "policy-input"
+    with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+        output.write(
+            "\nfunction Get-ManagedWorktreesPython { "
+            + "[IO.File]::WriteAllText('" + str(membership).replace("'", "''") + "', 'called'); "
+            + "return '" + sys.executable.replace("'", "''") + "' }\n"
+        )
+    (scripts / "installation-context" / "installation-context.ps1").write_text(
+        "[IO.File]::WriteAllText('" + str(validation).replace("'", "''") + "', 'called')\n"
+        + "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
+        + "$global:LASTEXITCODE = 0\n",
+        encoding="utf-8",
+    )
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    shutil.copyfile(scripts / "hook_policy_process.py", scripts / "hook_policy_process_original.py")
+    (scripts / "hook_policy_process.py").write_text(
+        "import base64,json,sys\nfrom pathlib import Path\n"
+        + "from hook_policy_process_original import _watch_caller\n"
+        + "if __name__ == '__main__':\n"
+        + f"    Path({str(policy)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
+        + "    print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+        encoding="utf-8",
+    )
+    flag = tmp_path / "default-stop.json"
+    flag.write_text('{"active":true}', encoding="utf-8")
+    env = environment(tmp_path, workspace)
+    env.update(
+        COPILOT_EXTENSIONS_CONTEXT=str(context), COPILOT_PLUGIN_ROOT=str(plugin),
+        AGENT_WORKTREES_PAYLOAD_ROOT=str(plugin), PRETOOL_KILLSWITCH_STATE_FILE=str(flag),
+    )
+    env.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
+    result = native_run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+        input=raw, capture_output=True, timeout=10,
+        cwd=workspace, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    assert membership.exists() is (case in {"incomplete", "receipt"})
+    policy_required = case not in {"view", "rg", "glob"}
+    assert validation.exists() is policy_required
+    assert policy.exists() is policy_required
+    if policy_required:
+        assert policy.read_bytes() == raw
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    else:
+        assert result.stdout == b""
+    assert not (legacy / "cache").exists()
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared cell membership")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("case", [
@@ -1236,6 +1422,127 @@ def test_real_admission_accepts_opaque_json_keys(tmp_path, shell, opaque):
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "True", result.stdout + result.stderr
     assert not result.stderr
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows admission serialization")
+@pytest.mark.parametrize("shell,old_engine", [
+    ("pwsh", False), ("pwsh", True), ("powershell.exe", False),
+])
+def test_admission_query_serialization_cold_fallback(tmp_path, shell, old_engine, capsys):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    samples = []
+    for index, variant in enumerate(("cmdlet", "native", "cmdlet")):
+        home = tmp_path / str(index)
+        home.mkdir()
+        anchor, registry = fixture_project(home)
+        session = home / ".copilot" / "session-state" / "query"
+        session.mkdir(parents=True)
+        scripts = home / "payload" / "scripts"
+        shutil.copytree(SCRIPTS, scripts)
+        managed = scripts / "managed-session.ps1"
+        managed.write_bytes(managed.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        source = managed.read_text(encoding="utf-8").replace("\r\n", "\n")
+        original = "$frame = ConvertTo-Json -InputObject $query -Compress"
+        candidate = (
+            "$frame = if ($PSVersionTable.PSVersion.Major -ge 6) {\n"
+            "            ConvertTo-PreparedWorktreesJson -InputObject $query -Depth 2\n"
+            "        } else { ConvertTo-Json -InputObject $query -Compress }"
+        )
+        assert source.count(candidate) == 1
+        if variant == "cmdlet":
+            source = source.replace(candidate, original)
+        for token in ("        $frame =", "        $python = Get-ManagedWorktreesPython"):
+            assert source.count(token) == 1
+        source = source.replace(
+            "        $frame =",
+            "        $script:serializationClock = [Diagnostics.Stopwatch]::StartNew()\n        $frame =",
+        )
+        source = source.replace(
+            "        $python = Get-ManagedWorktreesPython",
+            "        $script:serializationClock.Stop()\n"
+            "        $script:queryFrame = $frame\n        $python = Get-ManagedWorktreesPython",
+        )
+        if old_engine:
+            source = source.replace(
+                "'Microsoft.PowerShell.Commands.JsonObject+ConvertToJsonContext'",
+                "'UnavailablePreparedJsonContext'",
+            )
+        (scripts / "managed-session.ps1").write_text(source, encoding="utf-8")
+        query = {"sessionId": "query", "cwd": str(anchor), "workingDirectory": str(home)}
+        event = {
+            **query, "CWD": str(home),
+            "toolName": "edit", "toolArgs": {"text": "quote'\"\\\n\t\u00e9\U0001f680"},
+            "__type": "opaque", "Keys": [], "": {"discard": True},
+        }
+        driver = home / "admission-comparison.ps1"
+        driver.write_text(
+            "$ErrorActionPreference='Stop'\n"
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false,$true)\n"
+            ". $env:PREPARED_MEMBERSHIP_SCRIPT\n"
+            "$script:jsonCalls=0; $script:pythonCalls=0\n"
+            + r"""
+function ConvertTo-Json {
+    param([object]$InputObject, [switch]$Compress, [int]$Depth=2)
+    $script:jsonCalls++
+    & ($ExecutionContext.InvokeCommand.GetCommand('ConvertTo-Json',
+        [Management.Automation.CommandTypes]::Cmdlet)) @PSBoundParameters
+}
+$script:originalPython=(Get-Command Get-ManagedWorktreesPython).ScriptBlock
+function Get-ManagedWorktreesPython {
+    $script:pythonCalls++
+    & $script:originalPython
+}
+$raw=[Console]::In.ReadToEnd()
+$clock=[Diagnostics.Stopwatch]::StartNew()
+if (-not (Test-ManagedWorktreesSession $raw)) { throw 'Cold admission failed' }
+$clock.Stop()
+[Console]::Error.WriteLine(('admission_seconds='+$clock.Elapsed.TotalSeconds))
+[Console]::Error.WriteLine(('serialization_seconds='+$script:serializationClock.Elapsed.TotalSeconds))
+if ($script:pythonCalls -ne 1) { throw 'Cold admission did not use the real helper' }
+if ($script:jsonCalls -ne [int]$env:EXPECTED_JSON_CALLS) { throw 'Unexpected JSON cmdlet count' }
+if ($script:queryFrame.Contains("`r") -or $script:queryFrame.Contains("`n")) { throw 'Query framing is not compact' }
+[Console]::Out.WriteLine($script:queryFrame)
+$script:queryFrame=$null
+if (-not (Test-ManagedWorktreesSession $raw)) { throw 'Warm admission failed' }
+if ($script:pythonCalls -ne 1) { throw 'Warm admission rediscovered membership' }
+if ($null -ne $script:queryFrame) { throw 'Warm admission serialized another query' }
+""",
+            encoding="utf-8",
+        )
+        env = environment(home, anchor)
+        env.update(
+            COPILOT_PLUGIN_ROOT=str(scripts.parent),
+            PREPARED_MEMBERSHIP_SCRIPT=str(scripts / "managed-session.ps1"),
+            AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON=sys.executable,
+            EXPECTED_JSON_CALLS=str(int(variant == "cmdlet" or old_engine or shell == "powershell.exe")),
+        )
+        assert not (registry / "cache").exists()
+        started = time.perf_counter()
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(driver)],
+            input=json.dumps(event), capture_output=True, text=True, encoding="utf-8",
+            timeout=10, cwd=anchor, env=env, **no_window_kwargs(),
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout) == query
+        assert (registry / "cache" / "managed-sessions").is_dir()
+        assert result.stderr.startswith("admission_seconds="), result.stderr
+        timings = dict(line.split("=") for line in result.stderr.splitlines())
+        assert set(timings) == {"admission_seconds", "serialization_seconds"}
+        samples.append({
+            "variant": variant, "process_seconds": elapsed,
+            **{key: float(value) for key, value in timings.items()},
+        })
+    with capsys.disabled():
+        print(json.dumps({"admission_query_serialization": {
+            "shell": shell, "old_engine": old_engine, "samples": samples,
+        }}))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows runtime-only interpreter discovery")

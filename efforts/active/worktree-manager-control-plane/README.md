@@ -2253,20 +2253,20 @@ Original Request, status, participants, checked credit and first gates stay._
   admission/creation owner and compose its existing consumer seam. Manager
   installation, interactive New readiness or unrelated Phase 4a completion
   is not a prerequisite for the standalone engine's pure preview.
-- [ ] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
+- [x] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
   worktree row; BOTH menu presentation AND actual invocation must agree,
   rather than limiting the route to conversation/unused buckets or changing
   visibility alone.
-- [ ] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
+- [x] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
   refusals and expose the existing cleanup/claims/obligations help route.
   An operator should follow dependencies, not substitute force cleanup.
-- [ ] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
+- [x] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
   Finalize path and result/progress handling. Reconcile the original
   HEAD-ancestor-or-self-of-default AND no-outstanding-claims safety
   explanation with the actual current canonical content/default-branch/
   PR/obligation/owner policy. Do not reimplement a simplified historical
   predicate, weaken current guards or add an unrelated new ancestry gate.
-- [ ] **M4437-P4:** Retain managed-child/controller, provider-capability,
+- [x] **M4437-P4:** Retain managed-child/controller, provider-capability,
   live/unknown and source/resource boundaries. No hidden direct deletion,
   backend bypass, new cleanup authority or whole-Manager/every-host native
   programme follows from this finite menu/invocation proposal.
@@ -2664,7 +2664,7 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   unsupported cases preserve valid execution. No create-then-delete,
   broad allocator redesign, Manager dependency or unrelated startup/native
   prerequisite is added.
-- [ ] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
+- [x] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
   construction and canonical invocation/refusal/help across original row
   classes, including dirty/unmerged/claimed, conversation/unused and real
   managed/controller/provider refusal. Preserve confirmations, cancellation,
@@ -2887,6 +2887,99 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-09 - Truthful Knowledge readiness and explicit Reload retry
+
+- Managed source `humming-staple` takes #11735 as a bounded follow-up to the
+  existing #10763 / Phase 5 binding consumer. A check that is pending or
+  unavailable is not evidence that setup is missing. Confirmed missing
+  binding still offers configuration; an unresolved existing binding offers
+  inspection. Native New admission and configuration writers are unchanged.
+- Ordinary Worktrees Reload now requests a fresh bounded asynchronous
+  observation. There is no timer, per-render probe or automatic binding.
+  Generation fencing remains in the original reader, and unchanged action
+  sets do not reset toolbar focus. Reload's existing overall selection
+  policy is unchanged.
+- Eight fail-first cases reproduce the prior labels/state classification;
+  thirteen focused consumer cases pass after correction, including delayed
+  reads, failures, explicit Reload recovery and focus preservation. The
+  test fixture now supplies its startup scalars instead of reaching an
+  ambient engine; no timeout budget was increased.
+- The complete Configuration/notice consumer packet passes 63 cases, with
+  four opt-in native-owner cases skipped because their isolated engine
+  interpreter was not selected. No backend writer or provisioning path
+  changes here. Touched Python lint and the thirteen-plugin install
+  contract pass; this is source consumer proof, not an installed rollout.
+- The original intermittent red message is not currently reproduced and
+  its provider failure was not captured. This fixes independently confirmed
+  presentation/recovery defects, not an asserted timeout root cause or a
+  missing real binding. Broader source checks, review/CI, release and
+  separately authorized installed validation remain distinct gates.
+
+### 2026-11-08 - Bounded #4437 Finalize consumer slice
+
+- Managed source `weathered-crank` claims only M4437-P1 through P4 and
+  M4437-V1's menu/invocation/refusal-help consumer boundary. This continues
+  the reviewed finite contract, not this umbrella's other phases.
+- Keep Finalize discoverable on ordinary machine-backed rows. Preserve
+  managed-child/provider refusal, confirmation/cancel and the canonical
+  engine operation. Protected live/unknown observations become useful
+  executor refusals, never authorization to retire or restore a session.
+- Retain full local and SSH failure diagnostics through the existing
+  transport/executor. The completed progress dialog reuses the scrollable
+  command-result viewer for exact claims and the supported cleanup-help path.
+  No new command, persistent state, registry, polling or backend finality
+  predicate is introduced.
+- #11564 retains mux observation, discovery and unknown-state admission.
+  Its inspected changes are in the earlier liveness branches and the
+  Sync/Cleanup condition; this slice keeps those semantics and adds a
+  separately guarded Finalize route. No shared mux probe or live retirement.
+- Fail-first controls reproduce fourteen menu, protected-target, process
+  diagnostic and actual Textual confirmation failures against unchanged
+  production. The affected five-file packet passed 491 cases with two
+  render/capture fixture races; the 20-case residual packet then passed,
+  retaining all assertions and matching the current fake runtime API.
+  A final fourteen-case consumer run proves eighty claim references remain
+  available in the keyboard-scrollable viewer, confirmation/cancel and
+  local/SSH subprocess diagnostics. This is complementary evidence, not a
+  claimed single green 493-case run.
+- Touched-source Ruff and the install contract pass. The local conservative
+  typing sweep stopped on a cold Windows checker timeout; the prepared
+  checker-only residual passes Linux and Windows. Manager remains pending
+  typing admission, and no whole-portfolio typing pass is claimed.
+  Source review/CI, release and separately authorized installed evidence
+  remain distinct; no completion or rollout is claimed here.
+- Review found three real omissions: AHP/execution-leg live signals, the
+  separate bulk-menu predicate and detail-only canonical stderr refusals.
+  Four fail-first cases reproduced all three; the correction passes 179
+  Finalize, custody, Sync and engine-client controls. The normalizer's full
+  live-signal family now refuses, both menu paths agree, and the compact
+  summary retains the first actual refusal rather than trailing abandon
+  advice. Full diagnostics remain available without replay.
+- The required module-size check also refused the expanded engine client.
+  Its existing error-envelope parser now lives in `engine_progress`, which
+  already owns stderr/JSON-boundary handling, with the old private import
+  retained. Engine client is 995 lines; no baseline or guard was weakened.
+- The next review identified missing/malformed JSON fallback loss, not a
+  clean verdict despite zero inline issues. Four real-process controls
+  reproduced lost local and remote stdout/stderr, including malformed output
+  with exit zero. The explicit Finalize diagnostic path now retains both
+  streams as a failed result; ordinary engine-client callers are unchanged.
+  The expanded focused consumer/custody/transport packet passes 183 cases.
+
+### 2026-11-09 - Finite Finalize source acceptance reconciled
+
+- #11579 merged as `24f3953d034e85cb6280a96427cc27fa3defc364` after
+  final-head approval and green CI. The retained 183-case consumer packet
+  proves the finite M4437-P1 through P4 and M4437-V1 menu, invocation,
+  refusal/help, confirmation/cancel and local/SSH diagnostic contract.
+  Those five rows now reflect the accepted source delivery instead of
+  remaining an unimplemented proposal.
+- This status reconciliation adds no runtime behavior or new test claim.
+  #4437 remains open; release, separately authorized installed acceptance,
+  retained source-workspace finalization and the umbrella's other Plan and
+  Validation Plan items are not completed by these finite source controls.
+  No live Finalize, cleanup, mux probe or rollout is performed or authorized.
 
 ### 2026-11-05 - Planned #5898 terminal/mux receiving
 

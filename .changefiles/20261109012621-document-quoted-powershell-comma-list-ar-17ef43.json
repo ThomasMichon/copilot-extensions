@@ -1,0 +1,9 @@
+{
+  "comment": "Document quoted PowerShell comma-list arguments for scoped GitHub passthrough.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

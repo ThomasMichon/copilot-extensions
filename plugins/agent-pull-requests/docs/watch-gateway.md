@@ -133,6 +133,118 @@ returns the replay core's `uncertain/state_commit_uncertain` outcome.
 Neither this nor a transport failure licenses a second request identity or a
 process fallback. Reconcile the original request/event identities.
 
+## Optional existing-owner report reads
+
+`WatchGateway(..., reports={(principal, target): reader})` adds authenticated
+`POST /v1/read/<target>/capabilities|threads|diff` routes without changing watch
+or workspace operations. An absent reader is unsupported (404), not permission
+to discover a native command or another forge. This source embedding requires
+the optional `fleet` extra and a store with its existing service identity.
+
+Construct `report_read.ReportReader(consumer_scope, scope, resolve_binding,
+max_work_seconds=...)` only inside an existing authorized read pipeline.
+`scope` contains exactly `provider`, `endpoint`, `account` and `repo`; its account
+and repo must match the admitted `ConsumerScope`. The trusted resolver receives
+the remaining-budget checkpoint and must establish the actual selected owner,
+target, endpoint and account through its normal configuration/credential gates
+before returning `ReportBinding(scope, context_id, checkpoint, collect)`.
+Constructing these labels does not authorize a read. The live owner checkpoint
+must enforce replacement/withdrawal and current permission. The synchronous
+collector receives `(operation, number, remaining)` and returns the original
+`(exit_code, complete_json_text)`; it owns actual transport/process cleanup.
+If the owner checkpoint performs blocking work, supply the optional
+`final_checkpoint` as a separate nonblocking permission check. Blocking
+selection checks run in the original tracked request task's awaited workers;
+the last event-loop check reuses the original deadline, admission and binding
+without launching a child or transferring cleanup custody.
+No executable, credential, account or endpoint is deserialized from a request.
+
+Every request has exactly `{"binding": <expected ReplayBinding>, "request": ...}`.
+For this report protocol only, the request binding additionally requires
+`report_scope`, containing the selected provider/endpoint/account/repo mapping.
+Both scopes are compared before owner resolution/collection and through
+publication, so replacing a reader with a different endpoint/provider cannot
+perform an unselected read first. Responses retain the original replay binding
+and their separate report scope; watch/workspace binding syntax is unchanged.
+Capabilities request `{}`; reads request positive integer `number` and finite
+positive `budget_seconds`. The selected protocol is
+`agent-pull-requests.report-read/v1`, with profile `owner_executed_report/v1`.
+Responses preserve the whole validated native thread/diff report, original
+`owner_exit`, configured scope, operation/number, owner context and local
+observation interval. Routing labels are not observed forge-principal evidence,
+and raw reports are not review generations or write authority.
+
+`report_client.ReportClient(caller, route_prefix=..., binding=..., scope=...)`
+uses the existing authenticated `ServiceCaller`. Call `capabilities()` before
+`read("threads" | "diff", {"number": ..., "budget_seconds": ...})`. The client
+validates both boundaries and never retries or switches providers. HTTP 200
+means a valid exchange, including valid provider refusal/error reports;
+consumers must inspect `owner_exit`, `supported` and `error`. Null/false
+completeness and additive candidate evidence are preserved.
+
+The complete v1 request/response must fit the current 32 KiB caller-aware
+handler/report limit, independently of the channel's larger response ceiling.
+Oversized reports are unavailable, never truncated or persisted. Malformed
+input is 400, permission/expiry 403, binding mismatch 409, absent support 404,
+and unavailable owner/result 503. Exceptions return static diagnostics.
+Bodies exist only in the current exchange, with no replay/cache/journal writes,
+subscriptions, cursor advancement, attention ACK or mutation. Disconnect or
+deadline loss prevents publication, while the existing Gateway retains its
+original task until synchronous collection and owned cleanup settle; drain may
+time out rather than falsely release custody.
+
+The optional source adapter `native_report.NativeGitHubReport` supplies a
+Worktrees-backed resolver for GitHub.com only. A trusted host constructs it with
+an absolute `config_path`, the exact report `scope` (endpoint `github.com`) and
+its `context_id`, then passes `adapter.resolve` to `ReportReader`. Both source
+packages and their runtime dependencies must be available in the embedding
+interpreter; missing support refuses instead of invoking a native fallback.
+No default host installs or selects it.
+
+Each exchange re-resolves the explicit Worktrees configuration and strict
+repository account policy in caller-owned selection children. It requires a
+configured repository account or account-map entry, rejects legacy token
+commands/environment bindings, acquires that account's CLI-store entry even
+when active, and verifies its authenticated login before report reads. The
+exact repository entry takes precedence; checkout-free targets use only the
+owner's account-map entry, never another repository's account override. The
+same credential supplies absolute GitHub.com GraphQL and REST diff routes,
+without `gh pr diff`'s auxiliary discovery or ambient token/host overrides.
+Selection is rechecked before requests and publication. Configuration,
+credentials and provider children share the original finite execution/cleanup
+budget. Publication checks run in shielded, tracked workers rather than on the
+Gateway event loop; delayed cleanup retains the admitted request's custody and
+cannot publish a success. Malformed or unavailable contributing configuration
+and duplicate keys in explicit/global/drop-in sources refuse credential
+selection instead of dropping repository policy. A failed selection checkpoint
+or unavailable report transport remains unavailable even if a provider builder
+catches that failure; it cannot become a successful HTTP error-report exchange.
+Failed strict presence probes, including looping or dangling policy links, are not
+confirmed absence. This applies to global, repository and marketplace policy.
+Absent descendants require a readable first existing ancestor, so dangling
+policy-directory links cannot silently discard configuration.
+Missing, unusable or identity-mismatched enabled drop-in policy also refuses.
+Intentional plugin disable remains a confirmed inactive selection.
+Registry-derived anchor acquisition is strict as well: a failed anchor read
+cannot become checkout-free selection after a later account-registry read succeeds.
+Failed reads of established committed policy cannot select a divergent checkout;
+confirmed absence and successful same-source recovery remain supported.
+Policy-path absence requires a readable committed tree; unresolved refs/objects,
+a non-symbolic remote HEAD or an unavailable declared policy branch refuse.
+The existing exact-candidate tree probe runs only for an otherwise ambiguous
+empty batch, not as a repository crawl or network request. Provider
+access errors retain a sanitized native failed report and owner exit; transport
+and cleanup failures remain unavailable. Existing native commands and unselected
+providers are unchanged.
+
+The [opt-in v2 report profile](report-bounded.md) additionally composes a finite
+larger response budget through the executing SDK, reader, capture and client.
+V1 retains its existing bound. This is not installed HTTP adoption: native
+Windows execution, retained hosting and live-provider proof remain separate. Gitea,
+Azure DevOps and Enterprise endpoints are unsupported by this adapter, not
+alternate selections. The [source CLI facade](cli-reference.md#source-report-facade)
+still requires explicit host injection.
+
 ## Finite typed replay client
 
 `agent_pull_requests.watch_replay_client.ReplayClient` uses Fleet's finite

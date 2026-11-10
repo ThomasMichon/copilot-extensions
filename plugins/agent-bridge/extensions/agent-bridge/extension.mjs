@@ -35,6 +35,7 @@ import { metadataRefresher, processIdentity, registrationMetadata, resolveMetada
 import { createRetainedInbox, retainedDeliverySelected } from "./retained-delivery.mjs";
 import { createHeadedDriverSession, createRemoteDriverSession, isRemoteDriverSource } from "./remote-driver.mjs";
 import { PendingQuestions, QUESTION_TYPES, pollQuestions } from "./questions.mjs";
+import { DeliveryAttention, publishDeliveryAttention } from "./delivery-state.mjs";
 
 // --- Constants ---
 const HEARTBEAT_MS = 30_000; // refresh liveness (updated_at) every 30s
@@ -103,6 +104,8 @@ const state = {
   readinessTasks: new Map(),
   questions: new PendingQuestions(),
   questioning: false,
+  deliveryAttention: new DeliveryAttention(),
+  observingDelivery: false,
 };
 
 function extLog(msg) {
@@ -204,20 +207,26 @@ async function retainedBridgeRequest(method, path, body) {
 
 // Session metadata (machine, worktree, ...), resolved off the event loop from
 // load. Registration waits for it -- never readiness: see serializedRegister.
-const metadataReady = resolveMetadataAsync()
+const metadataReady = resolveMetadataAsync({ sessionId: state.sessionId })
   .then((meta) => {
     state.meta = meta;
     if (!meta.machine && !meta.receiving_scope_id) extLog("logical machine owner unresolved; session-only registration with bounded retries");
   })
   .catch((e) => extLog(`metadata resolution failed (degrading, session unaffected): ${e.message}`));
 // A worktree or repo the load-time lookup missed is looked up again (with
-// backoff) before heartbeats, once that first lookup settled.
+// backoff) on heartbeats, once that first lookup settled. That lookup may wait
+// on a slow CLI, so it never holds the liveness registration: whatever it fills
+// in is registered as soon as it lands.
 let metadataSettled = false;
 metadataReady.finally(() => { metadataSettled = true; });
-const refreshMetadata = metadataRefresher(state);
+const refreshMetadata = metadataRefresher(state, resolveMetadataAsync, Date.now, { log: extLog });
 async function heartbeat() {
-  if (metadataSettled && await refreshMetadata().catch(() => false)) {
-    extLog(`resolved this session's worktree (${state.meta?.worktree_id || "?"}) after registration`);
+  if (metadataSettled) {
+    refreshMetadata().then((filled) => {
+      if (!filled) return undefined;
+      extLog(`resolved this session's worktree (${state.meta?.worktree_id || "?"}) after registration`);
+      return register();
+    }).catch(() => {});
   }
   return register();
 }
@@ -463,6 +472,7 @@ session.on((event) => {
       setTimeout(() => register().catch(() => {}), 0);
     }
     state.questions.observe(event, state.nativeSessionId);
+    state.deliveryAttention.observe(event, state.nativeSessionId);
     // Represent (Phase 5): enqueue whitelisted events for the flusher. This is
     // pure in-memory bookkeeping -- NO I/O, NO await, NO translation (the bridge
     // translates) -- so the hot-potato rule holds. The bounded queue drops the
@@ -546,6 +556,15 @@ try {
       pollInbox().catch(() => {});
       pollControls().catch(() => {});
       pollQuestionAnswers().catch(() => {});
+      if (!state.observingDelivery && state.registered) {
+        state.observingDelivery = true;
+        const sid = state.sessionId;
+        publishDeliveryAttention({
+          sid, attention: state.deliveryAttention, identity: processIdentity(),
+          muted: !state.deliveryEnabled, request: retainedBridgeRequest,
+          isCurrent: () => state.registered && state.sessionId === sid && state.nativeSessionId === sid,
+        }).catch(() => {}).finally(() => { state.observingDelivery = false; });
+      }
     }, INBOX_POLL_MS);
     if (state.inboxPoll.unref) state.inboxPoll.unref();
   }

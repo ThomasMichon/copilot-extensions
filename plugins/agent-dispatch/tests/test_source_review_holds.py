@@ -1,12 +1,78 @@
 from __future__ import annotations
 
 from concurrent.futures import Future
+import hashlib
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from tests.test_supervisor_source import VERSION, _incumbent
+
+
+@pytest.mark.parametrize("checkpoint", ["withdrawing", "pre-release"])
+@pytest.mark.parametrize("failure", ["missing", "unreadable"])
+@pytest.mark.parametrize("custody", ["settled", "held"])
+def test_unreadable_withdrawal_profile_uses_owned_settlement_before_admission_rollback(
+    tmp_path, monkeypatch, checkpoint, failure, custody,
+):
+    from agent_procutil import daemon_instances
+    from agent_dispatch.supervisor_profile import MasterProfile
+
+    daemon, source = _incumbent(tmp_path, monkeypatch)
+    profile = tmp_path / "supervisor.env"
+    profile.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\n")
+    daemon._master_profile = MasterProfile(profile, hashlib.sha256(profile.read_bytes()).hexdigest())
+    receipt = SimpleNamespace(instance_id="a" * 32, registry_root=tmp_path / "registry")
+    child = SimpleNamespace(instance_receipt=receipt, poll=lambda: 1 if custody == "settled" else None)
+    state = {
+        "root": tmp_path, "version": VERSION, "target": Path("incoming"),
+        "phase": checkpoint if checkpoint == "withdrawing" else "preparing", "child": child,
+    }
+    daemon._source_handoff = state
+    unreadable = [False]
+    original_read = Path.read_bytes
+
+    def read(path):
+        if path == profile and unreadable[0]:
+            raise PermissionError("fixture profile read refused")
+        return original_read(path)
+
+    monkeypatch.setattr(Path, "read_bytes", read)
+
+    def withdraw():
+        daemon._pool_metadata_closed.set()
+        if failure == "missing":
+            profile.unlink()
+        else:
+            unreadable[0] = True
+        return True
+
+    if checkpoint == "withdrawing":
+        withdraw()
+    monkeypatch.setattr(daemon, "shutdown", withdraw)
+    monkeypatch.setattr(source, "read_prepared", lambda *_args, **_kwargs: {"instance_id": "d" * 32})
+    monkeypatch.setattr(source, "spawn_candidate", lambda *_args, **_kwargs: pytest.fail("unconfirmed effect replay"))
+    cleaned = []
+
+    def cleanup(actual, *, terminate):
+        assert actual is receipt and terminate is False
+        cleaned.append(actual)
+        return SimpleNamespace(status=custody)
+
+    monkeypatch.setattr(daemon_instances, "cleanup_instance", cleanup)
+    assert daemon._maybe_self_update() is False
+    assert cleaned == [receipt]
+    assert not daemon._lock.released
+    if custody == "settled":
+        assert daemon._source_handoff is None
+        assert not daemon._pool_metadata_closed.is_set()
+    else:
+        assert daemon._source_handoff is state
+        assert daemon._pool_metadata_closed.is_set()
+        assert daemon._maybe_self_update() is False
+        assert cleaned == [receipt, receipt]
+        assert daemon._source_handoff is state
 
 
 @pytest.mark.parametrize("checkpoint", ["early", "pre-release"])

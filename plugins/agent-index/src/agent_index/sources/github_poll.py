@@ -37,6 +37,7 @@ def _plan(connector: GitHubConnector, last_commit: str | None) -> dict:
         },
     )
     data = result.data
+    connector._observe_records(data, kind="listing")
     if result.not_modified or not isinstance(data, list) or len(data) > 100:
         raise ValueError("GitHub polling requires a complete fresh identity page")
     if has_next_link(result.headers.get("Link", "")):

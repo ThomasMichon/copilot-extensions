@@ -4,7 +4,7 @@
 
 Every effort README write that captures or updates operator intent must be
 re-read against the operator's actual words before treating it as complete.
-Validate Request, Guiding Intent and Plan; do not paraphrase away a constraint,
+Validate Goal, Request, Guiding Intent and Plan; do not paraphrase away a constraint,
 soften a firm decision or silently add scope.
 
 - **Validate against the source.** Compare the current round's literal input.

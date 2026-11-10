@@ -121,28 +121,41 @@ dependency or implementation assignment. Its reciprocal validation/edit
 interface and two satisfied within-producer precedences remain separate from
 the historical 145 relationships.
 
-Selected entry decisions already supported by the registers are:
+The [2026-11-09 tracking-route correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
+resolves two stale selection destinations: #9323's unfinished permission
+slice now routes through #9295, and #3002's steering slice through #2879.
+These audited tracking transfers are not prerequisite edges or completed
+fixes. Preserve each original finite alternative and existing claimant;
+neither receiver's unrelated lanes must finish first. The historical
+relationship counts and pinned source findings remain unchanged.
+
+Selected entry decisions already supported by the registers are listed below.
+The [historical-endpoint follow-through](<journal/2026/11.09 roadmap-receiving-routes.md#historical-endpoint-follow-through>)
+reuses nine audited tracking dispositions to name their actual receiving
+routes. It does not refresh the registers' source findings or turn a tracking
+transfer into implementation credit. #9377's disposition and next receiving
+route remain unqualified; its historical nomination is not a current assignment.
 
 | Selected contribution | What actually precedes it | What does not have to finish first |
 |---|---|---|
-| #5453 replacement/promotion design | #5512 Phase 1 reviewed merge, in the same singleton-correctness effort | Every Manager, keeper or unrelated restart issue |
+| #3938 replacement/promotion design retained from #5453 | #5512 Phase 1 reviewed merge, in the same singleton-correctness effort | Every Manager, keeper or unrelated restart issue |
 | #4195 paths that terminate stale owners | The applicable #5006 birth-bound force-signal qualification | Nonterminating atomic admission or all process-policy work |
 | #4050 ordinary default-read consumer | #4193's actual read-only AND bounded DB/tail boundary | #4053 lifetime mapping, unless the selected alias changes disconnect/stop effects |
 | #3905 selected source-install generation | #5472 immutable admission/reuse/refusal; #5851 write AND cleanup isolation only where that materializer is used | All thirteen adopters or the entirety of #4876/#3905/#5472 |
-| #5286 selected plugin-preparation consumer | #5072's selected authorized dependency/source closure | Every marketplace, venue or later propagation consumer |
+| #5286 selected plugin-preparation consumer | Its selected authorized dependency/source closure retained from #5072; a within-receiver slice condition, not a whole-issue self-dependency | Every marketplace, venue or later propagation consumer |
 | #5035 selected replacement branch | #5953 identity-bound confirmed retirement/handback where applicable | A universal successor-ready condition; already-dead OR ordinary successful retirement remains valid |
 | #4564 original native restoration qualification | Its actual readiness and existing-owner acceptance, still unsatisfied | Independent input, renderer, parser or supported venue work |
-| #3791 compact-width composition or #5641 refresh narrowing | Their original second-consumer or concrete refresh-cause demand | No speculative implementation is needed merely to make the roadmap look active |
-| #6076 selected ordinary acquisition caller | Delivered #6660 exact-owner lookup and #6462 ordinary native-identity/storage interfaces | The whole legacy recovery, native reservation or caller programme |
-| #7170 restored candidate admission | Full lifecycle ownership before effects OR refusal of all three entrypoints | Whole private-runtime adoption, all installer work or a new zero-outage veto |
+| #4182 compact-width composition retained from #3791, or #5641 refresh narrowing | Their original second-consumer or concrete refresh-cause demand | No speculative implementation is needed merely to make the roadmap look active |
+| #6076 selected ordinary acquisition caller | The credited exact-owner lookup and ordinary native-identity/storage interface slices retained from #6660/#6462, not their whole native/recovery acceptance | The whole legacy recovery, native reservation or caller programme |
+| #4477 restored candidate admission retained from #7170 | Full lifecycle ownership before effects OR refusal of all three entrypoints | Whole private-runtime adoption, all installer work or a new zero-outage veto |
 | #7805 terminal-task capacity discount | Fenced/returned-start AND positively absent-body evidence | Whole acknowledged handoff, task/exclusive release or native history |
-| #6681 selected construction/setup branch | Applicable #6240 role closure, #6241 operation custody and #7720 forward only where selected | Every fleet role, OAuth application, reverse-forward profile or whole Gateway programme |
+| #6030 selected construction/setup branch retained from #6681 | Applicable #6240 role closure and #6241 operation custody now retained in [Fleet Control V2](../fleet-control-v2/retained-fleet-contracts.md); #7720 forward only where selected | Every fleet role, OAuth application, reverse-forward profile or whole Gateway programme |
 | #9034 inventory routing | Actual operation and provider-capability classification before bootstrap | Whole runtime update or a duplicate inventory handler |
 | #7758 Dispatch ordinary publishers | The separately qualified actual Dispatch stamp/provision recipe | Reimplementation of delivered Logger/Bridge adapters or completion of all ordinary suite publishers |
 | #9375 selected removal witness | Exact applicable connectivity-retention/refusal and live-custody preflight | Duplicate bytecode repair, every-host rollout or a blanket credential-relay exemption |
 | #8924 revised local hook activation | Required trusted-main identifier replacement coverage | Every historical audit or a new runtime publication authority |
 | #7943 first-prompt qualification / #9097 residual compatibility | Current reviewed direct-copy source contract and exact safe declaration/path selection | Reviving old canonical-body authentication, receipt or prepared-generation mechanisms |
-| #9377 bounded manual-aide work | Explicit admission of Phase 1 after the reviewed inception | Mandatory helper code, Dispatch integration or a second completion ledger |
+| Historical #9377 bounded manual-aide nomination; current route unqualified | Original explicit Phase 1 admission after the reviewed inception remains the historical condition; verify actual disposition/receiving evidence before selecting this nomination | Mandatory helper code, Dispatch integration or a second completion ledger; this unresolved route does not block unrelated work |
 
 The union does not introduce unrecorded hard prerequisites between the four
 waves. A shared implementation seam is an interface to reconcile, not evidence

@@ -1,0 +1,9 @@
+{
+  "comment": "Require exact native text-comment types for retained observation correlation.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

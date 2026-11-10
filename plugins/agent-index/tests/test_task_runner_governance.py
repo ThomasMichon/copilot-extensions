@@ -24,7 +24,7 @@ class _Store:
         self.calls.append("pending")
         return self.pending
 
-    def dequeue_next(self):
+    def dequeue_next(self, *, accept_change_hints: bool = False):
         self.calls.append("dequeue")
         return self.task
 

@@ -272,7 +272,7 @@ def bootstrap_source(tmp_path_factory):
         "runtime_source_config", "runtime_source", "self_install", "self_install_runtime",
         "self_install_payload", "config_write_lock", "update_python_path", "runtime_identity",
         "runtime_launchers", "self_install_recovery", "mux_file_lock",
-        "engine_client", "engine_sessions", "agent_plugin_runtime", "picker_review", "engine_posix_process",
+        "engine_client", "engine_progress", "engine_sessions", "agent_plugin_runtime", "picker_review", "engine_posix_process",
         "engine_environment", "worktree_rows_contract", "worktree_observation_contract",
         "update_orchestration", "update_events", "project_update_controller",
     ):
@@ -451,14 +451,21 @@ def test_retained_controller_prepares_dev_source_without_its_acquisition(
     import bootstrap_inputs
 
     _root, acquisition, driver, _start, _effects = bootstrap
-    manifest = SOURCE / "worktree-manager" / "packaged-assets.json"
-    shutil.copy2(manifest, acquisition / "worktree-manager" / manifest.name)
-    declaration = json.loads(manifest.read_text(encoding="utf-8"))
-    for group in declaration.get("groups", [declaration]):
-        for name in group["files"]:
-            destination = acquisition / group["canonicalDir"] / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(SOURCE / group["canonicalDir"] / name, destination)
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        manifest = SOURCE / "worktree-manager" / filename
+        declaration = json.loads(manifest.read_text(encoding="utf-8"))
+        shutil.copy2(manifest, acquisition / "worktree-manager" / filename)
+        for group in declaration.get("groups", [declaration]):
+            for name in group["files"]:
+                relative = Path(group["canonicalDir"]) / name
+                target = acquisition / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(SOURCE / relative, target)
+    shutil.copytree(
+        SOURCE / "libs/installer-engine", acquisition / "libs/installer-engine",
+        ignore=shutil.ignore_patterns("tests", "docs", "__pycache__", "*.pyc"),
+        dirs_exist_ok=True,
+    )
     _git(acquisition, "add", ".")
     _git(
         acquisition, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",

@@ -1,0 +1,9 @@
+{
+  "comment": "Decline disposition wait treats lost task reads as unconfirmed and records the last failure in its blocker.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

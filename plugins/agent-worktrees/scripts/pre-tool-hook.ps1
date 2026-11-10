@@ -14,7 +14,7 @@ function Write-PreToolUnavailable([string]$Boundary) {
 function ConvertFrom-PreToolJson([string]$Text) {
     if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }
     if ($PSVersionTable.PSVersion.Major -ge 6) {
-        return ConvertFrom-Json -InputObject $Text -AsHashtable -ErrorAction Stop
+        return ,(ConvertFrom-ManagedWorktreesJson $Text)
     }
     if (-not $script:preToolJson) {
         [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
@@ -53,8 +53,10 @@ function Get-NativePreToolStop {
     } catch { return $null }
 }
 
-function Test-NativePreToolRead([object]$Payload) {
-    if ($env:COPILOT_EXTENSIONS_CONTEXT -or $Payload -isnot [Collections.IDictionary]) { return $false }
+function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
+    if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
+        $Payload -isnot [Collections.IDictionary]) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) { return $false }
     $name = $Payload.toolName
     if (-not $name) { $name = $Payload.tool_name }
     if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
@@ -128,13 +130,14 @@ try {
     $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
     if (-not [IO.File]::Exists($admission)) { exit 0 }
     . $admission
-    if (-not (Test-ManagedWorktreesSession -Raw $raw)) { exit 0 }
+    $preparedMembership = $false
+    if (-not (Test-ManagedWorktreesSession -Raw $raw -Prepared ([ref]$preparedMembership))) { exit 0 }
     $stop = Get-NativePreToolStop
     if ($stop -eq $true) { exit 0 }
     $script:preToolBoundary = 'event JSON'
     $payload = ConvertFrom-PreToolJson $raw
     if ($payload -isnot [Collections.IDictionary]) { throw 'Expected an event object' }
-    if ($stop -eq $false -and (Test-NativePreToolRead $payload)) { exit 0 }
+    if ($stop -eq $false -and (Test-NativePreToolRead $payload $preparedMembership)) { exit 0 }
     try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }
     catch { Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop }
     [IO.Directory]::SetCurrentDirectory((Get-Location).Path)

@@ -237,6 +237,78 @@ def writes(backend):
     return [call for call in backend.calls if call[0] != "GET"]
 
 
+def test_legacy_protected_context_without_native_policy_extension_keeps_original_callback(environment, monkeypatch):
+    from agent_worktrees.providers.azure_owned_review import AdoReviewContext
+
+    monkeypatch.delattr(AdoReviewContext, "check_review")
+    backend = environment[4]
+    assert run(environment)["status"] == "complete"
+    assert backend.policy_calls == ["finding", "finding", "verdict", "verdict"]
+    assert len(writes(backend)) == 2
+
+
+@pytest.mark.parametrize("outcome", ["complete", "policy_refusal", "unknown", "candidate_changed"])
+def test_reused_context_restores_original_policy_after_each_action(environment, outcome):
+    store, selected, generation, attachment, backend, _ = environment
+    with backend.context() as context:
+        original_policy = context.review_check
+
+        @contextmanager
+        def reused_context():
+            assert context.review_check is original_policy
+            yield context
+
+        if outcome == "policy_refusal":
+            def refuse(_backend, _action):
+                raise PermissionError("selected policy withdrawn")
+            backend.on_policy = refuse
+        elif outcome == "unknown":
+            backend.partial_reply = True
+        elif outcome == "candidate_changed":
+            backend.drift_after_comment = True
+        kwargs = dict(
+            context_factory=reused_context, checkpoint=backend.checkpoint,
+            expires_at=int(time.time()) + 600, budget_seconds=30,
+        )
+        try:
+            if outcome == "policy_refusal":
+                with pytest.raises(PermissionError, match="selected policy withdrawn"):
+                    execute_review(store, selected, generation, attachment, **kwargs)
+            else:
+                result = execute_review(store, selected, generation, attachment, **kwargs)
+                assert result["status"] == outcome
+                assert result["entered_writes"] == (2 if outcome == "complete" else 1)
+        finally:
+            assert context.review_check is original_policy
+        if outcome == "complete":
+            assert {"finding", "verdict"} <= set(backend.policy_calls)
+
+
+def test_fresher_native_policy_inputs_recheck_exact_candidate_before_effect(environment):
+    backend = environment[4]
+    original_context = backend.context
+
+    @contextmanager
+    def context():
+        with original_context() as selected:
+            original_perform = selected.perform
+
+            def perform(operation, action):
+                fresh = selected.read_state()
+                fresh["revision"]["head_sha"] = "d" * 40
+                selected.review_check(operation, action, fresh, context=selected)
+                return original_perform(operation, action)
+
+            selected.perform = perform
+            yield selected
+
+    backend.context = context
+    result = run(environment)
+    assert result["status"] == "candidate_changed"
+    assert result["actions"][0]["state"] == "unknown"
+    assert result["actions"][0]["attempt_id"] and writes(backend) == []
+
+
 @pytest.fixture
 def prepared_environment(environment: tuple, prepared_intent: dict) -> tuple:
     store, selected, _, _, _, _ = environment

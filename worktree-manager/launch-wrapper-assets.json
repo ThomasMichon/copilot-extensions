@@ -1,0 +1,10 @@
+{
+  "schema": "copilot-extensions.launch-wrapper-assets",
+  "version": 1,
+  "canonicalDir": "libs/payload-invocation",
+  "payloadDir": "scripts/libs/payload-invocation",
+  "files": [
+    "generate.py",
+    "runtime_admission.py"
+  ]
+}
