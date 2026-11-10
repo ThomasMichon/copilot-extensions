@@ -441,6 +441,12 @@ selector and context-validator substitutes remain, so this is not installed
 runtime qualification. Phase times include their instrumentation, and the
 outside-command startup/exit envelope is not isolated startup. Ordered controls
 do not establish exact subtractive attribution or a latency distribution.
+An after-call loaded-module observation, without importing or listing available
+modules, requires the three native read calls to leave
+`Microsoft.PowerShell.Management` unloaded while the real protected-policy call
+retains its original module work. These cases use Unicode, space and apostrophe
+source-root paths. Module absence is deterministic work-count evidence, not a
+latency or throughput pass.
 The boolean-only admission controls retain bounded command-entry, helper,
 input, admission and output phases; a timeout reports the partial phases
 without retrying the child or relaxing its original limit.

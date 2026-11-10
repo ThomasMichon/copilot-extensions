@@ -33,7 +33,8 @@ PATCH_PROTECTED_CASES = (
     "patch-protected-batch", "patch-protected-freeform", "patch-protected-commented-json",
 )
 NATIVE_WRITE_PHASES = {
-    "command-entry", "script-entry", "membership-start", "membership-complete",
+    "command-entry", "helper-loaded", "input-complete", "output-complete",
+    "script-entry", "membership-start", "membership-complete",
     "native-proof-start", "policy-start", "prepared-event-json", "prepared-paths",
     "prepared-marker-opened", "prepared-marker-json", "prepared-marker-decoded",
     "json-entry", "json-utility-load", "json-utility-ready", "json-web-load",
@@ -59,6 +60,36 @@ def native_write_fixture_stderr(stderr):
         else:
             errors.append(line)
     return "\n".join(phases), b"".join(errors)
+
+
+def instrument_prepared_admission(source):
+    prepared_function = "function Test-PreparedManagedWorktreesSession {"
+    prefix, prepared = source.split(prepared_function, 1)
+    opened = "        $openedLength = $stream.Length"
+    assert prepared.count(opened) == 1
+    prepared = prepared.replace(
+        opened, "Write-NativeWriteFixturePhase 'prepared-marker-opened'\n" + opened, 1,
+    )
+    source = prefix + prepared_function + prepared
+    for boundary, statement in (
+        ("prepared-event-json", "        $event = ConvertFrom-ManagedWorktreesJson $Raw"),
+        ("json-entry", "    if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }"),
+        ("json-utility-load", "    if (-not $script:managedWorktreesUtilityAssembly) {"),
+        ("json-utility-ready", "    if ($PSVersionTable.PSVersion.Major -ge 6) {"),
+        ("json-web-load", "        [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')"),
+        ("json-resolver-type", "        $resolverType = $script:managedWorktreesUtilityAssembly.GetType("),
+        ("json-resolver-create", "        $resolver = [Activator]::CreateInstance($resolverType, $true)"),
+        ("json-serializer-create", "        $script:managedWorktreesJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new($resolver)"),
+        ("json-deserialize", "    return ,($script:managedWorktreesJson.DeserializeObject($Text))"),
+        ("prepared-paths", "        $workspace = Get-PreparedWorktreesPath $cwd"),
+        ("prepared-marker-json", "        $value = ConvertFrom-ManagedWorktreesJson $text.TrimStart([char]0xfeff)"),
+        ("prepared-marker-decoded", "        $scope = $value['scope']"),
+    ):
+        assert statement in source
+        source = source.replace(
+            statement, f"Write-NativeWriteFixturePhase '{boundary}'\n" + statement, 1,
+        )
+    return source
 
 
 def qualify_complete_native_entry(scripts, entry, executable, event, env, workspace, capsys):
@@ -122,7 +153,11 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                 )
             tail = (
                 "Write-NativeWriteFixturePhase 'command-complete'; " if attributed else ""
-            ) + "[Console]::Error.WriteLine('NATIVE_ENTRY_BUILD ' + $PSVersionTable.PSVersion.ToString())"
+            ) + (
+                "[Console]::Error.WriteLine('NATIVE_ENTRY_BUILD ' + $PSVersionTable.PSVersion.ToString()); "
+                "[Console]::Error.WriteLine('NATIVE_ENTRY_MANAGEMENT ' + "
+                "[int][bool](Get-Module -Name Microsoft.PowerShell.Management))"
+            )
             command_entry = entry
             if attributed:
                 command_entry = entry.replace(
@@ -143,21 +178,30 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                     f"stdout={error.stdout!r}; stderr={error.stderr!r}"
                 ) from error
             elapsed = time.monotonic() - started
-            builds, stderr = [], []
+            builds, management, stderr = [], [], []
             for line in result.stderr.splitlines(keepends=True):
                 match = re.fullmatch(rb"NATIVE_ENTRY_BUILD ([0-9][0-9A-Za-z.+-]{0,127})\r?\n", line)
-                (builds if match else stderr).append(match[1].decode("ascii") if match else line)
+                module = re.fullmatch(rb"NATIVE_ENTRY_MANAGEMENT ([01])\r?\n", line)
+                if match:
+                    builds.append(match[1].decode("ascii"))
+                elif module:
+                    management.append(int(module[1]))
+                else:
+                    stderr.append(line)
             progress, errors = native_write_fixture_stderr(b"".join(stderr))
             phases = [(int(tick), name) for tick, name in (line.split(" ", 1) for line in progress.splitlines())]
             sample = {
                 "variant": variant, "outer_seconds": elapsed,
                 "shell_version": builds[0] if len(builds) == 1 else None,
+                "management_module_loaded": bool(management[0]) if len(management) == 1 else None,
                 "phases_monotonic_ms": phases,
                 "stdout": result.stdout.decode("utf-8", errors="backslashreplace"), "validated": False,
             }
             samples.append(sample)
             assert result.returncode == 0 and not errors, (variant, result.stdout, result.stderr)
             assert len(builds) == 1, (variant, builds, result.stderr)
+            assert len(management) == 1, (variant, management, result.stderr)
+            assert bool(management[0]) is (variant == "attributed-protected"), (variant, sample)
             assert [tick for tick, _ in phases] == sorted(tick for tick, _ in phases), phases
             names = [name for _, name in phases]
             if attributed:
@@ -192,7 +236,7 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                 "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
                 "source_sha256": source_digests, "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
                 "samples": samples, "complete": len(samples) == 4 and all(sample["validated"] for sample in samples),
-                "limits": "Fixture timing only; phases include instrumentation. Outer-minus-last-phase includes startup/exit and marker overhead, not isolated startup. Ordered controls are not subtractive attribution or a latency distribution.",
+                "limits": "Fixture timing only; phases include instrumentation. Outer-minus-last-phase includes startup/exit and marker/module-observer overhead, not isolated startup. Ordered controls are not subtractive attribution or a latency distribution.",
             }}))
 
 
@@ -861,41 +905,46 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
     session.mkdir(parents=True)
     payload = {"sessionId": "prepared", "cwd": str(workspace), "toolName": "view"}
     assert module.admitted(payload, home=tmp_path)
-    phases = tmp_path / "native-admission-phases"
+    admission = tmp_path / "managed-session.ps1"
+    admission.write_text(
+        instrument_prepared_admission((SCRIPTS / "managed-session.ps1").read_text(encoding="utf-8")),
+        encoding="utf-8",
+    )
     command = (
-        "function Write-AdmissionPhase([string]$Name) { "
-        "[IO.File]::AppendAllText($env:PREPARED_MEMBERSHIP_PHASES, "
-        "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
-        "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name + [Environment]::NewLine) }; "
-        "Write-AdmissionPhase 'command-entry'; "
-        ". $env:PREPARED_MEMBERSHIP_SCRIPT; Write-AdmissionPhase 'helper-loaded'; "
+        NATIVE_WRITE_PHASE_WRITER
+        + ". $env:PREPARED_MEMBERSHIP_SCRIPT; Write-NativeWriteFixturePhase 'helper-loaded'; "
         "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }; "
-        "$raw = [Console]::In.ReadToEnd(); Write-AdmissionPhase 'input-complete'; "
-        "$admitted = Test-ManagedWorktreesSession -Raw $raw; Write-AdmissionPhase 'admission-complete'; "
-        "[Console]::Out.Write($admitted.ToString()); Write-AdmissionPhase 'output-complete'"
+        "$raw = [Console]::In.ReadToEnd(); Write-NativeWriteFixturePhase 'input-complete'; "
+        "$admitted = Test-ManagedWorktreesSession -Raw $raw; Write-NativeWriteFixturePhase 'admission-complete'; "
+        "[Console]::Out.Write($admitted.ToString()); Write-NativeWriteFixturePhase 'output-complete'"
     )
     env = environment(tmp_path, workspace)
-    env["PREPARED_MEMBERSHIP_SCRIPT"] = str(SCRIPTS / "managed-session.ps1")
-    env["PREPARED_MEMBERSHIP_PHASES"] = str(phases)
+    env["PREPARED_MEMBERSHIP_SCRIPT"] = str(admission)
     started_ms = time.time_ns() // 1_000_000
     try:
         result = subprocess.run(
             [executable, "-NoProfile", "-NonInteractive", "-Command", command],
-            input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+            input=json.dumps(payload).encode("utf-8"), capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )
     except subprocess.TimeoutExpired as error:
-        progress = phases.read_text() if phases.exists() else "no command entry"
+        progress, diagnostic = native_write_fixture_stderr(error.stderr or b"")
         raise AssertionError(
             f"{shell} membership exceeded the original 10s child limit; start_ms={started_ms}; "
-            f"phases={progress!r}; stdout={repr(error.stdout)[:512]}; stderr={repr(error.stderr)[:512]}"
+            f"phases={progress or 'no command entry'!r}; "
+            f"stdout={repr(error.stdout)[:512]}; stderr={repr(diagnostic)[:512]}"
         ) from error
+    progress, result.stderr = native_write_fixture_stderr(result.stderr)
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "True", result.stdout + result.stderr
+    assert not result.stderr, result.stderr
+    assert result.stdout == b"True", result.stdout + result.stderr
+    phase_names = [line.split(" ", 1)[1] for line in progress.splitlines()]
+    assert "prepared-marker-opened" in phase_names and "prepared-marker-json" in phase_names, progress
+    assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress
     with capsys.disabled():
         print(json.dumps({
             "shell": shell, "linked": linked, "start_ms": started_ms,
-            "phases": phases.read_text().splitlines(),
+            "phases": progress.splitlines(),
         }))
 
 
@@ -1405,7 +1454,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         monkeypatch.delenv(key, raising=False)
     for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
         monkeypatch.setenv(key, str(tmp_path))
-    plugin = tmp_path / "payload"
+    payload_label = "payload-\u00e9 space'root" if case == "batch-read-only-attribution" else "payload"
+    plugin = tmp_path / payload_label
     if cell:
         from types import SimpleNamespace
         import test_registry_paths as fixtures
@@ -1416,7 +1466,9 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
             ),
         ))
-        plugin = fixtures._payload(tmp_path, "selected")
+        plugin = fixtures._payload(
+            tmp_path, payload_label if case == "batch-read-only-attribution" else "selected",
+        )
         with (registry / "repos.yaml").open("a", encoding="utf-8") as output:
             output.write('    remote: "https://github.com/example/project.git"\n')
         context, selected_registry = fixtures._stamp(
@@ -1613,34 +1665,9 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         )
     native_entry.write_text(instrumented, encoding="utf-8")
     admission = scripts / "managed-session.ps1"
-    instrumented = admission.read_text(encoding="utf-8")
-    prepared_function = "function Test-PreparedManagedWorktreesSession {"
-    prefix, prepared = instrumented.split(prepared_function, 1)
-    opened = "        $openedLength = $stream.Length"
-    assert prepared.count(opened) == 1
-    prepared = prepared.replace(
-        opened, "Write-NativeWriteFixturePhase 'prepared-marker-opened'\n" + opened, 1,
+    admission.write_text(
+        instrument_prepared_admission(admission.read_text(encoding="utf-8")), encoding="utf-8",
     )
-    instrumented = prefix + prepared_function + prepared
-    for boundary, source in (
-        ("prepared-event-json", "        $event = ConvertFrom-ManagedWorktreesJson $Raw"),
-        ("json-entry", "    if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }"),
-        ("json-utility-load", "    if (-not $script:managedWorktreesUtilityAssembly) {"),
-        ("json-utility-ready", "    if ($PSVersionTable.PSVersion.Major -ge 6) {"),
-        ("json-web-load", "        [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')"),
-        ("json-resolver-type", "        $resolverType = $script:managedWorktreesUtilityAssembly.GetType("),
-        ("json-resolver-create", "        $resolver = [Activator]::CreateInstance($resolverType, $true)"),
-        ("json-serializer-create", "        $script:managedWorktreesJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new($resolver)"),
-        ("json-deserialize", "    return ,($script:managedWorktreesJson.DeserializeObject($Text))"),
-        ("prepared-paths", "        $workspace = Get-PreparedWorktreesPath $cwd"),
-        ("prepared-marker-json", "        $value = ConvertFrom-ManagedWorktreesJson $text.TrimStart([char]0xfeff)"),
-        ("prepared-marker-decoded", "        $scope = $value['scope']"),
-    ):
-        assert source in instrumented
-        instrumented = instrumented.replace(
-            source, f"Write-NativeWriteFixturePhase '{boundary}'\n" + source, 1,
-        )
-    admission.write_text(instrumented, encoding="utf-8")
     raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
     started = time.monotonic()
     started_ms = time.time_ns() // 1_000_000
