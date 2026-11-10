@@ -56,7 +56,8 @@ def inventory(
                 )})
                 response = run_cli([
                     "gh", "api", "--hostname", host, endpoint + path + f"&per_page={PAGE_SIZE}",
-                ], env=env, timeout=max(1, int(deadline - time.monotonic())) if deadline else 60)
+                ], env=env, timeout=max(1, int(deadline - time.monotonic())),
+                   max_stdout_bytes=MAX_BYTES, max_stderr_bytes=8192)
                 if response.returncode:
                     raise ProviderError("inventory read failed")
                 body = response.stdout

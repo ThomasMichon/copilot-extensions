@@ -52,9 +52,9 @@ def test_paginated_inventory_renews_and_preserves_partial_pages(monkeypatch, kin
     assert all("--paginate" not in argv for argv, _ in requests)
     if kind == "gitea":
         scheme = "Bear" + "er "
-        assert requests[0][0][requests[0][0].index("-H") + 1] == (
-            "Authorization: " + scheme + "synthetic-1"
-        )
+        assert requests[0][1]["input_text"] == "Authorization: " + scheme + "synthetic-1\n"
+        assert "synthetic-1" not in " ".join(requests[0][0])
+    assert all(kwargs["max_stdout_bytes"] <= 1_048_584 for _, kwargs in requests)
 
 
 @pytest.mark.parametrize("kind", ["github", "gitea"])
@@ -132,6 +132,40 @@ def test_caps_and_wrong_credential_binding_are_not_complete(monkeypatch):
     assert result["outcome"] == "unavailable" and not result["numbers"]
 
 
+@pytest.mark.parametrize("http_status", [401, 403])
+def test_gitea_final_status_authorization_loss_aborts_snapshot(monkeypatch, http_status):
+    replies = iter([
+        (200, '{"state":"open","head":{"sha":"abc"},"base":{}}'),
+        (200, "[]"),
+        (http_status, "{}"),
+    ])
+
+    def run(argv, **kwargs):
+        status, body = next(replies)
+        assert kwargs["max_stdout_bytes"] == 1_048_584
+        assert kwargs["max_stderr_bytes"] == 8192
+        return subprocess.CompletedProcess(argv, 0, body + f"\n{status}", "")
+
+    monkeypatch.setattr(gitea, "run_cli", run)
+    with pytest.raises(ObservationCredentialError) as failure:
+        gitea.GiteaProvider().get_snapshot(
+            "owner/repo", 7, api_base="https://forge.example",
+            credential_source=source("gitea", "https://forge.example", []),
+        )
+    assert failure.value.transient
+
+
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_actual_native_capture_refuses_oversized_provider_stream(stream):
+    from agent_worktrees.providers.base import run_cli
+    result = run_cli(
+        [sys.executable, "-c", f"import sys; sys.{stream}.write('x'*1000000)"],
+        max_stdout_bytes=128, max_stderr_bytes=128, timeout=5,
+    )
+    assert result.returncode != 0
+    assert len(result.stdout) <= 128 and len(result.stderr) <= 128
+
+
 def test_native_parser_capability_discovery_is_passive_and_strict(capsys, monkeypatch):
     monkeypatch.setattr(
         observation_inventory, "inventory", lambda *_a, **_kw: pytest.fail("unexpected read"),
@@ -193,4 +227,5 @@ def test_actual_native_entry_and_executing_typed_credential_command(
         assert reads[0][1]["env"]["GH_TOKEN"] == material["token"]
     else:
         scheme = "Bear" + "er "
-        assert "Authorization: " + scheme + material["token"] in reads[0][0]
+        assert reads[0][1]["input_text"] == "Authorization: " + scheme + material["token"] + "\n"
+        assert material["token"] not in " ".join(reads[0][0])

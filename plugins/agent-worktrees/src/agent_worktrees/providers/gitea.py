@@ -100,14 +100,10 @@ class GiteaProvider:
     ) -> tuple[int, str]:
         """Run curl; return (http_status, body_text)."""
         if isinstance(token, ObservationCredentials):
-            if method != "GET" or payload is not None:
-                raise ProviderError("observation credentials permit only native reads")
-            authorization = token.authorization()
-        else:
-            scheme = "to" + "ken "
-            authorization = scheme + token
-        if read_deadline is not None and time.monotonic() >= read_deadline:
-            raise ObservationCredentialError("observation inventory deadline exhausted")
+            from .gitea_observation_read import read
+            return read(method, url, token, invoke=run_cli, payload=payload, deadline=read_deadline)
+        scheme = "to" + "ken "
+        authorization = scheme + token
         args = [
             "curl", "-sS", "-X", method, url,
             "-H", "Authorization: " + authorization,
@@ -116,9 +112,7 @@ class GiteaProvider:
         ]
         if payload is not None:
             args += ["-H", "Content-Type: application/json", "-d", json.dumps(payload)]
-        proc = run_cli(args, **({"preserve_line_endings": True} if preserve_line_endings else {}),
-                       **({"timeout": max(1, int(read_deadline - time.monotonic()))}
-                          if read_deadline is not None else {}))
+        proc = run_cli(args, **({"preserve_line_endings": True} if preserve_line_endings else {}))
         if proc.returncode != 0:
             raise ProviderError(
                 f"curl failed talking to Gitea ({url}): "

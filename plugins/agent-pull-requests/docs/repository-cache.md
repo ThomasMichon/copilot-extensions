@@ -35,6 +35,10 @@ terminal PR facts. Output is bounded per page; subprocess capture and the outer
 native invocation retain their existing limits. Queries will not invoke this
 command; only the single observation owner will.
 
+Typed Gitea headers pass through curl stdin, not process arguments. Both native
+inventory providers use byte-bounded caller-owned subprocess capture, and final
+HTTP 401/403 responses abort observation as retryable credential loss.
+
 Credential-backed native snapshots now accept Gitea as well as existing GitHub
 and Azure DevOps bindings. The Gitea read path renews and validates the typed
 provider/endpoint/repository/observe binding before every request. It cannot
