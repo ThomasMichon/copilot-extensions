@@ -81,7 +81,7 @@ def _resolve_mbase(cvb, base_ref: str, head_ref: str) -> tuple[str, str, str] | 
 
 def touched_plugins(base_ref: str, head_ref: str = "HEAD") -> set[str]:
     """Every plugin the ``base_ref..head_ref`` diff touches, per
-    check-version-bump.py's existing, tested plugin-diff rule."""
+    check-version-bump.py's diff rule, using prospective PR integration inputs."""
     cvb = _load_check_version_bump()
     resolved = _resolve_mbase(cvb, base_ref, head_ref)
     if resolved is None:
@@ -94,7 +94,7 @@ def touched_plugins(base_ref: str, head_ref: str = "HEAD") -> set[str]:
         f"{library}/pyproject.toml"
         for library in _changed_library_intents(cvb, mbase, head, target_base)
     )
-    tree = cvb._GitTree(head)
+    tree = cvb._prospective_pr_tree(target_base, head, mbase)
     consumers = cvb._vendored_consumers(tree=tree)
     return set(cvb._plugins_needing_bump(changed, consumers, tree=tree))
 

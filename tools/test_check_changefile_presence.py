@@ -45,9 +45,9 @@ def _plugin(repo: Path, name: str, version: str = "1.0.0") -> None:
     _write(repo, f"plugins/{name}/src/{name.replace('-', '_')}/__init__.py", "x = 1\n")
 
 
-def _run(repo: Path, *extra: str) -> subprocess.CompletedProcess[str]:
+def _run(repo: Path, *extra: str, guard: str = SCRIPT.name) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(repo / "tools" / SCRIPT.name), *extra],
+        [sys.executable, str(repo / "tools" / guard), *extra],
         cwd=repo, capture_output=True, text=True, check=False,
     )
 
@@ -606,4 +606,110 @@ def test_renamed_consumer_uses_a_fresh_release_identity(repo: Path) -> None:
     _git(repo, "commit", "-qm", "fresh library intent and renamed consumer release identity")
 
     result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("scenario", ["new-consumer", "new-edge"])
+def test_target_dependency_additions_require_fresh_consumer_coverage(
+    repo: Path, scenario: str,
+) -> None:
+    _nested_library_base(repo)
+    if scenario == "new-edge":
+        _plugin(repo, "beta")
+        _write(repo, "plugins/beta/pyproject.toml",
+               '[tool.uv.sources]\nparent = { path = "../../libs/parent", editable = true }\n')
+        _write(repo, "libs/parent/pyproject.toml", '[project]\nname = "parent"\n')
+        _git(repo, "add", "-A")
+        _git(repo, "commit", "-qm", "baseline consumer without the nested edge")
+        _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _write(repo, "libs/leaf/src/change.py", "value = 1\n")
+    _write(repo, ".changefiles/alpha-new.json", json.dumps(_intent("alpha")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "library edit already covers the original consumer")
+    _git(repo, "branch", "candidate")
+    _git(repo, "checkout", "-q", "-b", "integrated-base", "origin/main")
+    if scenario == "new-consumer":
+        _plugin(repo, "beta")
+        _write(repo, "plugins/beta/pyproject.toml",
+               '[tool.uv.sources]\nparent = { path = "../../libs/parent", editable = true }\n')
+    else:
+        _write(repo, "libs/parent/pyproject.toml",
+               '[tool.uv.sources]\nleaf = { path = "../leaf", editable = true }\n')
+    _write(repo, ".changefiles/beta-old.json", json.dumps(_intent("beta")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "target integrates a new materialized consumer")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-q", "candidate")
+    manifest = (repo / "libs/parent/pyproject.toml").read_text(encoding="utf-8")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "beta" in result.stderr
+    assert (repo / "libs/parent/pyproject.toml").read_text(encoding="utf-8") == manifest
+    if scenario == "new-consumer":
+        assert not (repo / "plugins/beta").exists()
+    _write(repo, ".changefiles/beta-new.json", json.dumps(_intent("beta")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "cover the target consumer with a fresh release identity")
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_target_dependency_removal_does_not_create_spurious_obligations(
+    repo: Path,
+) -> None:
+    _nested_library_base(repo)
+    _write(repo, "libs/leaf/src/change.py", "value = 1\n")
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "edit a library formerly used by the target")
+    _git(repo, "branch", "candidate")
+    _git(repo, "checkout", "-q", "-b", "integrated-base", "origin/main")
+    _write(repo, "libs/parent/pyproject.toml", '[project]\nname = "parent"\n')
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "target removes the nested dependency")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-q", "candidate")
+
+    result = _run(repo)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_conflicting_target_inputs_require_reconciliation(repo: Path) -> None:
+    _nested_library_base(repo)
+    original = (repo / "libs/parent/pyproject.toml").read_text(encoding="utf-8")
+    _write(repo, "libs/parent/pyproject.toml", '[project]\nname = "head"\n' + original)
+    _write(repo, ".changefiles/alpha-new.json", json.dumps(_intent("alpha")))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "candidate dependency manifest edit")
+    _git(repo, "branch", "candidate")
+    _git(repo, "checkout", "-q", "-b", "integrated-base", "origin/main")
+    _write(repo, "libs/parent/pyproject.toml", '[project]\nname = "target"\n' + original)
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "conflicting target manifest edit")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-q", "candidate")
+
+    result = _run(repo)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "rebase" in result.stderr.lower()
+
+
+def test_standalone_version_guard_keeps_literal_head_scope(repo: Path) -> None:
+    _nested_library_base(repo)
+    _write(repo, "libs/leaf/src/change.py", "value = 1\n")
+    _write(repo, "plugins/alpha/plugin.json",
+           json.dumps({"name": "alpha", "version": "1.0.1"}))
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "literal head changes its only consumer version")
+    _git(repo, "branch", "candidate")
+    _git(repo, "checkout", "-q", "-b", "integrated-base", "origin/main")
+    _plugin(repo, "beta")
+    _write(repo, "plugins/beta/pyproject.toml",
+           '[tool.uv.sources]\nparent = { path = "../../libs/parent", editable = true }\n')
+    _git(repo, "add", "-A")
+    _git(repo, "commit", "-qm", "a different target has an additional consumer")
+    _git(repo, "update-ref", "refs/remotes/origin/main", "HEAD")
+    _git(repo, "checkout", "-q", "candidate")
+
+    result = _run(repo, guard="check-version-bump.py")
     assert result.returncode == 0, result.stdout + result.stderr

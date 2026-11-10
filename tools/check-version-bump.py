@@ -92,9 +92,12 @@ _PLUGIN_JSON_VERSION = re.compile(r'"version"\s*:\s*"([^"]+)"')
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
+    result = subprocess.run(
         ["git", "-C", str(REPO), *args],
-        capture_output=True, text=True, encoding="utf-8", check=False,
+        capture_output=True, check=False,
+    )
+    return subprocess.CompletedProcess(
+        result.args, result.returncode, result.stdout.decode("utf-8"), result.stderr.decode("utf-8"),
     )
 
 
@@ -217,6 +220,22 @@ class _GitTree:
             return tomllib.loads(text) if text is not None else {}
         except tomllib.TOMLDecodeError as error:
             raise RuntimeError(f"invalid dependency input {relative}: {error}") from error
+
+
+def _prospective_pr_tree(target_base: str, head: str, merge_base: str) -> _GitTree:
+    """Compute PR integration inputs without changing the checkout or index."""
+    if merge_base == target_base:
+        return _GitTree(head)
+    result = _git("merge-tree", "--write-tree", target_base, head)
+    if result.returncode == 1:
+        raise RuntimeError("target/head release inputs conflict; rebase before validating coverage")
+    if result.returncode:
+        raise RuntimeError(result.stderr.strip() or "could not compute target/head release inputs")
+    lines = result.stdout.splitlines()
+    tree = lines[0].strip() if lines else ""
+    if re.fullmatch(r"(?:[0-9a-f]{40}|[0-9a-f]{64})", tree) is None:
+        raise RuntimeError("invalid prospective PR tree")
+    return _GitTree(tree)
 
 
 def _canonical_dependencies(lib: str, *, tree: _GitTree | None = None) -> set[str]:

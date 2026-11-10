@@ -14,6 +14,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
+from types import ModuleType
 
 import pytest
 
@@ -112,6 +113,20 @@ def test_revision_diff_is_unambiguously_separated_from_paths(guard_module, monke
     monkeypatch.setattr(guard_module, "_git", git)
     assert guard_module._changed_files("a" * 40, "b" * 40) == ["plugins/alpha/feature.py"]
     assert calls == [("diff", "--name-only", "-z", "a" * 40 + ".." + "b" * 40, "--")]
+
+
+def test_git_text_decoding_preserves_nul_protocol_bytes(
+    guard_module: ModuleType, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    _git(tmp_path, "init", "-q")
+    monkeypatch.setattr(guard_module, "REPO", tmp_path)
+    payload = b"libs/leaf/src/name\r.py\0"
+    result = subprocess.run(
+        ["git", "hash-object", "-w", "--stdin"], cwd=tmp_path, input=payload,
+        capture_output=True, check=True,
+    )
+    oid = result.stdout.decode("ascii").strip()
+    assert guard_module._git("cat-file", "blob", oid).stdout == payload.decode("utf-8")
 
 
 def test_revision_blob_reads_are_unambiguously_separated_from_paths(guard_module, monkeypatch):

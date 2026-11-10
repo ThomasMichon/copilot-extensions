@@ -1949,10 +1949,15 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > entries, release-note-only edits and removed intents do not create new
 > obligations. Consumer coverage still requires this PR's own newly added
 > changefiles, not coincidental pending entries from an earlier PR. Intent and
-> coverage reads use the resolved Git revisions, not checkout contents. Direct
-> consumer seeds, nested library edges and packaged-source declarations use that
-> same selected tree and the shared parsers. Git symlink modes are rejected even
-> when the checkout contains a regular file.
+> coverage reads use the resolved Git revisions, not checkout contents. PR
+> dependency discovery uses the prospective target/head integration tree, so
+> consumers or edges added on the target after a branch forked are included and
+> target-side removals do not create spurious obligations. Git merge plumbing
+> computes that tree without changing the checkout or index; conflicting inputs
+> require reconciliation. Direct consumer seeds, nested library edges and
+> packaged-source declarations still use the shared parsers. The retired
+> standalone version diagnostic retains its literal-head comparison. Git symlink
+> modes are rejected even when the checkout contains a regular file.
 >
 > New or changed library release intents and consumer coverage require fresh
 > changefile filenames: do not edit an old file to add a library/type intent or
