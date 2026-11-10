@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from .external_driver import PATH_PREFIX, drivers_dir, scan_drivers
+from .external_driver import BUNDLED_DRIVERS, PATH_PREFIX, drivers_dir, scan_drivers
 
 
 def cmd_runtime_proxy(args: argparse.Namespace) -> int:
@@ -55,9 +55,12 @@ def cmd_drivers(args: argparse.Namespace) -> int:
                 for s in specs.values()
             ],
             "findings": findings,
+            "bundled_drivers": list(BUNDLED_DRIVERS),
         }, indent=2))
         return 0
     print(f"Driver manifests: {drivers_dir()}")
+    print(f"Bundled fallback: {', '.join(BUNDLED_DRIVERS)} "
+          "(explicit manifest/PATH registration takes precedence).")
     if not specs:
         print(f"No manifest drivers (PATH fallback: {PATH_PREFIX}<name>).")
     for spec in specs.values():
