@@ -56,11 +56,14 @@ def test_existing_configured_sink_to_normal_cli_report_and_chart(tmp_path, capsy
     observed_at = datetime.now(timezone.utc) + timedelta(seconds=1)
     child = subprocess.run([
         sys.executable, "-m", "agent_machines", "health", "report", "--input", str(path),
+        "--store-dir", str(tmp_path / "absent-store"),
         "--now", observed_at.isoformat(), "--chart", str(chart),
     ], capture_output=True, text=True, timeout=20, **no_window_kwargs())
     assert child.returncode == 0, child.stderr
     report = json.loads(child.stdout)
     assert report["coverage"]["accepted_records"] == 2
+    assert report["health"] == {"state": "unavailable", "reason": "local-store-unavailable"}
+    assert not (tmp_path / "absent-store").exists()
     assert chart.read_text().startswith("<svg")
     assert "example/preparation" in chart.read_text()
     before = path.read_bytes()

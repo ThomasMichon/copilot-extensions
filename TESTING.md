@@ -5627,6 +5627,16 @@ the new constructor must not repair it.
 
 ## Unit-only promotion packet
 
+The actor-free `test_health_composition.py` packet executes the existing domain
+age projection, normal report/parser and SVG composition. Substituted storage
+and service owners retain stale/unknown evidence, independent unavailable
+inputs and unchanged old report selection. It starts no observer, writer or
+service. The selected Machines native observation packet separately proves
+actual loopback -> confirmed local slot -> normal report/chart, while the
+configured measurement/sink packet proves valid telemetry remains usable when
+an explicitly selected health store is unavailable. Neither qualifies a native
+scheduled job, installed publisher or carrier.
+
 The actor-free `test_hourly_contributions.py` packet executes the canonical
 service contribution codec and collection policy with substituted native owners
 and stage/outcome vocabularies. Exact

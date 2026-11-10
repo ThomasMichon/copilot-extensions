@@ -16,6 +16,10 @@ def add_parser(subparsers) -> None:
     report = commands.add_parser("report", help="summarize explicit local telemetry files")
     report.add_argument("--input", type=Path, action="append", default=[])
     report.add_argument(
+        "--store-dir", type=Path,
+        help="Read an explicit local health store; never probes, records or publishes",
+    )
+    report.add_argument(
         "--service", action="append", default=[],
         help="Installed same-cell service, optionally LABEL=SERVICE; read-only hourly export",
     )
@@ -113,8 +117,13 @@ def run_report(args) -> int:
             if args.now else datetime.now(timezone.utc)
         )
         report = HourlyReport(now)
-        if not args.input and not args.service:
-            raise ValueError("an explicit input or service is required")
+        if not args.input and not args.service and args.store_dir is None:
+            raise ValueError("an explicit input, service or health store is required")
+        if (
+            args.store_dir is not None and args.chart is not None
+            and args.chart.resolve().is_relative_to(args.store_dir.resolve())
+        ):
+            raise ValueError("chart overlaps health store")
         seen = set()
         for path in args.input:
             descriptor = None
@@ -162,6 +171,14 @@ def run_report(args) -> int:
             result["services_collected_at_ms"] = int(datetime.now(timezone.utc).timestamp() * 1000)
         elif args.hour:
             raise ValueError("hour requires an explicit service")
+        if args.store_dir is not None:
+            from . import health_slots
+
+            try:
+                view = health_slots.inspect(args.store_dir, now_ms=report.now_ns // 1_000_000)
+                result["health"] = {"state": "available", "view": view}
+            except (OSError, health_slots.HealthError):
+                result["health"] = {"state": "unavailable", "reason": "local-store-unavailable"}
         if args.chart is not None:
             from .health_chart import render
 
