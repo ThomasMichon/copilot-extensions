@@ -148,7 +148,8 @@ def materialized_vault(owning_context):
         assert content.count(marker) == 1
         transcript = str(project.parent / "native-installer.log").replace("'", "''")
         installer.write_text(content.replace(
-            marker, marker + f"Start-Transcript -LiteralPath '{transcript}' -Force | Out-Null\n", 1,
+            marker, marker + f"Start-Transcript -LiteralPath '{transcript}' -Force | Out-Null\n"
+            "Set-PSDebug -Trace 1\n", 1,
         ), encoding="utf-8-sig")
     return payload, installation, project
 

@@ -20,7 +20,7 @@ an ordinary contained install cannot prove that its service outlives the
 constructor's cleanup Job. Service checks read the selected generation's
 actual ping endpoint, not the optional Scheduled Task registration.
 The manual `diagnostic_stacks` input instruments only copied Windows service
-fixtures with one passive traceback capture. Those packets always remain
+fixtures with one passive traceback capture and installer line tracing. Those packets always remain
 diagnostic failures, never native acceptance; rerun without it for qualification.
 Diagnostic execution stops after 180 seconds; normal acceptance keeps its
 unchanged 900-second aggregate. Both hold the same environment-scoped admission
