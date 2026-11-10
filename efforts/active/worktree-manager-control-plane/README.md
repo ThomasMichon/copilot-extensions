@@ -796,7 +796,8 @@ worktree-manager.
       Preserve #356/#8545 repository setup, native Configuration/readiness
       writers and the full original acceptance matrix; an F1 navigation flow
       is not completion of F2/F3 or the parent issue. F1 source flow is
-      implemented and consumer-tested; F2/F3 and native/installed acceptance remain open.
+      accepted in #11837; F2 owner-adapter reconciliation, F3 and
+      release/native/installed acceptance remain open.
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
       trigger; a stale/incompatible `worktree-manager` stub can never capture the
@@ -2899,6 +2900,13 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-10 - First-run F1 source accepted; F2 owner composition next
+
+- #11837 merged after exact-head approval, resolved scope/timeout findings and
+  all required checks. The [Phase 4 acceptance record](phase-4-first-run-front-door.md#f1-acceptance-and-next-slice)
+  retains source/consumer proof and names F2 adapter reconciliation next.
+  #542 and the full matrix stay open; no release or installed rollout is claimed.
 
 ### 2026-11-10 - First-run F1 source flow and contained consumer proof
 
