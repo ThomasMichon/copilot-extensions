@@ -150,6 +150,31 @@ def test_dedicated_exit_follows_connection_and_owner_cleanup(monkeypatch):
     assert events == ["pump-settled", "owner-released", "process-exit"]
 
 
+@pytest.mark.parametrize("pid", ["42", 42])
+def test_native_fixture_normalizes_inspected_pid_before_native_open(monkeypatch, pid):
+    import importlib.util
+    from pathlib import Path
+
+    from agent_procutil import _daemon_instance_identity, daemon_broker
+
+    spec = importlib.util.spec_from_file_location(
+        "custody_native_lifetime_control",
+        Path(__file__).with_name("test_custody_native_lifetime.py"),
+    )
+    native = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(native)
+    process = Mock()
+
+    def open_process(value, _argv):
+        assert type(value) is int
+        assert value == 42
+        return process
+
+    monkeypatch.setattr(daemon_broker, "WindowsDaemonProcess", open_process)
+    monkeypatch.setattr(_daemon_instance_identity, "_windows_birth", lambda _: "native:1")
+    assert native.pin(pid, "native:1") is process
+
+
 @pytest.mark.skipif(
     os.name != "nt" and not sys.platform.startswith("linux"),
     reason="explicit session owner currently supports Windows and Linux",

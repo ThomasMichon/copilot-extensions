@@ -47,7 +47,7 @@ def pin(pid, birth):
     from agent_procutil._daemon_instance_identity import _windows_birth
     from agent_procutil.daemon_broker import WindowsDaemonProcess
 
-    process = WindowsDaemonProcess(pid, ["native-mcp-fixture"])
+    process = WindowsDaemonProcess(int(pid), ["native-mcp-fixture"])
     try:
         assert _windows_birth(process._handle) == birth
     except BaseException:
