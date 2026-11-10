@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import io
 import json
 import sys
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from xml.etree import ElementTree
 
 import pytest
@@ -44,21 +45,24 @@ def owners(monkeypatch):
     vocabulary.STAGES = frozenset({"preparation"})
     vocabulary.OUTCOMES = frozenset({"ok", "error", "cancelled", "unavailable"})
     load(telemetry.__name__ + ".report", "libs/process-telemetry/src/process_telemetry/report.py")
+    load(telemetry.__name__ + ".hourly", "libs/process-telemetry/src/process_telemetry/hourly.py")
     machines = package("promotion_health_composition")
     lock = package(machines.__name__ + ".killswitch_mutation")
     lock.mutation_lock = forbidden
+    lock._lock_byte = lock._unlock_byte = forbidden
     sources = "plugins/agent-machines/src/agent_machines/"
     modules = {
         name: load(machines.__name__ + "." + name, sources + name + ".py")
-        for name in ("health_slots", "health_report", "health_chart", "cli_health")
+        for name in ("health_slots", "health_hourly", "health_collect", "health_report", "health_chart", "cli_health")
     }
     services = package(machines.__name__ + ".service_reports")
     services.collect = lambda names, hour, **fields: [
         {"instance": name, "service": name, "hour": hour, "state": "unsupported"}
         for name in names
     ]
-    hourly = package(telemetry.__name__ + ".hourly")
-    hourly.hour_start = lambda hour: int(datetime.fromisoformat(hour.replace("Z", "+00:00")).timestamp() * 1000)
+    observer = package(machines.__name__ + ".health_observe")
+    observer.TIMEOUT_SECONDS = 2
+    observer.observe_bridge = forbidden
     monkeypatch.setattr(modules["health_slots"], "inspect", forbidden)
     parser = argparse.ArgumentParser(allow_abbrev=False)
     modules["cli_health"].add_parser(parser.add_subparsers(required=True))
@@ -160,6 +164,12 @@ def test_old_report_selection_is_unchanged_and_unknown_new_syntax_is_rejected(ow
     with pytest.raises(SystemExit) as error:
         parser.parse_args(["health", "report", "--store-directory", "not-supported"])
     assert error.value.code == 2
+    capsys.readouterr()
+    args = parser.parse_args([
+        "health", "report", "--service", "agent-dispatch", "--hour", "", "--now", NOW.isoformat(),
+    ])
+    assert args.func(args) == 2
+    assert not capsys.readouterr().out
 
 
 def test_chart_inside_selected_store_refuses_before_reading_or_writing(owners, monkeypatch, capsys):
@@ -248,3 +258,199 @@ def test_unresolvable_chart_is_a_bounded_output_refusal(owners, monkeypatch, cap
     assert args.func(args) == 2
     captured = capsys.readouterr()
     assert not captured.out and "private" not in captured.err
+
+
+def test_closed_hourly_envelope_retains_service_namespace_and_unknown_health(owners):
+    modules, _parser = owners
+    slots, hourly = modules["health_slots"], modules["health_hourly"]
+    record = hourly.validate_record({
+        "schema": hourly.SCHEMA, "version": 1, "publisher": "example-worker",
+        "continuity": "example-generation", "hour": STAMP // slots.HOUR_MS - 1,
+        "revision": 1, "parent": None, "observed_at_ms": STAMP, "observation": None,
+        "services": [{
+            "instance": "queue", "service": "agent-dispatch",
+            "hour": "2026-11-09T11:00:00Z", "state": "unsupported",
+        }],
+        "coverage": {"observation": "not-requested", "services": "collected"},
+    })
+    projected = hourly.sample(record, STAMP)
+    assert projected["services"] == record["services"]
+    assert projected["domains"]["local_listener"]["state"] == "unknown"
+    assert projected["domains"]["logical_agents"]["count"] is None
+    with pytest.raises(slots.HealthError, match="invalid-fields"):
+        slots.validate_record(record)
+    policy = {
+        "collection": {"bridge_port": None, "services": ["queue=agent-dispatch"]},
+    }
+    hourly.validate_replacement(record, None, policy)
+    with pytest.raises(slots.HealthError, match="service-replacement-refused"):
+        hourly.validate_replacement({**record, "services": []}, record, policy)
+    protocol = sys.modules["process_telemetry.hourly"]
+    source_stamp = record["hour"] * slots.HOUR_MS
+    contribution = {
+        "schema": protocol.SCHEMA, "version": 1, "service": "agent-dispatch",
+        "hour": "2026-11-09T11:00:00Z", "generated_at_ms": STAMP,
+        "source": {"first_ms": source_stamp, "last_ms": source_stamp, "continuity": None},
+        "coverage": {
+            **dict.fromkeys(protocol.COUNTERS, 0), "files": 1, "records": 1, "observations": 1,
+            "state": "observed", "reason": "retained-events", "scan_limited": False,
+            "expected_events": None, "producer_loss": "unknown",
+        },
+        "groups": [{
+            "metric": "task-lifecycle", "stage": "lifecycle", "unit": "count",
+            "aggregation": "count", "scope": "observed-events",
+            "observations": 1, "outcomes": {"completed": 1},
+        }],
+        "health": [], "diagnostics": [],
+    }
+    accepted = hourly.validate_record({**record, "services": [{
+        **record["services"][0], "state": "observed", "contribution": contribution,
+    }]})
+    for state in ("unavailable", "unsupported", "partial"):
+        empty = {
+            **contribution, "source": {"first_ms": None, "last_ms": None, "continuity": None},
+            "groups": [], "coverage": {
+                **contribution["coverage"], **dict.fromkeys(protocol.COUNTERS, 0),
+                "state": state, "reason": "capture-unsupported" if state == "unsupported" else "capture-unavailable",
+            },
+        }
+        candidate = hourly.validate_record({
+            **accepted, "revision": 2, "parent": 1, "services": [{
+                **accepted["services"][0], "state": state, "contribution": empty,
+            }],
+        })
+        assert hourly.has_service_evidence(accepted["services"][0])
+        assert not hourly.has_service_evidence(candidate["services"][0])
+        with pytest.raises(slots.HealthError, match="service-replacement-refused"):
+            hourly.validate_replacement(candidate, accepted, policy)
+    chart_view = view(slots)
+    chart_view["hours"][-2] = {"hour": record["hour"], "state": "observed", "sample": projected}
+    report = modules["health_report"].HourlyReport(NOW).result(0)
+    report["health"] = {"state": "available", "view": chart_view}
+    chart = modules["health_chart"].render(report)
+    ElementTree.fromstring(chart)
+    assert "queue/agent-dispatch: unsupported" in chart
+    assert all(hour["state"] == "no-observation" for hour in report["hours"])
+
+
+def test_listener_only_replacement_cannot_change_independent_domain_evidence(owners):
+    modules, _parser = owners
+    slots, hourly = modules["health_slots"], modules["health_hourly"]
+    observation = {
+        "schema": slots.SCHEMA, "version": 1, "publisher": "example-worker",
+        "continuity": "example-generation", "hour": STAMP // slots.HOUR_MS,
+        "revision": 1, "parent": None, "observed_at_ms": STAMP,
+        "domains": {"logical_agents": {
+            "state": "ok", "evidence": "session-owner", "reason": "none",
+            "observed_at_ms": STAMP - 1000, "count": 2,
+        }},
+    }
+    original = hourly.validate_record({
+        "schema": hourly.SCHEMA, "version": 1, "publisher": observation["publisher"],
+        "continuity": observation["continuity"], "hour": observation["hour"],
+        "revision": 1, "parent": None, "observed_at_ms": STAMP,
+        "observation": observation, "services": [],
+        "coverage": {"observation": "retained", "services": "not-requested"},
+    })
+    policy = {"collection": {"bridge_port": 1234, "services": []}}
+    candidate = copy.deepcopy(original)
+    candidate.update(revision=2, parent=1)
+    candidate["coverage"]["observation"] = "collected"
+    candidate["observation"]["domains"]["local_listener"] = {
+        "state": "ok", "evidence": "listener-check", "reason": "none", "observed_at_ms": STAMP,
+    }
+    hourly.validate_replacement(hourly.validate_record(candidate), original, policy)
+    for mutation in ("erased", "refreshed", "defaulted"):
+        forged = copy.deepcopy(candidate)
+        domains = forged["observation"]["domains"]
+        if mutation == "erased":
+            del domains["logical_agents"]
+        elif mutation == "refreshed":
+            domains["logical_agents"]["observed_at_ms"] = STAMP
+        else:
+            domains["logical_agents"] = {
+                "state": "unknown", "evidence": "not-observed", "reason": "not-observed",
+                "observed_at_ms": None, "count": None,
+            }
+        with pytest.raises(slots.HealthError, match="observation-replacement-refused"):
+            hourly.validate_replacement(hourly.validate_record(forged), original, policy)
+
+
+@pytest.mark.parametrize("mutation", ["owner", "hour", "field", "service"])
+def test_hourly_envelope_refuses_mismatched_or_unknown_components(owners, mutation):
+    modules, _parser = owners
+    slots, hourly = modules["health_slots"], modules["health_hourly"]
+    observation = {
+        "schema": slots.SCHEMA, "version": 1, "publisher": "example-worker",
+        "continuity": "example-generation", "hour": STAMP // slots.HOUR_MS,
+        "revision": 1, "parent": None, "observed_at_ms": STAMP, "domains": {},
+    }
+    record = {
+        "schema": hourly.SCHEMA, "version": 1, "publisher": "example-worker",
+        "continuity": "example-generation", "hour": observation["hour"],
+        "revision": 1, "parent": None, "observed_at_ms": STAMP, "observation": observation,
+        "services": [], "coverage": {"observation": "collected", "services": "not-requested"},
+    }
+    if mutation == "owner":
+        observation["publisher"] = "another-worker"
+    elif mutation == "hour":
+        record["hour"] -= 1
+    elif mutation == "field":
+        record["private-path"] = "not-allowed"
+    else:
+        record["services"] = [{
+            "instance": "queue", "service": "agent-dispatch",
+            "hour": "2026-11-09T12:00:00Z", "state": "observed",
+        }]
+    with pytest.raises(slots.HealthError):
+        hourly.validate_record(record)
+
+
+def test_explicit_collection_orchestration_keeps_hours_and_parent_budget(owners, monkeypatch):
+    modules, _parser = owners
+    collector, slots = modules["health_collect"], modules["health_slots"]
+    monkeypatch.setattr(collector, "time", SimpleNamespace(
+        monotonic=lambda: 10.0, time_ns=lambda: STAMP * 1_000_000,
+    ))
+    monkeypatch.setattr(collector, "admission", lambda store: nullcontext(lambda: None))
+    monkeypatch.setattr(slots, "_plain", lambda path, **fields: path)
+    policy = {
+        "schema": slots.POLICY_SCHEMA, "version": 2, "publisher": "example-worker",
+        "continuity": "example-generation",
+        "collection": {"bridge_port": None, "services": ["agent-dispatch"]},
+    }
+    monkeypatch.setattr(slots, "_read", lambda path, validator, **fields: (
+        (validator(policy), "policy-revision") if path.name == "policy.json" else (None, None)
+    ))
+    services = sys.modules[collector.__package__ + ".service_reports"]
+    calls = []
+
+    def collect(names, hour, **fields):
+        calls.append(fields)
+        return [{"instance": "agent-dispatch", "service": "agent-dispatch", "hour": hour, "state": "unsupported"}]
+
+    monkeypatch.setattr(services, "collect", collect)
+    historical = collector.collect(Path("synthetic-store"), "2026-11-09T11:00:00Z")
+    assert historical["observation"] is None
+    assert historical["services"][0]["hour"] == "2026-11-09T11:00:00Z"
+    assert historical["services"][0]["state"] == "unsupported"
+    assert calls == [{"now_ms": STAMP, "deadline": 54.75}]
+    assert historical["coverage"] == {"observation": "not-requested", "services": "collected"}
+    current = collector.collect(Path("synthetic-store"))
+    assert current["services"] == [] and current["hour"] == STAMP // slots.HOUR_MS
+    with pytest.raises(slots.HealthError, match="collection-hour-outside-window"):
+        collector.collect(Path("synthetic-store"), "2026-11-09T13:00:00Z")
+    with pytest.raises(ValueError, match="canonical UTC hour"):
+        collector.collect(Path("synthetic-store"), "")
+    tick = 10.0
+
+    @contextmanager
+    def admission(store):
+        nonlocal tick
+        yield lambda: None
+        tick = 60.0
+
+    monkeypatch.setattr(collector, "admission", admission)
+    monkeypatch.setattr(collector.time, "monotonic", lambda: tick)
+    with pytest.raises(slots.HealthError, match="collection-timeout"):
+        collector.collect(Path("synthetic-store"), "2026-11-09T11:00:00Z")

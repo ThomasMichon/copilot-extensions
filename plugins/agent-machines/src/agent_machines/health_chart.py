@@ -51,6 +51,25 @@ def _health_block(health: dict, top: int) -> tuple[list[str], int]:
             )
         top += 20
     text("Stale is source age at cutoff, not current uptime; missing owner evidence remains unknown.")
+    if any(hour.get("sample", {}).get("services") for hour in view["hours"]):
+        text("Stored service contributions: separate namespaces and source hours, not file totals.")
+        for index, hour in enumerate(view["hours"]):
+            services = hour.get("sample", {}).get("services", [])
+            if not services:
+                continue
+            details = [f'hour {hour["hour"]}']
+            for service in services:
+                details.append(f'{service["instance"]}/{service["service"]}: {service["state"]}')
+                for group in service.get("contribution", {}).get("groups", []):
+                    details.append(
+                        f'{group["metric"]}/{group["stage"]}: {group["observations"]} observed; '
+                        f'p95 ns {group.get("p95")}',
+                    )
+            parts.append(
+                f'<rect x="{16 + index * 6}" y="{top - 14}" width="5" height="10" '
+                f'fill="#2463a5"><title>{escape("; ".join(details))}</title></rect>',
+            )
+        top += 20
     return parts, top
 
 

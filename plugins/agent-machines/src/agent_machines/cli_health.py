@@ -43,6 +43,36 @@ def add_parser(subparsers) -> None:
     observe.add_argument("--publisher", required=True)
     observe.add_argument("--continuity", required=True)
     observe.set_defaults(func=run_observe)
+    collect = commands.add_parser(
+        "collect", help="collect one local hourly candidate; never stage or enroll a job", allow_abbrev=False,
+    )
+    collect.add_argument("--store-dir", type=Path, required=True, help="explicit preprovisioned v2 store")
+    collect.add_argument("--hour", help="canonical UTC hour; current health by default, historical services only")
+    collect.set_defaults(func=run_collect)
+
+
+def run_collect(args) -> int:
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    from .health_collect import collect
+    from .health_slots import HealthError
+
+    result = None
+    try:
+        result = collect(args.store_dir, args.hour)
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 0
+    except (ValueError, OSError, OverflowError, OwnedCleanupError) as error:
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
+        reason = (
+            "collection-cleanup-unconfirmed" if isinstance(error, OwnedCleanupError)
+            else str(error) if isinstance(error, HealthError) else "collection-unavailable"
+        )
+        print(json.dumps({
+            "ok": False, "error": reason, "applied": False, "carrier_publication": "not-requested",
+        }), file=sys.stderr)
+        return 2
 
 
 def run_observe(args) -> int:
@@ -179,12 +209,12 @@ def run_report(args) -> int:
             from .service_reports import collect
             from process_telemetry.hourly import hour_start
 
-            hour = args.hour or now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
+            hour = args.hour if args.hour is not None else now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
             if not report.first_hour <= hour_start(hour) // 3_600_000 <= report.last_hour:
                 raise ValueError("service hour outside report window")
             result["services"] = collect(args.service, hour, now_ms=report.now_ns // 1_000_000)
             result["services_collected_at_ms"] = int(datetime.now(timezone.utc).timestamp() * 1000)
-        elif args.hour:
+        elif args.hour is not None:
             raise ValueError("hour requires an explicit service")
         if args.store_dir is not None:
             from . import health_slots
