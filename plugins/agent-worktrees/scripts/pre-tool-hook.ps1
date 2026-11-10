@@ -164,36 +164,60 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
             $Facts.identity.common_dir -or -not [IO.File]::Exists([IO.Path]::Combine($gitDir, 'HEAD')) -or
             -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'objects')) -or
             -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'refs'))) { return $false }
-        $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        $rawPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
         foreach ($args in $writeArgs) {
             if ($args -is [string]) { $args = ConvertFrom-PreToolJson $args }
             if ($args -isnot [Collections.IDictionary]) { return $false }
+            $entries = [Collections.Generic.List[object]]::new()
+            $entries.Add($args)
             foreach ($key in @('edits', 'files', 'changes')) {
-                if ($args.ContainsKey($key)) { return $false }
+                if (-not $args.ContainsKey($key)) { continue }
+                $values = $args[$key]
+                if ($values -isnot [Collections.IList] -or $values.Count -gt 128) { return $false }
+                foreach ($entry in $values) {
+                    if ($entry -isnot [Collections.IDictionary]) { return $false }
+                    foreach ($nested in @('edits', 'files', 'changes')) {
+                        if ($entry.ContainsKey($nested)) { return $false }
+                    }
+                    $entries.Add($entry)
+                }
             }
             $callPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-            foreach ($key in @('path', 'file_path', 'filePath', 'filename', 'fileName', 'target_file', 'targetFile')) {
-                $raw = $args[$key]
-                if ($raw -isnot [string] -or -not $raw) { continue }
-                if ($raw.Length -gt 4096 -or ($raw -notmatch '^[A-Za-z]:[\\/]' -and
-                    ($raw.Contains(':') -or $raw -match '^[\\/]'))) { return $false }
-                $target = Get-PreparedWorktreesPath ([IO.Path]::Combine($cwd, $raw))
-                if (-not $target.StartsWith($root + '\', [StringComparison]::Ordinal)) { return $false }
-                $ancestor = $target
-                while ($ancestor -cne $root) {
-                    foreach ($marker in @('.git', 'HEAD', 'objects', 'refs')) {
-                        try {
-                            $null = [IO.File]::GetAttributes([IO.Path]::Combine($ancestor, $marker))
-                            return $false
-                        } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
-                        }
-                    }
-                    $ancestor = [IO.Path]::GetDirectoryName($ancestor)
+            for ($index = 0; $index -lt $entries.Count; $index++) {
+                $found = $false
+                foreach ($key in @('path', 'file_path', 'filePath', 'filename', 'fileName', 'target_file', 'targetFile')) {
+                    $raw = $entries[$index][$key]
+                    if ($raw -isnot [string] -or -not $raw) { continue }
+                    $found = $true
+                    $null = $callPaths.Add($raw)
+                    if ($callPaths.Count -gt 128) { return $false }
                 }
-                $null = $callPaths.Add($target)
+                if ($index -gt 0 -and -not $found) { return $false }
             }
-            if ($callPaths.Count -ne 1) { return $false }
-            foreach ($target in $callPaths) { $null = $paths.Add($target) }
+            if (-not $callPaths.Count) { return $false }
+            foreach ($raw in $callPaths) {
+                $null = $rawPaths.Add($raw)
+                if ($rawPaths.Count -gt 128) { return $false }
+            }
+        }
+        $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($raw in $rawPaths) {
+            if ($raw.Length -gt 4096 -or ($raw -notmatch '^[A-Za-z]:[\\/]' -and
+                ($raw.Contains(':') -or $raw -match '^[\\/]'))) { return $false }
+            $target = Get-PreparedWorktreesPath ([IO.Path]::Combine($cwd, $raw))
+            if (-not $target.StartsWith($root + '\', [StringComparison]::Ordinal)) { return $false }
+            $ancestor = $target
+            while ($ancestor -cne $root) {
+                foreach ($marker in @('.git', 'HEAD', 'objects', 'refs')) {
+                    try {
+                        $null = [IO.File]::GetAttributes([IO.Path]::Combine($ancestor, $marker))
+                        return $false
+                    } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+                    }
+                }
+                $ancestor = [IO.Path]::GetDirectoryName($ancestor)
+            }
+            $null = $paths.Add($target)
         }
         if (-not (Test-NativePreToolSources -WriteProof $true)) { return $false }
         $configPath = [IO.Path]::Combine($root, '.agent-worktrees', 'config.yaml')
