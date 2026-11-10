@@ -207,8 +207,10 @@ def _refresh_list_record(rec: tracking.WorktreeRecord, *, strict: bool = False) 
                 raise
 
     try:
-        bridge_live = rec.worktree_id in reclaim.live_bridge_worktrees()
-        scope = {"session_ids": [entry.session_id for entry in rec.sessions]} if strict else {}
+        bridge_live = rec.worktree_id in reclaim.live_bridge_worktrees(**({"strict": True} if strict else {}))
+        scope = {
+            "session_ids": [entry.session_id for entry in rec.sessions], "strict": True,
+        } if strict else {}
         bound_live = (
             bool(reclaim.resolve_bound_copilots(worktree_id=rec.worktree_id, **scope)) or bridge_live
         )

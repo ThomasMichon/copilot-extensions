@@ -97,10 +97,20 @@ def _publish_active_project(
             except ValueError as error:
                 runtime.refreshes.reject(request_id, str(error))
                 continue
-            for record in selected_records:
-                if record.worktree_id not in refreshed:
-                    _refresh_list_record(record, strict=True)
-                    refreshed.add(record.worktree_id)
+            try:
+                for record in selected_records:
+                    if record.worktree_id not in refreshed:
+                        previous_mux = (
+                            managed_mux_cache.get(project, record.worktree_id)
+                            if managed_mux_cache is not None else None
+                        )
+                        _refresh_list_record(record, strict=True)
+                        if record.mux_live is False:
+                            runtime.refreshes.supersede_mux(project, record.worktree_id, previous_mux)
+                        refreshed.add(record.worktree_id)
+            except (OSError, ValueError, MuxObservationUnavailable, push_timeout.ObservationUnavailable) as error:
+                runtime.refreshes.reject(request_id, str(error), code="refresh-unavailable")
+                continue
             accepted_requests.append((request_id, selector))
         refresh_requests = tuple(accepted_requests)
     session_ctx = sessions.scan_sessions_fast(records)
@@ -111,7 +121,12 @@ def _publish_active_project(
         mux_map = {}
         mux_observed = False
     if refresh_requests and not mux_observed:
-        raise MuxObservationUnavailable("point-refresh publication lacks a current mux observation")
+        for request_id, _selector in refresh_requests:
+            runtime.refreshes.reject(
+                request_id, "Point-refresh publication lacks a current mux observation",
+                code="refresh-unavailable",
+            )
+        refresh_requests = ()
     # Fresh receipt alone cannot qualify cached counts during observation loss.
     if managed_mux_cache is not None and mux_observed:
         from .mux_link import MAPPING_STALE_AFTER_SECONDS
@@ -121,6 +136,10 @@ def _publish_active_project(
             if record.worktree_id in refreshed:
                 continue
             entry = managed_mux_cache.get(project, record.worktree_id)
+            if entry is not None and not runtime.refreshes.mux_observation_current(
+                project, record.worktree_id, entry,
+            ):
+                continue
             received_at = entry.get("received_at") if entry else None
             if (
                 not entry or not entry.get("live")

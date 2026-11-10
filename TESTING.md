@@ -724,10 +724,17 @@ resident transport and its reconciliation/publication barrier. Old providers,
 unrelated publications, changed request identity, missing mux observations,
 failed publication and wrong/missing receipts cannot satisfy the request.
 These controls do not replace the real installed UI/exit/Resume witness.
+Review controls also cover unavailable Windows process-open/exit/image queries,
+strict Bridge-lock reads, request-local observation failures, hard cleanup
+failure propagation, a second publication with the same superseded mux cache
+and acceptance of a genuinely newer managed observation.
 After Resume reaches the actual CLI prompt, its next completed provider-backed
 turn establishes the history lock used to identify the replacement owner.
 The same strict duplicate/extension-host rules apply; pre-turn process presence
 without that binding is not mistaken for completed conversation-owner proof.
+Each turn requires its exact persisted assistant reply as well as rendered
+visibility. The final resumed history must retain all four user and assistant
+messages; a reply visible only on screen cannot earn a lifecycle receipt.
 Normal exit requires zero from the pinned Copilot process handle itself,
 not merely a successful pane wrapper or Manager return.
 Normal and private device-status queries are inert in this passive observer;

@@ -101,7 +101,7 @@ def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, 
 
 @pytest.mark.parametrize(("failure", "managed"), [
     (None, False), (None, True), ("bound", False), ("mux", False),
-    ("later-mux", False), ("publication", False), ("ambiguous", False),
+    ("later-mux", False), ("publication", False), ("ambiguous", False), ("cleanup", False),
 ])
 def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     tmp_path, monkeypatch, failure, managed,
@@ -135,11 +135,13 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         bound_reads.append(kwargs)
         if failure == "bound":
             raise OSError("bound observation failed")
+        if failure == "cleanup":
+            raise producer.push_timeout.ObservationCleanupError("owned process is not settled")
         return []
 
     monkeypatch.setattr(reclaim, "resolve_bound_copilots", bound)
     monkeypatch.setattr(reclaim, "bare_orphan_worktree_ids", lambda: set())
-    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda: set())
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda **_: set())
     monkeypatch.setattr(sessions, "scan_sessions_fast", lambda _: sessions.SessionContext())
     mux_reads = []
 
@@ -180,11 +182,17 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
             assert owner.handle(query)["error"]["code"] == "invalid-request"
             assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
             assert owner.refreshes.pending("project") == ()
-        elif failure:
-            with pytest.raises((OSError, producer.MuxObservationUnavailable)):
+        elif failure in {"publication", "cleanup"}:
+            with pytest.raises((OSError, producer.push_timeout.ObservationCleanupError)):
                 producer.publish_active_project(owner, **options)
             assert owner.handle(query)["error"]["code"] == "unready"
             assert owner.refreshes.pending("project")
+        elif failure:
+            assert producer.publish_active_project(owner, **options) == 1
+            assert owner.handle(query)["error"]["code"] == "refresh-unavailable"
+            assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
+            assert owner.refreshes.pending("project") == ()
+            assert producer.publish_active_project(owner, **options) == 1
         else:
             assert producer.publish_active_project(owner, **options) == 1
             result = owner.handle(query)
@@ -192,8 +200,18 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
             assert record.bound_live is False
             assert result["worktrees"][0].get("session_bound_live") is not True
             assert result["worktrees"][0]["mux_session"] is False
+            if managed:
+                assert producer.publish_active_project(owner, **options) == 1
+                assert owner.handle(query)["worktrees"][0]["mux_session"] is False
+                cache.apply_observation({
+                    "project": "project", "worktree_id": "one", "mux_session": "managed-one",
+                    "mapping_revision": 2, "live": True, "attached_clients": 2,
+                    "panes": [], "worktree_path": str(checkout),
+                })
+                assert producer.publish_active_project(owner, **options) == 1
+                assert owner.handle(query)["worktrees"][0]["mux_session"] is True
         assert bound_reads == ([] if failure == "ambiguous" else [
-            {"worktree_id": "one", "session_ids": []},
+            {"worktree_id": "one", "session_ids": [], "strict": True},
         ])
     finally:
         owner.shutdown()

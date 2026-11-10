@@ -528,3 +528,35 @@ remain mandatory. No helper exclusion or duplicate-owner refusal is weakened.
 All 21 focused resumed-turn, native-role, duplicate-owner, exit, UI-readiness
 and Refresh controls passed. Native and cleanup budgets are unchanged;
 another exact-source installed run is required.
+
+### 2026-11-10 - Historical core pass retained; review corrections reopen qualification
+
+Run 42821962997, attempt 1, passed the original installed-core witness at
+`6cdb0e16d1b0c81455989c67dbcf24848f6efbb9`
+(tree `7f68391b5f52c514372a06ed50ad075a5f1a604b`).
+Its JUnit contains exactly one selected test, zero failures/errors/skips and
+459.878 seconds; its receipt measures 443.407 seconds within the unchanged
+case budget. Installed Manager/engine origins and bytes (302/691 modules),
+actual Create/Open/detach/exit/Resume in a different native incarnation,
+four provider-backed turns, unusable-entry refusal and settled cleanup passed.
+This is historical installed-core evidence, not full-suite/update or promotion
+acceptance, and not qualification of the subsequently corrected candidate.
+
+Current-head Copilot review 5842652647 identified four blocking corrections:
+inconclusive process queries could certify absence; the witness did not require
+persisted assistant replies; failed Refresh could stall ordinary publication;
+and an unchanged managed observation could reactivate the next publication.
+The source correction reuses strict tri-state native liveness, refuses uncertain
+Bridge-lock evidence, isolates observation failures to terminal request errors
+while retaining hard cleanup failures, and suppresses superseded managed cache
+entries across later publications while accepting newer observations.
+The witness now requires each exact persisted reply and all four assistant
+messages in the final resumed history.
+
+All 452 focused Worktrees/legacy regressions passed, with the three previously
+recorded nominal timing cases still separately excluded and not credited.
+All 55 lifecycle source controls passed, including rendered-but-unpersisted
+reply refusals. The corrected candidate must earn another exact-source
+installed result and current-head review before merge. The parent campaign,
+complete suite/Machines, authentic update and mandatory candidate/Main gates
+remain open.

@@ -419,7 +419,7 @@ class WorktreesRuntime:
                         project, selection["worktree_id"], payload["refresh_id"],
                     )
                 except ProjectionError as exc:
-                    return self._failure("invalid-request", str(exc))
+                    return self._failure(getattr(exc, "code", "invalid-request"), str(exc))
                 if refresh_receipt is None:
                     if self._wake is not None:
                         self._wake.set()

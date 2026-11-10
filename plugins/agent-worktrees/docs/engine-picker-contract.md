@@ -535,7 +535,14 @@ session registry and bound/mux liveness. The request remains `unready` until
 that reconciliation is included in a successful publication. An unrelated
 publication, missing mux observation or failed publication cannot acknowledge
 it. Freshly observed mux absence is not overridden by a cached managed-mux
-receipt for that selected record.
+receipt for that selected record. The resident keeps that older observation
+superseded across later publications for its remaining cache-freshness window;
+a higher mapping revision or a later received observation may supersede it.
+This bounded protection survives request retirement within the resident.
+Native process queries use the existing tri-state liveness reader, including
+conclusive exit of a retained Windows process handle. Access-denied/image-query
+failures, unreadable session directories and unreadable/malformed Bridge locks
+cannot establish absence.
 
 Success adds `point_refresh: {request_id, generation, revision}`, identifying
 that request's publication barrier. The reader verifies the request ID, current
@@ -551,6 +558,10 @@ caller refuses a resident missing this optional capability before requesting
 reconciliation. Ordinary reads remain available after provider rollback.
 No caller-side reconstruction, advisory fallback or automatic runtime update
 substitutes for the requested observation.
+Unavailable observations terminate only that request with `refresh-unavailable`;
+the retained request ID does not repeat the failed work. Ordinary Git/tracking
+publications and feed updates continue without acknowledging the failed refresh.
+Unconfirmed owned-process cleanup remains a hard producer failure.
 
 The existing authenticated monitor control endpoint advertises
 `worktrees-current-v1`. Its request carries `contract_version: 1`, project,

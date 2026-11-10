@@ -167,6 +167,27 @@ def test_explicit_refresh_refuses_an_old_resident_before_demand_or_reconciliatio
     assert "worktrees-refresh-v1" in json.loads(capfd.readouterr().out)["error"]
 
 
+def test_unavailable_point_refresh_returns_its_terminal_failure_without_repeating_work(
+    tmp_path, monkeypatch, no_caller_compute,
+):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32)
+    owner.handle(query)
+    owner.refreshes.reject("a" * 32, "process observation unavailable", code="refresh-unavailable")
+    monkeypatch.setattr(
+        client, "_control_client",
+        lambda: SimpleNamespace(worktrees_read=lambda payload: owner.handle(payload)),
+    )
+    monkeypatch.setattr(client.time, "sleep", lambda _: pytest.fail("retried a failed refresh"))
+    try:
+        with pytest.raises(projection.ProjectionUnavailable, match="refresh-unavailable"):
+            client.read_current(query, wait=True)
+        assert owner.refreshes.pending("project") == ()
+    finally:
+        owner.shutdown()
+
+
 @pytest.mark.parametrize("changed", ["missing", "id", "generation", "revision", "unpublished"])
 def test_refresh_result_requires_its_own_same_generation_publication_receipt(tmp_path, changed):
     owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")

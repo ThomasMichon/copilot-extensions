@@ -18,6 +18,101 @@ from agent_worktrees import __main__ as m
 from agent_worktrees import locks, procs, process_table_cache, reclaim, worktree_identity
 
 
+@pytest.mark.parametrize(("observation", "expected"), [
+    ("access-denied", None), ("gone", False), ("exit-unavailable", None),
+    ("exited", False), ("image-unavailable", None), ("foreign", False), ("live", True),
+])
+def test_strict_refresh_preserves_unknown_native_process_observations(
+    tmp_path, monkeypatch, observation, expected,
+):
+    import ctypes
+    from types import SimpleNamespace
+    from agent_worktrees import list_cli, session_liveness, sessions
+    from agent_worktrees.push_timeout import ObservationUnavailable
+
+    entry = tmp_path / "registered"
+    entry.mkdir()
+    (entry / "inuse.7.lock").touch()
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(session_liveness.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(
+        ctypes, "get_last_error",
+        lambda: 87 if observation == "gone" else 5, raising=False,
+    )
+    closed = []
+
+    def exit_code(handle, result):
+        result._obj.value = 0 if observation == "exited" else 259
+        return observation != "exit-unavailable"
+
+    def image(handle, flags, buffer, size):
+        buffer.value = "python.exe" if observation == "foreign" else "copilot.exe"
+        return observation != "image-unavailable"
+
+    monkeypatch.setattr(sessions, "_get_kernel32", lambda: SimpleNamespace(
+        OpenProcess=lambda *_: 0 if observation in {"gone", "access-denied"} else 1,
+        GetExitCodeProcess=exit_code,
+        QueryFullProcessImageNameW=image,
+        CloseHandle=lambda handle: closed.append(handle),
+    ))
+    monkeypatch.setattr(process_table_cache, "cached", lambda *_: {})
+    monkeypatch.setattr(locks, "process_start_time", lambda *_: "birth")
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda **_: set())
+    monkeypatch.setattr(
+        sessions, "mux_status_many", lambda _: {"one": sessions.MuxInfo(exists=False)},
+    )
+    stamps = []
+    monkeypatch.setattr(
+        list_cli.tracking, "stamp_bound_live", lambda *a, **kw: stamps.append(("bound", a)),
+    )
+    monkeypatch.setattr(
+        list_cli.tracking, "stamp_mux_live", lambda *a, **kw: stamps.append(("mux", a)),
+    )
+    record = SimpleNamespace(
+        worktree_id="one", sessions=[SimpleNamespace(session_id="registered")], bound_live=True,
+    )
+    if expected is None:
+        with pytest.raises(ObservationUnavailable):
+            list_cli._refresh_list_record(record, strict=True)
+        assert record.bound_live is True and not stamps
+    else:
+        list_cli._refresh_list_record(record, strict=True)
+        assert record.bound_live is expected
+        assert stamps == [("bound", ("one", expected)), ("mux", ("one", False))]
+    assert closed == ([] if observation in {"gone", "access-denied"} else [1])
+
+
+@pytest.mark.parametrize("observation", ["missing", "malformed", "unreadable", "live", "dead"])
+def test_strict_bridge_observation_never_treats_an_unreadable_lock_as_absence(
+    tmp_path, monkeypatch, observation,
+):
+    from agent_worktrees.push_timeout import ObservationUnavailable
+
+    entry = tmp_path / "session"
+    entry.mkdir()
+    bridge = entry / "bridge.lock"
+    if observation != "missing":
+        bridge.write_text("{" if observation == "malformed" else json.dumps({
+            "pid": 7, "worktree_id": "one",
+        }), encoding="utf-8")
+    if observation == "unreadable":
+        original = Path.read_text
+
+        def denied(path, *args, **kwargs):
+            if path == bridge:
+                raise PermissionError("bridge lock access denied")
+            return original(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "read_text", denied)
+    monkeypatch.setattr(reclaim.sessions, "_session_state_dir", lambda: tmp_path)
+    monkeypatch.setattr(locks, "lock_is_running", lambda _: observation == "live")
+    if observation in {"malformed", "unreadable"}:
+        with pytest.raises(ObservationUnavailable):
+            reclaim.live_bridge_worktrees(strict=True)
+    else:
+        assert reclaim.live_bridge_worktrees(strict=True) == ({"one"} if observation == "live" else set())
+
+
 # ── homing_of / descendants_of (pure) ──────────────────────────────────────
 class TestHoming:
     def test_mux_ancestor(self):

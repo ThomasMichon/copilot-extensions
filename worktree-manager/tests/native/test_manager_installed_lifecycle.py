@@ -678,6 +678,7 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                 if (
                     prompt in texts
                     and turn_ends >= number
+                    and histories[-1]["reply_seen"]
                 ):
                     matches.append(path)
             self.turn_observation = {
@@ -1401,9 +1402,12 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
 
 
 @pytest.mark.parametrize("rendered", [True, False])
+@pytest.mark.parametrize("persisted", [True, False])
 @pytest.mark.parametrize("number", [1, 4])
 @pytest.mark.skipif(os.name != "nt", reason="The native pane uses a private PSMux namespace")
-def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeypatch, rendered, number):
+def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(
+    tmp_path, monkeypatch, rendered, persisted, number,
+):
     from types import SimpleNamespace
     from plugin_test_command_safety import private_mux_args
 
@@ -1417,6 +1421,7 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeyp
             {"type": "assistant.message", "data": {"content": f"LIFECYCLE_REPLY_{index + 1}"}},
             {"type": "assistant.turn_end", "data": {}},
         )
+        if persisted or event["type"] != "assistant.message" or index != number - 1
     ), encoding="utf-8")
     binary = tmp_path / "native" / "psmux.exe"
     witness = _Witness(tmp_path, {
@@ -1452,12 +1457,12 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeyp
     witness.records = records
     monkeypatch.setattr(installed, "_run", capture)
     result = witness.turn(PROMPTS[number - 1], number, SimpleNamespace(output=b"cursor redraw"))
-    assert result == (("native-pid", "native-birth") if rendered else None)
-    assert owners == ([history] if rendered else [])
-    assert calls == [[
+    assert result == (("native-pid", "native-birth") if rendered and persisted else None)
+    assert owners == ([history] if rendered and persisted else [])
+    assert calls == ([[
         binary, *namespace, "capture-pane", "-p",
         "-t", "wt-fixture-worktree", "-S", "-60",
-    ]]
+    ]] if persisted else [])
 
 
 def test_lifecycle_diagnostic_write_cannot_mask_unsettled_custody(tmp_path):
@@ -2082,6 +2087,11 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                         for event in _events(witness.history, copilot_home)
                         if event["type"] == "user.message"
                     ] == list(PROMPTS)
+                    assert [
+                        event["data"]["content"]
+                        for event in _events(witness.history, copilot_home)
+                        if event["type"] == "assistant.message"
+                    ] == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)]
                     assert any(
                         all(prompt in json.dumps(request) for prompt in PROMPTS)
                         for request in requests
