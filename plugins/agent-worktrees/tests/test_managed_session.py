@@ -858,11 +858,12 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "anchor-target", "foreign", "nested", "batch", "structured", "drive-relative",
     "missing-map", "partial-map", "wrong-scope", "array-schema", "oversized-config",
     "guard-drift", "reader-drift", "forms-drift", "missing-dependencies", "git-pointer-aba",
-    "delegated", "invalid-elevation", "noncanonical-map", "real-policy", "old-admission",
+    "delegated", "invalid-elevation", "noncanonical-map", "dot-segment-map", "real-policy", "old-admission",
     "cell-ordinary", "cell-create", "cell-personal-state", "cell-guard-drift",
     "personal-state-cr", "personal-state-crlf", "personal-state-dot-prefix",
     "personal-state-dot-file", "personal-state-dot-assignments",
     "personal-state-control-space", "ordinary-nested-dot-file",
+    "ordinary-unrelated-inventory",
 ])
 def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, shell, case):
     from agent_worktrees import guarded_anchors
@@ -971,9 +972,23 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         case.startswith("personal-state") or case in {"anchor-cwd", "anchor-target", "delegated"}
     ), decisions
     map_path = reader.map_path(workspace, registry)
-    if case == "missing-map":
+    if case == "ordinary-unrelated-inventory":
+        value = json.loads(map_path.read_text(encoding="utf-8"))
+        for index in range(128):
+            root = f"z:\\inventory-{index}"
+            value["postures"].append({
+                "name": f"inventory-{index}", "delegate": "none", "path": root,
+                "posture": "worktree", "elevated": False,
+                "identity": {"root": root, "git_dir": root + "\\.git", "common_dir": root + "\\.git"},
+            })
+        map_path.write_text(json.dumps(value), encoding="utf-8")
+        assert reader.read_map(workspace, registry).status == "ready"
+        assert load("cross_repo_guard").decide(event, env=env, home=tmp_path) is None
+    elif case == "missing-map":
         map_path.unlink()
-    elif case in {"partial-map", "wrong-scope", "array-schema", "invalid-elevation", "noncanonical-map"}:
+    elif case in {
+        "partial-map", "wrong-scope", "array-schema", "invalid-elevation", "noncanonical-map", "dot-segment-map",
+    }:
         value = json.loads(map_path.read_text(encoding="utf-8"))
         if case == "partial-map":
             value["posture_authority"] = "partial"
@@ -983,8 +998,10 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             value["schema"] = [value["schema"]]
         elif case == "invalid-elevation":
             value["postures"][0]["elevated"] = 0
-        else:
+        elif case == "noncanonical-map":
             value["postures"][0]["identity"]["common_dir"] = str(anchor / ".git").upper()
+        else:
+            value["postures"][0]["identity"]["common_dir"] += "\\."
         map_path.write_text(json.dumps(value), encoding="utf-8")
     elif case == "oversized-config":
         config.write_text("#" * 16385, encoding="utf-8")
@@ -1037,6 +1054,24 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             encoding="utf-8",
         )
     membership = tmp_path / "membership-interpreter"
+    inventory_probe = tmp_path / "inventory-probe"
+    native_membership = tmp_path / "native-membership"
+    if case == "ordinary-unrelated-inventory":
+        admission = scripts / "managed-session.ps1"
+        admission.write_text(admission.read_text(encoding="utf-8").replace(
+            "return $hasGitMarker",
+            "[IO.File]::WriteAllText('" + str(native_membership).replace("'", "''")
+            + "', $hasGitMarker.ToString()); return $hasGitMarker",
+        ), encoding="utf-8")
+        with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+            output.write(
+                "\n$script:originalPreparedPath = ${function:Get-PreparedWorktreesPath}\n"
+                "function Get-PreparedWorktreesPath {\n    param([object]$Path)\n"
+                "    if ($Path -is [string] -and $Path.StartsWith('z:\\inventory-')) {\n"
+                + "        [IO.File]::WriteAllText('" + str(inventory_probe).replace("'", "''") + "', 'called')\n"
+                "        throw 'Unexpected inventory filesystem probe'\n    }\n"
+                "    return & $script:originalPreparedPath $Path\n}\n",
+            )
     if case == "old-admission":
         admission = scripts / "managed-session.ps1"
         admission.write_text(
@@ -1067,9 +1102,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     native_seconds = time.monotonic() - started
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert not membership.exists()
-    policy_required = case not in {
-        "ordinary", "create", "path-alias", "json-args", "real-policy", "ordinary-nested-dot-file",
-    }
+    if case == "ordinary-unrelated-inventory":
+        assert native_membership.read_text() == "True"
+    assert not inventory_probe.exists()
+    policy_required = not (case.startswith("ordinary") or case in {
+        "create", "path-alias", "json-args", "real-policy",
+    })
     assert observed.exists() is policy_required, result.stdout
     if policy_required:
         assert observed.read_bytes() == raw

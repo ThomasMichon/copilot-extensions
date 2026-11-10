@@ -225,8 +225,17 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
                     if ($row[$field] -isnot [string] -or -not $row[$field]) { return $false }
                 }
                 foreach ($field in @('root', 'git_dir', 'common_dir')) {
-                    if ((Get-PreparedWorktreesPath $row.identity[$field]) -cne $row.identity[$field]) {
+                    $value = $row.identity[$field]
+                    # Inventory identities are lexical snapshot data, not live paths to probe.
+                    if ($value -isnot [string] -or $value.Length -gt 4096 -or
+                        $value -cnotmatch '^[a-z]:\\' -or $value.Contains([char]0) -or
+                        $value.Contains('/') -or $value.ToLowerInvariant() -cne $value) {
                         return $false
+                    }
+                    if ($value.Length -gt 3) {
+                        foreach ($part in $value.Substring(3).Split('\')) {
+                            if ($part -cin @('', '.', '..')) { return $false }
+                        }
                     }
                 }
                 if ($row.path -cne $row.identity.root) { return $false }

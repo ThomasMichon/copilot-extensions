@@ -3280,6 +3280,8 @@ return natively when current Git metadata proves it belongs to that same
 linked worktree. The shell reads the live stateless configuration and the
 original complete guarded-anchor inventory and posture view; it does not
 cache an allow decision or infer anchor protection from posture rows alone.
+Inventory identities are validated lexically without filesystem probes of
+unrelated repositories; current source and target paths retain live checks.
 Stateless checks retain the original guard's universal-newline, whitespace
 and leading-dot path normalization, including the normalized basename.
 Protected personal-state paths, anchors, foreign or nested repositories,
