@@ -121,6 +121,13 @@ while two starts on the *same* port still collide. The primary daemon
 (`~/.agent-bridge`) and the Windows elevated sub-daemon (`~/.agent-bridge/elevated`)
 also have distinct config dirs, so each gets its own single instance.
 
+## Command environment
+
+PowerShell payload and management commands select `AGENT_RT_ROOT` only for
+runtime resolution and the dispatched bridge child. They restore the caller's
+previous value (including absence) when resolution or dispatch returns or
+fails, so a later sibling command does not inherit the bridge's runtime owner.
+
 ## Credential Relay
 
 Agent-bridge owns and hosts the shared credential relay during its FastAPI

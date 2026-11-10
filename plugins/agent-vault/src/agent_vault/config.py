@@ -68,6 +68,7 @@ RUN_DIR_ENV = "AGENT_VAULT_RUN_DIR"
 # ``unix:/tmp/agent-vault.sock``) that a client dials before consulting the
 # rendezvous file or the legacy fixed port.
 ENDPOINT_ENV = "AGENT_VAULT_ENDPOINT"  # marketplace-isolation: allow env-var-name-declaration
+BIND_PORT_ENV = "AGENT_VAULT_BIND_PORT"
 
 
 def home_dir() -> Path:
@@ -113,6 +114,16 @@ class ResolvedVault:
     group: str | None
     port: int
     sources: dict[str, str]
+
+
+def daemon_bind_port(context: ResolvedVault) -> int:
+    """Keep the listener default separate from explicit client selection."""
+    value = os.environ.get(BIND_PORT_ENV)
+    if context.sources.get("port") != "default" or value is None:
+        return context.port
+    if not value.isascii() or not value.isdigit() or not 0 <= int(value) <= 65535:
+        raise ValueError("AGENT_VAULT_BIND_PORT must be an integer from 0 to 65535")
+    return int(value)
 
 
 def default_config_path() -> Path:

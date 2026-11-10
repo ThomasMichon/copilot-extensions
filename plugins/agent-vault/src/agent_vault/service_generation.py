@@ -19,7 +19,7 @@ from single_instance_lease import AlreadyRunningError, SingleInstance
 from single_instance_lease.supersession import pid_alive as _pid_exists
 from agent_procutil._daemon_instance_identity import runtime_slot_paths
 
-from . import __version__
+from . import __version__, config
 from .config import home_dir, installation_id
 from .rendezvous import Endpoint, read_endpoint
 from .service_connections import settle_owned
@@ -210,6 +210,10 @@ class ServiceGeneration:
 
     async def start(self, tcp_port: int | None) -> None:
         api = self.api
+        self.requested_port = tcp_port if tcp_port is not None else (
+            config.daemon_bind_port(config.resolve_context())
+            if config.BIND_PORT_ENV in os.environ else api.configured_tcp_port()
+        )
         self.service._runtime_can_work = False
         try:
             self.generation_lease.acquire()
@@ -267,7 +271,6 @@ class ServiceGeneration:
                 self.servers.append(listener)
                 os.chmod(self.socket, 0o600)
                 self._record_socket(self.socket)
-            self.requested_port = api.configured_tcp_port() if tcp_port is None else tcp_port
             try:
                 await self._tcp(self.requested_port)
             except OSError as error:
