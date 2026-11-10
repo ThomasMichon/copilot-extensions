@@ -1,0 +1,216 @@
+"""Private physical runtimes and caller-contained actors for handover evidence."""
+
+from __future__ import annotations
+
+import asyncio
+import importlib.util
+import json
+import os
+from pathlib import Path, PureWindowsPath
+import shutil
+import subprocess
+import sys
+
+from agent_procutil import no_window_kwargs
+
+REPOSITORY = Path(__file__).parents[3]
+_spec = importlib.util.spec_from_file_location(
+    "native_incoming_payload", Path(__file__).with_name("test_incoming_installer.py"),
+)
+_payload = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_payload)
+payload_copy = _payload.payload_copy
+
+
+ACTOR = r"""
+import asyncio, json, os, sys
+from pathlib import Path
+from agent_procutil.daemon_instances import daemon_entrypoint
+from agent_mcp import __version__, incoming, sockio
+from agent_mcp.custody_host import CustodyHost
+from agent_mcp.custody_launch import attach
+from agent_mcp.serve import Server
+
+role, root, handle, fixed, config = sys.argv[1:]
+if role.startswith("conduit"):
+    admission = incoming.ensure_current(fixed)
+    connection = attach(fixed, config, admission, ensure=role == "conduit-launcher")
+    raise SystemExit(sockio.pump(connection))
+
+@daemon_entrypoint(
+    "agent-mcp-custody" if role == "keeper" else "agent-mcp",
+    source=__file__, runtime_root=Path(handle).parent, purpose="unattended-test",
+)
+async def run():
+    if role == "keeper":
+        server = CustodyHost(handle, fixed, root, version=__version__, idle_timeout=1)
+    else:
+        server = Server(handle, version=__version__, passive=True,
+                        enable_lease=False, idle_timeout=0)
+    serving = asyncio.create_task(server.serve_forever())
+    while server._server is None or (
+        role != "keeper" and server._control_server is None
+    ):
+        if serving.done():
+            return await serving
+        await asyncio.sleep(.01)
+    if role != "keeper":
+        Path(handle + ".control.json").write_text(json.dumps({
+            "pid":os.getpid(), "port":server._control_server.sockets[0].getsockname()[1],
+        }), encoding="utf-8")
+    await serving
+
+asyncio.run(run())
+"""
+
+UPSTREAM = r"""
+import json, os, sys
+initialized = mutations = 0
+cancelled = False
+pending = None
+def emit(message):
+    print(json.dumps(message), flush=True)
+def result(mid):
+    return {"jsonrpc":"2.0", "id":mid, "result":{
+        "pid":os.getpid(), "initialized":initialized, "mutations":mutations,
+        "cancelled":cancelled, "content":[]}}
+for line in sys.stdin:
+    message = json.loads(line)
+    method = message.get("method")
+    mid = message.get("id")
+    if method == "initialize":
+        initialized += 1
+        emit(result(mid))
+    elif method == "notifications/cancelled":
+        cancelled = True
+    elif mid == "server-approval" and method is None:
+        emit(result(pending))
+        pending = None
+        emit({"jsonrpc":"2.0", "method":"notifications/tools/list_changed"})
+    elif method == "tools/call" and message["params"]["name"] == "mutate":
+        mutations += 1
+        pending = mid
+        emit({"jsonrpc":"2.0", "method":"notifications/progress", "params":{"progress":1}})
+        emit({"jsonrpc":"2.0", "id":"server-approval", "method":"sampling/createMessage",
+              "params":{}})
+    elif mid is not None:
+        emit(result(mid))
+emit({"jsonrpc":"2.0", "method":"notifications/upstream-eof",
+      "params":{"pid":os.getpid(), "initialized":initialized, "mutations":mutations}})
+"""
+
+
+def build_runtimes(private, retained):
+    """Use the construction owner, not a copied venv or patched launch identity."""
+    for library in ("installer-engine", "versioned-runtime"):
+        sys.path.insert(0, str(REPOSITORY / "libs" / library))
+    import installer_engine as engine
+    import versioned_runtime_source as source
+
+    git_command = ["git", "-C", str(REPOSITORY)]
+    metadata = REPOSITORY / ".git"
+    if os.name != "nt" and metadata.is_file():
+        declaration = metadata.read_text(encoding="utf-8").strip()
+        if declaration.startswith("gitdir: ") and PureWindowsPath(declaration[8:]).drive:
+            admin = subprocess.check_output(
+                ["wslpath", "-u", declaration[8:]], text=True, timeout=10,
+                **no_window_kwargs(),
+            ).strip()
+            git_command = ["git", "--git-dir=" + admin, "--work-tree=" + str(REPOSITORY)]
+
+    def git(revision):
+        return subprocess.check_output(
+            [*git_command, "rev-parse", revision],
+            text=True, timeout=10, **no_window_kwargs(),
+        ).strip()
+
+    commit, tree = git("HEAD"), git("HEAD^{tree}")
+    root = private / "runtime"
+    result = {}
+    for label in ("old", "new"):
+        payload, _ = payload_copy(private / label, label)
+        pipeline = payload / "src" / "agent_mcp" / "pipeline.py"
+        body = pipeline.read_text(encoding="utf-8")
+        needle = f"response['result']['pipeline_code']={label!r}"
+        assert body.count(needle) == 1
+        pipeline.write_text(body.replace(
+            needle,
+            needle + "\n"
+            "            response['result']['backend_pid']=__import__('os').getpid()\n"
+            "            response['result']['backend_prefix']=__import__('sys').prefix\n"
+            "            response['result']['backend_module']=__file__",
+        ), encoding="utf-8")
+        package = source.payload_package_version(payload, "agent-mcp")
+        digest = source.assembly_hash(payload)
+        identity = source.SourceIdentity(
+            "agent-mcp", package, commit, tree, digest,
+            source.runtime_version(package, commit, digest),
+        )
+        (payload / source.SOURCE_FILE).write_text(
+            json.dumps(identity.document()), encoding="utf-8",
+        )
+        candidate = retained.enter_context(engine.numbered_candidate(
+            root, identity.runtime_version, plugin=payload,
+            uv=Path(shutil.which("uv")), base_python=Path(sys.executable),
+            health_module="agent_mcp", expected_source_identity=source.manifest_fields(identity),
+            child_timeout=60, wait_timeout=60,
+        ))
+        assert engine.runtime.is_complete(
+            root, identity.runtime_version, expect_hash=candidate.payload_hash,
+        )
+        result[label] = (identity.runtime_version, candidate.slot)
+    assert result["old"][0] != result["new"][0]
+    return root, result
+
+
+async def eventually(operation, predicate=bool):
+    async def wait():
+        while True:
+            try:
+                value = await operation()
+                if predicate(value):
+                    return value
+            except (OSError, ValueError):
+                pass
+            await asyncio.sleep(0.02)
+
+    return await asyncio.wait_for(wait(), 10)
+
+
+async def send(process, message):
+    process.stdin.write((json.dumps(message) + "\n").encode())
+    await process.stdin.drain()
+
+
+async def receive(process):
+    line = await asyncio.wait_for(process.stdout.readline(), 10)
+    if not line:
+        error = await asyncio.wait_for(process.stderr.read(), 2)
+        raise AssertionError(error.decode(errors="replace")[-6000:])
+    return json.loads(line)
+
+
+async def spawn(slot, actor, role, root, handle, fixed, config, environment, home):
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    return await asyncio.create_subprocess_exec(
+        str(python), "-I", str(actor), role, str(root), str(handle), str(fixed), str(config),
+        cwd=home, env=environment, stdin=asyncio.subprocess.PIPE,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+
+
+async def shutdown(handle):
+    from agent_mcp.cutover import control_request
+    from agent_mcp.serve import _control_token_path
+
+    record = json.loads(Path(str(handle) + ".control.json").read_text(encoding="utf-8"))
+    token = _control_token_path(handle.parent, record["pid"]).read_text(encoding="utf-8")
+    reply = await asyncio.to_thread(
+        control_request, "127.0.0.1", record["port"], token, {"op": "ping"},
+    )
+    assert reply["pid"] == record["pid"]
+    reply = await asyncio.to_thread(
+        control_request, "127.0.0.1", record["port"], token, {"op": "shutdown"},
+    )
+    assert reply["ok"] is True
