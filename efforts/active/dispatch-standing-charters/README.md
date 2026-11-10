@@ -12,7 +12,7 @@ attachment controls without changing finite-task behavior.
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent per-slice PRs targeting `dev`.
 - **Created:** 2026-11-09
-- **Status:** Draft - contract review precedes implementation.
+- **Status:** In progress - implementation, operator documentation and complete isolated discovery/native-owner flows qualified locally; source publication and promotion remain open.
 - **Vision:** [Agent topology](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md).
 - **Umbrella issue:** [#11770](https://github.com/ThomasMichon/copilot-extensions/issues/11770).
 
@@ -89,33 +89,33 @@ later narrowing and explicit holds; recover missing authority before effects.
 
 - [x] Find and claim the existing issue; ground the proposal in registrar,
   task-lifecycle, template-materialization and topology owners.
-- [ ] Land this canonical effort and Proposal through upstream review.
-- [ ] Resolve review decisions on identity/retirement, attachment admission,
+- [x] Land this canonical effort and Proposal through upstream review.
+- [x] Resolve review decisions on identity/retirement, attachment admission,
   materialization and migration before their dependent implementation.
 
 ### Phase 2 - Persistent task and attachment lifecycle
 
-- [ ] Add the standing task/declaration model and idempotent reconciliation,
+- [x] Add the standing task/declaration model and idempotent reconciliation,
   retaining stable identity, explicit lanes and all history across restart.
-- [ ] Implement fenced attachment, detach, yield, unassignment, recovery and
+- [x] Implement fenced attachment, detach, yield, unassignment, recovery and
   retirement through existing lifecycle owners; reject finite completion paths.
-- [ ] Preserve independent finite children, holds, evaluators and existing
+- [x] Preserve independent finite children, holds, evaluators and existing
   finite/emitter/effort-driver-loop behavior.
 
 ### Phase 3 - Materialization and local admission
 
-- [ ] Reuse the `agent-roles` materialization/update owner for complete effective
+- [x] Reuse the `agent-roles` materialization/update owner for complete effective
   charters with explicit source and expected/accepted revisions.
-- [ ] Extend the registrar's local override mechanism with an attachment veto;
+- [x] Extend the registrar's local override mechanism with an attachment veto;
   serialize its effective policy with admission and preserve existing occupants.
-- [ ] Implement capability-selected clients/providers, migration and rollback
+- [x] Implement capability-selected clients/providers, migration and rollback
   protection before exposing standing records to mixed-version consumers.
 
 ### Phase 4 - Topology consumer and complete isolated flow
 
-- [ ] Update topology schema, skill and dispatcher charter to reference Dispatch
+- [x] Update topology schema, skill and dispatcher charter to reference Dispatch
   evidence without requiring an appointed dispatcher or a second writable map.
-- [ ] Derive desired, reserved, accepted, held, unknown and retiring coverage
+- [x] Derive desired, reserved, accepted, held, unknown and retiring coverage
   from native evidence; retain proposed-versus-adopted intent.
 - [ ] Prove a complete isolated declaration-to-accepted-owner flow, finite child
   completion, owner succession and explicit retirement using real consumer
@@ -133,32 +133,119 @@ later narrowing and explicit holds; recover missing authority before effects.
 
 ## Validation Plan
 
-- [ ] Contract review: identity, state/transition table, fencing, retirement,
+- [x] Contract review: identity, state/transition table, fencing, retirement,
   multi-lane staffing, materialization and deny semantics are coherent.
-- [ ] Repeat and race declaration discovery, reconcile and restart: exactly one
+- [x] Repeat and race declaration discovery, reconcile and restart: exactly one
   durable task per qualified key, preserved history, no false removal on errors.
-- [ ] Attach/detach/yield/unassign and confirmed lost-owner recovery preserve the
+- [x] Attach/detach/yield/unassign and confirmed lost-owner recovery preserve the
   task; stale generation and unknown liveness never admit another holder.
-- [ ] All finite terminal paths refuse standing parents, including unverified
+- [x] All finite terminal paths refuse standing parents, including unverified
   submission and evaluator/verification completion; finite children still finish.
-- [ ] Retirement with attached, absent and unknown owners preserves obligations
+- [x] Retirement with attached, absent and unknown owners preserves obligations
   and history; removal, disable and explicit re-enrollment cannot bypass it.
-- [ ] Multiple lanes do not share an exclusive claim or double-count staffing.
-- [ ] Template-only, incomplete and unresolved materializations fail admission;
+- [x] Multiple lanes do not share an exclusive claim or double-count staffing.
+- [x] Template-only, incomplete and unresolved materializations fail admission;
   source updates do not silently amend an accepted charter.
-- [ ] Local deny overrides repository enable; unreadable/unsupported policy
+- [x] Local deny overrides repository enable; unreadable/unsupported policy
   holds; clear does not launch; deny/admit races and existing occupants are tested.
-- [ ] Interrupt reservation, local admission and acknowledgement; replay events
+- [x] Interrupt reservation, local admission and acknowledgement; replay events
   and lose replies. Retain operation identities and unknown effects without
   duplicate attachment, timer takeover or forced claim clearing.
-- [ ] Mixed old/new clients, coordinators and stores fail closed for standing
+- [x] Mixed old/new clients, coordinators and stores fail closed for standing
   work while supported finite work remains compatible; rollback cannot expose a
   standing task as a completable finite task.
-- [ ] Topology reads agree with native ownership and accepted revisions; idle,
+- [x] Topology reads agree with native ownership and accepted revisions; idle,
   approval/CI waits, explicit holds and uncertainty are not false vacancies.
-- [ ] Run changed-code unit tests, focused real CLI/coordinator integration and
+- [x] Run changed-code unit tests, focused real CLI/coordinator integration and
   fresh-store/migration checks; record clean-room and external-venue coverage or
   explicit unavailability. Live adoption remains separately authorized.
+
+### Validation evidence and limits
+
+- **Unit and compatibility:** The journal records the passing Dispatch,
+  Worktrees and topology packets. `test_queue_standing_sources.py` covers
+  repeat/restart/change/last-removal and competing processes;
+  `test_standing_charters.py` covers independent lanes, retirement tombstones,
+  finite children, old-provider SQL and reservation races;
+  `test_standing_admission.py` covers lost replies, rollback, concurrent
+  acceptance, succession, materialization drift and serialized local deny.
+  Exposure and finite compatibility suites cover refused parent termination.
+- **Real consumer boundaries:** The final source/reconciliation packet passed
+  61 existing cases. A separate real Git discovery-to-coordinator case passed
+  after correcting its fixture and expected repository-derived namespace.
+  `test_dispatch_standing_lifecycle.py` passed through the real isolated native
+  owner: acceptance, finite-child completion, succession, native conclusion,
+  release, settled retirement and restart-preserved history.
+- **Fresh state:** The source and native flows use isolated fresh stores and
+  exercise restart/migration behavior. This is not a full fresh-OS installer
+  clean-room result; no installer behavior changes or installation is claimed.
+- **External venue:** No authorized live venue, enrollment or deployment is
+  available within this source-only scope. External adoption was not run and
+  remains separately authorized, not inferred from passing local evidence.
+- **Delivery gates:** Source review/CI, merge and promotion remain open.
+  These results do not authorize runtime installation or role appointment.
+
+## Publication impact assessments
+
+### Documentation
+
+The [standing-charter operator guide](../../../plugins/agent-dispatch/docs/standing-charters.md)
+documents declaration discovery, source-set reconciliation, attachment controls,
+compatibility and adoption prerequisites. The
+[topology skill](../../../plugins/agent-roles/skills/managing-agent-topology/SKILL.md),
+its schema, dispatcher charter and references describe the consuming contract.
+This closes existing agent-topology vision intent rather than changing it.
+Architecture and installation references remain unchanged: this change adds no
+daemon, installer or ownership model.
+
+### Contract
+
+The serving peer advertises `standing_charters` version 1, `finite_child_link`
+version 1, `source_set` version 1 and attachment support through `/health`.
+Each standing operation checks the serving peer's required capability; old,
+missing or malformed support refuses the required standing semantics. Existing
+finite wire shapes remain unchanged, and store rollback triggers fence old
+writers from treating standing records as finite work.
+
+Adoption is additive and provider-first, followed by optional caller adoption.
+No existing finite syntax is removed or requires a new invocation. Exposure,
+standing, source and admission tests cover mixed versions, legacy SQL/rollback,
+revision conflicts and lost replies. No installer behavior changes.
+
+### Performance
+
+This assessment is source analysis, not a native timing result. Committed-source
+discovery captures HEAD, scopes Git status and tree reads to registrar
+directories, compares each declaration's blob digest and rechecks HEAD.
+Git reads have 5-second and 1-MiB bounds. A successful discovery uses roughly
+`8 + D` Git subprocesses for `D` declaration blobs; changed revisions additionally
+require an ancestry check, while equal revisions skip it. The per-blob work is
+linear and is not claimed to be a latency improvement.
+
+The supervisor groups complete observations by namespace: one retained-repository
+query per namespace, then observation and reconciliation per repository. Client
+methods also check capabilities. Existing deadline and before-write guards
+bound admission to reconciliation, unchanged sets are idempotent and uncertain
+observations hold rather than remove work. This uses the existing supervisor
+collection cadence, not a new poller or daemon.
+
+The source/reconciliation and real Git-to-coordinator tests named above provide
+reproducible isolated correctness evidence. Native cold/warm timing is not
+available within this validation scope; no measured latency claim is made.
+
+### Graceful cutover
+
+The existing Dispatch coordinator, supervisor and installer retain their
+lifecycle ownership; installation and rollout require separate authorization.
+There is no new daemon, installer, routing layer, process-termination path or
+lease owner. Mutations use existing durable database, transaction and revision
+boundaries. Source reconciliation compares retained observations before writing,
+and attachment operation identity preserves recovery after a lost reply.
+
+The common cutover checklist was considered for these writes; this change does
+not alter a cutover algorithm. Existing lifecycle documentation remains
+authoritative. Isolated interruption/replay tests do not qualify a live cutover
+or the complete deployed lifecycle, and neither is claimed here.
 
 ## Proposal
 
@@ -292,3 +379,117 @@ Derived overview reads use bounded native queries; no second persistent map.
 - Separated lifetime from attachment because finite occurrence completion and
   affinity-only detachment cannot preserve a standing role's identity/history.
 - Implementation, promotion and live installation remain distinct gates.
+
+### 2026-11-10 - Contract accepted
+
+- [#11882](https://github.com/ThomasMichon/copilot-extensions/pull/11882)
+  received an approving review with no outstanding findings and passing
+  required CI, then merged to `dev` as
+  `17aa9b77404e4d886e6daf0d3e2063619450a4f2`.
+- The contract-review gate is satisfied. #11770 remains open for implementation;
+  no runtime behavior, installation or live adoption changed.
+- Next: implement the persistent task and fenced attachment lifecycle, preserving
+  finite-task compatibility and the separate materialization/admission gates.
+
+### 2026-11-10 - Persistent reservation implementation
+
+- Implemented standing task identity, revisioned event history and retained
+  tombstones, with rollback fences against legacy finite-task transitions.
+  Reservation reuses the native assignment relationship owner: restart and lost
+  replies retain the original request rather than allocate a second owner.
+- Added complete charter materialization/inspection to the topology owner and
+  host-local attachment denies using the existing serialized override store.
+  Reservation is not acceptance; native-head and materialization admission,
+  succession and settlement remain open.
+- Focused isolated results: 107 Dispatch standing/relationship tests passed,
+  20 override tests passed, and 57 topology tests passed, including actual CLI
+  materialization and inspection. Full consumer-flow, clean-room and live-venue
+  evidence remain outstanding; no runtime installation or adoption occurred.
+
+### 2026-11-10 - Acceptance, succession and settled release
+
+- Implemented native-head acceptance and succession fences. Unknown custody
+  retains the original reservation; a successor must accept the effective
+  charter rather than inherit claimed coverage implicitly.
+- Settled release requires exact native conclusion evidence and records
+  immutable unassignment history while retaining the original relationship
+  closure. Lost replies replay the same operation; stale owners, concurrent
+  release and transaction failures cannot admit a second attachment.
+- Contained source validation passed: 221 Dispatch standing/admission/relationship
+  tests and 129 Worktrees incarnation/CLI tests. Corrections to test expectations
+  preserved original-request admission and the existing storage exception
+  contract rather than weakening production custody checks.
+- These are local implementation results, not publication, promotion or rollout.
+  Finite-child completion, capability-selected CLI/coordinator integration,
+  topology consumption and the complete isolated flow remain open, as do
+  clean-room and live-venue qualification. No live enrollment, launch or
+  installation occurred.
+
+### 2026-11-10 - Finite-child linkage
+
+- Added an immutable, optional standing-parent reference to ordinary finite
+  tasks. Storage triggers and transactional create validation require a
+  same-repository, active standing parent; the link never carries the parent's
+  exclusive staffing key, and dedup refuses reuse under a different parent.
+- Linked children keep their own claim, verification and completion paths and
+  finish independently after the parent retires; child completion never
+  concludes the parent. Old SQL writers cannot attach or rewrite the link.
+- Focused validation: 472 Dispatch tests passed across standing, admission,
+  relationship, producer-fence, queue and category suites. One unrelated
+  pre-existing failure reproduces on the unmodified base and is tracked in
+  #11912. Capability-selected CLI/coordinator exposure, topology consumption
+  and the complete isolated flow remain open; nothing was installed or adopted.
+
+### 2026-11-10 - Capability-selected exposure
+
+- Added control-authenticated coordinator routes, a capability-gated client and
+  an `agent-dispatch standing` CLI. Clients refuse before effects without
+  declared coordinator support or a qualified relationship owner; the CLI names
+  exact revisions and never ensures, fails over or retargets a coordinator.
+  Finite routes cannot claim or conclude a standing task, and remote dispatch
+  forwards standing-parent filters. Operator reference:
+  `plugins/agent-dispatch/docs/standing-charters.md`.
+- Contained runner validation (`tools/run-plugin-tests.py`, explicit tiers):
+  every standing, admission, relationship, override, queue, producer-fence,
+  spawn-reservation, remote-dispatch, coordinator and category suite passed.
+  The finite compatibility packet (evaluator, verification, submission,
+  emitter and effort-driver-loop suites) passed 336 tests. Remaining failures
+  are pre-existing and independent of this change: #11912, and an ordering
+  dependency on leaked route ownership in the startup admission suite (#11922).
+- The exposure flow still uses a test relationship owner. Topology consumption,
+  the complete isolated flow through real native boundaries, clean-room and
+  live-venue qualification remain open. Nothing was published, installed or
+  adopted.
+
+### 2026-11-10 - Derived topology coverage
+
+- Extended the topology schema, skill and dispatcher charter with optional
+  Dispatch assignment evidence. The read-only join distinguishes reservations,
+  accepted revisions, successor generations, holds, drift and uncertainty;
+  neither a quiet owner nor an unsettled predecessor is a vacancy.
+- The contained topology packet passed 121 tests, including acceptance and
+  succession cases. Ruff F/E9 passed for staged Python changes, and all 29
+  changed modules passed the repository's 1,000-line size limit.
+- The complete lifecycle through real native owners remains the next gate:
+  declaration, acceptance, finite-child completion, succession and retirement.
+  Publication, promotion and final acceptance remain open. No installation,
+  live materialization, enrollment or adoption occurred.
+
+### 2026-11-10 - Complete isolated consumer flows
+
+- Qualified complete-set registrar discovery and source-revision reconciliation:
+  the 61-case source/reconciliation packet passed, followed by a passing real
+  Git discovery-to-coordinator case. The latter initially exposed two fixture
+  mistakes, corrected without weakening production admission or changing the
+  repository-derived namespace contract.
+- The real isolated native-owner lifecycle passed acceptance, finite-child
+  completion, owner succession, native conclusion, settled release, retirement
+  and restart-preserved history. The tests left no owned background work.
+- The complete isolated-flow gate is now satisfied; the Phase 4 combined
+  publication item remains unchecked until its source is published. No test
+  failure from these final consumer checks remains unresolved.
+- Recorded unit, real-consumer and fresh-store coverage above, with explicit
+  fresh-OS and external-venue limits. Next: finish the registrar/operator
+  documentation and required source checks, then review, merge and promotion.
+  No live enrollment, materialization, appointment, installation or adoption
+  occurred.

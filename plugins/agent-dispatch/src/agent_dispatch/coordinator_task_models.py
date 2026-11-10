@@ -85,6 +85,7 @@ class CreateBody(BaseModel):
     done_criteria: str | None = None
     not_before: FiniteFloat = 0.0
     claim_as: str | None = None
+    standing_parent_id: str | None = None
 
 
 class ProducerScopeHandoffBody(BaseModel):

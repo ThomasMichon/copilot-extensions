@@ -1,0 +1,17 @@
+{
+  "comment": "Add revision-fenced Dispatch standing charters with exact assignment admission, finite-child linkage and capability-selected control routes",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "minor"
+    },
+    {
+      "plugin": "agent-roles",
+      "type": "minor"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "minor"
+    }
+  ]
+}

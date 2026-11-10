@@ -42,6 +42,9 @@ class CategoryClientMixin:
         if params.get("category") is not None:
             category_value(params["category"], selection=True)
             self.require_task_categories()
+        if params.get("standing_parent_id") is not None:
+            # Older coordinators silently ignore unknown query parameters.
+            self.require_standing_charters()
         clean = {k: v for k, v in params.items() if v is not None}
         return self._unwrap(self._http.get("/tasks", params=clean))
 
@@ -82,6 +85,10 @@ class CategoryClientMixin:
         if category == "maintenance":
             self.require_task_categories()
             kwargs["category"] = category
+        if kwargs.get("standing_parent_id") is None:
+            kwargs.pop("standing_parent_id", None)
+        else:
+            self.require_standing_charters()
         # Omitted/work requests retain the old wire shape for older peers.
         return self._unwrap(self._http.post("/tasks", json={"title": title, **kwargs}))
 

@@ -314,20 +314,14 @@ def register_task_routes(
         dedup_key: str | None = None,
         sweep: bool = False,
         limit: int | None = None,
+        standing_parent_id: str | None = None,
     ) -> list[dict]:
         if dedup_key is not None:
             selectors = {
-                "status": status,
-                "target_machine": target_machine,
-                "target_repo": target_repo,
-                "label": label,
-                "evaluator_ref": evaluator_ref,
-                "source": source,
-                "origin_ref": origin_ref,
-                "exclusive_key": exclusive_key,
-                "category": category,
-                "q": q,
-                "limit": limit,
+                "status": status, "target_machine": target_machine, "target_repo": target_repo,
+                "label": label, "evaluator_ref": evaluator_ref, "source": source,
+                "origin_ref": origin_ref, "exclusive_key": exclusive_key, "category": category,
+                "q": q, "limit": limit, "standing_parent_id": standing_parent_id,
             }
             conflicts = [key for key, value in selectors.items() if value is not None]
             if sweep:
@@ -345,6 +339,8 @@ def register_task_routes(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             return [] if task is None else [_task_with_spawn_dict(queue, task)]
         limit = 200 if limit is None else limit
+        if standing_parent_id is not None and (sweep or q is not None):
+            raise HTTPException(400, detail="standing_parent_id cannot combine with sweep or q")
         if sweep:
             return _bulk_tasks(queue.sweep(repo=repo, limit=limit, category=category))
         if q is not None:
@@ -365,6 +361,7 @@ def register_task_routes(
             exclusive_key=exclusive_key,
             category=category,
             limit=limit,
+            standing_parent_id=standing_parent_id,
         )
         return _bulk_tasks(tasks)
 
@@ -414,9 +411,11 @@ def register_task_routes(
             "result": queue.read_result(task),
         }
 
+    from .coordinator_standing import register_standing_routes
     from .coordinator_task_relationships import register_task_relationship_routes
-    register_task_relationship_routes(
-        app, queue, control_token=control_token, emit_event=_emit_producer_event,
+    register_task_relationship_routes(app, queue, control_token=control_token, emit_event=_emit_producer_event)
+    register_standing_routes(
+        app, queue, control_token=control_token, emit_task=_emit, emit_event=_emit_producer_event,
     )
 
     @app.get("/tasks/{task_id}/events")
