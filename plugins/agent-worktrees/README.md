@@ -1196,7 +1196,10 @@ On Windows installations, a completed, independently healthy runtime
 with the installed mode-owner ABI can instead supply that control interpreter.
 Its canonical retention lease is acquired before health/ABI verification and
 remains held through the owning process family. Package-version equality is not
-the compatibility check. Repair never uses the generation being repaired as its
+the compatibility check. The installed control must also provide the monitor
+replacement module consumed by the current mode owner; an older ABI-compatible
+build without that capability uses the existing private bootstrap instead.
+Repair never uses the generation being repaired as its
 control; release considers the claim's original restore target. No installed
 control or an unavailable/incompatible ABI uses the private bootstrap, while malformed
 completion evidence, storage errors and failed health remain explicit refusals.

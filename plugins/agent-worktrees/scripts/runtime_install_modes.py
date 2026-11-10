@@ -50,7 +50,11 @@ candidate = importlib.import_module("agent_worktrees.runtime_candidate")
 assert pathlib.Path(candidate.__file__).resolve().is_relative_to(slot), "control import escaped"
 abi = getattr(candidate, "MODE_OWNER_ABI", None)
 compatible = type(abi) is int and abi == int(sys.argv[2])
+replacement = importlib.util.find_spec("agent_worktrees.runtime_monitor_replacement")
+compatible = compatible and replacement is not None
 if compatible:
+    assert isinstance(replacement.origin, str), "control replacement module has no ordinary origin"
+    assert pathlib.Path(replacement.origin).resolve().is_relative_to(slot), "control replacement escaped"
     assert (slot / ".runtime-input-origins.json").is_file(), "control has no origin receipt"
     candidate.verify_runtime_candidate()
     candidate.verify_installed_origins()
