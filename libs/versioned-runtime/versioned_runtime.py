@@ -68,7 +68,7 @@ import sys
 import threading
 import time
 from pathlib import Path
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 
 
 _runtime_components = globals().get("_retained_runtime_components", {})
@@ -120,7 +120,7 @@ RUNNING_VERSION_FILE = "running-version.json"
 CURRENT_VERSION_FILE = "current-version"
 # The last version `activate()` published, stamped atomically alongside the
 # marker. It is the fallback resolution target: if the `current-version` marker
-# is ever missing/unreadable (a torn or deleted marker), a resolver prefers the
+# is missing or malformed (or unreadable on POSIX), a resolver prefers the
 # last-known-good version -- whose slot, having been the active one, still exists
 # -- over guessing the newest installed slot. See `resolve_python`.
 LAST_KNOWN_GOOD_FILE = "last-known-good"
@@ -236,7 +236,7 @@ def _link_target(link: Path) -> Path | None:
     return target
 
 
-def current_version(root: Path, link_name: str = CURRENT_LINK) -> str | None:
+def current_version(root: Path, link_name: str = CURRENT_LINK, *, _tolerate_slot_error: bool = False) -> str | None:
     """The active version name.
 
     Reads the ``current-version`` marker file -- a plain text file, so it is
@@ -251,45 +251,44 @@ def current_version(root: Path, link_name: str = CURRENT_LINK) -> str | None:
         # Legacy fallback: a pre-marker root still carrying the old junction.
         target = _link_target(current_link(root, link_name))
         name = target.name if target is not None else None
-    if name and version_dir(root, name).exists():
-        return name
-    return None
+    try:
+        return name if name and version_dir(root, name).exists() else None
+    except OSError:
+        if _tolerate_slot_error:
+            return None
+        raise
 
 
 def _read_current_marker(root: Path) -> str | None:
     try:
-        txt = (root / CURRENT_VERSION_FILE).read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError):
+        return _runtime_component("versioned_runtime_publication").read_selector(root / CURRENT_VERSION_FILE).strip() or None
+    except (FileNotFoundError, UnicodeError):
         return None
-    return txt or None
 
 
 def read_last_known_good(root: Path) -> str | None:
     """The last version ``activate()`` published, or ``None`` if never stamped."""
     try:
-        txt = (root / LAST_KNOWN_GOOD_FILE).read_text(encoding="utf-8").strip()
-    except (OSError, UnicodeError):
+        return _runtime_component("versioned_runtime_publication").read_selector(root / LAST_KNOWN_GOOD_FILE).strip() or None
+    except (FileNotFoundError, UnicodeError):
         return None
-    return txt or None
 
 
 def _write_last_known_good(root: Path, version: str) -> None:
-    """Stamp ``last-known-good`` atomically (temp + os.replace), only-when-changed.
-
-    Best-effort: a failure here never undoes the (already-written) marker.
-    """
-    if read_last_known_good(root) == version:
-        return
+    """Best-effort atomic stamp of ``last-known-good`` without requiring incumbent reads."""
+    try:
+        if read_last_known_good(root) == version:
+            return
+    except OSError:
+        pass
     dest = root / LAST_KNOWN_GOOD_FILE
     tmp = dest.with_name(dest.name + f".tmp-{os.getpid()}")
     try:
         tmp.write_text(version + "\n", encoding="utf-8")
-        os.replace(tmp, dest)
+        _runtime_component("versioned_runtime_publication").replace_selector(tmp, dest)
     except OSError:
-        try:
+        with suppress(OSError):
             tmp.unlink()
-        except OSError:
-            pass
 
 
 def slot_python(root: Path, version: str) -> Path | None:
@@ -320,7 +319,7 @@ def resolve_python(root: Path) -> Path | None:
 
     1. the ``current-version`` marker (the source of truth, written atomically);
     2. ``last-known-good`` -- the last version ``activate()`` published -- when
-       the marker is missing/unreadable or names an unresolvable slot;
+       the marker is missing/malformed, unreadable on POSIX, or names an unresolvable slot;
     3. the newest complete package slot, only when no source generation needs recovery.
 
     Never resolves through a ``venv``/``.venv`` link (a reparse point on Windows
@@ -331,7 +330,8 @@ def resolve_python(root: Path) -> Path | None:
     never selected merely because it contains an interpreter-shaped file.
     """
     return _runtime_component("versioned_runtime_construction").resolve_completed_python(
-        root, current_version=current_version, read_last_known_good=read_last_known_good,
+        root, current_version=lambda path: current_version(path, _tolerate_slot_error=True),
+        read_last_known_good=read_last_known_good,
         is_complete=is_complete, slot_python=slot_python, list_versions=list_versions,
         requires_exact_selection=lambda versions: _runtime_component(
             "versioned_runtime_source"
@@ -390,8 +390,7 @@ def _activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
               replace_nonlink: bool = False, link_free: bool = False, ownership_receipt: Path | None = None) -> Path:
     """Mark ``versions/<version>`` as the active runtime.
 
-    Always writes the ``current-version`` marker file atomically (temp +
-    ``os.replace``) -- the marker is the source of truth on every OS.
+    Always atomically writes ``current-version``, the source of truth on every OS.
 
     **Windows is structurally junction-free.** A directory junction is a reparse
     point that RedirectionGuard (PROCESS_MITIGATION_REDIRECTION_TRUST_POLICY)
@@ -409,7 +408,7 @@ def _activate(root: Path, version: str, *, link_name: str = CURRENT_LINK,
     never applies. A legacy real venv dir at the link path is left as-is unless
     ``replace_nonlink`` moves it aside on first migration.
 
-    Returns the version dir; raises only if the version isn't installed.
+    Returns the version dir; raises if it is not installed or publication fails.
     """
     vdir = version_dir(root, version)
     if not vdir.is_dir():

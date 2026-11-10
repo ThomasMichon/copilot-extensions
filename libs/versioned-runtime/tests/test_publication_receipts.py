@@ -309,15 +309,16 @@ def test_failed_activation_keeps_created_selector_proof(tmp_path: Path, monkeypa
     root, context, _payload, bindings = case(tmp_path, ("current-version", "last-known-good"))
     (root / "versions/2.0.0").mkdir(parents=True)
     receipt = context.parent / "activate.jsonl"
-    actual = os.replace
+    publication = runtime._runtime_component("versioned_runtime_publication")
+    actual = publication.replace_selector
 
-    def fail_last(old: Path, new: Path, **kwargs: object) -> None:
+    def fail_last(old: Path, new: Path) -> None:
         if Path(new) == root / "last-known-good":
             raise OSError("injected selector failure")
-        actual(old, new, **kwargs)
+        actual(old, new)
 
     with monkeypatch.context() as patch:
-        patch.setattr(os, "replace", fail_last)
+        patch.setattr(publication, "replace_selector", fail_last)
         with pytest.raises(OSError, match="selector"):
             runtime.activate(root, "2.0.0", link_free=True, ownership_receipt=receipt)
     wanted = [[str(root / name), hashlib.sha256(b"2.0.0\n").hexdigest()]
@@ -325,6 +326,33 @@ def test_failed_activation_keeps_created_selector_proof(tmp_path: Path, monkeypa
     proof.check_owned(context, [receipt], [root / "current-version"], wanted)
     proof.recover_owned(context, [receipt], [root / "current-version"], context.parent / "recover.jsonl", wanted)
     assert (root / "current-version").read_bytes() == Path(bindings[0][1]).read_bytes()
+
+
+def test_activation_proof_for_nested_marker_keeps_generic_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, context, _payload, bindings = case(tmp_path, ("current-version",))
+    nested = root / "nested"
+    nested.mkdir()
+    target = nested / "current-version"
+    os.replace(root / "current-version", target)
+    backup = Path(bindings[0][1])
+    nested_context = context.parent / "nested-context.json"
+    proof.create_context(nested_context, root, [[str(target), str(backup), bindings[0][2]]])
+    receipt = context.parent / "nested-activation.jsonl"
+    producer = proof.Receipt(receipt, root, [target], "activate")
+    staged, created = proof._stage(root, target, b"new nested marker\n", 0o600, producer, phase="forward")
+    os.replace(staged, target)
+    producer.finish("success")
+    assert proof.state_path(target) == created
+
+    def reject_selector_replace(_source: Path, _destination: Path) -> None:
+        raise AssertionError("nested marker used selector replacement")
+
+    monkeypatch.setattr(proof, "replace_selector", reject_selector_replace)
+    expected = [[str(target), hashlib.sha256(b"new nested marker\n").hexdigest()]]
+    proof.recover_owned(nested_context, [receipt], [target], context.parent / "nested-recovery.jsonl", expected)
+    assert target.read_bytes() == backup.read_bytes()
 
 
 def test_failed_session_publisher_after_rename_is_owned(tmp_path: Path) -> None:
@@ -390,6 +418,8 @@ def test_created_proof_is_fsynced_before_actual_rename(tmp_path: Path, monkeypat
     root, context, payload, _bindings = case(tmp_path, names)
     receipt = context.parent / "producer.jsonl"
     actual_replace, actual_sync = os.replace, os.fsync
+    publication = runtime._runtime_component("versioned_runtime_publication")
+    actual_selector_replace = publication.replace_selector
     synced: set[tuple[int, int]] = set()
     seen = []
 
@@ -398,7 +428,7 @@ def test_created_proof_is_fsynced_before_actual_rename(tmp_path: Path, monkeypat
         info = os.fstat(fd)
         synced.add((info.st_ino, info.st_size))
 
-    def replace(old: Path, new: Path, **kwargs: object) -> None:
+    def check_replacement(old: Path, new: Path) -> None:
         if Path(new) in {root / name for name in names}:
             rows = [json.loads(line) for line in receipt.read_text().splitlines()]
             entry = next(row for row in reversed(rows) if row.get("target") == str(new))
@@ -407,14 +437,22 @@ def test_created_proof_is_fsynced_before_actual_rename(tmp_path: Path, monkeypat
             info = receipt.stat()
             assert (info.st_ino, info.st_size) in synced
             seen.append(Path(new))
+
+    def replace(old: Path, new: Path, **kwargs: object) -> None:
+        check_replacement(old, new)
         actual_replace(old, new, **kwargs)
+
+    def replace_selector(old: Path, new: Path) -> None:
+        check_replacement(old, new)
+        actual_selector_replace(old, new)
 
     with monkeypatch.context() as patch:
         patch.setattr(os, "fsync", sync)
-        patch.setattr(os, "replace", replace)
         if producer == "redirects":
+            patch.setattr(os, "replace", replace)
             publish(root, payload, receipt)
         else:
+            patch.setattr(publication, "replace_selector", replace_selector)
             (root / "versions/2.0.0").mkdir(parents=True)
             runtime.activate(root, "2.0.0", link_free=True, ownership_receipt=receipt)
     assert set(seen) == {root / name for name in names}
