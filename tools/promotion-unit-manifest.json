@@ -1,6 +1,7 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_listener_only_replacement_cannot_change_independent_domain_evidence",
         "tools/promotion_unit_tests/test_health_composition.py::test_closed_hourly_envelope_retains_service_namespace_and_unknown_health",
         "tools/promotion_unit_tests/test_health_composition.py::test_hourly_envelope_refuses_mismatched_or_unknown_components[owner]",
         "tools/promotion_unit_tests/test_health_composition.py::test_hourly_envelope_refuses_mismatched_or_unknown_components[hour]",
@@ -4745,8 +4746,8 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "ee56c639f7ffea0d6dff87b16d1ee13697205127391ca41ea5bbfbf8a62adb97",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "b9d04466bc89c442d06eeed2f972d023bfcb5501616c8ee5d92821ff7cbde4dc",
+        "tools/promotion_unit_tests/test_health_composition.py": "6f6d13314e868cdc2b377be5e365ae6ea1ea7f052a4a84fdf6c1474dc5d3922e",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "3eee04902b962b7c1366fe24457a568514c1d4e1f26b02e611b91d310968ca88",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "45087840504c3bf04894c19a13ff273953ca51a82674f4cde8402a5ecbdd269d",
@@ -5421,8 +5422,8 @@
         "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
         "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
-        "plugins/agent-machines/src/agent_machines/health_hourly.py": "1b94bf4997de27c455ecb6d9cd6f761c04f60e903717ba1a35c6a0231d701cae",
-        "plugins/agent-machines/src/agent_machines/health_collect.py": "cd5c0ea859d4c7013aabd20d0eaf2b4ccb6c15adc282abd3a2015aef8e13814b"
+        "plugins/agent-machines/src/agent_machines/health_hourly.py": "a04356ea2e0810f2d395fab4a3e10fc537edd0bb6b2c5446bb6e3649ccdc1160",
+        "plugins/agent-machines/src/agent_machines/health_collect.py": "ea14a9d7c7fb1e3aa5f6480869d2fd468e126a2c59986b3b760ca74f98058425"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_hourly.py",

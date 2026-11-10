@@ -21,31 +21,64 @@ _RUN_LOCK = threading.Lock()
 @contextmanager
 def admission(store: Path):
     """Nonblocking existing byte lock, without creating or replacing its file."""
+    from agent_procutil.owned_process import OwnedCleanupError
+
     path = slots._plain(store / "collection.lock")
     if not _RUN_LOCK.acquire(blocking=False):
         raise slots.HealthError("collection-overlap")
+    stream = None
+    locked = fenced = retained = False
+
+    def fence(value: bytes):
+        stream.seek(0)
+        if stream.write(value) != 1:
+            raise OSError("collection fence write incomplete")
+        stream.flush()
+        os.fsync(stream.fileno())
+
+    def begin_exports():
+        nonlocal fenced
+        fenced = True
+        fence(b"\1")
+
+    def release():
+        if fenced:
+            fence(b"\0")
+        if locked:
+            _unlock_byte(stream)
+        if stream is not None:
+            stream.close()
+        _RUN_LOCK.release()
+
     try:
         before = path.stat()
         if before.st_size != 1:
             raise slots.HealthError("invalid-collection-lock")
-        with path.open("r+b") as stream:
-            opened = os.fstat(stream.fileno())
-            if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
-                raise slots.HealthError("collection-lock-changed")
-            try:
-                _lock_byte(stream)
-            except OSError:
-                raise slots.HealthError("collection-overlap") from None
-            try:
-                slots._plain(path)
-                current = path.stat()
-                if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
-                    raise slots.HealthError("collection-lock-changed")
-                yield
-            finally:
-                _unlock_byte(stream)
+        stream = path.open("r+b", buffering=0)
+        opened = os.fstat(stream.fileno())
+        if (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino):
+            raise slots.HealthError("collection-lock-changed")
+        try:
+            _lock_byte(stream)
+        except OSError:
+            raise slots.HealthError("collection-overlap") from None
+        locked = True
+        slots._plain(path)
+        current = path.stat()
+        if (opened.st_dev, opened.st_ino) != (current.st_dev, current.st_ino):
+            raise slots.HealthError("collection-lock-changed")
+        stream.seek(0)
+        if stream.read(1) != b"\0":
+            raise slots.HealthError("collection-cleanup-unconfirmed")
+        try:
+            yield begin_exports
+        except OwnedCleanupError as error:
+            retained = True
+            error._retain_on_settled(release)
+            raise
     finally:
-        _RUN_LOCK.release()
+        if not retained:
+            release()
 
 
 def collect(store: Path, hour: str | None = None) -> dict:
@@ -62,7 +95,7 @@ def collect(store: Path, hour: str | None = None) -> dict:
     policy, policy_hash = slots._read(store / "policy.json", slots.validate_policy)
     if policy["version"] != 2:
         raise slots.HealthError("collection-store-unsupported")
-    with admission(store):
+    with admission(store) as begin_exports:
         target = store / f"{requested % slots.SLOTS:03d}.json"
         previous, _hash = slots._read(
             target, hourly.validate_record, optional=True, maximum=hourly.MAX_BYTES,
@@ -82,14 +115,21 @@ def collect(store: Path, hour: str | None = None) -> dict:
         if requested == current_hour and selection["bridge_port"] is not None:
             if deadline - time.monotonic() <= health_observe.TIMEOUT_SECONDS + .25:
                 raise slots.HealthError("collection-timeout")
-            observation = health_observe.observe_bridge(
+            fresh = health_observe.observe_bridge(
                 selection["bridge_port"], policy["publisher"], policy["continuity"],
             )
-            if observation["hour"] != requested:
+            if fresh["hour"] != requested:
                 raise slots.HealthError("collection-hour-changed")
+            observation = {
+                **fresh, "domains": {
+                    **(observation["domains"] if observation else {}),
+                    "local_listener": fresh["domains"]["local_listener"],
+                },
+            }
             coverage["observation"] = "collected"
         if requested < current_hour and selection["services"]:
             canonical_hour = datetime.fromtimestamp(requested * 3600, timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
+            begin_exports()
             rows = service_reports.collect(
                 selection["services"], canonical_hour, now_ms=started_ms, deadline=deadline - .25,
             )

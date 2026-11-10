@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import time
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -124,6 +125,97 @@ def test_record_boundary_refuses_component_erasure_even_for_a_forged_candidate(s
     with pytest.raises(slots.HealthError, match="observation-replacement-refused"):
         slots.record(store, source, now_ms=STAMP)
     assert slots.inspect(store, now_ms=STAMP)["hours"][-1]["sample"]["domains"]["local_listener"]["state"] == "ok"
+
+
+def test_listener_recollection_preserves_unselected_domain_evidence_and_source_times(
+    store, tmp_path, monkeypatch,
+):
+    original = collector.collect(store)
+    retained = {
+        "ssh_authenticated": {
+            "state": "ok", "evidence": "authenticated-session", "reason": "none",
+            "observed_at_ms": STAMP - 20_000, "direction": "outbound",
+        },
+        "logical_agents": {
+            "state": "ok", "evidence": "session-owner", "reason": "none",
+            "observed_at_ms": STAMP - 10_000, "count": 3,
+        },
+    }
+    original["observation"]["domains"].update(retained)
+    target = store / f"{HOUR % slots.SLOTS:03d}.json"
+    target.write_text(json.dumps(hourly.validate_record(original)), encoding="utf-8")
+    fresh = copy.deepcopy(original["observation"])
+    fresh["domains"] = {
+        "local_listener": {
+            "state": "unknown", "evidence": "not-observed",
+            "reason": "unavailable", "observed_at_ms": None,
+        },
+        "ssh_authenticated": {
+            "state": "unknown", "evidence": "not-observed", "reason": "not-observed",
+            "observed_at_ms": None, "direction": None,
+        },
+        "logical_agents": {
+            "state": "unknown", "evidence": "not-observed", "reason": "not-observed",
+            "observed_at_ms": None, "count": None,
+        },
+    }
+    monkeypatch.setattr(health_observe, "observe_bridge", lambda *a: fresh)
+    candidate = collector.collect(store)
+    for domain, evidence in retained.items():
+        assert candidate["observation"]["domains"][domain] == evidence
+    assert candidate["observation"]["domains"]["local_listener"] == fresh["domains"]["local_listener"]
+    assert stage(store, tmp_path, candidate)["applied"]
+    sample = slots.inspect(store, now_ms=STAMP)["hours"][-1]["sample"]
+    assert sample["domains"]["ssh_authenticated"]["observed_at_ms"] == STAMP - 20_000
+    assert sample["domains"]["logical_agents"]["count"] == 3
+    assert sample["domains"]["logical_agents"]["observed_at_ms"] == STAMP - 10_000
+    for domain in retained:
+        for change in ("erase", "refresh"):
+            forged = collector.collect(store)
+            if change == "erase":
+                del forged["observation"]["domains"][domain]
+            else:
+                forged["observation"]["domains"][domain]["observed_at_ms"] = STAMP
+            with pytest.raises(slots.HealthError, match="observation-replacement-refused"):
+                stage(store, tmp_path, forged)
+    assert json.loads(target.read_text()) == candidate
+
+
+def test_unconfirmed_exporter_cleanup_holds_admission_until_native_settlement(
+    store, monkeypatch, capsys,
+):
+    ready = False
+
+    def cleanup(deadline):
+        if not ready:
+            raise TimeoutError("fixture cleanup still unconfirmed")
+
+    error = service_reports.OwnedCleanupError(None, cleanup_retry=cleanup)
+
+    def unsettled(*args, **kwargs):
+        assert collector._RUN_LOCK.locked()
+        raise error
+
+    monkeypatch.setattr(service_reports, "collect", unsettled)
+    try:
+        assert main([
+            "health", "collect", "--store-dir", str(store), "--hour", "2026-11-09T11:00:00Z",
+        ]) == 2
+        captured = capsys.readouterr()
+        assert not captured.out
+        assert json.loads(captured.err)["error"] == "collection-cleanup-unconfirmed"
+        with pytest.raises(slots.HealthError, match="collection-overlap"):
+            collector.collect(store)
+        with pytest.raises(TimeoutError):
+            error.retry_cleanup(deadline=time.monotonic() + 1)
+        with pytest.raises(slots.HealthError, match="collection-overlap"):
+            collector.collect(store)
+        assert collector._RUN_LOCK.locked()
+    finally:
+        ready = True
+        error.retry_cleanup(deadline=time.monotonic() + 1)
+    assert (store / "collection.lock").read_bytes() == b"\0"
+    assert collector.collect(store)["hour"] == HOUR
 
 
 def test_collection_overlap_refuses_before_native_owners_and_releases_on_exit(store, monkeypatch):

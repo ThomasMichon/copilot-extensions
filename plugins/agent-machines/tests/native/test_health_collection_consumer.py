@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from agent_procutil import no_window_kwargs
-from agent_machines import _peer_launch, health_collect, health_slots, service_reports
+from agent_machines import _peer_launch, health_collect, health_hourly, health_slots, service_reports
 from agent_machines.__main__ import main
 from test_health_observe_consumer import QUALIFYING_BODY, listener, response
 
@@ -83,6 +83,32 @@ def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
             "collection": {"bridge_port": port, "services": ["queue=agent-dispatch"]},
         }), encoding="utf-8")
         (store / "collection.lock").write_bytes(b"\0")
+        source_ms = int(now.timestamp() * 1000)
+        retained_domains = {
+            "ssh_authenticated": {
+                "state": "ok", "evidence": "authenticated-session", "reason": "none",
+                "observed_at_ms": source_ms - 2000, "direction": "outbound",
+            },
+            "logical_agents": {
+                "state": "ok", "evidence": "session-owner", "reason": "none",
+                "observed_at_ms": source_ms - 1000, "count": 2,
+            },
+        }
+        seeded = health_hourly.validate_record({
+            "schema": health_hourly.SCHEMA, "version": 1,
+            "publisher": "example-worker", "continuity": "example-generation",
+            "hour": source_ms // health_slots.HOUR_MS, "revision": 1, "parent": None,
+            "observed_at_ms": source_ms, "observation": {
+                "schema": health_slots.SCHEMA, "version": 1,
+                "publisher": "example-worker", "continuity": "example-generation",
+                "hour": source_ms // health_slots.HOUR_MS, "revision": 1, "parent": None,
+                "observed_at_ms": source_ms, "domains": retained_domains,
+            },
+            "services": [], "coverage": {"observation": "retained", "services": "not-requested"},
+        })
+        (store / f"{seeded['hour'] % health_slots.SLOTS:03d}.json").write_text(
+            json.dumps(seeded), encoding="utf-8",
+        )
         original = {path.name: path.read_bytes() for path in store.iterdir()}
         assert main(["health", "collect", "--store-dir", str(store)]) == 0
         current = json.loads(capsys.readouterr().out)
@@ -108,6 +134,9 @@ def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
     view = report["health"]["view"]
     assert view["observed_hours"] == 2
     assert view["hours"][-1]["sample"]["domains"]["local_listener"]["state"] == "ok"
+    for domain, evidence in retained_domains.items():
+        sample = view["hours"][-1]["sample"]["domains"][domain]
+        assert all(sample[key] == value for key, value in evidence.items())
     assert view["hours"][-2]["sample"]["domains"]["local_listener"]["state"] == "unknown"
     assert view["hours"][-2]["sample"]["services"][0]["contribution"] == contribution
     assert report["coverage"]["accepted_records"] == 0
@@ -143,6 +172,37 @@ def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
     assert {path.name: path.read_bytes() for path in store.iterdir()} == before
     with health_collect.admission(store):
         pass
+
+
+def test_unconfirmed_exporter_fence_survives_its_cli_owner_exit(tmp_path):
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "policy.json").write_text(json.dumps({
+        "schema": health_slots.POLICY_SCHEMA, "version": 2,
+        "publisher": "example-worker", "continuity": "example-generation",
+        "collection": {"bridge_port": None, "services": ["queue=agent-dispatch"]},
+    }), encoding="utf-8")
+    (store / "collection.lock").write_bytes(b"\0")
+    prior = (datetime.now(timezone.utc) - timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00Z")
+    code = """
+import sys
+from agent_machines import service_reports
+from agent_machines.__main__ import main
+def unconfirmed(*args, **kwargs):
+    raise service_reports.OwnedCleanupError(None)
+service_reports.collect = unconfirmed
+raise SystemExit(main(["health", "collect", "--store-dir", sys.argv[1], "--hour", sys.argv[2]]))
+"""
+    child = subprocess.run(
+        [sys.executable, "-I", "-c", code, str(store), prior],
+        capture_output=True, text=True, timeout=10, **no_window_kwargs(),
+    )
+    assert child.returncode == 2 and not child.stdout
+    assert json.loads(child.stderr)["error"] == "collection-cleanup-unconfirmed"
+    assert (store / "collection.lock").read_bytes() == b"\1"
+    with pytest.raises(health_slots.HealthError, match="collection-cleanup-unconfirmed"):
+        health_collect.collect(store, prior)
+    assert not list(store.glob("[0-9][0-9][0-9].json"))
 
 
 @pytest.mark.parametrize("release", ["normal", "crash"])

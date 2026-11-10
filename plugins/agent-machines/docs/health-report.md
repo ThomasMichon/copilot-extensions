@@ -151,7 +151,8 @@ exclusive unsynchronized store through the local configuration owner with:
 }
 ```
 
-The store also needs a preprovisioned one-byte `collection.lock` regular file.
+The store also needs a preprovisioned one-byte `collection.lock` regular file,
+initially containing a zero byte.
 Preparation is explicit: collection creates neither the directory, policy nor
 lock, and does not migrate an existing v1 store. Select an existing admitted
 loopback Bridge listener by numeric `bridge_port` when wanted; null means do
@@ -179,7 +180,18 @@ Collection holds a nonblocking OS-backed run lock, uses a 45-second admission
 budget and passes the remaining ceiling to existing 30-second/ten-second
 service collection. It reserves response time and refuses on a changed policy,
 clock/hour boundary or expired budget. The native process owner retains cleanup
-custody. Lock, provider and filesystem failures never start a replacement
+custody. Before exporting, collection durably changes the existing lock byte
+to one; confirmed settlement clears it to zero. Unconfirmed native cleanup
+retains both admission locks and registers their release with that exact
+native owner's settlement callback. A failed cleanup retry cannot release them.
+If the CLI exits before settlement, the byte remains a fail-closed fence:
+later invocations refuse `collection-cleanup-unconfirmed` even after the OS
+lock releases. There is no automatic fence reset or recovery command; the
+original native owner must confirm settlement, or an explicit containment
+handoff must reconcile that exact custody before store recovery. File age,
+an exited CLI or a missing PID is not confirmation. Thus collection never writes
+evidence or slots, but can change this existing admission metadata.
+Lock, provider and filesystem failures never start a replacement
 service, change credentials or write a slot. Filesystem stalls defeating the
 budget remain a native qualification failure, not a hard-real-time guarantee.
 
@@ -194,6 +206,9 @@ evidence-free export, even when the response contains a valid contribution
 wrapper. This rule is also enforced for directly supplied record candidates.
 Components without evidence remain unknown; a fresh envelope does not refresh
 their source ages. Supplied input remains unverified, not an attested probe.
+Listener-only recollection replaces only `local_listener`; retained SSH,
+session and other unselected domains keep their exact evidence and source
+timestamps. The record boundary also refuses changes to those domains.
 
 V2 slots have a 768 KiB per-envelope limit and the same 168-name ring. The ring
 accounts for at most 126 MiB; failed writes or unrelated filesystem usage are

@@ -52,6 +52,8 @@ def add_parser(subparsers) -> None:
 
 
 def run_collect(args) -> int:
+    from agent_procutil.owned_process import OwnedCleanupError
+
     from .health_collect import collect
     from .health_slots import HealthError
 
@@ -60,10 +62,13 @@ def run_collect(args) -> int:
         result = collect(args.store_dir, args.hour)
         print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
         return 0
-    except (ValueError, OSError, OverflowError) as error:
+    except (ValueError, OSError, OverflowError, OwnedCleanupError) as error:
         if result is not None and isinstance(error, OSError):
             _silence_failed_stdout()
-        reason = str(error) if isinstance(error, HealthError) else "collection-unavailable"
+        reason = (
+            "collection-cleanup-unconfirmed" if isinstance(error, OwnedCleanupError)
+            else str(error) if isinstance(error, HealthError) else "collection-unavailable"
+        )
         print(json.dumps({
             "ok": False, "error": reason, "applied": False, "carrier_publication": "not-requested",
         }), file=sys.stderr)

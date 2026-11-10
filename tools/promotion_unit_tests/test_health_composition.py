@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import importlib.util
 import io
 import json
@@ -332,6 +333,49 @@ def test_closed_hourly_envelope_retains_service_namespace_and_unknown_health(own
     assert all(hour["state"] == "no-observation" for hour in report["hours"])
 
 
+def test_listener_only_replacement_cannot_change_independent_domain_evidence(owners):
+    modules, _parser = owners
+    slots, hourly = modules["health_slots"], modules["health_hourly"]
+    observation = {
+        "schema": slots.SCHEMA, "version": 1, "publisher": "example-worker",
+        "continuity": "example-generation", "hour": STAMP // slots.HOUR_MS,
+        "revision": 1, "parent": None, "observed_at_ms": STAMP,
+        "domains": {"logical_agents": {
+            "state": "ok", "evidence": "session-owner", "reason": "none",
+            "observed_at_ms": STAMP - 1000, "count": 2,
+        }},
+    }
+    original = hourly.validate_record({
+        "schema": hourly.SCHEMA, "version": 1, "publisher": observation["publisher"],
+        "continuity": observation["continuity"], "hour": observation["hour"],
+        "revision": 1, "parent": None, "observed_at_ms": STAMP,
+        "observation": observation, "services": [],
+        "coverage": {"observation": "retained", "services": "not-requested"},
+    })
+    policy = {"collection": {"bridge_port": 1234, "services": []}}
+    candidate = copy.deepcopy(original)
+    candidate.update(revision=2, parent=1)
+    candidate["coverage"]["observation"] = "collected"
+    candidate["observation"]["domains"]["local_listener"] = {
+        "state": "ok", "evidence": "listener-check", "reason": "none", "observed_at_ms": STAMP,
+    }
+    hourly.validate_replacement(hourly.validate_record(candidate), original, policy)
+    for mutation in ("erased", "refreshed", "defaulted"):
+        forged = copy.deepcopy(candidate)
+        domains = forged["observation"]["domains"]
+        if mutation == "erased":
+            del domains["logical_agents"]
+        elif mutation == "refreshed":
+            domains["logical_agents"]["observed_at_ms"] = STAMP
+        else:
+            domains["logical_agents"] = {
+                "state": "unknown", "evidence": "not-observed", "reason": "not-observed",
+                "observed_at_ms": None, "count": None,
+            }
+        with pytest.raises(slots.HealthError, match="observation-replacement-refused"):
+            hourly.validate_replacement(hourly.validate_record(forged), original, policy)
+
+
 @pytest.mark.parametrize("mutation", ["owner", "hour", "field", "service"])
 def test_hourly_envelope_refuses_mismatched_or_unknown_components(owners, mutation):
     modules, _parser = owners
@@ -368,7 +412,7 @@ def test_explicit_collection_orchestration_keeps_hours_and_parent_budget(owners,
     monkeypatch.setattr(collector, "time", SimpleNamespace(
         monotonic=lambda: 10.0, time_ns=lambda: STAMP * 1_000_000,
     ))
-    monkeypatch.setattr(collector, "admission", lambda store: nullcontext())
+    monkeypatch.setattr(collector, "admission", lambda store: nullcontext(lambda: None))
     monkeypatch.setattr(slots, "_plain", lambda path, **fields: path)
     policy = {
         "schema": slots.POLICY_SCHEMA, "version": 2, "publisher": "example-worker",

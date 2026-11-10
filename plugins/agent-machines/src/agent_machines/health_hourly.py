@@ -136,6 +136,11 @@ def validate_replacement(value: dict, previous: dict | None, policy: dict) -> No
         or value["coverage"]["observation"] != "collected"
     ):
         raise slots.HealthError("hourly-observation-replacement-refused")
+    before_domains = observation["domains"] if observation else {}
+    after_domains = value["observation"]["domains"] if value["observation"] else {}
+    for domain in (before_domains.keys() | after_domains.keys()) - {"local_listener"}:
+        if before_domains.get(domain) != after_domains.get(domain):
+            raise slots.HealthError("hourly-observation-replacement-refused")
     selected = {}
     for request in policy["collection"]["services"]:
         label, separator, service = request.partition("=")
