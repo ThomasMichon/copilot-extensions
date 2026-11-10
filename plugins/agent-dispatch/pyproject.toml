@@ -23,7 +23,7 @@ dependencies = [
     "fastapi>=0.141.1",
     "uvicorn>=0.52.4",
     "httpx>=0.27",
-    "packaging>=25.0",
+    "packaging>=26.3",
     "pyyaml>=6.0.3",
     "agent-zdd",
     "agent-procutil",
