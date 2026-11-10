@@ -260,6 +260,8 @@ def pool_lane_load(
     fresh placements, in the order they asked; ``ahead_of`` counts only the
     waiters before that one. Classification stops once the load reaches
     ``cutoff``, so a saturated pool never classifies its remaining history.
+    A waiter counts only while its reservation is still cold; once its body
+    runs, the reservation itself holds the lane.
     A body asking for its own lane omits only its waking reservation
     (``exclude_key``) and its own waiter entry (``exclude_waiter``); older
     accountable attempts of the same task still count.
@@ -267,11 +269,12 @@ def pool_lane_load(
     waiting = conn.execute(
         "SELECT a.task_id, a.lane_wait_since FROM task_pool_assignments a"
         " JOIN tasks t ON t.id = a.task_id"
+        " JOIN spawn_reservations s ON s.key = a.reservation_key AND s.state = ?"
         " WHERE a.registration_id = ? AND a.machine = ? AND a.env = ?"
         " AND a.assignment_released = 0 AND a.lane_wait_since IS NOT NULL"
         " AND a.recovery_requested_at IS NULL AND t.status = ? AND t.resume_requested = 1"
         " AND t.hold_reason IS NULL AND t.awaiting_steer = 0",
-        (*identity, Status.SUSPENDED),
+        (SpawnState.COLD, *identity, Status.SUSPENDED),
     ).fetchall()
     load = sum(
         1 for row in waiting

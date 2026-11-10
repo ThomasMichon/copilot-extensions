@@ -774,3 +774,83 @@ def test_cold_wake_still_counts_its_tasks_older_accountable_attempt(q: TaskQueue
     with pytest.raises(ExecutionSendUnresolved, match="free lane"):
         prepare_recovery_wake(q, wake)
     assert q.get_reservation(key).state == SpawnState.COLD
+
+
+def test_detached_wake_retaking_a_waiting_reactivations_lane_counts_once(q: TaskQueue) -> None:
+    from agent_dispatch.queue_pool_placement import pool_lane_load
+    publish(q, pool(capacity=2))
+    task_id, key = _suspend_placed(q, "native-a")
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/wt-native-a", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    other, _ = place(q, task(q))
+    q.resume(task_id, "host-a/wt-native-a", wake_requested=True, now=103)
+    assert q.pool_startup(task_id).recovery_requested_at is None  # waiting for a lane
+    _cold(q, other.key)
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    [wake] = q.list_run_waiter_wakes(task_id)
+    prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.SPAWNED
+    with q._connect() as conn:
+        # Keep the waiting entry as an unresolved send would, so counting alone is checked.
+        conn.execute("UPDATE task_pool_assignments SET lane_wait_since=103 WHERE task_id=?", (task_id,))
+        identity = tuple(conn.execute(
+            "SELECT registration_id, machine, env FROM pool_reservation_bindings WHERE reservation_key=?",
+            (key,),
+        ).fetchone())
+        assert pool_lane_load(conn, identity) == 2
+    _cold(q, running.key)
+    place(q, task(q))
+
+
+def test_lane_blocked_wake_does_not_starve_a_runnable_wake(q: TaskQueue) -> None:
+    import asyncio
+
+    from agent_dispatch.run_waiter_wake import drain_run_waiter_wakes
+    publish(q, pool())
+    blocked_id, blocked_key = _suspend_placed(q, "native-a")
+    blocked_waiter = q.register_run_waiter(
+        blocked_id, pid=123, host="host-a", start_token="waiter-a",
+        resume_worktree="host-a/wt-native-a", command=["synthetic-wait"],
+    )
+    _cold(q, blocked_key)
+    runnable_id, _ = _suspend_placed(q, "native-b")
+    runnable_waiter = q.register_run_waiter(
+        runnable_id, pid=124, host="host-a", start_token="waiter-b",
+        resume_worktree="host-a/wt-native-b", command=["synthetic-wait"],
+    )
+    for task_id, waiter in ((blocked_id, blocked_waiter), (runnable_id, runnable_waiter)):
+        q.recover_dead_run_waiter(
+            task_id, generation=waiter["generation"], reason="external",
+            message="continue", sender="recovery",
+        )
+    [blocked] = q.list_run_waiter_wakes(blocked_id)
+    with q._connect() as conn:
+        conn.execute("UPDATE run_waiter_wakes SET created_at=50 WHERE id=?", (blocked.id,))
+    delivered = []
+
+    async def scenario() -> None:
+        loop = asyncio.create_task(drain_run_waiter_wakes(
+            q, interval=0.01, deliver=lambda _o, task_id, *_a: delivered.append(task_id) or True,
+        ))
+        try:
+            for _ in range(200):
+                if delivered:
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            loop.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop
+
+    asyncio.run(scenario())
+    assert delivered == [runnable_id]
+    [blocked] = q.list_run_waiter_wakes(blocked_id)
+    assert blocked.status == "pending" and blocked.attempts == 0 and blocked.not_before > 100
+    assert q.get_reservation(blocked_key).state == SpawnState.COLD

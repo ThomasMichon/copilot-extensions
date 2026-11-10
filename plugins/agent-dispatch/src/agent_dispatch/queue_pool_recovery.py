@@ -296,7 +296,7 @@ def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
     The refusal is send-unresolved, so wake drains defer without spending an
     attempt and the legacy resume route retries later.
     """
-    from .queue_execution_custody import ExecutionSendUnresolved
+    from .queue_execution_custody import PoolLaneUnavailable
     from .queue_pool_placement import pool_lane_load
     catalog = getattr(owner, "_pool_catalog_from_conn", None)
     if row["state"] != SpawnState.COLD or catalog is None:
@@ -325,7 +325,7 @@ def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
             exclude_key=row["key"], exclude_waiter=row["task_id"],
         )
     if load >= pool.max_concurrent:
-        raise ExecutionSendUnresolved("cold pool body is waiting for a free lane")
+        raise PoolLaneUnavailable("cold pool body is waiting for a free lane")
 
 
 def _admit_cold_wake(owner: Any, wake: Any) -> None:
@@ -356,6 +356,13 @@ def _admit_cold_wake(owner: Any, wake: Any) -> None:
         worktree=reservation["worktree"], startup_complete=True,
         startup_revision=reservation["startup_revision"],
     )
+    if assignment is not None:
+        # The body re-took its lane; a queued reactivation no longer waits for one.
+        with owner._connect() as conn:
+            conn.execute(
+                "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL"
+                " WHERE reservation_key=? AND lane_wait_since IS NOT NULL", (reservation["key"],),
+            )
 
 
 def prepare_recovery_wake(owner: Any, wake: Any) -> None:

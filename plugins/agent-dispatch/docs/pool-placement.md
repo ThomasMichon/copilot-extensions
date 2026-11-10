@@ -50,12 +50,16 @@ until its reactivation is in flight or a wake send to it is unresolved. Any
 other restart of a cold body bound to a pool (a detached-run completion wake,
 or the legacy supervisor resume of an adopted body) reacquires a lane in its
 immutable binding's pool inside the same write transaction, and is deferred,
-without spending an attempt, while that pool is full. The admission check
+without spending an attempt, while that pool is full. A deferred wake is
+rescheduled after the drain's retry delay, so later wakes (including ones for
+pools with free lanes) are delivered in the meantime. The admission check
 excludes only the waking reservation and the task's own waiter entry; older
 accountable attempts of the same task still count. Load counting stops once it reaches the pool's
 capacity, so a saturated pool does not classify its remaining history. A suspended task whose resume finds its
 pool full waits (`lane_wait_since`) instead of over-subscribing; waiting
-reactivations count against the pool, so they take freed lanes before fresh
+reactivations count against the pool only while their body is still cold (a
+wake that re-takes the lane clears the wait, and the body is then counted once
+as a reservation), so they take freed lanes before fresh
 placements, and they start in request order when recovery reconciliation
 finds a free lane. A body that never parked keeps its own lane and resumes
 without waiting. Immutable per-reservation pool bindings

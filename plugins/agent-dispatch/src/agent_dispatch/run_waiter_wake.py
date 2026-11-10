@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from .queue import TaskError, TaskQueue
 from .coordinator_execution_wakes import deliver_execution_wake
-from .queue_execution_custody import ExecutionSendUnresolved
+from .queue_execution_custody import ExecutionSendUnresolved, PoolLaneUnavailable
 from .queue_run_waiter_transition_cleanup import CLAIM_RELEASE_SENDER
 
 DeliverWake = Callable[[str, str, str, str, str, str | None], bool]
@@ -96,7 +96,10 @@ async def drain_run_waiter_wakes(
         except ExecutionSendUnresolved as exc:
             log.info("run-waiter wake transport deferred for %s: %s", wake.id, exc)
             try:
-                await asyncio.to_thread(queue.defer_execution_wake, wake, detail=str(exc))
+                await asyncio.to_thread(
+                    queue.defer_execution_wake, wake, detail=str(exc),
+                    retry_after=retry_base if isinstance(exc, PoolLaneUnavailable) else None,
+                )
             except TaskError:
                 log.info("run-waiter wake delivery ownership changed for %s", wake.id)
             continue
