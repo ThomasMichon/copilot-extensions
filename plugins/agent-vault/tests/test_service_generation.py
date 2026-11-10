@@ -48,7 +48,7 @@ def test_direct_generation_start_applies_listener_default_before_binding(
     controller = generation.ServiceGeneration(SimpleNamespace(), SimpleNamespace(), [], [])
 
     def stop_before_binding() -> None:
-        raise AlreadyRunningError("synthetic generation; no endpoint may be opened")
+        raise AlreadyRunningError("synthetic generation; no endpoint may be opened", holder_pid=123)
 
     controller.generation_lease = SimpleNamespace(acquire=stop_before_binding)
     asyncio.run(controller.start(explicit))
