@@ -59,6 +59,13 @@ def _normalized_repository_remote(project: str) -> str:
         raise ValueError(f"repository {project!r} is not registered")
     if not isinstance(entry.remote, str):
         raise ValueError(f"repository {project!r} has no usable remote")
+    if not entry.remote.strip():
+        path = entry.local_path()
+        if not path or not Path(path).is_absolute():
+            raise ValueError(
+                f"remote-free repository {project!r} requires an absolute registered path"
+            )
+        return _normalize_repository_remote(project, path)
     return _normalize_repository_remote(project, entry.remote)
 
 
@@ -106,7 +113,7 @@ def _repository_id(normalized: str) -> str:
 def canonical_repository_id(
     project: str, *, remote: str | None = None, portable: bool = False,
 ) -> str:
-    """Read the native identity without enrolling namespaced project state."""
+    """Read remote or registered local identity without enrolling project state."""
     normalized = (
         _normalized_repository_remote(project) if remote is None
         else _normalize_repository_remote(project, remote)

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve local configuration identity for registered remote-free repositories without enabling portable identity.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

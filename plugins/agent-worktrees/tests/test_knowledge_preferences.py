@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 import sysconfig
 from types import SimpleNamespace
@@ -100,6 +102,72 @@ def test_native_identity_codec_is_shared_by_legacy_context_and_namespaced_identi
     assert project_state._identity("first").repository_id == native.ids["first"]
     assert project_state.canonical_repository_id("first", remote="git@github.com:EXAMPLE/FIRST.git") == native.ids["first"]
     assert not (native.root / "cell").exists()
+
+
+def test_remote_free_context_uses_registered_path_without_portable_identity(native, monkeypatch):
+    from agent_worktrees import config_sources
+
+    before = {}
+    for name in ("first", "second"):
+        mutate(native, name, remote="")
+        before[name] = project_state.canonical_repository_id(name)
+    config = preferences.cfg.Config(
+        srcroot=str(native.root), repo_name="first", machine="example-worker",
+        platform=repos._current_platform(),
+        repos={"first": preferences.cfg.RepoConfig(
+            anchor=native.entries["first"][repos._current_platform()],
+            worktree_root=str(native.root / "trees"),
+        )},
+    )
+    registry_bytes = native.registry.read_bytes()
+    assert before["first"] != before["second"]
+    assert config_sources.configuration_context(config)["repository_id"] == before["first"]
+    rows = {row["repository"]: row for row in preferences.identities()["entries"]}
+    assert rows["first"]["repository_id"] is None
+    assert rows["first"]["status"] == "local-only"
+    with pytest.raises(ValueError, match="not portable"):
+        project_state.canonical_repository_id("first", portable=True)
+    monkeypatch.setattr(project_state.registry_paths, "installation_context", lambda: {
+        "cellRoot": str(native.root / "cell"), "marketplaceId": "example-marketplace",
+    })
+    assert project_state._identity("first").repository_id == before["first"]
+    assert native.registry.read_bytes() == registry_bytes
+    assert not (native.root / "cell").exists()
+
+
+@pytest.mark.parametrize("path", ["", "relative-checkout"])
+def test_remote_free_identity_requires_an_absolute_registered_path(native, path):
+    mutate(native, "first", remote="", **{repos._current_platform(): path})
+    with pytest.raises(ValueError, match="path"):
+        project_state.canonical_repository_id("first")
+
+
+def test_native_remote_free_configuration_context_reaches_the_shared_consumer(native):
+    from configuration_context import read_owner_context
+
+    root = Path(native.entries["first"][repos._current_platform()])
+    subprocess.run(
+        ["git", "init", "--quiet", "--initial-branch=main", str(root)],
+        check=True, capture_output=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    mutate(native, "first", remote="")
+    before = native.registry.read_bytes()
+    report = read_owner_context(
+        [sys.executable, "-m", "agent_worktrees", "-p", "first"],
+        root, required=True,
+    )
+    context = report["context"]
+    assert context["repository_id"] == project_state.canonical_repository_id("first")
+    assert Path(context["base_root"]) == root
+    assert context["binding"] == "unbound"
+    assert native.registry.read_bytes() == before
+    remotes = subprocess.run(
+        ["git", "-C", str(root), "remote"], check=True,
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert not remotes.stdout.strip()
 
 
 @pytest.mark.parametrize("kind", ["missing", "ambiguous", "unavailable", "reference", "local-only"])
