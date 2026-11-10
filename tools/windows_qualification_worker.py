@@ -371,6 +371,7 @@ def main() -> int:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
             stream.write("source_sha=" + value["source_sha"] + "\n")
             stream.write("packet=" + value["selection"].get("name", "") + "\n")
+            stream.write("native=" + str(value["selection"].get("name") in NATIVE_PACKETS).lower() + "\n")
         return 0
     if args.operation == "tools":
         candidate = args.candidate.resolve()

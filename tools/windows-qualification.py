@@ -130,7 +130,7 @@ class Client:
             ] if selected["name"] == "native-worktrees-embody" else [
                 "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
                 "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
-            ] if selected["name"] == "native-driver-auth-wait" else [
+            ] if selected["name"] in {"native-driver-auth-wait", "native-driver-inflight"} else [
                 "tools/capture_bridge_http52.py", "tools/check-agent-bridge-contracts.py",
                 "tools/bridge_http52_artifact.py",
             ]

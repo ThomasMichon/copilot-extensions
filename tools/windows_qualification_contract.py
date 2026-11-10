@@ -20,6 +20,10 @@ NATIVE_PACKETS = {
         "agent-remote-driver", "test_native_headed_auth_wait",
         "test_opt_in_receiver_auth_wait_and_same_session_resume", "native-driver-auth-wait",
     ),
+    "native-driver-inflight": (
+        "agent-remote-driver", "test_native_headed_auth_wait",
+        "test_opt_in_receiver_inflight_expiry_preserves_hold", "native-driver-inflight",
+    ),
 }
 PACKETS = ("bridge-http52", *NATIVE_PACKETS)
 NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.3.8"}
