@@ -1,0 +1,9 @@
+{
+  "comment": "Retain bounded history-versus-rendering evidence for failed installed lifecycle turns without changing acceptance.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

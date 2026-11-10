@@ -1268,6 +1268,36 @@ authorize caller-side git/session/mux reconstruction. The Manager explicitly
 requires `--current`, and incompatible engines report an upgrade error rather
 than dropping that requirement.
 
+`list --json --current --worktree-id <id> --refresh` explicitly asks the
+resident producer to reconcile that record's session registry and bound/mux
+liveness, then waits for its own successful publication barrier. The running
+resident must advertise `worktrees-refresh-v1`; an older resident refuses this
+optional operation without disabling ordinary reads. Success includes a
+`point_refresh` request/generation/revision receipt bound to the reconciled
+`worktree_id`, `creation_nonce` and `path`. Refresh resolves the same status,
+platform, checkout and ID/suffix selection as the response. No readable match,
+an incomplete observation, malformed session-registry metadata, or a returned
+identity differing from the receipt refuses success. Strict Refresh checks raw
+registry structure and session identities before permissive legacy parsing can
+discard or coerce them. Unindexed discovery also requires an absolute selected
+checkout path so unmatched metadata cannot be mistaken for an empty registry.
+Workspace matching honors Windows case/separator semantics and path-component
+boundaries, while POSIX paths remain case-sensitive. A record that becomes
+malformed after selection or during observation terminates only its Refresh
+request without a receipt; ordinary roster publication continues.
+Legacy records without a creation nonce use the same absent identity in the
+receipt and published row; Refresh does not fabricate a nonce to match them.
+Backfilling a legacy registry advances its canonical lifecycle revision so an
+older full-record save cannot erase the discovered Resume target. Strict Refresh
+also refuses if that revision changes during observation.
+Legacy initialization rereads the record under its canonical lock, preserves a
+concurrent initializer's registry, and refuses a replaced incarnation before
+writing or stamping liveness.
+Reusing a request ID with different filters also refuses.
+It never falls back to caller-side scans or saved rows and cannot be combined
+with `--follow` or `--passive`. `--fresh` alone is still a publication read,
+not this explicit reconciliation.
+
 An installed tmux binary with no running server is a healthy empty session
 inventory, not a failed probe. Its recognized no-server responses do not block
 current-roster publication or make session liveness unknown by themselves.

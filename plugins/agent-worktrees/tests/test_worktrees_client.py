@@ -19,6 +19,8 @@ from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import worktrees_client as client
 from agent_worktrees import worktrees_projection as projection
 from agent_worktrees import worktrees_runtime as runtime
+from agent_worktrees.worktrees_projection_index import Selection
+from agent_worktrees.worktrees_refresh import record_identity
 
 
 def test_fresh_current_dispatch_cannot_acknowledge_bridge_live_refresh(
@@ -106,6 +108,128 @@ def test_semantic_archive_from_older_selection_is_refused_without_recompute(
                 client.validate_result(result, payload)
     finally:
         store.close()
+
+
+def test_explicit_refresh_crosses_authenticated_resident_and_waits_for_its_publication(
+    tmp_path, monkeypatch, capfd, no_caller_compute,
+):
+    wake = threading.Event()
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3", wake=wake)
+    owner.activate()
+    owner.publish("project", [{"id": "one", "session_bound_live": True}], observed_at=1)
+    wake.clear()
+    server = control.ControlServer(
+        lambda action, payload: owner.health() if action == "health" else owner.handle(payload),
+        token="fixture-token",
+    )
+    server.start()
+    connection = control.ControlClient(f"http://127.0.0.1:{server.port}", token="fixture-token")
+    monkeypatch.setattr(client, "_control_client", lambda: connection)
+    monkeypatch.setattr(client.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **kw: None)
+    errors = []
+
+    def produce():
+        try:
+            assert wake.wait(3)
+            pending = owner.refreshes.pending("project")
+            assert len(pending) == 1 and pending[0][1] == Selection(worktree_id="one")
+            owner.publish(
+                "project", [{"id": "one"}], observed_at=2,
+                refresh_requests=[(pending[0][0], record_identity({"id": "one"}))],
+            )
+        except BaseException as error:
+            errors.append(error)
+            owner.close_admission("closed")
+
+    worker = threading.Thread(target=produce, daemon=True)
+    worker.start()
+    try:
+        assert client.emit_current(argparse.Namespace(
+            json=True, current=True, refresh=True, worktree_id="one",
+            tracking_status="all", all=True, include_other_platforms=True,
+        )) == 0
+        result = json.loads(capfd.readouterr().out)
+        assert result["worktrees"] == [{"id": "one"}]
+        assert result["point_refresh"]["revision"] == result["projection"]["revision"] == 2
+        worker.join(3)
+        assert not worker.is_alive() and not errors
+    finally:
+        server.close()
+        owner.shutdown()
+
+
+def test_explicit_refresh_refuses_an_old_resident_before_demand_or_reconciliation(
+    monkeypatch, capfd, no_caller_compute,
+):
+    monkeypatch.setattr(client, "read_health", lambda: {"capabilities": [runtime.CAPABILITY]})
+    monkeypatch.setattr(client.cfg, "project_name", lambda: "project")
+    monkeypatch.setattr(list_cli.list_cache, "note_demand", lambda *a, **kw: pytest.fail("demand"))
+    monkeypatch.setattr(client, "read_current", lambda *a, **kw: pytest.fail("unnegotiated refresh"))
+    assert client.emit_current(argparse.Namespace(
+        refresh=True, worktree_id="one", tracking_status="all",
+    )) == 1
+    assert "worktrees-refresh-v1" in json.loads(capfd.readouterr().out)["error"]
+
+
+def test_unavailable_point_refresh_returns_its_terminal_failure_without_repeating_work(
+    tmp_path, monkeypatch, no_caller_compute,
+):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32)
+    owner.handle(query)
+    owner.refreshes.reject("a" * 32, "process observation unavailable", code="refresh-unavailable")
+    monkeypatch.setattr(
+        client, "_control_client",
+        lambda: SimpleNamespace(worktrees_read=lambda payload: owner.handle(payload)),
+    )
+    monkeypatch.setattr(client.time, "sleep", lambda _: pytest.fail("retried a failed refresh"))
+    try:
+        with pytest.raises(projection.ProjectionUnavailable, match="refresh-unavailable"):
+            client.read_current(query, wait=True)
+        assert owner.refreshes.pending("project") == ()
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("changed", [
+    "missing", "id", "generation", "revision", "unpublished",
+    "record", "incarnation", "path", "empty",
+])
+def test_refresh_result_requires_its_own_same_generation_publication_receipt(tmp_path, changed):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32)
+    try:
+        owner.handle(query)
+        row = {"id": "one", "creation_nonce": "first", "path": "checkout"}
+        owner.publish(
+            "project", [row], observed_at=1,
+            refresh_requests=[(query["refresh_id"], record_identity(row))],
+        )
+        result = owner.handle(query)
+        assert client.validate_result(result, query) is result
+        if changed == "missing":
+            result.pop("point_refresh")
+        elif changed == "empty":
+            result["worktrees"] = []
+            result["projection"]["selected_count"] = 0
+        else:
+            key, value = {
+                "id": ("request_id", "b" * 32),
+                "generation": ("generation", "b" * 32),
+                "revision": ("revision", True),
+                "unpublished": ("revision", result["projection"]["revision"] + 1),
+                "record": ("worktree_id", "two-one"),
+                "incarnation": ("creation_nonce", "second"),
+                "path": ("path", "other-checkout"),
+            }[changed]
+            result["point_refresh"] = {**result["point_refresh"], key: value}
+        with pytest.raises(projection.ProjectionUnavailable, match="requested point refresh"):
+            client.validate_result(result, query)
+    finally:
+        owner.shutdown()
 
 
 def test_waiting_read_starts_once_and_waits_past_old_recovery_budget(
@@ -286,7 +410,7 @@ def test_json_list_waits_for_real_cold_resident_publication(
     )
     try:
         assert list_cli.cmd_list(args) == 0
-        assert published.is_set()
+        assert published.wait(1)
         assert starts == [1]
         raw = capfd.readouterr().out
         frames = [json.loads(line) for line in raw.splitlines()] if stream else [json.loads(raw)]
@@ -845,6 +969,9 @@ def test_worktrees_current_cli_routes_all_read_modes_before_record_resolution(
     shape,
     explicit_current,
 ):
+    from agent_worktrees.worktrees_refresh import CAPABILITY
+
+    monkeypatch.setattr(client, "read_health", lambda: {"capabilities": [CAPABILITY]})
     monkeypatch.setattr(
         client,
         "read_current",

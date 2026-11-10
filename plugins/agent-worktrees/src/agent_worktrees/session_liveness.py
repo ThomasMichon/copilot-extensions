@@ -38,6 +38,14 @@ def copilot_pid_state(pid: int) -> bool | None:
         if not handle:
             return False if ctypes.get_last_error() == _ERROR_INVALID_PARAMETER else None
         try:
+            query_exit = kernel32.GetExitCodeProcess
+            query_exit.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+            query_exit.restype = wintypes.BOOL
+            code = wintypes.DWORD()
+            if not query_exit(handle, ctypes.byref(code)):
+                return None
+            if code.value != 259:  # STILL_ACTIVE
+                return False
             buf = ctypes.create_unicode_buffer(1024)
             size = wintypes.DWORD(len(buf))
             if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):

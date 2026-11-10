@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import platform
+import os
+import re
 from collections.abc import Iterable
 
 from . import locks, process_table_cache, sessions, tracking
@@ -15,6 +17,7 @@ def resolve_bound_copilots(
     worktree_path: str | None = None,
     table: dict[int, dict] | None = None,
     session_ids: Iterable[str] | None = None,
+    strict: bool = False,
 ) -> list[dict]:
     """Resolve lock-backed live Copilots and their mux/bare/unknown homing.
 
@@ -27,11 +30,13 @@ def resolve_bound_copilots(
     """
     from . import reclaim
 
+    if strict and session_ids is None:
+        raise ValueError("Strict binding observation requires registered session IDs")
     if session_ids is None and table is None:
         table = process_table_cache.cached(reclaim.build_process_table)
     state_dir = sessions._session_state_dir()
     results: list[dict] = []
-    if not state_dir.exists():
+    if not strict and not state_dir.exists():
         return results
     if session_ids is None:
         entries = sorted(state_dir.iterdir())
@@ -49,16 +54,38 @@ def resolve_bound_copilots(
     pane_ttys: list = [None]
 
     for entry in entries:
-        if not entry.is_dir():
+        if not strict and not entry.is_dir():
             continue
         sid = entry.name
         if session_id and not (sid == session_id or sid.startswith(session_id)):
             continue
-        live_pids = [
-            pid for pid in reclaim._lock_pids(entry)
-            if sessions._is_process_alive(pid)
-            and sessions._is_copilot_process(pid)
-        ]
+        if strict:
+            from . import session_liveness
+            from .push_timeout import ObservationUnavailable
+
+            try:
+                with os.scandir(entry) as lock_entries:
+                    names = [item.name for item in lock_entries
+                             if item.name.startswith("inuse.") and item.name.endswith(".lock")]
+            except OSError as error:
+                raise ObservationUnavailable("Registered session locks could not be observed") from error
+            live_pids = []
+            for name in names:
+                match = re.fullmatch(r"inuse\.(\d+)\.lock", name)
+                if match is None or int(match[1]) <= 0:
+                    raise ObservationUnavailable("Registered session has an unrecognized lock")
+                pid = int(match[1])
+                state = session_liveness.copilot_pid_state(pid)
+                if state is None:
+                    raise ObservationUnavailable("Registered session process observation is unavailable")
+                if state is True:
+                    live_pids.append(pid)
+        else:
+            live_pids = [
+                pid for pid in reclaim._lock_pids(entry)
+                if sessions._is_process_alive(pid)
+                and sessions._is_copilot_process(pid)
+            ]
         if not live_pids or sessions._is_detached_session(entry):
             continue
         cwd = reclaim._session_cwd(entry)

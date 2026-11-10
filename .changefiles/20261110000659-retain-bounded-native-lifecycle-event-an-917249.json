@@ -1,0 +1,9 @@
+{
+  "comment": "Retain bounded native lifecycle event and inference request counts on failure",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
