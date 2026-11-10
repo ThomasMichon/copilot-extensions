@@ -91,6 +91,10 @@ retained resources. Source completion does not claim installed recovery.
 - [ ] Land the bounded correction after passing review and required CI.
 - [ ] Record source results and any separately owned operational acceptance; archive this effort only after every item is resolved or transferred to a named tracker.
 
+### Phase 5 - Reopen without replaying an uncertain prompt
+- [x] Let ordinary Open preserve an unconfirmed prompt handoff without submitting it again; retain explicit-delivery refusal and final intent revalidation.
+- [ ] Validate both planning surfaces and the real admission-only preparation boundary, then land through review and required CI.
+
 ## Validation Plan
 
 - [ ] Prove the payload digest remains content-sensitive and deterministic, and linked/reparse/nonregular/oversized inputs still refuse.
@@ -125,6 +129,28 @@ current/prior providers retain the same required observation contract. Runtime
 replacement and rollout remain with their existing owners.
 
 ## Journal
+
+### 2026-11-09 - Ordinary Open and retained prompt custody
+- A subsequent report shows ordinary Open refusing because a prior creation
+  prompt handoff is unconfirmed. Metadata confirms retained typed intent;
+  no prompt content, liveness probe, live launch or replay is needed to diagnose
+  the planner's unconditional refusal.
+- Reuse the existing admission-only path with the retained seed identity.
+  Opening must not claim, finish, restore, discard or resubmit that prompt.
+  Explicit delivery remains refused and a changed identity before execution
+  remains blocking. This is a targeted routing correction, not new launch syntax,
+  wire generation, receipt authority or replay permission.
+- The readiness-only correction remains separately reviewed in #11782; its
+  required-check recognition blocker does not authorize bypass or rollout.
+- Both planning/preview files completed 140 assertions with one platform skip.
+  The local Windows ARM64 wrapper then failed deleting a copied x64 fixture
+  interpreter (WinError 5), matching the failure class tracked in #7643. This
+  is not a green whole-run result or an identification of the current lock
+  owner. Preserve the runner's retained artifacts and obtain disposable native
+  Windows qualification; do not alter host services to clear the mapping.
+- Ruff F/E9 and the install contract pass. No installation or first-provision
+  behavior changed; fresh native caller fixtures cover the existing admission
+  boundary rather than a new installer clean-room scenario.
 
 ### 2026-11-09 - Native scope review corrections
 - Review identified creation-namespace drift and a scrubbed teammate flag that

@@ -7,6 +7,21 @@ from . import launch_admission, launch_seed_state
 from pathlib import Path
 
 
+RETAINED_HANDOFF_WARNING = (
+    "Previous launch-prompt handoff is unconfirmed; opening without submitting "
+    "it again. The prompt remains retained."
+)
+
+
+def preserve_unconfirmed_seed(args, seed: launch_seed_state.LaunchSeed | None) -> bool:
+    return bool(
+        seed is not None and seed.handoff_id
+        and not getattr(args, "seed", None)
+        and not getattr(args, "seed_id", None)
+        and not getattr(args, "stage_launch_seed", False)
+    )
+
+
 def seed_for_attempt(
     path: Path, record, args, *, verdict: LiveVerdict | None = None,
 ) -> launch_seed_state.LaunchSeed | None:

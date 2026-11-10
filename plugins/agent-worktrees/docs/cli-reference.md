@@ -1471,6 +1471,20 @@ completion of those exact children. Older bundles still support exact source
 references; an alias-only retry without either the source ledger or durable
 proof fails explicitly rather than guessing equivalence.
 
+## Opening with a retained prompt handoff
+
+Ordinary Open (`resolve --worktree-id <id>`, without prompt text, `--seed-id`
+or `--stage-launch-seed`) can reopen a confirmed stopped worktree whose previous
+prompt handoff is unconfirmed. It warns and preserves the prompt and handoff
+unchanged, using admission-only execution rather than submitting that prompt
+again. Existing history selection is unchanged.
+
+Explicit delivery of that retained prompt still refuses. A changed staged
+identity between planning and execution also refuses rather than consuming the
+new intent. Opening the worktree is not a delivery receipt or permission to
+discard, restore or replay the retained prompt; reconcile its original handoff
+separately. Liveness, hosting and execution admission checks remain in force.
+
 ## Resolve previews
 
 `resolve --dry-run --worktree-id <id>` is read-only, including with `--json`

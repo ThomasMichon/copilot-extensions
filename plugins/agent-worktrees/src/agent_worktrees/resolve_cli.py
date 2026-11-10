@@ -16,7 +16,10 @@ from . import codename_tracking, config as cfg
 from . import machine_identity as machine_identity
 from .launch_trace import append_launch_event
 from .execution_spaces import ExecutionSpaceError, registry_for_config
-from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
+from .resume_seed import (
+    RETAINED_HANDOFF_WARNING, cold_start_error, plain_live_open,
+    preserve_unconfirmed_seed, seed_for_attempt,
+)
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
 from .launch_progress import preview_mode, step
@@ -805,15 +808,18 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         verdict = sessions.verify_worktree_active(record)
     if staged_seed is not None and plain_live_open(state.args, verdict):
         staged_seed = None
+    retain_seed = preserve_unconfirmed_seed(state.args, staged_seed)
     if staged_seed is not None and not getattr(state.args, "bare_resume", False):
         seed_error = cold_start_error(verdict, staged_seed.kind)
         if seed_error:
             return output._json_error(seed_error, exit_code=3)
-        if staged_seed.handoff_id:
+        if staged_seed.handoff_id and not retain_seed:
             return output._json_error(
                 "Previous launch-prompt handoff is unconfirmed; the seed is retained "
                 "but will not be automatically submitted twice.", exit_code=3,
             )
+    if retain_seed:
+        print(RETAINED_HANDOFF_WARNING, file=sys.stderr)
     if not getattr(state.args, "dry_run", False):
         try:
             with step("Recording worktree resume", worktree_id=worktree_id), tracking._RecordLock(
@@ -884,7 +890,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     elif not no_resume:
         _emit_parent_context_hint(record, to_stderr=True)
 
-    seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
+    seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False) and not retain_seed)
     env["WORKTREE_NO_PROVISION"] = "0" if getattr(state.args, "first_launch", False) else "1"
     if native_resume and (seed_pending or not no_resume):
         return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)

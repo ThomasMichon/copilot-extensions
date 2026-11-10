@@ -962,3 +962,90 @@ def test_positive_live_open_keeps_staged_prompt_despite_secondary_probe_failure(
     assert not plan["seed_pending"] and "--admission-only" in plan["cmd"]
     assert plan["cmd"][-2:] == ["--", "copilot"]
     assert launch_seed_state.peek(record.yaml_path) == saved
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("kind", ["new", "resume"])
+def test_plain_open_preserves_unconfirmed_handoff_without_resubmitting(
+    tmp_path, monkeypatch, capfd, surface, kind,
+):
+    from agent_worktrees import launch_seed_exec
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind=kind, text="must not replay")
+    receipt = launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    retained = launch_seed_state.peek(record.yaml_path)
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface=surface,
+        command=["copilot", "--resume=saved-session"],
+    )
+    assert code == 0 and not plan["seed_pending"]
+    assert "--admission-only" in plan["cmd"]
+    assert plan["cmd"][plan["cmd"].index("--preserve-seed-id") + 1] == seed.seed_id
+    assert seed.text not in plan["cmd"] and "--interactive" not in plan["cmd"]
+    for name in ("take", "finish", "restore"):
+        monkeypatch.setattr(
+            launch_seed_state, name,
+            lambda *a, **k: pytest.fail("plain Open must not settle or replay a retained prompt"),
+        )
+    prepared = launch_seed_exec._prepare(
+        record.yaml_path, ["copilot", "--resume=saved-session"],
+        invoke=False, seed_id=None, admission_only=True, preserve_seed_id=seed.seed_id,
+    )
+    assert isinstance(prepared, launch_seed_exec.PreparedLaunch)
+    assert prepared.argv == ["copilot", "--resume=saved-session"] and prepared.receipt is None
+    assert launch_seed_state.peek(record.yaml_path) == retained
+    assert retained.handoff_id == receipt["seed"]["handoff_id"]
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("selection", ["seed_id", "stage_launch_seed"])
+def test_explicit_delivery_still_refuses_unconfirmed_handoff(
+    tmp_path, monkeypatch, capfd, surface, selection,
+):
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    retained = launch_seed_state.peek(record.yaml_path)
+    options = {selection: seed.seed_id if selection == "seed_id" else True}
+    code, plan = _resume_plan(config, record, monkeypatch, capfd, surface=surface, **options)
+    assert code == 3 and "handoff is unconfirmed" in plan["error"]
+    assert launch_seed_state.peek(record.yaml_path) == retained
+
+
+def test_plain_open_retained_handoff_still_revalidates_seed_identity(
+    tmp_path, monkeypatch, capfd,
+):
+    from agent_worktrees import launch_seed_exec
+
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    assert resolve_cli.cmd_resolve(_args()) == 0
+    captured = capfd.readouterr()
+    assert "opening without submitting it again" in captured.err
+    assert "must not replay" not in captured.err
+    newer = launch_seed_state.stage(record.yaml_path, kind="resume", text="newer intent")
+    assert launch_seed_exec._prepare(
+        record.yaml_path, ["copilot"], invoke=False, seed_id=None,
+        admission_only=True, preserve_seed_id=seed.seed_id,
+    ) == 3
+    assert launch_seed_state.peek(record.yaml_path) == newer
