@@ -22,6 +22,7 @@ native Task session, a Bridge peer, or an `agent-dispatch` task/recipe.
 | Fleet maintainer ("maintain-and-update-fleet") | [`maintain-agent-fleet`](skills/maintain-agent-fleet/SKILL.md) | [charter](skills/maintain-agent-fleet/assets/CHARTER.md) | Worktree-owned release observation, separately authorized per-machine updates and original-session recovery through existing owners; no permanent anchor chat |
 | Sustained PR reviewer | [`review-pull-requests`](skills/review-pull-requests/SKILL.md) | [charter](skills/review-pull-requests/assets/CHARTER.md) | Independent review lanes with a work-conserving concurrency target, retained per-PR context, repository-specific verdict/merge policy and existing agent-to-agent communication |
 | Persistent issue triager | [`triage-issue-backlog`](skills/triage-issue-backlog/SKILL.md) | [charter](skills/triage-issue-backlog/assets/CHARTER.md) | Selected GitHub/ADO backlog and filter, durable harness/knowledge addenda, bounded read-only research, one publisher, evidence acceptance and change-driven revisits |
+| Finite backlog consolidator | [`consolidate-issue-backlog`](skills/consolidate-issue-backlog/SKILL.md) | [charter](skills/consolidate-issue-backlog/assets/CHARTER.md) | Duplicate/overlap cohorts, complete canonical receiving, evidenced dispositions and a whole-queue or selected-cohort target with retained ownership |
 | Topology dispatcher | [`managing-agent-topology`](skills/managing-agent-topology/SKILL.md) | [charter](skills/managing-agent-topology/assets/CHARTER.md) | Durable complete assignments, native worktree/current-head routing, eligible placement, temporary work separation and qualified minimum role coverage |
 
 A static [progress instruction](instructions/progress.instructions.md) gives
@@ -39,6 +40,7 @@ parent return before a detour, and deliver once the actual gates pass.
 | "Set up sustained PR attention with three lanes" | A filled reviewer charter, qualified adapter/policy table, complete census and lane assignment through existing owners |
 | "Run the persistent issue triager role for example/project" | Resolved target/filter, durable triager charter and applicable rubric/addenda; continuous assessment through existing adapters, with writes only under an original grant |
 | "Run the persistent issue-triager role for Example Controls ADO backlog, Widget issues only" | Exact provider-supported organization/project/query/filter selection or one focused scope question; no broadened intake or inferred write permission |
+| "Consolidate an issue backlog to this finite target, read-only first" | Explicit target/filter and counting rule, qualified census, requirement-preserving receiver proposals and retained gaps; no closure without original effect authority |
 | "Act as topology dispatcher for these machines and roles" | Private assignment map and complete charters; native allocation/Bridge launch only under original effect authority, same-owner follow-ups and evidence-based coverage |
 | "Assign a fleet maintainer role" / "maintain-and-update-fleet" | Durable worktree charter, bounded release/health census and rollout/recovery plan; read-only unless original authority covers the selected effects |
 
@@ -116,6 +118,15 @@ delegable parameters; target/provider owners retain rubric, access and safety.
 An idle continuous pass stays Active. Restoring Dispatch does not automatically
 transfer the charter or pending effects.
 
+The backlog consolidator is a separate finite role, not continuous per-issue
+triage or implementation. It defaults to read-only proposals, records the
+adopter's actual authorship and acquisition policy, and preserves every
+unresolved requirement before authorized source retirement. No numeric queue
+target, collaborator restriction or event exception is universal. A new
+activation supplies its own scope and authority; it never resets old limits.
+Reaching the verified target stops extra cohorts, while final review, journal
+and genuinely resolved own-resource gates still apply.
+
 The topology dispatcher is a conversational allocator, not a worker. It records
 complete assignments before native effects, discovers and adopts existing owners
 in place when authorized, and retains allocation/launch identities across unknown
@@ -170,6 +181,9 @@ references where available, and a private writable report home.
 | `skills/triage-issue-backlog/SKILL.md` | Persistent issue-triager procedure and target resolution |
 | `skills/triage-issue-backlog/assets/` | Fillable charter and synthetic contract walkthroughs |
 | `skills/triage-issue-backlog/references/` | Durable addenda/adapters, evidence, publication and continuity |
+| `skills/consolidate-issue-backlog/SKILL.md` | Finite bulk-consolidation runbook, distinct from individual triage |
+| `skills/consolidate-issue-backlog/assets/CHARTER.md` | Explicit target, eligibility, authority, read limits and closeout template |
+| `skills/consolidate-issue-backlog/references/` | Cohort/acquisition discipline, canonical receiving, dispositions and continuity |
 | `skills/managing-agent-topology/SKILL.md` | Portable conversational topology-dispatcher runbook |
 | `skills/managing-agent-topology/assets/` | Complete charter template, version-1 JSON Schema and synthetic topology |
 | `skills/managing-agent-topology/references/` | Native-adapter qualification, state/effect recovery and reporting limits |
