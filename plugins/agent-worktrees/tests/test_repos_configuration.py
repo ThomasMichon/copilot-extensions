@@ -6,6 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 import json
 from pathlib import Path
+import stat
 import subprocess
 import sys
 from types import SimpleNamespace
@@ -369,6 +370,50 @@ def symlink_registry(native):
     except OSError as error:
         pytest.skip(f"native file symlinks are unavailable: {error}")
     return backing
+
+
+def test_local_knowledge_registration_rejects_nonregular_registry_before_fingerprinting(native, monkeypatch):
+    from agent_worktrees import repos_knowledge_registration as registration
+
+    root = local_knowledge(native)
+    registry = repos._repos_yaml_path()
+    before = tree(native)
+    original_stat, original_read = Path.stat, Path.read_bytes
+
+    def fifo_mode(path, *args, **kwargs):
+        return SimpleNamespace(st_mode=stat.S_IFIFO) if path == registry else original_stat(path, *args, **kwargs)
+
+    def read(path):
+        if path == registry:
+            pytest.fail("A nonregular registry must be rejected before attempting to open it.")
+        return original_read(path)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "stat", fifo_mode)
+        patch.setattr(Path, "read_bytes", read)
+        with pytest.raises(repos.RepositoryResolutionError, match="regular file"):
+            registration.preview("sample", "local-knowledge", str(root), "main")
+    assert tree(native) == before
+
+
+@pytest.mark.skipif(not hasattr(repos.os, "mkfifo"), reason="native FIFO creation is unavailable")
+@pytest.mark.parametrize("operation", ["preview", "apply"])
+def test_local_knowledge_registration_refuses_real_fifo_registry_promptly(native, operation):
+    root = local_knowledge(native)
+    registry = repos._repos_yaml_path()
+    registry.unlink()
+    repos.os.mkfifo(registry)
+    before = tree(root)
+    started = time.monotonic()
+    result = request(
+        "knowledge-register-" + operation, "--checkout-path", str(root),
+        "--default-branch", "main",
+        *(("--preview-token", "0" * 64) if operation == "apply" else ()), name="local-knowledge",
+    )
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["code"] == "owner-read-or-write-failed"
+    assert time.monotonic() - started < 5
+    assert stat.S_ISFIFO(registry.stat().st_mode) and tree(root) == before
 
 
 def test_local_knowledge_registration_refuses_symlinked_registry_without_replacing_its_owner(native):

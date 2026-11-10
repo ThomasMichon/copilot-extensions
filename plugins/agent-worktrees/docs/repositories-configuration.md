@@ -122,6 +122,8 @@ never overwritten or reclassified.
 Like native preference editing, selection and the final write reject registry
 source indirection. A symlinked registry requires inspection by its owner;
 registration never replaces that link while leaving its backing source unchanged.
+The strict native reader rejects nonregular registry files before fingerprinting
+can open them, retaining the existing regular-file and subsequent symlink checks.
 After acquiring the guard-publication lock, apply re-inspects the full proposal
 and compares its token again immediately before persistence. Checkout, origin,
 policy or preference drift during that wait refuses rather than persisting the

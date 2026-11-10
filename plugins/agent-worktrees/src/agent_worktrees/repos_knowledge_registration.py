@@ -112,8 +112,8 @@ def _selection(project: str, name: str, path: str, branch: str, account: str, bu
         or not binding_names_supported(project, name) or name == project
     ):
         raise ConfigurationError("invalid-registration-name", "Choose distinct exact harness and knowledge names.")
-    fingerprint([repos._repos_yaml_path()])
     registry = repos.read_registry(strict=True)
+    fingerprint([repos._repos_yaml_path()])
     if project not in registry.repos:
         raise ConfigurationError("context-not-registered", "The selected harness is not canonically registered.")
     if registry.repos[project].repo_class != "worktree":

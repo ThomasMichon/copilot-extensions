@@ -324,3 +324,21 @@ passes 43 cases: the local-registration controls and five ordinary pin controls.
 The real Manager registration form additionally passes against this native
 owner. Final inspection remains inside the original apply budget; no deadline,
 authentication or cleanup rule is relaxed.
+
+## Nonregular registry ordering
+
+A later review identifies that fingerprinting before the strict reader can open
+a FIFO and block before regular-file validation. The operation now follows the
+existing preference owner: perform the strict registry read first, then retain
+the source-indirection fingerprint check. A portable nonregular-mode control
+fails if any registry read is attempted before refusal; it reproduces the old
+ordering without blocking. Native FIFO preview/apply controls additionally
+exercise prompt refusal on platforms that support FIFO creation. Those two
+controls are explicitly unavailable on Windows, not claimed as native evidence.
+
+The portable control fails before the ordering correction. Afterward, all 39
+applicable native registration controls pass; only the two actual FIFO controls
+are skipped on Windows. The source change is limited to registry read ordering,
+so no Manager UI or caller contract changes: the preceding real-form result is
+retained, while the current native CLI positive/refusal controls qualify this
+revision. Exact-source required CI and a fresh review remain separate gates.
