@@ -539,6 +539,142 @@ class TestMigrateConfig:
         migrated = migrate_config(load_config())
         assert migrated.idle_reap_ttl_seconds == 300
 
+    @pytest.mark.parametrize(("latest_ttl", "expected_ttl"), [(0, 600), (300, 300)])
+    def test_migration_uses_latest_config(self, config_home, latest_ttl, expected_ttl):
+        from agent_bridge.config import migrate_config
+
+        save_config(ServiceConfig(port=1234, idle_reap_ttl_seconds=0))
+        stale = load_config()
+        latest = load_config()
+        latest.port = 2345
+        latest.idle_reap_ttl_seconds = latest_ttl
+        save_config(latest)
+
+        migrated = migrate_config(stale)
+        assert migrated.port == load_config().port == 2345
+        assert migrated.idle_reap_ttl_seconds == load_config().idle_reap_ttl_seconds == expected_ttl
+
+    def test_completed_migration_uses_latest_config(self, config_home):
+        from agent_bridge.config import migrate_config
+
+        marker = config_home / ".migrations" / "idle_reap_default_on"
+        marker.parent.mkdir()
+        marker.write_text("applied\n", encoding="utf-8")
+        save_config(ServiceConfig(port=1234, idle_reap_ttl_seconds=0))
+        stale = load_config()
+        latest = load_config()
+        latest.port = 2345
+        save_config(latest)
+        migrated = migrate_config(stale)
+        assert migrated.port == 2345
+        assert migrated.idle_reap_ttl_seconds == 0
+
+    def test_migration_preserves_unrecognized_settings(self, config_home):
+        from agent_bridge.config import migrate_config
+
+        path = config_home / "config.yaml"
+        path.write_text(yaml.safe_dump({
+            "idle_reap_ttl_seconds": 0,
+            "other_setting": {"value": "keep"},
+        }), encoding="utf-8")
+        migrate_config(load_config())
+        actual = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert actual["idle_reap_ttl_seconds"] == 600
+        assert actual["other_setting"] == {"value": "keep"}
+
+    def test_migration_does_not_mark_failed_write_as_applied(self, config_home, monkeypatch):
+        from agent_bridge import config
+
+        save_config(ServiceConfig(idle_reap_ttl_seconds=0))
+        cfg = load_config()
+        write = config.atomic_write_config
+
+        def fail_write(*args, **kwargs):
+            raise OSError("write failed")
+
+        monkeypatch.setattr(config, "atomic_write_config", fail_write)
+        with pytest.raises(OSError, match="write failed"):
+            config.migrate_config(cfg)
+        assert load_config().idle_reap_ttl_seconds == 0
+        assert not (config_home / ".migrations" / "idle_reap_default_on").exists()
+        monkeypatch.setattr(config, "atomic_write_config", write)
+        assert config.migrate_config(load_config()).idle_reap_ttl_seconds == 600
+
+    def test_migration_refuses_a_changed_config_snapshot(self, config_home, monkeypatch):
+        from agent_bridge import config
+
+        save_config(ServiceConfig(port=1234, idle_reap_ttl_seconds=0))
+        stale = load_config()
+        original_load = config.load_config
+        path = config_home / "config.yaml"
+
+        def load_then_change():
+            result = original_load()
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data["port"] = 2345
+            path.write_text(yaml.safe_dump(data), encoding="utf-8")
+            return result
+
+        monkeypatch.setattr(config, "load_config", load_then_change)
+        with pytest.raises(ValueError, match="configuration changed during migration"):
+            config.migrate_config(stale)
+        assert original_load().port == 2345
+        assert original_load().idle_reap_ttl_seconds == 0
+        assert not (config_home / ".migrations" / "idle_reap_default_on").exists()
+
+    def test_migration_serializes_with_another_process(self, tmp_path, config_home):
+        import subprocess
+        import sys
+        import time
+
+        from agent_procutil import no_window_kwargs
+        from agent_bridge import config
+        from agent_bridge.config_write import config_file_lock
+
+        save_config(ServiceConfig(port=1234, idle_reap_ttl_seconds=0))
+        waiting = tmp_path / "migration-waiting"
+        script = """
+import sys
+from pathlib import Path
+from agent_bridge import config, config_write
+assert Path(config.__file__).resolve() == Path(sys.argv[2]).resolve()
+cfg = config.load_config()
+sleep = config_write.time.sleep
+def contended(delay):
+    Path(sys.argv[1]).touch()
+    sleep(delay)
+config_write.time.sleep = contended
+config.migrate_config(cfg)
+"""
+        process = None
+        try:
+            with config_file_lock(config_home / "config.yaml"):
+                process = subprocess.Popen(
+                    [sys.executable, "-c", script, str(waiting), config.__file__],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    **no_window_kwargs(),
+                )
+                deadline = time.monotonic() + 15
+                while not waiting.exists():
+                    if process.poll() is not None:
+                        _, error = process.communicate()
+                        pytest.fail(f"migration process exited early: {error}")
+                    if time.monotonic() >= deadline:
+                        pytest.fail("migration process did not wait for the config owner")
+                    time.sleep(0.02)
+                latest = load_config()
+                latest.port = 2345
+                save_config(latest)
+            _, error = process.communicate(timeout=10)
+            assert process.returncode == 0, error
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+        assert load_config().port == 2345
+        assert load_config().idle_reap_ttl_seconds == 600
+
 
 class TestAdoptTopology:
     def test_auto_discovers_machines_not_agents(self, config_home, fake_repo):
