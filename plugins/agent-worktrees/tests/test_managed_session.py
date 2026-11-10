@@ -1375,6 +1375,28 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             source, source + "\n" + marker if source.endswith("{") else marker + "\n" + source,
         )
     native_entry.write_text(instrumented, encoding="utf-8")
+    admission = scripts / "managed-session.ps1"
+    instrumented = admission.read_text(encoding="utf-8")
+    for boundary, source in (
+        ("prepared-event-json", "        $event = ConvertFrom-ManagedWorktreesJson $Raw"),
+        ("json-entry", "    if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }"),
+        ("json-utility-load", "    if (-not $script:managedWorktreesUtilityAssembly) {"),
+        ("json-utility-ready", "    if ($PSVersionTable.PSVersion.Major -ge 6) {"),
+        ("json-web-load", "        [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')"),
+        ("json-resolver-type", "        $resolverType = $script:managedWorktreesUtilityAssembly.GetType("),
+        ("json-resolver-create", "        $resolver = [Activator]::CreateInstance($resolverType, $true)"),
+        ("json-serializer-create", "        $script:managedWorktreesJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new($resolver)"),
+        ("json-deserialize", "    return ,($script:managedWorktreesJson.DeserializeObject($Text))"),
+        ("prepared-paths", "        $workspace = Get-PreparedWorktreesPath $cwd"),
+        ("prepared-marker-opened", "        $openedLength = $stream.Length"),
+        ("prepared-marker-json", "        $value = ConvertFrom-ManagedWorktreesJson $text.TrimStart([char]0xfeff)"),
+        ("prepared-marker-decoded", "        $scope = $value['scope']"),
+    ):
+        assert source in instrumented
+        instrumented = instrumented.replace(
+            source, f"Write-NativeWriteFixturePhase '{boundary}'\n" + source, 1,
+        )
+    admission.write_text(instrumented, encoding="utf-8")
     raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
     started = time.monotonic()
     started_ms = time.time_ns() // 1_000_000
