@@ -115,40 +115,20 @@ native result, including partial pair outcomes and preparation failures.
 Ordinary CLI calls take the original result path without a heartbeat or stream.
 The version-1 declaration is included in the engine's package data.
 
-Four focused tests failed before implementation for missing frames, missing
-pre-configuration syntax refusal and unsupported parser syntax. The current
-first submitted Windows x64 source packet passed 30 distinct cases in disjoint
-selections: seven producer/real-parser-process/knowledge-side controls, ten
-ordinary pair controls and thirteen failure/policy/freshness controls. Each
-selection retains the ordinary 30-second item and 300-second group bounds.
-This is not a monolithic aggregate-budget or native ARM64 qualification.
-
-An initial broad packet hit its group bound without named coverage. A named
-follow-up located item cost in repeated Git fixture/oracle children; private
-fixtures now copy one fresh seed into independent repositories and read their
-actual loose refs directly. Git synchronization, independent pair storage,
-failure assertions and cleanup remain real. The blocked-stream oracle was
-also corrected to preserve the original top-level `updated: false` while
-earlier member results retain their successful advances.
-
-ARM64 dependency preparation could not build the optional authentication
-dependency without a configured Rust toolchain. Validation used an existing
-x64 interpreter instead, without changing dependencies or host configuration.
-A later retained-cache access refusal was preserved; the normal runner's
-supported private scratch-root selection supplied a fresh owned cache.
-Focused F/E9 lint and the installation contract check pass.
-
-The first review found shortened-option acceptance, missing terminal selector
-refusals and lost completed batch results after a later exception. Four focused
-regressions failed before correction. Sync now requires exact option names,
+Sync requires exact option names,
 retains native selector diagnostics in a known-not-started terminal refusal,
 and preserves completed entries plus an explicitly unknown interrupted item.
-The command body moves into the existing native Sync module while its old CLI
-entry and native helper seams remain available. This also removes the CLI
-module's newly introduced 1000-line-cap violation without widening a baseline.
-The revised source packet passes 33 distinct cases in disjoint 10/10/13
+The command body lives in the native Sync module; its legacy CLI entry and
+native helper seams remain available. Private test fixtures copy one fresh seed
+into independent repositories and inspect actual loose refs, retaining real Git
+synchronization, independent pair storage, failure assertions and cleanup.
+
+The qualified Windows x64 source packet passes 33 distinct cases in disjoint 10/10/13
 selections, including all 32 Sync cases and the existing fetch-ledger control.
-Exact-head review/CI and the module-size guard still gate publication acceptance.
+The ordinary 30-second item and 300-second group bounds remain unchanged.
+This is not a monolithic aggregate-budget or native ARM64 qualification.
+Focused F/E9 lint, installation-contract and changed-module-size checks pass.
+Exact-head review/CI still gate publication acceptance.
 
 S2 local incremental rendering, selected-runtime negotiation/rollback, consumer
 two-clock and uncertain-outcome validation remain open. No Manager path uses the
@@ -188,6 +168,36 @@ live venue or rollout is admitted. No installed behavior is claimed.
   test. The complete #4183 issue stays open for its remaining original lanes.
 
 ## Journal
+
+### 2026-11-10 - Producer validation and refinement
+
+- Four focused tests failed before implementation for missing frames,
+  pre-configuration syntax refusal and parser support. The first submitted
+  source packet passed 30 distinct cases in disjoint 7/10/13 selections.
+- A broad packet exhausted its group bound without named coverage; those dots
+  were not reused as passing evidence. Named follow-up located item cost in
+  repeated Git fixture/oracle children. Copying one fresh seed into independent
+  repositories and inspecting actual loose refs reduced setup/assertion cost
+  without replacing real synchronization or raising deadlines. The blocked
+  oracle also had to retain the native distinction between top-level
+  `updated: false` and earlier successful member results.
+- ARM64 dependency preparation required a cryptography source build without an
+  available Rust toolchain. Source validation used an existing x64 interpreter,
+  preserving dependencies and host configuration. A retained-cache access
+  refusal was preserved; the runner's supported private scratch selection
+  supplied a fresh owned cache.
+- Unsupported shortened options must not start a mutation; known selector
+  refusals need terminal diagnostics rather than an unknown stream; and a late
+  batch exception must not erase completed effects. Four focused regressions
+  demonstrated those failures before correction. Strict parsing, captured native
+  selector diagnostics and retained batch results address those invariants.
+  Moving command composition into the existing Sync owner also restores the
+  CLI module's 1000-line cap without widening a baseline or dropping its entry
+  and helper compatibility seams.
+- The revised source packet passes 33 distinct cases in disjoint 10/10/13
+  selections under the same item/group bounds. Focused lint, installation
+  contract and changed-module-size checks pass. This remains source validation,
+  not Manager consumption, native ARM64, release or installed acceptance.
 
 - 2026-11-10: #11873 merged to `dev` as
   `431751d0fd5d916bdd1132a32f82652431a26ac5` after genuine Copilot approval
