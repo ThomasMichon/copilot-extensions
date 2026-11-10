@@ -61,6 +61,19 @@ __all__ = [
 ]
 
 
+async def _join_cleanup(task: asyncio.Task) -> None:
+    """Keep stream cleanup owned until terminal, then propagate cancellation."""
+    interrupted = False
+    while not task.done():
+        try:
+            await asyncio.shield(task)
+        except asyncio.CancelledError:
+            interrupted = True
+    await task
+    if interrupted:
+        raise asyncio.CancelledError
+
+
 async def aclose_writer(writer: asyncio.StreamWriter) -> None:
     """Close a stream writer and await its teardown deterministically.
 
@@ -74,15 +87,16 @@ async def aclose_writer(writer: asyncio.StreamWriter) -> None:
         await writer.wait_closed()
 
 
-async def _connect(socket_path: str | Path):
+async def _connect(socket_path: str | Path, *, limit: int | None = None):
     """Open a client connection to the serve daemon (platform transport).
 
     Returns ``(reader, writer, token)``: the token is ``None`` on AF_UNIX and the
     daemon's shared secret on the loopback-TCP transport. Raises ``OSError`` when
     the daemon can't be reached so callers fall back to the cold path.
     """
+    options = {} if limit is None else {"limit": limit}
     if _HAS_AF_UNIX:
-        reader, writer = await asyncio.open_unix_connection(str(socket_path))
+        reader, writer = await asyncio.open_unix_connection(str(socket_path), **options)
         return reader, writer, None
     ep = _read_endpoint(socket_path)
     if ep is None:
@@ -99,7 +113,7 @@ async def _connect(socket_path: str | Path):
     attempts, delay = 5, 0.05
     for attempt in range(attempts):
         try:
-            reader, writer = await asyncio.open_connection(_TCP_HOST, ep["port"])
+            reader, writer = await asyncio.open_connection(_TCP_HOST, ep["port"], **options)
             return reader, writer, ep.get("token")
         except ConnectionRefusedError:
             if attempt == attempts - 1:

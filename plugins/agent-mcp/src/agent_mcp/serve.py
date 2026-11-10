@@ -39,7 +39,7 @@ import secrets
 import time
 from pathlib import Path
 
-from . import execution_context, incoming, source_serving
+from . import backend, execution_context, incoming, source_serving
 from .client import (
     OneShotSession,
     UpstreamError,
@@ -55,6 +55,7 @@ from .ipc import (
     _TCP_HOST,
     _connect,
     _endpoint_path,
+    _join_cleanup,
     _read_endpoint,
     aclose_writer,
     call_via_socket,
@@ -65,6 +66,7 @@ from .ipc import (
 )
 from .session import BridgeSession
 from .request_context import CONTEXT_VERSION, request_root
+from .custody_wire import MAX_FRAME
 
 
 def _control_token_path(config_dir: str | Path, pid: int) -> Path:
@@ -95,17 +97,6 @@ _SWEEP_INTERVAL = 30.0  # seconds between idle sweeps
 _DEFAULT_IDLE_TIMEOUT = 300.0  # evict a warm session unused this long
 _LATE_LEASE_RETRY_INTERVAL = 1.0  # seconds between promoted-passive lease retries
 
-
-async def _join_cleanup(task: asyncio.Task) -> None:
-    interrupted = False
-    while not task.done():
-        try:
-            await asyncio.shield(task)
-        except asyncio.CancelledError:
-            interrupted = True
-    await task
-    if interrupted:
-        raise asyncio.CancelledError
 
 # The serve IPC transport + client-attach primitives now live in agent_mcp.ipc
 # (stdlib-only) so the thin forwarder can import them without dragging in this
@@ -387,6 +378,9 @@ class Server:
                     await self._send(writer, {"ok": False, "error": "invalid JSON"})
                     continue
                 self._busy_connections.add(owner)
+                if isinstance(req, dict) and req.get("op") == "backend":
+                    await backend.run_backend(self, req, reader, writer)
+                    return
                 # A full-session attach hands the whole connection over to a
                 # resident BridgeSession (the work-coalescing multiplexer, #744):
                 # after this the stream carries raw MCP JSON-RPC, not ops.
@@ -431,7 +425,10 @@ class Server:
             return {"ok": False, "error": "serving generation changed; request not accepted"}
         self._touch()  # any op is host activity; reset the idle self-evict clock
         if op == "ping":
-            return {**incoming.ping_reply(self), "configuration_context": CONTEXT_VERSION}
+            return {
+                **incoming.ping_reply(self), "configuration_context": CONTEXT_VERSION,
+                **backend.capability(self),
+            }
         if op == "shutdown":
             return {"ok": True}
         if op in ("call", "list"):
@@ -658,12 +655,12 @@ class Server:
                     if self.socket_path.exists() or self.socket_path.is_symlink():
                         self.socket_path.unlink()
                     self._server = await asyncio.start_unix_server(
-                        self._handle, path=str(self.socket_path))
+                        self._handle, path=str(self.socket_path), limit=MAX_FRAME)
                     log.info("serving on unix:%s", self.socket_path)
                 else:
                     self._token = secrets.token_hex(16)
                     self._server = await asyncio.start_server(
-                        self._handle, host=_TCP_HOST, port=0)
+                        self._handle, host=_TCP_HOST, port=0, limit=MAX_FRAME)
                     port = self._server.sockets[0].getsockname()[1]
                     self._token_port = port
                     self._write_endpoint(port, self._token)
