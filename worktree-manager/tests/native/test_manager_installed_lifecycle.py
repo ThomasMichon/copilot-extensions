@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from contextlib import ExitStack, contextmanager
 import http.server
 import json
@@ -321,7 +322,7 @@ def _events(path, owner):
 
 
 class _Witness:
-    def __init__(self, root, env, manager_python, engine, copilot, budget):
+    def __init__(self, root, env, manager_python, engine, copilot, budget, provider_requests=()):
         self.root, self.env = root, env
         self.manager_python = manager_python
         self.engine, self.copilot = engine, copilot
@@ -330,6 +331,7 @@ class _Witness:
         self.native_handles = {}
         self.history = None
         self.turn_observation = None
+        self.provider_requests = provider_requests
         self.stack = ExitStack()
 
     def wait(self, check, label, timeout=30):
@@ -473,9 +475,16 @@ class _Witness:
                 events = _events(path, Path(self.env["COPILOT_HOME"]))
                 texts = [e["data"]["content"] for e in events if e["type"] == "user.message"]
                 turn_ends = sum(e["type"] == "assistant.turn_end" for e in events)
+                event_types = Counter(e["type"] for e in events)
+                retained_types = [
+                    (kind, count) for kind, count in sorted(event_types.items())
+                    if len(kind) <= 80
+                ][:32]
                 histories.append({
                     "session": path.parent.name,
                     "events": len(events),
+                    "event_type_counts": dict(retained_types),
+                    "event_types_omitted": len(event_types) - len(retained_types),
                     "prompt_seen": prompt in texts,
                     "turn_ends": turn_ends,
                     "reply_seen": any(
@@ -491,6 +500,7 @@ class _Witness:
                     matches.append(path)
             self.turn_observation = {
                 "turn": number,
+                "provider_requests": len(self.provider_requests),
                 "histories": histories,
                 "reply_in_terminal": f"LIFECYCLE_REPLY_{number}" in installed._visible(console.output),
             }
@@ -870,7 +880,8 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
                 {"type": "assistant.turn_end", "data": {}},
             ]
         history.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
-    witness = _Witness(tmp_path, {"COPILOT_HOME": str(home)}, None, None, None, None)
+    requests = [{"private": "request content must not enter diagnostics"}]
+    witness = _Witness(tmp_path, {"COPILOT_HOME": str(home)}, None, None, None, None, requests)
     witness._diagnose_bootstrap = lambda: None
     witness._reply_in_pane = lambda _number: False
 
@@ -884,6 +895,8 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
         with _capture_failure(tmp_path, lambda _name, value: records.append(json.loads(value))), witness:
             witness.turn(PROMPTS[0], 1, SimpleNamespace(output=b"cursor redraw"))
     observed = json.loads(records[0]["lifecycle-conversation.json"]["text"])
+    assert observed["provider_requests"] == 1
+    assert "request content" not in json.dumps(observed)
     assert observed["reply_in_terminal"] is False
     if phase == "missing-history":
         assert observed["histories"] == []
@@ -892,6 +905,11 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
         assert row["prompt_seen"] is True
         assert row["turn_ends"] == (1 if phase == "rendering-only" else 0)
         assert row["reply_seen"] is (phase == "rendering-only")
+        assert row["event_type_counts"] == (
+            {"user.message": 1, "assistant.message": 1, "assistant.turn_end": 1}
+            if phase == "rendering-only" else {"user.message": 1}
+        )
+        assert row["event_types_omitted"] == 0
 
 
 @pytest.mark.parametrize("reply", ["LIFECYCLE_REPLY_1", "unfinished"])
@@ -1162,7 +1180,7 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                 env.update(lifecycle)
                 env["AGENT_WORKTREES_STATUS_MONITOR"] = "1"
                 env["COPILOT_PROVIDER_BASE_URL"] = f"http://127.0.0.1:{port}"
-                with _Witness(root, env, manager, engine, copilot, budget) as witness:
+                with _Witness(root, env, manager, engine, copilot, budget, requests) as witness:
                     first = witness.manager()
                     first.send(b"\r")
                     witness.wait(

@@ -271,3 +271,14 @@ Resume/Open assertions remain required. This is not a callback, terminal
 assertion removal or a timeout extension. Missing enabled payload warnings
 remain a separate unresolved fixture-closure observation, not an accepted
 degraded installation.
+
+### 2026-11-10 - A later run stopped before completed history
+
+Run 42776996317 at `9756e5cc5ae89fa0280046ac5913fff142be69bc`
+retained one history with six events and the expected prompt, but no reply or
+assistant turn end. The rendered-pane fallback was therefore not reached.
+This is a distinct unfinished-turn failure, not another raw-stream false
+negative. The owned witness now retains bounded event-type counts and the
+private provider's request count without request content. All 14 source
+controls passed; native qualification and the missing enabled-payload closure
+remain open. No assertion, deadline, plugin policy or installed receipt changed.

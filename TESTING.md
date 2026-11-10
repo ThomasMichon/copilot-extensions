@@ -710,6 +710,9 @@ Resume, plus the existing unusable-installed-entry negative control.
 Completed turns require durable conversation history and the reply in the
 terminal stream or the actual bound private pane's rendered capture. Removing
 escape sequences from a redraw stream is not itself a rendered-screen witness.
+Failure diagnostics retain bounded event-type counts and the private provider's
+request count, never inference request bodies. These distinguish an unfinished
+native turn from completed history whose reply has not rendered.
 The stateless harness has a real private knowledge repository, registered and
 bound before New; the installed coordination-readiness command must resolve it.
 Before constructing runtimes, the case requires an empty, confirmed native
