@@ -256,6 +256,9 @@ named tracked objective before the whole effort is Done.
     ordinary reconciliation against the newly versioned payloads. Coordinator
     retains review, release and installed acceptance; source guards alone do
     not complete the measured sweep.
+    - [x] **Source correction merged:** #11709 landed at
+      `4176aaea9a1d3dde5f3e6f924cc5542e7fce9483` after current-head approval
+      and required CI. Promotion and installed reconciliation remain open.
 - [x] **Worktrees incoming-monitor source correction:** #11673 merged the
   #11524 correction at `2e575be1a26c789f1b5b1912df626165fb9c7158`
   after current-head approval, required CI and Windows/Linux native acceptance.
@@ -529,6 +532,30 @@ migration already works.
   from native identity of the incoming writer. The remaining implementation
   must preserve uncertain recovery records and conflicting-work protection,
   rather than merely suppressing the first outgoing-observation exception.
+
+### 2026-11-09 - Nested-library consumer correction merged
+
+- #11709 merged at `4176aaea9a1d3dde5f3e6f924cc5542e7fce9483` after
+  genuine current-head Copilot approval, zero unresolved findings and required
+  green CI. It expands canonical dependency coverage transitively, checks
+  library-only release intents and preserves byte-exact Git pathname handling.
+- PR presence validation uses prospective target/head integration inputs,
+  including consumers or edges added on the target after a branch forked and
+  target-side dependency removals. It does not change the checkout or index.
+  The retired version diagnostic retains its literal-head comparison.
+  Git-mode checks and fresh changefile identities prevent checkout drift or
+  consumed filenames from silently dropping a requested release.
+- The final target-aware, byte-reader, identity and admitted release-decision
+  selection passed 34 tests with no skips and bounded cleanup verified.
+  Earlier residual selections and explicit native-symlink capability skips
+  retain their recorded scope; a combined local execution timeout is not
+  counted as a passing full run. The reconciled upstream unit inventory and
+  300-second qualification budget were preserved.
+- Patch intents cover the five omitted consumers and the Manager's packaged
+  release helpers. The next stretch is automatic Dev qualification and formal
+  Main promotion, followed by authorized ordinary installed reconciliation.
+  No release, installed payload, full-update performance, application-state
+  recovery or MCP-session-reattachment result is claimed by this source merge.
 
 ### 2026-11-08 - Termination-free installer source merged
 
