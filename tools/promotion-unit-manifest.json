@@ -5412,7 +5412,7 @@
         "plugins/agent-codespaces/src/agent_codespaces/owner_startup.py": "b49522cc34a28da9966820fc2590925425e2bdcbb9f793b4a943092928ee4962",
         "plugins/agent-worktrees/src/agent_worktrees/installer_run.py": "0aeb1946faedaf902c55c5153a15bc430f4207262ddd1d7b51ee65265bfa2408",
         "plugins/agent-worktrees/src/agent_worktrees/reconcile.py": "c20648bfbb57b5653c9ad3e58a0e47ad96b5458b08c9763eafaea110cc8f1f2b",
-        "plugins/agent-worktrees/src/agent_worktrees/reconcile_freshness.py": "88c017962d9d03ca1ad9d2a7a4cad7351159a1327e70793854739091d6f4a9ae",
+        "plugins/agent-worktrees/src/agent_worktrees/reconcile_freshness.py": "18bd6825b058c8117b4f48a44f2ac2d42de65b3e22afb3672ec0ea4df2703077",
         "tools/promotion_unit_tests/test_launch_freshness.py": "ad42ff259246d16df7ad8583a486e26db5b8b5861e5a1dc498c08d60d9d112f8",
         "plugins/agent-worktrees/src/agent_worktrees/update_installer_process.py": "6cc476966f7c03b4c256926af80ab93aa2c92f7ef5bbd8818794521f7f965e77",
         "plugins/agent-worktrees/src/agent_worktrees/update_runtime.py": "0c2c0bb91dd954a290bb7477d7c30d62ad7fde622522a99d8ab06b4430c7aa0f",

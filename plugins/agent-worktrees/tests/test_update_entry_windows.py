@@ -931,6 +931,8 @@ def test_native_entry_controller_custody_requires_supported_launch(
     ["--inventory", "--json"],
     ["--target", "agent-example"],
     ["--target=agent-example"],
+    ["--runtime-backend", "agent-worktrees=cpu"],
+    ["--runtime-backend=agent-worktrees=cpu"],
 ])
 def test_selected_update_operation_bypasses_native_repair_and_implicit_provision(
     update_entry_case, native_powershell, monkeypatch, front, available, flags,
