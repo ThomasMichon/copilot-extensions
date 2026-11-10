@@ -94,6 +94,7 @@ item in this umbrella.
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 | Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
 | First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
+| Optional Sync-progress implementer | Proposed #4183 LP1-LP3/LPV Sync producer and local ProgressScreen consumer only; no PK/WI ownership or runtime rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
 
 ## Context
 
@@ -453,6 +454,15 @@ the same effort Journal/open bounded-source process preserves current owners.
       setup/reload docs were reconciled to the final worker-owned production
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
+
+### Optional built-in lifecycle progress
+
+- [ ] Review and deliver the bounded Sync producer/local ProgressScreen consumer
+      in [phase-3c-optional-sync-progress.md](phase-3c-optional-sync-progress.md),
+      under #4183 LP1-LP3/LPV (received #4274). Preserve CLI defaults, exact
+      selected-runtime support, complete paired results and existing process
+      ownership. Other verbs, remote streaming and original PK/WI acceptance
+      remain separate; this does not reopen completed Phase 3c.
 
 ### Phase 3d — Retire the production Picker's in-process engine-module boundary (production slice Done)
 
@@ -2903,8 +2913,22 @@ own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
 
+### 2026-11-10 - Optional Sync-progress proposal
+
+- `patient-knob` claims only the bounded #4183 LP Sync-progress proposal.
+  [The proposed plan](phase-3c-optional-sync-progress.md) reuses the D4
+  envelope while preserving structured Sync results, paired diagnostics and
+  selected-runtime compatibility. Review precedes implementation.
+- Existing contributed streaming is not built-in progress proof. PK/WI,
+  remaining verbs, remote support and native/installed acceptance stay open;
+  no channel, host operation, installation or custody transfer occurred.
+
 ### 2026-11-10 - First-run original-matrix source audit
 
+- #11865 merged to `dev` as `c0601e44dca9508cab3b10462d0dc8eae260d065`.
+  Copilot approval `5837314932` covered exact head
+  `f0ecb761d0697ed036538a98959d1776d5e82602`, the journal-placement thread
+  was resolved and exact-head CI passed before the managed merge.
 - Reconciled the original #542 body in the [Phase 4 source matrix](phase-4-first-run-front-door.md#f3-original-matrix-reconciliation-and-source-recovery-controls).
   Three contained production-runner/Textual cases exercise actual registry
   partial/empty/malformed recovery, unchanged observation inputs and explicit
