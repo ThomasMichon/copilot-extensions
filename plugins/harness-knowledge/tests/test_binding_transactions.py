@@ -139,7 +139,6 @@ def test_capability_probe_is_available_before_repository_selection_without_effec
         "existing_binding_configuration": 2,
         "portable_binding_precondition": 1,
         "binding_precondition_freshness": 1,
-        "repository_registration_preflight": 1,
     }
     assert list(tmp_path.iterdir()) == []
 

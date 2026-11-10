@@ -25,7 +25,6 @@ def command(argv: list[str]) -> int:
     if "--json" in argv:
         payload = {
             "platform": repos._current_platform(),
-            "capabilities": {"repository_registration_preflight": 1},
             "repos": [
                 {
                     "name": entry.name,

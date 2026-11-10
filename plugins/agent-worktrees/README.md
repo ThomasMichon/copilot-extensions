@@ -590,11 +590,6 @@ separately observes an explicitly configured GitHub account and repository API
 access. It does not acquire credentials or certify Git, Copilot, MCP or complete
 onboarding readiness.
 
-The standalone [registration/provider preflight](docs/repository-registration-preflight.md)
-adds canonical/discovered selection and bounded server default-branch policy
-observations. Unknown or inaccessible policy never implies direct publication;
-this optional read does not add a gate to local binding.
-
 ## Independent Execution Spaces
 
 Native Windows and WSL can register independent execution-space keys without

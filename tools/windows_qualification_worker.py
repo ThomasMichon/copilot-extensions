@@ -221,9 +221,6 @@ def tool_tests(root: Path, selected: dict, output: Path) -> int:
 def execute(root: Path, value: dict, output: Path) -> dict:
     """Run selected source, retaining a truthful manifest even after failure."""
     request(value)
-    for stream in (sys.stdout, sys.stderr):
-        if hasattr(stream, "reconfigure"):
-            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     native = NATIVE_PACKETS.get(value["selection"].get("name"))
     output.mkdir(parents=True, exist_ok=True)
     result = {

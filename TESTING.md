@@ -432,14 +432,6 @@ Registered entries assert that membership-marker opening precedes marker JSON
 decoding, so a similarly shaped content reader cannot stand in for that stage.
 They never retry the child, extend its ten-second bound or classify the
 unobserved stalled phase as a known flake.
-On PS5.1, the copied admission helper records process CPU ticks (100 ns units)
-and whether Utility/Web assemblies are already loaded immediately before and
-after the original `System.Web.Extensions` load. Enumeration uses only the
-current AppDomain; it does not load an assembly or warm another child.
-The `patch-protected-input` control retains those successful-call phases too.
-Snapshots include their observer work and cannot establish why an earlier
-unobserved load stalled. Malformed or out-of-bound snapshot markers remain
-real stderr; native timeout controls preserve valid snapshots alongside errors.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
@@ -468,20 +460,6 @@ latency or throughput pass.
 The boolean-only admission controls retain bounded command-entry, helper,
 input, admission and output phases; a timeout reports the partial phases
 without retrying the child or relaxing its original limit.
-The `shell-entry-attribution` cases reuse that complete-entry fixture for a
-read-only `Get-Location` event and the original recognized protected
-`Set-Content` target shape. The hook only inspects the commands: the target
-must remain absent. Both engines and legacy/cell contexts use the actual
-strict policy worker, not the ordinary client's relevance shortcut or a
-policy stub. Fixture-only runtime-selection boundaries include CWD repair
-and selected-context validation; source/worker hashes and actual no-op/deny
-outputs accompany ordered phase-free/attributed calls. The existing fixture
-runtime/context substitutes remain, so this is not installed selection
-qualification. Production entry, guards, contract and worker are unchanged.
-All shell calls may load their original Management module. Timings retain
-instrumentation and outside-command uncertainty under the same 10/30/300
-limits; this does not qualify a shell-only replacement or Git/PR, POSIX,
-lifecycle, composed or productive-throughput acceptance.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
@@ -725,18 +703,6 @@ the deadline cap. The same console-fixture file's explicitly selected T3
 `native_image_query_exit` control uses a real owned Windows process and retained
 handle with an injected image-query failure; it is not proof of the precise
 lifetime of a historical failing PID.
-
-Rendered output and installed process attribution share the original
-30-second readiness window. A rendered frame alone does not freeze one
-possibly incomplete descendant snapshot: the witness resamples at most every
-100 milliseconds until the live installed Manager image is pinned. Foreign
-images never satisfy readiness, and unreadable live handles still fail
-immediately. Failure diagnostics retain at most 16 observed image/name/live
-records, without command lines, inside the existing evidence size budget.
-An early consumer exit also retains up to 16 birth-bound descendant exit codes
-before Job cleanup, distinguishing already-exited processes from live ones.
-The installed-process, keyboard, native-terminal-offer and cleanup assertions
-remain unchanged; the bounded wait is not a larger readiness deadline.
 
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
@@ -3025,6 +2991,24 @@ case's clock before this distinct consumer even starts; this case is not a
 300-second Worktrees construction-performance check. The existing 300-second
 admission case and 300+180 installed execution-owner case remain unchanged,
 as do the native startup and cleanup limits.
+The public application cases allocate a short, fixture-owned sandbox below
+the candidate checkout rather than nesting installed version slots beneath
+pytest's test-name directory. The real console entrypoint must still remain
+below MAX_PATH; no launcher alias or path assertion is substituted.
+
+Select `-k public_copilot` separately with those same prerequisites and bounds
+for the installed public TTY caller. Its real console entrypoint inherits an
+owned private ConPTY; the fixture asserts real stdin/stdout terminal status,
+not a patched `isatty`. The private namespace adapter forwards only the exact
+managed session's foreground `attach-session` to the actual pinned mux.
+Both fresh and cold-resume legs must attach one client, remain foreground
+until an exact-session detach, and leave the same broker/native processes
+running afterward. Another real TTY invocation then reuses that mux
+incarnation without another launch attempt or seed replay. Broker input while
+attached must update the original native history. Exact broker retirement,
+terminal receipts and fixture cleanup remain required.
+This is not new-window/no-mux, automatic sessionStart adoption, all-caller-Job
+survival or a measurement of the operator's installed runtime.
 
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone

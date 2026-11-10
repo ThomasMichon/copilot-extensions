@@ -264,13 +264,8 @@ class Console:
 
     def wait(self, timeout=15000):
         assert self.exited(self.process.process, timeout), self.output.decode("utf-8", "replace")
-        return self.exit_code(self.process.process)
-
-    def exit_code(self, handle):
-        if not self.exited(handle):
-            return None
         code = w.DWORD()
-        self._check(self.api.GetExitCodeProcess(handle, ctypes.byref(code)))
+        self._check(self.api.GetExitCodeProcess(self.process.process, ctypes.byref(code)))
         return code.value
 
     def hangup(self):
