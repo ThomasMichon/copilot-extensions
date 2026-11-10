@@ -87,7 +87,7 @@ def test_local_completion_requires_fresh_clean_containment(api, state):
         if args == ("remote",):
             return SimpleNamespace(returncode=0, stdout="origin\n" if state == "remote-added" else "")
         if args[0] == "status":
-            assert args == ("status", "--porcelain", "--untracked-files=all")
+            assert args == ("status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none")
             return SimpleNamespace(returncode=1 if state == "unknown-status" else 0,
                                    stdout="?? unfinished\n" if state == "dirty" else "")
         if args[0] == "rev-parse":

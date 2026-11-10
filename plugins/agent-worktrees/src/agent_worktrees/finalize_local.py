@@ -45,7 +45,10 @@ def content_error(repo, worktree_path: str, branch: str, upstream: str) -> str |
     exists = Path(worktree_path).exists()
     cwd = worktree_path if exists else repo.anchor
     if exists:
-        status = git_ops.git("status", "--porcelain", "--untracked-files=all", cwd=cwd, check=False)
+        status = git_ops.git(
+            "status", "--porcelain", "--untracked-files=all", "--ignore-submodules=none",
+            cwd=cwd, check=False,
+        )
         if status.returncode != 0 or status.stdout.strip():
             return "Local-only finalization requires verified clean content, including untracked files."
     current = "HEAD" if exists else f"refs/heads/{branch}"

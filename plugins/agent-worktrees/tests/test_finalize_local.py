@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import config as cfg
-from agent_worktrees import finalize, finalize_local, git_ops, tracking
+from agent_worktrees import cleanup_reap, finalize, finalize_local, git_ops, tracking
 from pr_test_helpers import _git
 
 
@@ -126,6 +126,49 @@ def test_local_finalization_preserves_declared_default_branch(local_repo, monkey
     assert finalize.validate_and_finalize(wid, config)
     assert git_ops.ref_exists(f"refs/heads/{repo.default_branch}", cwd=repo.anchor)
     assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "finalized"
+
+
+@pytest.mark.parametrize("retained", [False, True])
+def test_local_finalize_then_cleanup_preserves_default(local_repo, monkeypatch, retained):
+    config, wid, checkout = local_repo
+    repo = config.default_repo
+    _git("switch", "-c", "anchor-alternate", cwd=repo.anchor)
+    _git("switch", repo.default_branch, cwd=checkout)
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    record.branch = repo.default_branch
+    tracking.save_record(record)
+    monkeypatch.setattr(finalize, "_has_live_session", lambda record: retained)
+    monkeypatch.setattr(finalize.procs, "checkout_retirement_blocker", lambda path: None)
+
+    assert finalize.validate_and_finalize(wid, config)
+    assert checkout.exists() is retained
+    record = tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml")
+    failures, _ = cleanup_reap.reap_worktree(
+        record, git_ops.WorktreeStateInfo(git_ops.WorktreeState.COMPLETED), repo, cfg.tracking_dir(),
+    )
+    assert failures == 0
+    assert not checkout.exists()
+    assert git_ops.ref_exists(f"refs/heads/{repo.default_branch}", cwd=repo.anchor)
+
+
+@pytest.mark.parametrize("dirty", ["modified", "untracked"])
+def test_local_finalization_refuses_ignored_dirty_submodule(local_repo, foreign_repo, dirty):
+    config, wid, checkout = local_repo
+    (foreign_repo / "tracked.txt").write_text("base\n")
+    _git("add", "tracked.txt", cwd=foreign_repo)
+    _git("commit", "-m", "submodule content", cwd=foreign_repo)
+    _git("-c", "protocol.file.allow=always", "submodule", "add", str(foreign_repo), "nested",
+         cwd=checkout)
+    _git("commit", "-m", "add submodule", cwd=checkout)
+    _git("merge", "--ff-only", f"worktree/{wid}", cwd=config.default_repo.anchor)
+    _git("config", "submodule.nested.ignore", "all", cwd=checkout)
+    pending = checkout / "nested" / ("tracked.txt" if dirty == "modified" else "new.txt")
+    pending.write_text("keep\n")
+    assert not _git("status", "--porcelain", "--untracked-files=all", cwd=checkout)
+
+    assert not finalize.validate_and_finalize(wid, config)
+    assert pending.read_text() == "keep\n"
+    assert tracking.load_record(cfg.tracking_dir() / f"{wid}.yaml").status == "active"
 
 
 def test_local_finalization_uses_registered_anchor_store(local_repo, foreign_repo):
