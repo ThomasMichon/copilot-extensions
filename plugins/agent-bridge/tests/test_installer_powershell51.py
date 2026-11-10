@@ -116,12 +116,20 @@ def test_codec_snapshot_embeds_every_declared_library_under_real_powershell(tmp_
             (destination / "pyproject.toml").write_text(
                 f'[project]\nname = "{package}"\nversion = "1.0.0"\n', encoding="utf-8",
             )
+    metadata = sources / "ssh-manager" / ".metadata"
+    metadata.mkdir()
+    (metadata / "empty").mkdir()
+    payload = metadata / "[entry].bin"
+    payload.write_bytes(bytes(range(256)) + b"\r\n\x00\n")
     snapshot = tmp_path / "standalone"
     snapshot.mkdir()
     shutil.copy2(PLUGIN / "pyproject.toml", snapshot / "pyproject.toml")
     source = INSTALLER.read_text(encoding="utf-8")
     materializer = _function_source(
         source, "Materialize-SnapshotVendoredLibs", "\nfunction Materialize-SnapshotInstallerEngine {",
+    )
+    copier = _function_source(
+        source, "Copy-InstallerStageDirectory", "\n# === end install-contract:v4 payload-copy ===",
     )
     root = str(sources).replace("'", "''")
     target = str(snapshot).replace("'", "''")
@@ -135,6 +143,8 @@ function Resolve-Zdd {{ return Join-Path $LibraryRoot 'zdd' }}
 function Resolve-SingleInstanceLease {{ return Join-Path $LibraryRoot 'single-instance-lease' }}
 function Resolve-ConfigMigrate {{ return Join-Path $LibraryRoot 'config-migrate' }}
 function Resolve-VendoredLib {{ param($LibName) return Join-Path $LibraryRoot $LibName }}
+function Copy-Item {{ throw 'Ordinary vendored files must not use provider copying' }}
+{copier}
 {materializer}
 Materialize-SnapshotVendoredLibs -SnapshotDir '{target}'
 """
@@ -153,6 +163,9 @@ Materialize-SnapshotVendoredLibs -SnapshotDir '{target}'
     }
     for name in libraries.values():
         assert (snapshot / "libs" / name / "pyproject.toml").is_file()
+    copied_metadata = snapshot / "libs" / "ssh-manager" / ".metadata"
+    assert (copied_metadata / "empty").is_dir()
+    assert (copied_metadata / "[entry].bin").read_bytes() == payload.read_bytes()
     embedded = snapshot / "libs/worktree-identity/src/worktree_identity/__init__.py"
     assert embedded.read_bytes() == (codec / "src/worktree_identity/__init__.py").read_bytes()
     shutil.move(str(sources), str(tmp_path / "authoring-unavailable"))
