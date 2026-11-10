@@ -121,7 +121,14 @@ function Invoke-AwNativeSeedPhase {
             [Threading.Tasks.Task[]]@($stdout, $stderr), 1000
         )) { return $null }
         if ($process.ExitCode -ne 0) {
-            if ($null -ne $Diagnostics) { $Diagnostics['stderr'] = $stderr.GetAwaiter().GetResult() }
+            $diagnostic = $stderr.GetAwaiter().GetResult()
+            if ($null -ne $Diagnostics) { $Diagnostics['stderr'] = $diagnostic }
+            [Console]::Error.Write($diagnostic)
+            if ($env:WORKTREE_SETUP_LOG) {
+                try {
+                    [IO.File]::AppendAllText($env:WORKTREE_SETUP_LOG, $diagnostic)
+                } catch {}
+            }
             return $null
         }
         $raw = $stdout.GetAwaiter().GetResult()
