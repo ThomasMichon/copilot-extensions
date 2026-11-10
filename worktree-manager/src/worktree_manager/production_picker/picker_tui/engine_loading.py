@@ -701,6 +701,21 @@ class PickerScreenLoadingMixin:
         if changed:
             self.data = updated
     def on_unmount(self):
+        executor = getattr(self, "executor", None)
+        sync = executor is not None and getattr(executor, "op", None) == "sync"
+        if sync:
+            executor.request_stop()
+        try:
+            PickerScreenLoadingMixin._close_picker_providers(self)
+        finally:
+            if sync:
+                try:
+                    executor.close()
+                except Exception as error:
+                    self.app.binding_error = error
+                    raise
+
+    def _close_picker_providers(self):
         # Picker is tearing down (a launch decision, cancel, or quit). Signal
         # every in-flight ``_run_bg`` pivot-action worker first: each checks
         # ``_bg_cancel`` right before it would otherwise race

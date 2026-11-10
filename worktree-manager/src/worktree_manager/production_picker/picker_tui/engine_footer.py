@@ -102,6 +102,12 @@ class PickerFooterMixin:
         if self.progress:
             hints = ("Esc cancel" if not self.progress["done"]
                      else "Enter/Esc close")
+            if self.progress.get("op") == "sync" and self.progress.get("armed", True):
+                if any((item.get("result") or {}).get("cleanup_pending")
+                       for item in self.progress.get("items", [])):
+                    hints = "Cleanup unconfirmed; exact custody retained"
+                elif not self.progress["done"]:
+                    hints = "Sync running; Escape does not cancel"
         else:
             hints = self._focus_hint()
             if self._kind() == "worktrees" and self._orphans:

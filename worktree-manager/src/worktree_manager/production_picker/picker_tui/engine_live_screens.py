@@ -137,6 +137,12 @@ class ProgressScreen(ModalScreen[None]):
             row.append(title, style="white" if st != "pending" else C_MUTED)
             body.append_text(row)
             body.append("\n")
+            update = it.get("progress") or {}
+            if st == "running" and update:
+                message = " ".join(str(update.get("message") or "").split())
+                body.append(f"    {message[:140]}\n", style=C_META)
+                if update.get("communication_lost"):
+                    body.append("    Progress silent; Sync outcome unknown. Still observing.\n", style=C_WARN)
             if sync_details:
                 from .maintenance import finalize_diagnostics, sync_diagnostics
 
@@ -152,6 +158,8 @@ class ProgressScreen(ModalScreen[None]):
             body.append("\n v: full result details\n", style=C_META)
             if failed:
                 body.append(" Ask: help clean up worktree <id> (claims/obligations)\n", style=C_CAUTION)
+        if any((it.get("result") or {}).get("cleanup_pending") for it in items):
+            body.append("\n Cleanup unconfirmed; exact process custody retained.\n", style=C_WARN)
         if p.get("op") == "profiles" and p["done"]:
             # #1368: after Apply the fragment is regenerated, but the terminal
             # app only re-reads it on a FULL restart -- spell out what changed
