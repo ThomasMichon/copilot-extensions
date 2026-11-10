@@ -1400,9 +1400,10 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
         assert row["event_types_omitted"] == 0
 
 
-@pytest.mark.parametrize("reply", ["LIFECYCLE_REPLY_1", "unfinished"])
+@pytest.mark.parametrize("rendered", [True, False])
+@pytest.mark.parametrize("number", [1, 4])
 @pytest.mark.skipif(os.name != "nt", reason="The native pane uses a private PSMux namespace")
-def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeypatch, reply):
+def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeypatch, rendered, number):
     from types import SimpleNamespace
     from plugin_test_command_safety import private_mux_args
 
@@ -1410,17 +1411,27 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeyp
     home = tmp_path / "copilot-home"
     history = home / "session-state" / "fixture-session" / "events.jsonl"
     history.parent.mkdir(parents=True)
-    history.write_text("".join(json.dumps(event) + "\n" for event in (
-        {"type": "user.message", "data": {"content": PROMPTS[0]}},
-        {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
-        {"type": "assistant.turn_end", "data": {}},
-    )), encoding="utf-8")
+    history.write_text("".join(
+        json.dumps(event) + "\n" for index in range(number) for event in (
+            {"type": "user.message", "data": {"content": PROMPTS[index]}},
+            {"type": "assistant.message", "data": {"content": f"LIFECYCLE_REPLY_{index + 1}"}},
+            {"type": "assistant.turn_end", "data": {}},
+        )
+    ), encoding="utf-8")
     binary = tmp_path / "native" / "psmux.exe"
     witness = _Witness(tmp_path, {
         "COPILOT_HOME": str(home), "COPILOT_DRIVER_PSMUX_NAMESPACE": namespace[1],
     }, None, None, None, None, mux_binary=binary)
     witness.wait = lambda check, *_args, **_kwargs: check()
-    witness.one_native = lambda: ("native-pid", "native-birth")
+    if number == 4:
+        witness.history = history
+    owners = []
+
+    def owner():
+        owners.append(witness.history)
+        return "native-pid", "native-birth"
+
+    witness.one_native = owner
     calls = []
 
     def records(_label):
@@ -1436,12 +1447,13 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeyp
         assert command_problem(
             list(map(str, command)), cwd=cwd, environment=env, sandbox=Path(os.environ[SANDBOX_ENV]),
         ) is None
-        return reply
+        return f"LIFECYCLE_REPLY_{number}" if rendered else "unfinished"
 
     witness.records = records
     monkeypatch.setattr(installed, "_run", capture)
-    result = witness.turn(PROMPTS[0], 1, SimpleNamespace(output=b"cursor redraw"))
-    assert result == (("native-pid", "native-birth") if reply == "LIFECYCLE_REPLY_1" else None)
+    result = witness.turn(PROMPTS[number - 1], number, SimpleNamespace(output=b"cursor redraw"))
+    assert result == (("native-pid", "native-birth") if rendered else None)
+    assert owners == ([history] if rendered else [])
     assert calls == [[
         binary, *namespace, "capture-pane", "-p",
         "-t", "wt-fixture-worktree", "-S", "-60",
@@ -2061,12 +2073,9 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
 
                     resumed = witness.manager()
                     witness.select(resumed, record, "Resume")
-                    replacement = witness.wait(
-                        witness.one_native, "Resume did not start a real CLI", timeout=60
-                    )
-                    assert replacement != original
                     resumed.send(PROMPTS[3].encode() + b"\r")
-                    assert witness.turn(PROMPTS[3], 4, resumed) == replacement
+                    replacement = witness.turn(PROMPTS[3], 4, resumed)
+                    assert replacement != original
                     assert witness.records("records-resumed") == record
                     assert [
                         event["data"]["content"]

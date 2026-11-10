@@ -508,3 +508,23 @@ nominal-performance gaps #7935/#7936/#7946, not waived or reported as passes.
 No scaled timing run, host repair or production deadline change was performed.
 Clean-room and live external validation of this correction still require the
 next exact-source isolated installed-lifecycle run.
+
+### 2026-11-10 - Stopped discovery and Resume reached; owner check ran before binding
+
+Run 42819736352 at `dd25d9c1beb2556514abdebf4b5c4b8da19ca18e`
+passed normal native exit, unchanged identity, stopped discovery and the real
+Resume selection. The resumed CLI reached its prompt with one interactive
+parent and two owned extension-bootstrap children, but its history had no
+active lock at the instant the witness tried to identify the bound owner.
+The strict duplicate-owner check refused; no fourth turn or complete lifecycle
+acceptance is claimed.
+
+The witness now sends the resumed prompt after its existing actual-prompt
+readiness check, then identifies the replacement through the same completed
+history/rendered-reply/lock-bound single-owner postcondition used by the
+fresh conversation. The replacement must differ from the original native
+incarnation, and unchanged history plus all four provider-backed prompts
+remain mandatory. No helper exclusion or duplicate-owner refusal is weakened.
+All 21 focused resumed-turn, native-role, duplicate-owner, exit, UI-readiness
+and Refresh controls passed. Native and cleanup budgets are unchanged;
+another exact-source installed run is required.

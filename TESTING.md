@@ -724,6 +724,10 @@ resident transport and its reconciliation/publication barrier. Old providers,
 unrelated publications, changed request identity, missing mux observations,
 failed publication and wrong/missing receipts cannot satisfy the request.
 These controls do not replace the real installed UI/exit/Resume witness.
+After Resume reaches the actual CLI prompt, its next completed provider-backed
+turn establishes the history lock used to identify the replacement owner.
+The same strict duplicate/extension-host rules apply; pre-turn process presence
+without that binding is not mistaken for completed conversation-owner proof.
 Normal exit requires zero from the pinned Copilot process handle itself,
 not merely a successful pane wrapper or Manager return.
 Normal and private device-status queries are inert in this passive observer;
