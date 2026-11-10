@@ -156,8 +156,11 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   and service namespaces in the normal report/chart, without a new writer or job (#11843).
 - [x] Review the [bounded local collection/staging amendment](local-collection.md)
   before implementing the combined hourly operation or native job.
-- [ ] Prove the complete explicit local collect -> stage -> reread/report flow,
+- [x] Prove the complete explicit local collect -> stage -> reread/report flow,
   keeping present health and prior-hour telemetry correctly attributed.
+- [ ] Review and prove the [adopted one-shot operation](local-collection.md#adopted-one-shot-operation)
+  over current health and prior-hour telemetry, with explicit policy-scoped
+  local staging authority and one shared admission/deadline.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
@@ -1094,3 +1097,27 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   Added pure empty-hour/empty-evidence controls and an actual native exporter
   configuration-loss case that must retain the accepted contribution.
   Follow-up validation and current-head review remain pending.
+
+### 2026-11-09 - Explicit collection flow merged; one-shot execution next
+- #11857 merged as `ab4cf39dd9` after current-head Copilot approval with no open
+  findings, all resolved threads and fresh green required unit/coverage and
+  guard CI. #10873 remains open; this completes only the explicit local
+  collect -> confirmed stage -> reread/report checkpoint.
+- Final targeted controls pass 37 cases plus 44 actor-free controls. Review
+  corrections preserve actual service evidence, retained SSH/session domains
+  and original source timestamps at collection and write boundaries. Native
+  admission remains held through unconfirmed exporter cleanup; its existing
+  lock byte preserves refusal after an unsettled CLI exits. Final budget/hour
+  checks include successful fence settlement.
+- The merged source matches the owned local implementation and tests. Routine
+  sync could not replay the squashed branch; preserved a local backup and
+  reconciled only the four provider-confirmed merged commits onto current
+  `dev`, retaining intervening contributors' changes.
+- Next deliver the reviewed current-health/prior-hour one-shot path through
+  the existing transaction owner and explicit local staging authority, then
+  prepare separately selected native job definitions. Keep exact-runtime
+  capability qualification, platform/headlessness, installed adoption,
+  preferences, carrier and activation as distinct remaining gates.
+- Proposed the exact one-shot CLI/approval/result boundary as an amendment to
+  the existing collection design. It remains review-before-code: neither
+  automatic staging nor scheduler enrollment is implemented by this update.
