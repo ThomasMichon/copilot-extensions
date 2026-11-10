@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify complete ordinary and streamed paired Sync CLI result equivalence",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

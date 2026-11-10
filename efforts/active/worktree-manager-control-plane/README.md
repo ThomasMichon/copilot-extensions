@@ -94,7 +94,7 @@ item in this umbrella.
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 | Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
 | First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
-| Optional Sync-progress implementer | Bounded #4183 LP1-LP3/LPV Sync producer and local ProgressScreen consumer; provider source accepted, local consumer open; no PK/WI ownership or runtime rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
+| Optional Sync-progress implementer | Bounded #4183 LP1-LP3/LPV Sync producer and local ProgressScreen consumer; both source implementations accepted, complete CLI result comparison open; no PK/WI ownership or runtime rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
 
 ## Context
 
@@ -457,13 +457,14 @@ the same effort Journal/open bounded-source process preserves current owners.
 
 ### Optional built-in lifecycle progress
 
-- [ ] Review and deliver the bounded Sync producer/local ProgressScreen consumer
+- [x] Review and deliver the bounded Sync producer/local ProgressScreen consumer
       in [phase-3c-optional-sync-progress.md](phase-3c-optional-sync-progress.md),
       under #4183 LP1-LP3/LPV (received #4274). Preserve CLI defaults, exact
       selected-runtime support, complete paired results and existing process
       ownership. Other verbs, remote streaming and original PK/WI acceptance
-      remain separate; this does not reopen completed Phase 3c. Provider source
-      is accepted; runtime-qualified local consumption remains open.
+      remain separate; this does not reopen completed Phase 3c. Provider and
+      local consumer source are accepted in #11889/#11914. Complete CLI result
+      comparison and the independent release/native/installed gates remain open.
 
 ### Phase 3d — Retire the production Picker's in-process engine-module boundary (production slice Done)
 
@@ -2551,7 +2552,9 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
 - [ ] Qualify the [optional Sync progress flow](phase-3c-optional-sync-progress.md#validation-plan):
   complete versioned results, real incremental local ProgressScreen use,
   selected-runtime compatibility/rollback, independent clocks and unknown
-  outcomes. Provider source acceptance alone does not close these gates.
+  outcomes. Producer/local consumer source acceptance resolves the recorded
+  source-tier flow controls; full ordinary/streamed CLI result equality still
+  gates SV1/S3. Release/native/installed evidence remains independent.
 
 - [ ] Qualify the [#542 first-run front-door matrix](phase-4-first-run-front-door.md#validation-and-promotion-gates):
   real no-project navigation/diagnostic flow, TTY/text routing, source-safe
