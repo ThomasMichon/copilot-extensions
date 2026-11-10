@@ -797,7 +797,8 @@ worktree-manager.
       writers and the full original acceptance matrix; an F1 navigation flow
       is not completion of F2/F3 or the parent issue. F1 source flow is
       accepted in #11837 and F2 owner sequencing in #11847. F2a read-only
-      guides have contained source/consumer proof; effectful F2b, F3 and
+      guides are source-accepted in #11858. The Phase 4 source matrix now
+      distinguishes real registry recovery from provisioning; effectful F2b, F3 and
       release/native/installed acceptance remain open.
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
@@ -2902,8 +2903,20 @@ own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
 
+### 2026-11-10 - First-run original-matrix source audit
+
+- Reconciled the original #542 body in the [Phase 4 source matrix](phase-4-first-run-front-door.md#f3-original-matrix-reconciliation-and-source-recovery-controls).
+  Three contained production-runner/Textual cases exercise actual registry
+  partial/empty/malformed recovery, unchanged observation inputs and explicit
+  selection after Reload. Engine/core observations remain inert fixtures.
+- This advances source validation only. F2b provisioning actions, pristine-profile
+  diagnostic qualification, full native/platform and installed acceptance stay
+  open; no new writer, installation, service probe or rollout is admitted.
+
 ### 2026-11-10 - First-run owner guidance and retained effectful gates
 
+- #11858 merged after exact-head approval, no inline findings and all three
+  required checks. F2a is accepted source, not release/native/installed proof.
 - #11847 accepted the concrete four-action owner matrix and read-only F2a
   sequencing before implementation. The [Phase 4 source record](phase-4-first-run-front-door.md#f2a-source-implementation-and-validation)
   records guide navigation, real setup-plan and source-preservation controls.

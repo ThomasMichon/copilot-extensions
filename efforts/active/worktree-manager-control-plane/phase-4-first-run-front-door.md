@@ -3,8 +3,8 @@
 [Parent effort](README.md#phase-4--bare-invocation-seam--handoff-plugin-side-landed-end-state-pending)
 and [original acceptance](https://github.com/ThomasMichon/copilot-extensions/issues/542).
 
-**Status:** Active; F1 source accepted in #11837 and F2 owner sequencing
-accepted in #11847. F2a guidance implementation is below; F2b/F3 and release,
+**Status:** Active; F1 source accepted in #11837, F2 owner sequencing
+accepted in #11847 and F2a guidance source accepted in #11858. F2b/F3 and release,
 installed/native qualification remain open.
 **Participant:** `patient-knob`, bounded Manager presentation/entry slice.
 This is an agent-recommended implementation sequence under the existing effort,
@@ -144,7 +144,7 @@ their independently tracked construction/replacement adoption gaps.
 - [x] Fail-first entry controls cover interactive bare, redirected stdin,
   redirected output with/without stderr terminal, absent/broken streams,
   ACP-style invocation, explicit verbs/project/help/version and launcher output.
-- [ ] Production Textual tests prove chrome before slow discovery, empty and
+- [x] Production Textual tests prove chrome before slow discovery, empty and
   partial states, explicit project selection, unknown versus empty roster,
   retry/recovery, cancellation and no late activation after owner loss.
 - [x] A real isolated Manager subprocess exercises Review setup plan and its
@@ -332,3 +332,41 @@ read-only first touch is exercised; no installer/apply behavior changed, so no
 installer clean-room/apply lane was selected. No admitted live TTY venue,
 shared-service probe, installation or rollout was exercised. F2a does not
 complete the original F2 effectful handoffs, F3 or #542.
+
+#11858 merged to `dev` on 2026-11-10 as
+`37ebdd70acca93b10bfdeddec8108221afe25d7c`. Genuine Copilot approval
+`5836953954` covers exact head `98e79fe34008b74219098f415f999a2596f4ab80`
+with no active issues or inline findings; all three required checks passed
+before the managed merge. #542 remains open. Next: reconcile the original F3
+source matrix against the accumulated consumer proof, retaining effectful
+owner handoffs and native/installed acceptance as separate unmet gates.
+
+## F3 original-matrix reconciliation and source recovery controls
+
+The original #542 body requires bare TTY entry, state-derived Setup/Doctor
+versus Worktrees, and actual Install core, Add machine, Adopt repo and Enable
+plugins actions. The table below credits the accepted source controls without
+reducing that original outcome to read-only navigation.
+
+| Original cell | Source evidence and remaining boundary |
+|---|---|
+| Bare TTY / non-TTY entry | F1 entry and stream controls cover interactive input, usable terminal output, redirected/absent/broken streams, explicit verbs and launcher output. Native terminal modes and installed qualification remain separate. |
+| Empty and partial setup | Real fresh-profile setup-plan receipts and F2a guides are accepted. Additional production-runner/Textual controls now read actual isolated registries with partial core and an existing project, available engine with no project, and malformed project data. Engine/core observations are inert fixtures, not a real installation. |
+| Unknown data, repair and Reload | The three new controls preserve malformed versus empty, disable Open without an engine and compare every fixture file/directory before and after each observation. Only the fixture owner repairs the input; explicit Reload rereads it and exposes Open without implicitly binding, loading Worktrees or running optional project, diagnostic or maintenance work. |
+| Provisioned / project choice | Existing F1 controls retain single-project bootstrap, multiple-project explicit selection, selection-time reread, capability refusal/retry, surviving-widget activation and owner-loss cancellation. They are source/contained-consumer proof, not an installed engine/current-feed qualification. |
+| Missing-source provisioning actions | F2a supplies truthful guides and the real read-only setup plan. F2b remains unmet: core apply and adoption are external owner commands; Add machine and Enable plugins have no in-app writer. Confirmation, failure, restart and post-action reread must be qualified through those actual owners. |
+
+The three new recovery cases passed through the canonical contained runner.
+Their first attempt correctly refused noninteractive test stdin before reaching
+the app; the fixture now supplies the same explicit terminal stream as the
+existing production-entry control. No production terminal gate changed.
+Changed-test F/E9 lint passed. No runtime, installer, dependency, command or
+service contract changed, and no new suite was added to required unit CI.
+
+This closes the production-Textual observation/recovery checkbox only. The
+full pristine-profile diagnostic/nonmutation gate, F2b effectful handoffs,
+complete native/platform matrix, release and installed acceptance remain open.
+There was no shared-service Doctor, native mux probe, apply, installation or
+rollout. An installer/apply clean-room lane is inapplicable to this test-only
+delta; the read-only fresh-profile consumer remains the separately recorded F1
+proof. #542 and F3 remain open.
