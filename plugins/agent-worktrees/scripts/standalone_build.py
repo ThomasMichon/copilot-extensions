@@ -25,6 +25,7 @@ APPLICATION_RESOURCES = {
         "scripts/installer-instance-reconcile.*",
         "scripts/runtime-source-tools/**/*",
         "scripts/runtime-input-provider/**/*",
+        "scripts/libs/payload-invocation/*.py",
         "bin/**/*",
         "references/control-plane-provider.json", "references/uninstall-contract.json",
     ),
