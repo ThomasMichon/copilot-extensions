@@ -11,13 +11,18 @@ from . import sessions as session_api
 from .push_timeout import ObservationUnavailable
 
 
+def _workspace_path(value: str):
+    windows = PureWindowsPath(value)
+    return windows if windows.is_absolute() else PurePosixPath(value)
+
+
 def backfill_sessions(records: list, *, strict: bool = False) -> dict[str, list[str]]:
     """Discover existing session IDs without changing tracking records."""
     session_dir = session_api._session_state_dir()
     if not strict and not session_dir.exists():
         return {}
 
-    path_to_wt: dict[str, str] = {}
+    path_to_wt: dict[PurePosixPath | PureWindowsPath, str] = {}
     for rec in records:
         sessions = getattr(rec, "sessions", None)
         if sessions:
@@ -32,7 +37,7 @@ def backfill_sessions(records: list, *, strict: bool = False) -> dict[str, list[
             raise ObservationUnavailable("Session discovery requires an absolute worktree path")
         if not rec.worktree_path:
             continue
-        path_to_wt[session_api._normalize_path(rec.worktree_path)] = rec.worktree_id
+        path_to_wt[_workspace_path(rec.worktree_path)] = rec.worktree_id
 
     if not path_to_wt:
         return {}
@@ -87,15 +92,15 @@ def backfill_sessions(records: list, *, strict: bool = False) -> dict[str, list[
                 raise ObservationUnavailable("Session workspace metadata is malformed")
             continue
         cwd = ws_data.get("cwd", "")
-        if not cwd or strict and not isinstance(cwd, str):
+        if not cwd or not isinstance(cwd, str):
             if strict:
                 raise ObservationUnavailable("Session workspace has no conclusive path")
             continue
         if strict and not (PurePosixPath(cwd).is_absolute() or PureWindowsPath(cwd).is_absolute()):
             raise ObservationUnavailable("Session workspace path is not absolute")
-        norm_cwd = session_api._normalize_path(cwd)
+        norm_cwd = _workspace_path(cwd)
         for wt_path, wt_id in path_to_wt.items():
-            if norm_cwd == wt_path or norm_cwd.startswith(wt_path + os.sep):
+            if norm_cwd == wt_path or wt_path in norm_cwd.parents:
                 if strict and not conversation:
                     raise ObservationUnavailable("Owned session history is not yet discoverable")
                 updated_at = str(ws_data.get("updated_at", ""))

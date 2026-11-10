@@ -779,3 +779,41 @@ snapshot/CAS pairing. A replaced incarnation stops before liveness stamps.
 The final backend packet passes 240 selected controls in 54.97 seconds, with the
 same 224 unrelated sessions/reclaim cases deselected. Fresh combined-head native
 qualification, actual review and required CI remain mandatory.
+
+### 2026-11-10 - Palette-independent focus and request-local parsing failures
+
+Exact-source run 42879412714 at
+`0d8a9b0789f3f01c53325d36c6f5775e97f92310` failed before Create:
+one test, one failure, zero errors/skips and 289.282 seconds. Its bounded
+input diagnostics show Create already highlighted with foreground `1a1a1a`
+and background `ffaf00`, while Cancel retained its rest style. The observer
+incorrectly required the foreground to be literal black. It now recognizes the
+selected orange1 background independently of ANSI foreground remapping, requires
+a uniform Create foreground distinct from Cancel, and rejects Cancel, dual-button
+and partial highlights. All 30 focused palette/focus controls pass.
+
+Actual current-head review 5847618117 resolves the atomic-initialization finding
+but names Windows path mismatches and malformed-YAML publication failures in
+its body. Both remain blocking until corrected-candidate acceptance.
+Legacy workspace matching now uses lexical Windows/POSIX path semantics rather
+than case-sensitive string prefixes, preserving child-path boundaries and POSIX
+case sensitivity. Strict tracking reads translate malformed YAML and typed
+record-parsing errors into request-local unavailability; hard cleanup errors
+are not caught or weakened.
+
+The contained targeted packet passes 63 controls in 45.79 seconds, including
+16 strict/default Windows/POSIX path cases and eight actual YAML-file races
+after selection or during observation. The latter cover malformed YAML,
+invalid typed fields, missing keys and non-finite numeric conversion; they
+require terminal rejection, no receipt, unchanged corrupted bytes, continued
+ordinary publication and no implicit retry. All 227 tests in the complete
+producer/runtime/client/projection packet pass in 86.75 seconds. Scoped lint,
+module limits and all 13 installation contracts pass.
+
+Two lifecycle source attempts using the OS-default temporary venue timed out
+in candidate-archive hashing/materialization under the existing 180-second test
+deadline. Neither is a pass. Restoring this task's established scratch venue,
+used by the previous successful packet, passes all 88 lifecycle source controls
+in 106.60 seconds under unchanged limits, including the archive boundary.
+New exact-head installed qualification, fresh actual review and required CI
+remain mandatory. No parent suite/update/promotion gate closes.

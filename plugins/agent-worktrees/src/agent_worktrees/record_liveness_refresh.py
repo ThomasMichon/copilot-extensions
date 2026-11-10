@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 
+import yaml
+
 from . import config as cfg, reclaim, sessions, tracking
 from .push_timeout import ObservationUnavailable
 from .record_io import read_record_mapping
@@ -14,7 +16,10 @@ _HINTS = ("bound_live", "bound_live_at", "mux_live", "mux_live_at")
 
 
 def _read(path):
-    data = read_record_mapping(path)
+    try:
+        data = read_record_mapping(path)
+    except yaml.YAMLError as error:
+        raise ObservationUnavailable("Strict refresh tracking YAML is malformed") from error
     registry = data.get("sessions")
     if registry is not None and (
         not isinstance(registry, list)
@@ -26,7 +31,10 @@ def _read(path):
         )
     ):
         raise ObservationUnavailable("Strict refresh session registry metadata is malformed")
-    return tracking.parse_record_data(data, path=path)
+    try:
+        return tracking.parse_record_data(data, path=path)
+    except (ValueError, TypeError, KeyError, OverflowError) as error:
+        raise ObservationUnavailable("Strict refresh tracking metadata is malformed") from error
 
 
 def _fence(record):

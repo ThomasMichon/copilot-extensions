@@ -873,6 +873,28 @@ class TestDetachedSessionsExcluded:
         assert discovered.get("backfill-wt") == ["real-sess"]
 
 
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize(("worktree", "cwd", "matches"), [
+    (r"C:\Work\Task", "c:/work/task", True),
+    (r"C:\Work\Task\\", r"c:/WORK/task\src", True),
+    (r"C:\Work\Task", "c:/work/task-other", False),
+    (r"C:\Work\Task", "d:/work/task", False),
+    (r"\\Host\Share\Task", "//host/share/task/src", True),
+    ("/work/Task", "/work/Task/src", True),
+    ("/work/Task", "/work/task/src", False),
+    ("/work/Task", "/work/Task-other", False),
+])
+def test_backfill_matches_workspace_path_semantics(
+    tmp_session_state_dir: Path, strict, worktree, cwd, matches,
+):
+    make_session_dir(tmp_session_state_dir, "legacy-path", cwd)
+    record = _make_record("backfill-wt", worktree, sessions=None)
+    with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        assert backfill_sessions([record], strict=strict) == (
+            {"backfill-wt": ["legacy-path"]} if matches else {}
+        )
+
+
 @pytest.mark.parametrize("workspace", [
     "complete", "missing", "malformed", "relative", "record-missing", "record-relative",
 ])

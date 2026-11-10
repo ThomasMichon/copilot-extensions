@@ -6,6 +6,7 @@ import subprocess
 from types import SimpleNamespace
 
 import pytest
+import yaml
 
 from agent_worktrees import __main__ as core
 from agent_worktrees import git_ops, list_cli, mux_link, reclaim, sessions, tracking
@@ -111,6 +112,9 @@ def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, 
     ("partial-registry", False), ("numeric-id", False),
     ("malformed-during-observation", False),
     ("lifecycle-changed", False),
+    *[(f"parse-{kind}-{phase}", False)
+      for kind in ("yaml", "type", "key", "overflow")
+      for phase in ("selection", "observation")],
 ])
 def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     tmp_path, monkeypatch, failure, managed,
@@ -120,6 +124,7 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     import threading
 
     collision = failure is not None and failure.endswith("-collision")
+    parse_failure = failure is not None and failure.startswith("parse-")
     selected_id = "two-one" if collision else "one"
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -178,6 +183,24 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         paths[0].write_text(json.dumps(data, default=str), encoding="utf-8")
         initial_bytes = paths[0].read_bytes()
 
+    def corrupt_record():
+        nonlocal initial_bytes
+
+        data = read_record_mapping(paths[0])
+        kind = failure.split("-")[1]
+        if kind == "yaml":
+            content = "sessions: ["
+        else:
+            if kind == "key":
+                del data["worktree_id"]
+            else:
+                data["sessions"] = [{
+                    "session_id": "legacy", "pid": [1] if kind == "type" else float("inf"),
+                }]
+            content = yaml.safe_dump(data)
+        paths[0].write_text(content, encoding="utf-8")
+        initial_bytes = paths[0].read_bytes()
+
     if failure in malformed:
         corrupt_sessions(malformed[failure])
     if failure == "malformed-record":
@@ -207,6 +230,8 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         bound_reads.append(kwargs)
         if failure == "malformed-during-observation":
             corrupt_sessions(malformed["malformed-registry"])
+        elif parse_failure and failure.endswith("-observation"):
+            corrupt_record()
         elif failure == "lifecycle-changed":
             changed = tracking.load_record(paths[0])
             tracking._next_lifecycle_revision(changed)
@@ -239,6 +264,12 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     owner = WorktreesRuntime(tmp_path / "current.sqlite3")
     owner.activate()
     options = {}
+    if parse_failure and failure.endswith("-selection"):
+        def corrupt_after_selection(_project, selected):
+            if selected:
+                corrupt_record()
+
+        options["observe_records"] = corrupt_after_selection
     if managed:
         cache = mux_link.ManagedMuxCache()
         cache.apply_observation({
@@ -312,16 +343,19 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         elif failure and not collision and failure not in {"registered", "unindexed"}:
             count = 0 if failure in {"unreadable-record", "malformed-record"} else 1
             assert producer.publish_active_project(owner, **options) == count
-            assert owner.handle(query)["error"]["code"] == "refresh-unavailable"
+            rejected = owner.handle(query)
+            assert rejected["error"]["code"] == "refresh-unavailable"
+            assert "point_refresh" not in rejected
             assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
             assert owner.refreshes.pending("project") == ()
-            assert producer.publish_active_project(owner, **options) == count
+            assert producer.publish_active_project(owner, **options) == (0 if parse_failure else count)
+            assert owner.handle(query) == rejected
             if failure == "unreadable-record":
                 assert denied_reads
                 assert paths[0].read_bytes() == initial_bytes
             if failure in {"unreadable-workspace", "contended", "unpersisted", "lifecycle-changed"}:
                 assert paths[0].read_bytes() == initial_bytes
-            if failure in malformed or failure == "malformed-during-observation":
+            if failure in malformed or failure == "malformed-during-observation" or parse_failure:
                 assert paths[0].read_bytes() == initial_bytes
             if failure in {"contended", "unpersisted"}:
                 release.set()
@@ -360,7 +394,7 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 assert owner.handle(query)["worktrees"][0]["mux_session"] is True
         calls = 0 if failure in malformed or failure in {
             "ambiguous", "unreadable-workspace", "unreadable-record", "malformed-record",
-        } else (
+        } or parse_failure and failure.endswith("-selection") else (
             2 if failure in {"contended", "unpersisted"} else 1
         )
         assert bound_reads == [

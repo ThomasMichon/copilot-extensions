@@ -1281,6 +1281,10 @@ identity differing from the receipt refuses success. Strict Refresh checks raw
 registry structure and session identities before permissive legacy parsing can
 discard or coerce them. Unindexed discovery also requires an absolute selected
 checkout path so unmatched metadata cannot be mistaken for an empty registry.
+Workspace matching honors Windows case/separator semantics and path-component
+boundaries, while POSIX paths remain case-sensitive. A record that becomes
+malformed after selection or during observation terminates only its Refresh
+request without a receipt; ordinary roster publication continues.
 Backfilling a legacy registry advances its canonical lifecycle revision so an
 older full-record save cannot erase the discovered Resume target. Strict Refresh
 also refuses if that revision changes during observation.

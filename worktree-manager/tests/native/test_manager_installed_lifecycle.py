@@ -447,9 +447,10 @@ class _Witness:
             cancel_style=[(cell.fg, cell.bg) for cell in cancel],
         )
         return (
-            all(cell.fg in {"black", "000000"} for cell in create)
-            and all(cell.fg not in {"black", "000000"} for cell in cancel)
-            and all(cell.bg != cancel[0].bg for cell in create)
+            # C_BTN_SEL's orange1 background is stable across ANSI foreground palettes.
+            all(cell.bg == "ffaf00" for cell in create)
+            and len({cell.fg for cell in create}) == 1
+            and all(cell.bg != "ffaf00" and cell.fg != create[0].fg for cell in cancel)
         )
 
     def _new_prompt_focused(self, console):
@@ -1857,9 +1858,13 @@ def test_lifecycle_prompt_paste_requires_the_actual_terminal_mode(mode):
 
 
 @pytest.mark.parametrize("phase", [
-    "create", "prompt", "idle", "unrelated-redraw", "foreign-caret", "nonempty", "missing-box",
+    "create", "cancel", "both", "partial", "prompt", "idle", "unrelated-redraw",
+    "foreign-caret", "nonempty", "missing-box",
 ])
-def test_lifecycle_new_dialog_requires_its_rendered_focus_not_any_redraw(tmp_path, phase):
+@pytest.mark.parametrize("foreground", ["30", "38;2;0;0;0", "38;2;26;26;26"])
+def test_lifecycle_new_dialog_requires_its_rendered_focus_not_any_redraw(
+    tmp_path, phase, foreground,
+):
     from types import SimpleNamespace
 
     def draw(row, column, text, style="0;37;48;5;235"):
@@ -1880,8 +1885,11 @@ def test_lifecycle_new_dialog_requires_its_rendered_focus_not_any_redraw(tmp_pat
         (16, " Create     Cancel "),
     ):
         data.extend(draw(row, 10, text))
-    if phase == "create":
-        data.extend(draw(16, 11, "Create", "0;30;48;5;214"))
+    if phase in {"create", "both", "partial"}:
+        data.extend(draw(16, 11, "Creat" if phase == "partial" else "Create",
+                         f"0;{foreground};48;5;214"))
+    if phase in {"cancel", "both"}:
+        data.extend(draw(16, 22, "Cancel", f"0;{foreground};48;5;214"))
     if phase in {"prompt", "nonempty"}:
         data.extend(draw(8, 12, " ", "0;37;48;5;235;7"))
     if phase == "nonempty":
