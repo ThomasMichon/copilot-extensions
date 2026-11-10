@@ -850,7 +850,8 @@ class TestDetachedSessionsExcluded:
         assert norm not in ctx.active_sessions
         assert norm not in ctx.session_count
 
-    def test_backfill_skips_detached(self, tmp_session_state_dir: Path):
+    @pytest.mark.parametrize("strict", [False, True])
+    def test_backfill_skips_detached(self, tmp_session_state_dir: Path, strict):
         """Backfill must not register a detached session against a worktree."""
         wt_path = "/tmp/wt-backfill-detached"
         make_session_dir(
@@ -867,9 +868,34 @@ class TestDetachedSessionsExcluded:
             "agent_worktrees.sessions._session_state_dir",
             return_value=tmp_session_state_dir,
         ):
-            discovered = backfill_sessions([rec])
+            discovered = backfill_sessions([rec], strict=strict)
 
         assert discovered.get("backfill-wt") == ["real-sess"]
+
+
+@pytest.mark.parametrize("workspace", ["complete", "missing", "malformed", "relative"])
+def test_strict_backfill_requires_complete_attributable_workspace_data(
+    tmp_session_state_dir: Path, workspace,
+):
+    from agent_worktrees.push_timeout import ObservationUnavailable
+
+    wt_path = "/tmp/wt-strict-backfill"
+    entry = make_session_dir(tmp_session_state_dir, "legacy", wt_path)
+    path = entry / "workspace.yaml"
+    if workspace == "missing":
+        path.unlink()
+    elif workspace == "malformed":
+        path.write_text("cwd: [", encoding="utf-8")
+    elif workspace == "relative":
+        path.write_text("cwd: relative-worktree\n", encoding="utf-8")
+    record = _make_record("backfill-wt", wt_path, sessions=None)
+    with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        if workspace == "complete":
+            assert backfill_sessions([record], strict=True) == {"backfill-wt": ["legacy"]}
+        else:
+            with pytest.raises(ObservationUnavailable):
+                backfill_sessions([record], strict=True)
+            assert backfill_sessions([record]) == {}
 
 
 # ---------------------------------------------------------------------------

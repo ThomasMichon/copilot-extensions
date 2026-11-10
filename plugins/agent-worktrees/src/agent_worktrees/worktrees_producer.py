@@ -90,6 +90,7 @@ def _publish_active_project(
     if refresh_requests:
         from .list_cli import _filter_list_worktree, _refresh_list_record
 
+        positions = {record.worktree_id: index for index, record in enumerate(records)}
         accepted_requests = []
         for request_id, selector in refresh_requests:
             try:
@@ -104,8 +105,9 @@ def _publish_active_project(
                             managed_mux_cache.get(project, record.worktree_id)
                             if managed_mux_cache is not None else None
                         )
-                        _refresh_list_record(record, strict=True)
-                        if record.mux_live is False:
+                        persisted = _refresh_list_record(record, strict=True)
+                        records[positions[record.worktree_id]] = persisted
+                        if persisted.mux_live is False:
                             runtime.refreshes.supersede_mux(project, record.worktree_id, previous_mux)
                         refreshed.add(record.worktree_id)
             except (OSError, ValueError, MuxObservationUnavailable, push_timeout.ObservationUnavailable) as error:

@@ -728,6 +728,12 @@ Review controls also cover unavailable Windows process-open/exit/image queries,
 strict Bridge-lock reads, request-local observation failures, hard cleanup
 failure propagation, a second publication with the same superseded mux cache
 and acceptance of a genuinely newer managed observation.
+Strict discovery/persistence controls use real tracking files and reload them
+between publications. Unreadable legacy workspaces, a real contended record
+lock and a no-op writer cannot acknowledge success or change the prior bytes;
+a new explicit request succeeds once contention or the writer fault is removed.
+Backfill controls also preserve the old default and cover strict missing,
+malformed and relative metadata, detached sessions and the single-sweep guard.
 After Resume reaches the actual CLI prompt, its next completed provider-backed
 turn establishes the history lock used to identify the replacement owner.
 The same strict duplicate/extension-host rules apply; pre-turn process presence

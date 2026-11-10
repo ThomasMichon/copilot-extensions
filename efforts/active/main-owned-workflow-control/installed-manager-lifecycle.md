@@ -560,3 +560,38 @@ reply refusals. The corrected candidate must earn another exact-source
 installed result and current-head review before merge. The parent campaign,
 complete suite/Machines, authentic update and mandatory candidate/Main gates
 remain open.
+
+### 2026-11-10 - Stricter native pass retained; legacy discovery/write corrections
+
+Run 42831416101, attempt 1, passed at
+`d130f9c038e4bbf3f7b3c545d5da96e4547fedfe`
+(tree `1ac29533d46254d40d94da59b6b01a4c423870f3`).
+JUnit records exactly one test with zero failures/errors/skips and 428.719
+seconds; the lifecycle receipt measures 407.328 seconds. This run also enforces
+all four exact persisted assistant replies. Candidate origins/bytes, the real
+Create/Open/detach/exit/Resume flow, unusable-entry refusal and owned cleanup
+passed. This remains installed-core evidence for that candidate only.
+
+Review 5843274168 confirms the prior four corrections, but its body identifies
+two further Medium issues despite its "No open issues" banner: best-effort
+backfill can hide an unreadable workspace, and best-effort stamps can skip
+persistence while an in-memory row is acknowledged. Both are treated as
+blocking, not excused by the banner or absence of inline threads.
+
+The sanctioned backfill implementation was extracted in a separate
+behavior-preserving commit, retaining its facade, compatibility helpers and
+single-sweep guard, and tightening only its own module ceiling. Strict discovery
+now refuses incomplete or unattributable candidate metadata. Strict point
+reconciliation probes outside the record lock, rechecks a fresh record fence
+under the canonical required-sidecar lock, saves registry/liveness together and
+rereads the actual mapping before returning the confirmed record for publication.
+Legacy best-effort callers remain unchanged.
+
+The combined regression selection passed 469 controls, with explicit backfill
+scope in the larger sessions file and the three already recorded nominal timing
+cases excluded; this is not a full-plugin pass. Real tracking-file controls
+cover unreadable workspace data, actual thread-held lock contention, a no-op
+writer, reload between publications and successful new requests after fault
+removal. The changed candidate still requires exact-source native
+requalification and fresh current-head review. All broader campaign gates remain
+open.

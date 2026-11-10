@@ -835,7 +835,7 @@ def resolve_resume_target(
     )
 
 
-def backfill_sessions(records: list) -> dict[str, list[str]]:
+def backfill_sessions(records: list, *, strict: bool = False) -> dict[str, list[str]]:
     """Populate empty session registries from existing session-state data.
 
     Scans ``~/.copilot/session-state/`` once, matches sessions to
@@ -855,7 +855,7 @@ def backfill_sessions(records: list) -> dict[str, list[str]]:
     """
     from .session_backfill import backfill_sessions as discover
 
-    return discover(records)
+    return discover(records, strict=strict)
 
 
 # Copilot CLI event types that render meaningfully in a transcript view.

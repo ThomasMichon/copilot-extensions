@@ -102,11 +102,13 @@ def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, 
 @pytest.mark.parametrize(("failure", "managed"), [
     (None, False), (None, True), ("bound", False), ("mux", False),
     ("later-mux", False), ("publication", False), ("ambiguous", False), ("cleanup", False),
+    ("unreadable-workspace", False), ("contended", False), ("unpersisted", False),
 ])
 def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     tmp_path, monkeypatch, failure, managed,
 ):
     from datetime import datetime
+    import threading
 
     checkout = tmp_path / "checkout"
     checkout.mkdir()
@@ -114,7 +116,8 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         worktree_id="one", branch="worktree/one", worktree_path=str(checkout),
         repo="project", machine="host", platform="windows", title="Task",
         started_at="", last_resumed_at="", resume_count=0, status="active",
-        completed_at=None, sessions=[], bound_live=True,
+        completed_at=None, sessions=None if failure == "unreadable-workspace" else [],
+        creation_nonce="fixture-incarnation", bound_live=True,
         bound_live_at=datetime.now().isoformat(),
     )
     monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
@@ -125,8 +128,19 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     if failure == "ambiguous":
         from dataclasses import replace
 
-        records.append(replace(record, worktree_id="two-one"))
-    monkeypatch.setattr(tracking, "list_records", lambda *a, **kw: records)
+        records.append(replace(record, worktree_id="two-one", creation_nonce="second-incarnation"))
+    tracking_dir = producer.cfg.tracking_dir("project")
+    tracking_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for item in records:
+        path = tracking_dir / (item.worktree_id + ".yaml")
+        tracking.save_record(item, path)
+        paths.append(path)
+    initial_bytes = paths[0].read_bytes()
+    monkeypatch.setattr(
+        tracking, "list_records",
+        lambda *a, **kw: [tracking.load_record(path) for path in paths],
+    )
     monkeypatch.setattr(tracking, "stamp_bound_live", lambda *a, **kw: None)
     monkeypatch.setattr(tracking, "stamp_mux_live", lambda *a, **kw: None)
     bound_reads = []
@@ -169,9 +183,44 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     query = {"contract_version": 1, "project": "project", "worktree_id": "one", "refresh_id": "a" * 32}
     if failure == "ambiguous":
         query["worktree_id"] = "ne"
+    release, entered = threading.Event(), threading.Event()
+    contender, contention_errors = None, []
+    original_save = tracking.save_record
     try:
         owner.publish("project", [{"id": "one", "session_bound_live": True}], observed_at=1)
         assert owner.handle(query)["error"]["code"] == "unready"
+        if failure == "unreadable-workspace":
+            import builtins
+
+            state = tmp_path / "session-state"
+            legacy = state / "legacy"
+            legacy.mkdir(parents=True)
+            workspace = legacy / "workspace.yaml"
+            workspace.write_text(json.dumps({"cwd": str(checkout)}), encoding="utf-8")
+            (legacy / "events.jsonl").write_text("fixture", encoding="utf-8")
+            monkeypatch.setattr(sessions, "_session_state_dir", lambda: state)
+            original_open = builtins.open
+
+            def unavailable(file, *args, **kwargs):
+                if str(file) == str(workspace):
+                    raise PermissionError("workspace is unreadable")
+                return original_open(file, *args, **kwargs)
+
+            monkeypatch.setattr(builtins, "open", unavailable)
+        elif failure == "contended":
+            def occupy():
+                try:
+                    with tracking._RecordLock(paths[0], require_sidecar=True):
+                        entered.set()
+                        assert release.wait(10)
+                except BaseException as error:
+                    contention_errors.append(error)
+
+            contender = threading.Thread(target=occupy)
+            contender.start()
+            assert entered.wait(3)
+        elif failure == "unpersisted":
+            monkeypatch.setattr(tracking, "save_record", lambda *a, **kw: None)
         if failure == "publication":
             def failed_publish(*a, **kw):
                 raise OSError("publication failed")
@@ -193,11 +242,24 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
             assert owner.handle({"contract_version": 1, "project": "project"})["ok"] is True
             assert owner.refreshes.pending("project") == ()
             assert producer.publish_active_project(owner, **options) == 1
+            if failure in {"unreadable-workspace", "contended", "unpersisted"}:
+                assert paths[0].read_bytes() == initial_bytes
+            if failure in {"contended", "unpersisted"}:
+                release.set()
+                if contender is not None:
+                    contender.join(3)
+                    assert not contender.is_alive() and not contention_errors
+                monkeypatch.setattr(tracking, "save_record", original_save)
+                retry = {**query, "refresh_id": "b" * 32}
+                assert owner.handle(retry)["error"]["code"] == "unready"
+                assert producer.publish_active_project(owner, **options) == 1
+                assert owner.handle(retry)["point_refresh"]["request_id"] == "b" * 32
+                assert tracking.load_record(paths[0]).bound_live is False
         else:
             assert producer.publish_active_project(owner, **options) == 1
             result = owner.handle(query)
             assert result["ok"] is True and result["point_refresh"]["request_id"] == "a" * 32
-            assert record.bound_live is False
+            assert tracking.load_record(paths[0]).bound_live is False
             assert result["worktrees"][0].get("session_bound_live") is not True
             assert result["worktrees"][0]["mux_session"] is False
             if managed:
@@ -210,10 +272,15 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 })
                 assert producer.publish_active_project(owner, **options) == 1
                 assert owner.handle(query)["worktrees"][0]["mux_session"] is True
-        assert bound_reads == ([] if failure == "ambiguous" else [
-            {"worktree_id": "one", "session_ids": [], "strict": True},
-        ])
+        calls = 0 if failure in {"ambiguous", "unreadable-workspace"} else (
+            2 if failure in {"contended", "unpersisted"} else 1
+        )
+        assert bound_reads == [{"worktree_id": "one", "session_ids": [], "strict": True}] * calls
     finally:
+        release.set()
+        if contender is not None:
+            contender.join(3)
+            assert not contender.is_alive() and not contention_errors
         owner.shutdown()
 
 

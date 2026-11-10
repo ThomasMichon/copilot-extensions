@@ -543,6 +543,17 @@ Native process queries use the existing tri-state liveness reader, including
 conclusive exit of a retained Windows process handle. Access-denied/image-query
 failures, unreadable session directories and unreadable/malformed Bridge locks
 cannot establish absence.
+For an unindexed legacy record, the sanctioned backfill sweep must establish
+complete, attributable workspace discovery; unreadable, missing or malformed
+candidate metadata cannot become an empty authoritative registry. The normal
+backfill API retains its best-effort default for existing callers.
+
+Strict reconciliation probes outside the record lock, then takes the canonical
+required-sidecar lock and rechecks the record incarnation and observation fence.
+It saves registry and liveness together through the canonical writer and rereads
+the actual mapping before publishing the confirmed record. Contention, failed or
+unconfirmed writes, and concurrent fenced changes cannot earn a completion
+receipt. Best-effort background stamps do not satisfy this operation.
 
 Success adds `point_refresh: {request_id, generation, revision}`, identifying
 that request's publication barrier. The reader verifies the request ID, current

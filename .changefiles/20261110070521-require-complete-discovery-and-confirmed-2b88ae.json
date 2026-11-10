@@ -1,0 +1,9 @@
+{
+  "comment": "Require complete discovery and confirmed atomic tracking persistence before strict Refresh completion",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

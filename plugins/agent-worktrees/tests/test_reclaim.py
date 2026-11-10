@@ -27,12 +27,25 @@ def test_strict_refresh_preserves_unknown_native_process_observations(
 ):
     import ctypes
     from types import SimpleNamespace
-    from agent_worktrees import list_cli, session_liveness, sessions
+    from agent_worktrees import config, list_cli, session_liveness, sessions, tracking
     from agent_worktrees.push_timeout import ObservationUnavailable
 
     entry = tmp_path / "registered"
     entry.mkdir()
     (entry / "inuse.7.lock").touch()
+    monkeypatch.setattr(config, "project_name", lambda: "project")
+    tracking_dir = config.tracking_dir()
+    tracking_dir.mkdir(parents=True, exist_ok=True)
+    record = tracking.WorktreeRecord(
+        worktree_id="one", branch="worktree/one", worktree_path=str(tmp_path / "checkout"),
+        repo="project", machine="host", platform="windows", title="Task",
+        started_at="", last_resumed_at="", resume_count=0, status="active",
+        completed_at=None, sessions=[tracking.SessionEntry("registered", "")],
+        creation_nonce="fixture-incarnation", bound_live=True,
+    )
+    path = tracking_dir / "one.yaml"
+    tracking.save_record(record, path)
+    before = path.read_bytes()
     monkeypatch.setattr(sessions, "_session_state_dir", lambda: tmp_path)
     monkeypatch.setattr(session_liveness.platform, "system", lambda: "Windows")
     monkeypatch.setattr(
@@ -68,17 +81,15 @@ def test_strict_refresh_preserves_unknown_native_process_observations(
     monkeypatch.setattr(
         list_cli.tracking, "stamp_mux_live", lambda *a, **kw: stamps.append(("mux", a)),
     )
-    record = SimpleNamespace(
-        worktree_id="one", sessions=[SimpleNamespace(session_id="registered")], bound_live=True,
-    )
     if expected is None:
         with pytest.raises(ObservationUnavailable):
             list_cli._refresh_list_record(record, strict=True)
-        assert record.bound_live is True and not stamps
+        assert path.read_bytes() == before and not stamps
     else:
-        list_cli._refresh_list_record(record, strict=True)
-        assert record.bound_live is expected
-        assert stamps == [("bound", ("one", expected)), ("mux", ("one", False))]
+        persisted = list_cli._refresh_list_record(record, strict=True)
+        assert persisted.bound_live is expected
+        assert tracking.load_record(path).bound_live is expected
+        assert not stamps
     assert closed == ([] if observation in {"gone", "access-denied"} else [1])
 
 
