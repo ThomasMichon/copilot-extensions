@@ -100,6 +100,12 @@ Confirmed operator responses:
   coverage and physical Python-file coverage.
 - The confirmed terminal policy is every first-party file checked strictly, with typed dynamic boundaries and narrow reviewed third-party exceptions. It is not a literal ban on all `Any` expressions.
 - No blanket ignores, unchecked first-party substitutes or permanent pending/basic cohorts count as completion.
+- Plugin self-provisioning is being retired, with service implementations
+  ultimately distributed outside Copilot plugin payloads. Qualification must
+  validate explicitly declared Invocation consumers without requiring every
+  Python application or thin connector to adopt that legacy model. This
+  direction does not authorize service removal, runtime rollout or weakened
+  validation of declarations that remain.
 - Normal PR/CI/review gates remain. Main-controller adoption is limited to the
   explicitly approved two-step workflow change and job deadline above; no ruleset/CI bypass,
   pause/resume, service restart or installed rollout is authorized. The only
