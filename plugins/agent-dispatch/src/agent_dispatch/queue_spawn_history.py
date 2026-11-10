@@ -125,7 +125,10 @@ class SpawnHistoryMixin:
         are reported and left untouched; nothing is fenced, released or rewritten.
         A row with no recorded worktree (an in-flight launch) is not safely
         adoptable, because pool publication requires that workspace; it is
-        reported as ``workspace_unrecorded`` and can be adopted once recorded.
+        reported as ``workspace_unrecorded`` and can be adopted once recorded. A
+        recorded workspace the pool or current task routing refuses (an excluded
+        worktree, another machine) is reported as ``workspace_conflict``; the
+        same check guards publication into an accounting-only binding.
         Every row stays unresolved while the pool catalog is not ready, since an
         incomplete catalog cannot prove a pool is the only match. An adopted row is
         accounting-only: it gains no pool recovery assignment, so a parked legacy
@@ -135,7 +138,7 @@ class SpawnHistoryMixin:
         if apply and (not permitted or not reason.strip()):
             raise TaskError("legacy capacity adoption requires permission and a reason")
         from .bridge_remote import normalize_host
-        from .queue_pool_placement import _permits
+        from .queue_pool_placement import _permits, bound_workspace_conflict
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
             timestamp = self._now(None)
@@ -166,6 +169,14 @@ class SpawnHistoryMixin:
                     # A bound row must publish into its recorded workspace; a
                     # launch that has not recorded one stays legacy for now.
                     unresolved["workspace_unrecorded"].append(row["key"])
+                elif len(matches) == 1 and bound_workspace_conflict(
+                    task, row["worktree"], machine, machine=matches[0].machine,
+                    env=matches[0].env, registration_id=matches[0].registration_id,
+                    capabilities=matches[0].filters.permit.get("capabilities", frozenset()),
+                ):
+                    # Publication would run the body in a workspace the pool or
+                    # current task routing refuses.
+                    unresolved["workspace_conflict"].append(row["key"])
                 elif len(matches) == 1:
                     adopt.append((row, matches[0]))
                 else:

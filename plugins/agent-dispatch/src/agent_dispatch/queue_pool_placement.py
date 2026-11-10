@@ -426,25 +426,46 @@ def require_pool_workspace(
         or not machine_matches(task.target_machine, assignment.machine)
     ):
         raise TaskError("pool workspace requires its recorded execution machine")
-    if task.target_worktree is not None and task.target_worktree != worktree:
-        raise TaskError("pool workspace conflicts with the task target worktree")
     binding = conn.execute(
         "SELECT capabilities FROM pool_reservation_bindings WHERE reservation_key = ?",
         (assignment.reservation_key,),
     ).fetchone()
     if binding is None or binding["capabilities"] is None:
         raise TaskError("pool workspace capability binding requires reconciliation")
-    capabilities = frozenset(json.loads(binding["capabilities"]))
-    if _routing_requirements(
-        task, machine=assignment.machine, env=assignment.env,
-        registration_id=assignment.registration_id, capabilities=capabilities, worktree=worktree,
-    ) is None:
-        raise TaskError("pool workspace conflicts with current task requirements")
-    if _execution_excluded(
-        task, machine=assignment.machine, env=assignment.env,
-        registration_id=assignment.registration_id, capabilities=capabilities, worktree=worktree,
+    conflict = bound_workspace_conflict(
+        task, worktree, execution_machine, machine=assignment.machine, env=assignment.env,
+        registration_id=assignment.registration_id,
+        capabilities=frozenset(json.loads(binding["capabilities"])),
+    )
+    if conflict is not None:
+        raise TaskError(conflict)
+
+
+def bound_workspace_conflict(
+    task: Task, worktree: str | None, execution_machine: object, *,
+    machine: str, env: str, registration_id: str, capabilities: frozenset[str],
+) -> str | None:
+    """Why a recorded workspace cannot run in a bound pool under current task routing."""
+    from .bridge_remote import normalize_host
+    if (
+        isinstance(execution_machine, str) and execution_machine.strip()
+        and normalize_host(execution_machine) != normalize_host(machine)
+        or not machine_matches(task.target_machine, machine)
     ):
-        raise TaskError("pool workspace is excluded by current task routing")
+        return "pool workspace requires its recorded execution machine"
+    if task.target_worktree is not None and task.target_worktree != worktree:
+        return "pool workspace conflicts with the task target worktree"
+    if _routing_requirements(
+        task, machine=machine, env=env, registration_id=registration_id,
+        capabilities=capabilities, worktree=worktree,
+    ) is None:
+        return "pool workspace conflicts with current task requirements"
+    if _execution_excluded(
+        task, machine=machine, env=env, registration_id=registration_id,
+        capabilities=capabilities, worktree=worktree,
+    ):
+        return "pool workspace is excluded by current task routing"
+    return None
 
 
 def pool_native_publication(
@@ -458,10 +479,23 @@ def pool_native_publication(
         return False
     if not releasing and not row["worktree"]:
         raise TaskError("pool publication requires its recorded workspace")
-    if not releasing:
+    if not releasing and pool_assignment(conn, task.id) is not None:
         require_pool_workspace(
             conn, task, row["worktree"], row["execution_machine"], driver=row["driver"],
         )
+    elif not releasing:
+        # An accounting-only (adopted) binding has no assignment; its immutable
+        # binding still decides where the body may publish.
+        bound = conn.execute(
+            "SELECT * FROM pool_reservation_bindings WHERE reservation_key = ?", (row["key"],),
+        ).fetchone()
+        conflict = bound_workspace_conflict(
+            task, row["worktree"], row["execution_machine"], machine=bound["machine"],
+            env=bound["env"], registration_id=bound["registration_id"],
+            capabilities=frozenset(json.loads(bound["capabilities"] or "[]")),
+        )
+        if conflict is not None:
+            raise TaskError(conflict)
     from .ordinary_native_bindings import native_binding_evidence, reservation_native_identity
     candidate = {**dict(row), "session_handle": session_handle, "conversation_retired": 0}
     native = reservation_native_identity(conn, candidate)

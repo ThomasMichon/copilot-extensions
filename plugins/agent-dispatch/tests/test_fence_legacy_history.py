@@ -416,7 +416,7 @@ def test_adopted_cold_body_detached_wake_waits_for_a_free_lane(queue):
         parked.id, generation=waiter["generation"], reason="external",
         message="continue", sender="recovery",
     )
-    [wake] = queue.list_run_waiter_wakes(parked.id)
+    wake = queue.claim_due_run_waiter_wake()
     with pytest.raises(ExecutionSendUnresolved, match="free lane"):
         prepare_recovery_wake(queue, wake)
     assert queue.get_reservation(reservation.key).state == "cold"
@@ -439,6 +439,40 @@ def test_adopt_legacy_leaves_a_launch_without_a_recorded_workspace_publishable(q
     queue.record_spawn(reservation.key, session_handle="local-body:launch", worktree="launch-worktree")
     assert queue.get_reservation(reservation.key).session_handle == "local-body:launch"
     assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
+
+
+def test_adopt_legacy_leaves_an_excluded_recorded_workspace_unresolved(queue):
+    from tests.test_pool_placement import pool, publish
+
+    launching = queue.create("launching", excludes=["worktree:excluded-worktree"])
+    reservation, _ = queue.reserve_spawn(launching.id)
+    queue.record_spawn_worktree(reservation.key, "excluded-worktree")
+    publish(queue, pool())
+    result = queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")
+    assert result["adopted"] == 0
+    assert result["unresolved"]["workspace_conflict"] == [reservation.key]
+    with queue._connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM pool_reservation_bindings").fetchone()[0] == 0
+
+
+def test_adopted_binding_refuses_publishing_a_newly_excluded_workspace(queue):
+    from tests.test_pool_placement import pool, publish
+
+    launching = queue.create("launching")
+    reservation, _ = queue.reserve_spawn(launching.id)
+    queue.record_spawn_worktree(reservation.key, "launch-worktree")
+    publish(queue, pool())
+    assert queue.adopt_legacy_capacity(apply=True, permitted=True, reason="migration")["adopted"] == 1
+    with queue._connect() as conn:
+        conn.execute(
+            "UPDATE tasks SET excludes=? WHERE id=?", ('["worktree:launch-worktree"]', launching.id),
+        )
+    with pytest.raises(TaskError, match="excluded"):
+        queue.record_spawn(
+            reservation.key, session_handle="local-body:launch", startup_complete=True,
+            startup_revision=1,
+        )
+    assert queue.get_reservation(reservation.key).state == "reserving"
 
 
 def test_client_posts_legacy_history_controls_with_control_identity():

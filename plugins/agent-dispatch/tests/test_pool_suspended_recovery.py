@@ -730,7 +730,7 @@ def test_detached_waiter_completion_waits_for_its_cold_owners_lane(q: TaskQueue)
         task_id, generation=waiter["generation"], reason="external",
         message="continue", sender="recovery",
     )
-    [wake] = q.list_run_waiter_wakes(task_id)
+    wake = q.claim_due_run_waiter_wake()
     assert getattr(wake, "pool_recovery_revision", None) is None
     with pytest.raises(ExecutionSendUnresolved, match="free lane"):
         prepare_recovery_wake(q, wake)
@@ -770,7 +770,7 @@ def test_cold_wake_still_counts_its_tasks_older_accountable_attempt(q: TaskQueue
         task_id, generation=waiter["generation"], reason="external",
         message="continue", sender="recovery",
     )
-    [wake] = q.list_run_waiter_wakes(task_id)
+    wake = q.claim_due_run_waiter_wake()
     with pytest.raises(ExecutionSendUnresolved, match="free lane"):
         prepare_recovery_wake(q, wake)
     assert q.get_reservation(key).state == SpawnState.COLD
@@ -794,7 +794,7 @@ def test_detached_wake_retaking_a_waiting_reactivations_lane_counts_once(q: Task
         task_id, generation=waiter["generation"], reason="external",
         message="continue", sender="recovery",
     )
-    [wake] = q.list_run_waiter_wakes(task_id)
+    wake = q.claim_due_run_waiter_wake()
     prepare_recovery_wake(q, wake)
     assert q.get_reservation(key).state == SpawnState.SPAWNED
     with q._connect() as conn:
@@ -982,7 +982,7 @@ def test_renewed_suspend_after_a_detached_wake_withdraws_the_resume(q: TaskQueue
         task_id, generation=waiter["generation"], reason="external",
         message="continue", sender="recovery",
     )
-    [wake] = q.list_run_waiter_wakes(task_id)
+    wake = q.claim_due_run_waiter_wake()
     prepare_recovery_wake(q, wake)
     assert q.get(task_id).resume_requested  # the lane was re-taken, the resume intent remains
     q.suspend(task_id, q.get(task_id).owner, reason="intentional wait", cooldown_seconds=None, now=120)
@@ -991,3 +991,25 @@ def test_renewed_suspend_after_a_detached_wake_withdraws_the_resume(q: TaskQueue
     _cold(q, running.key)
     assert reconcile_recoveries(q, now=130) == 0
     assert q.list_wakes(task_id) == []
+
+
+def test_stale_detached_wake_does_not_take_its_cold_owners_lane(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/worktree", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    wake = q.claim_due_run_waiter_wake()
+    q.register_run_waiter(
+        task_id, pid=124, host="host-a", start_token="waiter-next",
+        resume_worktree="host-a/worktree", command=["synthetic-wait"],
+    )
+    with pytest.raises(TaskError, match="fence advanced"):
+        prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.COLD
+    place(q, task(q))  # the capacity-one lane is still free

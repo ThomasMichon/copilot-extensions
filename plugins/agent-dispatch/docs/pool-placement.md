@@ -49,7 +49,9 @@ not caller estimates or task status. A `cold` (parked) body holds no lane
 until its reactivation is in flight or a wake send to it is unresolved. Any
 other restart of a cold body bound to a pool (a detached-run completion wake,
 or the legacy supervisor resume of an adopted body) reacquires a lane in its
-immutable binding's pool inside the same write transaction, and is deferred,
+immutable binding's pool inside the same write transaction that revalidates
+the wake (its delivery token, task and waiter incarnation, and reservation), so
+a superseded wake leaves the body cold; it is deferred,
 without spending an attempt, while that pool is full. A deferred wake is
 rescheduled after the drain's retry delay, so later wakes (including ones for
 pools with free lanes) are delivered in the meantime. The admission check
@@ -136,7 +138,10 @@ is not ready (pending, expired or invalidated publications) every row is left
 unbound as `catalog_not_ready` with the catalog blockers. A row with no
 recorded worktree (a launch still in flight) is left unbound as
 `workspace_unrecorded`, because pool publication requires that workspace;
-adopt it again once the launch records one. Adopted bindings are
+adopt it again once the launch records one. A recorded workspace the matched
+pool or the task's current routing refuses (an excluded worktree, another
+machine or target worktree) is left unbound as `workspace_conflict`, and
+publishing into an adopted binding repeats that check. Adopted bindings are
 accounting-only: they create no recovery assignment, so a parked adopted body
 keeps its legacy supervisor resume path, which still waits for a free lane in
 its bound pool.

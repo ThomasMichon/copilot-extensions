@@ -353,6 +353,57 @@ def admit_cold_lane(owner: Any, row: sqlite3.Row) -> None:
         raise PoolLaneUnavailable("cold pool body is waiting for a free lane")
 
 
+def _require_wake_admissible(owner: Any, conn: sqlite3.Connection, wake: Any,
+                             reservation_key: str) -> None:
+    """Validate a wake as its delivery admission would, before it may take a lane.
+
+    Runs under the reservation's write lock, so a superseded token, task or
+    waiter incarnation, or a released reservation leaves the body cold.
+    """
+    from .queue_execution_wakes import RunWaiterWakeOperation, WakeOperation, wake_table
+    table = wake_table(wake)
+    row = conn.execute(f"SELECT * FROM {table} WHERE id=?", (wake.id,)).fetchone()
+    if (
+        row is None or row["status"] != "delivering"
+        or not wake.delivery_token or row["delivery_token"] != wake.delivery_token
+        or row["delivery_expires_at"] is None or row["delivery_expires_at"] <= owner._now(None)
+    ):
+        raise TaskError("wake send requires the current unexpired delivery token")
+    task = owner._fetch(conn, wake.task_id)
+    current = (
+        owner._wake_is_current(task, WakeOperation._from_row(row)) if table == "wake_outbox"
+        else owner._run_waiter_wake_is_current(conn, task, RunWaiterWakeOperation._from_row(row))
+    )
+    if not current or task is None:
+        raise TaskError("wake send task fence advanced")
+    if getattr(wake, "pool_recovery_revision", None) is not None:
+        assignment = recovery_assignment(conn, task.id)
+        if (
+            not recovery_wake(conn, task, wake.id)
+            or assignment["recovery_revision"] != wake.pool_recovery_revision
+            or assignment["reservation_key"] != reservation_key
+        ):
+            raise TaskError("suspended recovery wake incarnation changed")
+    reservation = conn.execute(
+        "SELECT release_requested, conversation_retired, state FROM spawn_reservations WHERE key=?",
+        (reservation_key,),
+    ).fetchone()
+    if reservation is None or reservation["release_requested"] or reservation["conversation_retired"]:
+        raise TaskError("wake reservation release or retirement advanced")
+
+
+def _restart_cold(owner: Any, wake: Any, reservation: sqlite3.Row) -> None:
+    """Validate the wake and take the lane in one write transaction."""
+    def validate(conn: sqlite3.Connection) -> None:
+        _require_wake_admissible(owner, conn, wake, reservation["key"])
+
+    owner.record_spawn(
+        reservation["key"], session_handle=reservation["session_handle"],
+        worktree=reservation["worktree"], startup_complete=True,
+        startup_revision=reservation["startup_revision"], cold_admission=validate,
+    )
+
+
 def _admit_cold_wake(owner: Any, wake: Any) -> None:
     """Route any other wake of a parked pool body through lane admission.
 
@@ -376,11 +427,7 @@ def _admit_cold_wake(owner: Any, wake: Any) -> None:
         ).fetchone()
     if reservation is None or reservation["state"] != SpawnState.COLD:
         return
-    owner.record_spawn(
-        reservation["key"], session_handle=reservation["session_handle"],
-        worktree=reservation["worktree"], startup_complete=True,
-        startup_revision=reservation["startup_revision"],
-    )
+    _restart_cold(owner, wake, reservation)
     if assignment is not None:
         # The body re-took its lane; a queued reactivation no longer waits for one.
         with owner._connect() as conn:
@@ -405,11 +452,7 @@ def prepare_recovery_wake(owner: Any, wake: Any) -> None:
             raise TaskError("suspended recovery wake revision changed")
         reservation = _current(conn, task, assignment)
     if reservation["state"] == SpawnState.COLD:
-        owner.record_spawn(
-            reservation["key"], session_handle=reservation["session_handle"],
-            worktree=reservation["worktree"], startup_complete=True,
-            startup_revision=reservation["startup_revision"],
-        )
+        _restart_cold(owner, wake, reservation)
 
 
 def exhaust_recovery(owner: Any, conn: sqlite3.Connection, task: Task,
