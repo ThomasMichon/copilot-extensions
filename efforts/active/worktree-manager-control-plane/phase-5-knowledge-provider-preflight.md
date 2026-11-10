@@ -170,6 +170,12 @@ retaining separately scoped facts. Missing `viewerPermission` is a sanitized
 partial response; an explicitly null permission remains supported and unknown.
 The existing partial-ruleset positive-PR exception remains distinct.
 
+A second review correction preserves bounded HTTP-200 GraphQL error bodies for
+explicit inspection when `gh` exits nonzero. It does not accept a policy
+success or weaken ordinary nonzero credential/API failures. The 100-case
+policy/native/legacy-credential packet passes, including a real provider child
+that returns the nonzero permission-error shape without leaking diagnostics.
+
 Strict binding-owner checks pass for Python 3.10 Linux and Windows targets.
 Scoped Python lint, all 13 install contracts, version/documentation consistency,
 local documentation links and whitespace checks pass. The actual fixed source

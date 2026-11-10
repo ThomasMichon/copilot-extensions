@@ -15,7 +15,7 @@ import pytest
 from agent_worktrees import repos
 
 
-@pytest.mark.parametrize("mode", ["direct", "pull-request", "legacy", "timeout"])
+@pytest.mark.parametrize("mode", ["direct", "pull-request", "legacy", "timeout", "forbidden"])
 def test_real_shared_binding_read_has_no_registration_or_credential_effects(
     tmp_path, monkeypatch, mode,
 ):
@@ -53,6 +53,8 @@ def test_real_shared_binding_read_has_no_registration_or_credential_effects(
         "        'isArchived': False, 'isDisabled': False, 'viewerPermission': 'WRITE',\n"
         "        'defaultBranchRef': {'name': 'main', 'target': {'oid': 'a' * 40},\n"
         "            'branchProtectionRule': None}}}}\n"
+        "    if mode == 'forbidden':\n"
+        "        value = {'errors': [{'type': 'FORBIDDEN', 'message': 'private-policy-detail'}]}\n"
         "elif sys.argv[-1].endswith('/user'):\n"
         "    value = {'login': 'selected-user'}\n"
         "else:\n"
@@ -60,6 +62,12 @@ def test_real_shared_binding_read_has_no_registration_or_credential_effects(
         "print('HTTP/2.0 200 OK\\r\\n\\r\\n' + json.dumps(value))\n",
         encoding="utf-8",
     )
+    with provider.open("a", encoding="utf-8") as stream:
+        stream.write(
+            "if mode == 'forbidden' and 'graphql' in sys.argv:\n"
+            "    print('private-provider-error', file=sys.stderr)\n"
+            "    raise SystemExit(1)\n"
+        )
     driver = tmp_path / "native_owner.py"
     driver.write_text(
         "import os, runpy, shutil, sys\n"
@@ -117,11 +125,18 @@ def test_real_shared_binding_read_has_no_registration_or_credential_effects(
         assert value["status"] == "partial"
         assert value["failure"]["code"] == "timeout"
         assert value["landing"]["mode"] == "unknown"
+    elif mode == "forbidden":
+        assert value["status"] == "partial"
+        assert value["account"]["status"] == "verified"
+        assert value["landing"]["status"] == "insufficient-permission"
+        assert value["landing"]["mode"] == "unknown"
     else:
         assert value["status"] == "observed"
         assert value["landing"]["mode"] == mode
         assert value["account"]["status"] == "verified"
     assert "synthetic-private-token" not in completed.stdout + completed.stderr
+    assert "private-policy-detail" not in completed.stdout + completed.stderr
+    assert "private-provider-error" not in completed.stdout + completed.stderr
     after = {str(path.relative_to(tmp_path)): path.read_bytes()
              for path in tmp_path.rglob("*") if path.is_file()}
     assert after == before

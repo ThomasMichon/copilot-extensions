@@ -23,7 +23,9 @@ query($owner:String!,$name:String!) {
 
 
 def _response(selected, stage: str, arguments: list[str], expected: type):
-    raw = selected.capture(stage, arguments)
+    raw = selected.capture(
+        stage, arguments, allow_graphql_errors=arguments[:2] == ["api", "graphql"],
+    )
     try:
         header, body = re.split(r"\r?\n\r?\n", raw, maxsplit=1)
         status = re.match(r"HTTP/\S+ ([0-9]{3})(?:\s|$)", header)

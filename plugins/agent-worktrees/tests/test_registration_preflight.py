@@ -12,9 +12,9 @@ from agent_worktrees import repos
 from agent_worktrees.repos_registration_preflight import inspect_repository
 
 
-def api(value, *, status=200, link=""):
+def api(value, *, status=200, link="", exit_code=None):
     return SimpleNamespace(
-        returncode=0 if status == 200 else 1,
+        returncode=(0 if status == 200 else 1) if exit_code is None else exit_code,
         stdout=f"HTTP/2.0 {status} Response\r\n{link}\r\n\r\n{json.dumps(value)}",
         stderr="private-provider-diagnostic",
     )
@@ -272,14 +272,43 @@ def test_missing_permission_is_sanitized_while_explicit_null_remains_unknown(reg
         assert result["landing"]["writable"] is False
 
 
-def test_explicit_graphql_permission_failure_is_not_an_expired_credential(registry, provider):
+@pytest.mark.parametrize("exit_code", [0, 1])
+def test_explicit_graphql_permission_failure_is_not_an_expired_credential(registry, provider, exit_code):
     _, responses = provider
-    responses[2] = api({"errors": [{"type": "FORBIDDEN", "message": "private-policy-detail"}]})
+    responses[2] = api(
+        {"errors": [{"type": "FORBIDDEN", "message": "private-policy-detail"}]},
+        exit_code=exit_code,
+    )
     result = inspect()
     assert result["account"]["status"] == "verified"
     assert result["landing"]["status"] == "insufficient-permission"
     assert result["landing"]["mode"] == "unknown"
     assert "private-policy-detail" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("value", [
+    classic(), {**classic(), "errors": []},
+    {"errors": [{"type": "SOME_OTHER_FAILURE", "message": "private-detail"}]},
+])
+def test_nonzero_graphql_is_never_an_ordinary_success(registry, provider, value):
+    _, responses = provider
+    responses[2] = api(value, exit_code=1)
+    result = inspect()
+    assert result["landing"]["mode"] == "unknown"
+    assert result["status"] == "partial"
+    assert result["failure"]["code"] == "access-unconfirmed"
+    assert "private-detail" not in json.dumps(result)
+
+
+def test_ordinary_identity_capture_does_not_opt_into_graphql_error_bodies(registry, provider):
+    calls, responses = provider
+    responses[1] = api({
+        "login": "selected-user", "errors": [{"type": "FORBIDDEN"}],
+    }, exit_code=1)
+    result = inspect()
+    assert result["account"]["status"] == "unavailable"
+    assert result["landing"]["mode"] == "unknown"
+    assert len(calls) == 2
 
 
 def test_paginated_active_rules_are_not_a_first_page_absence_claim(registry, provider):

@@ -66,6 +66,10 @@ arbitrary commit will pass provider enforcement.
 An ambiguous 404 is not proof of absent protection. GraphQL errors, unavailable
 policy, response/target mismatch and denied access stay explicit; HTTP 403 is
 reported as insufficient permission rather than diagnosed as token expiration.
+HTTP-200 GraphQL permission errors retain that classification when `gh` exits
+nonzero; only explicit, bounded GraphQL error-body inspection opts into that
+response. Ordinary nonzero credential/API captures still fail unchanged, and
+an error response can never establish successful policy evidence.
 No direct-write trial, login, credential pin, global account switch, branch
 mutation or protection update is performed.
 
