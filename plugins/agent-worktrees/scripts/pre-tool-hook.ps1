@@ -178,16 +178,17 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
         try {
             $attributes = [IO.File]::GetAttributes($configPath)
             if ($attributes -band [IO.FileAttributes]::Directory) { return $false }
-            $text = Read-NativePreToolText $configPath 16384
+            $text = (Read-NativePreToolText $configPath 16384).Replace("`r`n", "`n").Replace("`r", "`n")
+            # Python's guard also recognizes the four information-separator whitespace characters.
             $stateless = [regex]::IsMatch($text,
-                '^\s*(?:stateless|requires_external_state_root)\s*:\s*true\s*(?:#.*)?$', 'Multiline')
+                '^[\s\x1c-\x1f]*(?:stateless|requires_external_state_root)[\s\x1c-\x1f]*:[\s\x1c-\x1f]*true[\s\x1c-\x1f]*(?:#.*)?$', 'Multiline')
         } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
         }
         if ($stateless) {
             foreach ($target in $paths) {
-                $relative = $target.Substring($root.Length + 1).Replace('\', '/')
+                $relative = $target.Substring($root.Length + 1).Replace('\', '/').TrimStart([char[]]'./')
                 if ($relative -match '^(?:efforts|logs|weekly-updates|icm)(?:/|$)' -or
-                    [IO.Path]::GetFileName($target) -cin @('ownership.yml', 'dev-assignments.yml')) {
+                    [IO.Path]::GetFileName($relative) -cin @('ownership.yml', 'dev-assignments.yml')) {
                     return $false
                 }
             }

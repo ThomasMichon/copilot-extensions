@@ -860,6 +860,9 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "guard-drift", "reader-drift", "forms-drift", "missing-dependencies", "git-pointer-aba",
     "delegated", "invalid-elevation", "noncanonical-map", "real-policy", "old-admission",
     "cell-ordinary", "cell-create", "cell-personal-state", "cell-guard-drift",
+    "personal-state-cr", "personal-state-crlf", "personal-state-dot-prefix",
+    "personal-state-dot-file", "personal-state-dot-assignments",
+    "personal-state-control-space", "ordinary-nested-dot-file",
 ])
 def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, shell, case):
     from agent_worktrees import guarded_anchors
@@ -879,12 +882,20 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     config = workspace / ".agent-worktrees" / "config.yaml"
     config.parent.mkdir()
     config.write_text("stateless: false\n" if case == "anchor-cwd" else "stateless: true\n", encoding="utf-8")
+    if case in {"personal-state-cr", "personal-state-crlf"}:
+        newline = "\r" if case == "personal-state-cr" else "\r\n"
+        config.write_bytes(f"default_branch: main{newline}stateless: true{newline}".encode("utf-8"))
     session = tmp_path / ".copilot" / "session-state" / "pre-write"
     session.mkdir(parents=True)
     event = {
         "sessionId": "pre-write", "cwd": str(workspace), "toolName": "edit",
         "toolArgs": {
-            "path": "efforts/private.md" if case == "personal-state" else "source-\u00e9.py",
+            "path": {
+                "personal-state-dot-prefix": ".efforts/private.md",
+                "personal-state-dot-file": ".ownership.yml",
+                "personal-state-dot-assignments": "..dev-assignments.yml",
+                "ordinary-nested-dot-file": "source/.ownership.yml",
+            }.get(case, "efforts/private.md" if case.startswith("personal-state") else "source-\u00e9.py"),
             "text": "quote'\"\\\n\t",
         },
     }
@@ -949,13 +960,15 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     reader = load("guarded_anchor_map")
     facts = reader.read_map(workspace, registry)
     assert facts.status == "ready" and not facts.posture_errors
+    if case == "personal-state-control-space":
+        config.write_bytes(b"default_branch: main\n\x1cstateless: true\n")
     assert load("managed_session").admitted(event, home=tmp_path)
     decisions = [
         load(name).decide(event, env=env, home=tmp_path)
         for name in ("statelessness_guard", "cross_repo_guard", "anchor_write_guard", "pr_supersede_guard")
     ]
     assert any(value and value.get("permissionDecision") == "deny" for value in decisions) is (
-        case in {"personal-state", "anchor-cwd", "anchor-target", "delegated"}
+        case.startswith("personal-state") or case in {"anchor-cwd", "anchor-target", "delegated"}
     ), decisions
     map_path = reader.map_path(workspace, registry)
     if case == "missing-map":
@@ -1054,7 +1067,9 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     native_seconds = time.monotonic() - started
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert not membership.exists()
-    policy_required = case not in {"ordinary", "create", "path-alias", "json-args", "real-policy"}
+    policy_required = case not in {
+        "ordinary", "create", "path-alias", "json-args", "real-policy", "ordinary-nested-dot-file",
+    }
     assert observed.exists() is policy_required, result.stdout
     if policy_required:
         assert observed.read_bytes() == raw
