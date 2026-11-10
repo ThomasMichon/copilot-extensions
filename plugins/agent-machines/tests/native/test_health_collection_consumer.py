@@ -15,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from agent_procutil import no_window_kwargs
-from agent_machines import _peer_launch, health_collect, health_slots
+from agent_machines import _peer_launch, health_collect, health_slots, service_reports
 from agent_machines.__main__ import main
 from test_health_observe_consumer import QUALIFYING_BODY, listener, response
 
@@ -124,6 +124,22 @@ def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
     rollback = json.loads(capsys.readouterr().out)
     assert rollback["coverage"]["services"] == "partial"
     assert rollback["services"][0]["contribution"] == contribution
+    assert {path.name: path.read_bytes() for path in store.iterdir()} == before
+    metadata.write_text(json.dumps(support), encoding="utf-8")
+    (producer / "telemetry.json").unlink()
+    empty = service_reports.collect(["queue=agent-dispatch"], prior, now_ms=int(now.timestamp() * 1000))[0]
+    assert "contribution" in empty and not empty["contribution"]["groups"]
+    assert not empty["contribution"]["health"] and not empty["contribution"]["diagnostics"]
+    assert main(["health", "collect", "--store-dir", str(store), "--hour", prior]) == 0
+    recollected = json.loads(capsys.readouterr().out)
+    assert recollected["coverage"]["services"] == "partial"
+    assert recollected["services"][0]["contribution"] == contribution
+    forged = {**recollected, "services": [empty]}
+    source = tmp_path / "empty-replacement.json"
+    source.write_text(json.dumps(forged), encoding="utf-8")
+    assert main(["health", "record", "--store-dir", str(store), "--input", str(source)]) == 2
+    refusal = json.loads(capsys.readouterr().err)
+    assert refusal["error"] == "hourly-service-replacement-refused"
     assert {path.name: path.read_bytes() for path in store.iterdir()} == before
     with health_collect.admission(store):
         pass

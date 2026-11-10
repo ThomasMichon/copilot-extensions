@@ -4745,8 +4745,8 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "65f0387b1279de59f62e5b5eff9bb29def0be95bb213ebe8a98d56d4e403461b",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "5c0324a222a5c860184df757f67cdff8080db871c4ffc3673bf5d84cd422e522",
+        "tools/promotion_unit_tests/test_health_composition.py": "ee56c639f7ffea0d6dff87b16d1ee13697205127391ca41ea5bbfbf8a62adb97",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "b9d04466bc89c442d06eeed2f972d023bfcb5501616c8ee5d92821ff7cbde4dc",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "45087840504c3bf04894c19a13ff273953ca51a82674f4cde8402a5ecbdd269d",
@@ -5421,8 +5421,8 @@
         "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
         "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
-        "plugins/agent-machines/src/agent_machines/health_hourly.py": "ebb3998638afe0d12b21735a0af0815b6bf3d7349e5eb0c8feb2f4b40d977d3d",
-        "plugins/agent-machines/src/agent_machines/health_collect.py": "0ac0cb3b414477ed7580b85336baeeb69ddd224f79f36b0df5966665d6d0ef03"
+        "plugins/agent-machines/src/agent_machines/health_hourly.py": "1b94bf4997de27c455ecb6d9cd6f761c04f60e903717ba1a35c6a0231d701cae",
+        "plugins/agent-machines/src/agent_machines/health_collect.py": "cd5c0ea859d4c7013aabd20d0eaf2b4ccb6c15adc282abd3a2015aef8e13814b"
     },
     "coverage_targets": [
         "plugins/agent-machines/src/agent_machines/health_hourly.py",

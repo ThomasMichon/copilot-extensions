@@ -168,6 +168,14 @@ def test_lock_and_policy_failures_are_bounded_cli_errors(store, capsys):
     assert str(store) not in json.dumps(result)
 
 
+def test_empty_explicit_hour_refuses_before_native_admission(store, monkeypatch, capsys):
+    monkeypatch.setattr(collector, "admission", lambda *a: pytest.fail("invalid hour admitted"))
+    assert main(["health", "collect", "--store-dir", str(store), "--hour", ""]) == 2
+    captured = capsys.readouterr()
+    assert not captured.out and json.loads(captured.err)["applied"] is False
+    assert not list(store.glob("[0-9][0-9][0-9].json"))
+
+
 def test_read_only_storage_failure_does_not_prune_or_activate(store, tmp_path, monkeypatch):
     candidate = collector.collect(store)
     source = tmp_path / "candidate.json"

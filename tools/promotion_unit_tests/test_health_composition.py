@@ -163,6 +163,12 @@ def test_old_report_selection_is_unchanged_and_unknown_new_syntax_is_rejected(ow
     with pytest.raises(SystemExit) as error:
         parser.parse_args(["health", "report", "--store-directory", "not-supported"])
     assert error.value.code == 2
+    capsys.readouterr()
+    args = parser.parse_args([
+        "health", "report", "--service", "agent-dispatch", "--hour", "", "--now", NOW.isoformat(),
+    ])
+    assert args.func(args) == 2
+    assert not capsys.readouterr().out
 
 
 def test_chart_inside_selected_store_refuses_before_reading_or_writing(owners, monkeypatch, capsys):
@@ -278,6 +284,44 @@ def test_closed_hourly_envelope_retains_service_namespace_and_unknown_health(own
     hourly.validate_replacement(record, None, policy)
     with pytest.raises(slots.HealthError, match="service-replacement-refused"):
         hourly.validate_replacement({**record, "services": []}, record, policy)
+    protocol = sys.modules["process_telemetry.hourly"]
+    source_stamp = record["hour"] * slots.HOUR_MS
+    contribution = {
+        "schema": protocol.SCHEMA, "version": 1, "service": "agent-dispatch",
+        "hour": "2026-11-09T11:00:00Z", "generated_at_ms": STAMP,
+        "source": {"first_ms": source_stamp, "last_ms": source_stamp, "continuity": None},
+        "coverage": {
+            **dict.fromkeys(protocol.COUNTERS, 0), "files": 1, "records": 1, "observations": 1,
+            "state": "observed", "reason": "retained-events", "scan_limited": False,
+            "expected_events": None, "producer_loss": "unknown",
+        },
+        "groups": [{
+            "metric": "task-lifecycle", "stage": "lifecycle", "unit": "count",
+            "aggregation": "count", "scope": "observed-events",
+            "observations": 1, "outcomes": {"completed": 1},
+        }],
+        "health": [], "diagnostics": [],
+    }
+    accepted = hourly.validate_record({**record, "services": [{
+        **record["services"][0], "state": "observed", "contribution": contribution,
+    }]})
+    for state in ("unavailable", "unsupported", "partial"):
+        empty = {
+            **contribution, "source": {"first_ms": None, "last_ms": None, "continuity": None},
+            "groups": [], "coverage": {
+                **contribution["coverage"], **dict.fromkeys(protocol.COUNTERS, 0),
+                "state": state, "reason": "capture-unsupported" if state == "unsupported" else "capture-unavailable",
+            },
+        }
+        candidate = hourly.validate_record({
+            **accepted, "revision": 2, "parent": 1, "services": [{
+                **accepted["services"][0], "state": state, "contribution": empty,
+            }],
+        })
+        assert hourly.has_service_evidence(accepted["services"][0])
+        assert not hourly.has_service_evidence(candidate["services"][0])
+        with pytest.raises(slots.HealthError, match="service-replacement-refused"):
+            hourly.validate_replacement(candidate, accepted, policy)
     chart_view = view(slots)
     chart_view["hours"][-2] = {"hour": record["hour"], "state": "observed", "sample": projected}
     report = modules["health_report"].HourlyReport(NOW).result(0)
@@ -352,3 +396,5 @@ def test_explicit_collection_orchestration_keeps_hours_and_parent_budget(owners,
     assert current["services"] == [] and current["hour"] == STAMP // slots.HOUR_MS
     with pytest.raises(slots.HealthError, match="collection-hour-outside-window"):
         collector.collect(Path("synthetic-store"), "2026-11-09T13:00:00Z")
+    with pytest.raises(ValueError, match="canonical UTC hour"):
+        collector.collect(Path("synthetic-store"), "")

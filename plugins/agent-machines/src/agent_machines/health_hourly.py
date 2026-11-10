@@ -120,6 +120,12 @@ def sample(value: dict, now_ms: int) -> dict:
     }
 
 
+def has_service_evidence(row: dict) -> bool:
+    """A contribution wrapper alone is not retained observation evidence."""
+    contribution = row.get("contribution", {})
+    return bool(contribution.get("groups") or contribution.get("health") or contribution.get("diagnostics"))
+
+
 def validate_replacement(value: dict, previous: dict | None, policy: dict) -> None:
     """Keep retained/unselected evidence intact at the actual write boundary."""
     previous = previous if previous is not None and previous["hour"] == value["hour"] else None
@@ -144,7 +150,8 @@ def validate_replacement(value: dict, previous: dict | None, policy: dict) -> No
             new is None or new["service"] != selected.get(label)
             or value["coverage"]["services"] not in {"collected", "partial"}
             or old is not None and (
-                old["service"] != new["service"] or "contribution" in old and "contribution" not in new
+                old["service"] != new["service"]
+                or has_service_evidence(old) and not has_service_evidence(new)
             )
         ):
             raise slots.HealthError("hourly-service-replacement-refused")

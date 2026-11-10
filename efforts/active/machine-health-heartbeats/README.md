@@ -1082,3 +1082,15 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   with Windows CRLF bytes; every mismatch matches the admitted hash after LF
   normalization. No template or acceptance rule was changed to manufacture a
   pass. Canonical full unit/coverage evidence remains owed by required CI.
+
+### 2026-11-09 - Preserve actual evidence, not merely its wrapper
+- Fresh canonical unit/coverage CI passed the implementation head. Review then
+  identified two concrete preservation gaps: native exporters can return a
+  valid empty contribution, and a directly supplied candidate can do the same.
+  The shared rule now checks actual metric, native-health or diagnostic evidence
+  at both collection and confirmed-write boundaries.
+- Explicit empty hours now refuse instead of becoming current-hour collection;
+  the same explicit-hour distinction is retained in the report path.
+  Added pure empty-hour/empty-evidence controls and an actual native exporter
+  configuration-loss case that must retain the accepted contribution.
+  Follow-up validation and current-head review remain pending.

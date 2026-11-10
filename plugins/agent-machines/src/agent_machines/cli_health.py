@@ -204,12 +204,12 @@ def run_report(args) -> int:
             from .service_reports import collect
             from process_telemetry.hourly import hour_start
 
-            hour = args.hour or now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
+            hour = args.hour if args.hour is not None else now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
             if not report.first_hour <= hour_start(hour) // 3_600_000 <= report.last_hour:
                 raise ValueError("service hour outside report window")
             result["services"] = collect(args.service, hour, now_ms=report.now_ns // 1_000_000)
             result["services_collected_at_ms"] = int(datetime.now(timezone.utc).timestamp() * 1000)
-        elif args.hour:
+        elif args.hour is not None:
             raise ValueError("hour requires an explicit service")
         if args.store_dir is not None:
             from . import health_slots

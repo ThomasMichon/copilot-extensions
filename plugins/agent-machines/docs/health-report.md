@@ -189,7 +189,9 @@ under its existing mutation lock before atomic replacement. There is no
 multi-slot transaction or automatic replay after an unknown write outcome.
 The new closed envelope holds only same-hour observation v1 and namespaced
 service contribution v1 data, with collection time separate from evidence
-times. A valid older service contribution survives a later failed export.
+times. A valid older service contribution survives a later failed or
+evidence-free export, even when the response contains a valid contribution
+wrapper. This rule is also enforced for directly supplied record candidates.
 Components without evidence remain unknown; a fresh envelope does not refresh
 their source ages. Supplied input remains unverified, not an attested probe.
 

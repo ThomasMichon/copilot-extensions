@@ -55,7 +55,7 @@ def collect(store: Path, hour: str | None = None) -> dict:
     deadline = time.monotonic() + COLLECTION_SECONDS
     started_ms = time.time_ns() // 1_000_000
     current_hour = started_ms // slots.HOUR_MS
-    requested = hour_start(hour) // slots.HOUR_MS if hour else current_hour
+    requested = hour_start(hour) // slots.HOUR_MS if hour is not None else current_hour
     if not current_hour - slots.SLOTS < requested <= current_hour:
         raise slots.HealthError("collection-hour-outside-window")
     store = slots._plain(store, directory=True)
@@ -98,7 +98,7 @@ def collect(store: Path, hour: str | None = None) -> dict:
                 old = services.get(row["instance"])
                 if old is not None and old["service"] != row["service"]:
                     raise slots.HealthError("collection-service-conflict")
-                if old is not None and "contribution" in old and "contribution" not in row:
+                if old is not None and hourly.has_service_evidence(old) and not hourly.has_service_evidence(row):
                     coverage["services"] = "partial"
                     continue
                 services[row["instance"]] = row
