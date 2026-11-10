@@ -138,6 +138,8 @@ def _stateless_config(harness: Path, knowledge_repo="knowledge"):
 @pytest.fixture
 def split(tmp_path: Path, monkeypatch):
     """A bound (harness, knowledge) pair with the stateless config wired in."""
+    from agent_worktrees import repos
+
     harness = tmp_path / "harness"
     knowledge = tmp_path / "knowledge"
     (harness / ".agent-worktrees").mkdir(parents=True)
@@ -160,6 +162,13 @@ def split(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         sr, "_checkout_path",
         lambda name: str(knowledge) if name == "knowledge" else None)
+    registry = repos.ReposRegistry(account_map={"example-org": "example-user"}, repos={
+        "knowledge": repos.RepoEntry(
+            name="knowledge", repo_class="knowledge",
+            paths={platform: str(knowledge) for platform in ("windows", "linux", "wsl")},
+        ),
+    })
+    monkeypatch.setattr(repos, "read_registry", lambda **kwargs: registry)
     return harness, knowledge
 
 
@@ -189,9 +198,6 @@ def test_native_launcher_reserves_and_delivers_configuration_data(split, monkeyp
     })
     monkeypatch.setattr(repos, "read_registry", lambda **kwargs: registry)
     monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", "harness")
-    monkeypatch.setattr(launch_environment, "_core", lambda: SimpleNamespace(
-        _self_owner_ref=lambda *args, **kwargs: None,
-    ))
     profile = SimpleNamespace(env={"AGENT_CONFIGURATION_CONTEXT": "forged-profile"})
 
     environment = launch_environment._build_env(
@@ -216,7 +222,7 @@ def test_related_list_surfaces_knowledge_entries(split, capfd):
     out = json.loads(capfd.readouterr().out)
     assert out["primary"] == "example-web"
     names = {e["name"] for e in out["related"]}
-    assert names == {"example-web", "copilot-extensions"}
+    assert names == {"example-web", "copilot-extensions", "knowledge"}
 
 
 def test_related_show_doc_resolves_in_knowledge(split, capfd):
@@ -264,7 +270,7 @@ def test_related_resolve_reminder_uses_remote_slug_not_alias(
     )
     assert run(["resolve", "example-web", "--repo", str(harness), "--json"]) == 0
     out = json.loads(capfd.readouterr().out)
-    assert out["account"] == "example-org"
+    assert out["account"] == "example-user"
     assert "example-org/proj" in out["account_routing_reminder"]
     assert "example-web" not in out["account_routing_reminder"]
 
@@ -339,7 +345,7 @@ def test_related_conduct_merges_configured_and_related_corpora(
     assert "`agent-worktrees repos list`" not in out
     assert "Registered repositories are discovered through the active project's" in out
     assert "repository tooling" in out
-    assert "2 directional related entries" in out
+    assert "3 directional related entries" in out
     assert "`agent-worktrees related list`" in out
     assert "`agent-worktrees related show <repo>`" in out
     assert "`agent-worktrees related resolve <repo>`" in out
@@ -792,9 +798,7 @@ def test_related_unregistered_explicit_target_does_not_borrow_binding(
     assert related.read_related_grafted(anchors).related["target"].summary == "standalone"
 
 
-def test_related_explicit_binding_refusal_never_falls_back_to_base(ordinary_related_sources):
-    from configuration_layers import ConfigurationError
-
+def test_related_explicit_binding_refusal_never_falls_back_to_base(ordinary_related_sources, capfd):
     from agent_worktrees import related_cli
 
     roots, _, _, _, configs = ordinary_related_sources
@@ -803,8 +807,10 @@ def test_related_explicit_binding_refusal_never_falls_back_to_base(ordinary_rela
         srcroot="", machine="execution-a", platform="windows", repo_name="base",
         repos=configs["base"].repos, knowledge_repo="missing-registration",
     )
-    with pytest.raises(ConfigurationError, match="binding is unresolved"):
-        related_cli.cmd_related_dispatch(["list", "--repo", str(roots["base"]), "--json"])
+    assert related_cli.cmd_related_dispatch(["list", "--repo", str(roots["base"]), "--json"]) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert "binding is unresolved" in result["error"]
+    assert "related" not in result
 
 
 @pytest.mark.parametrize("machine,cell", [
@@ -831,9 +837,7 @@ def test_related_cli_machine_and_cell_roots_are_independent(
     assert json.loads(capfd.readouterr().out)["related"][0]["summary"] == f"{cell}-{machine}"
 
 
-def test_related_cli_rejects_refused_installation_root(ordinary_related_sources, monkeypatch):
-    from configuration_layers import ConfigurationError
-
+def test_related_cli_rejects_refused_installation_root(ordinary_related_sources, monkeypatch, capfd):
     from agent_worktrees import related_cli
 
     roots, _, _, _, _ = ordinary_related_sources
@@ -842,15 +846,15 @@ def test_related_cli_rejects_refused_installation_root(ordinary_related_sources,
         raise ValueError("native installation owner refused this cell")
 
     monkeypatch.setattr(cfg, "install_dir", refused)
-    with pytest.raises(ConfigurationError, match="machine-wide configuration root"):
-        related_cli.cmd_related_dispatch(["list", "--repo", str(roots["base"]), "--json"])
+    assert related_cli.cmd_related_dispatch(["list", "--repo", str(roots["base"]), "--json"]) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert "machine-wide configuration root" in result["error"]
+    assert "related" not in result
 
 
 def test_related_cli_rejects_refused_namespaced_exact_root(
-    ordinary_related_sources, monkeypatch,
+    ordinary_related_sources, monkeypatch, capfd,
 ):
-    from configuration_layers import ConfigurationError
-
     from agent_worktrees import related_cli
 
     roots, _, _, _, _ = ordinary_related_sources
@@ -860,8 +864,10 @@ def test_related_cli_rejects_refused_namespaced_exact_root(
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "{}")
     monkeypatch.setattr(cfg, "project_dir", refused)
-    with pytest.raises(ConfigurationError, match="selected repository configuration root"):
-        related_cli.cmd_related_dispatch(["list", "--repo", str(roots["base"]), "--json"])
+    assert related_cli.cmd_related_dispatch(["list", "--repo", str(roots["base"]), "--json"]) == 1
+    result = json.loads(capfd.readouterr().out)
+    assert "selected repository configuration root" in result["error"]
+    assert "related" not in result
 
 
 def test_related_cli_unbound_keeps_base_and_write_policy_separate(

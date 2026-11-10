@@ -55,7 +55,7 @@ def owners(monkeypatch):
         name: load(machines.__name__ + "." + name, sources + name + ".py")
         for name in (
             "health_slots", "health_hourly", "health_collect", "health_run",
-            "health_report", "health_chart", "cli_health",
+            "health_report", "health_chart", "health_jobs", "cli_health",
         )
     }
     services = package(machines.__name__ + ".service_reports")
@@ -70,6 +70,65 @@ def owners(monkeypatch):
     parser = argparse.ArgumentParser(allow_abbrev=False)
     modules["cli_health"].add_parser(parser.add_subparsers(required=True))
     return modules, parser
+
+
+def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners):
+    modules, _ = owners
+    jobs = modules["health_jobs"]
+    token = "a" * 64
+    windows = jobs.prepare(
+        platform="win32", payload=r"C:\Example Tools\payload", store=r"C:\Example Data\store",
+        policy_token=token, user_id="S-1-5-21-111-222-333-1001", windows_root=r"C:\Windows",
+    )
+    root = ElementTree.fromstring(windows["artifacts"]["agent-machines-health.xml"])
+    nodes = {"t": jobs.NS}
+    assert root.find("t:Settings/t:Enabled", nodes).text == "false"
+    assert root.find("t:Principals/t:Principal/t:LogonType", nodes).text == "InteractiveToken"
+    assert root.find("t:Principals/t:Principal/t:RunLevel", nodes).text == "LeastPrivilege"
+    assert root.find("t:Settings/t:MultipleInstancesPolicy", nodes).text == "IgnoreNew"
+    assert root.find("t:Settings/t:ExecutionTimeLimit", nodes).text == "PT1M"
+    arguments = root.find("t:Actions/t:Exec/t:Arguments", nodes).text
+    assert "--headless" in arguments and 'health run --store-dir "C:\\Example Data\\store"' in arguments
+    assert f"--apply --expect-policy {token}" in arguments
+    linux = jobs.prepare(
+        platform="linux", payload="/example/payload $one%", store="/example/store",
+        policy_token=token,
+    )
+    assert '"/example/payload $$one%%/bin/agent-machines"' in linux["artifacts"]["agent-machines-health.service"]
+    assert "WorkingDirectory=/example/payload $one%%\n" in linux["artifacts"]["agent-machines-health.service"]
+    assert "TimeoutStartSec=55s\nTimeoutStopSec=5s\n" in linux["artifacts"]["agent-machines-health.service"]
+    assert "OnCalendar=*-*-* *:00:15 UTC\nPersistent=true" in linux["artifacts"]["agent-machines-health.timer"]
+    for result in (windows, linux):
+        assert not result["registered"] and not result["enabled"]
+        assert result["qualification"] == "native-scheduler-not-qualified"
+
+
+def test_native_job_preparation_refuses_unsupported_platforms_and_unsafe_definition_values(owners):
+    modules, _ = owners
+    jobs = modules["health_jobs"]
+    fields = dict(platform="linux", payload="/example/payload", store="/example/store", policy_token="a" * 64)
+    for change in (
+        {"platform": "darwin"}, {"payload": "relative"}, {"store": "/example/\nstore"},
+        {"policy_token": "none"}, {"user_id": "S-1-5-18"}, {"windows_root": "/wrong"},
+    ):
+        with pytest.raises(ValueError):
+            jobs.prepare(**(fields | change))
+
+
+def test_native_job_preparation_preserves_the_original_path_for_owner_validation(owners, monkeypatch, capsys):
+    modules, parser = owners
+    requested = Path("/example/link/../store")
+
+    def policy_preview(store):
+        assert store == requested
+        raise modules["health_slots"].HealthError("absolute-plain-path-required")
+
+    monkeypatch.setattr(modules["health_run"], "policy_preview", policy_preview)
+    args = parser.parse_args(["health", "prepare-job", "--store-dir", str(requested)])
+    assert args.func(args) == 2
+    result = json.loads(capsys.readouterr().err)
+    assert result["error"] == "absolute-plain-path-required"
+    assert not result["registered"] and not result["enabled"]
 
 
 def view(slots):

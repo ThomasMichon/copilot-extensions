@@ -226,7 +226,7 @@ Missing, wrong or changed approval refuses before effects; a token without
 `--apply` also refuses. Keep this local policy and approval outside synchronized
 report data. They authorize neither service changes nor carrier writes.
 Both payload entry points select an already provisioned runtime read-only for
-`health run`, including apply. A missing runtime refuses with the existing
+`health run`, including apply, and `health prepare-job`. A missing runtime refuses with the existing
 launcher failure status before calling an installer, stamping diagnostics or
 creating runtime/store state; use the normal setup owner separately.
 
@@ -274,15 +274,21 @@ Independently installed callers must first qualify the exact selected Machines
 runtime's packaged `agent_machines/health-collection-v1.json` declaration:
 
 ```json
-{"schema":"agent-machines.health.collection","version":1,"operations":["preview","apply"]}
+{"schema":"agent-machines.health.collection","version":1,"operations":["preview","apply","prepare-job"]}
 ```
 
 This declaration is separate from the package version and from service-export
 metadata. Missing, changed or unsupported metadata is unavailable support,
 never permission to trial a new command, resolve PATH, provision or update.
 Runtime replacement/rollback invalidates the selection and requires fresh
-qualification. This provider declaration prepares that seam; it does not
-implement or enroll a native scheduler caller.
+qualification. The payload-owned stdlib compatibility entry runs with `-I`
+under that selected interpreter. It reads the declaration from that
+interpreter's `purelib`, verifies that the package selected for import is
+the same package, then forwards the operation in-process. No extra negotiation
+subprocess, PATH lookup or trial invocation is used. Missing/invalid support
+returns exit 2 with `collection-contract-unsupported` before importing the
+provider or touching the store. A prior declaration with only preview/apply
+retains those operations but cannot prepare jobs.
 
 The focused one-shot controls cover pure preview/approval, empty selections,
 mutation-time policy/revision drift, shared lock budget, partial outcomes,
@@ -293,6 +299,56 @@ export preserving the confirmed first transaction. Required actor-free CI
 substitutes native/storage owners and starts none of those actors. Installed
 adoption, Linux/Windows job qualification, carrier behavior and activation
 remain separate gates.
+
+## Inert native job preparation
+
+```text
+agent-machines health prepare-job --store-dir <absolute-v2-store>
+agent-machines health prepare-job --store-dir <absolute-v2-store> --user-id <interactive-Windows-SID>
+```
+
+Use the first form on Linux, the second on Windows. The command reads the
+existing policy and owning payload launcher and returns
+`agent-machines.health.job-preparation` v1 JSON on stdout. Its `artifacts`
+map contains definition text only: no files, task registration, unit installation,
+enable/start, lingering, runtime provisioning or carrier write occurs.
+Keep this output local: it contains absolute paths and policy-scoped approval.
+The original absolute store path goes directly through the existing plain-path
+owner; preparation never normalizes traversal or resolves links into a
+different store before policy validation.
+macOS is unsupported.
+
+The Windows proposal uses the explicitly named interactive account at
+LeastPrivilege, an hourly UTC repetition at 15 seconds after the boundary,
+IgnoreNew overlap handling, late-start coalescing, no restart policy, a
+60-second outer task limit and the existing headless `conhost` launch shape.
+Both task and trigger are disabled. The Linux proposal contains a systemd-user
+oneshot and hourly UTC persistent timer, no retries, control-group cleanup and
+55-second start/five-second stop limits, retaining the same 60-second outer
+containment bound. WorkingDirectory uses literal directive-specific path
+rendering and percent-specifier escaping, not ExecStart argument quoting.
+Paths with parent traversal, edge whitespace or a trailing continuation
+backslash refuse rather than silently changing the directory.
+Returned unit text is not an installed
+or enabled unit. Neither definition depends on the update watchdog.
+
+The action calls the owning payload's normal `health run --apply` entry with
+the previewed policy token. Selection and capability qualification happen again
+at invocation, and normal collection revalidates the token at each mutation.
+A changed policy refuses; a late invocation only targets current health and the
+preceding complete service hour, never replays every missed hour.
+The enclosing scheduler budget leaves startup/settlement headroom around the
+unchanged 45-second collection budget, including Linux stop time; native timing and
+termination behavior are **not qualified by rendering these definitions**.
+
+`registered: false`, `enabled: false` and
+`qualification: native-scheduler-not-qualified` are preparation results, not
+queries of an existing task. Registration/enrollment is deliberately absent.
+Before a future owner registers anything, it must verify the actual interactive
+identity, current installation selection, policy adoption, existing-definition
+conflicts and the native first/reconcile, two-cycle headlessness, overlap,
+late-wake, deadline/storage and exact-cleanup gates in the reviewed local
+collection plan. Obtain separate activation authority; preparation is not it.
 Listener-only recollection replaces only `local_listener`; retained SSH,
 session and other unselected domains keep their exact evidence and source
 timestamps. The record boundary also refuses changes to those domains.

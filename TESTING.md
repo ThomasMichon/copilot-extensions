@@ -5740,6 +5740,21 @@ The native selected-runtime fixture copies the actual early CLI/export closure,
 not the unrelated coordinator tree, keeping preparation outside the operation
 budget and inside the unchanged test deadline.
 
+The same actor-free packet renders inert Windows/Linux native job definitions
+and refuses unsupported platforms or unsafe definition values; it never
+contacts a scheduler. Agent Machines' selected `tests/test_health_jobs.py`
+packet additionally exercises the normal preparation parser and unchanged
+store/payload state. `tests/test_health_job_payload.py` creates fresh private
+interpreter fixtures and drives the shipped PowerShell/Bash entries through
+missing, preview/apply-only, capable and rolled-back declarations. Unsupported
+providers must never execute. `tests/test_configuration_payload_readonly.py`
+also covers missing-runtime preparation without bootstrap. Select these with
+the managed runner's repeatable `--test-file` and `--allow-explicit-tiers`
+options. Bash on Windows is a script compatibility check, not native Linux
+scheduler qualification. Actual scheduler registration, two-cycle headlessness,
+late wake, deadline/storage and cleanup qualification remain explicit opt-in
+gates before enrollment; the preparation packet does not execute them.
+
 The actor-free `test_hourly_contributions.py` packet executes the canonical
 service contribution codec and collection policy with substituted native owners
 and stage/outcome vocabularies. Exact

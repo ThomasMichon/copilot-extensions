@@ -214,6 +214,18 @@ cannot be settled through generic release, at-rest, sweep or abandon commands.
 
 ## Source-only destination allocation
 
+Owner identity is resolved from the invoking CWD, or supplied with
+`--owner-ref`; a destination `--project` does not change the creator's project.
+Launch environments do not publish an owner identity. `create --no-owner`
+deliberately creates a standalone worktree without a parent owner or session.
+
+`run --owner-ref REF "<command>"` reserves and journals the produced resource
+against that explicit owner; it does not export ownership into the command's
+environment. If the inner producer runs outside the owner's directory and
+requires creator context, pass its own supported owner argument explicitly.
+Detached CLI sessions resolve their own worktree/head rather than inheriting
+the launching session as owner.
+
 `create [--machine EXECUTION_SPACE] [--repo REPOSITORY] [--creation-key KEY]
 [--creation-request-id EXISTING_REQUEST]
 --json` selects a destination while preserving the original CWD creator.
