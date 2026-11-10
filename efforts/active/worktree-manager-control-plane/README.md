@@ -795,7 +795,8 @@ worktree-manager.
       [bounded entry/setup-home sequence](phase-4-first-run-front-door.md).
       Preserve #356/#8545 repository setup, native Configuration/readiness
       writers and the full original acceptance matrix; an F1 navigation flow
-      is not completion of F2/F3 or the parent issue.
+      is not completion of F2/F3 or the parent issue. F1 source flow is
+      implemented and consumer-tested; F2/F3 and native/installed acceptance remain open.
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
       trigger; a stale/incompatible `worktree-manager` stub can never capture the
@@ -2898,6 +2899,14 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-10 - First-run F1 source flow and contained consumer proof
+
+- The [Phase 4 source record](phase-4-first-run-front-door.md#f1-source-implementation-and-validation)
+  records the genuine no-project Setup / Doctor flow, strict fresh selection,
+  real read-only child receipts and focused validation. F2/F3, review/CI,
+  native/installed qualification and #542 remain open; no rollout or writer
+  takeover is claimed.
 
 ### 2026-11-10 - Bounded first-run front-door design reservation
 

@@ -3,7 +3,8 @@
 [Parent effort](README.md#phase-4--bare-invocation-seam--handoff-plugin-side-landed-end-state-pending)
 and [original acceptance](https://github.com/ThomasMichon/copilot-extensions/issues/542).
 
-**Status:** Proposed design; no runtime behavior or installed acceptance claimed.
+**Status:** Active; F1 source flow implemented and consumer-tested. F2/F3,
+review/CI and installed/native qualification remain open.
 **Participant:** `patient-knob`, bounded Manager presentation/entry slice.
 This is an agent-recommended implementation sequence under the existing effort,
 not a replacement for #542 or a new configurator implementation.
@@ -18,9 +19,9 @@ See the [Picker vision](../../../visions/picker/README.md#first-run-onboarding-e
 [Installer vision](../../../visions/installer/README.md#onboards-from-empty-gracefully)
 and [Configuration workbench](phase-5-configuration-workbench.md).
 
-Current bare Manager invocation prints `startup_status`; explicit `picker`
-enters the production pending-binding screen. That screen paints before engine
-discovery but cannot represent ordinary first-run states: `runner._select_project`
+Explicit `picker` enters the production pending-binding screen. That screen
+paints before engine discovery, but project-binding errors alone cannot
+represent ordinary first-run states: `runner._select_project`
 rejects an absent engine or empty/multiple project roster, while
 `ProjectBootstrap` correctly requires a real nonempty project. Catching those
 errors and inventing an empty project/source would bypass the engine contract.
@@ -46,7 +47,7 @@ or install anything merely to browse, refresh or obtain a status observation.
 
 ## Observable outcomes and order
 
-- [ ] F1: Bare interactive entry opens responsive, project-independent
+- [x] F1: Bare interactive entry opens responsive, project-independent
   Setup/Doctor chrome, observes state, runs an explicitly selected read-only setup
   plan through the real Manager command, shows its complete result and can
   refresh or quit without side effects. Provisioned single-project entry binds
@@ -109,7 +110,8 @@ No probe loops, automatic retries or new background workers.
 
 F1's Review setup plan uses existing `worktree-manager setup` without `--apply`
 or a repository/trust argument. The result view mounts before the bounded child
-starts and retains stdout, stderr and actual exit status. Failure is a failed
+starts and retains stdout, stderr and actual exit status when observed. Timeout
+reports retain bounded partial streams without inventing a normal exit. Failure is a failed
 observation, not a partial install or success. Return/reload works after success,
 failure and cancellation. Do not execute arbitrary rendered command strings.
 
@@ -138,20 +140,20 @@ their independently tracked construction/replacement adoption gaps.
 
 ## Validation and promotion gates
 
-- [ ] Fail-first entry controls cover interactive bare, redirected stdin,
+- [x] Fail-first entry controls cover interactive bare, redirected stdin,
   redirected output with/without stderr terminal, absent/broken streams,
   ACP-style invocation, explicit verbs/project/help/version and launcher output.
 - [ ] Production Textual tests prove chrome before slow discovery, empty and
   partial states, explicit project selection, unknown versus empty roster,
   retry/recovery, cancellation and no late activation after owner loss.
-- [ ] A real isolated Manager subprocess exercises Review setup plan and its
+- [x] A real isolated Manager subprocess exercises Review setup plan and its
   result/return/reload path. Prove successful and unsuccessful status with the
   actual transport, not only a mocked button callback.
 - [ ] Fresh isolated homes and strict before/after state comparisons prove that
   launch, browse, refresh, plan, diagnostic and cancel never install, adopt,
   rewrite source, bind knowledge, authenticate or start maintenance/services.
   Effect adapters and process tests use inert fixture-owned targets.
-- [ ] Preserve the provisioned production bootstrap/current-feed consumer and
+- [x] Preserve the provisioned production bootstrap/current-feed consumer and
   knowledge-only/project-selection exclusions. Do not broaden mock/capture paths.
 - [ ] F2 adds focused real-owner handoff, confirm/cancel, failure, restart and
   reread controls for every supported missing-source action, preserving separate
@@ -169,3 +171,61 @@ Count discovery/command work in deterministic controls; use the existing
 actual visible/input-ready and key-to-result qualification. Synthetic mount
 timing is not native latency proof. No source plan or merge proves installed
 behavior, release promotion or rollout.
+
+## F1 source implementation and validation
+
+The bare-entry router requires interactive input and a terminal output channel.
+The existing production app paints pending chrome before its worker observes
+installation state and strict registry-owned project identity. No engine/project
+means a genuine Setup / Doctor widget, not a fake bootstrap or operational data
+source. One available project uses the existing bootstrap; multiple projects
+require explicit selection. Selection re-observes the registry before bootstrap,
+including removal or conversion to a knowledge-only repository.
+
+The setup plan invokes the actual Manager CLI without apply/trust arguments.
+Doctor consumes the existing Installation & Updates diagnostic action. Both use
+the canonical finite caller-owned process primitive and existing result screen;
+Return waits for settlement, preserves stdout/stderr and the exit code, then
+re-observes state without automatic Worktrees entry. Cleanup uncertainty retains
+its exact exception/custody and disables retry, rather than replaying a command.
+The setup child retains the caller's selected installation-context pointer after
+the general child-environment scrub; unrelated contributed commands retain that
+scrub, and Doctor retains its owner-provided argv handoff. A timeout preserves
+bounded partial stdout/stderr, including byte captures, without a normal exit
+status.
+
+Source controls exercised:
+
+- The initial five-file packet passed 120 cases: startup text/entry, first-run
+  observations, pending/operational binding, no-project navigation and existing
+  production launch dispatch. The stale relocated-launch assertion now retains
+  the existing `--first-launch` flag as well as the already-created worktree ID.
+- After adding selection-time re-observation, the focused first-run and
+  production-dispatch packet passed 80 cases.
+- The final pending/Setup packet passed 16 cases, including real inert child
+  success and Doctor-route failure receipts, terminal cleanup-custody refusal,
+  owner cancellation and an actual fresh-home Manager setup plan. The plan
+  returned exit 1 for missing prerequisites/core without changing the empty
+  home; fixture PATH excludes host/native prerequisite commands.
+- Ten focused TUI stream controls passed, including captured, absent and closed
+  original stdout, stderr-terminal rendering and stdout restoration.
+- The final 28-case model/Setup packet also drives actual bare `main` through
+  the production runner and TUI into the real app's contained terminal driver,
+  proving project selection, bootstrap refusal, Reload and Quit compose together.
+- The scope/timeout packet's 31 cases passed across its selected packet and a
+  focused rerun of the Windows namespaced report case. That case supplies a real
+  namespaced-only observation to the home, executes the actual setup child and
+  compares all fixture files/directories before and after. The initial core
+  observation is recorded separately from UI dispatch, not treated as a native
+  discovery latency budget. Portable scope transport, byte-output timeout and
+  a real printing-then-stalling owned child cover the remaining corrections.
+- Changed Python `F,E9` lint, the install-contract guard and headless-launch
+  guard passed. No dependencies or version fields were changed.
+
+These are source/contained-consumer proofs, not native visible/input-ready
+latency or installed acceptance. A full installer clean-room/apply lane is not
+selected because this flow performs no installation; fresh-profile first touch
+is exercised directly. No admitted fixture-scoped live TTY venue was exercised,
+and no shared native-service Doctor/probe or rollout was performed. Full partial
+state/action/TTY qualification and required exact-head review/CI remain separate
+unchecked gates above; #542 remains open.
