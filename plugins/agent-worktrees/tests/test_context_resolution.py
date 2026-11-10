@@ -85,7 +85,7 @@ def adopted_repo(tmp_path: Path, monkeypatch, _context_repo_seed):
     tdir = tmp_path / "tracking"
     tdir.mkdir()
     (tdir / f"{wt_id}.yaml").write_text("id: x\n")
-    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda: tdir)
+    monkeypatch.setattr("agent_worktrees.config.tracking_dir", lambda name=None: tdir)
 
     conf = cfg.Config(
         srcroot=str(tmp_path), machine="t", platform="linux", repo_name="myproj",
@@ -802,6 +802,28 @@ def test_get_repo_dir_is_anchor(adopted_repo, active_myproj, monkeypatch, capsys
     out = capsys.readouterr().out.strip()
     assert rc == 0
     assert Path(out).resolve() == anchor.resolve()
+
+
+@pytest.mark.parametrize("record_machine", ["friendly-host", "friendly-host-wsl"])
+def test_get_owner_ref_preserves_tracked_execution_identity(
+    adopted_repo, monkeypatch, capsys, record_machine,
+):
+    from agent_worktrees import execution_spaces
+
+    _anchor, _wt_root, wt_path, wt_id, conf = adopted_repo
+    record_path = cfg.tracking_dir() / f"{wt_id}.yaml"
+    record_path.write_text(json.dumps({
+        "worktree_id": wt_id, "branch": f"worktree/{wt_id}", "worktree_path": str(wt_path),
+        "repo": conf.repo_name, "machine": record_machine, "platform": conf.platform,
+    }), encoding="utf-8")
+    before = record_path.read_bytes()
+    monkeypatch.chdir(wt_path)
+    monkeypatch.setattr(cfg, "_ACTIVE_PROJECT", conf.repo_name)
+    monkeypatch.setattr(execution_spaces, "require_current_execution_space", lambda config: None)
+    assert conf.machine != record_machine
+    assert m.cmd_get(types.SimpleNamespace(key="owner-ref")) == 0
+    assert capsys.readouterr().out.strip() == f"{record_machine}/{conf.repo_name}/{wt_id}"
+    assert record_path.read_bytes() == before
 
 
 def test_get_keys_lists_swapped_keys(adopted_repo, capsys):

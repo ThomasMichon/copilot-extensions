@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $forwardArgs = @($args)
 $configurationEntry = $forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'installation-configuration'
-$healthRunEntry = $forwardArgs.Count -gt 1 -and $forwardArgs[0] -ceq 'health' -and $forwardArgs[1] -ceq 'run'
+$healthRunEntry = $forwardArgs.Count -gt 1 -and $forwardArgs[0] -ceq 'health' -and $forwardArgs[1] -cin @('run', 'prepare-job')
 $readOnlyRuntimeEntry = $configurationEntry -or $healthRunEntry
 
 $payloadRoot = [Environment]::GetEnvironmentVariable(
@@ -190,7 +190,11 @@ function Invoke-AgentMachinesRuntime([string]$Python) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_machines @forwardArgs
+        if ($healthRunEntry) {
+            & $Python -I (Join-Path $scriptDir 'health-collection-entry.py') @forwardArgs
+        } else {
+            & $Python -m agent_machines @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }

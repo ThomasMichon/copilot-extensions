@@ -16,6 +16,8 @@ worktree.
 
 from __future__ import annotations
 
+from contextlib import nullcontext
+
 import pytest
 from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
@@ -190,6 +192,9 @@ class _StubMgr:
     def __init__(self, known_session_ids=()):
         self.started = False
         self._known_session_ids = list(known_session_ids)
+
+    def start_admission(self):
+        return nullcontext()
 
     def list_sessions(self, status=None):  # noqa: ARG002 - caller-affinity path
         class _S:

@@ -10,19 +10,15 @@ survives the handoff by construction.
 
 from __future__ import annotations
 
-import os
 import shutil
 import subprocess
-from collections.abc import Callable, Mapping
+from collections.abc import Callable
 from typing import Any, Protocol
 
 
 class _OwnerRefResult(Protocol):
     stdout: str
     returncode: int
-
-_OWNER_REF_ENV = "AGENT_WORKTREES_OWNER_REF"
-
 
 def worktree_ref(ref: str | None) -> str:
     """``ref`` without a ``#session`` suffix, or ``""`` unless it is qualified
@@ -32,15 +28,16 @@ def worktree_ref(ref: str | None) -> str:
 
 
 def supervisor_ref(
-    *, env: Mapping[str, str] | None = None,
+    *, explicit: str | None = None,
     which: Callable[[str], str | None] = shutil.which,
     run: Callable[..., _OwnerRefResult] = subprocess.run,
 ) -> str:
-    """The caller's qualified worktree ref, or ``""``: ``AGENT_WORKTREES_OWNER_REF``
-    (set for sessions agent-worktrees launches), else ``agent-worktrees get
-    owner-ref`` from the current directory. Best-effort; never raises."""
-    env = os.environ if env is None else env
-    ref = worktree_ref(env.get(_OWNER_REF_ENV))
+    """Resolve an explicit supervisor or the CWD's qualified worktree reference.
+
+    Supervisor metadata identifies the launcher, not the detached child's owner.
+    Best-effort; never raises.
+    """
+    ref = worktree_ref(explicit)
     if ref:
         return ref
     binstub = which("agent-worktrees")
