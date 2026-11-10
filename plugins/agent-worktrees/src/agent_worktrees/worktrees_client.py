@@ -233,7 +233,7 @@ def _wait_current(request: dict, *, recover: bool) -> dict:
 def read_current(request: dict, *, recover: bool = True, wait: bool = False) -> dict:
     if wait:
         return _wait_current(request, recover=recover)
-    project, selection = request_selection(request)
+    request_selection(request)
     unavailable = None
     recovery_pending = False
     try:
@@ -285,21 +285,13 @@ def read_current(request: dict, *, recover: bool = True, wait: bool = False) -> 
     from . import status_monitor_runtime as monitor
 
     try:
-        result = read_advisory(
-            monitor._aw_runtime_home() / "worktrees-current.sqlite3",
-            project,
-            **selection,
-            contract_version=request["contract_version"],
+        return saved_result(
+            request, unavailable or "Resident unavailable; showing saved worktrees",
+            db_path=monitor._aw_runtime_home() / "worktrees-current.sqlite3",
         )
     except (ProjectionError, ProjectionUnavailable) as exc:
         failure = ResidentRecoveryPending if recovery_pending else ProjectionUnavailable
         raise failure(f"{unavailable}; no usable advisory roster: {exc}") from exc
-    result["availability"] = {"status": "advisory", "reason": unavailable}
-    result["contract_version"] = request["contract_version"]
-    if request["contract_version"] == observations.VERSION:
-        result["project"] = project
-    result["ok"] = True
-    return result
 
 
 def emit_current(args) -> int:
