@@ -2395,6 +2395,11 @@ not an implementation assignment or accepted source disposition.)_
 _(Agent-recommended additive tracking proposal; completed Inbox/non-blocking
 I/O and static-guard credit is not reopened.)_
 
+The [bounded execution proposal](phase-8-action-progress-inbox.md) preserves
+these original rows and requires source-plan review before functional edits.
+`patient-knob` owns only this registered-action producer/modal slice under
+#5343; provider, other-progress and native/resource owners remain unchanged.
+
 - [ ] **P5343-1:** Migrate the ACTUAL `_run_task_action_progress` producer
   in `engine_pivot_actions`, whose worker/reader writes `pct`, `msg`,
   `done`, `error` and final message into the UI-polled progress dict.
@@ -2928,6 +2933,17 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-10 - Registered action-progress Inbox proposal
+
+Added the bounded #5343 execution proposal after current issue/comment,
+open-source and actual producer/renderer reconciliation. The worker still
+mutates the UI progress dictionary, while the main screen's closure-draining
+Inbox would discard pure data before a later modal peek. The proposal keeps
+latest-value publication at the owning modal, preserves run/cancellation and
+provider authority, and specifies actual consumer and late-run controls.
+P5343/V5343 remain unchecked; no functional implementation or live operation
+is included. Source-plan review precedes execution.
 
 ### 2026-11-10 - New-venue composition researched before provider wiring
 
