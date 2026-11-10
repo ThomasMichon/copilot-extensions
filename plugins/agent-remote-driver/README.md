@@ -48,6 +48,32 @@ Explicit authorized stop addresses the retained native child, never a mux name.
 Native creation, SDK binding, input readiness, prompt acceptance and restoration
 are distinct; complete history restoration is not qualified by this entrypoint.
 
+For the common headed broker, `running` means authenticated SDK binding, not
+startup input readiness. A capable executing adapter advertises
+`_meta.inputReadiness: { version: 1, method: "copilot-driver/input-status" }`
+in `initialize`. That read-only request requires the bound `sessionId` and
+returns the same identity, `startupSeed` (`pending`, `observed`, or
+`not-requested`), `startupTurn` (`pending`, `active`, `idle-observed`, or
+`not-requested`), and separate `nativeSend`/`prompt` readiness states
+(`pending`, `ready`, `busy`, or `unavailable`). An observed seed permits native
+enqueue/steer; an ACP prompt additionally requires a subsequent native idle
+observation to avoid mixing its output with the original turn. These are
+startup admission observations, not successful turn completion, complete
+pending-work evidence or history restoration. No requested seed means
+`not-requested`, not a claim that a resumed conversation is empty or idle.
+
+Unresolved startup refuses controlled input before dispatch with code `-32002`,
+without revoking control or consuming the one-time launch-seed observation.
+Later human input still revokes control, including identical seed text.
+The retained client observes advertised readiness for up to five seconds
+before its one send; a startup-only timeout reports that no prompt was
+dispatched and permits a later explicit request on that same connection.
+It never replays a possibly accepted send. Missing readiness metadata preserves
+the legacy native-send contract for retained peers, whose startup ordering
+remains unqualified; unknown versions, malformed status and identity changes
+refuse before dispatch. The auth-state v1 snapshot and freeze/expiry semantics
+are unchanged, and reading readiness cannot thaw a frozen controller.
+
 Local launches export the core into their retained runtime directory
 and execute it with a physical base interpreter, independently of the caller's
 venv. The same core can export a compact receiving zipapp without Bridge,
