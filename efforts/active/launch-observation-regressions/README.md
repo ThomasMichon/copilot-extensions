@@ -93,7 +93,7 @@ retained resources. Source completion does not claim installed recovery.
 
 ### Phase 5 - Reopen without replaying an uncertain prompt
 - [x] Let ordinary Open preserve an unconfirmed prompt handoff without submitting it again; retain explicit-delivery refusal and final intent revalidation.
-- [ ] Validate both planning surfaces and the real admission-only preparation boundary, then land through review and required CI.
+- [x] Validate both planning surfaces and the real admission-only preparation boundary, then land through review and required CI (#11809).
 
 ## Validation Plan
 
@@ -120,11 +120,25 @@ unknown enabled payloads retain their admission boundaries.
 
 This closes existing responsiveness and truthful-observation intent rather
 than extending a vision. The service-contract and performance-measurement
-patterns govern the implementation. No new CLI or wire generation is proposed;
-current/prior providers retain the same required observation contract. Runtime
-replacement and rollout remain with their existing owners.
+patterns govern the implementation. Readiness observation retains the existing
+required-observation contract. Promptless reopening uses the opt-in,
+versioned retained-seed contract documented by the Engine/Picker boundary.
+Runtime replacement and rollout remain with their existing owners.
 
 ## Journal
+
+### 2026-11-10 - Promptless Open landed; readiness delivery continues
+- #11809 merged as `8108fff27a` after approval at the final source and green
+  required CI. Exact-source Windows qualification passed 22 Worktrees cases
+  and 13 Manager cases with zero skips or failures, including stopped-to-live
+  reattachment, early restore refusal, identity preservation across delegation,
+  both native interpreter patches and real older-parser pre-effect refusal.
+- Phase 5 is complete in source. Neither that merge nor isolated qualification
+  proves installed recovery. Readiness delivery in #11782 remains the next
+  stretch, followed by release and separately authorized operational acceptance.
+- Rebased that source onto the actual changed contribution base and preserved
+  both source slices' journal entries. Fresh exact-source qualification, review
+  and required CI remain; no check-recognition workaround or bypass is inferred.
 
 ### 2026-11-09 - Ordinary Open and retained prompt custody
 - A subsequent report shows ordinary Open refusing because a prior creation
