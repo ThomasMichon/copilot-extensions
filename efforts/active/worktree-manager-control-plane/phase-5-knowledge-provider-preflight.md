@@ -154,7 +154,9 @@ The source plan adds no installation, credential, policy, resource, binding,
 service or rollout authority. A reviewed contract or successful fixture is not
 complete public-first onboarding or receiving acceptance.
 
-## Source qualification
+## Journal
+
+### 2026-11-10 - Native provider and binding read qualification
 
 The initial native/provider/inventory packet passes 207 cases, including the
 actual binding payload through the native parser and owned synthetic provider.
