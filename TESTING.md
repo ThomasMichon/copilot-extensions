@@ -173,6 +173,19 @@ preparation, sanitization and 120/180/300/420-second limits, without a feed.
 The in-flight packet alone does not qualify loss of observation. None of these
 packets enables productive renewal or qualifies unrelated pending-work sources.
 
+The separate `native-driver-startup-seed`, `native-driver-startup-no-seed` and
+`native-driver-startup-cold-resume` packets each select one exact candidate case
+in `tests/native/test_headed_extension.py`. The seed case delays observation
+of the actual SDK startup event while the isolated provider holds the original
+response. The real retained Bridge client must observe pending readiness
+without sending, then accept one controlled enqueue after the original seed is
+observed and before its turn is idle. No-seed and cold-resume cases separately
+prove that an absent opening seed is not represented as idle or restoration.
+All retain exact history/session identity and fixture cleanup, the same native
+pins, public-only preparation, sanitization and 120/180/300/420-second limits.
+None inherits qualification from a steady recovery packet, qualifies all
+caller modes or changes productive activation authority.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
@@ -5020,6 +5033,18 @@ Windows uses the public embedding stop event; Linux exercises CLI SIGTERM.
 Windows passive-reader rename sharing is tested at the actual file boundary.
 These controls do not qualify a live provider, built container or fleet
 placement, and do not close the remaining production-performance/update gates.
+The same standalone lane discovers `services/pr/tests/test_local_foreground.py`,
+`test_local_lifetime.py` and `test_local_recovery.py`. They select the independent
+Linux `repository-local/v1` profile with no running Core/Gateway: both synthetic
+providers populate before subscriptions, actual packaged CLI processes query
+and consume continuing events, and original-root restart preserves each
+consumer's original IDs and ACK. Separate embedded foreground controls hold
+exact native/disk cleanup and inject post-replacement persistence uncertainty.
+These process fixtures remain in the manual standalone lane, not required
+unit-only PR CI. Use a short private runner scratch root: the selected Unix
+socket is an absolute child of its dedicated state root and is limited to
+100 encoded bytes. The local runtime is Linux-only; strict typing separately
+analyzes both Linux and Windows.
 The focused observer/service tests additionally exercise a four-read admission
 bound, rolling progress past a blocked target, distinct subscriber identities,
 real native-child completion order and retained writer custody until every

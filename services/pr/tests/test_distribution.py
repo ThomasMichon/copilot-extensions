@@ -147,7 +147,11 @@ def test_independent_wheel_has_no_source_checkout_or_marketplace_requirement(tmp
         cwd=tmp_path, capture_output=True, text=True, timeout=10,
         creationflags=cast(int, getattr(subprocess, "CREATE_NO_WINDOW")) if os.name == "nt" else 0,
     )
-    assert child.returncode == 0 and "{provision,serve,ready}" in child.stdout
+    assert child.returncode == 0
+    assert all(command in child.stdout for command in (
+        "provision", "serve", "ready", "list", "query", "subscribe", "inspect",
+        "events", "acknowledge", "cancel", "follow",
+    ))
 
 
 @pytest.mark.parametrize("fault", ["missing", "mismatched"])

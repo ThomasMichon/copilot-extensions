@@ -131,6 +131,7 @@ agent-pull-requests-service list --socket /data/pr-cache/local.sock --namespace 
 agent-pull-requests-service query --socket /data/pr-cache/local.sock --namespace installation-a --target example-github --limit 16
 agent-pull-requests-service query --socket /data/pr-cache/local.sock --namespace installation-a --target example-github --number 7
 agent-pull-requests-service subscribe --socket /data/pr-cache/local.sock --namespace installation-a --target example-github --request-id consumer-a --ttl 3600
+agent-pull-requests-service inspect --socket /data/pr-cache/local.sock --namespace installation-a --target example-github --registration-id REGISTRATION_ID
 agent-pull-requests-service events --socket /data/pr-cache/local.sock --namespace installation-a --target example-github --registration-id REGISTRATION_ID
 agent-pull-requests-service acknowledge --socket /data/pr-cache/local.sock --namespace installation-a --target example-github --registration-id REGISTRATION_ID --event-id EVENT_ID
 agent-pull-requests-service cancel --socket /data/pr-cache/local.sock --namespace installation-a --target example-github --registration-id REGISTRATION_ID
@@ -225,3 +226,16 @@ These are supported source interfaces and synthetic qualification surfaces.
 They do **not** authorize real traffic, retained hosting, enrollment, installation
 or activation. Release, installed/running support, authorized target footprint
 and actual live read-only events remain separate acceptance.
+
+## Source qualification
+
+The standalone manual test lane runs `test_local_foreground.py`,
+`test_local_lifetime.py` and `test_local_recovery.py` with fixture-owned
+GitHub/Gitea native processes and fresh explicitly provisioned state. It
+exercises the packaged foreground and actual CLI, independent continuing
+consumers across original-root restart, later-event follow, degraded readiness
+with usable queries, and exact native/disk drain and replacement recovery.
+The [M1 source map](../../efforts/active/durable-pr-watch-delegation/repository-cache-events-m1.md#source-evidence-map)
+links complementary scope, schema, gap and pressure controls.
+These fixtures neither select a retained deployment artifact nor supply real
+provider/credential authority.
