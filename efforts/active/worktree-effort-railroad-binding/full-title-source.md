@@ -142,6 +142,19 @@ authorized by this plan; unavailable native rollout is not replaced by a fixture
 
 ## Journal
 
+### 2026-11-10 - Unit dependency readmission
+
+The initial required unit job refused execution because the admitted
+`tracking.py` import dependency had changed. Only that dependency digest is
+readmitted after reviewing the scalar normalization/helper changes: no new
+imports, actors, packet nodes, coverage targets, effect permissions or budgets
+are introduced. The existing required Linux packet must qualify the corrected
+head before merge; an earlier approval does not waive this gate.
+
+The local prepared interpreters lack Coverage, so no local native-packet pass
+is claimed and no package was installed to manufacture one. The 107/12 source
+consumer results remain distinct from required packet execution.
+
 ### 2026-11-10 - Implementation candidate
 
 The finite plan merged in #11952 at 17:36:56 UTC as
