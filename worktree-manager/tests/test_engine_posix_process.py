@@ -34,6 +34,40 @@ import asyncio
 from dataclasses import replace
 
 
+def test_external_progress_destination_is_not_rewound_or_recaptured(tmp_path, monkeypatch):
+    owner = SimpleNamespace(
+        pid=123, stdout=io.BytesIO(b'{"returncode":0}\n'), communicate=lambda **kw: None,
+    )
+    monkeypatch.setattr(pp.select, "select", lambda *args: ([owner.stdout], [], []))
+    monkeypatch.setattr(pp.signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(pp.os, "killpg", lambda *args: None, raising=False)
+
+    def spawn(argv, **kwargs):
+        os.write(int(argv[-1]), b'{"type":"progress"}\n')
+        return owner
+
+    monkeypatch.setattr(pp.subprocess, "Popen", spawn)
+    with (tmp_path / "progress").open("w+b") as output:
+        result = pp.run(["engine"], timeout=1, env={}, stdout=output, stderr=subprocess.DEVNULL)
+        assert result.returncode == 0 and result.stdout is None
+        assert output.tell() == len(b'{"type":"progress"}\n')
+        output.seek(0)
+        assert output.read() == b'{"type":"progress"}\n'
+
+
+def test_failed_group_retirement_retains_the_exact_unreaped_owner(monkeypatch):
+    owner = SimpleNamespace(pid=123, stdout=io.BytesIO(b'{"returncode":0}\n'))
+    monkeypatch.setattr(pp.subprocess, "Popen", lambda *a, **k: owner)
+    monkeypatch.setattr(pp.select, "select", lambda *args: ([owner.stdout], [], []))
+    monkeypatch.setattr(pp.signal, "SIGKILL", 9, raising=False)
+    monkeypatch.setattr(pp.os, "killpg",
+                        lambda *args: (_ for _ in ()).throw(OSError("fixture retirement failed")),
+                        raising=False)
+    with pytest.raises(EngineCleanupError) as caught:
+        pp.run(["engine"], timeout=1, env={}, stderr=subprocess.DEVNULL)
+    assert caught.value.process is owner and caught.value.group_id == owner.pid
+
+
 @pytest.mark.parametrize("outcome", ["success", "timeout", "interrupt", "invalid", "closed", "launch-failed"])
 def test_group_owner_is_not_reaped_before_descendant_sweep(monkeypatch, outcome):
     events = []

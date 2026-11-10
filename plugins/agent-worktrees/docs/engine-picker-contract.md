@@ -159,9 +159,11 @@ produce a terminal error. Frames use the shared unbuffered, single-attempt stdou
 writer. Unconfirmed stdout writes are never retried; loss
 of a complete terminal frame remains an unknown observation, not replay authority.
 
-The producer does not add a Picker consumer, timeout policy, cancellation,
-rollback, retry or progress store. Built-in Manager maintenance still uses its
-existing JSON path until a separately qualified consumer migration. Readers
+The producer does not add cancellation, rollback, retry or a progress store.
+The [Manager's local consumer](../../../worktree-manager/README.md#explicit-sync-progress)
+qualifies the exact selected interpreter's declaration before opting in,
+retains the complete result and observes communication separately from its
+finite execution budget. Remote Sync retains its existing JSON path. Readers
 must preserve unknown outcomes after missing terminal output and select the
 legacy baseline before effects when support is absent, never replay a started
 Sync after removing an optional flag. Every target update is communication
