@@ -198,6 +198,39 @@ def test_changed_target_does_not_return_stale_direct_policy(registry, provider, 
         assert result["failure"]["code"] == "source-changed"
 
 
+@pytest.mark.parametrize("requires_pr", [False, True])
+@pytest.mark.parametrize("kind", ["registry", "deadline"])
+def test_final_checkpoint_invalidates_mode_but_retains_branch_specific_facts(
+    registry, provider, monkeypatch, requires_pr, kind,
+):
+    from agent_worktrees import github_landing_observation, repos_registration_preflight
+
+    _, responses = provider
+    value = classic(requires_pr=True) if requires_pr else classic()
+    responses[2] = api(value)
+    responses[4] = api(value)
+    observe = github_landing_observation.observe
+
+    def invalidate(selected, landing):
+        observe(selected, landing)
+        assert landing["mode"] == ("pull-request" if requires_pr else "direct")
+        if kind == "registry":
+            registry.write_text(registry.read_text(encoding="utf-8") + "# moved\n", encoding="utf-8")
+        else:
+            monkeypatch.setattr(
+                repos_registration_preflight, "time",
+                SimpleNamespace(monotonic=lambda: float("inf")),
+            )
+
+    monkeypatch.setattr(github_landing_observation, "observe", invalidate)
+    result = inspect()
+    assert result["status"] == "partial"
+    assert result["landing"]["status"] == "unknown"
+    assert result["landing"]["mode"] == "unknown"
+    assert result["landing"]["observed_pr_requirement"] is requires_pr
+    assert result["failure"]["code"] == ("source-changed" if kind == "registry" else "timeout")
+
+
 @pytest.mark.parametrize("status", [401, 403, 404, 429])
 def test_denied_or_ambiguous_policy_does_not_prove_absence(registry, provider, status):
     _, responses = provider
@@ -219,6 +252,24 @@ def test_malformed_or_partial_graphql_is_not_policy_success(registry, provider, 
     result = inspect()
     assert result["landing"]["mode"] == "unknown"
     assert result["status"] == "partial"
+
+
+@pytest.mark.parametrize("omitted", [True, False])
+def test_missing_permission_is_sanitized_while_explicit_null_remains_unknown(registry, provider, omitted):
+    _, responses = provider
+    value = classic(permission=None)
+    if omitted:
+        del value["data"]["repository"]["viewerPermission"]
+    responses[2] = api(value)
+    responses[4] = api(value)
+    result = inspect()
+    assert result["status"] == "partial"
+    assert result["landing"]["mode"] == "unknown"
+    if omitted:
+        assert result["failure"]["code"] == "target-unconfirmed"
+    else:
+        assert "failure" not in result
+        assert result["landing"]["writable"] is False
 
 
 def test_explicit_graphql_permission_failure_is_not_an_expired_credential(registry, provider):

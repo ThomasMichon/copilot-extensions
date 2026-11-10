@@ -59,6 +59,7 @@ def _classic(selected) -> dict:
         or repository["nameWithOwner"].casefold() != selected.repository.casefold()
         or type(repository.get("isArchived")) is not bool
         or type(repository.get("isDisabled")) is not bool
+        or "viewerPermission" not in repository
         or repository.get("viewerPermission") is not None and (
             not isinstance(repository["viewerPermission"], str)
             or repository["viewerPermission"] not in {"ADMIN", "MAINTAIN", "WRITE", "TRIAGE", "READ"}

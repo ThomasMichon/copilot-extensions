@@ -156,13 +156,19 @@ complete public-first onboarding or receiving acceptance.
 
 ## Source qualification
 
-The final native/provider/inventory packet passes 207 cases, including the
+The initial native/provider/inventory packet passes 207 cases, including the
 actual binding payload through the native parser and owned synthetic provider.
 Direct/PR/legacy-owner and real aggregate-timeout cases preserve the complete
 fixture tree. The binding regression packet passes 156 cases; its one exact
 capability expectation was updated for the additive declaration, then the
 affected consumer and real capability-probe packet passes all 19 selected
 cases. No failed assertion is waived.
+
+Review follow-up passes 51 policy/native cases. Final-checkpoint registry and
+deadline invalidation now reset a completed direct/PR mode to unknown while
+retaining separately scoped facts. Missing `viewerPermission` is a sanitized
+partial response; an explicitly null permission remains supported and unknown.
+The existing partial-ruleset positive-PR exception remains distinct.
 
 Strict binding-owner checks pass for Python 3.10 Linux and Windows targets.
 Scoped Python lint, all 13 install contracts, version/documentation consistency,

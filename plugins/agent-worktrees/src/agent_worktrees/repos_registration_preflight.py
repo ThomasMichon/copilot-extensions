@@ -135,6 +135,7 @@ def inspect_repository(name: str) -> dict:
             "insufficient-permission"
             if error.http_status == 403 or error.code == "insufficient-permission" else "unknown"
         )
+        result["landing"]["mode"] = "unknown"
         if (
             result["landing"]["observed_pr_requirement"] is True
             and error.stage == "ruleset-policy"
