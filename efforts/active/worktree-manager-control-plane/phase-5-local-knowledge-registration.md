@@ -365,3 +365,28 @@ optional validation success/refusal ordering, actual prepared-map preservation
 through both publication-lock drift cases, and all registration controls.
 The real Manager registration form additionally passes against this native
 owner. No deadline, cleanup or partial-write assertion is relaxed.
+
+## Pre-mutation withdrawal deadline recovery
+
+A later review identifies execution expiry during view withdrawal, before the
+source callback begins. An actual-deadline native regression reproduces the
+unchanged registry and unusable prepared view.
+
+Budgeted withdrawal now retains prior views by same-directory rename. A
+pre-mutation withdrawal failure restores them using the original cleanup
+reserve, without a new clock, Git probe or source reacquisition. Once the source
+callback begins, old views cannot be restored because source effects may be
+partial or unknown; normal cleanup discards their prior copies. Failed
+restoration remains explicit and retains prior copies for owner recovery, never
+automatic stale-state replay. Unbudgeted callers retain their existing flow.
+
+Focused controls pass the real native execution-expiry/restoration case,
+budgeted and unbudgeted partial-write failure behavior, and failed restoration
+with retained copies plus normal owner requalification. The two independent
+prepared views are not falsely reported healthy after an unrecovered failure.
+
+The complete shared packet passes 198 cases, with three Windows-unavailable
+FIFO controls skipped. The real Manager registration form additionally passes
+against this native owner. The new withdrawal path adds only per-view
+same-directory retention/cleanup metadata operations; restoration does not
+replay source mutation, reacquire Git facts or renew its original deadline.

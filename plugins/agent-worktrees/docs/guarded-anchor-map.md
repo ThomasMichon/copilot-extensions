@@ -77,6 +77,14 @@ that boundary leaves prepared view bytes untouched and never invokes the source
 mutation. Successful validation still precedes withdrawal, mutation and refresh;
 actual partial writes and publication failures keep their unavailable-state
 behavior. Callers without this optional callback retain their existing flow.
+Budgeted withdrawal retains each prior view by a unique same-directory rename.
+If withdrawal aborts before the source callback starts, the owner restores those
+views using only the original budget's remaining cleanup reserve. Once the source
+callback begins, old views are never restored: its effects may be partial or
+unknown. Prior copies are discarded during normal cleanup. Failed restoration
+or cleanup remains an explicit failure with retained copies for owner recovery;
+their presence never authorizes replaying old state. Normal refresh requalifies
+current facts. Unbudgeted callers keep their previous withdrawal behavior.
 Prepared-view inventory uses failure-visible directory enumeration, not a glob
 that can suppress listing errors. Failed enumeration prevents source mutation
 and cannot report a successful empty refresh.

@@ -130,6 +130,10 @@ policy or preference drift during that wait refuses rather than persisting the
 earlier selection; the same aggregate deadline covers both inspection passes.
 A validation refusal leaves the existing prepared views untouched. Successful
 validation still withdraws them before the registry mutation begins.
+If the execution deadline expires during withdrawal before mutation starts,
+the owner restores the prior views within its original cleanup reserve. It
+does not restart the clock or restore old views after an uncertain source write.
+Incomplete restoration is an explicit guard-owner failure, not persistence.
 
 Successful return means registration and its normal protection publication:
 a new non-agent `class: knowledge` entry, normal registry/publication lock

@@ -719,6 +719,46 @@ def test_local_knowledge_registration_contention_respects_aggregate_apply_deadli
     assert repos._repos_yaml_path().read_bytes() == before
 
 
+def test_local_knowledge_registration_restores_prepared_views_when_withdrawal_spends_deadline(native, monkeypatch):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration
+
+    root, caller, reader = prepared_knowledge_observer(native)
+    selected, registry = registration._selection(
+        "sample", "local-knowledge", str(root), "main", "",
+        OwnedExecutionBudget.from_timeout(18, cleanup_reserve=2),
+    )
+    token = registration._token(selected)
+    monkeypatch.setattr(registration, "_selection", lambda *args: (selected, registry))
+    budgets = []
+
+    def budget(*args, **kwargs):
+        value = OwnedExecutionBudget.from_timeout(1.4, cleanup_reserve=0.6)
+        budgets.append(value)
+        return value
+
+    monkeypatch.setattr(registration, "OwnedExecutionBudget", SimpleNamespace(from_timeout=budget))
+    registry_path = repos._repos_yaml_path()
+    directory = registry_path.parent / "guarded-anchors"
+    map_path = reader.map_path(caller, registry_path.parent)
+    before_registry, before_map = registry_path.read_bytes(), map_path.read_bytes()
+    before_files = set(directory.iterdir())
+    original = guarded_anchors._withdraw_views
+
+    def slow_withdrawal(*args, **kwargs):
+        original(*args, **kwargs)
+        assert reader.read_map(caller, registry_path.parent).status == "unusable"
+        time.sleep(max(0, budgets[-1].execution_deadline - time.monotonic()) + 0.02)
+
+    monkeypatch.setattr(guarded_anchors, "_withdraw_views", slow_withdrawal)
+    with pytest.raises(TimeoutError):
+        registration.apply("sample", "local-knowledge", str(root), "main", "", token)
+    assert time.monotonic() < budgets[-1].deadline
+    assert registry_path.read_bytes() == before_registry
+    assert reader.read_map(caller, registry_path.parent).status == "ready"
+    assert map_path.read_bytes() == before_map and set(directory.iterdir()) == before_files
+
+
 @pytest.mark.parametrize("change", ["origin", "defaults"])
 def test_local_knowledge_registration_rechecks_after_publication_lock_wait(native, monkeypatch, change):
     from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration, tracking

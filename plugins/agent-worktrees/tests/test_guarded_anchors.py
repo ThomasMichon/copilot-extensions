@@ -1423,19 +1423,60 @@ def test_managed_validation_precedes_withdrawal_and_preserves_views_on_refusal(p
     assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
 
 
-def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(producer, monkeypatch):
+@pytest.mark.parametrize("budgeted", [False, True])
+def test_managed_write_withdraws_before_mutation_and_retains_failed_scope(producer, monkeypatch, budgeted):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
     p = producer
     monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
     p.module.refresh(p.callers, registry_root=p.root)
+    directory = p.root / "guarded-anchors"
+    before_files = set(directory.iterdir())
+    arguments = {"budget": OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1)} if budgeted else {}
 
     def failed_write():
         assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
         raise ValueError("synthetic partially completed mutation")
 
     with pytest.raises(ValueError, match="partially completed"):
-        p.module.managed_write(failed_write)
+        p.module.managed_write(failed_write, **arguments)
     assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+    assert set(directory.iterdir()) == before_files
     assert p.module.refresh(registry_root=p.root)["published"] == 2
+
+
+def test_failed_prewrite_restoration_retains_previous_views_and_requires_owner_recovery(producer, monkeypatch):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    p = producer
+    monkeypatch.setattr(p.module.registry_paths, "registry_root", lambda *a: p.root)
+    p.module.refresh(p.callers, registry_root=p.root)
+    directory = p.root / "guarded-anchors"
+    before_files = set(directory.iterdir())
+    previous = {p.reader.map_path(caller, p.root).read_bytes() for caller in p.callers}
+    original = p.module._withdraw_views
+
+    def expired(*args, **kwargs):
+        original(*args, **kwargs)
+        raise TimeoutError("synthetic prewrite execution expiry")
+
+    def failed_restore(*args):
+        raise PermissionError("synthetic restoration failure")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(p.module, "_withdraw_views", expired)
+        fault.setattr(p.module, "_restore_withdrawn", failed_restore)
+        with pytest.raises(p.module.GuardPublicationError, match="restoration incomplete"):
+            p.module.managed_write(
+                lambda: pytest.fail("An aborted withdrawal must not start source mutation."),
+                budget=OwnedExecutionBudget.from_timeout(5, cleanup_reserve=1),
+            )
+    assert all(p.reader.read_map(caller, p.root).status == "unusable" for caller in p.callers)
+    retained = set(directory.iterdir()) - before_files
+    assert len(retained) == len(p.callers)
+    assert {path.read_bytes() for path in retained} == previous
+    assert p.module.refresh(registry_root=p.root)["published"] == 2
+    assert all(p.reader.read_map(caller, p.root).status == "ready" for caller in p.callers)
 
 
 def test_managed_write_reports_completed_source_before_publication_failure(producer, monkeypatch):

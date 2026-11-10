@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 import time
 import uuid
 
@@ -234,10 +235,12 @@ def _view_paths(directory: Path) -> list[Path]:
         ]
 
 
-def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
+def _withdraw_views(directory: Path, *, paths=None, reader=None, backups=None, budget=None) -> None:
     reader = reader if reader is not None else _reader()
     reader.validate_directory(directory)
     for path in _view_paths(directory) if paths is None else paths:
+        if budget is not None:
+            remaining_timeout(budget, float("inf"))
         try:
             data = _view_data(path, reader)
         except (FileNotFoundError, ValueError):
@@ -246,10 +249,47 @@ def _withdraw_views(directory: Path, *, paths=None, reader=None) -> None:
             key: data[key] for key in ("source_root", "registry_root", "source_project")
             if isinstance(data, dict) and isinstance(data.get(key), str)
         }
+        if backups is not None:
+            remaining_timeout(budget, float("inf"))
+            fd, name = tempfile.mkstemp(prefix=".withdrawn-", dir=directory)
+            os.close(fd)
+            backup = Path(name)
+            try:
+                remaining_timeout(budget, float("inf"))
+                os.replace(path, backup)
+            except BaseException:
+                backup.unlink(missing_ok=True)
+                raise
+            backups.append((path, backup))
         _atomic_write(path, json.dumps({
             **scope, "inventory_authority": "unavailable",
             "generation": uuid.uuid4().hex,
         }))
+
+
+def _restore_withdrawn(backups, budget) -> None:
+    for path, backup in reversed(backups):
+        budget.cleanup_timeout()
+        os.replace(backup, path)
+
+
+def _withdraw_before_write(directory: Path, budget):
+    if budget is None:
+        _withdraw_views(directory)
+        return []
+    backups = []
+    try:
+        _withdraw_views(directory, backups=backups, budget=budget)
+        remaining_timeout(budget, float("inf"))
+    except BaseException:
+        try:
+            _restore_withdrawn(backups, budget)
+        except OSError as error:
+            raise GuardPublicationError(
+                "source mutation did not start; guard-map restoration incomplete; previous views retained"
+            ) from error
+        raise
+    return backups
 
 
 def _refresh_locked(
@@ -400,22 +440,25 @@ def managed_write(write, *, caller: str | Path | None = None, budget=None, valid
         if budget is not None:
             remaining_timeout(budget, float("inf"))
         # Readers must stop using old policy before the source mutation commits.
-        _withdraw_views(directory)
-        if budget is not None:
-            remaining_timeout(budget, float("inf"))
-        result = write()
+        backups = _withdraw_before_write(directory, budget)
         try:
-            reader = _reader()
-            identity = reader.repository_identity(caller) if caller is not None else None
-            callers = [identity["root"]] if identity else []
-            _refresh_locked(root, callers, require_callers=False, **arguments)
-            if budget is not None:
-                remaining_timeout(budget, float("inf"))
-        except (OSError, ValueError, TypeError, RuntimeError) as exc:
-            raise GuardPublicationError(
-                f"managed source write completed; guard-map publication incomplete: {exc}"
-            ) from exc
-        return result
+            result = write()
+            try:
+                reader = _reader()
+                identity = reader.repository_identity(caller) if caller is not None else None
+                callers = [identity["root"]] if identity else []
+                _refresh_locked(root, callers, require_callers=False, **arguments)
+                if budget is not None:
+                    remaining_timeout(budget, float("inf"))
+            except (OSError, ValueError, TypeError, RuntimeError) as exc:
+                raise GuardPublicationError(
+                    f"managed source write completed; guard-map publication incomplete: {exc}"
+                ) from exc
+            return result
+        finally:
+            for _, backup in backups:
+                budget.cleanup_timeout()
+                backup.unlink(missing_ok=True)
 
 
 def prepare(caller: str | Path) -> str:
