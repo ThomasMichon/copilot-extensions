@@ -3147,6 +3147,27 @@ case's clock before this distinct consumer even starts; this case is not a
 300-second Worktrees construction-performance check. The existing 300-second
 admission case and 300+180 installed execution-owner case remain unchanged,
 as do the native startup and cleanup limits.
+The public application cases allocate a short, fixture-owned directory
+directly inside the runner's sandbox rather than nesting installed version
+slots beneath pytest's test-name directory. Their initial caller stays
+outside the source-only checkout while their mux namespace remains inside
+the runner's declared resource scope. Neither guard is relaxed. The real
+console entrypoint must still remain below MAX_PATH; no launcher alias or
+path assertion is substituted.
+
+Select `-k public_copilot` separately with those same prerequisites and bounds
+for the installed public TTY caller. Its real console entrypoint inherits an
+owned private ConPTY; the fixture asserts real stdin/stdout terminal status,
+not a patched `isatty`. The private namespace adapter forwards only the exact
+managed session's foreground `attach-session` to the actual pinned mux.
+Both fresh and cold-resume legs must attach one client, remain foreground
+until an exact-session detach, and leave the same broker/native processes
+running afterward. Another real TTY invocation then reuses that mux
+incarnation without another launch attempt or seed replay. Broker input while
+attached must update the original native history. Exact broker retirement,
+terminal receipts and fixture cleanup remain required.
+This is not new-window/no-mux, automatic sessionStart adoption, all-caller-Job
+survival or a measurement of the operator's installed runtime.
 
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone
