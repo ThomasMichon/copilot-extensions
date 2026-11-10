@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import json
+from types import SimpleNamespace
+
 import pytest
 
 from agent_bridge import __main__ as cli
-from agent_bridge import worktree_head
+from agent_bridge import caller_project as caller_context
 from agent_bridge.caller_project import CallerProjectContextError, owning_project
 from agent_bridge.worktree_head import HeadInfo
+
+_REAL_CALLER_HEAD = caller_context._caller_head
 
 
 @pytest.fixture(autouse=True)
@@ -14,7 +19,7 @@ def isolate_caller(monkeypatch):
     monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", None)
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
-    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: HeadInfo(
+    monkeypatch.setattr(caller_context, "_caller_head", lambda wid, **kwargs: HeadInfo(
         tracked=True, active=True, head_session="child",
     ))
 
@@ -29,7 +34,7 @@ def test_detached_child_uses_cwd_head_despite_stale_inherited_parent(monkeypatch
     def head(wid, *, project):
         calls.append((wid, project))
         return HeadInfo(tracked=True, active=True, head_session="child")
-    monkeypatch.setattr(worktree_head, "resolve_head", head)
+    monkeypatch.setattr(caller_context, "_caller_head", head)
     assert cli._sender_repo() == "harness"
     assert calls == [("worktree", "harness")]
 
@@ -58,7 +63,7 @@ def test_explicit_project_override_wins(monkeypatch):
 def test_stale_or_unknown_head_refuses_dispatch(monkeypatch, capsys, head):
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "child")
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/worktree#child")
-    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: head)
+    monkeypatch.setattr(caller_context, "_caller_head", lambda wid, **kwargs: head)
     with pytest.raises(CallerProjectContextError):
         owning_project()
     with pytest.raises(SystemExit) as error:
@@ -101,10 +106,50 @@ def test_plain_terminal_can_resolve_a_worktree_without_native_session(monkeypatc
 def test_singleton_owner_has_no_worktree_head(monkeypatch):
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "child")
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/@anchor#child")
-    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: pytest.fail("not a worktree"))
+    monkeypatch.setattr(caller_context, "_caller_head", lambda wid, **kwargs: pytest.fail("not a worktree"))
     assert owning_project() == "harness"
 
 
 def test_unmanaged_cli_uses_existing_cwd_resolution(monkeypatch):
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: "standalone" if key == "project" else None)
     assert cli._sender_repo() == "standalone"
+
+
+def test_caller_head_scopes_duplicate_worktree_ids_to_project(monkeypatch):
+    from agent_bridge import agent_registry, provider_process
+
+    monkeypatch.setattr(agent_registry, "_agent_worktrees_bin", lambda: "worktrees")
+    heads = {"first": "other-session", "harness": "caller-session"}
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        project = argv[argv.index("--project") + 1] if "--project" in argv else "first"
+        assert kwargs["timeout"] == 8
+        return SimpleNamespace(returncode=0, stdout=json.dumps({
+            "tracked": True, "active": True, "head_session": heads[project],
+        }))
+    monkeypatch.setattr(provider_process, "run_captured", run)
+    for project, session in heads.items():
+        head = _REAL_CALLER_HEAD("shared-id", project=project)
+        assert head.tracked and head.active and head.head_session == session
+    assert calls == [
+        ["worktrees", "--project", project, "head-session",
+         "--worktree-id", "shared-id", "--json"]
+        for project in heads
+    ]
+
+
+@pytest.mark.parametrize("response", [
+    SimpleNamespace(returncode=1, stdout='{"tracked":true,"active":true,"head_session":"child"}'),
+    SimpleNamespace(returncode=0, stdout="not-json"),
+])
+def test_caller_head_query_failure_cannot_authorize_dispatch(monkeypatch, response):
+    from agent_bridge import agent_registry, provider_process
+
+    monkeypatch.setattr(agent_registry, "_agent_worktrees_bin", lambda: "worktrees")
+    monkeypatch.setattr(provider_process, "run_captured", lambda *args, **kwargs: response)
+    monkeypatch.setattr(caller_context, "_caller_head", _REAL_CALLER_HEAD)
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "child")
+    monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/worktree")
+    with pytest.raises(CallerProjectContextError):
+        owning_project()

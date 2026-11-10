@@ -16,9 +16,7 @@ worktree.
 
 from __future__ import annotations
 
-import json
 from contextlib import nullcontext
-from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI, HTTPException
@@ -31,27 +29,6 @@ from agent_bridge.worktree_head import HeadInfo, parse_head_payload
 
 
 # --- pure parser: the ground-layer envelope -> HeadInfo mapping --------------
-
-def test_head_lookup_scopes_duplicate_worktree_ids_to_project(monkeypatch):
-    monkeypatch.setattr(worktree_head, "_agent_worktrees_bin", lambda: "worktrees")
-    heads = {"first": "other-session", "harness": "caller-session"}
-    calls = []
-    def run(argv, **kwargs):
-        calls.append(argv)
-        project = argv[argv.index("--project") + 1] if "--project" in argv else "first"
-        return SimpleNamespace(returncode=0, stdout=json.dumps({
-            "tracked": True, "active": True, "head_session": heads[project],
-        }))
-    monkeypatch.setattr(worktree_head.subprocess, "run", run)
-    for project, session in heads.items():
-        head = worktree_head.resolve_head("shared-id", project=project)
-        assert head.tracked and head.active and head.head_session == session
-    assert calls == [
-        ["worktrees", "--project", project, "head-session",
-         "--worktree-id", "shared-id", "--json"]
-        for project in heads
-    ]
-
 
 def test_parse_active_head():
     hi = parse_head_payload(

@@ -2491,7 +2491,7 @@ class TestSenderRepoFallback:
     @pytest.mark.parametrize("qualifier", ["", "#session"])
     async def test_cwd_owning_harness_survives_knowledge_default(self, monkeypatch, qualifier):
         from agent_bridge import __main__ as cli
-        from agent_bridge import worktree_head
+        from agent_bridge import caller_project, worktree_head
 
         self.agents["dev6"].project = "knowledge-fixture"
         monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", None)
@@ -2499,7 +2499,7 @@ class TestSenderRepoFallback:
         monkeypatch.setattr(cli, "_worktrees_get", lambda key: (
             "host/harness-fixture/wt" + qualifier if key == "owner-ref" else None
         ))
-        monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: worktree_head.HeadInfo(
+        monkeypatch.setattr(caller_project, "_caller_head", lambda wid, **kwargs: worktree_head.HeadInfo(
             tracked=True, active=True, head_session="session",
         ))
         sender_repo = cli._sender_repo()
