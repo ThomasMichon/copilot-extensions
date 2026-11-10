@@ -181,7 +181,7 @@ def test_native_parser_capability_discovery_is_passive_and_strict(capsys, monkey
 def test_actual_native_entry_and_executing_typed_credential_command(
     tmp_path, monkeypatch, capsys, kind,
 ):
-    from agent_worktrees import __main__ as main, config, pr_config, pr_read_context
+    from agent_worktrees import __main__ as main, config, pr_read_context
 
     endpoint = "https://api.github.com" if kind == "github" else "https://forge.example"
     selected = "https://github.com" if kind == "github" else endpoint
@@ -196,12 +196,12 @@ def test_actual_native_entry_and_executing_typed_credential_command(
     helper = tmp_path / "read_credential.py"
     helper.write_text("import json\nprint(json.dumps(" + repr(material) + "))\n")
     repo = config.RepoConfig(
-        anchor="", worktree_root="", pr=config.PRConfig(provider=kind, api_base=selected),
+        anchor="", worktree_root="",
+        pr=config.PRConfig(provider=kind, api_base=selected, repository="owner/repo"),
     )
-    monkeypatch.setattr(pr_read_context, "load_read_config", lambda _path: object())
     monkeypatch.setattr(
-        pr_read_context, "resolve_read_repo_config",
-        lambda *_args, **_kw: pr_config.ForeignRepoResolution(repo, "target"),
+        pr_read_context, "load_read_config",
+        lambda _path: SimpleNamespace(repos={"target": repo}, checkout_free_pr={}),
     )
     monkeypatch.setattr(
         main, "_resolve_active_project", lambda *_args: pytest.fail("native read needs no project"),
@@ -229,3 +229,42 @@ def test_actual_native_entry_and_executing_typed_credential_command(
         scheme = "Bear" + "er "
         assert reads[0][1]["input_text"] == "Authorization: " + scheme + material["token"] + "\n"
         assert material["token"] not in " ".join(reads[0][0])
+
+
+def test_inventory_real_resolver_refuses_registry_only_target(tmp_path, monkeypatch):
+    from agent_worktrees import pr_config, pr_read_context, pr_related_binding
+    monkeypatch.setattr(
+        pr_read_context, "load_read_config",
+        lambda _path: SimpleNamespace(repos={}, checkout_free_pr={}),
+    )
+    monkeypatch.setattr(
+        pr_config, "resolve_repo_config_for_slug",
+        lambda *_args: pytest.fail("selected config fell back to registry"),
+    )
+    monkeypatch.setattr(
+        pr_related_binding, "control_plane_pr_map",
+        lambda: pytest.fail("selected config fell back to control plane"),
+    )
+    assert pr_inventory_cli.dispatch([
+        "owner/repo", "--config", str(tmp_path / "native.yaml"),
+        "--credential-command", json.dumps([sys.executable]), "--json",
+    ]) == 2
+
+
+@pytest.mark.parametrize("operation", ["inventory", "snapshot"])
+def test_typed_gitea_plaintext_refuses_before_credential_acquisition(monkeypatch, operation):
+    calls = []
+    credential = source("gitea", "http://forge.example", calls)
+    monkeypatch.setattr(gitea, "run_cli", lambda *_a, **_kw: pytest.fail("plaintext transport"))
+    if operation == "inventory":
+        result = observation_inventory.inventory(
+            gitea.GiteaProvider(), "owner/repo", api_base="http://forge.example",
+            credential_source=credential,
+        )
+        assert result["outcome"] == "unavailable"
+    else:
+        with pytest.raises(ObservationCredentialError):
+            gitea.GiteaProvider().get_snapshot(
+                "owner/repo", 7, api_base="http://forge.example", credential_source=credential,
+            )
+    assert calls == []

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import time
+from urllib.parse import urlsplit
 
 from .base import ProviderError
 from .observation_credentials import ObservationCredentialError
@@ -11,6 +12,14 @@ from .observation_credentials import ObservationCredentialError
 def read(method, url, credentials, *, invoke, payload=None, deadline=None):
     if method != "GET" or payload is not None:
         raise ProviderError("observation credentials permit only native reads")
+    address = urlsplit(url)
+    if (
+        address.scheme != "https" or not address.hostname
+        or address.username is not None or address.password is not None
+        or address.fragment or any(ord(char) < 32 for char in url)
+    ):
+        raise ObservationCredentialError("typed Gitea observation requires an HTTPS endpoint")
+    address.port
     authorization = credentials.authorization()
     remaining = 60 if deadline is None else deadline - time.monotonic()
     if remaining <= 0:
