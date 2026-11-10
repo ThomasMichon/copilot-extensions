@@ -5,9 +5,11 @@ from __future__ import annotations
 from collections import Counter
 from contextlib import ExitStack, contextmanager
 import http.server
+import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
 import shutil
 import subprocess
 import sys
@@ -27,6 +29,7 @@ PROMPTS = (
     "LIFECYCLE_DETACHED_73",
     "LIFECYCLE_RESUMED_74",
 )
+LAUNCH_COMPANIONS = ("agent-conduct-guidance", "agent-roles")
 
 
 @contextmanager
@@ -112,6 +115,7 @@ def _capture_failure(root, record_property):
                 "lifecycle-launch.jsonl",
                 "lifecycle-processes.jsonl",
                 "lifecycle-conversation.json",
+                "lifecycle-payload-closure.json",
                 "lifecycle-pane-*.stdout.txt",
                 "lifecycle-pane-*.stderr.txt",
             ):
@@ -322,7 +326,10 @@ def _events(path, owner):
 
 
 class _Witness:
-    def __init__(self, root, env, manager_python, engine, copilot, budget, provider_requests=()):
+    def __init__(
+        self, root, env, manager_python, engine, copilot, budget, provider_requests=(),
+        *, mux_binary=None,
+    ):
         self.root, self.env = root, env
         self.manager_python = manager_python
         self.engine, self.copilot = engine, copilot
@@ -332,6 +339,7 @@ class _Witness:
         self.history = None
         self.turn_observation = None
         self.provider_requests = provider_requests
+        self.mux_binary = mux_binary
         self.stack = ExitStack()
 
     def wait(self, check, label, timeout=30):
@@ -519,10 +527,19 @@ class _Witness:
         return self.wait(finished, f"Native conversation did not finish {prompt}", timeout=60)
 
     def _reply_in_pane(self, number):
+        from plugin_test_command_safety import validate_private_mux_args
+        from plugin_test_containment import SANDBOX_ENV
+
         record = self.records(f"records-rendering-{number}")
+        namespace = validate_private_mux_args(
+            ["-L", self.env["COPILOT_DRIVER_PSMUX_NAMESPACE"]],
+            sandbox=Path(os.environ[SANDBOX_ENV]),
+        )
+        if self.mux_binary is None:
+            raise RuntimeError("Rendered-pane evidence requires the selected native mux binary")
         rendered = installed._run(
             [
-                self.root / "mux" / "psmux.exe", "capture-pane", "-p",
+                self.mux_binary, *namespace, "capture-pane", "-p",
                 "-t", "wt-" + record["id"], "-S", "-60",
             ],
             self.env,
@@ -848,6 +865,113 @@ def _project(root, env, engine, copilot):
         )
 
 
+def _stage_launch_companions(root, identity, deadline):
+    import prepare_runtime_source as preparation
+    import versioned_runtime_source as provenance
+
+    payloads = root / "payloads"
+    prepared = json.loads((root / "prepared.json").read_text(encoding="utf-8"))
+    if prepared["identity"] != identity:
+        raise RuntimeError("Payload staging lost the admitted candidate")
+    retained = {name: Path(path) for name, path in prepared["payloads"].items()}
+    if set(retained) != {"worktree-manager", "agent-worktrees"} or any(
+        not path.resolve().is_relative_to(payloads.resolve()) for path in retained.values()
+    ):
+        raise RuntimeError("Payload staging requires the private selected runtime payloads")
+    before = {name: provenance.assembly_hash(path) for name, path in retained.items()}
+    receipts = {name: (path / provenance.SOURCE_FILE).read_bytes() for name, path in retained.items()}
+    archive = root / "catalog-candidate.tar"
+    snapshot = root / "catalog-candidate"
+    snapshot.mkdir()
+    preparation._archive(
+        installed.REPO, identity["candidate_commit"], archive, deadline=deadline,
+    )
+    pointers = []
+    preparation._extract_archive(
+        archive, snapshot, deadline=deadline, file_pointer_candidates=pointers,
+    )
+    archive.unlink()
+    catalog_path = Path(".github") / "plugin" / "marketplace.json"
+    catalog_bytes = (snapshot / catalog_path).read_bytes()
+    if catalog_bytes != (payloads / catalog_path).read_bytes():
+        raise RuntimeError("Payload staging found another candidate marketplace")
+    catalog = json.loads(catalog_bytes)
+    entries = catalog.get("plugins")
+    if not isinstance(entries, list) or not entries:
+        raise RuntimeError("Payload staging requires a complete candidate catalogue")
+    sources = {}
+    for entry in entries:
+        name, version, relative = (entry.get(key) for key in ("name", "version", "source"))
+        if (
+            not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]*", name)
+            or name in sources or not isinstance(version, str) or not version
+            or not isinstance(relative, str)
+            or PurePosixPath(relative).parts != ("plugins", name)
+        ):
+            raise RuntimeError("Payload staging found an invalid candidate catalogue entry")
+        source = snapshot / "plugins" / name
+        manifest = json.loads((source / "plugin.json").read_text(encoding="utf-8"))
+        if manifest.get("name") != name or manifest.get("version") != version:
+            raise RuntimeError(f"Payload staging found a mismatched candidate manifest: {name}")
+        sources[name] = (source, version)
+    staging = root / "launch-payloads"
+    for name in LAUNCH_COMPANIONS:
+        if name not in sources:
+            raise RuntimeError(f"Candidate catalogue lacks a native launch companion: {name}")
+        source, _version = sources[name]
+        manifest = json.loads((source / "plugin.json").read_text(encoding="utf-8"))
+        if manifest.get("runtimeScope", "none") != "none":
+            raise RuntimeError(f"Launch companion requires a separately installed runtime: {name}")
+        shutil.copytree(source, staging / "plugins" / name)
+    selected_pointers = [
+        staging / path.relative_to(snapshot)
+        for path in pointers
+        if path.relative_to(snapshot).parts[:2] in {
+            ("plugins", name) for name in LAUNCH_COMPANIONS
+        }
+    ]
+    log = preparation.materializer.materialize(
+        staging, canonical_root=snapshot, file_pointer_candidates=selected_pointers,
+    )
+    refusals = [entry for entry in log if entry.startswith("SKIP ")]
+    if refusals:
+        raise RuntimeError("Companion payload materialization refused:\n" + "\n".join(refusals))
+    preparation._remaining(deadline)
+    inventory = {}
+    for name, (source, version) in sources.items():
+        if name not in retained and name not in LAUNCH_COMPANIONS:
+            continue
+        destination = payloads / "plugins" / name
+        if name in retained:
+            if destination.resolve() != retained[name].resolve():
+                raise RuntimeError("The catalogue and selected runtime payload disagree")
+        else:
+            shutil.copytree(staging / "plugins" / name, destination)
+            receipt = provenance.read_source_identity(destination, version, plugin=name)
+            if receipt is not None and receipt.source_commit != identity["source_commit"]:
+                raise RuntimeError(f"Payload staging found another release source: {name}")
+        manifest = json.loads((destination / "plugin.json").read_text(encoding="utf-8"))
+        if manifest.get("name") != name or manifest.get("version") != version:
+            raise RuntimeError(f"Materialized candidate manifest changed: {name}")
+        inventory[name] = {"version": version, "assembly_hash": provenance.assembly_hash(destination)}
+    if before != {name: provenance.assembly_hash(path) for name, path in retained.items()} or any(
+        (path / provenance.SOURCE_FILE).read_bytes() != receipts[name] for name, path in retained.items()
+    ):
+        raise RuntimeError("Companion staging changed a selected runtime payload or its receipt")
+    preparation._remaining(deadline)
+    (root / "diagnostics" / "lifecycle-payload-closure.json").write_text(
+        json.dumps({
+            "candidate_commit": identity["candidate_commit"],
+            "catalog_sha256": hashlib.sha256(catalog_bytes).hexdigest(),
+            "payloads": inventory,
+            "payload_scope": "installed-core-and-observed-launch-companions",
+            "selected_runtime_payloads_unchanged": True,
+            "runtime_installation": "manager-and-worktrees-only",
+        }),
+        encoding="utf-8",
+    )
+
+
 def test_lifecycle_diagnostics_retain_the_constructor_refusal(tmp_path):
     diagnostics = tmp_path / "diagnostics"
     diagnostics.mkdir()
@@ -862,6 +986,115 @@ def test_lifecycle_diagnostics_retain_the_constructor_refusal(tmp_path):
     assert len(records) == 1
     evidence = json.loads(records[0][1])
     assert "controlled constructor refusal" in evidence["install-engine.stderr.txt"]["text"]
+
+
+@pytest.mark.timeout(180)
+def test_lifecycle_launch_companions_use_the_real_candidate_archive():
+    from plugin_test_containment import SANDBOX_ENV, TestSandbox
+
+    identity = _identity()
+    with TestSandbox(prefix="pc-", dir=Path(os.environ[SANDBOX_ENV])) as raw:
+        root = Path(raw)
+        installed.prepare(root, identity)
+        _stage_launch_companions(root, identity, time.monotonic() + 150)
+        report = json.loads(
+            (root / "diagnostics" / "lifecycle-payload-closure.json").read_text(encoding="utf-8"),
+        )
+        assert {"agent-worktrees", "agent-conduct-guidance", "agent-roles"} <= set(report["payloads"])
+        assert report["selected_runtime_payloads_unchanged"] is True
+
+
+@pytest.mark.parametrize(
+    "refusal", [None, "catalogue", "manifest", "source-path", "runtime-companion", "missing-companion"],
+)
+def test_lifecycle_stages_exact_launch_companions_without_replacing_selected_runtimes(
+    tmp_path, monkeypatch, refusal,
+):
+    import prepare_runtime_source as preparation
+
+    identity = {"candidate_commit": "a" * 40, "source_commit": "b" * 40}
+    frozen = tmp_path / "frozen"
+    root = tmp_path / "fixture"
+    (root / "diagnostics").mkdir(parents=True)
+    entries = [
+        {"name": name, "version": "1.0.0", "source": "plugins/" + name}
+        for name in ("agent-worktrees", *LAUNCH_COMPANIONS)
+    ]
+    if refusal == "source-path":
+        entries[-1]["source"] = "../companion"
+    if refusal == "missing-companion":
+        entries.pop()
+    catalog = Path(".github") / "plugin" / "marketplace.json"
+    for base in (frozen, root / "payloads"):
+        (base / catalog).parent.mkdir(parents=True)
+        (base / catalog).write_text(json.dumps({"plugins": entries}), encoding="utf-8")
+    for entry in entries:
+        source = frozen / "plugins" / entry["name"]
+        source.mkdir(parents=True)
+        (source / "plugin.json").write_text(json.dumps({
+            "name": entry["name"],
+            "version": "2.0.0" if refusal == "manifest" else "1.0.0",
+            "runtimeScope": (
+                "universal" if refusal == "runtime-companion" and entry["name"] in LAUNCH_COMPANIONS
+                else "none"
+            ),
+        }), encoding="utf-8")
+    (frozen / "plugins" / LAUNCH_COMPANIONS[0] / "README.md").write_text(
+        "Exact candidate companion payload\n", encoding="utf-8",
+    )
+    retained = {}
+    for name in ("worktree-manager", "agent-worktrees"):
+        path = root / "payloads" / ("plugins/agent-worktrees" if name == "agent-worktrees" else name)
+        path.mkdir(parents=True)
+        (path / "plugin.json").write_text(
+            json.dumps({"name": name, "version": "1.0.0"}), encoding="utf-8",
+        )
+        (path / "runtime-source.json").write_bytes(b"selected installed owner receipt\n")
+        retained[name] = str(path)
+    before = {
+        str(path.relative_to(root)): path.read_bytes()
+        for value in retained.values() for path in Path(value).rglob("*") if path.is_file()
+    }
+    (root / "prepared.json").write_text(
+        json.dumps({"identity": identity, "payloads": retained}), encoding="utf-8",
+    )
+    if refusal == "catalogue":
+        (root / "payloads" / catalog).write_text('{"plugins":[]}', encoding="utf-8")
+
+    def archive(_source, commit, path, *, deadline):
+        assert commit == identity["candidate_commit"] and deadline is None
+        path.write_bytes(b"owned archive")
+
+    def extract(_archive, destination, *, deadline, file_pointer_candidates):
+        assert deadline is None
+        assert file_pointer_candidates == []
+        shutil.copytree(frozen, destination, dirs_exist_ok=True)
+
+    monkeypatch.setattr(preparation, "_archive", archive)
+    monkeypatch.setattr(preparation, "_extract_archive", extract)
+    if refusal is not None:
+        with pytest.raises(
+            RuntimeError,
+            match="candidate marketplace|candidate manifest|catalogue entry|installed runtime|launch companion",
+        ):
+            _stage_launch_companions(root, identity, None)
+    else:
+        _stage_launch_companions(root, identity, None)
+        companion = root / "payloads" / "plugins" / LAUNCH_COMPANIONS[0]
+        assert (companion / "README.md").read_bytes() == (
+            frozen / "plugins" / LAUNCH_COMPANIONS[0] / "README.md"
+        ).read_bytes()
+        report = json.loads(
+            (root / "diagnostics" / "lifecycle-payload-closure.json").read_text(encoding="utf-8"),
+        )
+        assert set(report["payloads"]) == {"agent-worktrees", *LAUNCH_COMPANIONS}
+        assert report["payload_scope"] == "installed-core-and-observed-launch-companions"
+        assert report["selected_runtime_payloads_unchanged"] is True
+        assert report["runtime_installation"] == "manager-and-worktrees-only"
+    assert before == {
+        str(path.relative_to(root)): path.read_bytes()
+        for value in retained.values() for path in Path(value).rglob("*") if path.is_file()
+    }
 
 
 @pytest.mark.parametrize("phase", ["missing-history", "unfinished", "rendering-only"])
@@ -915,7 +1148,9 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
 @pytest.mark.parametrize("reply", ["LIFECYCLE_REPLY_1", "unfinished"])
 def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeypatch, reply):
     from types import SimpleNamespace
+    from plugin_test_command_safety import private_mux_args
 
+    namespace = private_mux_args(tmp_path)
     home = tmp_path / "copilot-home"
     history = home / "session-state" / "fixture-session" / "events.jsonl"
     history.parent.mkdir(parents=True)
@@ -924,7 +1159,10 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeyp
         {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
         {"type": "assistant.turn_end", "data": {}},
     )), encoding="utf-8")
-    witness = _Witness(tmp_path, {"COPILOT_HOME": str(home)}, None, None, None, None)
+    binary = tmp_path / "native" / "psmux.exe"
+    witness = _Witness(tmp_path, {
+        "COPILOT_HOME": str(home), "COPILOT_DRIVER_PSMUX_NAMESPACE": namespace[1],
+    }, None, None, None, None, mux_binary=binary)
     witness.wait = lambda check, *_args, **_kwargs: check()
     witness.one_native = lambda: ("native-pid", "native-birth")
     calls = []
@@ -934,8 +1172,14 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeyp
         return {"id": "fixture-worktree"}
 
     def capture(command, env, cwd, diagnostics, label, timeout):
+        from plugin_test_command_safety import command_problem
+        from plugin_test_containment import SANDBOX_ENV
+
         calls.append(command)
         assert env is witness.env and cwd == tmp_path and timeout == 5
+        assert command_problem(
+            list(map(str, command)), cwd=cwd, environment=env, sandbox=Path(os.environ[SANDBOX_ENV]),
+        ) is None
         return reply
 
     witness.records = records
@@ -943,7 +1187,7 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeyp
     result = witness.turn(PROMPTS[0], 1, SimpleNamespace(output=b"cursor redraw"))
     assert result == (("native-pid", "native-birth") if reply == "LIFECYCLE_REPLY_1" else None)
     assert calls == [[
-        tmp_path / "mux" / "psmux.exe", "capture-pane", "-p",
+        binary, *namespace, "capture-pane", "-p",
         "-t", "wt-fixture-worktree", "-S", "-60",
     ]]
 
@@ -1127,6 +1371,7 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
             env = _case_environment(root)
             _private_psmux(root / "mux", psmux, namespace, env)
             installed.prepare(root, identity)
+            _stage_launch_companions(root, identity, budget.execution_deadline)
             for component in ("manager", "engine"):
                 installed.construct(root, identity, component)
             prepared = json.loads((root / "prepared.json").read_text(encoding="utf-8"))
@@ -1180,7 +1425,9 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                 env.update(lifecycle)
                 env["AGENT_WORKTREES_STATUS_MONITOR"] = "1"
                 env["COPILOT_PROVIDER_BASE_URL"] = f"http://127.0.0.1:{port}"
-                with _Witness(root, env, manager, engine, copilot, budget, requests) as witness:
+                with _Witness(
+                    root, env, manager, engine, copilot, budget, requests, mux_binary=psmux,
+                ) as witness:
                     first = witness.manager()
                     first.send(b"\r")
                     witness.wait(

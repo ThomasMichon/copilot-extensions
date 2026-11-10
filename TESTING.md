@@ -726,9 +726,17 @@ volume, the runner supports a private, source-external `AGENT_SCRATCH_ROOT`.
 Record the actual placement and timing; changing volumes is not permission to
 increase deadlines or reuse an installed fixture.
 
-The candidate source snapshot retains sibling plugin inputs needed by canonical
-invocation materialization, but this core case constructs only Manager and
-Worktrees. It cannot satisfy complete selected-suite, actual Machines readiness,
+The lifecycle witness separately archives the exact candidate and uses the
+canonical marketplace materializer for the observed native launch companions,
+`agent-conduct-guidance` and `agent-roles`, preserving the selected
+Manager/Worktrees bytes and source receipts.
+It validates catalogue paths, manifest identities and versions and retains a
+bounded, explicitly core-and-companions inventory without changing activation.
+This is not a complete catalogue payload closure. Rendered-pane
+reads use the selected real PSMux binary and verified private namespace
+explicitly, not an implicitly routed adapter command.
+This core case still constructs only Manager and Worktrees.
+It cannot satisfy complete selected-suite, actual Machines readiness,
 ordinary baseline-to-candidate update or required promotion-result acceptance.
 Those remain separate obligations in the
 [installed lifecycle contract](efforts/active/main-owned-workflow-control/installed-manager-lifecycle.md).

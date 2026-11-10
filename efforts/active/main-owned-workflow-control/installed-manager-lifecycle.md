@@ -282,3 +282,38 @@ negative. The owned witness now retains bounded event-type counts and the
 private provider's request count without request content. All 14 source
 controls passed; native qualification and the missing enabled-payload closure
 remain open. No assertion, deadline, plugin policy or installed receipt changed.
+
+### 2026-11-10 - Inference completed; pane read lacked explicit private scope
+
+Run 42780390102 at `cb6a005bf0aadec6050b9c887de046cdc167b952`
+recorded one actual provider request and one history with eleven events,
+including the exact reply and assistant turn end. The pane fallback reached
+the command-safety boundary and correctly refused an adapter command without
+an explicit private socket/namespace. A subsequent diagnostic-file sharing
+error during cleanup did not turn that refusal into qualification.
+
+The owned witness now passes the selected real PSMux binary and its verified
+private namespace directly. The guard remains enabled. Separately, lifecycle
+preparation stages the exact candidate's two observed native launch companions
+through the canonical marketplace materializer, outside the two already
+selected runtime payloads. Catalogue/manifests and existing runtime bytes and
+receipts are checked; activation and runtime installation scope are unchanged.
+These are fixture repairs, not evidence that missing payloads caused inference
+to stall. Native positive qualification, actual suite installation and required
+frozen-candidate enforcement remain open.
+
+Two local complete-catalogue materialization probes exceeded their fixed
+180-second control deadline, first during pointer scanning and then during
+unrelated runtime materialization. Passing the extractor's pointer candidates
+removed the redundant pointer scan, but did not make whole-suite preparation
+appropriate for this core witness. The implementation therefore stages only
+the two observed payload-only launch companions and reports that limited scope.
+It does not raise deadlines or credit either timed-out probe as qualification.
+
+The narrowed source selection passed all 21 controls in 114.95 seconds,
+including an actual Git candidate archive and canonical companion
+materialization under the unchanged control deadline. The controls verify
+byte-preserved runtime payloads/receipts, catalogue and manifest mismatches,
+unsafe paths, absent companions and unexpected runtime companions, plus
+command-safety admission of the explicit private-pane read. This is lightweight
+source-consumer evidence, not the installed native lifecycle result.
