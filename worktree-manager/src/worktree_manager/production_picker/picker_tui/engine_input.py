@@ -354,6 +354,13 @@ class PickerScreenInputMixin:
                 )
                 return
         if key in ("escape", "q") or (p["done"] and key in ("enter", "space")):
+            if (p.get("op") == "sync" and self.executor is not None
+                    and self.executor.cleanup_pending()):
+                self.debug = "Sync cleanup is unconfirmed; exact process custody is retained."
+                return
+            if p.get("op") == "sync" and not p["done"] and self.executor is not None:
+                self.debug = "Sync is still running; this view does not cancel or roll back Git."
+                return
             verb = p["verb"].lower()
             n = len(p["items"])
             failed = sum(1 for it in p["items"] if it["state"] == "failed")
