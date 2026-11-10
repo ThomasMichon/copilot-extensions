@@ -1,20 +1,223 @@
 """Opt-in actual default-service command adoption on disposable hosted runners."""
 
-import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
+import sys
 
 import pytest
 from agent_procutil import no_window_kwargs
 from update_driver import foundation_status, status
 
 from test_first_use_vault import (
-    cold_environment, materialized_vault as materialized_vault,
-    native_genesis, stamp_vault, vault_command,
+    cold_environment, default_service_environment, materialized_vault as materialized_vault,
+    native_genesis, selected_service_probe, stamp_vault, vault_command,
 )
+
+
+def uninstall_child_diagnostic(result, *, shell, env, project, installation=None, payload=None):
+    match = re.search(
+        r"Vault still owns a live child \(pid=([1-9][0-9]*)\); refusing uninstall",
+        result.stdout + result.stderr,
+    )
+    if os.name != "nt" or result.returncode == 0:
+        return ""
+    process_id = int(match[1]) if match is not None else None
+    if process_id is None and installation is not None and (
+        "Vault PID receipt names a foreign process; refusing uninstall" in result.stdout + result.stderr
+    ):
+        try:
+            with (installation / "run" / "agent-vault-service.pid").open("rb") as stream:
+                receipt = stream.read(65).strip()
+            if re.fullmatch(rb"[1-9][0-9]{0,9}", receipt):
+                process_id = int(receipt)
+        except OSError:
+            return ""
+    if process_id is None:
+        return ""
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        "function Describe($row) { if ($null -eq $row) { return $null }; "
+        "$row | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,"
+        "@{Name='CreationDateUtc';Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} }; "
+        f"$child=Get-CimInstance Win32_Process -Filter 'ProcessId={process_id}'; "
+        "$parent=$null; if ($child -and $child.ParentProcessId -gt 0) { "
+        "$parent=Get-CimInstance Win32_Process -Filter "
+        "('ProcessId='+[string]$child.ParentProcessId) }; "
+        "$native=$null; if ($child) { try { $p=Get-Process -Id $child.ProcessId; "
+        "$native=@{image=$p.Path;birth=$p.StartTime.ToUniversalTime().ToFileTimeUtc();"
+        "captured=$child.CreationDate.ToUniversalTime().ToFileTimeUtc()}; "
+        "$owner=Invoke-CimMethod -InputObject $child -MethodName GetOwnerSid; "
+        "$native.sameUser=($owner.ReturnValue -eq 0 -and $owner.Sid -eq "
+        "[Security.Principal.WindowsIdentity]::GetCurrent().User.Value); "
+        "$p.Dispose() } catch { $native=@{unavailable=$_.Exception.GetType().Name} } }; "
+        "[ordered]@{observedAtUtc=[DateTime]::UtcNow.ToString('o');"
+        "child=(Describe $child);parent=(Describe $parent);native=$native} | ConvertTo-Json -Depth 3 -Compress"
+    )
+    try:
+        observed = subprocess.run(
+            [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
+            env=env, cwd=project, stdin=subprocess.DEVNULL, capture_output=True,
+            text=True, timeout=15, check=False, **no_window_kwargs(),
+        )
+        detail = f"probe exit={observed.returncode}\n{observed.stdout}{observed.stderr}"
+        if observed.returncode == 0 and payload is not None and installation is not None:
+            snapshot = json.loads(observed.stdout)
+            child = snapshot.get("child")
+            if isinstance(child, dict):
+                trace = """
+import json, runpy, sys
+module = runpy.run_path(sys.argv[1])
+state = {}
+def observe(frame, event, argument):
+    if frame.f_code.co_name == "admits":
+        if event == "return":
+            state["return_line"] = frame.f_lineno
+        elif event == "exception":
+            state["exception"] = argument[0].__name__
+    return observe
+sys.settrace(observe)
+state["admitted"] = module["admits"](json.load(sys.stdin))
+sys.settrace(None)
+print(json.dumps(state))
+"""
+                admitted = subprocess.run(
+                    [
+                        sys._base_executable, "-I", "-S", "-B", "-X", "utf8", "-c", trace,
+                        str(payload / "scripts/vault-uninstall-process.py"),
+                    ],
+                    input=json.dumps({
+                        "root": str(installation), "image": child["ExecutablePath"],
+                        "command": child["CommandLine"],
+                    }),
+                    env=env, cwd=project, capture_output=True, text=True, timeout=15,
+                    check=False, **no_window_kwargs(),
+                )
+                detail += f"\nsource admission exit={admitted.returncode}\n{admitted.stdout}{admitted.stderr}"
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        detail = f"probe unavailable: {type(error).__name__}: {error}"
+    private_root = str(project.parent)
+    for root in dict.fromkeys((json.dumps(private_root)[1:-1], private_root)):
+        detail = detail.replace(root, "<fixture-root>")
+    if len(detail) > 16000:
+        detail = detail[:16000] + "\n[diagnostic truncated at 16000 characters]"
+    return "\nUninstall child attribution (post-refusal snapshot, not ownership proof):\n" + detail
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows CIM failure diagnostics")
+@pytest.mark.parametrize(("code", "error"), [
+    (0, "Vault still owns a live child (pid=4216); refusing uninstall"),
+    (1, "Runtime uninstall requires an existing external Python"),
+])
+def test_uninstall_child_diagnostic_does_not_probe_other_results(monkeypatch, code, error):
+    def forbidden(*args, **kwargs):
+        pytest.fail("unrelated cleanup result must not query processes")
+
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    assert uninstall_child_diagnostic(
+        subprocess.CompletedProcess([], code, "", error),
+        shell="unused", env={}, project=Path("fixture") / "project",
+    ) == ""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows CIM failure diagnostics")
+@pytest.mark.parametrize("unavailable", [False, True])
+def test_uninstall_child_diagnostic_is_bounded_and_preserves_refusal(monkeypatch, unavailable):
+    project = Path("fixture") / "project"
+    result = subprocess.CompletedProcess(
+        [], 1, "", "Vault still owns a live child (pid=4216); refusing uninstall",
+    )
+    calls = []
+
+    def query(command, **kwargs):
+        calls.append(command)
+        assert kwargs["timeout"] == 15 and kwargs["check"] is False
+        assert "Win32_Process -Filter 'ProcessId=4216'" in command[-1]
+        assert "('ProcessId='+[string]$child.ParentProcessId)" in command[-1]
+        if unavailable:
+            raise subprocess.TimeoutExpired(command, 15)
+        return subprocess.CompletedProcess(
+            command, 0, json.dumps({"ExecutablePath": str(project.parent / "python.exe")}), "",
+        )
+
+    monkeypatch.setattr(subprocess, "run", query)
+    detail = uninstall_child_diagnostic(result, shell="powershell", env={}, project=project)
+    assert len(calls) == 1 and result.returncode == 1
+    assert "post-refusal snapshot, not ownership proof" in detail
+    assert ("TimeoutExpired" if unavailable else "<fixture-root>") in detail
+    assert "fixture" not in detail.replace("<fixture-root>", "")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows CIM failure diagnostics")
+@pytest.mark.parametrize("receipt", [b"4216\n", b"invalid", b"1" * 66])
+def test_uninstall_foreign_pid_diagnostic_reads_only_a_bounded_receipt(tmp_path, monkeypatch, receipt):
+    installation = tmp_path / "runtime"
+    run = installation / "run"
+    run.mkdir(parents=True)
+    (run / "agent-vault-service.pid").write_bytes(receipt)
+    result = subprocess.CompletedProcess(
+        [], 1, "", "Vault PID receipt names a foreign process; refusing uninstall",
+    )
+    calls = []
+
+    def query(command, **kwargs):
+        calls.append(command)
+        assert "Win32_Process -Filter 'ProcessId=4216'" in command[-1]
+        assert kwargs["timeout"] == 15
+        return subprocess.CompletedProcess(command, 0, "exact refused PID snapshot", "")
+
+    monkeypatch.setattr(subprocess, "run", query)
+    detail = uninstall_child_diagnostic(
+        result, shell="powershell", env={}, project=tmp_path / "project", installation=installation,
+    )
+    assert len(calls) == (1 if receipt == b"4216\n" else 0)
+    assert bool(detail) == bool(calls)
+    assert result.returncode == 1
+    assert (run / "agent-vault-service.pid").read_bytes() == receipt
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows source-admission failure diagnostics")
+@pytest.mark.parametrize("caught_error", [False, True])
+def test_uninstall_refusal_diagnostic_traces_actual_read_only_admission(tmp_path, monkeypatch, caught_error):
+    installation = tmp_path / "runtime"
+    run = installation / "run"
+    run.mkdir(parents=True)
+    (run / "agent-vault-service.pid").write_text("4216", encoding="ascii")
+    payload = tmp_path / "payload"
+    helper = payload / "scripts/vault-uninstall-process.py"
+    helper.parent.mkdir(parents=True)
+    body = (
+        "def admits(request):\n"
+        "    try:\n"
+        "        raise ValueError('controlled refusal')\n"
+        "    except ValueError:\n"
+        "        return False\n"
+        if caught_error else "def admits(request):\n    return False\n"
+    )
+    helper.write_text(body, encoding="utf-8")
+    result = subprocess.CompletedProcess(
+        [], 1, "", "Vault PID receipt names a foreign process; refusing uninstall",
+    )
+    actual_run = subprocess.run
+
+    def query(command, **options):
+        if command[0] == "fixture-powershell":
+            return subprocess.CompletedProcess(command, 0, json.dumps({
+                "child": {"ExecutablePath": "fixture-image", "CommandLine": "fixture-command"},
+            }), "")
+        return actual_run(command, **options)
+
+    monkeypatch.setattr(subprocess, "run", query)
+    detail = uninstall_child_diagnostic(
+        result, shell="fixture-powershell", env=dict(os.environ), project=tmp_path,
+        installation=installation, payload=payload,
+    )
+    assert '"admitted": false' in detail and '"return_line":' in detail
+    assert ('"exception": "ValueError"' in detail) is caught_error
+    assert result.returncode == 1 and helper.read_text(encoding="utf-8") == body
 
 
 @native_genesis
@@ -22,12 +225,17 @@ from test_first_use_vault import (
     os.environ.get("GITHUB_ACTIONS") != "true",
     reason="actual default service integration is limited to disposable hosted qualification",
 )
+@pytest.mark.skipif(
+    sys.platform == "linux" and os.environ.get("UPDATE_DRIVER_NATIVE_LINUX_SERVICE") != "1",
+    reason="Linux default service remains unqualified until a matching user-systemd venue is admitted (#9448 F9)",
+)
 @pytest.mark.parametrize("entry", ["payload", "primary"])
 def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
     materialized_vault, area, native_window_observation,
     monkeypatch, entry,
 ):
     payload, original_root, project = materialized_vault
+    installer = payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
     profile = original_root.parent
     installation = profile / "command-vault"
     monkeypatch.setenv("AGENT_VAULT_HOME", str(installation))
@@ -35,17 +243,16 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
         payload, command = stamp_vault(payload, installation, project)
     else:
         command = vault_command(payload)
-    env = cold_environment(installation, project, area)
+    env = default_service_environment(cold_environment(installation, project, area))
     env["AGENT_VAULT_INSTALLATION_ID"] = "fixture-foreign-installation"
     if os.name != "nt":
-        systemctl = shutil.which("systemctl")
+        systemctl = shutil.which("systemctl", path=env["PATH"])
         assert systemctl, "hosted qualification requires the real platform service manager client"
-        (Path(env["PATH"]) / "systemctl").symlink_to(systemctl)
-        env.pop("DBUS_SESSION_BUS_ADDRESS", None)
+        if not os.environ.get("UPDATE_DRIVER_NATIVE_USER_BUS"):
+            env.pop("DBUS_SESSION_BUS_ADDRESS", None)
     root = profile / ".copilot-extensions" / "update-driver"
     assert not root.exists()
     selected_payload = payload
-    installer = selected_payload / "scripts" / ("install.ps1" if os.name == "nt" else "install.sh")
     if os.name == "nt":
         shell = str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe")
         quote = lambda path: "'" + str(path).replace("'", "''") + "'"
@@ -94,15 +301,7 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
         if os.name == "nt":
             assert (installation / "service.ps1").is_file(), diagnostic
             assert "fixture-foreign-installation" not in (installation / "service.ps1").read_text()
-            suffix = hashlib.sha256(str(installation).lower().encode()).hexdigest()[:12]
-            task = f"AgentVault-{suffix}"
-            probe = subprocess.run(
-                [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-                 f"$ErrorActionPreference='Stop'; $task=Get-ScheduledTask -TaskName '{task}'; "
-                 f"if ($task.Actions.Arguments -notlike '*{installation}*') {{ exit 91 }}"],
-                env=env, cwd=project, capture_output=True, text=True, timeout=30,
-                **no_window_kwargs(),
-            )
+            probe = selected_service_probe(slot, env, project)
             assert probe.returncode == 0, probe.stdout + probe.stderr + diagnostic
         else:
             units = list((profile / ".config" / "systemd" / "user").glob("agent-vault-*.service"))
@@ -119,8 +318,46 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
     finally:
         cleanup_env = dict(env)
         cleanup_env.pop("AGENT_VAULT_INSTALLATION_ID", None)
+        # Cold construction is complete; uninstall needs its existing external interpreter.
+        cleanup_env["PATH"] = str(Path(sys._base_executable).parent) + os.pathsep + cleanup_env["PATH"]
         removed = subprocess.run(
             cleanup, env=cleanup_env, cwd=project, stdin=subprocess.DEVNULL,
             capture_output=True, text=True, timeout=90, **no_window_kwargs(),
         )
-        assert removed.returncode == 0, removed.stdout + removed.stderr
+        assert removed.returncode == 0, removed.stdout + removed.stderr + uninstall_child_diagnostic(
+            removed, shell=cleanup[0], env=cleanup_env, project=project, installation=installation,
+            payload=payload,
+        )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows snapshot cleanup command")
+@pytest.mark.parametrize("entry", ["payload", "primary"])
+def test_command_fixture_cleanup_keeps_external_installer_and_exact_target(tmp_path, monkeypatch, entry):
+    monkeypatch.delenv("UPDATE_DRIVER_NATIVE_SERVICE_LIFETIME", raising=False)
+    payload = tmp_path / "market" / "plugins" / "agent-vault"
+    original = tmp_path / "profile" / ".agent-vault"
+    project = tmp_path / "project"
+    target = original.parent / "command-vault"
+    snapshot = target / "snapshots" / "1.0"
+    command = lambda root: ["powershell", "-File", str(root / "command.ps1"), "--help"]
+    monkeypatch.setattr(sys.modules[__name__], "stamp_vault", lambda *_args: (snapshot, command(snapshot)))
+    monkeypatch.setattr(sys.modules[__name__], "vault_command", command)
+    monkeypatch.setattr(sys.modules[__name__], "cold_environment", lambda *_args: {"PATH": "fixture-path"})
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if len(calls) == 1:
+            raise RuntimeError("controlled foreground failure")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    with pytest.raises(RuntimeError, match="controlled foreground failure"):
+        test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
+            (payload, original, project), tmp_path, None, monkeypatch, entry,
+        )
+    assert len(calls) == 2
+    selected = snapshot if entry == "primary" else payload
+    assert str(selected / "command.ps1") in calls[0][-1]
+    assert Path(calls[1][calls[1].index("-File") + 1]) == payload / "scripts" / "install.ps1"
+    assert Path(calls[1][calls[1].index("-InstallDir") + 1]) == target

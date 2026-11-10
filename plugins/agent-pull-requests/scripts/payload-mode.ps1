@@ -75,7 +75,7 @@ if ((Split-Path -Parent $stage) -eq $stageRoot) {
     if (-not $completeCopy) {
         # The canonical freezer excludes generated artifacts and empty directories.
         $generated = @('.git', '.venv', '__pycache__', '.pytest_cache', '.ruff_cache',
-            'build', 'dist', 'node_modules')
+            '.test-runs', 'build', 'dist', 'node_modules')
         $sourceFiles = @($originalEntries | Where-Object {
             if ($_.PSIsContainer) { return $false }
             $parts = $_.FullName.Substring($origin.Length + 1).Split('\')

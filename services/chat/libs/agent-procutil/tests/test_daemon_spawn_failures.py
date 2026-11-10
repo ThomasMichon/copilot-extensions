@@ -1,6 +1,7 @@
 """Creation refusal, uncertain custody and exact execution provenance."""
 
 import os
+import io
 from pathlib import Path
 import subprocess
 from contextlib import contextmanager
@@ -53,6 +54,9 @@ def test_positive_native_breakaway_refusal_removes_record_without_activation(lau
     with pytest.raises(pu.DaemonSpawnError):
         start()
     assert inspect_instances(spec.registry_root) == []
+    diagnostic = (spec.runtime_root / "log").read_text()
+    assert "instance-reserved" in diagnostic and "creating-suspended" in diagnostic
+    assert "created-suspended" not in diagnostic and "spawn_daemon: resumed" not in diagnostic
     activate.assert_not_called()
 
 
@@ -118,6 +122,178 @@ def test_native_reservation_failure_is_visible_without_exception_payload(launch,
     assert "instance-reservation-failed" in text and "errno=5" in text
     assert "synthetic-private-exception-payload" not in text
     broker.assert_not_called()
+
+
+@pytest.mark.parametrize("operation", ["write", "flush"])
+def test_native_precreation_diagnostic_failure_cancels_only_its_reservation(
+    launch, monkeypatch, operation,
+):
+    start, spec = launch
+    failure = OSError("fixture diagnostic storage unavailable")
+    popen = Mock()
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(subprocess, "Popen", popen)
+
+    class Output:
+        reserved = False
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def write(self, data):
+            self.reserved = b"instance-reserved" in data
+            if self.reserved and operation == "write":
+                raise failure
+
+        def flush(self):
+            if self.reserved and operation == "flush":
+                raise failure
+
+    monkeypatch.setattr(pu, "_open_daemon_log", lambda _path: Output())
+    with pytest.raises(OSError) as caught:
+        start()
+    assert caught.value is failure
+    assert inspect_instances(spec.registry_root) == []
+    assert list(spec.registry_root.glob("*.lock"))
+    popen.assert_not_called()
+
+
+@pytest.mark.parametrize("stage", [
+    "creating-suspended", "created-suspended", "caller-jobs-verified", "resumed", "instance-bound",
+])
+def test_native_child_is_returned_even_when_stage_diagnostic_storage_fails(launch, monkeypatch, stage):
+    from agent_procutil import _daemon_instance_identity, _job_scopes
+
+    start, spec = launch
+    process = Mock(pid=4321)
+    seen = []
+    original = pu._open_daemon_log
+
+    @contextmanager
+    def output(path):
+        with original(path) as stream:
+            class Output:
+                def write(self, data):
+                    if ("spawn_daemon: " + stage + "\n").encode() in data:
+                        seen.append(stage)
+                        raise OSError("fixture final diagnostic unavailable")
+                    return stream.write(data)
+
+                def flush(self):
+                    stream.flush()
+
+            yield Output()
+
+    @contextmanager
+    def scopes(_environment):
+        yield lambda _handle: None
+
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_resume_suspended_process", lambda _pid: True)
+    monkeypatch.setattr(pu, "_open_daemon_log", output)
+    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
+    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _process: (4321, "fixture"))
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    assert start() is process
+    assert seen == [stage]
+    record = inspect_instances(spec.registry_root)[0]
+    assert record["state"] == "bound" and record["pid"] == "4321"
+    assert process.instance_receipt.instance_id == record["instance_id"]
+    process.kill.assert_not_called()
+
+
+def test_failed_native_diagnostics_preserve_unconfirmed_child_custody(launch, monkeypatch):
+    from agent_procutil import _daemon_instance_identity, _job_scopes
+
+    start, spec = launch
+    process = Mock(pid=4321)
+    process.kill.side_effect = OSError("fixture termination unconfirmed")
+    original = pu._open_daemon_log
+
+    @contextmanager
+    def output(path):
+        with original(path) as stream:
+            class Output:
+                def write(self, data):
+                    if b"instance-reserved" not in data and b"spawn_daemon:" in data:
+                        raise OSError("fixture diagnostic storage unavailable")
+                    return stream.write(data)
+
+                def flush(self):
+                    stream.flush()
+
+            yield Output()
+
+    @contextmanager
+    def scopes(_environment):
+        yield lambda _handle: None
+
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_resume_suspended_process", lambda _pid: False)
+    monkeypatch.setattr(pu, "_open_daemon_log", output)
+    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
+    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _process: (4321, "fixture"))
+    monkeypatch.setattr(store, "finish_failed_launch", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    with pytest.raises(pu.DaemonSpawnError) as caught:
+        start()
+    assert caught.value.process is process
+    assert caught.value.cleanup_confirmed is False and caught.value.process_created is True
+    assert caught.value.process_identity == (4321, "fixture")
+    assert caught.value.instance_receipt.record_path.is_file()
+    assert "failed to resume" in str(caught.value.__cause__)
+
+
+@pytest.mark.parametrize("cleanup_unconfirmed", [False, True])
+def test_persistent_buffered_flush_and_close_failures_preserve_child_outcome(
+    launch, monkeypatch, cleanup_unconfirmed,
+):
+    from agent_procutil import _daemon_instance_identity, _job_scopes
+
+    start, spec = launch
+    process = Mock(pid=4321)
+
+    class Storage(io.RawIOBase):
+        attempts = 0
+
+        def writable(self):
+            return True
+
+        def write(self, data):
+            self.attempts += 1
+            if self.attempts > 2:
+                raise OSError("fixture persistent diagnostic storage failure")
+            return len(data)
+
+    raw = Storage()
+    stream = io.BufferedWriter(raw)
+
+    @contextmanager
+    def scopes(_environment):
+        yield lambda _handle: None
+
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "_resume_suspended_process", lambda _pid: not cleanup_unconfirmed)
+    monkeypatch.setattr(pu, "_open_daemon_log", lambda _path: stream)
+    monkeypatch.setattr(_job_scopes, "query_scopes", scopes)
+    monkeypatch.setattr(_daemon_instance_identity, "created_process_identity", lambda _process: (4321, "fixture"))
+    monkeypatch.setattr(store, "finish_failed_launch", lambda *_args, **_kwargs: False)
+    monkeypatch.setattr(subprocess, "Popen", lambda *_args, **_kwargs: process)
+    if cleanup_unconfirmed:
+        process.kill.side_effect = OSError("fixture termination unconfirmed")
+        with pytest.raises(pu.DaemonSpawnError) as caught:
+            start()
+        assert caught.value.process is process and caught.value.cleanup_confirmed is False
+        assert caught.value.instance_receipt.record_path.is_file()
+    else:
+        assert start() is process
+        record = inspect_instances(spec.registry_root)[0]
+        assert record["state"] == "bound" and process.instance_receipt.instance_id == record["instance_id"]
+        process.kill.assert_not_called()
+    assert stream.closed and raw.attempts > 2
 
 
 @pytest.mark.parametrize("error,retained", [(FileNotFoundError("fallback missing"), False), (KeyboardInterrupt(), True)])

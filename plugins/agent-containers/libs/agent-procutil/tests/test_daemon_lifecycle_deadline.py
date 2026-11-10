@@ -42,7 +42,7 @@ def test_local_lock_acquisition_consumes_only_remaining_original_time(monkeypatc
     assert calls == [{"timeout": 10.0}, "released"]
 
 
-def test_cleanup_overrun_retains_the_record_and_reports_held(tmp_path: Path, monkeypatch) -> None:
+def test_cleanup_overrun_retains_the_record_and_reports_held(tmp_path: Path, monkeypatch, caplog) -> None:
     now = [20.0]
     receipt = DaemonInstanceReceipt("a" * 32, tmp_path)
     path = receipt.record_path
@@ -67,9 +67,12 @@ def test_cleanup_overrun_retains_the_record_and_reports_held(tmp_path: Path, mon
     result = store.cleanup(receipt, deadline=30)
     assert result.status == "held" and result.reason == "TimeoutError"
     assert path.read_bytes() == b"retained fixture record"
+    failure = next(record for record in caplog.records if "cleanup failed" in record.message)
+    assert receipt.instance_id in failure.message
+    assert failure.exc_info[0] is TimeoutError
 
 
-def test_lifecycle_exposes_held_cleanup_without_retrying_it(tmp_path: Path, monkeypatch) -> None:
+def test_lifecycle_exposes_held_cleanup_without_retrying_it(tmp_path: Path, monkeypatch, caplog) -> None:
     def fixture_owner(path: Path) -> None:
         assert path.is_relative_to(tmp_path)
 
@@ -99,7 +102,9 @@ def test_lifecycle_exposes_held_cleanup_without_retrying_it(tmp_path: Path, monk
 
     monkeypatch.setattr(store, "inspect", lambda _root: [record])
     monkeypatch.setattr(store, "_locked", locked)
-    monkeypatch.setattr(store, "_read", lambda _path: {"deadline": "100"})
+    monkeypatch.setattr(store, "_read", lambda _path: {
+        "deadline": "100", "state": "bound", "pid": "99", "runtime_root": str(tmp_path),
+    })
     monkeypatch.setattr(store, "_write", lambda *_args: None)
     monkeypatch.setattr(store, "cleanup", cleanup)
     outcomes = []
@@ -117,6 +122,8 @@ def test_lifecycle_exposes_held_cleanup_without_retrying_it(tmp_path: Path, monk
     assert len(calls) == 1 and calls[0][1] == {"deadline": 30}
     assert outcomes == [InstanceCleanupResult("a" * 32, "held", "unconfirmed")]
     assert store._owners == {}
+    diagnostic = next(item.message for item in caplog.records if "cleanup held" in item.message)
+    assert f"state=bound pid=99 runtime={tmp_path}" in diagnostic
 
 
 def test_expired_owner_cannot_renew_a_qualification_lease(monkeypatch) -> None:

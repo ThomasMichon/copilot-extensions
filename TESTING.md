@@ -1,5 +1,41 @@
 # Testing copilot-extensions
 
+The manual foundation portfolio separates contained functional checks from
+Windows production caller-Job loss. After the ordinary runner prepares its
+test environment, `tools/qualify_foundation_lifetime.py foundation` or
+`first-use` (or its `vault-command` / `vault-bootstrap` service packets) uses
+the existing native test owner, renewable daemon leases and
+the unchanged 900-second aggregate boundary. Only these explicit lifetime
+fixtures permit durable children to leave their caller Jobs; each packet also
+runs the queued-installer restrictive-Job negative and bounded-child cleanup.
+Ordinary runner containment remains unchanged. Contained hook fixtures retain
+their caller Job until owned work settles and do not claim Job-loss survival.
+The native Windows owner samples only its own instance registry in the existing
+resource-poll loop and retains birth-matched process handles through strict
+daemon cleanup, within the original process-count budget. This prevents a
+released fixture PID from being reused before cleanup; it neither signals a
+process nor relaxes unknown or reused-identity holds for unpinned records.
+Default-service acceptance uses the explicit leased native profile too:
+an ordinary contained install cannot prove that its service outlives the
+constructor's cleanup Job. Service checks read the selected generation's
+actual ping endpoint, not the optional Scheduled Task registration.
+The manual `diagnostic_stacks` input instruments only copied Windows service
+fixtures with one passive traceback capture and installer line tracing. Those packets always remain
+diagnostic failures, never native acceptance; rerun without it for qualification.
+Diagnostic execution stops after 180 seconds; normal acceptance keeps its
+unchanged 900-second aggregate. Both hold the same environment-scoped admission
+lease through daemon settlement and sandbox cleanup.
+The explicit `foundation-services` residual selection runs only the two Windows
+service packets with those same owners and limits. It is not a pass of the full
+seven-job `foundation` portfolio.
+Linux daemon-scope qualification uses the actual disposable user service
+manager and its bus, not a fake bus; only a manager created by that job is
+stopped afterward. That does not admit a private-HOME default-service venue:
+the Linux Vault default-service cases remain explicitly unqualified under
+issue #9448 F9 until the venue owner supplies matching HOME/unit search paths,
+bus/cgroup lifetime and authoritative cleanup. Their separate
+`UPDATE_DRIVER_NATIVE_LINUX_SERVICE=1` selector is not proof of those conditions.
+
 ## Select the evidence first
 
 This page is a reference catalog, not a sequential checklist. Read the lane
@@ -353,12 +389,31 @@ arguments, batch-over-single precedence, the 128-call bound and a later
 protected/foreign member defeating an earlier safe write. The separate
 structured packet covers the direct-plus-entry alias union, JSON arguments,
 deduplication and 128-entry/target limits, with late protected/foreign/nested
-targets, incomplete entries and patch fallback. It also compares structured
+targets, incomplete entries and fragmentary patch fallback. It also compares structured
 writes with the real original policy in legacy and selected-cell fixtures.
 The disjoint positive and protected write-name packets cover each original
 non-patch write alias, its protected-state target, JSON/structured arguments
 and heterogeneous batches. Real-policy comparisons in legacy and selected-cell scopes run in
 their own packet, retaining the same child/item/group limits.
+Disjoint patch-positive, protected, fallback and real-policy packets cover
+object/JSON/freeform input, every original Add/Update/Delete/Move header,
+CRLF, all-field/direct/structured union and mixed native batches. They retain
+both move endpoints, byte-exact whole-event fallback and real protected-state
+denials in legacy and selected-cell contexts. Exact 131072/131073-character
+field and 128/129-target boundaries, combined-union overflow, malformed,
+fragmentary, targetless, non-object JSON, foreign/nested/anchor and protected
+freeform cases run without changing the existing child/item/group limits.
+The commented-JSON regression preserves strict-original/freeform behavior
+when a permissive shell decoder would otherwise discard a protected header.
+Fixture-only phase markers report shell command entry, script entry,
+membership, native proof and policy entry on a native-write child timeout;
+they use the already-captured stderr pipe instead of opening a file per stage.
+Only complete, recognized marker lines are removed from successful stderr;
+genuine errors, blank lines, malformed markers and truncated output remain.
+Registered entries assert that membership-marker opening precedes marker JSON
+decoding, so a similarly shaped content reader cannot stand in for that stage.
+They never retry the child, extend its ten-second bound or classify the
+unobserved stalled phase as a known flake.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
@@ -1882,6 +1937,19 @@ approval engine is added by the pure notice controls. copilot-extensions
 
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
+
+The manual `installation-context-full.yml` `foundation` portfolio runs its
+five Windows cold first-use modules in independent packets. They retain the
+existing 900-second runner aggregate and 25-minute job caps instead of sharing
+one aggregate across multiple independent cold installations. All previous
+module selections remain covered; required unit-only CI is unchanged.
+
+Linux cold first-use fixtures keep Python and uv out of the product's native
+tool PATH. The runner-owned daemon lease separately selects an existing trusted
+system interpreter for test lifecycle accounting. That control-plane selector
+does not supply the product bootstrap interpreter or bypass lease enforcement;
+these cases prove Python-free product admission, not an interpreter-free pytest
+harness.
 
 Dispatch's reversible-maintenance Windows packet uses the existing
 `installation-context-full.yml` manual workflow with

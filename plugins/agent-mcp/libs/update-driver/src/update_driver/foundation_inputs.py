@@ -22,7 +22,7 @@ SUPPORT = (
     "installer_engine.py", "installer_engine_health.py", "installer_engine_process.py", "installer_dependency_policy.py",
     "installer_dependency_config.py", "installer_dependency_arguments.py",
     "installer_retained_content.py",
-    "runtime_launcher.py", "versioned_runtime.py",
+    "runtime_launcher.py", "resolve-runtime.ps1", "versioned_runtime.py",
     "versioned_runtime_leases.py", "versioned_runtime_construction.py",
     "versioned_runtime_source.py", "versioned_runtime_publication.py",
     "installer_source_build.py", "installer_source_wheel_cache.py",

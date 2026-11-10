@@ -82,13 +82,15 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
         if os.name == "nt":
             from test_foundation_genesis_process import pinned_worker
             shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
-            env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+            env["PATH"] = os.pathsep.join((
+                str(Path(sys.executable).parent), str(Path(os.environ["SystemRoot"]) / "System32"),
+            ))
             caller, job = agent_procutil.spawn_sync_in_kill_on_close_job(
                 [str(shell), "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
                  str(source / "scripts" / "first-use.ps1"), "-Root", str(root),
                  "-Payload", str(payload), "-RuntimeRoot", str(installation),
                  "-Project", str(project), "-InstallerAction", installer_action],
-                env=env, require_job=True, allow_breakaway=False,
+                env=env, require_job=True, allow_breakaway=True,
                 stdin=subprocess.DEVNULL, stdout=caller_log, stderr=caller_log,
                 **agent_procutil.no_window_kwargs(),
             )
@@ -105,12 +107,20 @@ def test_native_cold_first_use_survives_caller_loss_and_keeps_ordinary_result(
                 "sha256sum", "iconv", "cat", "mkdir", "sync", "awk", "date", "mktemp", "mv",
                 "rm", "cp", "flock", "grep", "sleep", "setsid", "mkfifo", "rmdir", "curl",
                 "tar", "gzip", "head", "chmod", "sed", "tr", "ps", "realpath", "cut",
-                "wc", "od", "id", "getent", "hostname",
+                "wc", "od", "id", "getent", "hostname", "base64",
+                "systemd-run", "systemctl",
             ):
                 executable = shutil.which(name)
                 assert executable, f"native tool unavailable: {name}"
                 (tools / name).symlink_to(executable)
             env["PATH"] = str(tools)
+            if os.environ.get("UPDATE_DRIVER_NATIVE_USER_BUS"):
+                env["DBUS_SESSION_BUS_ADDRESS"] = os.environ["UPDATE_DRIVER_NATIVE_USER_BUS"]
+            if env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"):
+                # The runner lease has an interpreter; the product bootstrap does not.
+                env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = "/usr/bin/python3"
+            assert shutil.which("python3", path=env["PATH"]) is None
+            assert shutil.which("uv", path=env["PATH"]) is None
             caller = subprocess.Popen(
                 [str(tools / "bash"), "-c", '"$@" ; code=$?; [[ "$code" == 0 ]] || exit "$code"; sleep 900',
                  "first-use-caller", str(tools / "bash"), str(source / "scripts" / "first-use.sh"),

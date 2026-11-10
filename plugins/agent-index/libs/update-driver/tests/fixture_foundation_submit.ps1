@@ -1,6 +1,9 @@
 param([string]$Root, [string]$Plugin, [string]$Label)
 $ErrorActionPreference = 'Stop'
-foreach ($name in @('python', 'python3', 'py', 'uv')) {
+if (-not (Get-Command python -CommandType Application -ErrorAction SilentlyContinue)) {
+    throw 'Cold native admission requires the setup-provided Python prerequisite.'
+}
+foreach ($name in @('python3', 'py', 'uv')) {
     if (Get-Command $name -CommandType Application -ErrorAction SilentlyContinue) {
         throw "Cold fixture unexpectedly discovered $name."
     }

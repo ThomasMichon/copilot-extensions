@@ -102,8 +102,59 @@ def test_explicit_client_only_recipe_is_distinct_and_reaches_native_installer(ow
     client = provision.enqueue(payload, installation, project, root=root, client_only=True)
     assert client.id != ordinary.id and client.spec.argv == ("--client-only",)
     drain(root=root)
-    assert all(status(item.id, root=root).exit_code == 7 for item in (ordinary, client))
+    for item in (ordinary, client):
+        result = status(item.id, root=root)
+        assert result.exit_code == 7, result.log_path.read_text(encoding="utf-8", errors="replace")
+    assert {item.id for item in status(root=root)} == {ordinary.id, client.id}
     assert (installation / "client-only").read_text().splitlines() == ["0", "1"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native installer custody")
+@pytest.mark.parametrize("client_only", [False, True])
+def test_vault_native_installer_authenticates_the_existing_provision_request(
+    owning_payload, area, client_only,
+):
+    from update_driver.foundation_inputs import PACKAGES
+
+    payload, installation, project = owning_payload
+    library = Path(__file__).resolve().parents[2]
+    for package in PACKAGES:
+        shutil.copytree(
+            library / package, payload / "libs" / package,
+            ignore=shutil.ignore_patterns(
+                "__pycache__", "*.pyc", ".pytest_cache", "tests", "build", "dist", "*.egg-info",
+            ),
+        )
+    manifest = payload / "pyproject.toml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8") +
+        '[tool.uv.sources]\nagent-update-driver={path="libs/update-driver"}\n',
+        encoding="utf-8",
+    )
+    installer = payload / "scripts" / "install.ps1"
+    marker = "[IO.Directory]::CreateDirectory($InstallDir) | Out-Null\n"
+    body = installer.read_text(encoding="utf-8")
+    assert body.count(marker) == 1
+    installer.write_text(body.replace(
+        marker,
+        "$python = @(Get-Command python -CommandType Application)[0].Source\n"
+        "& $python -I -S -B (Join-Path $PSScriptRoot 'installer_driver.py') "
+        "--payload (Split-Path $PSScriptRoot -Parent) --root $InstallDir "
+        "--shell (Get-Process -Id $PID).Path --plugin agent-vault --action provision "
+        "--check-native\n"
+        "if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }\n" + marker,
+    ), encoding="utf-8")
+    root = area / "queue"
+    request = provision.enqueue(
+        payload, installation, project, root=root, client_only=client_only,
+    )
+    drain(root=root)
+    result = status(request.id, root=root)
+    assert result.state == "completed" and result.exit_code == 7, result.log_path.read_text(
+        encoding="utf-8", errors="replace",
+    )
+    assert [item.id for item in status(root=root)] == [request.id]
+    assert (installation / "client-only").read_text().strip() == str(int(client_only))
 
 
 def test_stamp_recipe_is_distinct_coalesced_and_reaches_canonical_action(owning_payload, area):

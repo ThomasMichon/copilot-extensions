@@ -51,11 +51,15 @@ def test_actual_private_genesis_and_queue_preserving_upgrade_after_caller_group_
         "bash", "dirname", "uname", "readlink", "stat", "find", "sort", "sha256sum", "iconv",
         "cat", "mkdir", "sync", "awk", "date", "mktemp", "mv", "rm", "cp", "flock", "grep",
         "sleep", "setsid", "mkfifo", "rmdir", "curl", "tar", "gzip", "head", "chmod", "sed", "tr", "ps",
+        "basename", "base64", "wc", "od", "id", "getent", "hostname", "cut", "realpath",
+        "ln", "touch", "tail", "diff", "systemd-run", "systemctl",
     ):
         executable = shutil.which(name)
         assert executable, f"native tool missing: {name}"
         (tools / name).symlink_to(executable)
     env = dict(os.environ, PATH=str(tools), UV_PYTHON_DOWNLOADS="automatic")
+    if os.environ.get("UPDATE_DRIVER_NATIVE_USER_BUS"):
+        env["DBUS_SESSION_BUS_ADDRESS"] = os.environ["UPDATE_DRIVER_NATIVE_USER_BUS"]
     env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
     env.pop("UPDATE_DRIVER_WITNESS", None)
     descriptors = []
@@ -66,8 +70,8 @@ def test_actual_private_genesis_and_queue_preserving_upgrade_after_caller_group_
 
     def diagnostics():
         return "\n".join(
-            f"{path.relative_to(root)}:\n{path.read_text(errors='replace')[-12000:]}"
-            for path in root.rglob("*.log")
+            f"{path.relative_to(area)}:\n{path.read_text(errors='replace')[-12000:]}"
+            for path in (*root.rglob("*.log"), *area.glob("caller-*.log"))
         )
 
     def submit(plugin):
@@ -75,22 +79,25 @@ def test_actual_private_genesis_and_queue_preserving_upgrade_after_caller_group_
         # Parent's process group is the cleanup boundary destroyed after admission.
         script = (
             '"$1" "$2" "$3" "$4" >"$5"; '
-            'printf "ready\\n" >"$6"; sleep 300'
+            'code=$?; printf "%s\\n" "$code" >"$6"; '
+            '[[ "$code" == 0 ]] || exit "$code"; sleep 300'
         )
         label = str(len(parents))
         receipt, ready = area / f"launch-{label}", area / f"ready-{label}"
-        parent = subprocess.Popen(
-            [str(tools / "bash"), "-c", script, "foundation-caller", str(tools / "bash"),
-             str(plugin / "scripts" / "foundation-submit.sh"), str(root), digest,
-             str(receipt), str(ready)],
-            env=env, start_new_session=True, stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        )
+        with (area / f"caller-{label}.log").open("wb") as errors:
+            parent = subprocess.Popen(
+                [str(tools / "bash"), "-c", script, "foundation-caller", str(tools / "bash"),
+                 str(plugin / "scripts" / "foundation-submit.sh"), str(root), digest,
+                 str(receipt), str(ready)],
+                env=env, start_new_session=True, stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL, stderr=errors,
+            )
         parents.append(parent)
         observe(lambda: ready.exists() or parent.poll() is not None, 30, diagnostics)
         assert ready.exists(), diagnostics()
+        assert ready.read_text().strip() == "0", diagnostics()
         frame = receipt.read_text().strip()
-        assert frame.startswith("launched:")
+        assert frame.startswith("launched:"), diagnostics()
         descriptor = open_pidfd(int(frame.partition(":")[2]))
         descriptors.append(descriptor)
         assert not _pidfd_exited(descriptor), diagnostics()

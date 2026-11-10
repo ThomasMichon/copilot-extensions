@@ -157,6 +157,10 @@ def test_native_producer_never_creates_control_state_inside_its_source(producer_
 
 
 def test_native_submit_facade_preserves_contained_caller_job_suppression(producer_source, area):
+    from agent_procutil._daemon_instance_store import _test_context
+    from agent_procutil.daemon_instances import (
+        DaemonInstanceReceipt, cleanup_instance, inspect_instances,
+    )
     from test_foundation_genesis_process import pinned_worker
 
     root = area / "state"
@@ -185,13 +189,23 @@ def test_native_submit_facade_preserves_contained_caller_job_suppression(produce
                 assert worker.poll() is None, [
                     path.read_text(errors="replace") for path in root.glob("*.log")
                 ]
-                assert time.monotonic() < deadline
+                assert time.monotonic() < deadline, [
+                    path.read_text(errors="replace") for path in root.glob("*.log")
+                ]
                 time.sleep(.02)
+            registry = Path(_test_context(env)["registry_root"])
+            record = next(
+                item for item in inspect_instances(registry)
+                if item.get("pid") == str(worker.pid)
+            )
+            receipt = DaemonInstanceReceipt(record["instance_id"], registry)
             job.close()
             job = None
             worker.wait(timeout=10)
             assert not (root / "builder-finished").exists()
             assert foundation_status(root=root).state == "running"
+            producer_source.parent.rename(area / "removed-source")
+            assert cleanup_instance(receipt).status == "settled"
         finally:
             if worker is not None:
                 try:

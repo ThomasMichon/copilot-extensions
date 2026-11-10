@@ -1574,18 +1574,7 @@ function Invoke-Uninstall {
             Stop-ScheduledTask -TaskName $TaskName -ErrorAction Stop
         }
         foreach ($row in $ownedProcesses) {
-            $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
-            if ($now -and ($now.CreationDate -ne $row.CreationDate -or $now.CommandLine -cne $row.CommandLine)) {
-                throw 'Vault process identity changed; refusing uninstall'
-            }
-            if ($now) {
-                Stop-Process -Id $row.ProcessId -ErrorAction Stop
-                Wait-Process -Id $row.ProcessId -Timeout 15 -ErrorAction SilentlyContinue
-                $remaining = Get-CimInstance Win32_Process -Filter "ProcessId=$($row.ProcessId)" -ErrorAction Stop
-                if ($remaining -and $remaining.CreationDate -eq $row.CreationDate) {
-                    throw 'Owned Vault daemon did not stop'
-                }
-            }
+            Stop-VaultUninstallProcess -Row $row
         }
     }
     if (-not $DryRun -and $env:OS -eq 'Windows_NT' -and
@@ -1616,6 +1605,164 @@ function Invoke-Uninstall {
         else { Write-Ok 'Venv removed (state kept; -Purge to delete)' }
     }
     if ($DryRun) { Write-Host 'agent-vault uninstall dry run complete -- nothing was changed' -ForegroundColor Yellow }
+}
+
+function Get-VaultUninstallPathInfo {
+    param([string[]]$Paths)
+    $python = Get-FiniteUninstallPython -InstallRoot $InstallDir
+    if (-not $python) { throw 'Vault uninstall requires an external Python for native file observations.' }
+    $probe = @'
+import json, os, sys
+from pathlib import Path
+paths = json.load(sys.stdin)
+if os.name != "nt" or not isinstance(paths, list) or not 1 <= len(paths) <= 8:
+    raise ValueError("Invalid native file observation")
+result = []
+for value in paths:
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        raise ValueError("Native file observation requires an absolute path")
+    resolved = str(Path(value).resolve(strict=True))
+    if resolved.startswith("\\\\?\\UNC\\"):
+        resolved = "\\\\" + resolved[8:]
+    elif resolved.startswith("\\\\?\\"):
+        resolved = resolved[4:]
+    path = Path(resolved)
+    info = path.stat()
+    result.append({"path": str(path), "identity": f"{info.st_dev}:{info.st_ino}"})
+print(json.dumps(result))
+'@
+    $nativeError = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList @('-I', '-S', '-B', '-X', 'utf8', '-c', $probe) `
+        -InputText (ConvertTo-Json -InputObject @($Paths) -Compress) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Vault native file observation failed: $nativeError" }
+    $decoded = ($output | Out-String) | ConvertFrom-Json
+    $records = @($decoded)
+    if ($records.Count -ne $Paths.Count) { throw 'Vault native file observation is incomplete.' }
+    foreach ($record in $records) {
+        if ($record.path -isnot [string] -or -not [IO.Path]::IsPathRooted($record.path) -or
+            $record.identity -isnot [string] -or $record.identity -cnotmatch '^\d+:\d+$') {
+            throw 'Vault native file observation is invalid.'
+        }
+    }
+    return $records
+}
+
+function Stop-VaultUninstallProcess {
+    param($Row)
+    $now = Get-CimInstance Win32_Process -Filter "ProcessId=$($Row.ProcessId)" -ErrorAction Stop
+    if (-not $now) { return }
+    if ($now.CreationDate -ne $Row.CreationDate -or $now.CommandLine -cne $Row.CommandLine -or
+        $now.ExecutablePath -ine $Row.ExecutablePath -or $now.ParentProcessId -ne $Row.ParentProcessId -or
+        $Row.CreationDate -isnot [DateTime]) {
+        throw 'Vault process identity changed; refusing uninstall'
+    }
+    $process = [Diagnostics.Process]::GetProcessById([int]$Row.ProcessId)
+    try {
+        # Cache the native handle before validation; Kill and WaitForExit retain that identity.
+        [void]$process.Handle
+        $birth = $process.StartTime.ToUniversalTime().ToFileTimeUtc()
+        $captured = $Row.CreationDate.ToUniversalTime().ToFileTimeUtc()
+        $images = @(Get-VaultUninstallPathInfo @($process.Path, $Row.ExecutablePath))
+        if ($birth - ($birth % 10) -ne $captured - ($captured % 10) -or
+            $images[0].path -ine $images[1].path -or
+            $images[0].identity -cne $images[1].identity) {
+            throw 'Vault process native identity changed; refusing uninstall'
+        }
+        $process.Kill()
+        if (-not $process.WaitForExit(15000)) { throw 'Owned Vault daemon did not stop' }
+    } finally {
+        $process.Dispose()
+    }
+}
+
+function Test-VaultUninstallRedirectorChild {
+    param($Parent, $Child, [string]$Root)
+    if ($Child.ParentProcessId -ne $Parent.ProcessId) { return $false }
+    $service = '^\s*(?:"(?<exe>[^"]+)"|(?<exe>\S+))\s+(?<args>-m\s+agent_vault\.service(?:\s+--foreground)?(?:\s+--persistent)?)\s*$'
+    $parentCommand = [regex]::Match([string]$Parent.CommandLine, $service)
+    $childCommand = [regex]::Match([string]$Child.CommandLine, $service)
+    if (-not $parentCommand.Success -or -not $childCommand.Success -or
+        ($parentCommand.Groups['args'].Value -replace '\s+', ' ') -cne
+        ($childCommand.Groups['args'].Value -replace '\s+', ' ')) { return $false }
+    if ((Split-Path -Leaf $Parent.ExecutablePath) -ine 'python.exe' -or
+        (Split-Path -Leaf (Split-Path -Parent $Parent.ExecutablePath)) -ine 'Scripts') { return $false }
+    $parentImage = (Get-VaultUninstallPathInfo @($Parent.ExecutablePath)).path
+    if (-not $parentImage.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+    $venv = Split-Path -Parent (Split-Path -Parent $parentImage)
+    $config = Join-Path $venv 'pyvenv.cfg'
+    if (-not (Test-Path -LiteralPath $config -PathType Leaf)) { return $false }
+    $item = Get-Item -LiteralPath $config -Force -ErrorAction Stop
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { return $false }
+    # CPython's Windows venv launcher selects its physical interpreter from this home.
+    $homes = @(Get-Content -LiteralPath $config -Encoding UTF8 -ErrorAction Stop |
+        Where-Object { $_ -cmatch '^home\s*=' } |
+        ForEach-Object { ($_ -split '=', 2)[1].Trim() })
+    if ($homes.Count -ne 1 -or -not [IO.Path]::IsPathRooted($homes[0])) { return $false }
+    $images = @(Get-VaultUninstallPathInfo @(
+        $config, (Join-Path $homes[0] 'python.exe'), $Child.ExecutablePath,
+        $childCommand.Groups['exe'].Value, $parentCommand.Groups['exe'].Value
+    ))
+    if ($images[0].path -ine $config -or $images[2].path -ine $images[1].path -or
+        $images[4].path -ine $parentImage -or
+        ($images[3].path -ine $images[1].path -and $images[3].path -ine $parentImage)) { return $false }
+    $owner = Invoke-CimMethod -InputObject $Child -MethodName GetOwnerSid -ErrorAction Stop
+    if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+        return $false
+    }
+    $handles = @()
+    try {
+        foreach ($row in @($Parent, $Child)) {
+            if ($row.CreationDate -isnot [DateTime]) { return $false }
+            $process = [Diagnostics.Process]::GetProcessById([int]$row.ProcessId)
+            $handles += $process
+            [void]$process.Handle
+            $birth = $process.StartTime.ToUniversalTime().ToFileTimeUtc()
+            $captured = $row.CreationDate.ToUniversalTime().ToFileTimeUtc()
+            $files = @(Get-VaultUninstallPathInfo @($process.Path, $row.ExecutablePath))
+            # CIM exposes microseconds; the native handle retains 100ns FILETIME precision.
+            if ($birth - ($birth % 10) -ne $captured - ($captured % 10) -or $process.HasExited -or
+                $files[0].path -ine $files[1].path -or
+                $files[0].identity -cne $files[1].identity) { return $false }
+        }
+        $parentBirth = $handles[0].StartTime.ToUniversalTime().ToFileTimeUtc()
+        $childBirth = $handles[1].StartTime.ToUniversalTime().ToFileTimeUtc()
+        return $parentBirth -le $childBirth -and $childBirth -le [DateTime]::UtcNow.ToFileTimeUtc()
+    } finally {
+        foreach ($process in $handles) { $process.Dispose() }
+    }
+}
+
+function Test-VaultUninstallBootstrappedProcess {
+    param($Row, [string]$Root)
+    $python = Get-FiniteUninstallPython -InstallRoot $InstallDir
+    if (-not $python) { throw 'Vault uninstall requires an external Python for native process observations.' }
+    $request = @{
+        root = $Root; image = [string]$Row.ExecutablePath; command = [string]$Row.CommandLine
+    } | ConvertTo-Json -Compress
+    $nativeError = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList @(
+        '-I', '-S', '-B', '-X', 'utf8', (Join-Path $PSScriptRoot 'vault-uninstall-process.py')
+    ) -InputText $request -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Vault canonical daemon observation failed: $nativeError" }
+    $admitted = ($output | Out-String) | ConvertFrom-Json -ErrorAction Stop
+    if ($admitted -isnot [bool]) { throw 'Vault canonical daemon observation is invalid.' }
+    if (-not $admitted -or $Row.CreationDate -isnot [DateTime]) { return $false }
+    $owner = Invoke-CimMethod -InputObject $Row -MethodName GetOwnerSid -ErrorAction Stop
+    if ($owner.ReturnValue -ne 0 -or $owner.Sid -ne [Security.Principal.WindowsIdentity]::GetCurrent().User.Value) {
+        return $false
+    }
+    $process = [Diagnostics.Process]::GetProcessById([int]$Row.ProcessId)
+    try {
+        [void]$process.Handle
+        $birth = $process.StartTime.ToUniversalTime().ToFileTimeUtc()
+        $captured = $Row.CreationDate.ToUniversalTime().ToFileTimeUtc()
+        $images = @(Get-VaultUninstallPathInfo @($process.Path, $Row.ExecutablePath))
+        return -not $process.HasExited -and
+            $birth - ($birth % 10) -eq $captured - ($captured % 10) -and
+            $images[0].path -ieq $images[1].path -and $images[0].identity -ceq $images[1].identity
+    } finally {
+        $process.Dispose()
+    }
 }
 
 function Get-VaultUninstallProcesses {
@@ -1649,7 +1796,17 @@ function Get-VaultUninstallProcesses {
     }
     $rows = @(Get-CimInstance Win32_Process -ErrorAction Stop)
     $owned = @()
+    $bootstrapped = @($rows | Where-Object {
+        $_.ExecutablePath -and $_.CommandLine -cmatch 'runpy\.run_module' -and
+        $_.CommandLine -cmatch 'agent_vault\.service'
+    })
+    if ($bootstrapped.Count -gt 16) { throw 'Vault canonical daemon inventory exceeds its bound.' }
+    foreach ($row in $bootstrapped) {
+        if (Test-VaultUninstallBootstrappedProcess -Row $row -Root $root) { $owned += $row }
+    }
+    $canonicalIds = @($owned | ForEach-Object { [int]$_.ProcessId })
     foreach ($row in $rows) {
+        if ([int]$row.ProcessId -in $canonicalIds) { continue }
         if (-not $row.ExecutablePath -or -not ([string]$row.ExecutablePath).StartsWith(
                 $root + '\', [StringComparison]::OrdinalIgnoreCase)) { continue }
         if ([string]$row.CommandLine -notmatch '(?i)(?:^|\s)-m\s+agent_vault\.service(?:\s+--foreground)?(?:\s+--persistent)?\s*$') {
@@ -1660,6 +1817,16 @@ function Get-VaultUninstallProcesses {
             throw 'Vault daemon user ownership cannot be validated'
         }
         $owned += $row
+    }
+    $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
+    foreach ($parent in @($owned)) {
+        $children = @($rows | Where-Object {
+            $_.ParentProcessId -eq $parent.ProcessId -and $_.ProcessId -notin $ownedIds
+        })
+        if ($children.Count -eq 1 -and (Test-VaultUninstallRedirectorChild -Parent $parent -Child $children[0] -Root $root)) {
+            # Retire the physical interpreter before its waiting venv launcher.
+            $owned = @($children[0]) + $owned
+        }
     }
     $ownedIds = @($owned | ForEach-Object { [int]$_.ProcessId })
     foreach ($row in $rows) {
