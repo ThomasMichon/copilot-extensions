@@ -5,6 +5,8 @@ from __future__ import annotations
 import types
 from typing import Any
 
+import pytest
+
 from venue_copilot.supervisor import supervisor_ref, with_supervisor, worktree_ref
 
 
@@ -19,7 +21,7 @@ def test_supervisor_prefers_explicit_context() -> None:
     assert ref == "host/proj/wt-1"
 
 
-def test_supervisor_resolves_cwd_despite_inherited_owner(monkeypatch) -> None:
+def test_supervisor_resolves_cwd_despite_inherited_owner(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "stale/proj/wt-1#parent")
     calls: list[list[str]] = []
 
