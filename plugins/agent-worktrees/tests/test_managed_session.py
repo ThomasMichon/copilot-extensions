@@ -1429,6 +1429,14 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     native_entry.write_text(instrumented, encoding="utf-8")
     admission = scripts / "managed-session.ps1"
     instrumented = admission.read_text(encoding="utf-8")
+    prepared_function = "function Test-PreparedManagedWorktreesSession {"
+    prefix, prepared = instrumented.split(prepared_function, 1)
+    opened = "        $openedLength = $stream.Length"
+    assert prepared.count(opened) == 1
+    prepared = prepared.replace(
+        opened, "Write-NativeWriteFixturePhase 'prepared-marker-opened'\n" + opened, 1,
+    )
+    instrumented = prefix + prepared_function + prepared
     for boundary, source in (
         ("prepared-event-json", "        $event = ConvertFrom-ManagedWorktreesJson $Raw"),
         ("json-entry", "    if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }"),
@@ -1440,7 +1448,6 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         ("json-serializer-create", "        $script:managedWorktreesJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new($resolver)"),
         ("json-deserialize", "    return ,($script:managedWorktreesJson.DeserializeObject($Text))"),
         ("prepared-paths", "        $workspace = Get-PreparedWorktreesPath $cwd"),
-        ("prepared-marker-opened", "        $openedLength = $stream.Length"),
         ("prepared-marker-json", "        $value = ConvertFrom-ManagedWorktreesJson $text.TrimStart([char]0xfeff)"),
         ("prepared-marker-decoded", "        $scope = $value['scope']"),
     ):
@@ -1467,6 +1474,10 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     native_seconds = time.monotonic() - started
     progress, result.stderr = native_write_fixture_stderr(result.stderr)
     assert " command-entry" in progress, result.stderr
+    phase_names = [line.split(" ", 1)[1] for line in progress.splitlines()]
+    if "prepared-marker-json" in phase_names:
+        assert "prepared-marker-opened" in phase_names, progress
+        assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert not membership.exists()
     if case == "ordinary-unrelated-inventory":

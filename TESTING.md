@@ -374,6 +374,8 @@ membership, native proof and policy entry on a native-write child timeout;
 they use the already-captured stderr pipe instead of opening a file per stage.
 Only complete, recognized marker lines are removed from successful stderr;
 genuine errors, blank lines, malformed markers and truncated output remain.
+Registered entries assert that membership-marker opening precedes marker JSON
+decoding, so a similarly shaped content reader cannot stand in for that stage.
 They never retry the child, extend its ten-second bound or classify the
 unobserved stalled phase as a known flake.
 Invalid
