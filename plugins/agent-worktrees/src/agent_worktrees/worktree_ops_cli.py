@@ -235,6 +235,7 @@ def add_parsers(sub) -> None:
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
     p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
+    p.add_argument("--stream", action="store_true", help="Stream D4 progress and full results (requires --json)")
     p.add_argument(
         "--paired", action="store_true",
         help="Sync both registered worktree members before preparing local plugins",
@@ -926,6 +927,21 @@ def finalize_one(wt_id: str) -> dict:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     """Fast-forward worktrees to their upstream default branch (FF-only)."""
+    if not getattr(args, "stream", False):
+        return _cmd_sync(args)
+    if not getattr(args, "json", False):
+        print("sync: --stream requires --json", file=sys.stderr)
+        return 2
+    from .sync_progress import SyncProgress
+
+    with SyncProgress() as progress:
+        try:
+            return _cmd_sync(args, progress=progress)
+        except (OSError, RuntimeError, ValueError, git_ops.GitError) as error:
+            return progress.finish({"ok": False, "reason": "sync-failed", "detail": str(error)})
+
+
+def _cmd_sync(args: argparse.Namespace, *, progress=None) -> int:
     config = cfg.load_config()
     repo = config.default_repo
     tracking_path = cfg.tracking_dir()
@@ -937,6 +953,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
         yaml_path = tracking_path / f"{wt_id}.yaml"
         if not yaml_path.exists():
             res = {"worktree_id": wt_id, "updated": False, "reason": "not-found", "behind": 0}
+            if progress is not None:
+                return progress.finish(res)
             if as_json:
                 output._json_output(res)
             else:
@@ -957,6 +975,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
             and Path(r.worktree_path).exists()
         ]
 
+    if progress is not None:
+        progress.stage("Fetching repository")
     if git_ops.has_remote(repo.remote, cwd=repo.anchor):
         try:
             git_ops.fetch(repo.remote, cwd=repo.anchor)
@@ -966,6 +986,8 @@ def cmd_sync(args: argparse.Namespace) -> int:
             for _synced_repo in {r.repo for r in records if r.repo}:
                 tracking.record_repo_fetch_confirmed(_synced_repo)
 
+    if progress is not None:
+        progress.stage("Observing worktree sessions")
     session_ctx = sessions.scan_sessions_fast(records)
     active_paths = _build_active_paths(records, session_ctx)
 
@@ -974,10 +996,16 @@ def cmd_sync(args: argparse.Namespace) -> int:
         if getattr(args, "paired", False) and (rec.pair_id or rec.pair_ref):
             from .worktree_sync import sync_pair
 
-            results.append(sync_pair(rec))
+            results.append(sync_pair(
+                rec, **({"on_progress": progress.stage} if progress is not None else {}),
+            ))
         else:
+            if progress is not None:
+                progress.stage("Inspecting and synchronizing worktree")
             results.append(_core_helper("_sync_one_record", _sync_one_record)(rec, repo, active_paths))
 
+    if progress is not None:
+        return progress.finish(results[0] if single else {"results": results})
     if as_json:
         output._json_output(results[0] if single else {"results": results})
     elif not results:

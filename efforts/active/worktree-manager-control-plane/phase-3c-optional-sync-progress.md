@@ -1,7 +1,7 @@
 # Optional built-in Sync progress
 
 - **Parent:** [Worktree Manager control plane](README.md#optional-built-in-lifecycle-progress).
-- **Status:** Proposed; review before implementation.
+- **Status:** Provider expansion implemented and source-tested; review pending.
 - **Source:** [#4183](https://github.com/ThomasMichon/copilot-extensions/issues/4183)
   LP1-LP3/LPV, including the complete received #4274 request.
 - **Participant:** Optional Sync-progress implementer, public source
@@ -85,7 +85,7 @@ PATH-based command selection or a claim that cancelling display rolls back Git.
 
 ## Plan
 
-- [ ] **S0 - Review:** Accept this bounded proposal and participant before code.
+- [x] **S0 - Review:** Accept this bounded proposal and participant before code.
   Keep the original #4183 LP acceptance open and preserve PK/WI owners.
 - [ ] **S1 - Provider expansion:** Add optional stage callbacks inside the
   existing Sync owner and the strict CLI opt-in/packaged declaration. Preserve
@@ -106,6 +106,43 @@ settled operation or permission to replay. Do not wire Sync into the generic
 D4 kill-on-Cancel path. Keep the existing maintenance operation's ownership with
 an explicit finite stream execution budget; drain stdout/stderr concurrently and settle exact owned
 children using the existing process owner. Cleanup failure remains visible.
+
+## S1 implementation and source validation
+
+The explicit `sync --json --stream` producer reports real Sync stages and
+owner-emitted waiting messages in D4 frames. Terminal frames retain the whole
+native result, including partial pair outcomes and preparation failures.
+Ordinary CLI calls take the original result path without a heartbeat or stream.
+The version-1 declaration is included in the engine's package data.
+
+Four focused tests failed before implementation for missing frames, missing
+pre-configuration syntax refusal and unsupported parser syntax. The current
+contained Windows x64 source packet passes 30 distinct cases in disjoint
+selections: seven producer/real-parser-process/knowledge-side controls, ten
+ordinary pair controls and thirteen failure/policy/freshness controls. Each
+selection retains the ordinary 30-second item and 300-second group bounds.
+This is not a monolithic aggregate-budget or native ARM64 qualification.
+
+An initial broad packet hit its group bound without named coverage. A named
+follow-up located item cost in repeated Git fixture/oracle children; private
+fixtures now copy one fresh seed into independent repositories and read their
+actual loose refs directly. Git synchronization, independent pair storage,
+failure assertions and cleanup remain real. The blocked-stream oracle was
+also corrected to preserve the original top-level `updated: false` while
+earlier member results retain their successful advances.
+
+ARM64 dependency preparation could not build the optional authentication
+dependency without a configured Rust toolchain. Validation used an existing
+x64 interpreter instead, without changing dependencies or host configuration.
+A later retained-cache access refusal was preserved; the normal runner's
+supported private scratch-root selection supplied a fresh owned cache.
+Focused F/E9 lint and the installation contract check pass.
+
+S2 local incremental rendering, selected-runtime negotiation/rollback, consumer
+two-clock and uncertain-outcome validation remain open. No Manager path uses the
+new flag yet. Native/installed and external-venue qualification were not run:
+this producer increment changes no installer or live host, and no qualified
+live venue or rollout is admitted. No installed behavior is claimed.
 
 ## Validation Plan
 
@@ -140,6 +177,12 @@ children using the existing process owner. Cleanup failure remains visible.
 
 ## Journal
 
+- 2026-11-10: #11873 merged to `dev` as
+  `431751d0fd5d916bdd1132a32f82652431a26ac5` after genuine Copilot approval
+  `5837642164` on exact head `1f246476398d01c4a8744cde91ccad715539146c`,
+  no inline findings and all required checks passing. Native source sync
+  succeeded. S0 is accepted; S1/S2, all implementation validation and the
+  original #4183 acceptance remain open. No runtime operation occurred.
 - 2026-11-10: Qualified the existing D4 envelope, real Sync stages, current
   terminal-result consumer and selected-runtime support pattern. Proposed the
   bounded provider-first/local-consumer sequence; no implementation or runtime
