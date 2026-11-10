@@ -39,6 +39,7 @@ class AuthWaitReceiver:
         self.stopped_for_auth = False
         self.hold: str | None = None
         self._stop = asyncio.Event()
+        self._lease_changed = asyncio.Event()
         self._grant = asyncio.Event()
         self._server: asyncio.Server | None = None
         self._connections: dict[asyncio.Task, asyncio.StreamWriter] = {}
@@ -59,11 +60,19 @@ class AuthWaitReceiver:
         self._deadline = time.monotonic() + min(budget, expiry - time.time())
         self._wall_deadline = expiry
         self.lease_revision = revision
+        if self._stop_delay() <= 0:
+            self._stop.set()
+        self._lease_changed.set()
+
+    def _stop_delay(self) -> float:
+        return min(
+            self._deadline - time.monotonic(), self._wall_deadline - time.time(),
+        ) - 1
 
     def authorized(self) -> bool:
-        if self.hold or self._stop.is_set():
+        if self._stop.is_set():
             return False
-        if time.monotonic() >= self._deadline or time.time() >= self._wall_deadline:
+        if self._stop_delay() <= 0:
             self._stop.set()
             return False
         return True
@@ -74,20 +83,15 @@ class AuthWaitReceiver:
 
     async def expiry(self) -> None:
         # Reserve the bounded SDK-freeze exchange before the source deadline.
-        stop_at = min(self._deadline - 1, time.monotonic() + max(
-            0, self._wall_deadline - time.time() - 1,
-        ))
-        while self.authorized() and time.monotonic() < stop_at:
+        while self.authorized():
+            delay = self._stop_delay()
+            if delay <= 0:
+                break
+            self._lease_changed.clear()
             try:
-                await asyncio.wait_for(self._stop.wait(), min(
-                    .1, max(.001, stop_at - time.monotonic()),
-                    max(.001, self._wall_deadline - time.time()),
-                ))
+                await asyncio.wait_for(self._lease_changed.wait(), min(.1, delay))
             except asyncio.TimeoutError:
                 pass
-            stop_at = min(self._deadline - 1, time.monotonic() + max(
-                0, self._wall_deadline - time.time() - 1,
-            ))
         self._stop.set()
         self.phase = "stopping"
         self.stopped_for_auth = True
@@ -158,13 +162,14 @@ class AuthWaitReceiver:
                 raise ValueError("Unsupported or obsolete auth-wait binding")
             if operation == "revoke":
                 self._stop.set()
+                self._lease_changed.set()
             elif operation == "renew":
                 # Expiry cannot be raced by a fresh grant before owned stop settles.
                 active = self.authorized()
-                if self.hold or not active and self.phase != "auth_wait":
+                if not active and (self.hold or self.phase != "auth_wait"):
                     raise ValueError("Native stop or owner reconciliation is required")
                 self._install(request)
-                if self.phase == "auth_wait":
+                if self.phase == "auth_wait" and self._stop_delay() > 0:
                     self.incarnation = str(uuid.uuid4())
                     self._stop.clear()
                     self.phase = "starting"
@@ -193,6 +198,7 @@ class AuthWaitReceiver:
         self.preserve_hold("receiver-closed")
         self.phase = "closed"
         self._stop.set()
+        self._lease_changed.set()
         if self._server is not None:
             self._server.close()
         tasks = list(self._connections)

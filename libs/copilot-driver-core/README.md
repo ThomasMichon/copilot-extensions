@@ -165,6 +165,13 @@ its remaining authorization. Budgets must be finite, positive and at most
 native process, so clock rollback cannot extend the monotonic grant. Stop
 begins up to one second early to reserve the bounded SDK-freeze exchange;
 sub-second grants stop immediately.
+An accepted replacement wakes the deadline watcher. A grant already inside
+the stop reserve closes authorization synchronously and cannot start a new
+native incarnation, including renewal of a stopped session.
+Native input and other irreversible broker-control holds do not expire a
+still-valid source grant or retire its native CLI. Active source renewal can
+preserve that CLI without clearing its hold; recovery after actual source
+expiry or revocation still refuses while the control hold remains.
 No credentials are read, copied or accepted by the receiver.
 
 The private host-state file's `auth_wait` member declares the **running**

@@ -83,6 +83,51 @@ def test_missing_or_unbounded_source_authorization_refused(change):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("shortened", ["budget", "wall"])
+async def test_active_shortening_stops_before_endpoint_acceptance_can_extend_authority(shortened):
+    receiver = AuthWaitReceiver("durable-session", configuration())
+    await receiver.serve()
+    receiver.phase = "running"
+    watcher = asyncio.create_task(receiver.expiry())
+    try:
+        await asyncio.sleep(.01)
+        renewal = dict(lease_revision=2, budget_seconds=5, expires_at=time.time() + 5)
+        renewal["budget_seconds" if shortened == "budget" else "expires_at"] = (
+            .01 if shortened == "budget" else time.time() + .5
+        )
+        result = await request(receiver, "renew", **renewal)
+        assert result["ok"] and result["lease_revision"] == 2
+        assert receiver._stop.is_set()
+        await asyncio.wait_for(watcher, .05)
+        assert receiver.phase == "stopping" and not receiver.authorized()
+    finally:
+        watcher.cancel()
+        await asyncio.gather(watcher, return_exceptions=True)
+        await receiver.close()
+
+
+@pytest.mark.asyncio
+async def test_sub_reserve_renewal_cannot_restart_a_stopped_native_incarnation():
+    receiver = AuthWaitReceiver("durable-session", configuration())
+    await receiver.serve()
+    original = receiver.incarnation
+    try:
+        await request(receiver, "revoke")
+        await receiver.expiry()
+        receiver.stopped(IDLE)
+        result = await request(
+            receiver, "renew", lease_revision=2, budget_seconds=.01,
+            expires_at=time.time() + 5,
+        )
+        assert result["ok"] and result["phase"] == "auth_wait"
+        assert result["incarnation"] == original and not receiver.authorized()
+        with pytest.raises(asyncio.TimeoutError):
+            await asyncio.wait_for(receiver.next_grant(), .05)
+    finally:
+        await receiver.close()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("changed", [
     {"controlled": False}, {"closed": True}, {"pending": True},
     {"sending": True}, {"outstanding": True}, {"waiting": False}, None,
@@ -148,11 +193,19 @@ peer.sendall((json.dumps({
     "sessionId": binding["sessionId"], "nonce": binding["nonce"],
     "nativePid": os.getpid(), "extensionPid": os.getpid(),
 }) + "\n").encode())
+if os.environ.get("AUTH_FIXTURE_NATIVE_INPUT"):
+    peer.sendall((json.dumps({
+        "contract": "copilot-driver.headed-auth-state", "version": 1,
+        "incarnation": binding["authWait"]["incarnation"],
+        "state": {"controlled": False, "closed": False, "pending": False,
+                  "sending": False, "outstanding": False, "waiting": False},
+    }) + "\n").encode())
 stream = peer.makefile("rb")
 for line in stream:
     request = json.loads(line)
     if request.get("contract") == "copilot-driver.headed-auth-freeze":
-        state = {"controlled": True, "closed": False, "pending": False,
+        state = {"controlled": not bool(os.environ.get("AUTH_FIXTURE_NATIVE_INPUT")),
+                 "closed": False, "pending": False,
                  "sending": False, "outstanding": False, "waiting": True}
         if os.environ.get("AUTH_FIXTURE_PENDING"):
             state["pending"] = True
@@ -174,6 +227,58 @@ async def eventually(read, predicate):
                 pass
             await asyncio.sleep(.01)
     return await asyncio.wait_for(poll(), 10)
+
+
+@pytest.mark.asyncio
+async def test_native_input_hold_preserves_native_lifetime_until_actual_source_revocation(
+    tmp_path, monkeypatch,
+):
+    if os.name != "nt" and not sys.platform.startswith("linux"):
+        pytest.skip("Receiver explicitly supports Windows Jobs and Linux process groups")
+    from agent_remote_driver.session_host.osutil import pid_alive
+
+    monkeypatch.setattr(launcher, "_require_receiving_policy", lambda *_args: None)
+    state_file, history_file = tmp_path / "host.json", tmp_path / "history.jsonl"
+    task = asyncio.create_task(launcher.run_headed(
+        [PYTHON, "-c", _NATIVE, "--session-id", "durable-session"],
+        session_id="durable-session", attempt_directory=tmp_path / "attempt",
+        state_file=state_file, cwd=str(tmp_path), auth_wait=configuration(),
+        env={"AUTH_FIXTURE_HISTORY": str(history_file), "AUTH_FIXTURE_NATIVE_INPUT": "1"},
+    ))
+    read_state = lambda: json.loads(state_file.read_text(encoding="utf-8"))
+    read_history = lambda: [json.loads(line) for line in history_file.read_text().splitlines()]
+    try:
+        running = await eventually(read_state, lambda value: value.get("state") == "running")
+        child = (await eventually(read_history, lambda value: len(value) == 1))[0]
+        endpoint = running["auth_wait"]
+
+        async def held_status():
+            while True:
+                status = await request(endpoint, "status")
+                if status["hold"] == "native-control-lost":
+                    return status
+                await asyncio.sleep(.01)
+
+        assert (await asyncio.wait_for(held_status(), 5))["phase"] == "running"
+        renewed = await request(
+            endpoint, "renew", lease_revision=2, budget_seconds=10, expires_at=time.time() + 10,
+        )
+        assert renewed["ok"] and renewed["hold"] == "native-control-lost"
+        assert renewed["incarnation"] == endpoint["incarnation"]
+        await asyncio.sleep(.15)
+        assert not task.done() and pid_alive(child["pid"]) and pid_alive(child["descendant"])
+        assert len(read_history()) == 1
+        assert (await request(endpoint, "revoke"))["ok"]
+        stopped = await eventually(read_state, lambda value: value.get("state") == "auth_held")
+        assert stopped["auth_wait"]["hold"] == "native-control-lost"
+        assert not pid_alive(child["pid"]) and not pid_alive(child["descendant"])
+        assert not (await request(
+            endpoint, "renew", lease_revision=3, budget_seconds=10, expires_at=time.time() + 10,
+        ))["ok"]
+        assert not task.done() and len(read_history()) == 1
+    finally:
+        task.cancel()
+        await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 5)
 
 
 @pytest.mark.asyncio
