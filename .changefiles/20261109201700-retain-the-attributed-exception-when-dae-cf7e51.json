@@ -1,0 +1,9 @@
+{
+  "comment": "Retain the attributed exception when daemon-instance cleanup holds a record",
+  "changes": [
+    {
+      "plugin": "libs/agent-procutil",
+      "type": "patch"
+    }
+  ]
+}

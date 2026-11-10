@@ -6,7 +6,7 @@ vault_runtime_activation() {
     if [[ -z "$python" ]]; then
         local candidate
         while IFS= read -r candidate; do
-            if "$candidate" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' >/dev/null 2>&1; then
+            if "$candidate" -I -S -B -c 'import sys; sys.exit(0 if sys.version_info >= (3,10) else 1)' </dev/null >/dev/null 2>&1; then
                 python="$candidate"
                 break
             fi
@@ -18,5 +18,5 @@ vault_runtime_activation() {
     fi
     local project="${1:-$PWD}"
     if [[ $# -ge 2 ]]; then shift 2; elif [[ $# -gt 0 ]]; then shift; fi
-    "$python" -I -B -X utf8 "$reader_dir/runtime-activation.py" --cwd "$project" "$@"
+    "$python" -I -B -X utf8 "$reader_dir/runtime-activation.py" --cwd "$project" "$@" </dev/null
 }

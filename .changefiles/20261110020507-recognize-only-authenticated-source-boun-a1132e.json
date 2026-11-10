@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize only authenticated source-bound Vault native uninstall controllers during broker and finite runtime removal.",
+  "changes": [
+    {
+      "plugin": "libs/installer-engine",
+      "type": "patch"
+    }
+  ]
+}
