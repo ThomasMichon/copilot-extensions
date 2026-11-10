@@ -1936,8 +1936,36 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > consumer's own top-level `libs/*`), but a lib consumed *solely* through a
 > `uv`-editable canonical-reference pointer (no local copy at all) is
 > invisible to it. `python tools/check-version-bump.py --list` additionally
-> names those pointer-only consumers — check both before assuming you've
-> found every plugin a shared-lib change reaches.
+> names those pointer-only consumers and expands canonical sibling-library
+> dependencies transitively, including shared edges and cycles. A nested
+> library change therefore requires changefiles for indirect consumers too;
+> malformed or symlinked reachable manifests fail closed rather than hiding
+> consumers. Check both before assuming you've found every plugin a shared-lib
+> change reaches.
+>
+> **Library-only bump intents also require consumer coverage.** The presence
+> guard expands new or changed library bump entries in top-level changefiles
+> through the same map, even without a library source edit. Unchanged baseline
+> entries, release-note-only edits and removed intents do not create new
+> obligations. Consumer coverage still requires this PR's own newly added
+> changefiles, not coincidental pending entries from an earlier PR. Intent and
+> coverage reads use the resolved Git revisions, not checkout contents. PR
+> dependency discovery uses the prospective target/head integration tree, so
+> consumers or edges added on the target after a branch forked are included and
+> target-side removals do not create spurious obligations. Git merge plumbing
+> computes that tree without changing the checkout or index; conflicting inputs
+> require reconciliation. Direct consumer seeds, nested library edges and
+> packaged-source declarations still use the shared parsers. The retired
+> standalone version diagnostic retains its literal-head comparison. Git symlink
+> modes are rejected even when the checkout contains a regular file.
+>
+> New or changed library release intents and consumer coverage require fresh
+> changefile filenames: do not edit an old file to add a library/type intent or
+> recycle a filename already used in the target branch's history. Promotion
+> excludes previously consumed filenames regardless of edited contents. Use
+> `tools/changefile.py add` for a new identity; a rename to a previously unused
+> filename also creates a new release identity. Complete Git history is required
+> to verify freshness, including identities integrated after a PR forked.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes
