@@ -52,9 +52,10 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
         "if($errors.Count){throw 'Installer parse failed'}\n"
         "$functions=@($ast.FindAll({param($node) "
         "$node -is [Management.Automation.Language.FunctionDefinitionAst] "
-        "-and $node.Name -eq 'Write-SupervisorLauncher'},$true))\n"
-        "if($functions.Count -ne 1){throw 'Expected one launcher writer'}\n"
-        "Invoke-Expression $functions[0].Extent.Text\n"
+        "-and $node.Name -in @('Enter-PluginSnapshotLock','Publish-FileAtomically',"
+        "'Publish-ServiceLauncher','Write-SupervisorLauncher')},$true))\n"
+        "if($functions.Count -ne 4){throw 'Expected launcher writer and publication helpers'}\n"
+        "foreach($function in $functions){Invoke-Expression $function.Extent.Text}\n"
         "Write-SupervisorLauncher | Out-Null\n", encoding="utf-8",
     )
     common = [shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File"]

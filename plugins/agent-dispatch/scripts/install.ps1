@@ -1351,6 +1351,31 @@ function Publish-FileAtomically {
     }
 }
 
+function Publish-ServiceLauncher {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Content
+    )
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    # Serialize comparison and replacement with other installer publications.
+    # An unchanged script may be held open without write/delete sharing.
+    $mutex = Enter-PluginSnapshotLock -InstallDir ([IO.Path]::GetDirectoryName($fullPath))
+    try {
+        $encoding = New-Object Text.UTF8Encoding($false)
+        if ([IO.File]::Exists($fullPath) -and
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($fullPath)) -ceq
+            [Convert]::ToBase64String($encoding.GetBytes($Content))) {
+            return
+        }
+        # Changed content must actually publish; the existing bounded atomic
+        # replacement retries preserve old readers and propagate refusal.
+        Publish-FileAtomically -Path $fullPath -Content $Content -Encoding $encoding
+    } finally {
+        $mutex.ReleaseMutex()
+        $mutex.Dispose()
+    }
+}
+
 function Enter-PluginSnapshotLock {
     <# Serializes a critical section against concurrent invocations (two
        near-simultaneous install/stamp actions) under one named mutex keyed
@@ -3055,7 +3080,7 @@ try {
 }
 if (`$_cache -eq `$_mintedCache) { try { [IO.Directory]::Delete(`$_mintedCache, `$true) } catch {} }
 "@
-    [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
+    Publish-ServiceLauncher -Path $launcher -Content $launcherBody
     if ($schedulingPolicy.windows_scheduled_task -ne 'enabled') {
         if (-not $NoStart) { Invoke-DispatchCoordinatorEnsure }
         return
@@ -3815,7 +3840,7 @@ try {
 if (`$_cache -eq `$_mintedCache) { try { [IO.Directory]::Delete(`$_mintedCache, `$true) } catch {} }
 exit `$LASTEXITCODE
 "@
-    [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
+    Publish-ServiceLauncher -Path $launcher -Content $launcherBody
     return $launcher
 }
 
