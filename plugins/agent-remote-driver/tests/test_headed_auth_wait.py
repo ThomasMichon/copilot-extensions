@@ -105,6 +105,25 @@ async def test_unsupported_owner_death_custody_refuses_before_receiving_endpoint
 
 
 @pytest.mark.asyncio
+async def test_missing_native_job_retirement_api_refuses_before_endpoint(tmp_path, monkeypatch):
+    from agent_remote_driver.headed import auth_child
+
+    monkeypatch.setattr(auth_child, "os", SimpleNamespace(name="nt"))
+    monkeypatch.setattr(auth_child, "JobHandle", SimpleNamespace())
+
+    async def forbidden_server(_receiver):
+        raise AssertionError("Missing native Job custody must refuse before endpoint creation")
+
+    monkeypatch.setattr(AuthWaitReceiver, "serve", forbidden_server)
+    with pytest.raises(RuntimeError, match="Job retirement custody"):
+        await launcher.run_headed(
+            ["native", "--session-id", "durable-session"], session_id="durable-session",
+            attempt_directory=tmp_path / "attempt", state_file=tmp_path / "state.json",
+            cwd=str(tmp_path), auth_wait=configuration(),
+        )
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("shortened", ["budget", "wall"])
 async def test_active_shortening_stops_before_endpoint_acceptance_can_extend_authority(shortened):
     receiver = AuthWaitReceiver("durable-session", configuration())
@@ -328,6 +347,8 @@ async def test_cancelled_retirement_waiter_retains_one_exact_cleanup(tmp_path, m
     second = None
     try:
         assert await asyncio.to_thread(started.wait, 2)
+        assert owner.retirement_started
+        await eventually(lambda: owner.returncode, lambda value: value is not None)
         first.cancel()
         await asyncio.gather(first, return_exceptions=True)
         second = asyncio.create_task(owner.terminate())

@@ -179,6 +179,9 @@ an irreversible hold. Broker EOF follows the admitted SDK stream's bounded
 drain rather than racing the final native replies.
 An owned-retirement TCP reset is delivered as EOF to the auth stream reader
 so complete buffered records still drain; an incomplete record remains held.
+The retirement marker follows the owned native Job termination request, before
+asynchronous settlement is queued; merely scheduling a worker cannot suppress
+a connection-loss hold.
 
 The private host-state file's `auth_wait` member declares the **running**
 contract/version, loopback `port`, random `nonce`, `session_id`, receiving

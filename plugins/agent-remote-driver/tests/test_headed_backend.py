@@ -24,6 +24,7 @@ class Owner:
 
     def __init__(self):
         self.done = asyncio.Event()
+        self.retirement_started = False
 
     async def wait(self):
         await self.done.wait()
@@ -31,6 +32,7 @@ class Owner:
 
     async def terminate(self):
         self.stops += 1
+        self.retirement_started = True
         self.returncode = 0
         self.done.set()
 
@@ -143,11 +145,11 @@ async def _peer(backend, **overrides):
 
 
 @asynccontextmanager
-async def _auth_peer():
+async def _auth_peer(owner=None):
     from agent_remote_driver.headed.auth_wait import AuthWaitReceiver
     from test_headed_auth_wait import configuration
 
-    owner = Owner()
+    owner = Owner() if owner is None else owner
     receiver = AuthWaitReceiver("native-fixture", configuration())
     receiver.phase = "running"
     await receiver.serve()
@@ -204,6 +206,41 @@ async def test_idle_freeze_then_sdk_loss_before_owned_retirement_cannot_resume()
 
 
 @pytest.mark.asyncio
+async def test_sdk_loss_during_retirement_worker_handoff_cannot_resume():
+    import time
+    from test_headed_auth_wait import request
+
+    entered, release = asyncio.Event(), asyncio.Event()
+
+    class DelayedOwner(Owner):
+        async def terminate(self):
+            entered.set()
+            await release.wait()
+            await super().terminate()
+
+    owner = DelayedOwner()
+    async with _auth_peer(owner) as (_, receiver, backend, reader, writer):
+        await _freeze_idle(receiver, backend, reader, writer)
+        retirement = asyncio.create_task(backend.retire_auth())
+        try:
+            await asyncio.wait_for(entered.wait(), 1)
+            assert owner.returncode is None and owner.stops == 0
+            writer.close()
+            await writer.wait_closed()
+            await asyncio.wait_for(backend.lost.wait(), 1)
+            release.set()
+            await asyncio.wait_for(retirement, 1)
+            assert receiver.phase == "held" and receiver.hold == "native-connection-lost"
+            assert not (await request(
+                receiver, "renew", lease_revision=2, budget_seconds=5,
+                expires_at=time.time() + 5,
+            ))["ok"]
+        finally:
+            release.set()
+            await asyncio.gather(retirement, return_exceptions=True)
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("record,forward_failure", [
     (b'{"jsonrpc":', False),
     (b'{"jsonrpc":"2.0"}', False),
@@ -222,7 +259,6 @@ async def test_abnormal_sdk_drain_cannot_reuse_an_old_idle_snapshot(record, forw
 
     async with _auth_peer() as (owner, receiver, backend, reader, writer):
         await _freeze_idle(receiver, backend, reader, writer)
-        backend.auth_retiring = True
         await owner.terminate()
         if forward_failure:
             backend.stdout.feed_eof()
@@ -246,7 +282,6 @@ async def test_abnormal_sdk_drain_cannot_reuse_an_old_idle_snapshot(record, forw
 async def test_owned_exit_drains_queued_sdk_reply_before_broker_eof(reply):
     async with _auth_peer() as (owner, receiver, backend, reader, writer):
         await _freeze_idle(receiver, backend, reader, writer)
-        backend.auth_retiring = True
         await owner.terminate()
         await asyncio.sleep(.01)
         assert not backend.stdout.at_eof()

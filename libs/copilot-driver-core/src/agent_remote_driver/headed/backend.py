@@ -93,7 +93,6 @@ class HeadedBackend:
         self._stream_closed = asyncio.Event()
         self._stream_clean = False
         self.auth_stopping = False
-        self.auth_retiring = False
         self.stdout = asyncio.StreamReader(limit=1_000_000)
         self.stdin = self
         self.bound = asyncio.Event()
@@ -115,6 +114,13 @@ class HeadedBackend:
     @property
     def returncode(self) -> int | None:
         return self._owner.returncode
+
+    @property
+    def auth_retiring(self) -> bool:
+        return (
+            self.auth_stopping
+            and getattr(self._owner, "retirement_started", False) is True
+        )
 
     async def wait(self) -> int:
         return await self._owner.wait()
@@ -173,7 +179,6 @@ class HeadedBackend:
     async def retire_auth(self) -> None:
         if self._auth_wait is None or not self.auth_stopping:
             raise RuntimeError("Auth retirement requires the original freeze boundary")
-        self.auth_retiring = True
         await self._owner.terminate()
         await self.finish_auth_stop()
 
