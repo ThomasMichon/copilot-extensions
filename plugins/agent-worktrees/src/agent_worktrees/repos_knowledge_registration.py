@@ -207,6 +207,9 @@ def apply(project: str, name: str, path: str, branch: str, account: str, token: 
 
             def write():
                 nonlocal attempted, committed
+                current, _ = _selection(project, name, path, branch, account, budget)
+                if not hmac.compare_digest(token, _token(current)):
+                    raise ConfigurationError("preview-conflict", "Registration inputs changed; refresh and preview again.")
                 fingerprint([repos._repos_yaml_path()])
                 attempted = True
                 write_checked(

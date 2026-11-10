@@ -82,6 +82,8 @@ the same remaining execution deadline, preserving the cleanup reserve.
 Committed-policy inspection, revalidation and guard-fact construction use that
 deadline too; neither an independent probe budget nor an earlier cached snapshot
 may replace it.
+Re-inspect and compare the complete proposal after the publication-lock wait,
+immediately before persistence, rather than committing the earlier selection.
 
 Return the actual persisted registration and the supported next step: refresh
 and select the existing binding action. Do not bind automatically or report
@@ -182,7 +184,9 @@ account resolver or ordinary credential-pinning implementation.
 Native reads share one 18-second aggregate and apply one 26-second aggregate,
 with their original cleanup reserves and existing lock owners. Each local Git
 read has its own four-second cap within that aggregate: three for local-only
-anchors and four when resolving an effective origin.
+anchors and four when resolving an effective origin per inspection pass.
+Apply performs an initial inspection and a final post-publication-lock
+inspection inside the same 26-second aggregate.
 The catalog adds no Git/provider read for this action. No deadline, liveness
 assertion, process containment or source-safety check is relaxed.
 
@@ -300,3 +304,23 @@ against the updated native owner. An earlier attempt stopped during dependency
 preparation because documentation edits overlapped its source snapshot; no tests
 ran in that attempt. The passing run held all source inputs stable through
 preparation, execution and cleanup.
+
+## Publication-time revalidation and fixture isolation
+
+A later review asks for assessment of a publication-time race and an ambient
+authentication path in a test. Two real publication-lock controls reproduce
+stale persistence after origin or preference changes during the wait. Apply now
+revalidates the complete proposal and token inside the guarded write callback,
+before persistence and without extending the existing execution deadline.
+
+The home-relative credential-pin fixture registered its explicit account before
+entering its auth mocks. A fail-on-ambient-auth guard reproduces that path
+without reading credentials. Registration now occurs inside the same synthetic
+token and active-account mocks as the explicit pin check; the outer guard
+retains the regression assertion. Production authentication behavior is unchanged.
+
+All three new controls fail before the corrections. The final focused packet
+passes 43 cases: the local-registration controls and five ordinary pin controls.
+The real Manager registration form additionally passes against this native
+owner. Final inspection remains inside the original apply budget; no deadline,
+authentication or cleanup rule is relaxed.

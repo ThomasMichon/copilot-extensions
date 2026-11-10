@@ -122,6 +122,10 @@ never overwritten or reclassified.
 Like native preference editing, selection and the final write reject registry
 source indirection. A symlinked registry requires inspection by its owner;
 registration never replaces that link while leaving its backing source unchanged.
+After acquiring the guard-publication lock, apply re-inspects the full proposal
+and compares its token again immediately before persistence. Checkout, origin,
+policy or preference drift during that wait refuses rather than persisting the
+earlier selection; the same aggregate deadline covers both inspection passes.
 
 Successful return means registration and its normal protection publication:
 a new non-agent `class: knowledge` entry, normal registry/publication lock

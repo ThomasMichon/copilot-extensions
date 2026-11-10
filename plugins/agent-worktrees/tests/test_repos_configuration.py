@@ -674,6 +674,46 @@ def test_local_knowledge_registration_contention_respects_aggregate_apply_deadli
     assert repos._repos_yaml_path().read_bytes() == before
 
 
+@pytest.mark.parametrize("change", ["origin", "defaults"])
+def test_local_knowledge_registration_rechecks_after_publication_lock_wait(native, monkeypatch, change):
+    from agent_worktrees import guarded_anchors, repos_knowledge_registration as registration, tracking
+
+    root = local_knowledge(native)
+    token = registration.preview("sample", "local-knowledge", str(root), "main")["token"]
+    inspected = threading.Event()
+    original = registration._selection
+
+    def observed(*args):
+        selected = original(*args)
+        inspected.set()
+        return selected
+
+    monkeypatch.setattr(registration, "_selection", observed)
+    publication = guarded_anchors._prepare_directory(repos._repos_yaml_path().parent) / "publication"
+    before = repos._repos_yaml_path().read_bytes()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with tracking._RecordLock(publication, require_sidecar=True):
+            future = pool.submit(registration.apply, "sample", "local-knowledge", str(root), "main", "", token)
+            assert inspected.wait(5), "the proposal must be inspected before the publication wait"
+            if change == "origin":
+                result = subprocess.run(
+                    ["git", "-C", str(root), "remote", "add", "origin", "https://github.com/example/changed.git"],
+                    capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+                )
+                assert result.returncode == 0, result.stderr
+            else:
+                path = cfg.global_config_path()
+                raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+                raw["default_copilot_account"] = "changed"
+                path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+            expected_git = tree(root)
+        with pytest.raises(ConfigurationError) as failure:
+            future.result(timeout=10)
+    assert failure.value.code == "preview-conflict"
+    assert repos._repos_yaml_path().read_bytes() == before
+    assert tree(root) == expected_git
+
+
 def test_local_registration_parser_rejects_unrelated_preference_fields_before_inspection(native, capsys):
     from agent_worktrees.repos_configuration import command
 
