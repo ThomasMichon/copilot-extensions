@@ -20,6 +20,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
+from urllib.parse import unquote
 
 
 from . import env_scrub, git_tree_diff, push_timeout
@@ -987,6 +988,8 @@ def slug_from_url(url: str | None) -> str | None:
     This is the value a PR provider needs (the API is keyed on the provider
     repo slug), as opposed to the local project name. Accepts a URL string
     (callers that have only a remote *name* should use :func:`remote_slug`).
+    Percent escapes are decoded once per selected path component, never before
+    splitting the URL or as a substitute for full provider-destination checks.
     """
     if not url:
         return None
@@ -1004,11 +1007,18 @@ def slug_from_url(url: str | None) -> str | None:
     # The provider API is keyed on ``{project}/{repo}`` -- the segment before
     # ``_git`` is the project, the one after is the repo. (ADO ssh remotes use
     # ``v3/{org}/{project}/{repo}`` with no ``_git`` and resolve fine below.)
+    components = parts[-2:]
     if "_git" in parts:
         gi = parts.index("_git")
         if 0 < gi < len(parts) - 1:
-            return f"{parts[gi - 1]}/{parts[gi + 1]}"
-    return f"{parts[-2]}/{parts[-1]}"
+            components = [parts[gi - 1], parts[gi + 1]]
+    try:
+        components = [unquote(component, errors="strict") for component in components]
+    except UnicodeDecodeError:
+        return None
+    if any("/" in component for component in components):
+        return None
+    return "/".join(components)
 
 
 def remote_slug(remote: str, *, cwd: str | Path) -> str | None:

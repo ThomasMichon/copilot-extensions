@@ -209,6 +209,53 @@ def test_repair_does_not_execute_the_generation_being_repaired(modes, tmp_path, 
         ) is None
 
 
+@pytest.mark.parametrize("replacement_present", [False, True])
+def test_installed_control_requires_monitor_replacement_capability(
+    modes, tmp_path, monkeypatch, replacement_present,
+):
+    from contextlib import ExitStack
+
+    runtime = modes.lifecycle.runtime
+    version = "1.0.0"
+    slot = runtime.slot(tmp_path, version)
+    package = slot / "agent_worktrees"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("")
+    health = slot / "health-checked"
+    (package / "runtime_candidate.py").write_text(
+        f"MODE_OWNER_ABI = {modes._MODE_OWNER_ABI!r}\n"
+        f"def verify_runtime_candidate(): open({str(health)!r},'w').close()\n"
+        "def verify_installed_origins(): pass\n",
+    )
+    if replacement_present:
+        (package / "runtime_monitor_replacement.py").write_text("")
+    (slot / ".runtime-input-origins.json").write_text("{}")
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.write_bytes(b"fixture")
+    runtime.mark_complete(tmp_path, version, payload_hash="a" * 64)
+    (tmp_path / "current-version").write_text(version + "\n")
+    monkeypatch.setattr(modes.lifecycle.engine, "_procutil", lambda _inputs: None)
+
+    def run_probe(argv, **_kwargs):
+        source = (
+            f"import sys; sys.prefix={str(slot)!r}; sys.path.insert(0,{str(slot)!r})\n"
+            + argv[4]
+        )
+        return subprocess.run(
+            [sys.executable, "-I", "-B", "-c", source, *argv[5:]],
+            check=True, capture_output=True, text=True, **no_window_kwargs(),
+        )
+
+    monkeypatch.setattr(modes.lifecycle.engine, "run_owned", run_probe)
+    with ExitStack() as custody:
+        control = modes._retained_control(
+            tmp_path, None, custody, mode="dev", wait_timeout=1, child_timeout=5,
+        )
+        assert (control is not None) is replacement_present
+    assert health.exists() is replacement_present
+
+
 @pytest.mark.parametrize("provenance", [{}, {"version": "1.0.0"}, None])
 def test_borrowed_control_provenance_refuses_without_an_admitted_source_pin(
     modes, tmp_path, monkeypatch, provenance,
@@ -1121,7 +1168,10 @@ def test_real_native_repair_preserves_broken_slot_and_allocates_distinct_generat
     (root / "current-version").write_text(version + "\n", encoding="utf-8")
     (root / "last-known-good").write_text(version + "\n", encoding="utf-8")
     environment = dict(os.environ)
-    environment.update(HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home))
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        PSModuleAnalysisCachePath=str(home / "module-analysis.cache"),
+    )
     for name in (
         "COPILOT_EXTENSIONS_CONTEXT",
         "COPILOT_PLUGIN_ROOT",
@@ -1146,6 +1196,8 @@ def test_real_native_repair_preserves_broken_slot_and_allocates_distinct_generat
                         "repair",
                         "-InstallDir",
                         str(root),
+                        "-BootstrapPython",
+                        sys.executable,
                     ]
                 )
         git = shutil.which("git")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import os
 import shutil
 import subprocess
@@ -46,7 +47,8 @@ def admission(tmp_path: Path):
     )[1].split("# === end command-lifecycle: admission before staging ===", 1)[0]
     program = (
         "param([string]$BootstrapPython='',[string]$ProjectName='',[string]$Owner='',"
-        "[string]$RuntimeSourceDescriptor='',[switch]$RuntimeOnly,[string]$InstallSource='',"
+        "[string]$RuntimeSourceDescriptor='',[string]$InstallationPayload='',"
+        "[switch]$RuntimeOnly,[string]$InstallSource='',"
         "[switch]$Force,[switch]$ZeroDowntime,[switch]$ProvisionMissingRuntime,[switch]$RemoveConfig)\n"
         "Set-StrictMode -Version Latest\n"
         "$ErrorActionPreference='Stop'\n$ContextualInstall=$false\n"
@@ -90,6 +92,7 @@ def _run(
     admission, host: str, candidates: dict, explicit: Path | None = None,
     *, native_driver: bool = False, participant: bool = False, first_use: bool = False,
     selected_snapshot: Path | str | None = None,
+    installation_payload: Path | None = None,
 ):
     root, script, home, receipt, _ = admission
     environment = {
@@ -113,12 +116,85 @@ def _run(
         environment["COPILOT_PLUGIN_STAGED_FROM"] = str(root / "original-payload")
     result = subprocess.run(
         [host, "-NoLogo", "-NoProfile", "-File", str(script),
-         *(["-BootstrapPython", str(explicit)] if explicit else [])],
+         *(["-BootstrapPython", str(explicit)] if explicit else []),
+         *(["-InstallationPayload", str(installation_payload)] if installation_payload else [])],
         cwd=root, env=environment, capture_output=True, text=True, timeout=20,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
     assert not (home / "never-created").exists()
     return result, json.loads(receipt.read_text()) if receipt.exists() else None
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows legacy dev admission")
+@pytest.mark.parametrize("host", HOSTS)
+@pytest.mark.parametrize("foreign", [False, True])
+def test_dev_directory_inputs_retain_verified_canonical_owner(admission, host, foreign):
+    root, script, home, _receipt, _old = admission
+    settings = home / ".copilot" / "settings.json"
+    settings.parent.mkdir()
+    settings.write_text(json.dumps({"extraKnownMarketplaces": {
+        "example": {"source": {"source": "github", "repo": "Example/Plugins"}},
+        "foreign": {"source": {"source": "github", "repo": "Other/Plugins"}},
+    }}), encoding="utf-8")
+    installed = home / ".copilot" / "installed-plugins" / "example" / "agent-worktrees"
+    other = installed.parents[1] / "foreign" / "agent-worktrees"
+    for payload in (installed, other):
+        payload.mkdir(parents=True)
+        (payload / "plugin.json").write_text('{"name":"agent-worktrees","version":"1.0.0"}')
+    runtime = home / "incumbent"
+    runtime.mkdir()
+    spec = importlib.util.spec_from_file_location("_dev_binding_test", SCRIPTS / "command_binding.py")
+    binding = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(binding)
+    primitive = binding._load_primitive(SCRIPTS.parent)
+    environment = {**os.environ, "USERPROFILE": str(home), "HOME": str(home)}
+    canonical = binding.publish_legacy_binding(
+        primitive, payload_root=installed, plugin_id="agent-worktrees",
+        legacy_root=runtime, project_root=root, environment=environment,
+    )
+    manifest = runtime / "deploy-manifest.json"
+    before = json.dumps({
+        "schema_version": 3, "service": "agent-worktrees", "commandBinding": canonical,
+        "commandLifecycle": {
+            "version": 1, "state": "complete",
+            "owner": {key: value for key, value in canonical.items() if key != "payloadRoot"},
+        },
+    }).encode()
+    manifest.write_bytes(before)
+    (script.parent / "command_binding.py").write_text(
+        "import importlib.util,json,os,sys\nfrom pathlib import Path\n"
+        f"spec=importlib.util.spec_from_file_location('_real_binding',{str(SCRIPTS / 'command_binding.py')!r})\n"
+        "binding=importlib.util.module_from_spec(spec);spec.loader.exec_module(binding)\n"
+        f"primitive=binding._load_primitive(Path({str(SCRIPTS.parent)!r}))\n"
+        "def arg(name): return sys.argv[sys.argv.index(name)+1]\n"
+        "try:\n"
+        " owner=binding.publish_legacy_binding(primitive,"
+        "payload_root=Path(arg('--source-payload-root')),plugin_id='agent-worktrees',"
+        "legacy_root=Path(arg('--legacy-root')),project_root=Path(arg('--project-root')))\n"
+        "except binding.CommandOwnershipConflict as error:\n"
+        " print(str(error),file=sys.stderr);raise SystemExit(3)\n"
+        "Path(os.environ['TEST_RECEIPT']).write_text(json.dumps({'owner':owner,'inputs':arg('--payload-root')}))\n",
+        encoding="utf-8",
+    )
+    script.write_text(
+        script.read_text(encoding="utf-8")
+        .replace("$Action='update'", "$Action='dev'")
+        .replace("$InstallDir=Join-Path $env:USERPROFILE 'never-created'", f"$InstallDir={_quote(runtime)}"),
+        encoding="utf-8",
+    )
+    result, receipt = _run(
+        admission, host, {}, explicit=Path(sys.executable),
+        installation_payload=other if foreign else installed,
+    )
+    assert manifest.read_bytes() == before
+    if foreign:
+        assert result.returncode == 3, result.stdout + result.stderr
+        assert "another owner" in result.stderr
+        assert receipt is None
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert receipt["owner"] == canonical
+        assert Path(receipt["inputs"]) == script.parent.parent
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native installer router")

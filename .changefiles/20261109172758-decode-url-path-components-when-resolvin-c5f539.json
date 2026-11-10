@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve encoded Azure DevOps targets to registered policy and base branches, including singleton repositories; preserve canonical ownership for explicit development inputs and qualify the retained control's replacement capability.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

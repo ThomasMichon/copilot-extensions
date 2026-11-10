@@ -223,7 +223,7 @@ def _admission_digest(args) -> str:
 
 def _native_arguments(args) -> list[str]:
     values = ["-Action", args.action, "-InstallDir", str(args.root.resolve())]
-    for option in ("project_name", "bootstrap_python", "owner", "install_source", "input_timeout"):
+    for option in ("project_name", "bootstrap_python", "owner", "installation_payload", "install_source", "input_timeout"):
         value = getattr(args, option, None)
         if value is not None:
             values.extend(["-" + "".join(word.title() for word in option.split("_")), str(value)])
@@ -366,7 +366,7 @@ def _foreground(args, driver) -> int:
         "--payload", str(args.payload), "--root", str(args.root),
         "--shell", str(args.shell), "--action", args.action, "--participant",
     ]
-    for option in ("project_name", "bootstrap_python", "owner", "install_source", "input_timeout"):
+    for option in ("project_name", "bootstrap_python", "owner", "installation_payload", "install_source", "input_timeout"):
         value = getattr(args, option, None)
         if value is not None:
             command.extend(["--" + option.replace("_", "-"), str(value)])
@@ -431,6 +431,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--runtime-only", action="store_true")
     parser.add_argument("--bootstrap-python", type=Path)
     parser.add_argument("--owner", type=Path)
+    parser.add_argument("--installation-payload", type=Path)
     parser.add_argument("--install-source", type=Path)
     parser.add_argument("--input-timeout", type=positive_input_timeout)
     parser.add_argument("--source-descriptor", type=json.loads, help=argparse.SUPPRESS)
@@ -448,6 +449,12 @@ def main(argv: list[str] | None = None) -> int:
     inspection.add_argument("--check-removal", action="store_true", help=argparse.SUPPRESS)
     inspection.add_argument("--remove-runtime", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
+    if args.installation_payload is not None and (
+        args.action not in ("dev", "dev-release")
+        or not args.installation_payload.is_absolute()
+        or os.environ.get("COPILOT_EXTENSIONS_CONTEXT")
+    ):
+        parser.error("--installation-payload requires an absolute legacy dev/dev-release payload")
     if args.runtime_only and (
         args.action not in ("install", "update") or args.project_name is not None
     ):

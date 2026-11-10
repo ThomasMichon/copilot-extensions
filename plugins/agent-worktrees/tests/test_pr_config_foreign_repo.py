@@ -4,6 +4,9 @@ resolution, independent of the caller's active project (the
 
 from __future__ import annotations
 
+import pytest
+import yaml
+
 from agent_worktrees import config as cfg
 from agent_worktrees import pr_config
 from agent_worktrees import repos as repos_mod
@@ -130,3 +133,59 @@ def test_registry_entry_without_remote_is_skipped(monkeypatch):
     )
     resolution = pr_config.resolve_repo_config_for_slug(config, "owner/no-remote")
     assert resolution.resolved is False
+
+
+@pytest.mark.parametrize("allow_git", [True, False])
+@pytest.mark.parametrize("remote", [
+    "https://dev.azure.com/example/Example%20Project/_git/WidgetRepo",
+    "https://example.visualstudio.com/Example%20Project/_git/WidgetRepo",
+    "git@ssh.dev.azure.com:v3/example/Example%20Project/WidgetRepo",
+])
+def test_encoded_singleton_loads_target_policy_and_base(monkeypatch, tmp_path, remote, allow_git):
+    from agent_worktrees import pr_related_binding, pr_source_publication
+
+    anchor = tmp_path / "widget"
+    anchor.mkdir()
+    local = tmp_path / "config"
+    local.mkdir()
+    target_pr = {
+        "enabled": True, "provider": "azure-devops",
+        "repository": "Example Project/WidgetRepo", "api_base": "https://dev.azure.com/example",
+        "branch_update_strategy": "merge",
+    }
+    (local / "config.yaml").write_text(yaml.safe_dump({
+        "repo_name": "widget", "machine": "test-machine",
+        "repos": {"widget": {"default_branch": "main", "pr": target_pr}},
+    }), encoding="utf-8")
+    entry = repos_mod.RepoEntry(
+        name="widget", remote=remote, repo_class="singleton", default_branch="main",
+        paths={platform: str(anchor) for platform in ("windows", "linux", "wsl")},
+    )
+    registry = repos_mod.ReposRegistry(repos={"widget": entry})
+    monkeypatch.setattr(repos_mod, "read_registry", lambda **kwargs: registry)
+    monkeypatch.setattr(repos_mod, "list_repos", lambda **kwargs: [entry])
+    monkeypatch.setattr(cfg, "project_dir", lambda *args: local)
+    monkeypatch.setattr(cfg, "global_config_path", lambda: tmp_path / "absent-global.yaml")
+    monkeypatch.setattr(cfg, "_load_inrepo_config", lambda *args, **kwargs: {})
+    monkeypatch.setattr(pr_related_binding, "control_plane_pr_map", lambda: {})
+    monkeypatch.setattr(pr_config, "_resolve_repo_remote", lambda *args: "https://github.com/owner/demo")
+    caller = _config("demo", "", provider="github")
+    caller.checkout_free_pr["widget"] = cfg._parse_pr(target_pr)
+
+    resolution = pr_config.resolve_repo_config_for_slug(
+        caller, "Example Project/WidgetRepo", allow_git=allow_git,
+    )
+
+    assert resolution.resolved and not resolution.same_as_active
+    assert resolution.repo_name == "widget"
+    target = resolution.repo_config
+    assert target.anchor == str(anchor)
+    assert target.default_branch == "main"
+    assert target.pr.provider == "azure-devops"
+    assert target.pr.branch_update_strategy == "merge"
+    assert target.pr.api_base == target_pr["api_base"]
+    assert pr_source_publication._canonical_destination(
+        target, "Example Project/WidgetRepo", str(anchor),
+    ) == remote
+    assert caller.repo_name == "demo" and caller.default_repo.pr.provider == "github"
+    assert not list(anchor.iterdir())

@@ -38,6 +38,10 @@
     Claiming worktree root for dev and dev-release. Dev requires its source
     payload to belong to that worktree. Omission resolves the source Git root.
 
+.PARAMETER InstallationPayload
+    Existing canonical payload for legacy dev/dev-release governance. Candidate
+    inputs still come from this installer's source worktree.
+
 .PARAMETER RemoveConfig
     On uninstall: also delete project config and worktree session metadata.
 
@@ -67,6 +71,7 @@ param(
     [Parameter(DontShow)][string]$RuntimePublicationPlan,
     [Parameter(DontShow)][string]$RuntimePublicationDigest,
     [string]$Owner,
+    [string]$InstallationPayload,
     [switch]$RemoveConfig,
     [switch]$Force,
     [switch]$ZeroDowntime
@@ -80,6 +85,14 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ($InstallationPayload -and (
+    $Action -notin @('dev', 'dev-release') -or
+    $env:COPILOT_EXTENSIONS_CONTEXT -or
+    -not [IO.Path]::IsPathRooted($InstallationPayload)
+)) {
+    throw '-InstallationPayload requires an absolute existing legacy dev/dev-release payload.'
 }
 
 $NativeScriptRoot = $PSScriptRoot
@@ -310,7 +323,9 @@ print(json.dumps(sys.executable, ensure_ascii=True))
     } else {
         (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     }
-    $admissionSource = if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -and
+    $admissionSource = if ($InstallationPayload) {
+        [IO.Path]::GetFullPath($InstallationPayload)
+    } elseif ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -and
         $env:COPILOT_PLUGIN_STAGED_FROM -and
         (($PSScriptRoot -replace '\\', '/') -notmatch '/\.copilot/installed-plugins/')) {
         $env:COPILOT_PLUGIN_STAGED_FROM
@@ -411,6 +426,7 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         }
         if ($RuntimeSourceDescriptor) { $driverArguments += @('--source-descriptor', $RuntimeSourceDescriptor) }
         if ($Owner) { $driverArguments += @('--owner', $Owner) }
+        if ($InstallationPayload) { $driverArguments += @('--installation-payload', $InstallationPayload) }
         if ($Force) { $driverArguments += '--force' }
         if ($ZeroDowntime) { $driverArguments += '--zero-downtime' }
         if ($ProvisionMissingRuntime) { $driverArguments += '--provision-missing-runtime' }
@@ -480,6 +496,7 @@ print(json.dumps(sys.executable, ensure_ascii=True))
             exit $admissionExitCode
         }
     }
+    if ($InstallationPayload) { $env:COPILOT_PLUGIN_STAGED_FROM = $admissionSource }
 }
 # === end command-lifecycle: admission before staging ===
 $RuntimeInputPlugin = if (
@@ -3092,7 +3109,8 @@ function Deploy-VenvAndPackage {
 }
 
 function Deploy-PythonRuntime {
-    $base = Get-SignedBasePython
+    $base = $BootstrapPython
+    if (-not $base) { $base = Get-SignedBasePython }
     if (-not $base) { $base = Get-BootstrapPython -ExcludeVenvDir }
     if (-not $base) {
         throw 'The Python-owned installer requires a base Python 3.11+ outside the target slot.'

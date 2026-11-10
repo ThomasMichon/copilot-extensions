@@ -654,6 +654,15 @@ class TestCrossAccountAuth:
         # Azure DevOps ssh (v3/{org}/{project}/{repo}) has no _git segment.
         ("git@ssh.dev.azure.com:v3/your-org/Developer/example-marketplace",
          "Developer/example-marketplace"),
+        ("https://dev.azure.com/example/Example%20Project/_git/WidgetRepo",
+         "Example Project/WidgetRepo"),
+        ("https://example.visualstudio.com/Example%20Project/_git/Widget%20Repo.git",
+         "Example Project/Widget Repo"),
+        ("git@ssh.dev.azure.com:v3/example/Example%20Project/WidgetRepo",
+         "Example Project/WidgetRepo"),
+        ("https://dev.azure.com/example/Example%2520Project/_git/WidgetRepo",
+         "Example%20Project/WidgetRepo"),
+        ("https://dev.azure.com/example/Example%20Project/_git/Widget%2FRepo", None),
     ])
     def test_remote_slug(self, monkeypatch, url, slug):
         monkeypatch.setattr(go, "_remote_url", lambda remote, *, cwd: url)

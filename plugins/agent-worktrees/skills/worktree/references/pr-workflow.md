@@ -89,6 +89,13 @@ receipt or an old package version cannot replace qualified source custody.
 Missing installed support blocks dependent migration, not ordinary supported
 observation and not permission to fall back to raw provider commands.
 
+Use provider names, not URL escapes, in the target slug: for a remote such as
+`https://dev.azure.com/example/Example%20Project/_git/WidgetRepo`, select
+`--repo "Example Project/WidgetRepo"`. Registered singleton checkouts use their
+own layered PR policy and default branch, while the managed caller retains
+ownership. URL decoding does not replace the independent full-destination
+checks or make a checkout-free binding sufficient for source publication.
+
 The optional native [`complete` source adapter](../../../../agent-pull-requests/docs/author-operations.md#local-source-reconciliation-is-not-finalization)
 uses this managed source's existing `pr-complete` owner with exact local
 branch/head admission. Unlike checkout-free PR reads, it executes from the
