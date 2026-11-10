@@ -498,10 +498,11 @@ def _project_entry_command(shell, stub):
     return [shutil.which("pwsh"), "-NoLogo", "-NoProfile", "-File", str(stub)]
 
 
-def _installed_picker(console, manager_python, engine_python, observations):
+def _installed_picker(console, manager_python, engine_python, observations, retained):
     if not _picker_rendered(console.output):
         return None
     descendants = console.pin_descendants()
+    retained.update(descendants)
     pinned = {}
     observations.clear()
     expected = (manager_python.resolve(), engine_python.resolve())
@@ -560,15 +561,17 @@ def _witness(shell, stub, env, project, diagnostics, manager_python, engine_pyth
 
         try:
             def installed_ready():
-                nonlocal descendants, pinned, next_probe
+                nonlocal pinned, next_probe
                 now = time.monotonic()
                 if now < next_probe:
                     return False
                 next_probe = now + .1
-                selected = _installed_picker(console, manager_python, engine_python, observations)
+                selected = _installed_picker(
+                    console, manager_python, engine_python, observations, descendants,
+                )
                 if selected is None:
                     return False
-                descendants, pinned = selected
+                _, pinned = selected
                 return True
 
             wait(installed_ready, "rendered project Picker")
@@ -1015,6 +1018,14 @@ def test_failure_evidence_retains_complete_bounded_stderr_and_refuses_oversize(t
 
 
 def test_consumer_exit_evidence_precedes_owned_job_cleanup(tmp_path, monkeypatch):
+    _consumer_exit_case(tmp_path, monkeypatch, pending=False)
+
+
+def test_consumer_exit_after_pending_probe_preserves_pre_input_evidence(tmp_path, monkeypatch):
+    _consumer_exit_case(tmp_path, monkeypatch, pending=True)
+
+
+def _consumer_exit_case(tmp_path, monkeypatch, *, pending):
     from types import SimpleNamespace
 
     import _terminal_console_fixture
@@ -1040,7 +1051,7 @@ def test_consumer_exit_evidence_precedes_owned_job_cleanup(tmp_path, monkeypatch
 
         def cleanup(self, _timeout):
             evidence = json.loads(exit_path.read_text(encoding="utf-8"))
-            assert evidence["input_sent"] is True
+            assert evidence["input_sent"] is (not pending)
             assert evidence["exit_code"] == 0xFFFFFFFF
             assert evidence["retained_descendants"] == {
                 "101": {"name": "manager", "birth": 1020, "exit_code": 7},
@@ -1053,7 +1064,7 @@ def test_consumer_exit_evidence_precedes_owned_job_cleanup(tmp_path, monkeypatch
             self.input_sent = True
 
         def exited(self, handle):
-            return self.input_sent
+            return pending or self.input_sent
 
         def wait(self, _timeout):
             return 0xFFFFFFFF
@@ -1070,10 +1081,15 @@ def test_consumer_exit_evidence_precedes_owned_job_cleanup(tmp_path, monkeypatch
 
     monkeypatch.setattr(_terminal_console_fixture, "Console", FailedConsole)
     monkeypatch.setattr(_terminal_offer, "validate", lambda _: (request, {"host_pid": 101}))
-    monkeypatch.setitem(globals(), "_installed_picker", lambda *_args: (
-        {101: ("manager", 1010), 102: ("engine", 1020)}, {},
-    ))
-    with pytest.raises(RuntimeError, match="Consumer exited 4294967295 before keyboard-driven"):
+
+    def probe(_console, _manager, _engine, _observations, retained):
+        sampled = {101: ("manager", 1010), 102: ("engine", 1020)}
+        retained.update(sampled)
+        return None if pending else (sampled, {})
+
+    monkeypatch.setitem(globals(), "_installed_picker", probe)
+    label = "rendered project Picker" if pending else "keyboard-driven quit dialog"
+    with pytest.raises(RuntimeError, match="Consumer exited 4294967295 before " + label):
         _witness("cmd", tmp_path / "project.cmd", {"TEMP": str(tmp_path)}, tmp_path,
                  diagnostics, tmp_path / "manager", tmp_path / "engine")
     assert _failure_evidence(tmp_path)["cmd.exit.json"]["truncated"] is False
@@ -1178,10 +1194,11 @@ def test_rendered_picker_waits_for_its_live_installed_process(monkeypatch, tmp_p
     )
     monkeypatch.setitem(_installed_picker.__globals__, "_live_image",
                         lambda _console, handle: engine if handle == 11 else manager)
-    observed = {}
-    assert _installed_picker(console, manager, engine, observed) is None
+    observed, retained = {}, {}
+    assert _installed_picker(console, manager, engine, observed, retained) is None
+    assert retained == {1: ("engine", 11)}
     assert observed == {"1": {"name": "engine", "image": str(engine), "live": True}}
-    descendants, pinned = _installed_picker(console, manager, engine, observed)
+    descendants, pinned = _installed_picker(console, manager, engine, observed, retained)
     assert descendants[2] == ("manager", 22)
     assert pinned[str(manager.resolve())] == {"pid": 2, "birth": 2200}
 
@@ -1198,10 +1215,10 @@ def test_rendered_picker_does_not_accept_foreign_or_exited_installed_image(monke
     owner = _installed_picker.__globals__
     observed = {}
     monkeypatch.setitem(owner, "_live_image", lambda *_: tmp_path / "foreign" / "python.exe")
-    assert _installed_picker(console, manager, engine, observed) is None
+    assert _installed_picker(console, manager, engine, observed, {}) is None
     monkeypatch.setitem(owner, "_live_image", lambda *_: manager)
     console.exited = lambda _handle: True
-    assert _installed_picker(console, manager, engine, observed) is None
+    assert _installed_picker(console, manager, engine, observed, {}) is None
 
 
 def test_rendered_picker_does_not_turn_live_image_query_error_into_pending(monkeypatch, tmp_path):
@@ -1220,7 +1237,7 @@ def test_rendered_picker_does_not_turn_live_image_query_error_into_pending(monke
 
     monkeypatch.setitem(_installed_picker.__globals__, "_live_image", unreadable)
     with pytest.raises(PermissionError) as caught:
-        _installed_picker(console, tmp_path / "manager", tmp_path / "engine", {})
+        _installed_picker(console, tmp_path / "manager", tmp_path / "engine", {}, {})
     assert caught.value is failure
 
 
