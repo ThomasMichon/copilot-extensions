@@ -25,6 +25,9 @@ from fleet_manager.credential_references import load_service_credentials
 from fleet_manager.gateway_service_handler import RequestDisconnected
 
 from .config import HostConfig, WorkspaceConfig
+from .local_config import LocalHostConfig
+
+ServiceConfig = HostConfig | LocalHostConfig
 
 _Entry = TypeVar("_Entry", bound=Callable[..., object])
 
@@ -125,7 +128,7 @@ def ready(path: Path, *, now: float | None = None) -> bool:
         return False
 
 
-async def run(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
+async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> None:
     """Start only while the caller has not already withdrawn the request."""
     if stop is not None and stop.is_set():
         return
@@ -133,7 +136,7 @@ async def run(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
 
 
 async def _workspace_operations(
-    config: HostConfig, workspace: WorkspaceConfig, store: ReplayStore,
+    config: ServiceConfig, workspace: WorkspaceConfig, store: ReplayStore,
     scope: LaunchScope, stop: asyncio.Event,
 ) -> dict[tuple[str, str], WorkspaceOperations] | None:
     pending = asyncio.create_task(asyncio.to_thread(
@@ -165,7 +168,7 @@ async def _workspace_operations(
 @daemon_entrypoint(
     "agent-pull-requests-service", source=__file__, purpose="production",
 )
-async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
+async def _run_service(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> None:
     """Adopt existing state, then own exactly the existing WatchService lifetime."""
     stop = stop if stop is not None else asyncio.Event()
     if stop.is_set():
@@ -196,7 +199,7 @@ async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None)
             signal.signal(selected, handler)
 
 
-async def _serve(config: HostConfig, scope: LaunchScope, stop: asyncio.Event) -> None:
+async def _serve(config: ServiceConfig, scope: LaunchScope, stop: asyncio.Event) -> None:
     store = config.store()
     workspaces = await _workspace_operations(config, config.workspaces, store, scope, stop) if (
         config.workspaces is not None
@@ -210,18 +213,27 @@ async def _serve(config: HostConfig, scope: LaunchScope, stop: asyncio.Event) ->
             "reports": config.reports.readers(config.operation_seconds),
             "response_limit": config.reports.response_bytes,
         }
-    credentials = load_service_credentials(
-        proof_key_file=config.proof_key_file, access_token_file=config.access_token_file,
-    )
-    service = WatchService(
-        store, fleet=config.fleet, gateway=config.gateway, slot=config.slot,
-        bindings=config.bindings, observations=config.observations,
-        gateway_origin=config.gateway_origin, access_token_callback=credentials.access_token,
-        proof_key=credentials.proof_key, authority=scope.deadline, checkpoint=scope.check,
-        gateway_ca=str(config.gateway_ca) if config.gateway_ca else None,
-        interval=config.interval, workspaces=workspaces,
-        **report_options,
-    )
+    if isinstance(config, LocalHostConfig):
+        service = WatchService(
+            store, fleet=None, gateway=None, slot=None,
+            bindings=config.bindings, observations=config.observations,
+            gateway_origin=None, access_token_callback=None, proof_key=None,
+            authority=scope.deadline, checkpoint=scope.check, interval=config.interval,
+            local_socket=config.repositories.socket_path, local_peers=config.repositories.peers,
+            operation_seconds=config.operation_seconds,
+        )
+    else:
+        credentials = load_service_credentials(
+            proof_key_file=config.proof_key_file, access_token_file=config.access_token_file,
+        )
+        service = WatchService(
+            store, fleet=config.fleet, gateway=config.gateway, slot=config.slot,
+            bindings=config.bindings, observations=config.observations,
+            gateway_origin=config.gateway_origin, access_token_callback=credentials.access_token,
+            proof_key=credentials.proof_key, authority=scope.deadline, checkpoint=scope.check,
+            gateway_ca=str(config.gateway_ca) if config.gateway_ca else None,
+            interval=config.interval, workspaces=workspaces, **report_options,
+        )
 
     async def observe() -> None:
         while True:

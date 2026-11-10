@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 
 from .repository_contract import (
-    MAX_CACHE_BYTES, MAX_EVENTS, MAX_PULLS, MAX_REGISTRATIONS, MAX_TARGETS, RepositoryIdentity,
+    MAX_CACHE_BYTES, MAX_EVENTS, MAX_PULLS, MAX_REGISTRATIONS, MAX_TARGETS,
+    RepositoryBackpressure, RepositoryIdentity,
 )
 
+METADATA_RESERVE_BYTES = 1_048_576
 
 def empty() -> dict:
     return {"repositories": [], "registrations": [], "events": [], "next_sequence": 1}
@@ -65,7 +67,7 @@ def facts(value):
         raise ValueError("normalized facts exceed byte bound")
 
 
-def validate(value: object, namespace: str) -> None:
+def validate(value: object, namespace: str, *, version: int = 1) -> None:
     """Refuse foreign/newer state rather than silently rebuilding a projection."""
     _fields(value, "repositories registrations events next_sequence")
     _integer(value["next_sequence"], 1)
@@ -108,7 +110,9 @@ def validate(value: object, namespace: str) -> None:
                 facts(pull["facts"])
     registrations = set()
     for row in value["registrations"]:
-        _fields(row, "registration_id request_id consumer target expires_at acknowledged cancelled")
+        _fields(row, "registration_id request_id consumer target expires_at acknowledged cancelled" + (
+            " request delivered acknowledged_event" if version == 2 else ""
+        ))
         if any(not isinstance(row[name], str) or not 1 <= len(row[name]) <= 128 for name in (
             "registration_id", "request_id", "consumer", "target",
         )) or row["target"] not in targets or row["registration_id"] in registrations:
@@ -118,6 +122,21 @@ def validate(value: object, namespace: str) -> None:
         _integer(row["acknowledged"])
         if row["acknowledged"] >= value["next_sequence"] or type(row["cancelled"]) is not bool:
             raise ValueError("invalid continuing cursor")
+        if version == 2:
+            _fields(row["request"], "after ttl")
+            after = row["request"]["after"]
+            if after is not None:
+                _integer(after)
+            _integer(row["request"]["ttl"], 1)
+            if row["request"]["ttl"] > 86400:
+                raise ValueError("invalid continuing request lifetime")
+            _integer(row["delivered"])
+            if not row["acknowledged"] <= row["delivered"] < value["next_sequence"] or (
+                row["acknowledged_event"] is not None and (
+                    not isinstance(row["acknowledged_event"], str) or len(row["acknowledged_event"]) != 32
+                )
+            ):
+                raise ValueError("invalid continuing delivery position")
     previous = 0
     for row in value["events"]:
         _fields(row, "sequence event_id target number kind facts")
@@ -143,5 +162,13 @@ def validate(value: object, namespace: str) -> None:
                     raise ValueError("invalid inventory status event")
             else:
                 facts(row["facts"])
-    if len(json.dumps(value, allow_nan=False).encode()) > MAX_CACHE_BYTES:
-        raise ValueError("repository cache byte capacity exceeded")
+    if not fits(value, version=version):
+        raise RepositoryBackpressure("repository cache byte capacity exceeded")
+
+
+def fits(value, *, version=1):
+    total = len(json.dumps(value, allow_nan=False).encode())
+    payload = len(json.dumps({**value, "registrations": []}, allow_nan=False).encode())
+    return total <= MAX_CACHE_BYTES and payload <= MAX_CACHE_BYTES - (
+        METADATA_RESERVE_BYTES if version == 2 else 0
+    )

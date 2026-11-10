@@ -88,10 +88,14 @@ class ReplayStore:
         terminal_cache_retirement: bool = False,
         terminal_comment_mapping: bool = False,
         repository_cache: bool = False,
+        repository_continuing: bool = False,
     ) -> None:
         if type(repository_cache) is not bool:
             raise ValueError("explicit repository cache selection required")
         self.repository_cache = repository_cache
+        if type(repository_continuing) is not bool or repository_continuing and not repository_cache:
+            raise ValueError("continuing repository selection requires its cache owner")
+        self.repository_continuing = repository_continuing
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
         self.terminal_retention = terminal_retention
@@ -185,11 +189,14 @@ class ReplayStore:
         if cache:
             from .repository_state import validate as validate_cache
             if not self.repository_cache or type(document["repository_cache_version"]) is not int or (
-                document["repository_cache_version"] != 1
+                document["repository_cache_version"] != (2 if self.repository_continuing else 1)
             ):
                 raise ReplayStoreInvalid("repository cache reader unavailable for adopted owner")
             names.update(("repository_cache_version", "repository_cache"))
-            validate_cache(document.get("repository_cache"), self.namespace)
+            validate_cache(
+                document.get("repository_cache"), self.namespace,
+                version=document["repository_cache_version"],
+            )
         elif self.repository_cache:
             raise ReplayStoreInvalid("repository cache requires explicit fresh provisioning")
         prepared = "review_intent_version" in document
@@ -616,7 +623,10 @@ class ReplayStore:
                 }
                 if self.repository_cache:
                     from .repository_state import empty
-                    document.update(repository_cache_version=1, repository_cache=empty())
+                    document.update(
+                        repository_cache_version=2 if self.repository_continuing else 1,
+                        repository_cache=empty(),
+                    )
                 self._validate_owner(document)
             _atomic_write_json(self.path, document)
 

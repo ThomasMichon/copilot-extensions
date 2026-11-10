@@ -249,7 +249,7 @@ PR workers additionally require `forge`, matching their exact configured rule:
 }
 ```
 
-`ForgeScope` accepts `github` or `azure-devops`, an explicit HTTPS API base
+`ForgeScope` accepts `github`, `gitea` or `azure-devops`, an explicit HTTPS API base
 without credentials/query/fragment/trailing slash, an exact two-component
 repository and only the `observe` permission. Authentication is `bearer`,
 or `basic` for an ADO PAT. This preserves the distinction between ADO access
@@ -257,6 +257,10 @@ tokens and PATs; the consumer must not infer an auth scheme from token bytes.
 The endpoint/repository/account selection is trusted configuration, not ambient
 CLI settings or a worker-selected alternate route. Index workers cannot send
 `forge`; PR workers cannot omit it or acquire index credentials.
+Gitea uses the same exact worker/controller/recipient binding and bearer profile;
+support expands the scope schema, not token issuance or enrollment. The external
+custodian still verifies real permissions/expiry/revocation. Prior receivers
+reject an unsupported forge rather than silently selecting another account.
 
 The authenticated worker's service/install/job/source/account/audience/scopes/
 recipient/generation must match current enrollment and exact provider policy.
