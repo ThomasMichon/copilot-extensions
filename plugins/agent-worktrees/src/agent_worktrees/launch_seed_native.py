@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager, nullcontext
 from dataclasses import asdict
-from datetime import datetime, timedelta
 import json
 import os
 from pathlib import Path
@@ -13,7 +12,7 @@ import secrets
 import sys
 from uuid import uuid4
 
-from . import agent_policy, config as cfg, launch_execution, locks
+from . import agent_policy, config as cfg, launch_attempt, launch_execution, locks
 from . import tracking_write
 
 _ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld)
@@ -88,6 +87,11 @@ def prepare(
         record_path, correlation or launch_execution.Correlation(uuid4().hex, uuid4().hex),
     )
     execution.append("execution-requested")
+    try:
+        _retain_planned_status(record_path, execution)
+    except (*_ERRORS, KeyboardInterrupt):
+        execution.observed("unknown")
+        raise
     try:
         # Admission-only preparation performs no seed mutation. Seeded preparation
         # uses the existing seed authority's own guards, never a nested lease.
@@ -208,34 +212,41 @@ _TERMINAL_STATUSES = frozenset({"finalizing", "complete", "completed", "finalize
 _RESUMABLE_STATUSES = frozenset({"complete", "completed", "finalized"})
 
 
-def _concluded_before(completed_at: str | None, started_at: object) -> bool:
-    """Whether the record's conclusion provably predates this execution's durable request."""
+def _planned_status_path(record_path: Path, attempt_id: str, operation_id: str) -> Path:
+    receipt = launch_attempt._path(record_path.parent, attempt_id, operation_id, execution=True)
+    return receipt.with_name(receipt.name.removesuffix(".execution.json") + ".planned-status.json")
+
+
+def _retain_planned_status(record_path: Path, execution: launch_execution.Execution) -> None:
+    """Persist the preparation-time status for separate native admission callbacks."""
+    path = _planned_status_path(
+        record_path, execution.subject["attempt_id"], execution.subject["operation_id"],
+    )
+    launch_attempt._mkdir(path.parent)
+    launch_attempt._write(path, {"version": 1, "status": execution.planned_status})
+
+
+def _read_planned_status(record_path: Path, attempt_id: str, operation_id: str) -> str | None:
+    """Return the retained status, or None (strict refusal) when absent or invalid."""
     try:
-        concluded = datetime.fromisoformat(str(completed_at)) if completed_at else None
-        started = datetime.fromisoformat(started_at) if isinstance(started_at, str) else None
-    except ValueError:
-        return False
-    if concluded is None or started is None or started.tzinfo is None:
-        return False
-    if concluded.tzinfo is None:
-        concluded = concluded.astimezone()
-    # completed_at has whole-second resolution; the entire second must precede the request.
-    return concluded + timedelta(seconds=1) <= started
+        path = _planned_status_path(record_path, attempt_id, operation_id)
+        with path.open("rb") as stream:
+            raw = stream.read(1025)
+        value = json.loads(raw) if len(raw) <= 1024 else None
+    except (OSError, ValueError):
+        return None
+    if (
+        not isinstance(value, dict) or set(value) != {"version", "status"}
+        or value["version"] != 1 or not isinstance(value["status"], str)
+    ):
+        return None
+    return value["status"]
 
 
-def _status_refused(
-    status: str, planned_status: str | None, *, completed_at: str | None = None,
-    started_at: object = None,
-) -> bool:
+def _status_refused(status: str, planned_status: str | None) -> bool:
     if status not in _TERMINAL_STATUSES:
         return False
-    if status not in _RESUMABLE_STATUSES:
-        return True
-    if planned_status is not None:
-        return planned_status != status
-    # Separate native callback processes have no in-memory snapshot; rely on the
-    # durable conclusion time instead of re-reading the current status.
-    return not _concluded_before(completed_at, started_at)
+    return not (planned_status == status and status in _RESUMABLE_STATUSES)
 
 
 @contextmanager
@@ -256,6 +267,11 @@ def admission(
             if any(event["phase"] == "process-spawned" for event in saved["events"]):
                 raise ValueError("Original headed launch was already observed")
             receipt = _receipt(record_path, saved)
+            planned = planned_status
+            if planned is None:
+                # Separate native callbacks (POSIX setup, Windows --phase admit)
+                # use the status their own prepare phase retained.
+                planned = _read_planned_status(record_path, correlation.attempt_id, operation_id)
             if admission_only:
                 if receipt is not None or not launch_seed_exec._valid_request(
                     record_path, invoke=False, seed_id=None, admission_only=True,
@@ -269,14 +285,11 @@ def admission(
                 if isinstance(prepared, int):
                     raise ValueError("Original admission-only launch intent changed before creation")
             current = tracking.load_record(record_path)
-            if _status_refused(
-                current.status, planned_status, completed_at=current.completed_at,
-                started_at=saved["events"][0]["at"],
-            ):
+            if _status_refused(current.status, planned):
                 raise ValueError(
                     f"Original headed launch intent changed before creation: "
                     f"worktree status is {current.status!r}"
-                    + (f" (launch started as {planned_status!r})" if planned_status else "")
+                    + (f" (launch started as {planned!r})" if planned else "")
                 )
             if (
                 current.pending_seed
