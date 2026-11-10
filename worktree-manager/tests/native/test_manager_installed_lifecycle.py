@@ -622,6 +622,8 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
             if len(selected) == 1:
                 if rows[0].get("owned_extension_bootstrap"):
                     raise RuntimeError("An extension host has no live native conversation owner")
+                if rows[0]["pid"] not in locks:
+                    raise RuntimeError("The native CLI is not bound to the verified conversation")
                 return next(iter(selected))
             bound = [
                 row for row in rows
@@ -1138,9 +1140,14 @@ def _stage_launch_companions(root, identity, deadline):
     archive = root / "catalog-candidate.tar"
     snapshot = root / "catalog-candidate"
     snapshot.mkdir()
-    preparation._archive(
-        installed.REPO, identity["candidate_commit"], archive, deadline=deadline,
-    )
+    with archive.open("xb") as output:
+        preparation._git(
+            installed.REPO, "-c", "tar.umask=0022", "-c", "core.eol=lf",
+            "archive", "--format=tar", identity["candidate_commit"], "--",
+            ".github/plugin/marketplace.json", "plugins/*/plugin.json",
+            *(f"plugins/{name}" for name in LAUNCH_COMPANIONS),
+            deadline=deadline, output=output,
+        )
     pointers = []
     preparation._extract_archive(
         archive, snapshot, deadline=deadline, file_pointer_candidates=pointers,
@@ -1258,6 +1265,9 @@ def test_lifecycle_launch_companions_use_the_real_candidate_archive():
         )
         assert {"agent-worktrees", "agent-conduct-guidance", "agent-roles"} <= set(report["payloads"])
         assert report["selected_runtime_payloads_unchanged"] is True
+        snapshot = root / "catalog-candidate"
+        assert not (snapshot / "worktree-manager").exists()
+        assert not (snapshot / "plugins" / "agent-worktrees" / "src").exists()
 
 
 @pytest.mark.parametrize(
@@ -1317,16 +1327,23 @@ def test_lifecycle_stages_exact_launch_companions_without_replacing_selected_run
     if refusal == "catalogue":
         (root / "payloads" / catalog).write_text('{"plugins":[]}', encoding="utf-8")
 
-    def archive(_source, commit, path, *, deadline):
-        assert commit == identity["candidate_commit"] and deadline is None
-        path.write_bytes(b"owned archive")
+    def archive(_source, *arguments, deadline, output):
+        assert arguments[:6] == (
+            "-c", "tar.umask=0022", "-c", "core.eol=lf", "archive", "--format=tar",
+        )
+        assert arguments[6] == identity["candidate_commit"] and deadline is None
+        assert set(arguments[8:]) == {
+            ".github/plugin/marketplace.json", "plugins/*/plugin.json",
+            *(f"plugins/{name}" for name in LAUNCH_COMPANIONS),
+        }
+        output.write(b"owned archive")
 
     def extract(_archive, destination, *, deadline, file_pointer_candidates):
         assert deadline is None
         assert file_pointer_candidates == []
         shutil.copytree(frozen, destination, dirs_exist_ok=True)
 
-    monkeypatch.setattr(preparation, "_archive", archive)
+    monkeypatch.setattr(preparation, "_git", archive)
     monkeypatch.setattr(preparation, "_extract_archive", extract)
     if refusal is not None:
         with pytest.raises(
@@ -1626,17 +1643,21 @@ def test_lifecycle_normal_exit_checks_the_native_owner_not_only_the_wrapper(tmp_
     "case", [
         "qualified", "unbound-owner", "helper-lock", "foreign-parent",
         "older-child", "unknown-child", "second-owner", "orphan-helper",
+        "single-qualified", "single-unbound-owner", "single-no-history",
     ],
 )
 def test_lifecycle_excludes_only_the_proven_native_extension_host(tmp_path, monkeypatch, case):
     history = tmp_path / "session-state" / "fixture-session" / "events.jsonl"
     history.parent.mkdir(parents=True)
-    if case != "unbound-owner":
+    if case not in {"unbound-owner", "single-unbound-owner", "single-no-history"}:
         (history.parent / "inuse.101.lock").touch()
     if case == "helper-lock":
         (history.parent / "inuse.102.lock").touch()
     witness = _Witness(tmp_path, {}, None, None, None, None)
-    witness.history, witness.turn_observation = history, {}
+    witness.history, witness.turn_observation = (
+        None if case == "single-no-history" else history,
+        {},
+    )
     owner = (101, 1000)
     selected = {
         owner: (None, 1),
@@ -1647,6 +1668,8 @@ def test_lifecycle_excludes_only_the_proven_native_extension_host(tmp_path, monk
         (history.parent / "inuse.103.lock").touch()
     if case == "orphan-helper":
         selected.pop(owner)
+    if case.startswith("single-"):
+        selected.pop((102, 1100))
     witness.native = lambda: selected
 
     def metadata(handle, *, owned_root):
@@ -1657,11 +1680,14 @@ def test_lifecycle_excludes_only_the_proven_native_extension_host(tmp_path, monk
         }
 
     monkeypatch.setattr(sys.modules[__name__], "_process_arguments", metadata)
-    if case == "qualified":
+    if case in {"qualified", "single-qualified"}:
         assert witness.one_native() == owner
     else:
-        with pytest.raises(RuntimeError, match="duplicate native CLI owners"):
+        with pytest.raises(RuntimeError, match="duplicate native CLI owners") as caught:
             witness.one_native()
+        if case in {"single-unbound-owner", "single-no-history"}:
+            assert any("not bound to the verified conversation" in note
+                       for note in caught.value.__notes__)
 
 
 def test_lifecycle_environment_drops_foreign_identity_mux_and_inference_credentials(

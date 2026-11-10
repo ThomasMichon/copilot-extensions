@@ -1,0 +1,9 @@
+{
+  "comment": "Require the verified conversation lock even for one native CLI process, and scope companion archive extraction without extending qualification deadlines.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

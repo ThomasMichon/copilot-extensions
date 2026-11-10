@@ -635,3 +635,42 @@ pass. The three separately recorded nominal feed-timing failures are outside
 this selection, not passed or waived. Exact-source installed requalification,
 fresh current-head review, required CI and all parent acceptance gates remain
 open.
+
+### 2026-11-10 - Selection-bound native pass; require single-process conversation binding
+
+Run 42851885922, attempt 1, passed at
+`62ed94ba9c7692686c985dca0a547a410b29093a`
+(tree `379215893bb7e4edc999971ea380af11d108e9fd`).
+JUnit records one selected test, zero failures/errors/skips and 422.196 seconds;
+the complete lifecycle receipt measures 407.219 seconds. Installed origins and
+candidate bytes are verified across 302 Manager and 693 engine modules.
+Create/Open/detach/normal exit/same-conversation Resume, all four persisted
+replies, unusable-entry refusal and settled cleanup pass. This remains
+installed-core evidence for that candidate only.
+
+Review 5845313738 emits a negative summary referencing omitted Refresh and
+conversation-owner findings, but provides no detailed findings or new inline
+comments. Its "No open issues" banner is not treated as an accepted review.
+The prior Refresh scenario is covered by the canonical full-selection and
+exact-identity correction. Direct examination confirms another witness gap:
+the single-native-process branch did not require that process's PID in the
+verified conversation's lock set. It now applies that requirement even without
+an extension host; bound, unbound and missing-history cases have focused controls.
+
+The owned branch was rebased onto current `dev`. The only content conflict was
+between independently added archive-selection and Refresh tests; both blocks
+were retained. All 205 affected Worktrees tests pass, including the upstream
+archive-selection cases.
+
+The first lifecycle source packet hit its original 180-second real-archive
+control limit during a redundant complete-source extraction. The companion
+staging pass now uses the canonical Git/archive reader for the complete
+catalogue and all plugin manifests plus the two selected companion trees.
+Canonical extraction/materialization, catalogue validation and retained runtime
+hash/receipt checks remain unchanged. The real control proves that unselected
+runtime source trees are not extracted. All 58 lifecycle source controls now
+pass in 86.66 seconds; no deadline was increased or failed attempt credited.
+
+The rebased, stricter candidate still requires exact-source installed
+qualification, a fresh actual review and required CI. No complete-suite,
+authentic-update, mandatory frozen-candidate or Main-adoption gate is closed.
