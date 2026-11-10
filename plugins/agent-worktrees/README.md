@@ -417,11 +417,11 @@ trace phases. This protects these native entrypoints, not every installer or lau
 publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
 owns the policy schema and decision semantics.
 
-On Windows, an unprovisioned payload-local command uses that payload's own
-`scripts\install.ps1` before saved-payload or installed-plugin discovery.
-Relocating an intact payload therefore does not require an existing
-`payload-dir` pointer. Global shims without an adjacent plugin manifest retain
-the saved-payload and installed-plugin fallbacks.
+On Windows, an unprovisioned command honors an existing `payload-dir` selection
+and rechecks it under the provision lock. Without a saved selection, a
+payload-local command uses its adjacent `scripts\install.ps1` before installed-plugin
+discovery, so relocating an intact payload does not require a saved pointer.
+Global shims without an adjacent plugin manifest retain installed-plugin discovery.
 
 Cell installers also check before self-staging and runtime-input writes. The
 Python lifecycle repeats admission at entry, under the existing genesis/install

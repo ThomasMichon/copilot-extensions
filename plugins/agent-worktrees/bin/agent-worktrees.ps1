@@ -116,13 +116,11 @@ if ($_awUpdateDiagnostic) {
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) { Invoke-AwTerminalPython 'python' (@('-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if (Test-Path -LiteralPath (Join-Path $_awPayloadRoot 'plugin.json') -PathType Leaf) {
+$_inst = if ($_snap) {
+    Join-Path $_snap 'scripts\install.ps1'
+} elseif (Test-Path -LiteralPath (Join-Path $_awPayloadRoot 'plugin.json') -PathType Leaf) {
     Join-Path $_awPayloadRoot 'scripts\install.ps1'
 } else { '' }
-$_awUsesAdjacentInstaller = [bool]($_inst -and (Test-Path -LiteralPath $_inst -PathType Leaf))
-if (-not $_awUsesAdjacentInstaller) {
-    $_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
-}
 if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) {
     $_inst = Get-ChildItem (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -Recurse -Filter 'install.ps1' -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match '[\\/]agent-worktrees[\\/]scripts[\\/]install\.ps1$' } |
@@ -161,14 +159,12 @@ try {
                 $_latestSnapshot = ''
                 try { $_latestSnapshot = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
                 if ($_latestSnapshot) {
-                    if (-not $_awUsesAdjacentInstaller -or $_latestSnapshot -cne $_snap) {
-                        $_latestInstaller = Join-Path $_latestSnapshot 'scripts\install.ps1'
-                        if (-not (Test-Path -LiteralPath $_latestInstaller -PathType Leaf)) {
-                            [Console]::Error.WriteLine('[agent-worktrees] selected snapshot installer is unavailable; run an explicit install or repair.')
-                            exit 126
-                        }
-                        $_inst = $_latestInstaller
+                    $_latestInstaller = Join-Path $_latestSnapshot 'scripts\install.ps1'
+                    if (-not (Test-Path -LiteralPath $_latestInstaller -PathType Leaf)) {
+                        [Console]::Error.WriteLine('[agent-worktrees] selected snapshot installer is unavailable; run an explicit install or repair.')
+                        exit 126
                     }
+                    $_inst = $_latestInstaller
                     $_snap = $_latestSnapshot
                 } elseif ($_snap) {
                     [Console]::Error.WriteLine('[agent-worktrees] selected snapshot changed while waiting; retry.')

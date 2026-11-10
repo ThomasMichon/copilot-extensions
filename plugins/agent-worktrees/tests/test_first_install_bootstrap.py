@@ -288,10 +288,10 @@ _PWSH = shutil.which("pwsh") or shutil.which("powershell")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
 @pytest.mark.parametrize("entry", ["cmd", "powershell"])
-@pytest.mark.parametrize("saved_pointer", [False, True])
+@pytest.mark.parametrize("selection", ["absent", "same", "different"])
 @pytest.mark.parametrize("installer_fails", [False, True])
 def test_packaged_windows_entry_self_provisions_after_relocation(
-    tmp_path: Path, entry: str, saved_pointer: bool, installer_fails: bool,
+    tmp_path: Path, entry: str, selection: str, installer_fails: bool,
 ) -> None:
     archive = tmp_path / "payload.zip"
     with zipfile.ZipFile(archive, "w") as output:
@@ -308,21 +308,36 @@ def test_packaged_windows_entry_self_provisions_after_relocation(
         launcher.read_text(encoding="utf-8").replace(
             r"Local\Copilot.AgentWorktrees.Provision",
             r"Local\Copilot.AgentWorktrees.Provision.Test." + uuid.uuid4().hex,
+        ).replace(
+            # Stable selection needs no retries; fail immediately on rejection.
+            "[DateTime]::UtcNow.AddSeconds(120)", "[DateTime]::UtcNow",
         ),
         encoding="utf-8",
     )
     home = tmp_path / "empty home"
     home.mkdir()
     runtime = home / ".agent-worktrees"
-    if saved_pointer:
-        decoy = tmp_path / "old payload" / "scripts"
-        decoy.mkdir(parents=True)
-        (decoy / "install.ps1").write_text(
-            "throw 'Saved payload must not replace the invoked payload'\n",
-            encoding="utf-8",
-        )
+    selected = tmp_path / "saved payload with spaces" if selection == "different" else payload
+    if selection != "absent":
         runtime.mkdir()
-        (runtime / "payload-dir").write_text(str(decoy.parent), encoding="utf-8")
+        (runtime / "payload-dir").write_text(str(selected), encoding="utf-8")
+    admission = tmp_path / "snapshot admission.py"
+    admission.write_text(
+        "import os, runpy, sys\n"
+        "from pathlib import Path\n"
+        "from types import SimpleNamespace\n"
+        "driver = runpy.run_path(os.environ['FIXTURE_DRIVER'])\n"
+        "snapshot = os.environ['AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT']\n"
+        "args = SimpleNamespace(\n"
+        "    root=Path(sys.argv[1]), payload=Path(sys.argv[2]),\n"
+        "    selected_snapshot=None if snapshot == '::absent::' else Path(snapshot),\n"
+        "    expect_no_snapshot=snapshot == '::absent::',\n"
+        ")\n"
+        "if not driver['_selected_snapshot_current'](args):\n"
+        "    print('::agent-worktrees-driver-reselect::', file=sys.stderr)\n"
+        "    raise SystemExit(75)\n",
+        encoding="utf-8",
+    )
     scripts = payload / "scripts"
     scripts.mkdir()
     # Isolate installer effects and the named mutex; retain real front-door dispatch.
@@ -335,11 +350,13 @@ if ($Action -ne 'provision') { throw 'Expected lean provisioning' }
 [Console]::Error.WriteLine('')
 [Console]::Error.WriteLine('')
 [Console]::Error.WriteLine('source-wheel-diagnostic')
+$root = Join-Path $env:USERPROFILE '.agent-worktrees'
+& $env:FIXTURE_PYTHON $env:FIXTURE_ADMISSION $root (Split-Path -Parent $PSScriptRoot)
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 if ($env:FIXTURE_INSTALLER_FAILS -eq '1') {
     Write-Error 'fixture installation failed' -ErrorAction Continue
     exit 23
 }
-$root = Join-Path $env:USERPROFILE '.agent-worktrees'
 $bin = Join-Path $root 'bin'
 [void][IO.Directory]::CreateDirectory($bin)
 [IO.File]::AppendAllText((Join-Path $root 'calls'), "$PSCommandPath`n")
@@ -350,6 +367,9 @@ $python = $env:FIXTURE_PYTHON.Replace("'", "''")
 """,
         encoding="utf-8",
     )
+    if selected != payload:
+        (selected / "scripts").mkdir(parents=True)
+        shutil.copy2(scripts / "install.ps1", selected / "scripts" / "install.ps1")
     module = tmp_path / "agent_worktrees"
     module.mkdir()
     (module / "__init__.py").write_text("", encoding="utf-8")
@@ -359,6 +379,8 @@ $python = $env:FIXTURE_PYTHON.Replace("'", "''")
     environment = {
         **os.environ, "USERPROFILE": str(home), "HOME": str(home),
         "FIXTURE_PYTHON": sys.executable,
+        "FIXTURE_ADMISSION": str(admission),
+        "FIXTURE_DRIVER": str(PLUGIN / "scripts" / "runtime_install_driver.py"),
         "FIXTURE_INSTALLER_FAILS": "1" if installer_fails else "0",
     }
     for name in (
@@ -389,7 +411,7 @@ $python = $env:FIXTURE_PYTHON.Replace("'", "''")
         assert result.returncode == 0, result.stdout + result.stderr
         assert json.loads(result.stdout) == ["repos", "account", "list"]
         assert (runtime / "calls").read_text().splitlines() == [
-            str(scripts / "install.ps1")
+            str(selected / "scripts" / "install.ps1")
         ]
         assert ("provisioning on first use" in result.stderr) == (invocation == 0)
 
