@@ -731,6 +731,10 @@ native turn from completed history whose reply has not rendered.
 Native-process observations retain pinned parent IDs, bounded option names,
 script basenames and the matching history's lock PIDs, never raw argument values.
 Failures retain the rendered Manager screen as well as the bounded stream tail.
+After a conversation exists, timeout diagnostics also project the private
+installed engine's current liveness flags and process identities before
+teardown. They do not request Refresh, retain credential-bearing binding
+values, or hide an unsettled diagnostic process.
 Copilot's extension host shares its executable. Exclude it from conversation-owner
 counting only when its sole argument is an ordinary, owned
 `extension_bootstrap.mjs`, it is a later-born direct child of the sole

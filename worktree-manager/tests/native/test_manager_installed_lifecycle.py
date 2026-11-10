@@ -116,6 +116,8 @@ def _capture_failure(root, record_property):
                 "lifecycle-launch.jsonl",
                 "lifecycle-processes.jsonl",
                 "lifecycle-conversation.json",
+                "lifecycle-liveness.stdout.txt",
+                "lifecycle-liveness.stderr.txt",
                 "lifecycle-payload-closure.json",
                 "lifecycle-pane-*.stdout.txt",
                 "lifecycle-pane-*.stderr.txt",
@@ -423,7 +425,76 @@ class _Witness:
             self._capture_processes()
         except Exception as diagnostic_error:
             screens += f"\nOwned-process diagnostic: {diagnostic_error}"
+        if self.history is not None:
+            from plugin_test_containment import UnreapedProcessError
+
+            try:
+                self._capture_liveness()
+            except UnreapedProcessError:
+                raise
+            except Exception as diagnostic_error:
+                screens += f"\nInstalled-liveness diagnostic: {diagnostic_error}"
         raise TimeoutError(f"{label}\n{screens}")
+
+    def _capture_liveness(self):
+        program = """
+import json,sys,time
+from pathlib import Path
+from worktree_manager import engine_client,harness_state
+from worktree_manager.production_picker import context
+root=Path(sys.argv[1]).resolve()
+if not harness_state.home().resolve().is_relative_to(root):
+    raise RuntimeError("Liveness diagnostic escaped the private Manager home")
+command=engine_client.engine_base_command()
+if not command or not Path(command[0]).resolve().is_relative_to(root):
+    raise RuntimeError("Liveness diagnostic has no private selected engine")
+project=sys.argv[2]
+context.set_project(project)
+rows=engine_client.list_worktree_rows(project,classify=True,mux_details=True,fresh=True)
+fields=("id","status","state","last_session_id","session_bound_live","session_lock_live",
+        "session_lock_stale","stale_lock_pids","session_bridge_live","session_ahp_live",
+        "session_bare_orphan","execution_leg_live","execution_leg_opaque",
+        "session_backend_opaque","mux_session","mux_attached","mux_clients",
+        "mux_observation_unavailable")
+observations=[]
+for row in rows:
+    if not Path(row["path"]).resolve().is_relative_to(root):
+        raise RuntimeError("Liveness diagnostic returned a foreign worktree")
+    item={key:row.get(key) for key in fields}
+    item["process_fields"]={
+        key:value if type(value) is int else value[:16]
+        for key,value in row.items() if "pid" in key and (
+            type(value) is int or isinstance(value,list)
+            and all(type(pid) is int for pid in value))}
+    item["liveness_field_names"]=sorted(key for key in row if
+        key.startswith(("session_","execution_leg","mux_","bound_")))
+    for key in ("execution_leg","session_backend"):
+        binding=row.get(key)
+        if isinstance(binding,dict):
+            item[key]={field:binding.get(field) for field in
+                       ("provider","kind","state","opaque","binding_revision")}
+            blob=binding.get("blob") or {}
+            item[key]["binding_fields"]=sorted(blob) if isinstance(blob,dict) else []
+            if isinstance(blob,dict):
+                item[key]["process_identity"]={
+                    field:blob[field] for field in
+                    ("pid","process_id","native_pid","parent_pid","start_time","session_id")
+                    if field in blob}
+    availability=row.get("_availability")
+    if isinstance(availability,dict):
+        item["availability_status"]=availability.get("status")
+    observations.append(item)
+print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
+                  "captured_at_ns":time.time_ns(),"rows":observations}),flush=True)
+"""
+        return installed._run(
+            [self.manager_python, "-I", "-B", "-c", program, self.root, PROJECT],
+            self.env,
+            self.root / PROJECT,
+            self.root / "diagnostics",
+            "lifecycle-liveness",
+            timeout=10,
+        )
 
     def _capture_processes(self):
         from agent_procutil._windows_caller_owned import _job_pids
@@ -1390,6 +1461,86 @@ def test_lifecycle_diagnostic_write_cannot_mask_unsettled_custody(tmp_path):
             raise original
     assert caught.value is original
     assert any("controlled diagnostic write failure" in note for note in original.__notes__)
+
+
+@pytest.mark.parametrize("scope", ["private", "foreign-row", "foreign-engine"])
+def test_lifecycle_liveness_diagnostic_uses_private_installed_reads_and_redacts_bindings(
+    tmp_path, monkeypatch, scope,
+):
+    import contextlib
+    import io
+    from worktree_manager import engine_client, harness_state
+    from worktree_manager.production_picker import context
+
+    row = {
+        "id": "fixture-c123",
+        "path": str(tmp_path / "worktree" if scope != "foreign-row" else tmp_path.parent / "foreign"),
+        "session_bound_live": True,
+        "bound_pids": [101],
+        "execution_leg_live": True,
+        "execution_leg": {
+            "provider": "native", "state": "active",
+            "blob": {"pid": 101, "token": "private-binding-secret"},
+        },
+        "unrelated": "private-field-secret",
+    }
+    calls = []
+
+    def rows(project, **options):
+        assert project == PROJECT and options == {
+            "classify": True, "mux_details": True, "fresh": True,
+        }
+        calls.append(project)
+        return [row]
+
+    engine = tmp_path / "engine.exe" if scope != "foreign-engine" else tmp_path.parent / "engine.exe"
+    monkeypatch.setattr(engine_client, "engine_base_command", lambda: [str(engine)])
+    monkeypatch.setattr(engine_client, "list_worktree_rows", rows)
+    monkeypatch.setattr(harness_state, "home", lambda: tmp_path / "manager")
+    monkeypatch.setattr(context, "set_project", lambda _project: None)
+
+    def run(argv, *_args, **_kwargs):
+        with monkeypatch.context() as patch:
+            patch.setattr(sys, "argv", ["-c", str(tmp_path), PROJECT])
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                exec(argv[argv.index("-c") + 1], {})
+            return output.getvalue()
+
+    monkeypatch.setattr(installed, "_run", run)
+    witness = _Witness(tmp_path, {}, tmp_path / "manager.exe", None, None, None)
+    if scope == "private":
+        observed = witness._capture_liveness()
+        data = json.loads(observed)["rows"][0]
+        assert data["session_bound_live"] is True
+        assert data["process_fields"] == {"bound_pids": [101]}
+        assert data["execution_leg"]["process_identity"] == {"pid": 101}
+        assert "private-binding-secret" not in observed and "private-field-secret" not in observed
+    else:
+        with pytest.raises(RuntimeError, match="foreign worktree|no private selected engine"):
+            witness._capture_liveness()
+        assert calls == ([] if scope == "foreign-engine" else [PROJECT])
+
+
+def test_lifecycle_liveness_diagnostic_cannot_hide_unsettled_processes(tmp_path):
+    from types import SimpleNamespace
+    from plugin_test_containment import UnreapedProcessError
+
+    witness = _Witness(
+        tmp_path, {}, None, None, None,
+        SimpleNamespace(execution_deadline=time.monotonic() - 1),
+    )
+    witness.history = tmp_path / "events.jsonl"
+    witness._capture_processes = lambda: None
+    original = UnreapedProcessError("private diagnostic process remains unsettled")
+
+    def capture():
+        raise original
+
+    witness._capture_liveness = capture
+    with pytest.raises(UnreapedProcessError) as caught:
+        witness.wait(lambda: None, "unfinished UI")
+    assert caught.value is original
 
 
 @pytest.mark.parametrize("metadata_available", [True, False])

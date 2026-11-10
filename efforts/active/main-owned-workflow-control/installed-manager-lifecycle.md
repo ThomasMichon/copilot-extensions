@@ -430,3 +430,23 @@ exit. The earlier run observed the normal exit command, owner termination
 and clean wrapper returns; it did not retain the native exit code directly.
 All nine focused native-exit/live-discovery/current-frame controls passed,
 including rejection of a nonzero native code behind a successful wrapper.
+
+### 2026-11-10 - Live Refresh still reports a process after native exit
+
+Run 42807975718 at `9d1a05b24a7169b267f882db9a541169a278de29`
+again completed the first three turns, active Open and detach preservation.
+This time the native Copilot handle also proved exit code zero, with no
+native CLI owner remaining and unchanged tracking identity before Refresh.
+The real UI Refresh executed and changed advisory `HOST(?)` into `PROC`,
+but the row remained Active. The fixture correctly refused to continue
+to Resume rather than asserting absence or changing the menu's policy.
+
+The retained evidence does not yet identify which bound-process or execution
+field keeps the row live. Timeout diagnostics now read the private selected
+installed engine's current classified rows before teardown and retain a
+bounded projection of liveness flags, PID identities and execution-binding
+state. They do not request Refresh or print credential-bearing binding
+values. Foreign engine/worktree reads refuse; unconfirmed diagnostic-process
+cleanup remains a hard failure. All seven focused projection/privacy/custody/
+discovery controls passed. This is diagnostic work, not a liveness fix or
+Resume acceptance.
