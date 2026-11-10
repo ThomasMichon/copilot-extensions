@@ -258,3 +258,24 @@ native owner: Cancel performs no registration, Confirm persists it, and refresh
 retains the unbound state. Scoped F/E9 lint, documentation consistency and all
 13 install contracts pass. Review and exact-head CI remain pending; these
 source results do not authorize or qualify an installed runtime update.
+
+## Converted-bare alias correction
+
+A later review overview identifies a local-only converted-bare alias: both the
+anchor and its nested `.git` directory were accepted as different registration
+paths. All four new real CLI controls reproduce it before the fix: selecting
+unregistered metadata, duplicating an existing anchor, selecting the harness's
+own metadata, and selecting a parent whose metadata is already registered.
+
+Registration now rejects direct metadata-directory selection. Collision checks
+also include the selected anchor's nested metadata path, retaining the reverse
+collision when an existing registration uses that spelling. This adds no Git
+probe or inventory scan and leaves ordinary, direct bare and converted-bare
+anchor support intact. The same selection owner serves preview and apply.
+
+After the fix, all 33 native local-registration controls pass, including the
+four aliases, supported layouts, strict write boundaries, drift, class
+eligibility, shared deadlines and truthful guard-publication receipts. The
+real Manager registration form additionally passes against the updated native
+owner. The earlier four-case reproduction remains a failing-before result,
+not a passed packet.

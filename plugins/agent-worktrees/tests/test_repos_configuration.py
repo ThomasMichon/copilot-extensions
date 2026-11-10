@@ -313,6 +313,34 @@ def test_local_knowledge_registration_rechecks_the_proposal_without_git_or_bindi
     assert {key: value for key, value in after.items() if not key.endswith(".lock")} == before
 
 
+@pytest.mark.parametrize("owner", ["unregistered", "registered", "harness", "registered-metadata"])
+def test_local_knowledge_registration_refuses_converted_bare_metadata_aliases(native, owner):
+    root = local_knowledge(native, bare="converted")
+    registry = repos._repos_yaml_path()
+    raw = yaml.safe_load(registry.read_text(encoding="utf-8"))
+    if owner == "harness":
+        raw["repos"]["sample"][repos._current_platform()] = str(root)
+        policy = root / ".agent-worktrees" / "config.yaml"
+        policy.parent.mkdir()
+        policy.write_text("stateless: true\nrequires_external_state_root: true\n", encoding="utf-8")
+    elif owner != "unregistered":
+        raw["repos"]["existing"] = {
+            "class": "knowledge", "agent": False,
+            repos._current_platform(): str(root / ".git" if owner == "registered-metadata" else root),
+        }
+    registry.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    selected = root if owner == "registered-metadata" else root / ".git"
+    before = tree(native)
+    result = request(
+        "knowledge-register-preview", "--checkout-path", str(selected),
+        "--default-branch", "main", name="local-knowledge",
+    )
+    expected = "registration-conflict" if owner == "registered-metadata" else "invalid-checkout"
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert json.loads(result.stdout)["code"] == expected
+    assert tree(native) == before
+
+
 @pytest.mark.parametrize("classification", ["reference", "singleton", "knowledge"])
 def test_local_knowledge_registration_requires_the_binding_owners_worktree_class(native, classification):
     local_knowledge(native)

@@ -98,6 +98,9 @@ nonsecret repository-account mapping. The branch and account are registration
 metadata, not observations of the server default, landing policy or credentials.
 Ordinary, direct bare and converted-clone bare anchors are supported; task worktrees, descendants and
 existing name/path/repository-identity collisions require their normal owners.
+Select the anchor itself, never its `.git` metadata directory. An existing
+registration at that nested metadata path also conflicts with the anchor,
+including for local-only repositories without a provider identity.
 
 ```text
 agent-worktrees repos configuration knowledge-register-preview --context-project sample --repository knowledge --checkout-path <absolute-anchor> --default-branch main

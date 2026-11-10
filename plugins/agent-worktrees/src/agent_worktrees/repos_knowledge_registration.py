@@ -62,6 +62,8 @@ def _checkout(path: str, branch: str, budget: OwnedExecutionBudget) -> dict:
     root = supplied.resolve(strict=True)
     if not root.is_dir():
         raise ConfigurationError("invalid-checkout", "Select an existing local checkout directory.")
+    if root.name.casefold() == ".git":
+        raise ConfigurationError("invalid-checkout", "Select the repository anchor, not its Git metadata directory.")
     values = _git(root, [
         "rev-parse", "--path-format=absolute", "--absolute-git-dir", "--git-common-dir", "--is-bare-repository",
     ], budget).splitlines()
@@ -119,11 +121,12 @@ def _selection(project: str, name: str, path: str, branch: str, account: str, bu
     config = cfg.load_project_config(project, include_control_plane_related_pr=False)
     selected = _checkout(path, branch, budget)
     root = Path(selected["path"])
-    if root == Path(config.default_repo.anchor).resolve():
+    checkout_paths = {root, (root / ".git").resolve()}
+    if Path(config.default_repo.anchor).resolve() in checkout_paths:
         raise ConfigurationError("registration-conflict", "The harness cannot be its own knowledge repository.")
     for existing_name, entry in registry.repos.items():
         if existing_name.casefold() == name.casefold() or (
-            entry.local_path() and Path(entry.local_path()).resolve() == root
+            entry.local_path() and Path(entry.local_path()).resolve() in checkout_paths
         ):
             raise ConfigurationError("registration-conflict", "The name or checkout is already registered; inspect its existing entry.")
         if selected["repository_id"] and entry.remote:
