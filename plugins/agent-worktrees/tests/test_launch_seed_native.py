@@ -251,6 +251,59 @@ def test_admission_only_python_owner_keeps_fence_and_does_not_claim_a_seed(recor
     assert saved["events"][-1]["details"]["process_exit_code"] == 17
 
 
+def _set_status(record, status):
+    current = tracking.load_record(record)
+    current.status = status
+    tracking.save_record(current, record)
+
+
+@pytest.mark.parametrize(("before", "during", "admitted"), [
+    ("finalized", None, True),
+    ("active", "finalized", False),
+    ("finalized", "finalizing", False),
+    ("finalized", "archived", False),
+])
+def test_admission_only_reopens_already_finalized_worktree_but_refuses_later_finalization(
+    record, monkeypatch, before, during, admitted,
+):
+    from agent_remote_driver.headed import caller
+
+    _set_status(record, before)
+
+    def execute(argv, **options):
+        if during:
+            _set_status(record, during)
+        if not admitted:
+            with pytest.raises(ValueError, match=f"worktree status is '{during}'"):
+                options["admit"]()
+            return 1, True
+        options["admit"]()
+        options["spawned"](os.getpid(), locks.process_start_time(os.getpid()))
+        return 17, True
+
+    monkeypatch.setattr(caller, "execute", execute)
+    assert legacy.launch(
+        record, ["copilot", "--session-id", "chosen"], admission_only=True,
+    ) == (17 if admitted else 1)
+
+
+def test_finalizing_worktree_is_refused_even_when_planned(record):
+    reply = native.prepare(record, ["custom-backend"], seed_id=None, admission_only=True)
+    _set_status(record, "finalizing")
+    with pytest.raises(ValueError, match="worktree status is 'finalizing'"):
+        native.admit(
+            record, _identity(reply), reply["operation_id"],
+            admission_only=True, planned_status="finalizing",
+        )
+    _set_status(record, "finalized")
+    with pytest.raises(ValueError, match="worktree status is 'finalized'"):
+        native.admit(record, _identity(reply), reply["operation_id"], admission_only=True)
+    native.admit(
+        record, _identity(reply), reply["operation_id"],
+        admission_only=True, planned_status="finalized",
+    )
+
+
 def test_admission_only_python_owner_rejects_newer_prompt_before_core_creation(record, monkeypatch):
     from agent_remote_driver.headed import caller
 

@@ -218,6 +218,10 @@ class Execution:
             "creation_nonce": record.creation_nonce,
             "native_epoch": _epoch(),
         }
+        # In-memory only: the lifecycle status this execution was started
+        # against, so creation admission can tell a resumed finalized
+        # worktree apart from one finalized after the launch began.
+        self.planned_status: str = record.status
         self.failed = False
         self.process_exit_code: int | None = None
 

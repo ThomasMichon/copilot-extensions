@@ -1,0 +1,21 @@
+{
+  "comment": "Admit headed opens of an already-finalized worktree (refusing only a terminal transition after launch start) and surface the startup admission refusal reason to the caller",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

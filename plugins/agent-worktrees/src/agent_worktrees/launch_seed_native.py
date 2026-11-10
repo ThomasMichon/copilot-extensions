@@ -190,14 +190,27 @@ def _headed_command(command: list[str]) -> tuple[list[str], str] | None:
 def admit(
     record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
     *, admission_only: bool = False, preserve_seed_id: str | None = None,
-    native_resume_session: str | None = None,
+    native_resume_session: str | None = None, planned_status: str | None = None,
 ) -> None:
     """Recheck the original launch immediately before its retained coordinator creates native."""
     with admission(
         record_path, correlation, operation_id, admission_only=admission_only,
         preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+        planned_status=planned_status,
     ):
         pass
+
+
+_TERMINAL_STATUSES = frozenset({"finalizing", "complete", "completed", "finalized", "archived"})
+# Resolve deliberately reopens these with their checkout retained; only a
+# transition into them after the launch started is changed intent.
+_RESUMABLE_STATUSES = frozenset({"complete", "completed", "finalized"})
+
+
+def _status_refused(status: str, planned_status: str | None) -> bool:
+    if status not in _TERMINAL_STATUSES:
+        return False
+    return not (planned_status == status and status in _RESUMABLE_STATUSES)
 
 
 @contextmanager
@@ -205,6 +218,7 @@ def admission(
     record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
     *, admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None, require_cold_stop: bool = True,
+    planned_status: str | None = None,
 ):
     """Keep the original creation fence until the exec or retained owner releases it."""
     from . import launch_admission, launch_seed_exec, launch_seed_state, tracking
@@ -230,9 +244,14 @@ def admission(
                 if isinstance(prepared, int):
                     raise ValueError("Original admission-only launch intent changed before creation")
             current = tracking.load_record(record_path)
+            if _status_refused(current.status, planned_status):
+                raise ValueError(
+                    f"Original headed launch intent changed before creation: "
+                    f"worktree status is {current.status!r}"
+                    + (f" (launch started as {planned_status!r})" if planned_status else "")
+                )
             if (
-                current.status in {"finalizing", "complete", "completed", "finalized", "archived"}
-                or current.pending_seed
+                current.pending_seed
                 or not admission_only and receipt is None and launch_seed_state.peek(record_path) is not None
             ):
                 raise ValueError("Original headed launch intent changed before creation")
