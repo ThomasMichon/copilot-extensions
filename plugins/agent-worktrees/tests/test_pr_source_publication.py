@@ -12,7 +12,8 @@ from agent_worktrees.pr_publication_config import PublicationChecksConfig
 pytestmark = pytest.mark.timeout(120)
 
 
-def test_registered_ado_destination_accepts_percent_encoded_names(monkeypatch, tmp_path):
+@pytest.mark.parametrize("repo_class", ["worktree", "singleton"])
+def test_registered_ado_destination_accepts_percent_encoded_names(monkeypatch, tmp_path, repo_class):
     from agent_worktrees import config as cfg
 
     remote = "https://dev.azure.com/example/My%20Project/_git/My%20Repo"
@@ -21,7 +22,7 @@ def test_registered_ado_destination_accepts_percent_encoded_names(monkeypatch, t
         pr=cfg.PRConfig(enabled=True, provider="azure-devops", api_base="https://dev.azure.com/example"),
     )
     monkeypatch.setattr(repos, "list_repos", lambda: [
-        SimpleNamespace(remote=remote, repo_class="worktree"),
+        SimpleNamespace(remote=remote, repo_class=repo_class),
     ])
     assert source._canonical_destination(repo, "My Project/My Repo", str(tmp_path)) == remote
 

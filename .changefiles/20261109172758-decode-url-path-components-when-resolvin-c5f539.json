@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve percent-encoded Azure DevOps project names to registered target policy and base branches, including singleton repositories.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
