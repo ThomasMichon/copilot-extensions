@@ -191,6 +191,14 @@ Settled expired registration metadata may retire after its documented
 one-day reconciliation window; unresolved delivered IDs are not discarded.
 Terminal/cache capacity backpressure is explicit, never a data-reset operation.
 
+Local requests wait for the existing shared transaction lock only within their
+original admission budget, without extending expiry or creating another writer.
+Response flushing and connection cleanup are bounded too; withdrawal aborts only
+owned socket transports while any started storage operation remains joined.
+`follow` drains all retained delivered pages even after cancellation/expiry.
+CLI diagnostics preserve permanent history-gap/binding reasons instead of
+instructing users to blindly retry every failure as an outage.
+
 Acquisition cadence uses `interval` (1..300 seconds, default 5); operation and
 drain budgets use their existing 1..300-second selectors (default 60).
 Inventory's emitted 4-page/200-member/60-second arguments, passive probe 15-second

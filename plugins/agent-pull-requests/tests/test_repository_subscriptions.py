@@ -177,3 +177,40 @@ def test_byte_backpressure_reserves_ack_progress_and_evicts_only_settled_history
     observe(selected, "resumed")
     current = selected[3].query(selected[2].key, expires_at=10000)
     assert current["pulls"][0]["facts"]["head_sha"] == "resumed"
+
+
+def test_subscription_precedes_first_observation_and_keeps_original_baseline(selected):
+    registration = execute(selected, "early", "subscribe", {
+        "request_id": "early", "ttl": 3600,
+    })
+    assert registration["baseline"]["inventory"]["outcome"] == "unknown"
+    assert registration["baseline"]["pulls"] == []
+    observe(selected)
+    pending = execute(selected, "early", "events", {
+        "registration_id": registration["subscription"]["registration_id"],
+    })
+    assert any(event["kind"] == "baseline" for event in pending["events"])
+
+
+def test_query_pages_by_encoded_bytes_without_losing_current_rows(selected, monkeypatch):
+    import copy
+    import json
+    from agent_pull_requests import repository_subscriptions
+    observe(selected)
+    def populate(document):
+        repository = document["repository_cache"]["repositories"][0]
+        original = repository["pulls"][0]
+        repository["pulls"] = [
+            {**copy.deepcopy(original), "number": number} for number in range(1, 17)
+        ]
+    selected[1]._review_transaction(populate, expires_at=10000)
+    monkeypatch.setattr(repository_subscriptions, "RESPONSE_BYTES", 10000)
+    numbers, after = [], 0
+    while True:
+        page = selected[3].query(selected[2].key, after=after, expires_at=10000)
+        assert page["pulls"] and len(json.dumps(page).encode()) < 10000 - 8192
+        numbers.extend(pull["number"] for pull in page["pulls"])
+        if not page["more"]:
+            break
+        after = page["pulls"][-1]["number"]
+    assert numbers == list(range(1, 17))

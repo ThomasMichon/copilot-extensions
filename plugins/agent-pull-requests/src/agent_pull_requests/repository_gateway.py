@@ -3,6 +3,7 @@
 import asyncio
 import json
 import re
+import time
 
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_handler import BoundedServiceResponse, RequestDisconnected
@@ -23,6 +24,16 @@ def response(status, value):
         status, (("content-type", "application/json"), ("cache-control", "no-store")),
         json.dumps(value, allow_nan=False).encode(),
     )
+
+
+def admitted_operation(owner, request, operation):
+    """Wait for shared transaction custody only within the original caller budget."""
+    while True:
+        owner.store.check_current(request.context.expires_at, lambda: owner._check(request))
+        try:
+            return operation()
+        except OperationLockedError:
+            time.sleep(.01)
 
 
 async def handle(owner, request):
@@ -72,10 +83,12 @@ async def handle(owner, request):
             if request.context.namespace != owner.store.namespace:
                 raise RequestDisconnected()
         checkpoint()
-        return RepositorySubscriptions(owner.repositories).execute(
-            identity.key, scope.consumer, operation, value["request"],
-            expires_at=request.context.expires_at, checkpoint=checkpoint,
-        )
+        return admitted_operation(owner, request, lambda: (
+            RepositorySubscriptions(owner.repositories).execute(
+                identity.key, scope.consumer, operation, value["request"],
+                expires_at=request.context.expires_at, checkpoint=checkpoint,
+            )
+        ))
 
     async def dispatch():
         try:
@@ -127,10 +140,12 @@ async def listing(owner, request):
                 "inventory": cached[key]["inventory"] if key in cached else {"outcome": "unknown"},
                 "known_members": sum(pull["member"] for pull in cached[key]["pulls"]) if key in cached else 0,
             } for target, key in selected.items()]
-        return owner.store._review_transaction(
-            read, persist=False, expires_at=request.context.expires_at,
-            checkpoint=lambda: owner._check(request),
-        )
+        return admitted_operation(owner, request, lambda: (
+            owner.store._review_transaction(
+                read, persist=False, expires_at=request.context.expires_at,
+                checkpoint=lambda: owner._check(request),
+            )
+        ))
     async def dispatch():
         try:
             result = await asyncio.to_thread(execute)

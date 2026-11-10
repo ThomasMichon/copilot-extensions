@@ -224,15 +224,6 @@ class RepositoryProjection:
         ) or number is not None and (type(number) is not int or number < 1):
             raise ValueError("invalid bounded repository query")
         def query(state):
-            row = next((row for row in state["repositories"]
-                        if RepositoryIdentity.parse(row["identity"]).key == key), None)
-            row = row or _new_repository(self.identities[key])
-            rows = sorted((pull for pull in row["pulls"] if pull["number"] > after
-                           and (number is None or pull["number"] == number)),
-                          key=lambda pull: pull["number"])
-            return {
-                "identity": row["identity"], "inventory": row["inventory"],
-                "pulls": rows[:limit], "more": len(rows) > limit,
-                "cursor": state["next_sequence"] - 1, "now": int(self.store.clock()),
-            }
+            from .repository_subscriptions import _page
+            return _page(state, self.identities[key], after, limit, number, int(self.store.clock()))
         return self._transaction(query, **authority)

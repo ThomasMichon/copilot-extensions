@@ -178,10 +178,13 @@ def run(args: argparse.Namespace) -> int:
                     payload.pop("after", None)
                 else:
                     payload["after"] = last["sequence"]
-            if result["status"] != "active":
+            if result["status"] != "active" and not result["more"]:
                 return 0
             time.sleep(min(args.interval, max(0, deadline - time.monotonic())))
         return 0
-    except (LocalClientError, ValueError, KeyError, BrokenPipeError):
+    except LocalClientError as error:
+        print(f"local repository request refused: {error}", file=sys.stderr)
+        return 2
+    except (ValueError, KeyError, BrokenPipeError):
         print("local repository request unavailable; original identities retained", file=sys.stderr)
         return 2

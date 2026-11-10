@@ -69,6 +69,7 @@ class LocalIngress:
             for writer, lifetime in tuple(self._requests.values()):
                 lifetime.close()
                 writer.close()
+                writer.transport.abort()
             if self._tasks:
                 await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
             if self.path.exists() and self.path.lstat().st_ino == owned.st_ino:
@@ -83,6 +84,8 @@ class LocalIngress:
         task.add_done_callback(self._tasks.discard)
 
     async def _connection(self, reader, writer):
+        deadline = time.monotonic() + self.seconds
+        expires_at = int(time.time()) + self.seconds
         lifetime = RequestLifetime()
         task = asyncio.current_task()
         self._requests[task] = (writer, lifetime)
@@ -94,7 +97,9 @@ class LocalIngress:
             _pid, uid, _gid = struct.unpack("3i", raw_peer)
             principal = self.peers.get(uid)
             if principal is None:
-                await self._write(writer, 403, b'{"error":"local_peer_refused"}')
+                await asyncio.wait_for(
+                    self._write(writer, 403, b'{"error":"local_peer_refused"}'), self.seconds,
+                )
                 return
             async def receive():
                 raw = await reader.readuntil(b"\r\n\r\n")
@@ -118,7 +123,7 @@ class LocalIngress:
                     raise ValueError
                 body = await reader.readexactly(size)
                 return LocalServiceRequest(
-                    LocalCallerContext(self.namespace, principal, int(time.time()) + self.seconds),
+                    LocalCallerContext(self.namespace, principal, expires_at),
                     method, target, tuple(headers.items()), body, lifetime,
                     response_limit=RESPONSE_BYTES,
                 )
@@ -132,7 +137,10 @@ class LocalIngress:
             lifetime.check()
             if len(result.body) > RESPONSE_BYTES:
                 raise ValueError
-            await self._write(writer, result.status, result.body)
+            await asyncio.wait_for(
+                self._write(writer, result.status, result.body),
+                max(.001, deadline - time.monotonic()),
+            )
         except (Exception, asyncio.CancelledError):
             lifetime.close()
         finally:
@@ -145,9 +153,11 @@ class LocalIngress:
             self._requests.pop(task, None)
             writer.close()
             try:
-                await writer.wait_closed()
-            except OSError:
-                pass
+                await asyncio.wait_for(
+                    writer.wait_closed(), max(.001, deadline - time.monotonic()),
+                )
+            except (OSError, asyncio.TimeoutError):
+                writer.transport.abort()
 
     @staticmethod
     async def _write(writer, status, body):

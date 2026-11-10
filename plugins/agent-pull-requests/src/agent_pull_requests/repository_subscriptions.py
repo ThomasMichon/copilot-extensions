@@ -109,6 +109,10 @@ class RepositorySubscriptions:
                     )]
                     if len(state["registrations"]) >= MAX_REGISTRATIONS:
                         raise RepositoryRequestConflict("subscription capacity reached")
+                    if not any(RepositoryIdentity.parse(item["identity"]).key == key
+                               for item in state["repositories"]):
+                        from .repository_projection import _new_repository
+                        state["repositories"].append(_new_repository(identity))
                     row = {
                         "registration_id": uuid.uuid4().hex, "request_id": request_id,
                         "consumer": consumer, "target": key, "expires_at": now + request["ttl"],

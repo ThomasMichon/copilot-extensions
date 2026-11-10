@@ -137,6 +137,11 @@ def test_real_local_client_continues_after_ack_with_scope_isolation(
                     break
                 await asyncio.sleep(.02)
             assert code == 0 and json.loads(output.out)["pulls"][0]["facts"]["head_sha"] == "a"
+            with config.store()._lock():
+                waiting = asyncio.create_task(asyncio.to_thread(client.request, "query", {}))
+                await asyncio.sleep(.1)
+                assert not waiting.done()
+            assert (await asyncio.wait_for(waiting, 5))["pulls"][0]["facts"]["head_sha"] == "a"
             first = (await request("subscribe", {"request_id": "first", "ttl": 3600}))["subscription"]
             second = (await request("subscribe", {"request_id": "second", "ttl": 3600}))["subscription"]
             assert first["registration_id"] != second["registration_id"]
