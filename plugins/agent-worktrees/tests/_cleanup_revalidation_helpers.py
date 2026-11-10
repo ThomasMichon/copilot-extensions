@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from agent_worktrees import __main__ as cli
-from agent_worktrees import git_ops, sessions, tracking, worktree_identity
+from agent_worktrees import finalize_local, git_ops, sessions, tracking, worktree_identity
 
 S = git_ops.WorktreeState
 _REAL_BUILD_ACTIVE_PATHS = cli._build_active_paths
@@ -142,6 +142,9 @@ class CleanupHarness:
         self.monkeypatch.setattr(cli.cfg, "tracking_dir", lambda: self.tracking_dir)
         self.monkeypatch.setattr(cli.git_ops, "has_remote", lambda *_a, **_k: False)
         self.monkeypatch.setattr(cli.git_ops, "fetch", lambda *_a, **_k: None)
+        self.monkeypatch.setattr(
+            finalize_local, "resolve_upstream", lambda *_a, **_k: ("origin/main", False),
+        )
         self.monkeypatch.setattr(cli.git_ops, "prune_worktrees", lambda *_a, **_k: None)
         self.monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
         self.monkeypatch.setattr(cli, "_hosted_session_blocks_cleanup", lambda rec: False)

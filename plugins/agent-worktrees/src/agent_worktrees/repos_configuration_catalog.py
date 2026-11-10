@@ -153,10 +153,20 @@ def inspect_project(project: str, workspace: str) -> Inspection:
 
 def catalog(project: str, *, workspace: str = "") -> dict:
     from .repos_knowledge_configuration import binding_names_supported, owner_status
+    from .repos_knowledge_default import observe
 
     registry = repos.read_registry(strict=True)
     inspection = inspect_project(project, workspace)
     binding_owner = owner_status(project)
+    try:
+        preferred = observe(project)
+    except (ValueError, TypeError, OSError) as error:
+        preferred = {
+            "status": "unavailable",
+            "code": error.code if isinstance(error, ConfigurationError) else "preference-input-unavailable",
+            "message": str(error) if isinstance(error, ConfigurationError) else
+            "Accepted preference inputs need owner inspection.",
+        }
     composition_error = None
     try:
         fingerprint([repos._repos_yaml_path()])
@@ -225,6 +235,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             same_machine_agent="enabled" if entry and entry.agent else "disabled",
             plugin_enablement="unsupported: owned by the plugin activation provider",
             route=route, binding=inspection.binding, pair=inspection.pair, findings=findings,
+            knowledge_preference={key: value for key, value in preferred.items() if key != "selection"},
             unsupported_operations={
                 "route": "No revisioned local route writer is exposed by the owner.",
                 "pair": "Binding and pairing require their canonical owner workflow.",
@@ -240,6 +251,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
             f"Route: {route}; editing unsupported",
             f"Bound state identity: {inspection.binding}",
             f"Actual tracked pair: {inspection.pair}",
+            f"Accepted knowledge default: {state['knowledge_preference']}",
             "Binding identifiers: " + ("supported" if binding_names else
                 "unsupported; exact Configuration names starting with an ASCII letter or digit are required."),
             "Sources (higher precedence last): " + str(state["sources"]),
@@ -267,10 +279,19 @@ def catalog(project: str, *, workspace: str = "") -> dict:
                 and binding_owner == "available"
             ).lower(),
             "binding_fields": [],
+            "preferred_knowledge_bindable": str(
+                preferred.get("status") == "suggested"
+                and preferred["resolution"]["knowledge"]["repository"] == name
+                and binding_names and not inspection.findings and binding_owner == "available"
+                and inspection.readiness.get("ready") is False
+            ).lower(),
+            "harness_repository_id": preferred.get("resolution", {}).get("harness", {}).get("repository_id", ""),
+            "knowledge_repository_id": preferred.get("resolution", {}).get("knowledge", {}).get("repository_id", ""),
         })
     summary = {
         "repositories": len(rows), "knowledge_readiness": inspection.readiness,
         "binding_owner": binding_owner,
+        "knowledge_preference": {key: value for key, value in preferred.items() if key != "selection"},
     }
     if binding_owner != "available" and inspection.readiness.get("ready") is False:
         summary.update(

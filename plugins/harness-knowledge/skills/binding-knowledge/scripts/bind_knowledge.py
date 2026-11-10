@@ -867,6 +867,7 @@ def main(argv: list[str] | None = None) -> int:
             "preserves_registration_class": True, "control_plane_pair": True,
             "existing_binding_configuration": 2,
             "portable_binding_precondition": 1,
+            "binding_precondition_freshness": 1,
         }))
         return 0
     if not args.control_plane and not (args.harness and args.knowledge):
@@ -928,6 +929,8 @@ def main(argv: list[str] | None = None) -> int:
                 print("error: paired control-plane binding is incomplete", file=sys.stderr)
                 return 1
     except RuntimeError as exc:
+        if args.configuration and args.json:
+            print(json.dumps({"status": "refused", "pointer_committed": False}))
         print(f"error: {exc}", file=sys.stderr)
         return 1
     if args.json:

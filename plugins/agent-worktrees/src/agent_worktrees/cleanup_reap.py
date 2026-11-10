@@ -95,7 +95,7 @@ def _reap_locked(
                 warnings.append(f"Directory still present: {wt_dir}")
                 failures += 1
 
-    if rec.branch:
+    if rec.branch and rec.branch != repo.default_branch:
         if not git_ops.delete_branch(rec.branch, cwd=repo.anchor, force=True):
             warnings.append(f"Could not delete branch {rec.branch}")
             failures += 1
