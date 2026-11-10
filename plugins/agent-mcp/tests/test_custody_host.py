@@ -186,6 +186,35 @@ async def test_shared_host_moves_settled_session_without_upstream_reinitialize(t
         await ipc.aclose_writer(writer)
 
 
+async def test_shared_host_adopts_same_slot_backend_replacement(tmp_path, monkeypatch):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        reader, writer, _, _ = await fixture.attach()
+        entry = next(iter(fixture.host.sessions))
+        old = entry.owner.state.current
+        old_server = fixture.backends[0]
+        await send(writer, {"jsonrpc": "2.0", "id": 0, "method": "initialize"})
+        assert (await receive(reader))["id"] == 0
+        await settled(entry.owner)
+        replacement = await fixture.publish("outgoing")
+        fixture.host.inspect_sessions()
+        await until(lambda: entry.migration is not None)
+        await asyncio.wait_for(entry.migration, 2)
+        await until(lambda: old_server.attached == 0)
+        assert entry.owner.state.current is not old
+        assert replacement.attached == 1 and entry.generation == "outgoing"
+        adopted = entry.migration
+        fixture.host.inspect_sessions()
+        assert entry.migration is adopted
+        await send(writer, {"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        assert (await receive(reader))["id"] == 1
+        upstream = fixture.upstreams[0]
+        assert upstream.starts == 1
+        assert sum(item.get("method") == "initialize" for item in upstream.messages) == 1
+        writer.write_eof()
+        assert await asyncio.wait_for(reader.read(), 2) == b""
+        await ipc.aclose_writer(writer)
+
+
 async def test_one_host_migrates_other_client_while_first_mutation_is_pending(tmp_path, monkeypatch):
     async with shared(tmp_path, monkeypatch) as fixture:
         first, writer1, _, _ = await fixture.attach()

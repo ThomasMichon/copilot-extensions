@@ -252,6 +252,47 @@ async def test_cancelled_handover_before_quiesce_settles_fence(resume_failure):
                 await asyncio.gather(move, return_exceptions=True)
 
 
+async def test_repeated_cancelled_handovers_invalidate_remote_quiesce_waiters():
+    async with composed() as (owner, backends, upstream, output):
+        await call(owner, 1)
+        instance = backends.instances[0]
+        original = instance.peer.handler
+        entered, finished = [], []
+
+        async def handler(operation, data):
+            if operation != "quiesce":
+                return await original(operation, data)
+            entered.append(None)
+            try:
+                return await original(operation, data)
+            finally:
+                finished.append(None)
+
+        instance.peer.handler = handler
+        for count in (1, 2):
+            move = asyncio.create_task(owner.handover(backends.connect))
+            while len(entered) < count:
+                await asyncio.sleep(0)
+            move.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await move
+            assert instance.state == "active" and not owner.state.fenced
+            assert not instance.accepted[1].done()
+        await upstream.complete(1)
+        await settled(owner)
+        while len(finished) < 2:
+            await asyncio.sleep(0)
+        assert instance.state == "active"
+        await owner.submit({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+        await settled(owner)
+        await owner.handover(backends.connect)
+        await owner.submit({"jsonrpc": "2.0", "id": 3, "method": "tools/list"})
+        await settled(owner)
+        assert [item["id"] for item in output] == [1, 2, 3]
+        assert sum(item.get("method") == "tools/call" for item in upstream.messages) == 1
+        assert upstream.starts == 1 and not owner.state.uncertain
+
+
 async def test_unacknowledged_publications_are_bounded_without_spending_control_credit():
     async with composed() as (owner, backends, upstream, output):
         backends.hold_application = True

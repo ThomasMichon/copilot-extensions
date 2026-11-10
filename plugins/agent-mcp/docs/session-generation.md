@@ -207,6 +207,14 @@ Cancelling handover before quiescence may resume the still-active committed
 epoch idempotently, with the same epoch and context checks. A failed or
 unconfirmed resumption makes custody uncertain and wakes blocked admission;
 it cannot leave a known session permanently fenced.
+Resumption invalidates earlier quiesce tokens, including lock waiters, so a
+stale operation cannot refence the backend after repeated cancellations.
+
+The watcher compares the last successfully adopted slot and endpoint
+publication identity. Republishing a different backend from the same
+immutable slot still migrates existing sessions. Admission verifies that
+the observed publication remains unchanged across its handshake; a failed
+candidate never becomes the successfully adopted identity.
 
 Clean teardown keeps the backend attached while upstream input is closed and
 final output drains, then detaches the backend and closes the transport.
@@ -266,6 +274,8 @@ uses the incoming physical backend while that mutation is pending. Subsequent
 calls from the original client execute installed incoming code even after the
 outgoing process exits. Supported rollback reconstructs both clients' pipelines
 on the prior physical slot without replacing either upstream.
+Both clients also adopt a new process from that same rollback slot, then
+continue after the superseded same-slot backend exits.
 
 The packet covers a prestarted custodian and the internal launcher's actual
 attributed startup. Two clients share one custody process; the peak registered

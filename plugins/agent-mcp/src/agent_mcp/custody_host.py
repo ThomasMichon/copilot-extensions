@@ -12,9 +12,9 @@ from pathlib import Path
 
 from agent_procutil.daemon_instances import daemon_entrypoint
 
-from . import execution_context, ipc, sockio
+from . import execution_context, sockio
 from .config import load_config
-from .custody_connector import BackendConnector
+from .custody_connector import BackendConnector, selection_signature
 from .custody_contract import CONTRACT, supports
 from .custody_intake import ClientIntake
 from .custody_session import CustodySession
@@ -33,6 +33,7 @@ class HostedSession:
     writer: asyncio.StreamWriter
     generation: str | None = None
     signature: tuple | None = None
+    adopted_signature: tuple | None = None
     migration: asyncio.Task | None = None
     retry_at: float = 0
     closing: bool = False
@@ -99,24 +100,13 @@ class CustodyHost(Server):
         )
 
     def _selection(self):
-        selected = self.installation / "current-version"
-        with selected.open("r", encoding="utf-8-sig") as stream:
-            generation = stream.read(1025).strip()
-        if not generation or len(generation) > 1024:
-            raise ValueError("backend selection is invalid")
-        handle = Path(self.backend_handle)
-        path = handle if ipc._HAS_AF_UNIX else ipc._endpoint_path(handle)
-        try:
-            info = path.lstat()
-            endpoint = (info.st_ino, info.st_mtime_ns, info.st_size)
-        except FileNotFoundError:
-            endpoint = None
-        return generation, endpoint
+        return selection_signature(self.installation, self.backend_handle)
 
     async def _migrate(self, entry):
         try:
             await entry.owner.handover(entry.connector)
             entry.generation = entry.connector.generation
+            entry.adopted_signature = entry.connector.signature
         except Exception:
             entry.retry_at = time.monotonic() + _RETRY_SECONDS
             log.warning("custody backend handover incomplete; no replay")
@@ -137,7 +127,7 @@ class CustodyHost(Server):
                 continue
             if entry.closing or (entry.migration is not None and not entry.migration.done()):
                 continue
-            if signature[0] == entry.generation:
+            if signature == entry.adopted_signature:
                 continue
             if signature == entry.signature and time.monotonic() < entry.retry_at:
                 continue
@@ -198,6 +188,7 @@ class CustodyHost(Server):
         try:
             await owner.start(connector, ready=ready)
             entry.generation = connector.generation
+            entry.adopted_signature = connector.signature
             self.sessions.add(entry)
             await ClientIntake(owner, reader, on_eof=owner.client_eof).run()
         except Exception as exc:

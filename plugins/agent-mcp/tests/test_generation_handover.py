@@ -71,9 +71,9 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 processes.append(process)
                 return process
 
-            async def backend(label):
+            async def backend(label, suffix=""):
                 (root / "current-version").write_text(slots[label][0], encoding="utf-8")
-                handle = fixed.parent / f"{label}.sock"
+                handle = fixed.parent / f"{label}{suffix}.sock"
                 process = await start(label, "backend", handle)
                 handles.append(handle)
                 reply = await fixture.eventually(lambda: request_via_socket(handle, {"op": "ping"}))
@@ -133,7 +133,7 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 })
                 assert (await fixture.receive(held))["method"] == "notifications/progress"
                 assert (await fixture.receive(held))["id"] == "server-approval"
-                incoming, _, new_pid = await backend("new")
+                incoming, new_handle, new_pid = await backend("new")
                 assert old_pid != new_pid
                 fresh, fresh_initialization = await client("new")
                 physical(fresh_initialization, "new", new_pid)
@@ -176,7 +176,7 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 assert held.returncode is None and fresh.returncode is None
                 assert identity_state(keeper_pid, keeper_birth) == "matching"
                 assert incoming.returncode is None
-                rollback, _, rollback_pid = await backend("old")
+                rollback, rollback_handle, rollback_pid = await backend("old")
                 rolled_back = await fixture.eventually(
                     inspect, lambda value: value["pipeline_code"] == "old",
                 )
@@ -189,6 +189,24 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 physical(reply, "old", rollback_pid)
                 assert reply["pid"] == fresh_initialization["pid"] and reply["initialized"] == 1
                 assert rollback.returncode is None and len(instances()) == 3
+                await fixture.shutdown(new_handle)
+                await asyncio.wait_for(incoming.wait(), 10)
+                assert incoming.returncode == 0
+                replacement, _, replacement_pid = await backend("old", "-replacement")
+                assert replacement_pid != rollback_pid and len(instances()) == 3
+                for process, initial in ((held, initialization), (fresh, fresh_initialization)):
+                    result = await fixture.eventually(
+                        lambda: inspect(process),
+                        lambda value: value["backend_pid"] == replacement_pid,
+                    )
+                    physical(result, "old", replacement_pid)
+                    assert result["pid"] == initial["pid"] and result["initialized"] == 1
+                await fixture.shutdown(rollback_handle)
+                await asyncio.wait_for(rollback.wait(), 10)
+                assert rollback.returncode == 0
+                physical(await inspect(), "old", replacement_pid)
+                assert replacement.returncode is None
+                assert identity_state(keeper_pid, keeper_birth) == "matching"
                 record_testsuite_property("platform", sys.platform)
                 record_testsuite_property("physical_generations_" + keeper_start, json.dumps({
                     label: generation for label, (generation, _) in slots.items()

@@ -192,7 +192,7 @@ async def test_backend_checks_equivalence_before_preparing_upstream(tmp_path, mo
         assert fixture.roots and fixture._attached == 0
 
 
-@pytest.mark.parametrize("case", ["malformed", "epoch", "selection"])
+@pytest.mark.parametrize("case", ["malformed", "epoch", "selection", "endpoint"])
 async def test_uncertain_or_stale_ack_never_returns_streams(tmp_path, monkeypatch, case):
     async with endpoint(tmp_path, monkeypatch) as fixture:
         ack = {
@@ -208,9 +208,13 @@ async def test_uncertain_or_stale_ack_never_returns_streams(tmp_path, monkeypatc
 
             async def changed(writer, message):
                 await original(writer, message)
-                fixture.selector.write_text("replacement", encoding="utf-8")
+                if case == "selection":
+                    fixture.selector.write_text("replacement", encoding="utf-8")
+                else:
+                    sidecar = ipc._endpoint_path(fixture.handle)
+                    sidecar.write_text(sidecar.read_text(encoding="utf-8") + " ", encoding="utf-8")
             fixture._send = changed
-        if case != "selection":
+        if case not in {"selection", "endpoint"}:
             fixture.ack = ack
         with pytest.raises(OSError):
             await fixture.connector(1)

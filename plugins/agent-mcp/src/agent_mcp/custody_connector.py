@@ -15,6 +15,21 @@ from .custody_wire import MAX_FRAME
 from .request_context import capture_context, supports_context
 
 
+def selection_signature(root, handle):
+    """Observe the selected slot and publication identity without contacting it."""
+    with (Path(root) / "current-version").open("r", encoding="utf-8-sig") as stream:
+        generation = stream.read(1025).strip()
+    if not generation or len(generation) > 1024:
+        raise ValueError("backend selection is invalid")
+    path = Path(handle) if ipc._HAS_AF_UNIX else ipc._endpoint_path(handle)
+    try:
+        info = path.lstat()
+        endpoint = (info.st_ino, info.st_mtime_ns, info.st_size)
+    except FileNotFoundError:
+        endpoint = None
+    return generation, endpoint
+
+
 class BackendConnector:
     """Connect only to a selected, authenticated backend in a known installation.
 
@@ -36,6 +51,7 @@ class BackendConnector:
         self.bridge, self.root, self.cfg = bridge, root.resolve(), cfg
         self.timeout = timeout
         self.generation = None
+        self.signature = None
         self.context = capture_context(bridge)
         self._binding = Binding.issue()
         self._identity = self._binding.identity(cfg)
@@ -84,6 +100,7 @@ class BackendConnector:
         return await asyncio.wait_for(self._connect(epoch), self.timeout)
 
     async def _connect(self, epoch):
+        signature = selection_signature(self.root, self.handle)
         reader, writer, token = await ipc._connect(self.handle, limit=MAX_FRAME)
         try:
             if not ipc._HAS_AF_UNIX and (not isinstance(token, str) or not token):
@@ -109,7 +126,13 @@ class BackendConnector:
             from .cutover import _require_selected
 
             _require_selected((generation, None, self.root))
+            if (
+                signature[0] != generation
+                or selection_signature(self.root, self.handle) != signature
+            ):
+                raise incoming.AdmissionRefused("backend publication changed during admission")
             self.generation = generation
+            self.signature = signature
             return reader, writer
         except BaseException:
             await ipc.aclose_writer(writer)
