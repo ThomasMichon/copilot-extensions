@@ -619,30 +619,19 @@ def _cmd_supervise_override(args: argparse.Namespace) -> int:
     path = overrides_path()
     try:
         if action == "disable":
-            record = set_override(
-                path, args.id, disabled=True, reason=getattr(args, "reason", None),
-            )
+            record = set_override(path, args.id, disabled=True, reason=getattr(args, "reason", None))
             return _emit({"id": args.id, "overridden_off": True, **record})
         if action == "enable":
             cleared = clear_override(path, args.id)
             return _emit({"id": args.id, "overridden_off": False, "cleared": cleared})
     except (OSError, ValueError) as exc:
-        print(
-            f"agent-dispatch: supervise override {action} refused; "
-            f"override map preserved ({exc})",
-            file=sys.stderr,
-        )
+        print(f"agent-dispatch: supervise override {action} refused; "
+              f"override map preserved ({exc})", file=sys.stderr)
         return 2
     # list (default)
     overrides = load_overrides(path)
     off = sorted(overridden_off_ids(overrides))
-    return _emit(
-        {
-            "path": str(path),
-            "overridden_off": off,
-            "overrides": overrides,
-        }
-    )
+    return _emit({"path": str(path), "overridden_off": off, "overrides": overrides})
 
 
 def _cmd_supervise(args: argparse.Namespace) -> int:
