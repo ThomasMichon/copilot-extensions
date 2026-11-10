@@ -13,6 +13,7 @@ on:
           - context-windows
           - path-captures
           - foundation
+          - foundation-services
           - mux-companion
           - worktree-state
           - pull-requests-commands
@@ -3061,14 +3062,14 @@ jobs:
           -k "vault_uninstall_admits_only_native_service_redirector_closure or vault_uninstall_stop_pins_native_identity"
           --allow-explicit-tiers --test-timeout 60 --timeout 300
   foundation-first-use-windows:
-    if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'
+    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'foundation' || inputs.portfolio == 'foundation-services')
     name: foundation first use (Windows, ${{ matrix.module }})
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        module: [genesis, vault, vault_command, vault_bootstrap, pull_requests]
+        module: ${{ fromJSON(inputs.portfolio == 'foundation-services' && '["vault_command","vault_bootstrap"]' || '["genesis","vault","vault_command","vault_bootstrap","pull_requests"]') }}
     env:
       UPDATE_DRIVER_FOUNDATION_BUILD: "1"
       UPDATE_DRIVER_NATIVE_FOUNDATION_GENESIS: "1"

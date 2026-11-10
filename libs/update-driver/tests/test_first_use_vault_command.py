@@ -18,19 +18,32 @@ from test_first_use_vault import (
 )
 
 
-def uninstall_child_diagnostic(result, *, shell, env, project):
+def uninstall_child_diagnostic(result, *, shell, env, project, installation=None):
     match = re.search(
         r"Vault still owns a live child \(pid=([1-9][0-9]*)\); refusing uninstall",
         result.stdout + result.stderr,
     )
-    if os.name != "nt" or result.returncode == 0 or match is None:
+    if os.name != "nt" or result.returncode == 0:
+        return ""
+    process_id = int(match[1]) if match is not None else None
+    if process_id is None and installation is not None and (
+        "Vault PID receipt names a foreign process; refusing uninstall" in result.stdout + result.stderr
+    ):
+        try:
+            with (installation / "run" / "agent-vault-service.pid").open("rb") as stream:
+                receipt = stream.read(65).strip()
+            if re.fullmatch(rb"[1-9][0-9]{0,9}", receipt):
+                process_id = int(receipt)
+        except OSError:
+            return ""
+    if process_id is None:
         return ""
     script = (
         "$ErrorActionPreference='Stop'; "
         "function Describe($row) { if ($null -eq $row) { return $null }; "
         "$row | Select-Object ProcessId,ParentProcessId,Name,ExecutablePath,CommandLine,"
         "@{Name='CreationDateUtc';Expression={$_.CreationDate.ToUniversalTime().ToString('o')}} }; "
-        f"$child=Get-CimInstance Win32_Process -Filter 'ProcessId={int(match[1])}'; "
+        f"$child=Get-CimInstance Win32_Process -Filter 'ProcessId={process_id}'; "
         "$parent=$null; if ($child -and $child.ParentProcessId -gt 0) { "
         "$parent=Get-CimInstance Win32_Process -Filter "
         "('ProcessId='+[string]$child.ParentProcessId) }; "
@@ -96,6 +109,34 @@ def test_uninstall_child_diagnostic_is_bounded_and_preserves_refusal(monkeypatch
     assert "post-refusal snapshot, not ownership proof" in detail
     assert ("TimeoutExpired" if unavailable else "<fixture-root>") in detail
     assert "fixture" not in detail.replace("<fixture-root>", "")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows CIM failure diagnostics")
+@pytest.mark.parametrize("receipt", [b"4216\n", b"invalid", b"1" * 66])
+def test_uninstall_foreign_pid_diagnostic_reads_only_a_bounded_receipt(tmp_path, monkeypatch, receipt):
+    installation = tmp_path / "runtime"
+    run = installation / "run"
+    run.mkdir(parents=True)
+    (run / "agent-vault-service.pid").write_bytes(receipt)
+    result = subprocess.CompletedProcess(
+        [], 1, "", "Vault PID receipt names a foreign process; refusing uninstall",
+    )
+    calls = []
+
+    def query(command, **kwargs):
+        calls.append(command)
+        assert "Win32_Process -Filter 'ProcessId=4216'" in command[-1]
+        assert kwargs["timeout"] == 15
+        return subprocess.CompletedProcess(command, 0, "exact refused PID snapshot", "")
+
+    monkeypatch.setattr(subprocess, "run", query)
+    detail = uninstall_child_diagnostic(
+        result, shell="powershell", env={}, project=tmp_path / "project", installation=installation,
+    )
+    assert len(calls) == (1 if receipt == b"4216\n" else 0)
+    assert bool(detail) == bool(calls)
+    assert result.returncode == 1
+    assert (run / "agent-vault-service.pid").read_bytes() == receipt
 
 
 @native_genesis
@@ -203,7 +244,7 @@ def test_actual_cold_command_keeps_default_service_recipe_and_healthy_dispatch(
             capture_output=True, text=True, timeout=90, **no_window_kwargs(),
         )
         assert removed.returncode == 0, removed.stdout + removed.stderr + uninstall_child_diagnostic(
-            removed, shell=cleanup[0], env=cleanup_env, project=project,
+            removed, shell=cleanup[0], env=cleanup_env, project=project, installation=installation,
         )
 
 

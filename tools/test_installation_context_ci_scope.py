@@ -6,6 +6,7 @@ import ast
 import importlib.util
 import json
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -1537,12 +1538,28 @@ def test_windows_cold_foundation_modules_have_independent_aggregate_budgets() ->
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
     )
     job = workflow["jobs"]["foundation-first-use-windows"]
-    assert job["if"] == "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'"
+    assert job["if"] == (
+        "github.event_name == 'workflow_dispatch' && "
+        "(inputs.portfolio == 'foundation' || inputs.portfolio == 'foundation-services')"
+    )
     assert job["runs-on"] == "windows-latest" and job["timeout-minutes"] == 25
     assert job["strategy"]["fail-fast"] is False
-    modules = job["strategy"]["matrix"]["module"]
+    expression = job["strategy"]["matrix"]["module"]
+    match = re.fullmatch(
+        r"\$\{\{ fromJSON\(inputs\.portfolio == 'foundation-services' && '([^']+)' \|\| '([^']+)'\) \}\}",
+        expression,
+    )
+    assert match is not None
+    assert json.loads(match[1]) == ["vault_command", "vault_bootstrap"]
+    modules = json.loads(match[2])
     assert len(modules) == len(set(modules)) == 5
     assert set(modules) == {"genesis", "vault", "vault_command", "vault_bootstrap", "pull_requests"}
+    for name in ("foundation-linux", "foundation-windows"):
+        assert workflow["jobs"][name]["if"] == (
+            "github.event_name == 'workflow_dispatch' && inputs.portfolio == 'foundation'"
+        )
+    trigger = workflow.get("on", workflow.get(True))
+    assert "foundation-services" in trigger["workflow_dispatch"]["inputs"]["portfolio"]["options"]
     step = next(
         entry for entry in job["steps"]
         if entry.get("name") == "Qualify one bounded cold first-use module"

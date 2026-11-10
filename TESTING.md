@@ -25,6 +25,9 @@ diagnostic failures, never native acceptance; rerun without it for qualification
 Diagnostic execution stops after 180 seconds; normal acceptance keeps its
 unchanged 900-second aggregate. Both hold the same environment-scoped admission
 lease through daemon settlement and sandbox cleanup.
+The explicit `foundation-services` residual selection runs only the two Windows
+service packets with those same owners and limits. It is not a pass of the full
+seven-job `foundation` portfolio.
 Linux daemon-scope qualification uses the actual disposable user service
 manager and its bus, not a fake bus; only a manager created by that job is
 stopped afterward. That does not admit a private-HOME default-service venue:
