@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shutil
+import sys
 from contextlib import asynccontextmanager
 
 import pytest
@@ -15,6 +16,108 @@ from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.host import SessionHost
 from agent_remote_driver.session_host.ws_transport import WebSocketTransport
 from agent_procutil.owned_process import run_caller_owned
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="native Linux foreground custody")
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source_stop", ["expiry", "revoke"])
+async def test_posix_foreground_settlement_preserves_earlier_sdk_eof_hold(
+    tmp_path, monkeypatch, source_stop,
+):
+    import threading
+    import time
+
+    from agent_procutil import async_foreground as foreground
+    from agent_remote_driver.headed.auth_wait import AuthWaitReceiver
+    from test_headed_auth_wait import IDLE, configuration, request
+
+    receiver = AuthWaitReceiver("native-fixture", configuration())
+    owner = backend = None
+    release, confirming = threading.Event(), threading.Event()
+    confirm = foreground.confirm_session
+    binding_file = tmp_path / "binding.json"
+    native = """
+import json,os,socket,subprocess,sys,time
+from pathlib import Path
+binding_file=Path(sys.argv[1])
+deadline=time.monotonic()+5
+while not binding_file.exists():
+    if time.monotonic()>=deadline:
+        raise TimeoutError('fixture binding was not published')
+    time.sleep(.005)
+binding=json.loads(binding_file.read_text())
+descendant=subprocess.Popen([sys.executable,'-c','import time;time.sleep(60)'])
+peer=socket.create_connection(('127.0.0.1',binding['port']))
+peer.sendall((json.dumps({
+    'contract':'copilot-driver.headed-sdk','version':1,
+    'sessionId':binding['sessionId'],'nonce':binding['nonce'],
+    'nativePid':os.getpid(),'extensionPid':os.getpid()})+'\\n').encode())
+for line in peer.makefile('rb'):
+    message=json.loads(line)
+    if message.get('contract')=='copilot-driver.headed-auth-freeze':
+        peer.sendall((json.dumps({
+            'contract':'copilot-driver.headed-auth-state','version':1,
+            'incarnation':binding['authWait']['incarnation'],
+            'state':{'controlled':True,'closed':False,'pending':False,
+                     'sending':False,'outstanding':False,'waiting':True}})+'\\n').encode())
+"""
+
+    def gate_confirmation(process, **kwargs):
+        confirming.set()
+        if not release.wait(5):
+            raise TimeoutError("fixture confirmation gate was not released")
+        return confirm(process, **kwargs)
+
+    await receiver.serve()
+    retiring = None
+    try:
+        owner = await foreground.AsyncForegroundProcess.start(
+            [sys.executable, "-c", native, str(binding_file)], cwd=str(tmp_path),
+        )
+        backend = HeadedBackend(
+            owner, session_id=receiver.session_id, nonce="fixture-" * 8, auth_wait=receiver,
+        )
+        await backend.serve()
+        binding_file.write_text(json.dumps(backend.declaration()), encoding="utf-8")
+        await asyncio.wait_for(backend.bound.wait(), 3)
+        receiver.phase = "running"
+        if source_stop == "expiry":
+            assert (await request(
+                receiver, "renew", lease_revision=2, budget_seconds=1.25,
+                expires_at=time.time() + 1.25,
+            ))["ok"]
+        else:
+            assert (await request(receiver, "revoke"))["ok"]
+        await asyncio.wait_for(receiver.expiry(), 2)
+        await backend.freeze_auth()
+        assert backend.auth_snapshot == IDLE and receiver.hold is None
+        monkeypatch.setattr(foreground, "confirm_session", gate_confirmation)
+        retiring = asyncio.create_task(backend.retire_auth())
+        assert await asyncio.to_thread(confirming.wait, 2)
+        await asyncio.wait_for(backend.lost.wait(), 2)
+        assert not owner.retirement_started
+        assert receiver.hold == "native-connection-lost"
+        release.set()
+        await asyncio.wait_for(retiring, 3)
+        assert owner.retirement_started and receiver.phase == "held"
+        result = await request(
+            receiver, "renew", lease_revision=3, budget_seconds=5,
+            expires_at=time.time() + 5,
+        )
+        assert not result["ok"] and not receiver.authorized()
+        assert not receiver._grant.is_set()
+        assert receiver.session_id == "native-fixture"
+    finally:
+        release.set()
+        try:
+            if owner is not None:
+                await owner.terminate()
+            if retiring is not None:
+                await asyncio.gather(retiring, return_exceptions=True)
+        finally:
+            if backend is not None:
+                await backend.close()
+            await receiver.close()
 
 
 class Owner:
