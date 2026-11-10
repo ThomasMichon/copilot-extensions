@@ -564,6 +564,18 @@ using the strict fixture-owned Job. Portable controls are not native evidence.
 Live descendant handles, creation-time checks and installed TTY assertions
 remain unchanged.
 
+Image attribution has a separate retained-handle exit boundary. After a failed
+image query, it waits at most 250 milliseconds, capped by the remaining shared
+work deadline, for that same handle to become signalled. Only confirmed exit
+permits omission; unreadable live processes still fail, with the descendant
+PID and snapshot name retained in the exception note. No PID is reopened and
+no installed-process, input or cleanup witness is waived.
+The portable `process_image_attribution` controls cover that distinction and
+the deadline cap. The same console-fixture file's explicitly selected T3
+`native_image_query_exit` control uses a real owned Windows process and retained
+handle with an injected image-query failure; it is not proof of the precise
+lifetime of a historical failing PID.
+
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
 Windows PowerShell and PowerShell 7. A controlled census verifies the real
