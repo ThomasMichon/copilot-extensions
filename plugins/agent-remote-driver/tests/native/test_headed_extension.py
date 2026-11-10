@@ -810,12 +810,16 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
                 timeout=20, max_stdout_bytes=4096, max_stderr_bytes=4096,
             ))
             if delivery == "startup-seed":
-                for _ in range(100):
-                    if status_file.is_file() and "\n" in status_file.read_text(encoding="utf-8"):
-                        break
+                while not (
+                    status_file.is_file() and "\n" in status_file.read_text(encoding="utf-8")
+                ) and not client_operation.done():
                     await asyncio.sleep(.02)
-                else:
-                    pytest.fail("The real Bridge client did not observe startup readiness")
+                if not status_file.is_file() or "\n" not in status_file.read_text(encoding="utf-8"):
+                    outcome = await client_operation
+                    pytest.fail(
+                        "The real Bridge client exited before startup readiness: "
+                        f"exit={outcome.returncode}; stderr={outcome.stderr[-2048:]!r}"
+                    )
                 statuses = [
                     json.loads(line)["result"]
                     for line in status_file.read_text(encoding="utf-8").split("\n")[:-1]
@@ -856,7 +860,10 @@ async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
                     assert ready[-1]["startupSeed"] == ready[-1]["startupTurn"] == "not-requested"
                     assert not held_file.exists()
             for _ in range(600):
-                events = [json.loads(line) for line in event_file.read_text().splitlines()]
+                events = (
+                    [json.loads(line) for line in event_file.read_text().splitlines()]
+                    if event_file.is_file() else []
+                )
                 if sum(event["type"] == "assistant.turn_end" for event in events) >= len(prompts):
                     break
                 await asyncio.sleep(0.05)
