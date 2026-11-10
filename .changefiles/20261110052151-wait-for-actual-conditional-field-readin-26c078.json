@@ -1,0 +1,9 @@
+{
+  "comment": "Wait for actual conditional-field readiness in the steering form consumer test and cover deferred reveal handling.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
