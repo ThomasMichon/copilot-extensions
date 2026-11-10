@@ -5696,6 +5696,25 @@ confirmed slot transactions and report/chart, plus competing native processes
 and normal/crash run-lock release. Required unit CI starts none of those actors;
 fixture-resolved installation admission is not deployed inventory or scheduling.
 
+The same actor-free composition packet exercises policy-approved `health run`
+preview and the shared in-memory transaction planner/writer using substituted
+storage, admission and native owners. Approval drift, independent target facts
+and late confirmed commits remain explicit. The native collection packet also
+executes one approved invocation through a real fixture listener and retained
+Dispatch export into both slots, then injects a second-target failure while
+preserving the first confirmed commit and normal report/chart. It does not
+enroll a job or qualify an installed runtime/carrier.
+Interruption controls retain an unknown transaction before writer entry;
+in-process cleanup controls recover the original retry owner and partial
+result. Native controls additionally exercise the durable fence after CLI exit,
+delayed second requests, prompt fixture cancellation and both payload entry
+points' refusal to provision a missing one-shot runtime.
+Final post-admission interruption retains already confirmed commits and any
+outstanding native cleanup owner; pre-plan cancellation fabricates no result.
+The native selected-runtime fixture copies the actual early CLI/export closure,
+not the unrelated coordinator tree, keeping preparation outside the operation
+budget and inside the unchanged test deadline.
+
 The actor-free `test_hourly_contributions.py` packet executes the canonical
 service contribution codec and collection policy with substituted native owners
 and stage/outcome vocabularies. Exact

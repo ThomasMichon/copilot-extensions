@@ -1,0 +1,9 @@
+{
+  "comment": "Add policy-approved one-shot health collection with independent current-health and prior-hour service transactions.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

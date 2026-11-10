@@ -1121,3 +1121,85 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - Proposed the exact one-shot CLI/approval/result boundary as an amendment to
   the existing collection design. It remains review-before-code: neither
   automatic staging nor scheduler enrollment is implemented by this update.
+
+### 2026-11-09 - Adopted one-shot design reviewed
+- #11869 merged as `ed098e92aa` after current-head Copilot approval with no open
+  findings and green required CI. The parent remains open and the source
+  worktree pulled forward onto the reviewed amendment.
+- Next implement the optional pure policy preview and explicitly approved
+  two-target one-shot through the existing collection/transaction owners.
+  One run admission and parent budget cover both targets; independent outcome
+  reporting must preserve a committed first slot after later failure.
+- This clears design review only. Runtime consumer proof, exact installed
+  capability selection, native job/platform qualification, carrier,
+  preferences and activation remain open; no installed runtime was updated.
+
+### 2026-11-09 - Policy-approved one-shot consumer implemented
+- The optional `health run` command previews only the explicit store/policy.
+  Apply shares one existing admission and 45-second parent budget across
+  current health and prior-hour services, using an in-memory entry into the
+  existing revision planner, mutation lock and atomic writer.
+- Approval is revalidated at each commit. Empty selections remain not-requested;
+  policy/revision conflicts, late committed writes and independent target
+  failures remain explicit. Unknown writes leave the existing admission fence
+  set rather than automatically replaying a potentially committed target.
+  Unconfirmed exporter cleanup retains its original native settlement owner.
+- The final focused packet passed 119 cases. The managed Windows collection,
+  transaction and native-consumer packet passed 84 cases with one skip for
+  the separately configured original Bridge-owner interpreter. Real fixture
+  listener and retained Dispatch data reached distinct slots and the ordinary
+  report/chart; a failed second export preserved the first confirmed commit.
+  Two CLI subprocess timeout controls from an earlier broader run passed at
+  their original limits in isolation and in the final managed packet.
+- Ruff, documentation/install contracts and all 41 admitted strict projects
+  passed both Linux and Windows type targets. Required actor-free CI receives
+  four focused composition controls, not the native subprocess matrix.
+- The packaged collection-v1 declaration expands the provider only. This is
+  fresh isolated local-store/fixture evidence, not installed runtime selection,
+  native Linux/job qualification, cold/warm scheduled cost or carrier receipt.
+  Required exact-source review/CI still gate the implementation; the parent
+  stays Active and enrollment, deployment and activation remain held.
+
+### 2026-11-09 - Interrupted-write and cleanup ownership corrections
+- An interruption after replacement but before transaction return must retain
+  an unknown target, not clear admission as though no write began. One-shot
+  staging now marks uncertainty before writer entry; original interruption
+  errors retain the bounded partial result and the durable fence stays set.
+- Unconfirmed native cleanup propagates the original retry owner with
+  `health_run_result`. Python callers can settle that exact owner; CLI callers
+  receive partial JSON while process exit leaves the durable fence unchanged.
+  The regression constructs the cleanup exception inside the exporter, not in
+  an external test reference.
+- A two-request fixture must remain available during a valid first run's
+  export/commit work. Its finite listener lifetime spans both operation budgets,
+  with explicit teardown cancellation rather than an eight-second second
+  accept deadline. Native controls delay the second request and cancel unused
+  cycles without abandoning a thread.
+- The new command's cold payload route also selects the existing runtime
+  read-only on both platforms. Preview/apply refuse a missing runtime before
+  installer execution, diagnostic stamping or directory creation, preserving
+  ordinary command provisioning and existing configuration entry behavior.
+- The focused packet passed 123 cases. The managed corrected collection,
+  cold-payload and native-consumer packet passed 64 cases with one expected
+  original Bridge-interpreter skip. Ruff, install and documentation checks
+  passed. Six focused actor-free composition nodes cover the orchestration;
+  native matrices remain opt-in. Fresh exact-source CI and review still gate
+  #11880; no enrollment, installed update, carrier write or activation occurred.
+
+### 2026-11-09 - Preserve facts through final admission checks
+- Interruption-result handling now covers the complete apply/finalization
+  boundary, including the final post-admission guard. Confirmed commits are
+  retained; an outstanding original cleanup owner still propagates with its
+  retry handle and the interruption as its cause. Cancellation before planning
+  propagates normally, without replacing it with an attribute error or an
+  invented operation result.
+- Focused controls passed 128 cases, including Python/CLI final-guard
+  interruption and final interruption while native cleanup remains retained.
+  The managed collection/native-consumer packet passed all 46 cases.
+- One native preparation run exhausted its unchanged test deadline copying the
+  entire coordinator package, before collection started. The fixture now copies
+  the real early CLI/export dependency closure only; the passing rerun uses the
+  same test and collection deadlines, real exporter and selected metadata.
+- Seven bounded actor-free composition nodes cover the new operation.
+  Review and fresh exact-source CI still gate #11880. Parent/platform,
+  installed-adoption, scheduling, carrier and activation gates remain open.
