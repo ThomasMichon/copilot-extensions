@@ -355,19 +355,10 @@ def register_task_routes(
             parts = [s.strip() for s in status.split(",") if s.strip()]
             status_filter = parts[0] if len(parts) == 1 else parts
         tasks = queue.list(
-            repo=repo,
-            status=status_filter,
-            target_machine=target_machine,
-            target_repo=target_repo,
-            label=label,
-            evaluator_ref=evaluator_ref,
-            source=source,
-            origin_ref=origin_ref,
-            exclusive_key=exclusive_key,
-            category=category,
-            limit=limit,
-            standing_parent_id=standing_parent_id,
-            kind=kind,
+            repo=repo, status=status_filter, target_machine=target_machine,
+            target_repo=target_repo, label=label, evaluator_ref=evaluator_ref, source=source,
+            origin_ref=origin_ref, exclusive_key=exclusive_key, category=category, limit=limit,
+            standing_parent_id=standing_parent_id, kind=kind,
         )
         return _bulk_tasks(tasks)
 
