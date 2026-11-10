@@ -303,9 +303,7 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
     return problems
 
 
-def find_uv_editable_refs(
-    consumer_dir: Path, *, data: dict | None = None, resolve_symlinks: bool = True,
-) -> list[tuple[str, str, str, bool]]:
+def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]]:
     """Every ``[tool.uv.sources]`` entry in ``consumer_dir/pyproject.toml``
     whose ``path`` escapes ``consumer_dir``'s own root -- the `uv`-editable
     canonical-reference form (as opposed to the ordinary in-tree vendored-
@@ -330,9 +328,8 @@ def find_uv_editable_refs(
     returns ``[]`` (a distinct, already-explicit refusal every caller
     checks for directly via ``.is_symlink()``)."""
     pyproject = consumer_dir / "pyproject.toml"
-    sources = read_uv_sources(consumer_dir, data=data)
-    resolve = Path.resolve if resolve_symlinks else lambda path: Path(os.path.abspath(path))
-    consumer_root = resolve(consumer_dir)
+    sources = read_uv_sources(consumer_dir)
+    consumer_root = consumer_dir.resolve()
     out: list[tuple[str, str, str, bool]] = []
     for name, entry in sources.items():
         if not isinstance(entry, dict) or "path" not in entry:
@@ -347,8 +344,8 @@ def find_uv_editable_refs(
                 f"{pyproject}: [tool.uv.sources] {name!r}'s path is not a "
                 f"string ({raw_path!r})"
             )
-        candidate = resolve(consumer_dir / raw_path)
-        if candidate != consumer_root and consumer_root not in candidate.parents:
+        candidate = (consumer_dir / raw_path).resolve()
+        if escapes_root(candidate, consumer_root):
             out.append((name, raw_path, Path(raw_path).name, entry.get("editable") is True))
     return out
 

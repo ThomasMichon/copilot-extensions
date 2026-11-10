@@ -11,7 +11,6 @@ MANIFEST_NAME = "launch-wrapper-assets.json"
 PACKAGED_MANIFEST_NAME = "packaged-assets.json"
 MANIFEST_NAMES = (MANIFEST_NAME, PACKAGED_MANIFEST_NAME)
 _SCHEMA = "copilot-extensions.launch-wrapper-assets"
-_UNSET = object()
 
 
 @dataclass(frozen=True)
@@ -62,14 +61,13 @@ def load_manifest(plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME) -> La
 
 
 def load_manifest_groups(
-    plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME, data: object = _UNSET,
+    plugin_dir: Path, *, manifest_name: str = MANIFEST_NAME,
 ) -> tuple[LaunchWrapperAssets, ...]:
     """Read explicit multi-root packaged assets without changing version-one declarations."""
     manifest_path = plugin_dir / manifest_name
-    if data is _UNSET:
-        if not manifest_path.is_file():
-            return ()
-        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if not manifest_path.is_file():
+        return ()
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
     if not isinstance(data, dict):
         raise ValueError(f"{manifest_path}: expected an asset manifest object")
     schema = _SCHEMA if manifest_name == MANIFEST_NAME else "copilot-extensions.packaged-assets"

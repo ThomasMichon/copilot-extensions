@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-from copy import deepcopy
 from pathlib import Path
 import re
 import subprocess
@@ -117,34 +116,13 @@ def test_source_partition_keeps_current_and_departed_head_obligations(
 
 def test_source_keeps_job_permissions_and_promotion_consumer(metadata_snapshot, metadata_workflows):
     _, snapshot = metadata_snapshot
-    original = deepcopy(snapshot[LOCKDOWN])
-    current = deepcopy(metadata_workflows[LOCKDOWN])
-    selector = current["on"]["workflow_dispatch"]["inputs"].pop("pull_request_number")
-    assert selector == {
-        "description": "Reconcile only this open dev PR's owned source checks (not a promotion)",
-        "required": False, "type": "string",
-    }
-    original_selector = original["on"]["workflow_dispatch"]["inputs"].pop("pull_request_number", None)
-    if original_selector is not None:
-        assert original_selector == selector
+    original = snapshot[LOCKDOWN]
+    current = metadata_workflows[LOCKDOWN]
     assert {key: value for key, value in current.items() if key != "jobs"} == {
         key: value for key, value in original.items() if key != "jobs"
     }
-    for name in ("workflow-lockdown-guard", "source-attribution"):
+    for name in ("workflow-lockdown-guard", "source-attribution", "refresh-source-attribution"):
         assert current["jobs"][name] == original["jobs"][name]
-    refresh = current["jobs"]["refresh-source-attribution"]
-    expected = deepcopy(original["jobs"]["refresh-source-attribution"])
-    expected["steps"][-1]["env"] = {"SOURCE_PULL_REQUEST": "${{ inputs.pull_request_number }}"}
-    expected["steps"][-1]["with"]["script"] = (
-        'if (process.env.SOURCE_PULL_REQUEST &&\n'
-        '    (context.payload.inputs?.promotion_sha || context.payload.inputs?.promotion_run)) {\n'
-        '  throw new Error("Scoped source repair cannot be combined with promotion inputs.");\n'
-        '}\n'
-        'await require("./.github/actions/required-pr-attribution.cjs").backfill({\n'
-        '  github, context, core, pullRequest: process.env.SOURCE_PULL_REQUEST || undefined,\n'
-        '});\n'
-    )
-    assert refresh == expected
     assert {key: value for key, value in current["jobs"][REFRESH].items() if key != "if"} == {
         key: value for key, value in snapshot[DEPARTURES]["jobs"][REFRESH].items() if key != "if"
     }

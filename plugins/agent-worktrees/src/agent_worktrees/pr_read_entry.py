@@ -4,10 +4,6 @@ from __future__ import annotations
 
 
 def select_read(argv):
-    if argv[:2] == ["pr-watch", "inventory"] and not any(
-        arg in ("--project", "-p") or arg.startswith("--project=") for arg in argv
-    ):
-        return lambda: _run_read(tuple(argv[1:]))
     if (
         len(argv) < 4 or argv[0] != "pr-watch"
         or argv[1] not in ("snapshot", "status", "threads", "diff")

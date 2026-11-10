@@ -365,8 +365,7 @@ The [native local source-reconciliation proposal](native-source-reconciliation.m
 under #11753 composes the existing Worktrees `pr-complete` owner with optional
 exact-source admission and a capability-directed native client. Contract review
 cleared in #11754; its [finite source qualification](journal/2026/11.09%20Native%20local%20source%20reconciliation.md)
-passes and implementation merged in #11761 after current-head independent
-approval and all actual required checks.
+passes while independent implementation review and delivery remain open.
 No remote source mutation, merge evidence, claim settlement or finalization is implied.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
@@ -1120,13 +1119,12 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [x] Deliver the finite [native local source-reconciliation controls](native-source-reconciliation.md#compatibility-delivery-and-qualification)
+- [ ] Deliver the finite [native local source-reconciliation controls](native-source-reconciliation.md#compatibility-delivery-and-qualification)
   after reviewed contract #11754. All five finite source-control rows pass
-  (229 coupled Worktrees and 123 frontend cases, five existing platform skips);
-  exact committed actor-free qualification passes 4,699 cases. Implementation
-  #11761 merged after current-head independent approval and every actual
-  required check. Legacy source behavior and broader
-  installed/provider/HTTP/resource/effort acceptance remain independent.
+  (193 Worktrees and 123 frontend cases, five existing platform skips);
+  independent implementation review, committed-source gates and actual
+  required CI/merge remain open. Preserve legacy source behavior and broader
+  installed/provider/HTTP/resource/effort acceptance.
 
 - [ ] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); neither fixtures nor a healthy empty host close M1 or this effort.
 

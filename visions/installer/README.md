@@ -127,10 +127,6 @@ and fix how it is wired.
   plugin pipe) and *wraps* session launches, the app **keeps itself up to date on
   its own when automatic maintenance is adopted**, out-of-band from any
   Copilot session, so the launcher never depends on a session to refresh it.
-- **Supplementary installables** - adopting repositories and their effective
-  plugin selections contribute tools, services and applications to the same
-  installation system. The [supplementary-installables vision](supplementary-installables/README.md)
-  defines that extension boundary without another builder or lifecycle owner.
 - **Presets** — a shareable configuration bundle a `<repo>-harness` plugin
   carries **as part of its own payload** (related-repo declarations, venue/
   CodeSpace product defaults, and more), so adopting the plugin preconfigures
