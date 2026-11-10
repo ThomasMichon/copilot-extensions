@@ -94,6 +94,12 @@ the caller. Curl stderr is captured, bounded and never forwarded verbatim.
 Capture is limited to 8 MiB of response data and 64 KiB of diagnostics.
 Credentials exceeding the 8 KiB authentication-header limit are refused.
 
+Configuration failures are reported separately from credential-read failures.
+Known safe context diagnostics identify invalid client-port selection or a
+missing/mismatched qualified owner. Other exception text is withheld because
+configuration and extension errors may contain private values. A configuration
+failure happens before credential lookup; unlocking cannot repair it.
+
 The permitted destination is a trusted credential consumer. This is not a
 general detector for unrelated secrets returned by an API, nor a cryptographic
 sandbox against an approved service deliberately transforming a credential

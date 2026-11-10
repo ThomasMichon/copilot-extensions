@@ -2319,6 +2319,8 @@ $_root = '__ROOT__'
 $_pipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
 $_source = '__SOURCE__'
 $_qualifiedSource = __QUALIFIED_SOURCE__
+$_previousRuntimeRoot = $env:AGENT_RT_ROOT
+try {
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_payload = $_snap
@@ -2370,6 +2372,9 @@ $env:AGENT_BRIDGE_CONFIG_DIR = $_root
 $env:AGENT_BRIDGE_PAYLOAD_ROOT = $_payload
 if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_gate @args } else { & $_gate @args }
 exit $LASTEXITCODE
+} finally {
+    $env:AGENT_RT_ROOT = $_previousRuntimeRoot
+}
 '@
     $ps1 = $ps1.Replace('__ROOT__', $rootLit).Replace('__SOURCE__', $sourceLit).Replace('__QUALIFIED_SOURCE__', $qualifiedSource)
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($true)))

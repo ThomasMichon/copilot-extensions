@@ -1,0 +1,17 @@
+{
+  "comment": "Preserve payload admission integrity, identify New failure stages, and remove legacy passive PSMux CLI reads.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

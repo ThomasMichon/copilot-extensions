@@ -134,6 +134,34 @@ for the recorded native versions, not the operator's installed build, attached
 or new-window use, or survival across caller cleanup Jobs. New packet support
 must be reviewed and promoted to the protected controller before submission.
 
+`submit --packet native-driver-auth-wait` selects only the Driver receiver's
+`test_opt_in_receiver_auth_wait_and_same_session_resume` in
+`tests/native/test_native_headed_auth_wait.py`. The candidate must supply that
+fixture; packet support neither supplies it nor enables production renewal.
+It uses the same disposable hash-pinned binaries and actual-version checks,
+but receives no configured feed secret and performs no private-feed probe.
+The canonical plugin runner prepares the Driver's source dependencies and
+public registry dependencies under its normal seasoning policy. The fixture
+uses an isolated loopback model provider, not a productive account or model.
+Its 120-second functional deadline and 180-second pytest deadline remain
+unchanged, inside a 300-second group and 420-second plugin aggregate.
+Only that exact passed case, its pinned prerequisites and all required phases
+qualify; missing, skipped, foreign or extra cases do not. Evidence sanitization
+and interruption handling are the same as the Worktrees packet. This does not
+qualify other callers, pending-work retirement or positive-renewal activation.
+
+`submit --packet native-driver-inflight` separately selects
+`test_opt_in_receiver_inflight_expiry_preserves_hold` from the same
+candidate-supplied fixture. Its private model response stays blocked while
+the source grant expires. The exact native processes must retire, interrupted
+input must not succeed or replay, and the receiver must retain a hold that
+refuses renewal. It uses the same pins, public preparation, source checks,
+120/180-second functional/test bounds and 300/420-second group/plugin limits,
+without a configured feed. Passing the steady recovery packet does not qualify
+this negative case, all pending-work sources or productive enablement.
+The protected admission owner derives native preparation and sanitization
+from its known packet registry, never a caller-supplied flag or name prefix.
+
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
 request, result or selection support refuses without publishing source.
@@ -156,8 +184,20 @@ child's environment only, so older worktree PR hooks admit the transport
 without disabling local hooks. Its command boundary rejects branch, force
 and deletion refspecs and suppresses automatic tag following. No installed
 hook, shared Git configuration or ordinary source-push policy is changed.
-Rejected pushes retain their bounded diagnostic with the original request;
-an absent or uncertain effect is not permission for automatic replay.
+Rejected pushes retain their bounded diagnostic with the original request.
+An exact Git contention rejection permits same-request recovery after an
+interrupted reconciliation read; each replacement envelope retains the prior
+attempt's identity and diagnostic. An absent or uncertain effect is not
+permission for automatic replay, even when the shared ref has advanced.
+Recovery carries the original history requirement into every append read
+and contention retry; a deleted or rewritten ref is not a new transport.
+For first-ref contention, the observed competing tip becomes that requirement;
+recovery never treats a missing competing tip as permission to recreate it.
+The first history anchor is saved before its reconciliation fetch and retained
+across interrupted operations and later resumes, not just retries in one process.
+Pending observations are saved before fetching and reconciled before another
+remote read. The retained anchor advances only to verified descendants or the
+confirmed envelope, so rewinding to an earlier retained ancestor is also refused.
 
 The client emits a request ID before effects and stores its state under the
 current worktree's Git metadata (`windows-qualification/<id>`). `status` and
@@ -177,6 +217,8 @@ returns the manifest. Actual test identities, failure/skip reasons, phase
 progress/timing, available JUnit, bounded logs and named-packet outputs are
 retained in Actions artifacts for seven days. Empty, skipped, failed, timed-out,
 unsupported or partial selections never become unconditional qualification.
+Python child standard streams use UTF-8 regardless of the ambient Windows
+console encoding, so non-ASCII failure diagnostics retain their phase logs.
 The result command exits zero only for qualification, one for a returned
 failed/incomplete result, and two for an unavailable or invalid result.
 Artifacts are immutable run evidence, not patches to execute or apply.
@@ -275,6 +317,21 @@ without utility-cmdlet preloading. It also rejects JSON cmdlet use by the
 production decoder and verifies structured-value and malformed-input parity.
 Child/item/group limits remain 10/30/300 seconds. These finite synthetic
 measurements are not installed, composed-hook or productive-throughput proof.
+
+For prepared Windows file-local writes, `prepared-membership-native.yml` runs
+`registered_file_local_write_reuses_original_guard_facts` from
+`tests/test_managed_session.py` in disjoint safe/admission and fallback packets.
+The controls use actual membership and guard-map publication for legacy and
+installation-cell scopes, retain protected-write decisions, and cover current
+metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
+The `real-policy` cases compare the same registered entry and fixture with the
+new contract and an older read-only contract, using the real caller-owned policy
+worker rather than a timing stub; they also require a real protected-state deny.
+These are finite source samples, not latency distributions or the 1-2 second
+whole-hook/throughput acceptance. Child/item/group limits stay 10/30/300 seconds.
+The boolean-only admission controls retain bounded command-entry, helper,
+input, admission and output phases; a timeout reports the partial phases
+without retrying the child or relaxing its original limit.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
@@ -497,6 +554,15 @@ Fixture diagnostics and cleanup remain privately owned and bounded; no operator
 installation, credentials, sessions or service registrations are borrowed.
 Source workflow wiring alone is not activation: the preserved Main controller
 requires its own reviewed adoption and exact-candidate native run.
+
+The console fixture's `tests/test_terminal_console_fixture.py` Manager packet
+checks the Toolhelp snapshot-to-handle race. Only `OpenProcess` error 87 for a
+PID absent from a fresh process snapshot permits omission; access failures,
+still-present PIDs and failed observations remain failures. The same file's
+Windows-only control deliberately releases a snapshotted child before pinning,
+using the strict fixture-owned Job. Portable controls are not native evidence.
+Live descendant handles, creation-time checks and installed TTY assertions
+remain unchanged.
 
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
@@ -2718,6 +2784,33 @@ This is installed execution-owner evidence, not the public Worktrees command,
 Manager integration, desktop attachment or survival across caller cleanup Jobs.
 The existing managed-environment controls remain separate and unchanged.
 
+Select `-k public_embody` with the same installed-broker prerequisites and
+900/1200/900 runner bounds for the public detached caller. That case builds and
+installs both real applications, deletes their disposable source inputs, and invokes
+the installed `agent-worktrees.exe --project <fixture> embody` against a private
+project configuration and worktree record. Worktrees must discover the installed
+current Manager's native pane wrapper; a Worktrees-only fixture does not
+qualify this public Windows launch path. The packaged default setup selects
+the native executable; recovery mode suppresses unrelated host reconciliation.
+The fixture declares its private mux adapter through `session_path` and uses
+the normal user-home `.copilot` layout. With no installed sessionStart hook,
+it explicitly registers the observed native session through the installed
+`bind-session` command and verifies that it becomes the worktree head;
+this is not evidence for automatic hook adoption.
+Fresh launch uses a literal explicit seed, cold resume selects the existing
+conversation without a supplied resume argument, and live reuse must preserve
+the mux incarnation without creating another attempt or replaying a seed.
+The same broker, history, process-birth and exact retirement checks remain.
+This checks the public detached-command boundary, not attached `copilot`, desktop
+new-window behavior, setup-hook adoption or survival across caller cleanup Jobs.
+The functional public-caller case has separate 420-second Worktrees preparation,
+300-second Manager preparation and 180-second caller-owned native bounds.
+Measured wheel/profile preparation can consume most of the original admission
+case's clock before this distinct consumer even starts; this case is not a
+300-second Worktrees construction-performance check. The existing 300-second
+admission case and 300+180 installed execution-owner case remain unchanged,
+as do the native startup and cleanup limits.
+
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone
 source/profile owners, removes disposable source inputs, and exercises the
@@ -4257,6 +4350,9 @@ and isolates home, app-data, provider, Manager, temp and mux paths. This is
 not full engine/daemon or performance qualification. Run that selector locally
 on Windows with psmux and PowerShell available; platforms without supported
 warm-worker birth identity retain the cold path and skip this packet.
+The Windows fixture also verifies the creation's private namespace against a
+different ambient observer selector and carries a parent teammate-mode flag
+through the caller-to-worker admission boundary.
 
 ## Optional daemon-instance lifetime acceptance
 
@@ -5542,6 +5638,35 @@ receipt/parser and pending-withdrawal suites still cover malformed legacy proof;
 the new constructor must not repair it.
 
 ## Unit-only promotion packet
+
+The actor-free `test_health_composition.py` packet executes the existing domain
+age projection, normal report/parser and SVG composition. Substituted storage
+and service owners retain stale/unknown evidence, independent unavailable
+inputs and unchanged old report selection. It starts no observer, writer or
+service. The selected Machines native observation packet separately proves
+actual loopback -> confirmed local slot -> normal report/chart, while the
+configured measurement/sink packet proves valid telemetry remains usable when
+an explicitly selected health store is unavailable. Neither qualifies a native
+scheduled job, installed publisher or carrier.
+
+The actor-free `test_hourly_contributions.py` packet executes the canonical
+service contribution codec and collection policy with substituted native owners
+and stage/outcome vocabularies. Exact
+source/node admission covers owner/hour/unit/population refusals, delayed native
+evidence, missing duration statistics and strict JSON/version compatibility,
+plus task-authority preservation, independent namespaces, de-duplication and
+unsettled native custody. Bounded source-selection and temporary-file snapshot
+cases preserve active/current records under saturated history, reject partial
+or oversized suffixes, and retain cleanup inside shared absolute deadlines.
+Duration cases call the actual service span adapter and shared statistical
+primitives, covering invalid spans, completion-hour boundaries and
+successful-only p50/p95/maximum with mixed outcomes, not prebuilt summaries.
+It starts no service or native actor. Dispatch's `tests/native/test_hourly_export.py`
+separately exercises producer-retained events, selected fixture package metadata
+and the normal Machines report/chart. Machines' selected
+`tests/native/test_service_report_cleanup.py` retains actual deadline, inherited
+pipe, output-limit, UTF-8 and native-settlement controls. Fixture installation
+admission is not deployed inventory, installed adoption or activation evidence.
 
 The project-routing controls distinguish the explicit `pr-watch diff` read
 from an unknown similarly named command. They exercise only the existing
@@ -10220,6 +10345,25 @@ required PR CI's unit gate is not that evidence. Fast structural/contract checks
 may carry `@pytest.mark.guard` (marketplace + picker integrity, shipped-manifest
 contract, binding invariants), but that marker alone does not admit a test into
 the unit-only release packet.
+
+## Required-application observation budget
+
+The explicit T3 case below runs the actual caller-owned Machines CLI against
+twelve fixture-owned required applications and 128 capability-only plugins.
+Native readiness scripts run; no installer does. It retains New's original
+55-second execution allowance plus five seconds for settlement, with a separate
+75-second test observer covering fixture work. It also checks the returned
+required result, not only process exit or a work-count proxy. This synthetic
+roster is not proof of installed application health or a latency distribution.
+
+```text
+python tools/run-plugin-tests.py agent-machines --allow-explicit-tiers --test-file tests/test_installation_repair.py -k readiness_only_roster_respects_the_original_caller_budget
+```
+
+The focused `-k readiness_only` controls cover no payload walk or installer
+qualification, missing inventory, retained runtime claims, selected optional
+prerequisites, changed actions/declarations, and scope-bound digest refusal.
+The actual-caller case includes a generic v1 payload command and a core v2 owner.
 
 ## Lint + contract gates (before a push)
 

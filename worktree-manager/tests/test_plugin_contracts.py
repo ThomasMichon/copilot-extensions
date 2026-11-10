@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 from worktree_manager.plugin_contracts import (
     CONTRACT_VERSION,
@@ -34,6 +37,8 @@ def _settings(home: Path, enabled: dict[str, bool]) -> None:
 def _manifest(root: Path, marketplace: str, plugin: str, name: str, data: dict) -> Path:
     path = root / marketplace / plugin / "pivots" / f"{name}.json"
     path.parent.mkdir(parents=True, exist_ok=True)
+    (path.parents[1] / "plugin.json").write_text(
+        json.dumps({"name": plugin}), encoding="utf-8")
     path.write_text(json.dumps(data), encoding="utf-8")
     return path
 
@@ -46,6 +51,213 @@ def _pivot(**extra) -> dict:
         "entry": {"id": "id", "title": "title"},
         **extra,
     }
+
+
+def _directory_plugin(home: Path, *, project: bool) -> Path:
+    checkout = home / "src" / "repo"
+    marketplace = checkout / ".ai"
+    plugin = marketplace / "payload"
+    (marketplace / ".claude-plugin").mkdir(parents=True)
+    (marketplace / ".claude-plugin" / "marketplace.json").write_text(json.dumps({
+        "name": "local",
+        "plugins": [{"name": "agent-local", "source": "./payload"}],
+    }), encoding="utf-8")
+    plugin.mkdir()
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "agent-local"}), encoding="utf-8")
+    settings = (
+        checkout / ".github" / "copilot" if project else home / ".copilot"
+    )
+    settings.mkdir(parents=True, exist_ok=True)
+    (settings / "settings.json").write_text(json.dumps({
+        "extraKnownMarketplaces": {
+            "local": {"source": {"source": "directory", "path": str(marketplace)}},
+        },
+        "enabledPlugins": {"agent-local@local": True},
+    }), encoding="utf-8")
+    if project:
+        aw = home / ".agent-worktrees"
+        aw.mkdir()
+        (aw / "repos.yaml").write_text(
+            "repos:\n  repo:\n    class: worktree\n"
+            + "".join(
+                f"    {platform}: {json.dumps(str(checkout))}\n"
+                for platform in ("windows", "linux", "macos")
+            ),
+            encoding="utf-8",
+        )
+        (aw / "projects.yaml").write_text(
+            "projects:\n  repo:\n    config_dir: \"~/.repo\"\n", encoding="utf-8")
+    pivot = plugin / "pivots" / "local.json"
+    pivot.parent.mkdir()
+    pivot.write_text(json.dumps(_pivot(list=[sys.executable])), encoding="utf-8")
+    return pivot
+
+
+@pytest.mark.parametrize("project", [False, True])
+def test_directory_contract_keeps_hidden_declaration_owned_and_read_only(
+    tmp_path, project, monkeypatch,
+):
+    from plugin_activation import resolve_active_plugins
+    from worktree_manager.production_picker.picker_tui import pivot_manifest, pivots
+
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=project)
+    path.write_text(json.dumps(_pivot(
+        list=[sys.executable], visible_when={"state_root_file": "notes/enabled.json"},
+    )), encoding="utf-8")
+    legacy = home / ".agent-worktrees" / "pivots" / path.name
+    legacy.parent.mkdir(parents=True, exist_ok=True)
+    legacy.write_bytes(path.read_bytes())
+    before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+
+    report = discover_contracts(project="repo" if project else None, home_dir=home)
+
+    assert [c.qualified_plugin for c in report.contributions] == ["agent-local@local"]
+    assert report.contributions[0].source_path == str(path.resolve())
+    assert not any(f.code.endswith("legacy-dropin") for f in report.findings)
+    registry = tmp_path / "ui-pivots"
+    registry.mkdir()
+    (registry / path.name).write_text(json.dumps({
+        "schema_version": pivot_manifest.MANAGED_SCHEMA_VERSION,
+        "plugin": "agent-local@local",
+        "plugin_root": str(path.parents[1].resolve()),
+        "template": path.name,
+    }), encoding="utf-8")
+    monkeypatch.setattr(pivot_manifest, "_resolve_state_root_path", lambda: None)
+    ui = pivots.scan_pivot_registry(
+        registry, materialize=False,
+        activation_report=resolve_active_plugins(
+            home=home, include_projects=False,
+            project_root=path.parents[3] if project else None,
+        ),
+    )
+    assert len(ui.contributions) == 1
+    assert ui.pivots == []
+    assert {p: p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
+
+
+def test_directory_contract_supersedes_cached_copy_and_retains_stale_owner(tmp_path):
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=False)
+    _manifest(home / ".copilot" / "installed-plugins", "local", "agent-local", "local",
+              _pivot(label="Cached", list=[sys.executable]))
+    legacy = home / ".agent-worktrees" / "pivots" / path.name
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("{}", encoding="utf-8")
+
+    report = discover_contracts(home_dir=home)
+
+    assert len(report.contributions) == 1
+    assert report.contributions[0].pivot.label == "Tasks"
+    assert not any(f.code == "orphan-legacy-dropin" for f in report.findings)
+    stale = next(f for f in report.findings if f.code == "stale-legacy-dropin")
+    assert (stale.marketplace, stale.plugin) == ("local", "agent-local")
+    assert str(path.resolve()) in stale.detail
+
+
+def test_directory_contract_respects_project_disable_and_scope(tmp_path):
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=True)
+    assert discover_contracts(home_dir=home).contributions == ()
+    _settings(home, {"agent-local@local": True})
+    (path.parents[3] / ".github" / "copilot" / "settings.local.json").write_text(
+        json.dumps({"enabledPlugins": {"agent-local@local": False}}), encoding="utf-8")
+
+    assert discover_contracts(project="repo", home_dir=home).contributions == ()
+
+
+@pytest.mark.parametrize("base,local", [(False, True), (None, True), (True, False)])
+def test_contracts_use_effective_user_local_enablement(tmp_path, base, local):
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=False)
+    settings = home / ".copilot" / "settings.json"
+    data = json.loads(settings.read_text("utf-8"))
+    data["enabledPlugins"] = {} if base is None else {"agent-local@local": base}
+    settings.write_text(json.dumps(data), encoding="utf-8")
+    (settings.parent / "settings.local.json").write_text(json.dumps({
+        "enabledPlugins": {"agent-local@local": local},
+    }), encoding="utf-8")
+    cached = home / ".copilot" / "installed-plugins"
+    _manifest(cached, "local", "agent-local", "local", _pivot())
+    legacy = home / ".agent-worktrees" / "pivots" / path.name
+    legacy.parent.mkdir(parents=True)
+    legacy.write_bytes(path.read_bytes())
+
+    report = discover_contracts(home_dir=home, plugins_root=cached)
+
+    assert [c.qualified_plugin for c in report.contributions] == (
+        ["agent-local@local"] if local else []
+    )
+    assert any(f.code == "disabled-contribution" for f in report.findings) is not local
+    assert any(f.code == "orphan-legacy-dropin" for f in report.findings) is not local
+
+
+@pytest.mark.parametrize("anchor_only", [False, True])
+def test_contracts_handle_project_registration_without_repository_path(tmp_path, anchor_only):
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=True)
+    aw = home / ".agent-worktrees"
+    (aw / "repos.yaml").write_text(
+        "repos: {}\n" if anchor_only else "repos:\n  repo:\n    class: worktree\n",
+        encoding="utf-8",
+    )
+    if anchor_only:
+        (aw / "projects.yaml").write_text(
+            "projects:\n  repo:\n    config_dir: \"~/.repo\"\n"
+            f"    anchor: {json.dumps(str(path.parents[3]))}\n", encoding="utf-8",
+        )
+
+    report = discover_contracts(project="repo", home_dir=home)
+
+    assert [c.qualified_plugin for c in report.contributions] == (
+        ["agent-local@local"] if anchor_only else []
+    )
+
+
+def test_directory_source_failure_retains_canonical_activation_diagnostics(tmp_path):
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=False)
+    cached = _manifest(
+        home / ".copilot" / "installed-plugins", "local", "agent-local", "local",
+        _pivot(label="Cached", list=[sys.executable]),
+    )
+    (path.parents[1] / "plugin.json").write_text(
+        json.dumps({"name": "wrong-owner"}), encoding="utf-8")
+
+    report = discover_contracts(home_dir=home)
+
+    assert [c.source_path for c in report.contributions] == [str(cached.resolve())]
+    assert any(f.code.startswith("activation-") for f in report.findings)
+
+
+def test_directory_contract_cli_reads_fresh_profile_without_materializing(tmp_path):
+    home = tmp_path / "home"
+    path = _directory_plugin(home, project=False)
+    malformed = path.with_name("malformed.json")
+    malformed.write_text("{", encoding="utf-8")
+    legacy = home / ".agent-worktrees" / "pivots"
+    legacy.mkdir(parents=True)
+    (legacy / path.name).write_bytes(path.read_bytes())
+    (legacy / "orphan.json").write_text("{}", encoding="utf-8")
+    before = {p: p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    env = {**os.environ, "USERPROFILE": str(home), "HOME": str(home)}
+    for key in ("WORKTREE_MANAGER_PLUGINS_DIR", "AGENT_WORKTREES_PLUGINS_DIR",
+                "AGENT_WORKTREES_PIVOTS_DIR"):
+        env.pop(key, None)
+
+    result = subprocess.run(
+        [sys.executable, "-m", "worktree_manager", "contracts", "--json"],
+        env=env, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+
+    assert result.returncode == 0, result.stderr
+    report = json.loads(result.stdout)
+    assert [c["plugin"] for c in report["contributions"]] == ["agent-local"]
+    assert any(f["code"] == "invalid-json" for f in report["findings"])
+    assert [f["source_path"] for f in report["findings"]
+            if f["code"] == "orphan-legacy-dropin"] == [str(legacy / "orphan.json")]
+    assert {p: p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
 
 
 @pytest.mark.parametrize("surface", [

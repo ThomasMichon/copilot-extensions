@@ -336,6 +336,7 @@ async def test_relocated_core_requires_live_owner_at_actual_child_spawn(tmp_path
         stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
     )
     client = None
+    output = None
     try:
         if outcome != "caller-unavailable":
             admission.start(proc)
@@ -358,6 +359,13 @@ async def test_relocated_core_requires_live_owner_at_actual_child_spawn(tmp_path
             assert proc.returncode != 0
             assert not state.exists() and not marker.exists()
             assert len(checks) == (2 if outcome == "closed-before-exec" else 0)
+            output = await asyncio.to_thread(proc.communicate, timeout=5)
+            if outcome == "closed-before-exec":
+                # The caller's actual refusal reason reaches the Host's user.
+                assert (
+                    b"refused startup admission: ValueError: fixture original epoch closed"
+                    in output[1]
+                ), output[1]
     finally:
         admission.close()
         if client is not None:
@@ -365,7 +373,8 @@ async def test_relocated_core_requires_live_owner_at_actual_child_spawn(tmp_path
         if proc.poll() is None:
             proc.kill()
             await asyncio.to_thread(proc.wait, timeout=5)
-        proc.communicate(timeout=5)
+        if output is None:
+            proc.communicate(timeout=5)
 
 
 @pytest.mark.asyncio

@@ -49,6 +49,10 @@ rescanning inputs or inventing a second statistics implementation.
 
 ## Health and carrier follow-up
 
+The proposed [bounded local collection/staging amendment](local-collection.md)
+specializes the next combined operation, slot-format evolution and native-job
+qualification. It must clear review before that runtime implementation.
+
 Health records distinguish local listener/process health, actual authenticated
 SSH direction/proof age, Gateway visibility, authorization, configured-provider
 credential readiness and logical active agents. Missing or unsupported owner

@@ -1,0 +1,9 @@
+{
+  "comment": "Add capability-directed exact-source admission for local PR completion while preserving existing history reconciliation and recovery refs",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

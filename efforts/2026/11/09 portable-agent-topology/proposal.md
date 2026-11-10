@@ -1,5 +1,7 @@
 # Portable topology contract proposal
 
+[Back to the effort](README.md).
+
 ## Shape and ownership
 
 Extend the payload-only `agent-roles` plugin with `managing-agent-topology`.

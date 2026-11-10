@@ -93,6 +93,7 @@ item in this umbrella.
 | Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 | Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
+| First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
 
 ## Context
 
@@ -790,6 +791,13 @@ legacy Picker's terminal-mirroring call site) now lives solely in
 worktree-manager.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
+- [ ] #542 Manager first-run front door: review and deliver the
+      [bounded entry/setup-home sequence](phase-4-first-run-front-door.md).
+      Preserve #356/#8545 repository setup, native Configuration/readiness
+      writers and the full original acceptance matrix; an F1 navigation flow
+      is not completion of F2/F3 or the parent issue. F1 source flow is
+      accepted in #11837; F2 owner-adapter reconciliation, F3 and
+      release/native/installed acceptance remain open.
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
       trigger; a stale/incompatible `worktree-manager` stub can never capture the
@@ -2253,20 +2261,20 @@ Original Request, status, participants, checked credit and first gates stay._
   admission/creation owner and compose its existing consumer seam. Manager
   installation, interactive New readiness or unrelated Phase 4a completion
   is not a prerequisite for the standalone engine's pure preview.
-- [ ] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
+- [x] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
   worktree row; BOTH menu presentation AND actual invocation must agree,
   rather than limiting the route to conversation/unused buckets or changing
   visibility alone.
-- [ ] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
+- [x] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
   refusals and expose the existing cleanup/claims/obligations help route.
   An operator should follow dependencies, not substitute force cleanup.
-- [ ] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
+- [x] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
   Finalize path and result/progress handling. Reconcile the original
   HEAD-ancestor-or-self-of-default AND no-outstanding-claims safety
   explanation with the actual current canonical content/default-branch/
   PR/obligation/owner policy. Do not reimplement a simplified historical
   predicate, weaken current guards or add an unrelated new ancestry gate.
-- [ ] **M4437-P4:** Retain managed-child/controller, provider-capability,
+- [x] **M4437-P4:** Retain managed-child/controller, provider-capability,
   live/unknown and source/resource boundaries. No hidden direct deletion,
   backend bypass, new cleanup authority or whole-Manager/every-host native
   programme follows from this finite menu/invocation proposal.
@@ -2527,6 +2535,11 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
 
 ## Validation Plan
 
+- [ ] Qualify the [#542 first-run front-door matrix](phase-4-first-run-front-door.md#validation-and-promotion-gates):
+  real no-project navigation/diagnostic flow, TTY/text routing, source-safe
+  owner handoffs, recovery and original empty/partial/provisioned acceptance.
+  Preserve independent native/installed gates; a plan merge is not implementation.
+
 - [ ] G1: Resolve EVERY directly retained #4096 original
   confirmation-OR-force/accepted-disposition and validation/continuing Coordination
   clause at its finite tier, preserving delivered class repair, independent axes and
@@ -2664,7 +2677,7 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   unsupported cases preserve valid execution. No create-then-delete,
   broad allocator redesign, Manager dependency or unrelated startup/native
   prerequisite is added.
-- [ ] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
+- [x] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
   construction and canonical invocation/refusal/help across original row
   classes, including dirty/unmerged/claimed, conversation/unused and real
   managed/controller/provider refusal. Preserve confirmations, cancellation,
@@ -2888,6 +2901,35 @@ own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
 
+### 2026-11-10 - First-run F1 source accepted; F2 owner composition next
+
+- #11837 merged after exact-head approval, resolved scope/timeout findings and
+  all required checks. The [Phase 4 acceptance record](phase-4-first-run-front-door.md#f1-acceptance-and-next-slice)
+  retains source/consumer proof and names F2 adapter reconciliation next.
+  #542 and the full matrix stay open; no release or installed rollout is claimed.
+
+### 2026-11-10 - First-run F1 source flow and contained consumer proof
+
+- The [Phase 4 source record](phase-4-first-run-front-door.md#f1-source-implementation-and-validation)
+  records the genuine no-project Setup / Doctor flow, strict fresh selection,
+  real read-only child receipts and focused validation. F2/F3, review/CI,
+  native/installed qualification and #542 remain open; no rollout or writer
+  takeover is claimed.
+
+### 2026-11-10 - Bounded first-run front-door design reservation
+
+- `patient-knob` claims only the Manager-owned #542 entry/no-project
+  presentation and existing-owner composition slice. Its public reservation
+  preserves first-repository setup/trust, knowledge/authentication writers,
+  provider-policy, runtime construction and all existing native/rollout owners.
+- The production pending-binding screen already paints before discovery, but
+  ordinary absent-engine and no-project states currently become binding errors.
+  Keep the nonempty project bootstrap contract; do not substitute a fake source.
+- The linked Phase 4 proposal sequences an independently useful real
+  navigation/diagnostic flow before complete missing-source action composition
+  and original-matrix qualification. No production code, live service probe,
+  installation, source-claim transfer or parent completion is claimed.
+
 ### 2026-11-09 - Truthful Knowledge readiness and explicit Reload retry
 
 - Managed source `humming-staple` takes #11735 as a bounded follow-up to the
@@ -2966,6 +3008,20 @@ own scopes. No source/resource/physical custody or updater authority transfers.
   with exit zero. The explicit Finalize diagnostic path now retains both
   streams as a failed result; ordinary engine-client callers are unchanged.
   The expanded focused consumer/custody/transport packet passes 183 cases.
+
+### 2026-11-09 - Finite Finalize source acceptance reconciled
+
+- #11579 merged as `24f3953d034e85cb6280a96427cc27fa3defc364` after
+  final-head approval and green CI. The retained 183-case consumer packet
+  proves the finite M4437-P1 through P4 and M4437-V1 menu, invocation,
+  refusal/help, confirmation/cancel and local/SSH diagnostic contract.
+  Those five rows now reflect the accepted source delivery instead of
+  remaining an unimplemented proposal.
+- This status reconciliation adds no runtime behavior or new test claim.
+  #4437 remains open; release, separately authorized installed acceptance,
+  retained source-workspace finalization and the umbrella's other Plan and
+  Validation Plan items are not completed by these finite source controls.
+  No live Finalize, cleanup, mux probe or rollout is performed or authorized.
 
 ### 2026-11-05 - Planned #5898 terminal/mux receiving
 

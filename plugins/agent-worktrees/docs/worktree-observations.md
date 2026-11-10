@@ -574,6 +574,19 @@ The original resolver still owns cold or incompatible admission. On a valid
 old association it can publish the additive view without Git/registry traversal;
 an unchanged complete association needs no rewrite.
 
+The registered Windows pre-tool entry also uses that per-call native result
+for its existing exact `view`/`rg`/`glob` read exemption. It still checks the
+four original guard-source digests before returning without a policy child.
+Fallback admission does not qualify, even if the original resolver refreshes
+the association during that call. Changed guard sources, incomplete or changed
+cell observations, other tool names, writes and every `toolCalls` envelope
+retain the original validation and policy path, even with read-labelled
+envelope metadata. The default-installation emergency stop never governs a cell.
+This does not qualify installed or composed hook latency.
+After guard-source changes, regenerate the shipped contract with
+`python tools/render-hook-read-policy.py`. Registered-consumer fixtures copy
+that contract unchanged, so a stale digest cannot be hidden by fixture repair.
+
 New producers remain compatible with old readers, which ignore the additive
 field and retain their old cell path. New readers use an old producer's
 association only after its original resolver supplies the required observation;

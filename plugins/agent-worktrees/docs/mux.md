@@ -132,6 +132,13 @@ Fresh observations do not reactivate automatic pane discovery/status-bar
 repainting through the PSMux CLI. Worktrees publishes current roster facts;
 Manager's periodic status-option writes remain refused. Cached in-pane bar
 text is not fresh listing evidence.
+Legacy `status-updater` entrypoints also skip PSMux rather than restarting that
+CLI polling loop when monitor registration is unavailable. Manager's warm
+Picker observes presence and incarnation natively; an unknown observation
+cannot retire its retained UI state. Its Windows creation client starts in the
+user home without inheriting another pane's nesting variables. Native reads
+use that creation's exact namespace, not another observer's ambient namespace;
+scrubbed nesting flags are excluded from both sides of the worker scope hash.
 
 Cleanup retains checkouts and tracking records whenever mux presence is
 unknown, including its lock-held recheck and final managed-removal guard.

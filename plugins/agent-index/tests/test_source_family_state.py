@@ -199,8 +199,9 @@ def test_retired_pending_alias_restores_without_losing_unchanged_files(queued_so
         def interrupt(*args, **kwargs):
             raise RuntimeError("fixture acquisition interrupted before apply")
 
-        patch.setattr(engine, "_apply_source_manifest", interrupt)
+        patch.setattr(engine, "_publish_prepared_manifest", interrupt)
         assert run(source="git:alias")[1].status == "partial"
+    assert initialize_source_store(config)._source_domain.receipt()["state"] == "clean"
     paths = PathIndex(config.data_dir / "path_index.db")
     assert PendingCrawls(paths).sources() == ["git:alias"]
     configure(anchor, name="git:anchor")

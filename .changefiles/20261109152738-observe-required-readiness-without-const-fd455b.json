@@ -1,0 +1,13 @@
+{
+  "comment": "Observe required readiness without constructing installer plans; preserve full repair identity and accept canonical generic command owners.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

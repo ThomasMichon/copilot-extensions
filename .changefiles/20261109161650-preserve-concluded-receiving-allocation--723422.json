@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve concluded receiving allocation provenance through the first owner-serialized current-location revision",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

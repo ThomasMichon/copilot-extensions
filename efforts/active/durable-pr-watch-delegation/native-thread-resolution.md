@@ -180,8 +180,8 @@ remain open under their existing owners; no live thread was changed.
 
 ## Selected native reopening proposal
 
-**Refinement reviewed in #11741 under #7051; source implementation qualified,
-independent implementation review and merge pending.** Continue
+**Refinement reviewed in #11741 under #7051; finite source implementation
+merged in #11748.** Continue
 the same provider-neutral lifecycle intent and existing owner, rather than
 treating the delivered close-only operation as reopening support.
 The [native ADO thread-update contract](https://learn.microsoft.com/en-us/rest/api/azure/devops/git/pull-request-threads/update?view=azure-devops-rest-7.1)

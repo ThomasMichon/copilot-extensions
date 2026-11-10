@@ -16,6 +16,9 @@ the [standing vision](../../../visions/main-owned-workflow-control/README.md).
 The October 23 rolling follow-up separates fast runner pickup from promotion
 admission, actual review execution and late synthetic check refreshes. Its next
 investigation is semantic event/helper closure, not another capacity setup.
+The November 9 priority extends installed release qualification through the
+[Manager Create/Resume/Open lifecycle](installed-manager-lifecycle.md), reusing
+the existing #11377 native and #3336/#7529 release owners.
 
 ## Guiding Intent
 
@@ -38,6 +41,9 @@ Main release. Integration and multiprocess coverage moves to scheduled Dev
 execution with accountable repair ownership, not silent deletion. Reduced
 promotion frequency or integration-gated promotion remains a later
 dev-backed-deployment consideration.
+The November 9 request explicitly adds the bounded installed-Manager lifecycle
+exception to that portfolio policy. It does not restore unrelated integration
+suites to fast PR CI or transfer the promotion writer.
 
 ## Participants
 
@@ -50,6 +56,7 @@ dev-backed-deployment consideration.
 | Capacity operator | Qualify the selected image/venue and enforce admitted shared-host limits | #7122 capacity handoff; provider-specific state stays downstream |
 | Remediation owner | Own failure signatures, bounded repair and named escalation | #6142 and the existing remediation effort |
 | PR completion steward | Own Phase 5a readiness, author guidance, consent automation and completion visibility; coordinate shared provider and release seams | #6237 Phase 5a; #3638, #4234 and the linked completion contract |
+| Installed Manager qualification coordinator | Retain authentic installation, native TTY and agreed lifecycle-witness source ownership | Existing #11377 effort; exact extension seam must be accepted before edits |
 | Repository owner | Critical-path acceptance and bounded administrative decisions | Owner-authored PRs and issue steering |
 | Automated reviewer | Review each plan and implementation PR | Repository Copilot review flow |
 
@@ -90,6 +97,12 @@ dev-backed-deployment consideration.
   and PR-completion authorities remain with their current owners. Concrete
   conflicting edits must be reconciled before landing; responsibility is not
   handed off merely by sending another message.
+- **November 9 installed lifecycle:** the Campaign driver captures the
+  CI/promotion requirement and reviewed contract. #11377 retains its native
+  fixture and open Main-activation work; #3336/#7529 retain candidate,
+  construction and publication authority. Coordinate an exact non-overlapping
+  implementation seam before native/workflow edits. A request or posted
+  handoff is not acceptance, a new writer or live activation.
 
 ## Context
 
@@ -219,6 +232,15 @@ when no pending/current-head review or recent request exists. Preserve the
 observed-request grace, Maintainer-only eligibility and all merge gates.
 Trusted Main activation and actual timing remain separate from source merge.
 
+**2026-11-09 - Installed Manager lifecycle (verbatim):**
+
+> Since this worktree is focused on CI and promotion, this is a good place to request that we focus on ensuring that between CI and promotion runs, we validate that worktree-manager can actually launch after install and be able to create and resume worktrees. We regularly encounter issues where after an install, some weird qualification got added that is failing, a "resolve path" fails, PSMux connectivity fails, etc. We need to have e2e tests at some point which set up a representative harness, install our suite, launch worktree manager, create a worktree via manager, start a session (we can mock Copilot's endpoint to avoid token issues), exit Copilot, then open Worktree manager to Resume. We also need a test where we open Worktree Manager in parallel to an active session and Open it.
+
+The [installed lifecycle contract](installed-manager-lifecycle.md) is the
+**agent-recommended** realization. It extends existing qualification rather
+than treating installed TTY rendering or direct launch-plan tests as proof of
+the full requested user flow.
+
 ## Plan
 
 All slices use the execution gates in [design.md](design.md#phase-execution-gates).
@@ -278,13 +300,19 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 1 - Earliest safe run and check reductions
 
-- [ ] Qualify and land operator-authorized exact-input reuse for repeated
+- [x] Qualify and land operator-authorized exact-input reuse for repeated
   source PR unit qualification. Bind complete source/workflow/manifest,
   platform/interpreter/dependency and provider run/attempt identities;
   missing or incompatible proof retains fresh execution. Preserve current
   guards/metadata/retarget/aggregate behavior and independent execution for
   every Main release. Source implementation and synthetic refusal tests are
   not real consumer, current-CI or whole-flow performance acceptance.
+  #8311 merges with exact-head approval and required CI. A real ordinary
+  repeated PR run verifies the original immutable packet and omits all 1,129
+  repeated unit executions; current guards and the required aggregate pass.
+  Qualification takes 27/8 seconds and the allocated unit job 49/27 seconds
+  in one cold/reused observation. Overall CI remains guard-bound (62/69
+  seconds); no whole-flow, queue, release-adoption or full-census gate closes.
 
 - [x] Land the bounded source-CI job consolidation and remove duplicate
   report-only PR inventory (#7656), preserving real selected-unit outcomes,
@@ -470,6 +498,14 @@ authorizes critical main-path acceptance or a bounded administrative change.
 
 ### Phase 5 - Finish validation and automation consolidation
 
+- [ ] Qualify the [installed Manager lifecycle](installed-manager-lifecycle.md):
+  representative harness and authentic candidate suite installation, Manager
+  Create through a real CLI session and clean exit, later same-history Resume,
+  and parallel Manager Open of the active session without a duplicate owner.
+  Keep real path resolution, admission, terminal/mux and session persistence;
+  substitute only deterministic inference. Existing #11377/#3336/#7529 owners
+  retain source and activation custody. Failed or incomplete exact-candidate
+  evidence must block promotion, not merely report an informational check.
 - [ ] Complete the [test validation burndown](test-validation-burndown.md):
   measured promotion/PR CI history, reliable parallel unit suites, per-suite
   coverage baselines and conservative PR selection, full unit execution on
@@ -689,6 +725,12 @@ regressions, retained-owner seams and the completion gate.
 
 ## Validation Plan
 
+- [ ] Installed-Manager acceptance satisfies every positive, falsifying,
+  isolation, identity and actual promotion-admission case in the
+  [lifecycle matrix](installed-manager-lifecycle.md#validation-plan).
+  Installed TTY, direct CLI create/resume or a synthetic session is not the
+  complete witness. Record source, native execution and live gate activation
+  separately; retain existing repair and control owners.
 - [ ] Test-portfolio routing: compare collected unit identities with the
   release execution manifest; every unit runs for every Main release.
   Missing/stale/incompatible coverage baselines select full affected suites

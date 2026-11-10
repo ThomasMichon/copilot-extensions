@@ -13,7 +13,10 @@ from typing import TYPE_CHECKING
 
 from . import activity, codename_tracking, git_ops, local_cache_refresh, output, profile_assignment, sessions, tracking, tracking_write
 from . import config as cfg
-from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
+from .resume_seed import (
+    RETAINED_HANDOFF_WARNING, cold_start_error, plain_live_open,
+    preserve_unconfirmed_seed, seed_for_attempt,
+)
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
 from .worktree_naming import prospective_session_worktree_id
@@ -455,6 +458,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         output.err(error)
         _emit_plan({"action": "error", "error": error, "exit_code": 3})
         return 3
+    retain_seed = preserve_unconfirmed_seed(args, staged_seed)
     if (interactive and not args.dry_run) or staged_seed:
         if args.dry_run:
             try:
@@ -464,8 +468,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         if staged_seed is not None and plain_live_open(args, verdict):
             staged_seed = None
         if staged_seed is not None:
-            seed_error = cold_start_error(verdict, staged_seed.kind)
-            if not seed_error and staged_seed.handoff_id:
+            seed_error = cold_start_error(verdict, staged_seed.kind, preserving=retain_seed)
+            if not seed_error and staged_seed.handoff_id and not retain_seed:
                 seed_error = (
                     "Previous launch-prompt handoff is unconfirmed; the seed is retained "
                     "but will not be automatically submitted twice."
@@ -483,6 +487,8 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
             args.no_mux = False
             args.bare_resume = False
 
+    if retain_seed:
+        print(RETAINED_HANDOFF_WARNING, file=sys.stderr)
     bare_resume = getattr(args, "bare_resume", False)
     plan_work_dir = os.path.expanduser("~") if bare_resume else record.worktree_path
     launch_preflight = context.launch_preflight or _preflight_launch(config, args, plan_work_dir)
@@ -620,7 +626,7 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
         merged_env[_session_bind_worktree_key()] = record.worktree_id
         merged_env[_session_bind_session_key()] = resume_target
 
-    seed_pending = bool(staged_seed and not bare_resume)
+    seed_pending = bool(staged_seed and not bare_resume and not retain_seed)
     merged_env["WORKTREE_NO_PROVISION"] = "0" if getattr(args, "first_launch", False) else "1"
     if native_resume and (seed_pending or not no_resume):
         return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
@@ -680,6 +686,9 @@ def _resolve_resume_context(context: ResolveLaunchContext) -> int:
     }
     if selection.assignment is not None:
         plan["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+    if retain_seed and staged_seed is not None:
+        plan["seed_preserved_id"] = staged_seed.seed_id
+        plan["seed_preservation_version"] = 1
     _emit_plan(plan)
     return 0
 

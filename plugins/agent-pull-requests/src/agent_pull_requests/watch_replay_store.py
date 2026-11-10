@@ -87,7 +87,11 @@ class ReplayStore:
         terminal_retention: bool = False, terminal_recovery: bool = False,
         terminal_cache_retirement: bool = False,
         terminal_comment_mapping: bool = False,
+        repository_cache: bool = False,
     ) -> None:
+        if type(repository_cache) is not bool:
+            raise ValueError("explicit repository cache selection required")
+        self.repository_cache = repository_cache
         if type(terminal_retention) is not bool:
             raise ValueError("explicit terminal reader selection required")
         self.terminal_retention = terminal_retention
@@ -177,6 +181,17 @@ class ReplayStore:
     def _validate_owner(self, document: dict) -> None:
         version = document.get("version")
         names = {"schema", "version", "namespace", "service", "replay", "reviews", "capacities"}
+        cache = "repository_cache_version" in document
+        if cache:
+            from .repository_state import validate as validate_cache
+            if not self.repository_cache or type(document["repository_cache_version"]) is not int or (
+                document["repository_cache_version"] != 1
+            ):
+                raise ReplayStoreInvalid("repository cache reader unavailable for adopted owner")
+            names.update(("repository_cache_version", "repository_cache"))
+            validate_cache(document.get("repository_cache"), self.namespace)
+        elif self.repository_cache:
+            raise ReplayStoreInvalid("repository cache requires explicit fresh provisioning")
         prepared = "review_intent_version" in document
         selections = "review_selection_version" in document
         mappings = "review_comment_mapping_version" in document
@@ -255,6 +270,7 @@ class ReplayStore:
             + capacities.get("attention_bytes", 0)
             + capacities.get("feedback_capture_bytes", 0)
             + capacities.get("feedback_readback_bytes", 0)
+            + (16 * 1024 * 1024 if cache else 0)
             + capacities.get("terminal_retention_bytes", 0) > MAX_OWNER_BYTES - 4096
             or capacities["receipt_bytes"] < 4096
         ):
@@ -585,7 +601,7 @@ class ReplayStore:
                 self.namespace, state=None, commit=lambda _state: None, clock=self.clock,
             )
             document = self._encode(core.snapshot())
-            if conversations:
+            if conversations or self.repository_cache:
                 from .conversation_journal import ConversationJournal
                 document = {
                     "schema": OWNER_SCHEMA, "version": 3, "namespace": self.namespace,
@@ -598,6 +614,9 @@ class ReplayStore:
                         "conversation_bytes": 8 * 1024 * 1024,
                     },
                 }
+                if self.repository_cache:
+                    from .repository_state import empty
+                    document.update(repository_cache_version=1, repository_cache=empty())
                 self._validate_owner(document)
             _atomic_write_json(self.path, document)
 

@@ -1,0 +1,13 @@
+{
+  "comment": "Remove the unsupported Bare choice from New worktree while preserving supported launch options and prompts",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

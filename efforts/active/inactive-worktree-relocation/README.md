@@ -125,15 +125,23 @@ request, not a new migration or runtime-effect grant.
   its existing owner; unavailable evidence remains a hold, not inactive proof.
 - [x] Complete the independent pure planning/refusal source boundary without action
   probes, original-proof recovery or mutation leases. Its local qualification
-  is not native inactivity proof. #11706 is reviewed and merged; ordinary
-  accepted Main qualification/publication remains separately observed.
-- [ ] Qualify explicit source-owned receiving-proof inspection/reconciliation
-  separately from read-only planning, preserving the original operation.
+  is not native inactivity proof. #11706 and reconciliation #11731 are merged;
+  run 42696377770 and generated Main #11737 accepted and published that source.
+- [x] Qualify the independent first receiving current-location component,
+  retaining original concluded proof and settled local creator responsibility;
+  fixture-only admission does not resolve complete native-owner evidence.
+  #11813 merged after actual approval and required CI; ordinary accepted Main
+  qualification/publication remains separately observed.
+- [x] Inspect intact original receiving proof without recovery, sidecar/index
+  creation or lifecycle/backend admission; invalid/unknown evidence refuses.
+- [ ] Reconcile missing original receiving proof explicitly through its owner,
+  separately from read-only planning and preserving the original operation.
 - [ ] Support the first clean, sessionless, unpaired concluded receiving
   allocation with settled origin responsibility and an owner-serialized
   current-location revision; immutable allocation provenance stays unchanged.
-- [ ] Prove the complete native consumer and interrupted/refused paths before
-  source merge/release or separately authorized adopter practice.
+- [ ] Prove the complete native receiving consumer and interrupted/refused paths
+  before claiming full receiving support or separately authorized adopter
+  practice. Independent component source acceptance does not resolve this gate.
 
 ### Phase 2 — Broader inactive continuity
 - [ ] Incorporate generic first-flow feedback; support inactive WIP with exact
@@ -183,6 +191,9 @@ effects remain separate gates. Phase 1 source implementation is admitted;
 adopter pilot feedback gates subsequent widening.
 
 ## Journal
+
+[2026-11-09 — First receiving current-location component](journal/2026/11.09%20Receiving%20current-location%20component.md)
+records independent component qualification and the remaining native-owner gate.
 
 [2026-11-08 — Owner observation and receiving proof](journal/2026/11.08%20Owner%20observation%20and%20receiving%20proof.md)
 records the source-confirmed boundary and current prerequisite proposal.

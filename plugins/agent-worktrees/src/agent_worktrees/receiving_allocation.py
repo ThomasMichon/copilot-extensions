@@ -85,11 +85,24 @@ class ReceivingAllocation:
 def record_identity(record: tracking.WorktreeRecord) -> allocation.AllocationIdentity:
     from . import tracking
 
-    return allocation.AllocationIdentity.from_dict({
+    current = allocation.AllocationIdentity.from_dict({
         "ref": tracking.format_claim_ref(record.execution_machine, record.repo, record.worktree_id),
         "creation_nonce": record.creation_nonce,
         "path": record.worktree_path, "branch": record.branch,
     })
+    receipt = record.receiving_allocation
+    if record.receiving_allocation_present and isinstance(receipt, dict) and "identity" in receipt:
+        original = allocation.AllocationIdentity.from_dict(receipt["identity"])
+        if (original.ref, original.creation_nonce, original.branch) != (
+            current.ref, current.creation_nonce, current.branch,
+        ):
+            raise ValueError("receiving allocation identity conflicts with the child incarnation")
+        if original.path != current.path:
+            from .receiving_relocation import require_current_location
+
+            require_current_location(record, original)
+        return original
+    return current
 
 
 def parsed_receipt(record: tracking.WorktreeRecord) -> ReceivingAllocation:
@@ -138,7 +151,7 @@ def require_record(record: tracking.WorktreeRecord, config: cfg.Config) -> None:
     if not isinstance(saved, dict) or any(
         saved.get(key) != value for key, value in {
             "id": record.worktree_id, "repo": record.repo,
-            "branch": record.branch, "path": record.worktree_path,
+            "branch": record.branch, "path": record_identity(record).path,
         }.items()
     ):
         raise ValueError("receiving allocation conflicts with its journaled child")

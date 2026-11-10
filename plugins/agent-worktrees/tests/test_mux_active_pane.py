@@ -111,10 +111,7 @@ def test_native_owned_pane_hands_off_seed(
     assert launch_seed_state.peek(record.yaml_path) is None
 
 
-@pytest.mark.parametrize(("mux", "target"), [("tmux", "=wt-example:"), ("psmux", "wt-example")])
-def test_active_pane_targets_preserve_mux_syntax(
-    monkeypatch: pytest.MonkeyPatch, mux: str, target: str,
-) -> None:
+def test_active_pane_targets_preserve_tmux_syntax(monkeypatch: pytest.MonkeyPatch) -> None:
     calls = []
 
     def run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
@@ -122,6 +119,17 @@ def test_active_pane_targets_preserve_mux_syntax(
         return subprocess.CompletedProcess(argv, 0, stdout="%7\n", stderr="")
 
     monkeypatch.setattr(subprocess, "run", run)
-    assert sessions.mux_active_pane("example", mux=mux) == "%7"
-    assert sessions.mux_active_pane_named("wt-example", mux=mux) == "%7"
-    assert calls == [[mux, "display-message", "-p", "-t", target, "#{pane_id}"]] * 2
+    assert sessions.mux_active_pane("example", mux="tmux") == "%7"
+    assert sessions.mux_active_pane_named("wt-example", mux="tmux") == "%7"
+    assert calls == [["tmux", "display-message", "-p", "-t", "=wt-example:", "#{pane_id}"]] * 2
+
+
+def test_active_pane_uses_native_psmux_without_cli(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agent_worktrees import psmux_observation
+
+    calls = []
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: pytest.fail("passive PSMux CLI"))
+    monkeypatch.setattr(psmux_observation, "active_pane", lambda name: calls.append(name) or "%7")
+    assert sessions.mux_active_pane("example", mux="psmux") == "%7"
+    assert sessions.mux_active_pane_named("wt-example", mux="psmux") == "%7"
+    assert calls == ["wt-example", "wt-example"]

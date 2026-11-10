@@ -18,7 +18,7 @@ from windows_qualification_contract import (
     PACKETS, SUPPORT_PATH, TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
     canonical, request, selection, sha, validate_result,
 )
-from windows_qualification_transport import Transport, command
+from windows_qualification_transport import Transport, command, rejected_attempt
 
 
 def request_lock(directory: Path):
@@ -128,6 +128,9 @@ class Client:
                 "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
                 "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
             ] if selected["name"] == "native-worktrees-embody" else [
+                "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
+                "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
+            ] if selected["name"] in {"native-driver-auth-wait", "native-driver-inflight"} else [
                 "tools/capture_bridge_http52.py", "tools/check-agent-bridge-contracts.py",
                 "tools/bridge_http52_artifact.py",
             ]
@@ -162,10 +165,6 @@ class Client:
         value = state["request"]
         candidate = value["source_sha"]
 
-        def persist(delta):
-            state.update(delta)
-            self.save(directory, state)
-
         # A commit readable by the receiving repository needs no transport write.
         try:
             published = self.api(f"repos/{self.repository}/commits/{candidate}")["sha"] == candidate
@@ -174,13 +173,41 @@ class Client:
                 raise
             published = False
         if not published:
-            try:
-                value["envelope_sha"] = self.transport.append(candidate, persist)
-            except Exception as exc:
-                raise RuntimeError(
-                    f"transport incomplete ({exc}); resume --request-id {value['request_id']}",
-                ) from None
+            self.append_transport(directory, state)
+
+    def append_transport(
+        self, directory: Path, state: dict, *, required_history: str | None = None,
+    ) -> None:
+        """Retain superseded attempt evidence before starting another envelope."""
+        value = state["request"]
+        required_history = required_history or state.get("transport_history_anchor")
+
+        def persist(delta):
+            replacing = delta.get("phase") in {"transport-attempt", "transport-confirmed"}
+            if replacing and state.get("envelope_sha") and (
+                delta["phase"] == "transport-attempt"
+                or delta["envelope_sha"] != state["envelope_sha"]
+            ):
+                state.setdefault("transport_history", []).append({
+                    key: state.get(key) for key in
+                    ("envelope_sha", "previous_tip", "phase", "transport_failure")
+                })
+                state["transport_failure"] = None
+            state.update(delta)
             self.save(directory, state)
+
+        try:
+            options = {"required_history": required_history} if required_history else {}
+            if state.get("transport_observed_tip"):
+                options["observed_tip"] = state["transport_observed_tip"]
+            value["envelope_sha"] = self.transport.append(
+                value["source_sha"], persist, **options,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"transport incomplete ({exc}); resume --request-id {value['request_id']}",
+            ) from None
+        self.save(directory, state)
 
     def dispatch(self, directory: Path, state: dict) -> dict:
         """Perform the one dispatch attempt, durably excluding automatic replay."""
@@ -217,16 +244,41 @@ class Client:
             raise ValueError("provider identity changed")
         self.transport.scoped_credentials(provider["owner"])
         if state.get("envelope_sha"):
-            tip = self.transport.tip()
+            history = state.get("transport_history_anchor") or state.get("previous_tip")
+
+            def remember(delta):
+                state.update(delta)
+                self.save(directory, state)
+
+            tip = self.transport.observe(
+                history, remember, observed_tip=state.get("transport_observed_tip"),
+            )
+            history = state.get("transport_history_anchor") or state.get("previous_tip")
+            if history and (not tip or history != tip and self.transport.git(
+                "merge-base", "--is-ancestor", history, tip, check=False,
+            ).returncode):
+                raise ValueError("shared transport history changed; refusing reconciliation")
             envelope = state["envelope_sha"]
             if not tip or self.transport.git(
                 "merge-base", "--is-ancestor", envelope, tip, check=False,
             ).returncode:
-                raise ValueError("original transport effect remains unknown; not replaying")
-            self.transport.validate_tip(envelope)
-            state["request"]["envelope_sha"] = envelope
-            state["phase"] = "transport-confirmed"
-            self.save(directory, state)
+                if not rejected_attempt(state):
+                    raise ValueError("original transport effect remains unknown; not replaying")
+                self.transport.validate_tip(envelope)
+                parents = self.transport.git("show", "-s", "--format=%P", envelope).stdout.split()
+                expected = ([state["previous_tip"]] if state.get("previous_tip") else []) + [
+                    state["request"]["source_sha"],
+                ]
+                if parents != expected:
+                    raise ValueError("rejected transport ancestry differs from original request")
+                if not tip:
+                    raise ValueError("shared transport history changed; refusing replacement")
+                self.append_transport(directory, state, required_history=history or tip)
+            else:
+                self.transport.validate_tip(envelope)
+                state["request"]["envelope_sha"] = envelope
+                state["phase"] = "transport-confirmed"
+                self.save(directory, state)
         elif state["phase"] != "prepared":
             raise ValueError("no original transport identity to reconcile")
         else:

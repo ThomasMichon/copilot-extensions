@@ -440,6 +440,27 @@ unapplied v2 acquisition; manual journal deletion is not a supported recovery pa
 Pending work must finish through a journal-capable engine before rolling back
 to an older engine; old runtimes do not implement this recovery contract.
 
+Successful application also records the latest completed cursor for the exact
+canonical acquisition family in `IndexState.completed_family_cursors`. It is
+published in the same atomic JSON replacement as the alias cursor, after store
+application; failed application/publication restores both in-memory values.
+After pending work has replayed, an existing alias whose cursor differs from
+that family's completed cursor refuses incremental acquisition and requests an
+explicit full reindex. For example, alias one at A cannot apply a net A..C
+delta after alias two completed B: a file changed in B and reverted in C could
+otherwise remain incorrectly stored at B. The engine does not copy another
+alias's cursor or account scope, start automatic repair, or clear pending work.
+Equal-cursor aliases and independent families retain their existing behavior.
+
+The family map is additive and optional when loading older state; its absence
+does not prove historical alias consistency. Older writers can omit it, so this
+is a participating-reader repair rule, not mixed-generation source ownership.
+It compares exact-family cursor values, not ancestor/descendant publication or
+mutations that preserve a polling cursor. The existing pending-refresh journal
+continues to own hinted changes. Acquisition-through-checkpoint exclusion,
+source-GC coordination and surviving immutable workers remain the separate
+durable source-lock work in #4220.
+
 When a presented file misses its complete fingerprint, chunk/model selection
 uses derived `embedding_coverage` receipts in the same path-index database.
 Each receipt binds a physical model table and chunk ID to the raw embedding
@@ -1072,6 +1093,42 @@ index`), with no full reindex and no service restart required. Both passes
 share the `AGENT_INDEX_REINDEX_GC=0` opt-out and an `AGENT_INDEX_GC_KEEP_SOURCES`
 escape hatch for reviving a remote-ingest source without a code change.
 
+### Data-directory writer ownership
+
+`indexing.source_ownership.source_writer` serializes participating writers for
+one resolved data directory. All sources share one JSON checkpoint file, so
+independent per-source locks would still permit lost updates. The executing
+process holds a kernel lock on `.source-writer-v1.lock`; it is reentrant within
+the owning thread, never expires, and is never unlinked on release. Process exit
+releases ownership. A forked child closes inherited writer descriptors without
+unlocking the parent's ownership.
+
+`run_reindex` acquires before connector resolution, state loading or store opening
+and retains ownership through acquisition, publication and maintenance. Direct
+calls refuse contention with `SourcePipelineBusy`. `run_worker` waits cancellably
+before invoking its selected indexer, retaining its processing task rather than
+requeueing it; the worker, not its service monitor, owns the lock.
+`run_source_gc` owns stale-generation collection from state load through saved
+state, requested compaction and final FTS preparation. When compaction runs,
+its store statistics are returned in the optional `compaction` result field.
+Dry runs publish no checkpoint, path-index schema or derived maintenance.
+
+Search reads do not join this writer lock; selected-store reader/publication
+fences remain independent. Hosted ingest, deletion and low-level GC callers
+must explicitly participate around their complete read-modify-save operation.
+An older immutable worker or endpoint that does not acquire this lock is not
+retroactively fenced. During mixed-version operation, defer conflicting new
+writer admission until the existing owner safely finishes, or use an
+owner-approved isolated target; do not expire or kill an incumbent.
+This writer boundary is not an installer/readiness veto or retirement authority.
+
+The focused process packet is opt-in:
+`python tools/run-plugin-tests.py agent-index --allow-explicit-tiers
+--test-file tests/test_source_ownership_native.py`. It exercises actual engine
+and queued-worker acquisition, a waiting worker, GC refusal before state load,
+fresh checkpoints on retry and kernel release after an acquiring owner exits.
+It uses private stores, empty deltas and no models or network.
+
 ## Sources and corpus config
 
 Registered source prefixes are `git`, `github`, `ado`, and `azure-devops`.
@@ -1183,8 +1240,9 @@ tracebacks;
 
 - Query-time trust-domain enforcement is not implemented; callers must scope
 queries with `source`/`repo` when crossing trust domains.
-- Cross-process source locks during a service cutover are not implemented; store
-locking is relied on for the narrow overlap window.
+- Cross-process writer exclusion requires every writer to participate in the
+data-directory ownership context; unmodified older workers and hosted endpoints
+remain outside that guarantee.
 - The plugin does not expose a public network listener, gateway, or relay.
 - The read-only agent-facing CLI surface does not expose reindexing.
 - There is no plugin-local clean-room scenario under `plugins/agent-index`; fresh

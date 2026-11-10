@@ -3545,7 +3545,8 @@ def test_profiles_grid_cell_restored_on_tab():
     asyncio.run(run())
 
 
-def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
+@pytest.mark.parametrize("output", ["pipe", "absent", "closed"])
+def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch, output):
     """When stdout is captured (launcher) but stderr is a TTY, Textual must
     render to stderr while the real stdout stays reserved for the plan."""
     import io
@@ -3572,6 +3573,10 @@ def test_run_tui_picker_redirects_stdout_when_captured(monkeypatch):
             return True
 
     pipe, tty = _Pipe(), _Tty()
+    if output == "absent":
+        pipe = None
+    elif output == "closed":
+        pipe.close()
     monkeypatch.setattr(sys, "stdin", tty)
     monkeypatch.setattr(sys, "__stdout__", pipe)
     monkeypatch.setattr(sys, "stderr", tty)
@@ -4877,12 +4882,12 @@ def test_new_worktree_decision_exits():
             assert dlg.query_one("#scope-buttons", FocusGroup).has_focus
             assert all(not o["on"] for o in dlg._dlg["opts"])
             await pilot.press("enter")      # confirm Create, no options, blank prompt
-            await pilot.pause()
+            await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
         assert app.result["is_local"] is True
         assert app.result["options"] == {
-            "anchor": False, "bare": False,
+            "anchor": False,
             "no_mux": False, "ahp": False, "local_model": False,
             "seed_prompt": "",
         }
@@ -4938,8 +4943,9 @@ def test_new_worktree_dialog_focus_stops_prompt_list_buttons():
     asyncio.run(run())
 
 
-def test_new_worktree_bare_refuses_prompt_but_allows_blank_launch(monkeypatch):
-    """Bare has no prompt handoff; refuse without discarding the draft."""
+@pytest.mark.parametrize("remote", [False, True])
+def test_new_worktree_offers_only_supported_options_and_retains_prompt(monkeypatch, remote):
+    """New never advertises an unsupported no-bootstrap launch mode."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     from worktree_manager.production_picker.picker_tui.field_widgets import (
         _AutoExpandTextArea,
@@ -4951,35 +4957,22 @@ def test_new_worktree_bare_refuses_prompt_but_allows_blank_launch(monkeypatch):
         app = PickerApp(src, live=False)
         async with app.run_test(size=(118, 36)) as pilot:
             scr = app.query_one(PickerScreen)
-            scr.htab = 0
-            scr.btn_idx = 0
-            scr.sel = ("BTN", 0)
-            scr._activate()
+            target = ("remote-host", "WSL") if remote else src.LOCAL
+            scr.create_target = lambda: target
+            scr._open_optmenu()
             await pilot.pause()
             dlg = _scope_dlg(scr)
             dlg.query_one("#q-0", _AutoExpandTextArea).text = "fix the flaky test"
             labels = [o["label"] for o in dlg._dlg["opts"]]
-            bare = labels.index("Bare")
-            await pilot.press("tab")            # buttons -> prompt
-            await pilot.press("tab")            # prompt -> options
-            for _ in range(bare):
-                await pilot.press("down")
-            await pilot.press("space")          # toggle Bare on
-            await pilot.press("tab")            # options -> buttons
-            await pilot.press("enter")          # confirm Create
-            await _wait_for_launch_confirmation(pilot)
-            assert app.screen is dlg and app.result is None
-            field = dlg.query_one("#q-0", _AutoExpandTextArea)
-            assert field.text == "fix the flaky test"
-            field.load_text("")
-            from worktree_manager.production_picker.picker_tui.engine_focus import FocusGroup
-            dlg.on_focus_group_activated(
-                FocusGroup.Activated(dlg.query_one(FocusGroup), 0, "confirm"))
+            assert labels == ["Anchor repo", "No Mux"] + ([] if remote else ["AHP"])
+            await pilot.press("enter")
             await _wait_for_launch_confirmation(pilot)
         assert app.result is not None
         assert app.result["action"] == "new"
-        assert app.result["options"]["bare"] is True
-        assert app.result["options"]["seed_prompt"] == ""
+        assert (app.result["machine"], app.result["env"]) == target
+        assert app.result["is_local"] is not remote
+        assert "bare" not in app.result["options"]
+        assert app.result["options"]["seed_prompt"] == "fix the flaky test"
 
     asyncio.run(run())
 
@@ -5023,10 +5016,7 @@ def test_new_worktree_no_mux_preserves_seed_prompt(monkeypatch):
 
 
 def test_new_worktree_seed_prompt_carries_through(monkeypatch):
-    """A typed prompt in the SAME dialog's prompt box reaches the launch
-    decision's ``options["seed_prompt"]`` when no incompatible option is
-    checked (``_SEED_PROMPT_ENABLED`` forced on -- see
-    ``test_new_worktree_bare_drops_seed_prompt``)."""
+    """A typed prompt reaches the launch decision with default options."""
     from worktree_manager.production_picker.picker_tui import engine_maintenance_actions as ema
     from worktree_manager.production_picker.picker_tui.field_widgets import (
         _AutoExpandTextArea,
@@ -5085,9 +5075,6 @@ def test_new_worktree_no_mux_option():
             await pilot.press("tab")            # options -> button group
             await pilot.press("enter")          # confirm Create
             await _wait_for_launch_confirmation(pilot)
-            # No Mux bypasses the mux pane `embody`'s delivery depends on
-            # entirely, so the (blank) prompt is dropped -- this must go
-            # straight to the launch decision, same as Bare.
         assert app.result["action"] == "new"
         assert app.result["options"]["no_mux"] is True
 
@@ -5153,8 +5140,6 @@ def test_new_worktree_modifiers_can_be_combined():
             await pilot.press("tab")
             await pilot.press("enter")
             await _wait_for_launch_confirmation(pilot)
-            # No Mux bypasses the mux pane `embody`'s delivery depends on
-            # entirely, so the (blank) prompt is dropped here too.
         assert app.result["options"]["no_mux"] is True
         assert app.result["options"]["ahp"] is True
 
@@ -5209,9 +5194,6 @@ def test_new_worktree_anchor_option_shows_selected_state():
             await pilot.press("tab")
             await pilot.press("enter")
             await _wait_for_launch_confirmation(pilot)
-            # Anchor resolves via `--base`, which the engine's own resolve
-            # CLI rejects alongside `--seed` -- the (blank) prompt is
-            # dropped here too, same as Bare/No Mux.
         assert app.result["action"] == "new"
         assert app.result["options"]["anchor"] is True
         assert app.result["options"]["seed_prompt"] == ""

@@ -57,9 +57,10 @@ def _read(path: Path) -> bytes:
     return value
 
 
-def _namespace() -> str:
-    value = os.environ.get("COPILOT_DRIVER_PSMUX_NAMESPACE", "")
-    if value and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", value):
+def _namespace(value: str | None = None) -> str:
+    if value is None:
+        value = os.environ.get("COPILOT_DRIVER_PSMUX_NAMESPACE", "")
+    if not isinstance(value, str) or value and not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", value):
         raise ValueError("Invalid native namespace")
     return value
 
@@ -148,13 +149,15 @@ def _settled_inventory(root: Path, deadline: float) -> dict[str, tuple[str, int]
 
 def observe_psmux(
     session: str, *, timeout: float = 1.0, data_dir: Path | None = None,
-    _inventory=None,
+    namespace: str | None = None, _inventory=None,
 ) -> Observation:
     """Read native rendezvous hints, then require an authenticated live response.
 
     Missing rendezvous needs complete native coverage before absence is known.
     A stale endpoint, denied read, timeout or protocol mismatch is unknown.
     No observation deletes, reconstructs or refreshes the provider's files.
+    An explicit namespace selects the creation transport without changing the
+    process-wide default used by independent observers.
     """
     if (
         not isinstance(session, str)
@@ -171,7 +174,7 @@ def observe_psmux(
     deadline = time.monotonic() + timeout
     try:
         root = data_dir if data_dir is not None else _data_dir()
-        namespace = _namespace()
+        namespace = _namespace(namespace)
         base = namespace + "__" + session if namespace else session
         paths = {ext: root / (base + "." + ext) for ext in ("port", "key", "sid", "pid")}
         try:
