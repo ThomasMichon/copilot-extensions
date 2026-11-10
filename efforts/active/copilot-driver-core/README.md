@@ -3216,3 +3216,32 @@ and controller selection in the qualification workspace, without changing
 receiver implementation, widening secret exposure, installing on a productive
 host or relabeling the public-caller pass. Native receiver proof remains an
 independent gate before positive renewal.
+
+### 2026-11-10 - Same-request transport recovery
+
+The source-owned qualification client now distinguishes an exact Git
+contention rejection from an unknown push outcome. Recovery checks the
+original envelope, candidate parents and retained shared history, keeps the
+rejected attempt's diagnostic, and clears stale diagnostics before another
+attempt. Unknown effects remain non-replayable even after the ref advances.
+No request/admission record, installed runtime, shared Git setting or history
+was manually rewritten.
+
+Focused source validation passes 118 controls in an isolated Python
+environment; the final ancestry and stale-diagnostic refinements pass the
+25 affected cases. These include real Git contention and interrupted-fetch
+recovery, wrong-envelope/ref/previous-tip and policy-rejection negatives,
+lost-response refusal and unchanged single-dispatch custody. F/E9,
+whitespace and all 13 install contracts pass. An initial run's two nested
+consumer failures were missing isolated pytest dependencies, resolved by
+using a prepared isolated environment rather than changing test semantics.
+
+The original reconciled-source request
+`f6c576c52d9d4e48a4e440f5f852092e` is now accepted for the same
+`759e2739e7b78df521ccd60d44829589b2b0adc6` candidate. Its rejected
+envelope and diagnostic remain in the request's attempt history; a normal
+append to the same reserved ref supplied the replacement envelope. No fresh
+request, per-request branch, forced ref update or dispatch replay was used.
+The hosted result remains pending; acceptance is not native qualification.
+The source-client correction still owes its normal review/CI/merge, and
+the parent caller, receiver, lifetime and receiving gates remain open.
