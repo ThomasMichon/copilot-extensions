@@ -99,6 +99,8 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
             if argv[1:4] == ["plugin", "marketplace", "add"]:
                 assert argv[-1] == artifact
                 return ""
+            if argv[1:] == ["plugin", "list", "--json"]:
+                return "{}"
             name = argv[-1].split("@")[0]
             shutil.copytree(
                 artifact / "plugins" / name,
@@ -140,10 +142,11 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
     else:
         result = _SUITE["install_payload_closure"](artifact, _COMMIT, **arguments)
         assert calls[0] == [copilot, "plugin", "marketplace", "add", artifact]
-        assert [argv[1:] for argv in calls[1:-1]] == [
+        assert [argv[1:] for argv in calls[1:-2]] == [
             ["plugin", "install", name + "@example-marketplace"]
             for name in sorted(profile["inventory"])
         ]
+        assert calls[-2] == [copilot, "plugin", "list", "--json"]
         assert set(result["payloads"]) == set(profile["inventory"])
         assert result["profile"]["repository_config"]["stateless"] is True
         assert result["runtime_installation"] == "not-observed"

@@ -122,6 +122,9 @@ def _capture_failure(root, record_property):
                 "lifecycle-payload-closure.json",
                 "lifecycle-pane-*.stdout.txt",
                 "lifecycle-pane-*.stderr.txt",
+                "suite-*.stdout.txt",
+                "suite-*.stderr.txt",
+                "suite-*.custody.json",
             ):
                 for path in (root / "diagnostics").glob(pattern):
                     text = (
@@ -1324,6 +1327,13 @@ def test_lifecycle_diagnostics_retain_the_constructor_refusal(tmp_path):
         "RuntimeError: controlled constructor refusal\n",
         encoding="utf-8",
     )
+    suite_diagnostics = {
+        "suite-cli-inventory.stdout.txt": '{"plugins": ["example"]}',
+        "suite-selected-payloads.stdout.txt": '{"example": ""}',
+        "suite-payload-example.custody.json": '{"settled": true}',
+    }
+    for name, value in suite_diagnostics.items():
+        (diagnostics / name).write_text(value, encoding="utf-8")
     records = []
     with pytest.raises(RuntimeError, match="outer construction failed"):
         with _capture_failure(tmp_path, lambda name, value: records.append((name, value))):
@@ -1331,6 +1341,8 @@ def test_lifecycle_diagnostics_retain_the_constructor_refusal(tmp_path):
     assert len(records) == 1
     evidence = json.loads(records[0][1])
     assert "controlled constructor refusal" in evidence["install-engine.stderr.txt"]["text"]
+    for name, value in suite_diagnostics.items():
+        assert value in evidence[name]["text"]
 
 
 @pytest.mark.timeout(180)

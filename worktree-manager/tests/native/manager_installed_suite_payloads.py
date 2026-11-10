@@ -85,6 +85,10 @@ def install_payload_closure(
             [copilot, "plugin", "install", name + "@" + marketplace],
             environment, project, diagnostics, "suite-payload-" + name, timeout=120,
         )
+    run(
+        [copilot, "plugin", "list", "--json"],
+        environment, project, diagnostics, "suite-cli-inventory", timeout=30,
+    )
     observed = json.loads(run(
         [
             engine, "-I", "-B", "-c",
@@ -106,7 +110,10 @@ def install_payload_closure(
             payload.name != name or not payload.is_absolute()
             or not payload.resolve().is_relative_to(home.resolve())
         ):
-            raise ValueError(f"{name}: selected payload is not installed in the private home")
+            raise ValueError(
+                f"{name}: selected payload is not installed in the private home "
+                f"(selected={observed[name]!r}, home={str(home)!r})",
+            )
         if payload.parent not in installed_trees:
             installed_trees[payload.parent] = _PROVENANCE["content_manifest"](payload.parent)
         prefix = name + "/"

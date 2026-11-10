@@ -935,3 +935,18 @@ exact local frozen artifact through the same actual CLI and bounded private
 HOME executor before installation. Source controls require this command and
 stop immediately on registration failure; no ledger or acquisition result is
 fabricated. A new exact-head native run remains required.
+
+Run 42905375223 at `66e9d22518e29068ca53e30a86c7397c7cfe706b`
+successfully registered the actual local marketplace (6.656 seconds) and ran
+all 24 real CLI plugin installations successfully (roughly 0.8-1 second each).
+It then refused the first installed engine-selected payload location; the case
+failed after 302.54 seconds. This is progress past acquisition, not a complete
+payload-closure or runtime/readiness pass. The original source result did not
+retain the selected paths or CLI inventory, so the exact location discrepancy
+is not yet established.
+
+The witness now retains bounded actual CLI inventory, selected-path and command
+custody diagnostics. It preserves the private-installation and exact-byte
+assertions rather than copying payloads into a guessed layout or substituting
+discovery. Another exact-source native observation is required before deciding
+whether the correction belongs in fixture configuration or product discovery.
