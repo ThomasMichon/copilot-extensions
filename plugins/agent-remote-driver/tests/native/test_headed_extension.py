@@ -298,6 +298,60 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     assert not (offline_cli.home / "permissions-config.json").exists()
 
 
+def test_native_joined_observer_close_returns_no_attributed_outcome(tmp_path, offline_cli):
+    plugin = tmp_path / "observer-plugin"
+    extension = plugin / "extensions" / "observer-fixture"
+    extension.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "observer-fixture", "version": "1.0.0"}), encoding="utf-8",
+    )
+    (extension / "extension.mjs").write_text("""
+import { writeFileSync } from "node:fs";
+import { joinSession } from "@github/copilot-sdk/extension";
+const session = await joinSession();
+const unsubscribe = session.on(() => {});
+const unsubscribeResult = unsubscribe();
+const disconnect = session.disconnect();
+const disconnectIsPromise = typeof disconnect?.then === "function";
+const disconnectResult = await disconnect;
+const repeatedResult = await session.disconnect();
+writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
+    sessionId: session.sessionId,
+    unsubscribeResult: typeof unsubscribeResult,
+    disconnectIsPromise,
+    disconnectResult: typeof disconnectResult,
+    repeatedResult: typeof repeatedResult,
+}));
+""", encoding="utf-8")
+    output = tmp_path / "observer-close.json"
+    result = subprocess.run(
+        [
+            offline_cli.executable, "-p", "ISOLATED_OBSERVER_CLOSE_FIXTURE", "--trust-folder",
+            "--experimental", "--plugin-dir", str(plugin), "--no-auto-update",
+            "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
+            "--log-dir", str(offline_cli.logs),
+        ],
+        cwd=offline_cli.workspace, env={**offline_cli.env, "DRIVER_FIXTURE_OUTPUT": str(output)},
+        capture_output=True, timeout=60, text=True, encoding="utf-8", **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr + _logs(offline_cli.logs)
+    assert output.is_file(), result.stderr + _logs(offline_cli.logs)
+    observed = json.loads(output.read_text(encoding="utf-8"))
+    assert observed == {
+        "sessionId": observed["sessionId"], "unsubscribeResult": "undefined",
+        "disconnectIsPromise": True, "disconnectResult": "undefined", "repeatedResult": "undefined",
+    }
+    session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
+    assert [path.parent.name for path in session_files] == [observed["sessionId"]]
+    events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
+    assert not any(
+        event.get("data", {}).get("permissionRequest", {}).get("kind") == "extension-permission-access"
+        for event in events
+    )
+    assert len(offline_cli.requests) == 1
+    assert not (offline_cli.home / "permissions-config.json").exists()
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("pane_owner", ["direct", "manager-wrapper"])
 async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identity(

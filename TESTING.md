@@ -3025,6 +3025,15 @@ permission grant, checking the native `tasks` and `entries` arrays in the same
 conversation. Missing/failed/invalid reads do not produce an empty snapshot.
 This is SDK read-support qualification, not complete background-agent evidence,
 active-work/schedule mutation coverage or automatic-idle retirement.
+The separate `native_joined_observer_close_returns_no_attributed_outcome`
+control invokes the selected CLI's actual unsubscribe function and awaits its
+public `session.disconnect()` twice. It checks the void return shapes while
+preserving one native conversation and requiring no extension-permission grant.
+It does not attribute why the original SDK observer ended, prove queued
+notification draining, or distinguish an initiated disconnect from an already
+disconnected no-op. Passing this control is not positive auth recovery or
+qualification of another pinned native runtime; unexpected SDK EOF remains
+an independent hold.
 
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied
