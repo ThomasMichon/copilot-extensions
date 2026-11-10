@@ -1,0 +1,9 @@
+{
+  "comment": "Forward explicit runtime backend intent to project controllers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

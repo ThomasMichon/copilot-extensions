@@ -229,6 +229,23 @@ The caller still owns source admission, child settlement and verification.
 This is not evidence that other installed or running update writers are
 capable or quiescent, and it does not select an authority.
 
+An operator may pass repeatable `--runtime-backend NAME=CAPABILITY` selections
+to a configured project controller. The driver records and forwards each
+selection unchanged; Worktrees does not infer a backend or persist profile
+settings. Invalid or duplicate names, standalone/phase requests, and a missing
+project controller are refused. `runtime_backend_intent` in the delegation
+capability reports support by the selected engine, not by the project
+controller. A supporting controller places a sibling
+`<script>.capabilities.json` beside the selected script:
+
+```json
+{"schema":"copilot-extensions.project-update-controller-capabilities","version":1,"capabilities":["project-runtime-backend-intent/v1"]}
+```
+
+Worktrees checks that declaration before queuing and again before launch.
+Missing or unsupported declarations refuse this option without launching the
+controller; ordinary updates remain unchanged. Older engines reject the option.
+
 Runtime installers may execute from a delivered or prepared payload directory.
 The collected plan preserves the resolved invoking repository separately in
 `COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT` for native and prepared-source

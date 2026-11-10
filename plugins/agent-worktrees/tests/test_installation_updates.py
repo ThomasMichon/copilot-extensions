@@ -80,7 +80,11 @@ def installed_capability_runtime(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("capable", [False, True])
 def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, monkeypatch, tmp_path, capable):
+    from agent_worktrees import update_driver_cli
+
     prefix = installed_capability_runtime(tmp_path, monkeypatch)
+    for module in (update_options, update_driver_cli):
+        monkeypatch.setattr(module, "__file__", str(prefix / "site" / f"{module.__name__}.py"))
     driver = SimpleNamespace(
         __file__=str(prefix / "site" / "update_driver" / "__init__.py"),
         UPDATE_AUTHORITY_CAPABILITY="suite-update-authority/v1" if capable else None,
@@ -96,7 +100,19 @@ def test_inventory_advertises_delegation_only_with_a_capable_driver(installed, m
         "schema": "copilot-extensions.project-update-delegation",
         "version": 1, "engine_fallback": True, "isolated_runtime_phase": True,
         "targeted_payload_install": False, "project_integration": False,
+        "runtime_backend_intent": True,
     } if capable else None)
+
+
+@pytest.mark.parametrize("foreign", ["options", "driver"])
+def test_runtime_backend_intent_capability_requires_selected_modules(monkeypatch, tmp_path, foreign):
+    from agent_worktrees import project_update_controller, update_driver_cli
+
+    prefix = tmp_path / "selected"
+    for name, module in (("options", update_options), ("driver", update_driver_cli)):
+        root = tmp_path / "foreign" if name == foreign else prefix
+        monkeypatch.setattr(module, "__file__", str(root / f"{name}.py"))
+    assert not project_update_controller._runtime_backend_intent_capability(prefix)
 
 
 @pytest.mark.parametrize("foreign", [False, True])

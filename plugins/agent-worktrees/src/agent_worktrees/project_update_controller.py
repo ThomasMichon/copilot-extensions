@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+import stat
 import subprocess
 import sys
 from copy import copy
@@ -16,6 +18,7 @@ from . import output, update_options
 PROBE_TIMEOUT = 30
 DELEGATION_SCHEMA = "copilot-extensions.project-update-delegation"
 DELEGATION_VERSION = 1
+CONTROLLER_CAPABILITIES_SCHEMA = "copilot-extensions.project-update-controller-capabilities"
 _CONTROLLER_OWNS_MANAGER = object()
 
 
@@ -76,6 +79,21 @@ def _targeted_payload_install_capability(prefix: Path) -> bool:
         return False
 
 
+def _runtime_backend_intent_capability(prefix: Path) -> bool:
+    try:
+        from . import update_driver_cli
+
+        return (
+            all(Path(module.__file__).resolve().is_relative_to(prefix)
+                for module in (update_options, update_driver_cli))
+            and update_driver_cli.RUNTIME_BACKEND_INTENT_CAPABILITY
+            == update_options.RUNTIME_BACKEND_INTENT_CAPABILITY
+            == "project-runtime-backend-intent/v1"
+        )
+    except (AttributeError, ImportError, OSError, TypeError, ValueError):
+        return False
+
+
 def delegation_capability():
     """Advertise only the selected runtime's usable driver-backed seam."""
     try:
@@ -104,6 +122,7 @@ def delegation_capability():
         "engine_fallback": True, "isolated_runtime_phase": True,
         "targeted_payload_install": _targeted_payload_install_capability(prefix),
         "project_integration": _project_integration_capability(prefix),
+        "runtime_backend_intent": _runtime_backend_intent_capability(prefix),
     }
 
 
@@ -164,6 +183,9 @@ def dispatch_update(args, auth, manager, standalone) -> int:
         controlled = run_project_update(args)
     if controlled is not None:
         return controlled
+    if getattr(args, "runtime_backend", None):
+        output.err("--runtime-backend requires a selected project update controller.")
+        return 1
     handed_off = manager(args)
     return handed_off if handed_off is not None else standalone()
 
@@ -172,6 +194,58 @@ def configured_script(repo) -> str:
     controllers = getattr(repo, "update_controller", {})
     platform = cfg.detect_platform()
     return controllers.get(platform) or (controllers.get("linux", "") if platform == "wsl" else "")
+
+
+def _controller_path(repo, script: str) -> tuple[Path, Path]:
+    root = Path(repo.anchor).resolve(strict=True)
+    relative = Path(script)
+    if relative.is_absolute() or relative.suffix.lower() != ".py":
+        raise ValueError("the controller must be a repo-relative Python script")
+    path = (root / relative).resolve(strict=True)
+    if not path.is_relative_to(root) or not path.is_file():
+        raise ValueError("the controller is outside the project or is not a file")
+    return root, path
+
+
+def _controller_supports_runtime_backend(path: Path) -> bool:
+    from .installation_probe import strict_json_object
+
+    descriptor = path.with_name(path.name + ".capabilities.json")
+    try:
+        info = descriptor.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode) or stat.S_ISLNK(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            or info.st_size > 65536
+        ):
+            return False
+        with descriptor.open("rb") as stream:
+            raw = stream.read(65537)
+        if len(raw) > 65536:
+            return False
+        record = json.loads(raw.decode("utf-8"), object_pairs_hook=strict_json_object)
+        capabilities = record.get("capabilities") if isinstance(record, dict) else None
+        return (
+            isinstance(record, dict) and record.get("schema") == CONTROLLER_CAPABILITIES_SCHEMA
+            and type(record.get("version")) is int and record["version"] == 1
+            and isinstance(capabilities, list) and len(capabilities) <= 128
+            and all(isinstance(value, str) and value for value in capabilities)
+            and len(set(capabilities)) == len(capabilities)
+            and update_options.RUNTIME_BACKEND_INTENT_CAPABILITY in capabilities
+        )
+    except (OSError, TypeError, ValueError):
+        return False
+
+
+def supports_runtime_backend(project: str | None) -> bool:
+    if not project:
+        return False
+    try:
+        repo = cfg.load_config(project=project).default_repo
+        script = configured_script(repo)
+        return bool(script) and _controller_supports_runtime_backend(_controller_path(repo, script)[1])
+    except (AttributeError, OSError, TypeError, ValueError):
+        return False
 
 
 def _selected_project(args, *, project=None):
@@ -236,6 +310,15 @@ def run_project_update(args) -> int | None:
         return None
     repo, script = selected
     request = getattr(args, "_controller_request", None)
+    if request is not None:
+        try:
+            requested_backends = update_options.request_runtime_backends(request.argv)
+        except (AttributeError, ValueError):
+            output.err("The submitted runtime backend selection is invalid.")
+            return 1
+        if requested_backends != tuple(getattr(args, "runtime_backend", None) or ()):
+            output.err("The runtime backend selection changed after submission.")
+            return 1
     if getattr(args, "auto", False) and request is not None:
         from dataclasses import replace
         from update_driver.core import automatic_update_refusal
@@ -251,13 +334,9 @@ def run_project_update(args) -> int | None:
             output.err(refusal)
             return 3
     try:
-        root = Path(repo.anchor).resolve(strict=True)
-        relative = Path(script)
-        if relative.is_absolute() or relative.suffix.lower() != ".py":
-            raise ValueError("the controller must be a repo-relative Python script")
-        path = (root / relative).resolve(strict=True)
-        if not path.is_relative_to(root) or not path.is_file():
-            raise ValueError("the controller is outside the project or is not a file")
+        root, path = _controller_path(repo, script)
+        if getattr(args, "runtime_backend", None) and not _controller_supports_runtime_backend(path):
+            raise ValueError("the selected project controller does not advertise runtime backend intent")
         from update_driver import participant_environment
 
         custody = participant_environment()
