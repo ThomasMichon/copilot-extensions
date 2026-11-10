@@ -50,7 +50,7 @@ def test_departed_snapshot_child_does_not_hide_live_sibling(console_type, monkey
     assert console.pin_descendants() == {102: ("manager", 1020)}
 
 
-@pytest.mark.parametrize("code,present", [(87, True), (5, False)])
+@pytest.mark.parametrize("code,present", [(87, True), (5, False), (None, False)])
 def test_unexplained_pin_failure_is_not_ignored(console_type, monkeypatch, code, present):
     entry = {101: (100, "query")}
     failure = _failure(code)
@@ -107,7 +107,9 @@ def test_native_departed_snapshot_pid_is_confirmed_before_omission(
             assert time.monotonic() < deadline, f"Missing {path.name}"
             time.sleep(.01)
 
-    with console_type([sys.executable, "-I", str(script), str(tmp_path)],
+    # Windows venv redirectors add another parent between the root and script.
+    python = getattr(sys, "_base_executable", sys.executable)
+    with console_type([python, "-I", str(script), str(tmp_path)],
                       env=os.environ.copy(), cwd=tmp_path) as console:
         wait(tmp_path / "child")
         child = int((tmp_path / "child").read_text())

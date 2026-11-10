@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native terminal fixture descendant pinning strict while confirming departed snapshot PIDs.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
