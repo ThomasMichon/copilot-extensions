@@ -2,7 +2,7 @@
 
 [Canonical Manager effort](README.md#proposed-finite-action-progress-inbox-consumer-from-5343)
 
-This is the bounded execution proposal for #5343 and the existing
+This is the finite implementation and acceptance record for #5343 and the existing
 P5343/V5343 contract. It closes the Picker's existing render-derive-not-own,
 nonblocking and addressed-background-publication intent. It does not reopen
 the delivered Inbox primitive or all background producers.
@@ -37,7 +37,7 @@ There is no new runtime service, progress store or process-lifecycle authority.
 ## Mechanism
 
 The reviewed mechanics retain the original outcome and do not authorize live
-effects. Source acceptance still requires the implementation's review and merge.
+effects. The source implementation is accepted in #11948.
 
 - Use the existing Inbox primitive at the owning action-progress modal, with
   one addressed latest-value slot for that run. Do not mix its data with the
@@ -80,7 +80,7 @@ not replaced by a version assertion.
   nondestructive current-value rendering, with exact run and cancellation fences.
 - [x] I3: Preserve completion, provider error/final message and unexpected-reader
   failure; keep provider refresh and other progress consumers unchanged.
-- [ ] I4: Pass the affected consumer packet, source guards and required review/CI,
+- [x] I4: Pass the affected consumer packet, source guards and required review/CI,
   merge the implementation and reconcile only the finite P5343/V5343 rows.
 
 ## Validation Plan
@@ -98,7 +98,7 @@ not replaced by a version assertion.
   and native Textual progress modal for the simple consumer check. Preserve
   existing success/error/cancel behavior and explicit fixture cleanup. No
   real provider, shared mux, service or operator session is a fixture.
-- [ ] IV5: Run the directly affected progress/action/Inbox packet and existing
+- [x] IV5: Run the directly affected progress/action/Inbox packet and existing
   applicable lint, install-contract, module-size and documentation checks.
   Keep the original primitive and nonblocking-I/O credit intact.
 - [x] IV6: Record evidence tiers honestly. Unprepared modal/reader fixtures
@@ -116,6 +116,22 @@ Other progress producers, provider lifecycle, native performance, release,
 authorized rollout and the wider Manager/Picker campaign remain separate.
 
 ## Journal
+
+### 2026-11-10 - Finite source acceptance
+
+#11948 actually merged at 17:05:34 UTC as
+`d46ec448ba52aa3b5b8606f3083a89167ad3b1c5`. Genuine Copilot
+approval5845984279 covers `55e0ca1d65443bd53cedbc0cc0c8f421f32dcc7d`,
+with no active issues and no inline findings. The actual required PR gate,
+guard/lint, eligible-unit, lockdown and source-attribution checks passed before
+merge. The 106-case local consumer packet and focused source guards remain
+the evidence recorded below.
+
+The original issue and complete current Plan/local/global Validation and
+Coordination clauses were reread against this implementation. Only the finite
+P5343/V5343/G5343 family is accepted. Existing Inbox/nonblocking credit and
+provider/process/resource custodians remain unchanged; this is neither parent
+Manager completion nor release, installed-native acceptance or rollout.
 
 ### 2026-11-10 - Implementation candidate
 
