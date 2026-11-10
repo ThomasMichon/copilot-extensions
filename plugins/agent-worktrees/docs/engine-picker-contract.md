@@ -125,6 +125,50 @@ decision from that retired lifetime.
 
 ## Explicit paired worktree Sync
 
+### Optional Sync progress producer
+
+The version-1 `agent-worktrees.sync-progress` declaration is packaged as
+`agent_worktrees/sync-progress-v1.json` in the selected runtime. A caller that
+has qualified that exact runtime may opt into `sync --json --stream`, with the
+same worktree selection and optional `--paired` behavior. `--stream` without
+`--json` refuses before configuration or synchronization. Existing text and
+single-document JSON invocations are unchanged.
+Sync option names are exact: abbreviated spellings such as `--str` are rejected
+before synchronization.
+
+The opt-in emits flushed D4 NDJSON: `{"type":"progress","pct":null,"msg":"..."}`
+at real operation stages, including owner-emitted waiting updates during
+long nested work. Percentages are indeterminate rather than estimates.
+A terminal `done` or `error` frame carries `message` and the complete original
+versioned JSON object in `result`, using the same canonical formatter as ordinary
+JSON output. Paired member outcomes, preparation state and failure
+detail are not replaced with the latest message. Stream success follows actual
+Sync completion; a blocked single repository is an error even where the legacy
+JSON command's exit code alone was not a success predicate.
+
+Invalid or ambiguous worktree selectors produce a terminal error with
+`reason: "worktree-id-rejected"`, the original diagnostic in `detail`, and
+`outcome: "not-started"`. If a later batch item raises, the terminal result
+retains earlier completed entries and identifies the interrupted item with
+`reason: "sync-interrupted"` and `outcome: "unknown"`. No `updated` value is
+invented for that item, later items are not started, and successful earlier
+mutations are not claimed rolled back. Ordinary non-streamed exception handling
+is unchanged.
+Ordinary preflight exceptions, including malformed tracking documents, also
+produce a terminal error. Frames use the shared unbuffered, single-attempt stdout
+writer. Unconfirmed stdout writes are never retried; loss
+of a complete terminal frame remains an unknown observation, not replay authority.
+
+The producer does not add a Picker consumer, timeout policy, cancellation,
+rollback, retry or progress store. Built-in Manager maintenance still uses its
+existing JSON path until a separately qualified consumer migration. Readers
+must preserve unknown outcomes after missing terminal output and select the
+legacy baseline before effects when support is absent, never replay a started
+Sync after removing an optional flag. Every target update is communication
+evidence; consumer silence and execution budgets remain independent.
+
+### Paired synchronization semantics
+
 The original `sync --worktree-id <id> --json` contract remains a
 single-repository fast-forward. Optional `--paired` requests both registered
 worktree members followed by local plugin/instruction preparation. Picker Sync
