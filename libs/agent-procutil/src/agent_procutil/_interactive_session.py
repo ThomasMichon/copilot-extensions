@@ -29,7 +29,7 @@ os.execvpe(sys.argv[3],sys.argv[3:],os.environ)
 """
 
 
-def main():
+def main(*, asynchronous=False):
     require_contained_worker()
     lifetime, reply, control, owner, slave = map(int, sys.argv[1:6])
     for fd in (lifetime, reply, control, slave):
@@ -42,12 +42,21 @@ def main():
     custody = SessionCustody(lifetime)
     retiring = threading.Event()
     retirement_lock = threading.Lock()
+    native_wait_lock = threading.Lock()
+    child = None
+    exit_reported = False
 
     def emit(frame):
         try:
             os.write(reply, frame)
         except BrokenPipeError:
             pass
+
+    def report_exit():
+        nonlocal exit_reported
+        if asynchronous and child is not None and not exit_reported:
+            emit(f"exit {child.returncode}\n".encode("ascii"))
+            exit_reported = True
 
     def retire():
         retiring.set()
@@ -56,6 +65,12 @@ def main():
             while True:
                 try:
                     custody.retire()
+                    if asynchronous:
+                        with native_wait_lock:
+                            if child is not None:
+                                child.wait(timeout=2)
+                                report_exit()
+                        emit(f"settled {os.getpid()}\n".encode("ascii"))
                     os.killpg(os.getpid(), signal.SIGKILL)
                 except Exception:
                     # Keep the session and unreaped group anchors in custody.
@@ -115,14 +130,26 @@ def main():
                 raise RuntimeError("interactive command group did not become ready")
             if retiring.is_set():
                 return
+            if asynchronous:
+                emit(f"native {child.pid}\n".encode("ascii"))
+                if os.read(control, 1) != b"g" or retiring.is_set():
+                    return
             if slave >= 0:
                 os.tcsetpgrp(slave, child.pid)
             os.write(start, b"g")
+            if asynchronous:
+                emit(b"running\n")
         finally:
             os.close(ready)
             os.close(start)
         while True:
-            pid, status = os.waitpid(child.pid, os.WUNTRACED)
+            with native_wait_lock:
+                if asynchronous and child.returncode is not None:
+                    return
+                pid, status = os.waitpid(child.pid, os.WUNTRACED)
+                if not os.WIFSTOPPED(status):
+                    child.returncode = os.waitstatus_to_exitcode(status)
+                    report_exit()
             if pid != child.pid:
                 raise RuntimeError("interactive command identity changed")
             if os.WIFSTOPPED(status):
@@ -131,8 +158,8 @@ def main():
                     return
                 os.killpg(child.pid, signal.SIGCONT)
                 continue
-            child.returncode = os.waitstatus_to_exitcode(status)
-            emit(f"exit {child.returncode}\n".encode("ascii"))
+            if not asynchronous:
+                emit(f"exit {child.returncode}\n".encode("ascii"))
             return
     except Exception:
         emit(b"failed\n")
