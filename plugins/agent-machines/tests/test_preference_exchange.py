@@ -54,6 +54,57 @@ def publish(inputs, output, **changes):
     return exchange.exchange("publish", **args, **changes, apply=True, expected=plan["preview_token"])
 
 
+@pytest.mark.parametrize(("harness", "local_target", "status", "target", "origin"), [
+    ("repo-first", "repo-local", "suggested", "repo-local", "local-machine"),
+    ("repo-first", None, "suppressed", None, "local-machine"),
+    ("repo-second", "repo-local", "suggested", "repo-shared", "shared"),
+    ("repo-missing", "repo-local", "absent", None, None),
+])
+def test_accepted_repository_projection_is_scoped_read_only_and_preserves_local_precedence(
+    inputs, harness, local_target, status, target, origin,
+):
+    from agent_machines.preference_repositories import project
+
+    state = inputs["state"]
+    write(state / "accepted.json", snapshot())
+    local = write(state.parent / "local.json", {
+        "schema": codec.LOCAL_SCHEMA, "version": 1, "machine": inputs["machine"],
+        "domains": {"repositories": {"knowledge": [
+            {"harness_repository_id": "repo-first", "knowledge_repository_id": local_target},
+        ]}},
+    })
+    before = {path.name: path.read_bytes() for path in state.iterdir()}
+    result = project(state, machine=inputs["machine"], harness=harness, local=local)
+    assert result["knowledge_preference"] == {"status": status, "knowledge_repository_id": target}
+    assert result["accepted_revision"] == 1 and result["provenance"] == origin
+    assert result["read_only"] and not result["configuration_applied"] and not result["binding_changed"]
+    assert {path.name: path.read_bytes() for path in state.iterdir()} == before
+    assert sorted(before) == ["accepted.json", "policy.json"]
+    original = result["input_revision"]
+    local.write_bytes(local.read_bytes() + b"\n")
+    assert project(state, machine=inputs["machine"], harness=harness, local=local)["input_revision"] != original
+
+
+def test_accepted_repository_projection_handles_withdrawal_absence_and_narrowed_policy(inputs):
+    from agent_machines.preference_repositories import project
+
+    args = {"machine": inputs["machine"], "harness": inputs["harness"]}
+    state = inputs["state"]
+    assert project(state, **args)["knowledge_preference"]["status"] == "absent"
+    write(state / "accepted.json", snapshot(2, 1, domains={}))
+    assert project(state, **args)["accepted_revision"] == 2
+    assert project(state, **args)["knowledge_preference"]["status"] == "absent"
+    write(state / "accepted.json", snapshot())
+    policy_path = state / "policy.json"
+    policy = json.loads(policy_path.read_bytes())
+    write(policy_path, {**policy, "publisher": "another-publisher"})
+    with pytest.raises(codec.PreferenceError, match="accepted-publisher-mismatch"):
+        project(state, **args)
+    write(policy_path, {**policy, "domains": ["copilot"]})
+    with pytest.raises(codec.PreferenceError, match="domain-not-permitted"):
+        project(state, **args)
+
+
 def test_preview_is_read_only_acceptance_is_complete_atomic_and_duplicate_is_idempotent(inputs):
     state = inputs["state"]
     before = {path.name: path.read_bytes() for path in state.iterdir()}

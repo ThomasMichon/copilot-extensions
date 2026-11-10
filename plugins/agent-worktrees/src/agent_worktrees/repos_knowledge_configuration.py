@@ -12,6 +12,7 @@ import subprocess
 import sys
 import sysconfig
 
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from dropin_registry import ScanAuthority
 from plugin_activation import resolve_active_plugins
 
@@ -130,13 +131,17 @@ def _native_read_runner(project: str):
 
 def _run_selected_payload(
     project: str, name: str, operation: str, token: str, expected_script: str,
-    portable_resolution: dict | None = None,
+    portable_resolution: dict | None = None, preference_selection: dict | None = None,
 ) -> None:
     script = owner_script(project)
     if str(script) != expected_script:
         raise ConfigurationError("binding-owner-changed", "The binding owner changed; preview again.")
 
     def revalidate() -> None:
+        if preference_selection is not None:
+            from .repos_knowledge_default import revalidate
+
+            revalidate(project, preference_selection)
         if portable_resolution is not None:
             from .repos_knowledge_preferences import resolve
 
@@ -146,7 +151,6 @@ def _run_selected_payload(
             )
             if current != portable_resolution:
                 raise ConfigurationError("preview-conflict", "Portable binding scope changed; preview again.")
-
     previous = sys.argv
     try:
         sys.argv = _owner_arguments(script, project, name, operation, token)
@@ -162,13 +166,16 @@ def _run_selected_payload(
 
 
 def _apply_worker(
-    project: str, name: str, token: str, expected_script: str, portable_resolution: dict | None = None,
+    project: str, name: str, token: str, expected_script: str,
+    portable_resolution: dict | None = None, preference_selection: dict | None = None,
 ) -> None:
     from . import repos
     from .repos_registry_transaction import registry_lock
 
     with registry_lock(repos._repos_yaml_path()):
-        _run_selected_payload(project, name, "apply-locked", token, expected_script, portable_resolution)
+        _run_selected_payload(
+            project, name, "apply-locked", token, expected_script, portable_resolution, preference_selection,
+        )
 
 
 def _preview_worker(project: str, name: str, expected_script: str) -> None:
@@ -177,13 +184,15 @@ def _preview_worker(project: str, name: str, expected_script: str) -> None:
 
 def invoke(
     project: str, name: str, operation: str, token: str = "", *, portable_resolution: dict | None = None,
+    preference_selection: dict | None = None,
+    require_preference_freshness: bool = False,
+    budget: OwnedExecutionBudget | None = None,
 ) -> dict:
     if not binding_names_supported(project, name):
         raise ConfigurationError(
             "binding-name-unsupported",
             "Binding requires exact Configuration names beginning with an ASCII letter or digit.",
         )
-    from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
     script = owner_script(project)
@@ -194,10 +203,14 @@ def invoke(
     ]
     if portable_resolution is not None:
         args.append(json.dumps(portable_resolution, sort_keys=True))
+    if preference_selection is not None:
+        if portable_resolution is None:
+            raise ConfigurationError("invalid-request", "Accepted defaults require native portable resolution.")
+        args.append(json.dumps(preference_selection, sort_keys=True))
     environment = dict(os.environ)
     for key in ("PYTHONPATH", "PYTHONHOME", "VIRTUAL_ENV", "COPILOT_PLUGIN_ROOT"):
         environment.pop(key, None)
-    budget = OwnedExecutionBudget.from_timeout(
+    budget = budget or OwnedExecutionBudget.from_timeout(
         26 if operation == "apply" else 18, cleanup_reserve=2,
     )
     try:
@@ -215,6 +228,10 @@ def invoke(
             or portable_resolution is not None and (
                 type(capabilities.get("portable_binding_precondition")) is not int
                 or capabilities["portable_binding_precondition"] != 1
+            )
+            or (require_preference_freshness or preference_selection is not None) and (
+                type(capabilities.get("binding_precondition_freshness")) is not int
+                or capabilities["binding_precondition_freshness"] != 1
             )
         ):
             raise ConfigurationError(
@@ -261,6 +278,10 @@ def _worker_main() -> None:
         _apply_worker(sys.argv[1], sys.argv[2], sys.argv[4], sys.argv[5])
     elif len(sys.argv) == 7 and sys.argv[3] == "apply":
         _apply_worker(sys.argv[1], sys.argv[2], sys.argv[4], sys.argv[5], json.loads(sys.argv[6]))
+    elif len(sys.argv) == 8 and sys.argv[3] == "apply":
+        _apply_worker(
+            sys.argv[1], sys.argv[2], sys.argv[4], sys.argv[5], json.loads(sys.argv[6]), json.loads(sys.argv[7]),
+        )
     elif len(sys.argv) == 6 and sys.argv[3] == "preview" and not sys.argv[4]:
         _preview_worker(sys.argv[1], sys.argv[2], sys.argv[5])
     else:

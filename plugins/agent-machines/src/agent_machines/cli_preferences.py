@@ -71,6 +71,29 @@ def add_parser(subparsers) -> None:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--expect", default="")
     parser.set_defaults(func=run_telemetry)
+    parser = commands.add_parser(
+        "repositories", help="read accepted relationship defaults without native effects", allow_abbrev=False,
+    )
+    parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--local-overrides", type=Path)
+    parser.add_argument("--machine", required=True, help="native caller's logical execution identity")
+    parser.add_argument("--harness", required=True, help="native caller's canonical repository identity")
+    parser.set_defaults(func=run_repositories)
+
+
+def run_repositories(args) -> int:
+    from .preference_repositories import project
+
+    try:
+        result = project(
+            args.state_dir, machine=args.machine, harness=args.harness, local=args.local_overrides,
+        )
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False))
+        return 0
+    except (preferences.PreferenceError, OSError) as error:
+        reason = str(error) if isinstance(error, preferences.PreferenceError) else "preference-input-unavailable"
+        print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
+        return 2
 
 
 def run_preview(args) -> int:

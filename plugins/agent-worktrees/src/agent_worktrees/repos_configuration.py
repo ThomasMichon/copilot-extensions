@@ -171,6 +171,7 @@ def command(argv: list[str]) -> int:
     parser.add_argument("--preview-token", default="")
     parser.add_argument("--harness-id")
     parser.add_argument("--knowledge-id")
+    parser.add_argument("--accepted-default", action="store_true")
     try:
         args = parser.parse_args(argv)
         # Native loaders may warn about source content. Return sanitized findings,
@@ -178,6 +179,8 @@ def command(argv: list[str]) -> int:
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             project = resource_name(args.context_project)
             portable = args.harness_id is not None or args.knowledge_id is not None
+            if args.accepted_default and (not portable or args.command not in {"knowledge-preview", "knowledge-apply"}):
+                raise ConfigurationError("invalid-request", "Accepted defaults require a portable binding preview/apply.")
             if portable and (
                 not args.command.startswith("knowledge-")
                 or not args.harness_id or not args.knowledge_id or args.repository is not None
@@ -188,14 +191,22 @@ def command(argv: list[str]) -> int:
 
                 result = identities()
             elif args.command == "knowledge-resolve" or portable:
-                from . import repos_knowledge_preferences
+                from . import repos_knowledge_default, repos_knowledge_preferences
 
                 operation = args.command.removeprefix("knowledge-")
-                function = getattr(repos_knowledge_preferences, operation)
+                function = getattr(
+                    repos_knowledge_default if args.accepted_default else repos_knowledge_preferences, operation,
+                )
                 arguments = [project, args.harness_id, args.knowledge_id]
                 if operation == "apply":
                     arguments.append(args.preview_token)
                 result = function(*arguments)
+                if args.accepted_default and operation == "preview":
+                    result = {
+                        **result["native_preview"], "token": result["token"],
+                        "summary": "Bind the accepted knowledge default after native confirmation. "
+                        + result["native_preview"]["summary"],
+                    }
             elif args.command == "catalog":
                 from .repos_configuration_catalog import catalog
 
