@@ -98,8 +98,9 @@ not enforce native UI input or in-flight work. Auth-wait must remain separate
 from irreversible user-input/unknown-send control holds; renewal never resets
 those holds. These adapters do not close/reconnect
 a headed backend, replace a process, seize a pane, or advertise an auth-wait RPC.
-Until that independent owner supports and enforces the required lifecycle,
-this is source preparation, **not an active lease-enforced deployment**.
+Until that independent owner supports and enforces the required lifecycle on
+the file adapter's supported platform, this is source preparation,
+**not an active lease-enforced deployment**.
 
 The focused `tests/test_source_file_auth.py` packet covers real scoped header
 construction, source/capability rotation, unsupported/redirect/malformed peers,
@@ -113,9 +114,15 @@ identity, renewal and wrong-capability refusal.
 
 ## Disabled integration prestage
 
-There is no callable native source-auth enforcement contract today.
-`source-auth-state/v1` is a proposed credential-free observation shape, not an
-implemented RPC. An ordinary Driver `initialize` response, `nativeSend` support,
+The default-off Driver provider delivered in #11781 exposes
+`copilot-driver.headed-auth-wait/v1` through the explicit Python `run_headed`
+configuration and its running private declaration. This is separate from the
+earlier `source-auth-state/v1` observation proposal, which is not an implemented
+RPC. Its qualified Windows path does not make this POSIX-only file adapter
+interoperable: the receiver still refuses POSIX before endpoint/native creation
+until independent owner-death custody is implemented and qualified.
+
+An ordinary Driver `initialize` response, `nativeSend` support,
 `backend_admitted`, a merged controller or an inbox receipt cannot substitute
 for it. Missing runtime support is **unsupported**; unavailable or ambiguous
 receiving identity, state or admission is **unknown**. Neither permits automatic
@@ -129,11 +136,12 @@ revive expired authority. Their private synthetic history fixture proves only
 that these file operations leave unrelated bytes intact. It is not a native
 conversation, process-preservation or recovery test.
 
-The positive integration remains blocked on the existing native execution
-owner. Its revision-bound acceptance record must cover the actual receiving
-incarnation, native UI and in-flight work, not only semantic prompt admission.
+The positive integration remains blocked on an applicable POSIX native execution
+owner and actual platform-compatible composition. Its revision-bound acceptance
+record must cover the actual receiving incarnation, native UI and in-flight
+work, not only semantic prompt admission or a Windows receiver pass.
 The [Driver core](../../../libs/copilot-driver-core/README.md) remains the owner;
-`requireControl`, `prompt` and `nativeSend` do not yet implement source-auth wait,
+`requireControl`, `prompt` and `nativeSend` are not the source-auth-wait contract,
 and raw Host write observation is not an enforcement seam. Renewal must never
 clear irreversible control loss, pending/sending state or unknown admission.
 
@@ -150,8 +158,8 @@ inventing a new RPC or treating synthetic controls as a native pass:
 | Obsolete lease, source loss or changed owner | Stale authority cannot resume execution or reset irreversible control holds |
 | End of the proof | Exact owned-child cleanup is confirmed; unrelated sessions and services remain untouched |
 
-Use the native owner's existing public-caller qualification lane rather than
-launching another qualification or taking over core/Host/backend/launcher code.
+Use the existing owned native qualification lanes and coordinate any actual
+core/Host/backend/launcher changes through their source owners.
 Do not revoke real credentials, sign users out, alter a global clock, restart
 shared services or delete history to manufacture expiry. Acceptance of that
 native contract is necessary for integration readiness, not permission to
