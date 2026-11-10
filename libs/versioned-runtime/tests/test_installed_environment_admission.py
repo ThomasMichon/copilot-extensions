@@ -165,7 +165,7 @@ def test_completion_is_usable_by_retained_reader_and_preserves_exact_reuse(insta
     } == before
 
 
-@pytest.mark.parametrize("damage_case", ["malformed", "hardlink", "missing-launcher"])
+@pytest.mark.parametrize("damage_case", ["malformed", "hardlink", "missing-launcher", "oversized"])
 def test_invalid_incoming_identity_is_not_certified_or_overwritten(installed, damage_case):
     root, slot, _site = installed
     bootstrap = _bootstrap(slot)
@@ -173,7 +173,10 @@ def test_invalid_incoming_identity_is_not_certified_or_overwritten(installed, da
     if damage_case == "missing-launcher":
         (bootstrap / "runtime_launcher.py").unlink()
     else:
-        generation.write_bytes(b"not-a-generation\n" if damage_case == "malformed" else b"a" * 32)
+        content = b"not-a-generation\n" if damage_case == "malformed" else b"a" * (
+            65 if damage_case == "oversized" else 32
+        )
+        generation.write_bytes(content)
         if damage_case == "hardlink":
             os.link(generation, slot / "foreign-generation")
     before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
@@ -231,7 +234,16 @@ def test_real_constructed_environment_launches_with_its_published_identity(tmp_p
         "from pathlib import Path\n"
         f"Path({str(sentinel)!r}).write_text('ran')\n",
     )
+    if os.name != "nt":
+        (slot / ".runtime-bootstrap/runtime_launcher.py").chmod(0o664)
+    generation = slot / ".runtime-bootstrap/runtime-generation"
+    original_generation = b"a" * 32 + b"\n"
+    generation.write_bytes(original_generation)
+    generation.chmod(0o664)
     owner.mark_complete(root, "2.0", payload_hash="same")
+    assert generation.read_bytes() == original_generation
+    if os.name != "nt":
+        assert stat.S_IMODE(generation.stat().st_mode) == 0o644
     identity = _retained_reader().runtime_identity(slot)
     python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     command = [

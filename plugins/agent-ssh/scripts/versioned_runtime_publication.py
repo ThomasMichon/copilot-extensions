@@ -91,12 +91,14 @@ class PhysicalState:
         return cls(**value)
 
 
-def state_fd(fd: int, *, owned: bool = True) -> PhysicalState:
+def state_fd(fd: int, *, owned: bool = True, max_bytes: int | None = None) -> PhysicalState:
     before = os.fstat(fd)
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise PublicationProofError("Proof requires a single-link ordinary file")
     if owned and not (_windows_owned(fd) if os.name == "nt" else before.st_uid == os.getuid()):
         raise PublicationProofError("Proof object is not owned by this principal")
+    if max_bytes is not None and before.st_size > max_bytes:
+        raise PublicationProofError("Proof object exceeds the size limit")
     position = os.lseek(fd, 0, os.SEEK_CUR)
     previous_mode = None
     if os.name == "nt":
@@ -106,7 +108,11 @@ def state_fd(fd: int, *, owned: bool = True) -> PhysicalState:
     digest = hashlib.sha256()
     try:
         os.lseek(fd, 0, os.SEEK_SET)
-        while block := os.read(fd, 65536):
+        size = 0
+        while block := os.read(fd, 65536 if max_bytes is None else min(65536, max_bytes - size + 1)):
+            size += len(block)
+            if max_bytes is not None and size > max_bytes:
+                raise PublicationProofError("Proof object exceeds the size limit")
             digest.update(block)
     finally:
         os.lseek(fd, position, os.SEEK_SET)
@@ -120,7 +126,9 @@ def state_fd(fd: int, *, owned: bool = True) -> PhysicalState:
                          after.st_size, after.st_mtime_ns, digest.hexdigest())
 
 
-def state_path(path: Path, *, private: bool = False, owned: bool = True) -> PhysicalState | None:
+def state_path(
+    path: Path, *, private: bool = False, owned: bool = True, max_bytes: int | None = None,
+) -> PhysicalState | None:
     _plain_parents(path)
     try:
         named = path.lstat()
@@ -130,7 +138,7 @@ def state_path(path: Path, *, private: bool = False, owned: bool = True) -> Phys
         raise PublicationProofError(f"Not an ordinary proof object: {path}")
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
-        result = state_fd(fd, owned=owned)
+        result = state_fd(fd, owned=owned, max_bytes=max_bytes)
         if private and os.name != "nt" and result.mode & 0o022:
             raise PublicationProofError(f"Proof file permits untrusted writes: {path}")
         final = path.lstat()
@@ -143,49 +151,55 @@ def state_path(path: Path, *, private: bool = False, owned: bool = True) -> Phys
         os.close(fd)
 
 
+def _protect_incoming_helper(path: Path, *, max_bytes: int) -> PhysicalState | None:
+    original = state_path(path, max_bytes=max_bytes)
+    if original is None:
+        return None
+    protected = original
+    if os.name != "nt" and original.mode & 0o022:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        try:
+            if state_fd(fd, max_bytes=max_bytes) != original:
+                raise PublicationProofError("Retained runtime helper changed before protection")
+            os.fchmod(fd, stat.S_IMODE(original.mode) & ~0o022)
+            protected = state_fd(fd, max_bytes=max_bytes)
+            if protected != replace(original, mode=original.mode & ~0o022):
+                raise PublicationProofError("Retained runtime helper changed during protection")
+        finally:
+            os.close(fd)
+    if state_path(path, private=True, max_bytes=max_bytes) != protected:
+        raise PublicationProofError("Retained runtime helper changed after protection")
+    return protected
+
+
 def prepare_retained_generation(slot: Path) -> None:
     """Publish a retained build identity before its first completion marker."""
     bootstrap = slot / ".runtime-bootstrap"
     if not os.path.lexists(bootstrap):
         return
     launcher = bootstrap / "runtime_launcher.py"
-    original = state_path(launcher)
-    if original is None:
+    if _protect_incoming_helper(launcher, max_bytes=1024 * 1024) is None:
         raise PublicationProofError("Retained runtime launcher is missing")
-    protected = original
-    if os.name != "nt" and original.mode & 0o022:
-        fd = os.open(launcher, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-        try:
-            if state_fd(fd) != original:
-                raise PublicationProofError("Retained runtime launcher changed before protection")
-            os.fchmod(fd, stat.S_IMODE(original.mode) & ~0o022)
-            protected = state_fd(fd)
-            if protected != replace(original, mode=original.mode & ~0o022):
-                raise PublicationProofError("Retained runtime launcher changed during protection")
-        finally:
-            os.close(fd)
-    if state_path(launcher, private=True) != protected:
-        raise PublicationProofError("Retained runtime launcher changed after protection")
     path = bootstrap / "runtime-generation"
-    before = state_path(path, private=True)
+    before = _protect_incoming_helper(path, max_bytes=64)
     if before is None:
         with os.fdopen(_created_file(path), "wb") as stream:
             stream.write((uuid.uuid4().hex + "\n").encode("ascii"))
             stream.flush()
             os.fsync(stream.fileno())
-        before = state_path(path, private=True)
+        before = state_path(path, private=True, max_bytes=64)
     if before is None or before.size > 64:
         raise PublicationProofError("Retained runtime generation is missing or oversized")
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
-        if state_fd(fd) != before:
+        if state_fd(fd, max_bytes=64) != before:
             raise PublicationProofError("Retained runtime generation changed before read")
         content = os.read(fd, 65)
-        if state_fd(fd) != before:
+        if state_fd(fd, max_bytes=64) != before:
             raise PublicationProofError("Retained runtime generation changed during read")
     finally:
         os.close(fd)
-    if state_path(path, private=True) != before or re.fullmatch(b"[0-9a-f]{32}", content.strip()) is None:
+    if state_path(path, private=True, max_bytes=64) != before or re.fullmatch(b"[0-9a-f]{32}", content.strip()) is None:
         raise PublicationProofError("Retained runtime generation is invalid or changed")
 
 
