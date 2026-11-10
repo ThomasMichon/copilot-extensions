@@ -205,7 +205,7 @@ class BackendSession:
                 raise ValueError("backend epoch has not quiesced")
             return self.session.checkpoint()
         if operation == "resume":
-            if self.state not in {"quiescing", "quiescent"} or not self.committed:
+            if self.state not in {"active", "quiescing", "quiescent"} or not self.committed:
                 raise ValueError("backend epoch cannot resume")
             if self.transport.binding.identity(self.session.cfg) != self.session._checkpoint_identity:
                 raise CheckpointRefused("execution context changed before epoch resumption")

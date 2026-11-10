@@ -199,7 +199,7 @@ class CustodyHost(Server):
             await owner.start(connector, ready=ready)
             entry.generation = connector.generation
             self.sessions.add(entry)
-            await ClientIntake(owner, reader).run()
+            await ClientIntake(owner, reader, on_eof=owner.client_eof).run()
         except Exception as exc:
             if not attached:
                 await self._send(writer, execution_context.config_failure(exc))

@@ -205,6 +205,53 @@ async def test_cancelled_handover_resumes_old_epoch_without_cancelling_accepted_
         assert backends.instances[0].state == "active"
 
 
+@pytest.mark.parametrize("resume_failure", [False, True])
+async def test_cancelled_handover_before_quiesce_settles_fence(resume_failure):
+    async with composed() as (owner, backends, upstream, output):
+        backends.hold_application = True
+        admission = asyncio.create_task(owner.submit(
+            {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        ))
+        move = None
+        try:
+            while not output or not owner._admissions:
+                await asyncio.sleep(0)
+            instance = backends.instances[0]
+            original = instance.peer.handler
+
+            async def handler(operation, data):
+                if operation == "resume" and resume_failure:
+                    raise ValueError("fixture resumption refused")
+                return await original(operation, data)
+
+            instance.peer.handler = handler
+            move = asyncio.create_task(owner.handover(backends.connect))
+            while not owner.state.fenced:
+                await asyncio.sleep(0)
+            assert instance.state == "active"
+            move.cancel()
+            with pytest.raises((asyncio.CancelledError, RuntimeError)):
+                await move
+            if resume_failure:
+                assert owner.state.uncertain
+                with pytest.raises(ConnectionError, match="unknown"):
+                    await owner.submit({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+            else:
+                assert not owner.state.fenced and not owner.state.uncertain
+                backends.hold_application = False
+                await owner.submit({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+                backends.release_admission.set()
+                await admission
+                await settled(owner)
+                assert [item["id"] for item in output] == [1, 2]
+            assert upstream.starts == 1 and len(backends.instances) == 1
+        finally:
+            backends.release_admission.set()
+            await asyncio.gather(admission, return_exceptions=True)
+            if move is not None:
+                await asyncio.gather(move, return_exceptions=True)
+
+
 async def test_unacknowledged_publications_are_bounded_without_spending_control_credit():
     async with composed() as (owner, backends, upstream, output):
         backends.hold_application = True

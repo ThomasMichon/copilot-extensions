@@ -250,9 +250,11 @@ async def test_eof_with_unanswerable_server_request_aborts_only_its_owned_sessio
         if request_timing == "before-eof":
             await upstream._emit_message(request)
             assert (await receive(reader))["id"] == "unanswered"
+        await send(writer, {"jsonrpc": "2.0", "id": 11, "method": "tools/list"})
+        await asyncio.sleep(0)
         writer.write_eof()
         if request_timing == "after-eof":
-            await until(lambda: entry.closing)
+            await until(lambda: entry.owner._input_ended)
             with pytest.raises(ConnectionError, match="input is closed"):
                 await upstream._emit_message(request)
         await until(lambda: entry not in fixture.host.sessions)
@@ -266,6 +268,53 @@ async def test_eof_with_unanswerable_server_request_aborts_only_its_owned_sessio
         assert await asyncio.wait_for(other.read(), 2) == b""
         await ipc.aclose_writer(writer)
         await ipc.aclose_writer(other_writer)
+
+
+async def test_eof_preserves_queued_server_reply_and_fenced_application(tmp_path, monkeypatch):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        reader, writer, _, _ = await fixture.attach()
+        upstream = fixture.upstreams[0]
+        entry = next(iter(fixture.host.sessions))
+        await send(writer, {
+            "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+            "params": {"name": "test_echo", "arguments": {}},
+        })
+        await until(lambda: upstream.pending)
+        await fixture.publish("incoming")
+        fixture.host.inspect_sessions()
+        await until(lambda: entry.owner.state.fenced)
+        await upstream._emit_message(
+            {"jsonrpc": "2.0", "id": "server-1", "method": "sampling/createMessage"},
+        )
+        assert (await receive(reader))["id"] == "server-1"
+        original = entry.owner.submit
+        release = asyncio.Event()
+
+        async def submit(message, *, wait):
+            if "method" not in message:
+                await release.wait()
+            return await original(message, wait=wait)
+
+        monkeypatch.setattr(entry.owner, "submit", submit)
+        try:
+            await send(writer, {"jsonrpc": "2.0", "id": 11, "method": "tools/list"})
+            await send(writer, {"jsonrpc": "2.0", "id": "server-1", "result": {}})
+            writer.write_eof()
+            await until(lambda: entry.owner._input_ended)
+            assert not entry.owner.state.uncertain and not entry.migration.done()
+            release.set()
+            await until(lambda: not entry.owner.state.server_requests)
+            await upstream.complete(10)
+            assert (await receive(reader))["id"] == 10
+            assert (await receive(reader))["id"] == 11
+            assert await asyncio.wait_for(reader.read(), 2) == b""
+            assert not entry.owner.state.uncertain
+            assert entry.connector.generation == "incoming"
+            assert sum(item.get("id") == "server-1" and "result" in item
+                       for item in upstream.messages) == 1
+            await ipc.aclose_writer(writer)
+        finally:
+            release.set()
 
 
 @pytest.mark.parametrize("after_handshake", [False, True])

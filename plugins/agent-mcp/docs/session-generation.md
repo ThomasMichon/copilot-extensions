@@ -194,12 +194,19 @@ an active handover before owning teardown; failed quiescence still closes
 the exact retained transport while reporting uncertain accepted effects.
 Losing only a backend link is not evidence that the external client died.
 
-Queued client responses are accounted for before EOF settlement. A retained
+Read-side EOF reaches custody independently of queued application admission.
+Already-read responses, including those still awaiting publication, remain
+possible until their admission settles. A retained
 server request with no remaining possible client response, including one
 arriving after EOF, terminates that session as uncertain instead of stranding
 handover. Upstream validation, ledger overflow and unexpected reader termination
 also fence execution, wake admission/migration waits and close the owned links.
 They never authorize replay or affect another client's retained upstream.
+
+Cancelling handover before quiescence may resume the still-active committed
+epoch idempotently, with the same epoch and context checks. A failed or
+unconfirmed resumption makes custody uncertain and wakes blocked admission;
+it cannot leave a known session permanently fenced.
 
 Clean teardown keeps the backend attached while upstream input is closed and
 final output drains, then detaches the backend and closes the transport.

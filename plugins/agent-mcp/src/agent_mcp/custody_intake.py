@@ -23,13 +23,16 @@ class ClientIntake:
     queued target's admission without blocking unrelated server responses.
     """
 
-    def __init__(self, owner, reader):
+    def __init__(self, owner, reader, *, on_eof=None):
         self.owner, self.reader = owner, reader
+        self._on_eof = on_eof
         self._queues = {False: asyncio.Queue(), True: asyncio.Queue()}
         self._counts = {False: 0, True: 0}
         self._bytes = {False: 0, True: 0}
         self._pending = {}
         self._started = False
+        self._eof = False
+        self._replies = {}
 
     def _enqueue(self, message):
         message, size = CustodyState._message(message)
@@ -52,13 +55,22 @@ class ClientIntake:
                 dependency = self._pending.get(target)
         self._counts[control] += 1
         self._bytes[control] += size
+        if "method" not in message:
+            mid = message["id"]
+            self._replies[mid] = self._replies.get(mid, 0) + 1
         self._queues[control].put_nowait((message, size, admitted, dependency))
+
+    def _notify_eof(self):
+        if self._eof and self._on_eof is not None:
+            self._on_eof(self._replies)
 
     async def _read(self):
         while line := await self.reader.readline():
             if len(line) > MAX_FRAME or not line.endswith(b"\n"):
                 raise ValueError("invalid or oversized client frame")
             self._enqueue(json.loads(line))
+        self._eof = True
+        self._notify_eof()
         self._queues[False].put_nowait(None)
         for _ in range(MAX_CONTROL):
             self._queues[True].put_nowait(None)
@@ -71,6 +83,12 @@ class ClientIntake:
                 if dependency is not None:
                     await asyncio.shield(dependency)
                 await self.owner.submit(message, wait=True)
+                if "method" not in message:
+                    mid = message["id"]
+                    self._replies[mid] -= 1
+                    if not self._replies[mid]:
+                        del self._replies[mid]
+                    self._notify_eof()
                 if admitted is not None:
                     admitted.set_result(None)
             finally:

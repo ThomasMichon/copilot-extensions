@@ -56,6 +56,7 @@ class CustodySession:
         self._early_bytes = 0
         self._closing = False
         self._input_ended = False
+        self._queued_replies = set()
         self._ending_upstream = False
 
     def _fail(self):
@@ -69,11 +70,12 @@ class CustodySession:
             item.message["id"] for item in self.state.accepted.values()
             if "method" not in item.message
         }
-        return self.state.server_requests.keys() - replies
+        return self.state.server_requests.keys() - replies - self._queued_replies
 
-    def client_eof(self):
-        """No further server responses can arrive after queued input is published."""
+    def client_eof(self, queued_replies=()):
+        """Only responses already read or admitted can settle after input EOF."""
         self._input_ended = True
+        self._queued_replies = set(queued_replies)
         if self._unanswered():
             self._fail()
 
@@ -327,12 +329,19 @@ class CustodySession:
                         self.state.discard(candidate.attachment)
                         await candidate.close()
                         self._links.pop(candidate.attachment)
-                    result = await old.peer.request("resume", epoch=old.attachment.epoch)
-                    if not isinstance(result, dict) or result.get("active") is not True:
+                    try:
+                        result = await old.peer.request("resume", epoch=old.attachment.epoch)
+                        if (
+                            not isinstance(result, dict) or result.get("active") is not True
+                            or type(result.get("epoch")) is not int
+                            or result["epoch"] != old.attachment.epoch
+                        ):
+                            raise ConnectionError("outgoing epoch resumption is unknown")
+                        self.state.resumed(old.attachment)
+                        self._changed.set()
+                    except BaseException:
                         self._fail()
-                        raise ConnectionError("outgoing epoch resumption is unknown")
-                    self.state.resumed(old.attachment)
-                    self._changed.set()
+                        raise
                 raise
 
     async def close(self):
