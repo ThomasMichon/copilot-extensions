@@ -1,0 +1,9 @@
+{
+  "comment": "Use native stage copying for legacy snapshot libraries and materialize every declared Bridge dependency.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

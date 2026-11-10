@@ -169,6 +169,10 @@ session-reattachment objective.
   or legacy-adoption gates, nor authorize a public-feed fallback or trust changes.
 - The operator requested a source-backed MCP retirement/update fix and selected
   reattachment when explicitly offered reattachment versus old-host draining.
+- The operator approved coordinator custody of the retained implementation:
+  reconcile its preserved journal and prototype against current Dev, then
+  continue through normal tests and review. This grants no work discard,
+  production effects, process termination, elevation or review/CI bypass.
 - Existing live clients and state-preservation processes must not be force-killed.
   Their retained code cannot be live-patched to manufacture new protocol support.
 - This reviewed plan does not itself grant rollout, elevation, service-restart,
@@ -216,6 +220,10 @@ named tracked objective before the whole effort is Done.
 
 ### Phase 2 - Incoming publication and fresh-call convergence
 
+- [x] **Bounded source slice merged:** #10754 landed at
+  `6dec373a753716d4e780d9ed03079c263dd61b55` after required current-head CI and
+  an accepted owner-authored review with no open findings. The completion
+  items below retain promoted-release and authorized installed-consumer gates.
 - [ ] Keep the literal portable `agent-mcp bridge` entry and resolve current
   software for every fresh invocation.
 - [ ] Correct #10652: publish authentic incoming readiness, selectors, commands,
@@ -429,6 +437,10 @@ backend execution. This plan does not assert that reattachment or legacy live
 migration already works.
 
 ## Journal
+
+### 2026-11-09 - Retained reattachment source reconciled
+
+- [Preserved source history and next implementation boundary](journal/2026/11.09%20retained%20reattachment%20source.md).
 
 ### 2026-11-09 - Incoming-monitor correction resumed
 
@@ -1581,6 +1593,10 @@ migration already works.
   original assertions. New-source formal validation and current review/CI
   remain pending. Neither finding establishes the cause of the historical
   warm PID mismatch; that finding remains not reproduced with unknown cause.
+
+### 2026-11-06: Bounded incoming source merged; historical milestone
+
+- [Source merge, qualification scope and then-open delivery gates](journal/2026/11.06%20bounded%20incoming%20source%20merged.md).
 
 ### 2026-11-07: Corrective serving recovery and update transaction work
 

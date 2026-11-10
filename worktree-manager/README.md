@@ -53,6 +53,39 @@ does not execute its displayed commands, open links or change readiness.
 Redirected/noninteractive bare invocation still prints installation status;
 explicit verbs, project launch and launcher JSON output keep their contracts.
 
+## Explicit Sync progress
+
+Local paired Sync reads `agent_worktrees/sync-progress-v1.json` beside the exact
+selected engine interpreter. A valid version-1 declaration enables
+`sync --paired --json --stream`; missing, invalid or unsupported support retains
+the ordinary JSON invocation. The selected command is pinned for that invocation.
+Remote Sync remains on its existing attributable JSON path. Neither path retries
+an uncertain operation or strips an optional flag after execution starts.
+
+The existing progress screen shows real stage messages while the engine runs
+off-thread and retains the complete final result, including both pair members.
+A 30-second communication interval reports initial or later silence without
+cancelling Sync; received updates, including unfamiliar kinds, renew contact.
+A separate one-hour execution budget remains finite despite progress.
+Missing or contradictory terminal/process results are unknown outcomes, not
+success. Output is bounded; expiry retires the owned Job/group and preserves
+diagnostics. Unconfirmed cleanup retains exact custody and blocks another item.
+Escape does not dismiss an active Sync or claim cancellation/rollback. Completed
+results keep the existing diagnostic browsing controls. This does not install,
+update or automatically synchronize a worktree.
+
+Application teardown is different from Escape: idle expiry, owner-lifetime exit
+and normal Picker shutdown stop queued items, settle the current owned local
+Sync and join its worker/observer. Both streamed and legacy JSON local Sync use
+the application-owned lifetime; baseline syntax and its 120-second execution
+bound remain unchanged. Interrupted execution is unknown, not rolled back or
+safe to replay. If retirement fails after a terminal result, complete member/
+plugin results and bounded stderr remain attached to the retained cleanup error.
+An in-flight remote SSH Sync retains its prior bounded JSON lifetime: teardown
+stops later queued items but neither waits for that remote operation nor claims
+it cancelled or settled. Mixed selections join only the currently owned local
+Sync; remote streaming and remote-process ownership are unchanged.
+
 ## Picker notices and diagnostics
 
 Mux uncertainty is separate from process liveness: `MUX(?)` means last-known

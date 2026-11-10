@@ -24,6 +24,24 @@ NATIVE_PACKETS = {
         "agent-remote-driver", "test_native_headed_auth_wait",
         "test_opt_in_receiver_inflight_expiry_preserves_hold", "native-driver-inflight",
     ),
+    "native-driver-observation-loss": (
+        "agent-remote-driver", "test_native_headed_auth_wait",
+        "test_opt_in_receiver_sdk_observation_loss_preserves_hold", "native-driver-observation-loss",
+    ),
+    "native-driver-startup-seed": (
+        "agent-remote-driver", "test_headed_extension",
+        "test_native_headed_startup_seed_observation_precedes_controlled_send",
+        "native-driver-startup-seed",
+    ),
+    "native-driver-startup-no-seed": (
+        "agent-remote-driver", "test_headed_extension",
+        "test_native_headed_startup_no_seed_is_not_an_idle_claim", "native-driver-startup-no-seed",
+    ),
+    "native-driver-startup-cold-resume": (
+        "agent-remote-driver", "test_headed_extension",
+        "test_native_headed_startup_cold_resume_preserves_history",
+        "native-driver-startup-cold-resume",
+    ),
 }
 PACKETS = ("bridge-http52", *NATIVE_PACKETS)
 NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.3.8"}

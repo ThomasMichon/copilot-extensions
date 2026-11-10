@@ -31,16 +31,7 @@ powershell_host = _powershell_host
 
 
 def _installer_environment(fixture: dict[str, Any], shell: str) -> dict[str, str]:
-    environment = _native_fixture(fixture, shell)
-    if os.name != "nt":
-        # The relocated child has a fresh CLR; its OS-account lookup must use
-        # the same isolated home as the parent, not the real WSL user's home.
-        helper = fixture["payload"] / "scripts/installation-context/installation-context.ps1"
-        content = helper.read_text(encoding="utf-8")
-        original = "$passwdHome = [CePosixAccount]::Home()"
-        assert content.count(original) == 1
-        helper.write_text(content.replace(original, "$passwdHome = $env:HOME"), encoding="utf-8")
-    return environment
+    return _native_fixture(fixture, shell)
 
 
 def _cell(

@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve unchanged Windows service launchers and atomically publish changed content without interrupting live readers",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

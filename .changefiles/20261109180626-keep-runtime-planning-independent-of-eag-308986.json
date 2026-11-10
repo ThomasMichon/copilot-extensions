@@ -1,0 +1,9 @@
+{
+  "comment": "Keep runtime planning independent of eager freshness imports",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

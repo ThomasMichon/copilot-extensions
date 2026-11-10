@@ -94,7 +94,7 @@ item in this umbrella.
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 | Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
 | First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
-| Optional Sync-progress implementer | Proposed #4183 LP1-LP3/LPV Sync producer and local ProgressScreen consumer only; no PK/WI ownership or runtime rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
+| Optional Sync-progress implementer | Bounded #4183 LP1-LP3/LPV Sync producer/local-consumer source increment accepted, including complete CLI comparison; other verbs/runtime/platform lanes stay separate, with no PK/WI ownership or rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
 
 ## Context
 
@@ -457,12 +457,15 @@ the same effort Journal/open bounded-source process preserves current owners.
 
 ### Optional built-in lifecycle progress
 
-- [ ] Review and deliver the bounded Sync producer/local ProgressScreen consumer
+- [x] Review and deliver the bounded Sync producer/local ProgressScreen consumer
       in [phase-3c-optional-sync-progress.md](phase-3c-optional-sync-progress.md),
       under #4183 LP1-LP3/LPV (received #4274). Preserve CLI defaults, exact
       selected-runtime support, complete paired results and existing process
       ownership. Other verbs, remote streaming and original PK/WI acceptance
-      remain separate; this does not reopen completed Phase 3c.
+      remain separate; this does not reopen completed Phase 3c. Provider and
+      local consumer source are accepted in #11889/#11914, with complete CLI
+      result comparison in #11924. The independent release/native/installed
+      gates and other #4183 lanes remain open.
 
 ### Phase 3d — Retire the production Picker's in-process engine-module boundary (production slice Done)
 
@@ -2547,6 +2550,14 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
 
 ## Validation Plan
 
+- [x] Qualify the [optional Sync progress flow](phase-3c-optional-sync-progress.md#validation-plan):
+  complete versioned results, real incremental local ProgressScreen use,
+  selected-runtime compatibility/rollback, independent clocks and unknown
+  outcomes. Producer/local consumer source acceptance resolves the recorded
+  source-tier flow controls; full ordinary/streamed CLI result equality and
+  SV1/S3 are accepted in #11924. This is the bounded source increment only;
+  release/native/installed evidence and remaining #4183 lanes stay independent.
+
 - [ ] Qualify the [#542 first-run front-door matrix](phase-4-first-run-front-door.md#validation-and-promotion-gates):
   real no-project navigation/diagnostic flow, TTY/text routing, source-safe
   owner handoffs, recovery and original empty/partial/provisioned acceptance.
@@ -2912,6 +2923,16 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-10 - Optional Sync producer source accepted
+
+- #11889 merged as `0b3c3304e750ed6df153d3c52a113beb14ab62d4` after genuine
+  exact-head approval, resolved findings and required green CI. The
+  [acceptance record](phase-3c-optional-sync-progress.md#journal) retains
+  37-case source qualification with explicit reuse and platform limits.
+- Only provider expansion is accepted. The next slice is the selected-runtime
+  local ProgressScreen consumer; complete LP acceptance, PK/WI, remote/other
+  verbs and native/installed gates remain open. No rollout occurred.
 
 ### 2026-11-10 - Optional Sync-progress proposal
 

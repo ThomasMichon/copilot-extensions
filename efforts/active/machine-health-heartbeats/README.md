@@ -158,7 +158,7 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   before implementing the combined hourly operation or native job.
 - [x] Prove the complete explicit local collect -> stage -> reread/report flow,
   keeping present health and prior-hour telemetry correctly attributed.
-- [ ] Review and prove the [adopted one-shot operation](local-collection.md#adopted-one-shot-operation)
+- [x] Review and prove the [adopted one-shot operation](local-collection.md#adopted-one-shot-operation)
   over current health and prior-hour telemetry, with explicit policy-scoped
   local staging authority and one shared admission/deadline.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
@@ -167,6 +167,9 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   existing owners and no remediation or new resident process.
 - [ ] Add independent native scheduled execution through Agent Machines after
   source review, retaining a separate explicit enrollment/activation gate.
+- [x] Prepare inert Windows/Linux job definitions and qualify collection
+  support from the exact selected runtime before forwarding new operations;
+  keep scheduler registration and native execution unqualified.
 - [ ] Qualify the selected carrier's delayed delivery, weekly slot reuse,
   conflicts, offline catch-up and reader-side outage reporting.
 - [ ] Obtain activation authority for the selected cohort, prove actual hourly
@@ -1121,3 +1124,146 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - Proposed the exact one-shot CLI/approval/result boundary as an amendment to
   the existing collection design. It remains review-before-code: neither
   automatic staging nor scheduler enrollment is implemented by this update.
+
+### 2026-11-09 - Adopted one-shot design reviewed
+- #11869 merged as `ed098e92aa` after current-head Copilot approval with no open
+  findings and green required CI. The parent remains open and the source
+  worktree pulled forward onto the reviewed amendment.
+- Next implement the optional pure policy preview and explicitly approved
+  two-target one-shot through the existing collection/transaction owners.
+  One run admission and parent budget cover both targets; independent outcome
+  reporting must preserve a committed first slot after later failure.
+- This clears design review only. Runtime consumer proof, exact installed
+  capability selection, native job/platform qualification, carrier,
+  preferences and activation remain open; no installed runtime was updated.
+
+### 2026-11-09 - Policy-approved one-shot consumer implemented
+- The optional `health run` command previews only the explicit store/policy.
+  Apply shares one existing admission and 45-second parent budget across
+  current health and prior-hour services, using an in-memory entry into the
+  existing revision planner, mutation lock and atomic writer.
+- Approval is revalidated at each commit. Empty selections remain not-requested;
+  policy/revision conflicts, late committed writes and independent target
+  failures remain explicit. Unknown writes leave the existing admission fence
+  set rather than automatically replaying a potentially committed target.
+  Unconfirmed exporter cleanup retains its original native settlement owner.
+- The final focused packet passed 119 cases. The managed Windows collection,
+  transaction and native-consumer packet passed 84 cases with one skip for
+  the separately configured original Bridge-owner interpreter. Real fixture
+  listener and retained Dispatch data reached distinct slots and the ordinary
+  report/chart; a failed second export preserved the first confirmed commit.
+  Two CLI subprocess timeout controls from an earlier broader run passed at
+  their original limits in isolation and in the final managed packet.
+- Ruff, documentation/install contracts and all 41 admitted strict projects
+  passed both Linux and Windows type targets. Required actor-free CI receives
+  four focused composition controls, not the native subprocess matrix.
+- The packaged collection-v1 declaration expands the provider only. This is
+  fresh isolated local-store/fixture evidence, not installed runtime selection,
+  native Linux/job qualification, cold/warm scheduled cost or carrier receipt.
+  Required exact-source review/CI still gate the implementation; the parent
+  stays Active and enrollment, deployment and activation remain held.
+
+### 2026-11-09 - Interrupted-write and cleanup ownership corrections
+- An interruption after replacement but before transaction return must retain
+  an unknown target, not clear admission as though no write began. One-shot
+  staging now marks uncertainty before writer entry; original interruption
+  errors retain the bounded partial result and the durable fence stays set.
+- Unconfirmed native cleanup propagates the original retry owner with
+  `health_run_result`. Python callers can settle that exact owner; CLI callers
+  receive partial JSON while process exit leaves the durable fence unchanged.
+  The regression constructs the cleanup exception inside the exporter, not in
+  an external test reference.
+- A two-request fixture must remain available during a valid first run's
+  export/commit work. Its finite listener lifetime spans both operation budgets,
+  with explicit teardown cancellation rather than an eight-second second
+  accept deadline. Native controls delay the second request and cancel unused
+  cycles without abandoning a thread.
+- The new command's cold payload route also selects the existing runtime
+  read-only on both platforms. Preview/apply refuse a missing runtime before
+  installer execution, diagnostic stamping or directory creation, preserving
+  ordinary command provisioning and existing configuration entry behavior.
+- The focused packet passed 123 cases. The managed corrected collection,
+  cold-payload and native-consumer packet passed 64 cases with one expected
+  original Bridge-interpreter skip. Ruff, install and documentation checks
+  passed. Six focused actor-free composition nodes cover the orchestration;
+  native matrices remain opt-in. Fresh exact-source CI and review still gate
+  #11880; no enrollment, installed update, carrier write or activation occurred.
+
+### 2026-11-09 - Preserve facts through final admission checks
+- Interruption-result handling now covers the complete apply/finalization
+  boundary, including the final post-admission guard. Confirmed commits are
+  retained; an outstanding original cleanup owner still propagates with its
+  retry handle and the interruption as its cause. Cancellation before planning
+  propagates normally, without replacing it with an attribute error or an
+  invented operation result.
+- Focused controls passed 128 cases, including Python/CLI final-guard
+  interruption and final interruption while native cleanup remains retained.
+  The managed collection/native-consumer packet passed all 46 cases.
+- One native preparation run exhausted its unchanged test deadline copying the
+  entire coordinator package, before collection started. The fixture now copies
+  the real early CLI/export dependency closure only; the passing rerun uses the
+  same test and collection deadlines, real exporter and selected metadata.
+- Seven bounded actor-free composition nodes cover the new operation.
+  Review and fresh exact-source CI still gate #11880. Parent/platform,
+  installed-adoption, scheduling, carrier and activation gates remain open.
+
+### 2026-11-10 - Adopted one-shot merged; native job preparation next
+- #11880 merged as `52b200b156` after actual current-head Copilot approval with
+  no open issues, all four resolved review threads and green required CI,
+  including the actor-free units/coverage lane.
+- A superseded attribution check was reconciled through the supported
+  metadata-only workflow scoped to this PR. Its successful result preserved the
+  approved source head; no source push, review bypass of findings or CI bypass
+  was used to repair it.
+- The final focused packet passed 128 cases and the final managed
+  collection/native-consumer packet passed all 46 cases. Earlier cold payload,
+  delayed listener and native CLI-exit controls remain recorded above.
+- Pull-forward aborted safely on squash-history conflicts. All implementation
+  paths matched the confirmed merge; the only difference was four unrelated
+  upstream documentation lines. A retained backup allowed reconciliation of
+  only the three confirmed merged commits, preserving those upstream lines.
+  The source worktree is now on the merged default branch.
+- Completed only the one-shot source checkbox. Next prepare independent native
+  job definitions through Agent Machines, qualifying the exact selected
+  runtime's collection-v1 declaration before any caller can use the operation.
+  Keep preparation separate from enrollment, retain the shared bounded
+  one-shot action, and do not revive the update watchdog.
+- The parent remains Active. Native/platform and installed mixed-version
+  qualification, broader domains, preferences, carrier delivery and explicitly
+  authorized enrollment/activation remain open. No runtime was installed,
+  service activated, task enrolled or carrier written by this source slice.
+
+### 2026-11-10 - Inert native job preparation
+- Added read-only `health prepare-job` output through the normal parser. It
+  reads the selected v2 policy and owning payload launcher and returns proposed
+  definition text only. Windows task/trigger remain disabled; Linux user-unit
+  text is not installed or enabled. macOS remains unsupported.
+- Proposals use hourly UTC delayed triggers, late-run coalescing, no restart
+  storm, overlap suppression and bounded native action settings. The action
+  reuses normal policy-approved `health run`, not the update watchdog.
+- Both payload entries now execute a stdlib compatibility adapter under the
+  exact selected interpreter, reading its immutable-slot collection declaration
+  before provider import. Missing, invalid and rollback support refuse without
+  trialing new syntax; preview/apply-only runtimes cannot prepare jobs.
+- Focused source/parser/composition controls passed 75 tests. The managed
+  fresh-runtime/cold-payload packet passed all 20 tests on Windows PowerShell
+  and Bash entry paths, including zero provider calls when unsupported and
+  qualification again after rollback. Bash here does not qualify Linux.
+- Install, headless-source and documentation contracts passed. Native scheduler
+  definitions, two-cycle window/focus observation, real overlap/late wake,
+  deadline/storage/cleanup, installed adoption, carrier and explicit activation
+  remain unqualified. No registration, installed runtime change or carrier
+  effect was performed; the parent remains Active.
+- Review corrections keep the 45-second collection budget inside the reviewed
+  60-second outer containment ceiling: Windows uses 60 seconds; Linux uses
+  55 seconds before stop plus five seconds for settlement. Linux WorkingDirectory
+  now uses directive-specific literal path rendering rather than command quotes,
+  retaining dollar/backslash/quote characters and escaping percent specifiers.
+  Edge whitespace refuses instead of silently selecting a different directory.
+  The focused post-correction preparation/composition packet passed all 36
+  cases; required source pins and documentation were refreshed together.
+- A follow-up review correction passes the original store path directly to the
+  existing policy owner, preserving its absolute/plain/traversal rejection
+  before token generation or rendering. Normal CLI controls reject both
+  traversal and relative paths without changing the store; an actor-free
+  contract ensures the original path reaches that owner unchanged.

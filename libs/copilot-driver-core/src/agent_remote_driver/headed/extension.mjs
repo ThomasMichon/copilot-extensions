@@ -34,6 +34,10 @@ socket.write(JSON.stringify({
 }) + "\n");
 const adapter = createHeadedAdapter(session, {
   emit: send, cwd: process.cwd(), startupPrompt: binding.startupPrompt,
+  observeState: binding.authWait ? (state) => send({
+    contract: "copilot-driver.headed-auth-state", version: 1,
+    incarnation: binding.authWait.incarnation, state,
+  }) : null,
 });
 let buffer = Buffer.alloc(0);
 let inFlight = 0;
@@ -54,6 +58,11 @@ socket.on("data", (chunk) => {
     } catch {
       socket.destroy();
       return;
+    }
+    if (binding.authWait && request?.contract === "copilot-driver.headed-auth-freeze" &&
+        request.version === 1 && request.incarnation === binding.authWait.incarnation) {
+      adapter.authWait();
+      continue;
     }
     if (++inFlight > 32) {
       socket.destroy();

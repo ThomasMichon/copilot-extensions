@@ -226,6 +226,66 @@ runtimes remain usable by name but cannot promise identity-bound adoption;
 do not downgrade an ID request or replay an effectful operation by basename.
 No automatic caller migration or retirement is implied by a source release.
 
+### Accepted default in Configuration
+
+An optional **machine-local** `knowledge_preferences` selection in the project's
+`config.yaml` (or its machine-global default) supplies `state_dir` and optionally
+`local_overrides`. Both are explicit absolute native paths. The state directory
+is the existing unsynchronized Machines preference state, not the carrier or a
+knowledge checkout. The override is the existing local preference JSON document.
+Repository, knowledge and synchronized preferences cannot select these paths.
+No command here creates this local selection or enrolls a carrier.
+
+Without this setting, the catalog never resolves or invokes Machines. With it,
+Worktrees derives the canonical harness ID and logical execution machine using
+its native owners, selects its own installation's Machines peer and checks the
+accepted-repository descriptor in that exact runtime before calling the
+read-only projection. Application-readiness support is not a prerequisite.
+An absent/old/refused owner leaves the optional default visibly unavailable,
+without disabling existing Configuration rows or the by-name binding flow.
+
+For an unbound harness, the matching registered knowledge row offers **Bind the
+accepted knowledge default** only when native knowledge readiness is false;
+already-ready/self-hosted repositories retain the existing action gate.
+The form still requires the existing explicit
+preview and confirmation. It uses the ID-bound transaction above with
+`--accepted-default` on both `knowledge-preview` and `knowledge-apply`.
+The selected preview projects the binding owner's exact version-1 Configuration
+envelope with the combined token, so the existing Manager decoder and
+Cancel-default confirmation remain unchanged. The richer portable-resolution
+response is not passed to that strict UI decoder.
+The token additionally binds the configured source, selected runtime and
+Machines' scoped input revision. Apply rechecks them, including inside the
+existing binding pointer-write precondition. The final portable-scope comparison
+runs after the potentially blocking Machines read, so an identity change during
+that read cannot commit a previous machine's preference. The machine-local source
+selection is also reread after that child returns. A changed snapshot, policy,
+override, scope, source or runtime requires a fresh preview.
+Accepted-default preview and apply additionally require the selected binding
+owner's integer `binding_precondition_freshness: 1` capability. Its preserving
+writer compares the captured configuration bytes after the callback and again
+before replacement, refusing unrelated external edits without losing them or
+reporting a pointer commit. Older owners leave this optional action unsupported;
+existing explicit portable-ID and by-name flows retain their capability contract.
+Accepted-default confirmation shares one aggregate caller-owned deadline across
+preference observations, capability discovery and native preview/apply: 18 seconds
+for preview and 26 seconds for apply, including cleanup. Each preference read
+retains its eight-second local cap within that aggregate. Sequential successful
+reads cannot renew the operation beyond Manager's existing 20/30-second limits;
+the pointer-bound worker remains inside the same caller-owned execution window.
+
+Existing effective local bindings win; unresolved explicit bindings require
+owner repair. Absent, withdrawn or locally suppressed defaults invoke no binder.
+Missing/ambiguous native registration cannot fall back to a name or clone.
+The portable preference remains distinct from effective binding, pairing,
+plugin delivery, credentials and activation.
+
+The new form is gated by `preferred_knowledge_bindable` from the capable
+Worktrees catalog; an older catalog omits it and keeps its existing actions.
+Machines support is provider-first metadata plus conditional consumption, not
+a package-version assumption. A provider rollback makes only this opt-in feature
+unavailable; it never replays binding by name.
+
 ## Validation
 
 Native coverage runs through `tools/run-plugin-tests.py agent-worktrees -k
@@ -253,3 +313,19 @@ the native operation budgets, and refuse a global-machine change after the
 portable check but before the locked worker. Its example non-GitHub origins require no account
 credentials or network. This is isolated source execution, not installed-runtime,
 cloud-carrier or cross-platform deployment qualification.
+
+`tests/test_knowledge_default.py` covers optional-provider degradation,
+confirmation, changed inputs and pointer-boundary refusal. The native binding
+packet additionally uses the real Machines CLI with an explicitly
+fixture-selected **non-editably** prepared interpreter
+(`KNOWLEDGE_PREFERENCE_TEST_PYTHON`). Ordinary `--prepare-only` creates an
+editable Machines environment and does not qualify the immutable-slot
+descriptor prerequisite. Prepare the non-editable artifact through the
+repository's normal seasoned/retained source installer; never copy a descriptor
+into an editable environment or disable the support check. Without the explicit
+artifact selector these two integration cases skip, not pass.
+It exercises the actual catalog, Configuration parser and selected binding
+payload through pointer/readback, consumes the preview with Manager's actual
+strict decoder, and refuses changed accepted bytes at the
+pointer precondition. This is not qualification of installed peer discovery or
+productive Manager/carrier use.

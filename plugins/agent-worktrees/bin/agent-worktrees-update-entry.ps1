@@ -30,8 +30,9 @@ if ($_updateArgs.Count -ge 3 -and $_updateArgs[0] -cin @('--project', '-p')) {
 }
 if ($_updateArgs.Count -eq 0 -or $_updateArgs[0] -cne 'update') { return }
 if (@($_updateArgs | Where-Object {
-    $_ -cin @('--phase', '--plugin', '--inventory', '--target') -or
-    $_.StartsWith('--phase=') -or $_.StartsWith('--plugin=') -or $_.StartsWith('--target=')
+    $_ -cin @('--phase', '--plugin', '--inventory', '--target', '--runtime-backend') -or
+    $_.StartsWith('--phase=') -or $_.StartsWith('--plugin=') -or $_.StartsWith('--target=') -or
+    $_.StartsWith('--runtime-backend=')
 }).Count) {
     $_awUpdateDiagnostic = $true
     return

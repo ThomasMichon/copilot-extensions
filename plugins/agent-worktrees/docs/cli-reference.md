@@ -214,6 +214,18 @@ cannot be settled through generic release, at-rest, sweep or abandon commands.
 
 ## Source-only destination allocation
 
+Owner identity is resolved from the invoking CWD, or supplied with
+`--owner-ref`; a destination `--project` does not change the creator's project.
+Launch environments do not publish an owner identity. `create --no-owner`
+deliberately creates a standalone worktree without a parent owner or session.
+
+`run --owner-ref REF "<command>"` reserves and journals the produced resource
+against that explicit owner; it does not export ownership into the command's
+environment. If the inner producer runs outside the owner's directory and
+requires creator context, pass its own supported owner argument explicitly.
+Detached CLI sessions resolve their own worktree/head rather than inheriting
+the launching session as owner.
+
 `create [--machine EXECUTION_SPACE] [--repo REPOSITORY] [--creation-key KEY]
 [--creation-request-id EXISTING_REQUEST]
 --json` selects a destination while preserving the original CWD creator.
@@ -660,6 +672,35 @@ continue to work unchanged.
 | `list` | List worktrees from tracking records. `--codename <name>` restricts to the worktree with that assigned codename, as an alternative to `--worktree-id` |
 | `handoff-cutover` | Internal live-handoff primitive: spawn a seeded successor window, safely refocus an already-live successor with `--retry`, or retire an old pane |
 | `embody` | Agent-facing primitive to create/resume a detached mux+Copilot session in a worktree. `--codename <name>` selects the target by its assigned codename (effort `pr-attribution-codenames`), same local-then-cross-machine resolution as `resolve`; a match on a different machine fails closed (reports the machine, does not attempt a remote launch). Optional `--copilot-process-launcher <absolute-executable>` binds a one-launch native wrapper without putting inference credentials in the manager/mux environment. It supports direct `copilot` templates or normalized setup; incompatible templates, missing executables and configured `copilot_path` overrides refuse. The attended `copilot` counterpart can also write a nonsecret create-or-resume receipt with `--launch-result-file <launcher-directory>/result.json` before attaching. Rejoining a running session does not use a new launcher or refresh its authentication. |
+
+### Remote-free finalization
+
+For a non-PR repository with no configured Git remotes, `finalize` verifies
+that the actual clean checkout commit is contained in the declared local
+default branch (`refs/heads/<default>`). It neither fetches nor rewrites refs,
+merges local work, or invents an `origin`. Missing or unreadable refs,
+uncontained commits and dirty content refuse finalization.
+The default ref and ancestry are verified in the registered anchor's Git store,
+not a separate checkout's store. Immediate and deferred cleanup preserve the
+declared local default branch even when it was the finalized checkout's branch.
+Checks ignore inherited Git repository selectors and enumerate untracked files
+explicitly, regardless of `status.showUntrackedFiles`; submodule ignore settings
+cannot hide dirty submodule content. Failed status reads refuse.
+
+A failed remote inspection or fetch is not evidence that a repository is
+local-only. Configured remotes and PR-mode repositories keep their existing
+remote/PR requirements. Local containment is checked again after retirement
+inspection, and all pair, claim, live-process and cleanup guards still apply.
+Normal deferred cleanup rechecks surviving finalized local checkouts and
+branches before removal; finalization does not authorize discarding content
+added afterward. An already-removed checkout and branch may retire only after
+the branch is positively observed absent, not after an unreadable observation.
+`--dry-run` remains a plan, not proof of successful finalization.
+
+The focused `tests/test_finalize_local.py` controls cover local containment and
+refusals. The remote-free cases in `tests/test_paired_finalize_integration.py`
+exercise the actual CLI and paired settlement; successful native Windows
+retirement additionally needs qualified private PSMux observation.
 
 ### Detached embodiment versus current-terminal attachment
 
@@ -1931,16 +1972,32 @@ after PowerShell has already split them.
 ### Bulk account resolution (`repos account list --json --with-resolutions`)
 
 This optional read-only form adds versioned `repository_accounts`,
-`owner_accounts` and `unmapped_owner_fallback` metadata to `account_map`.
+`owner_accounts` and `unmapped_owner_fallback` metadata to `account_map` and
+the configured `default_account` (null when unpinned).
 It uses one strict registry snapshot and the canonical `account-for` policy,
 with per-snapshot first-match indexes rather than repeated registry scans.
 Malformed account mappings are refused, not treated as an empty map.
 Exact registered targets take precedence over owner policy; bare registry names
 remain case-sensitive, while GitHub slugs and owners match case-insensitively.
-The explicit fallback flag means an otherwise unknown owner resolves to its
-literal name. Unreadable or malformed registry storage fails rather than
-certifying missing targets. Without the flag, the legacy JSON shape is unchanged.
-Consumers of older peers must retain their individual `account-for` fallback.
+Current snapshots set `unmapped_owner_fallback: false`: namespaces are not
+accounts, and a repo exception never becomes owner-wide policy. Older peers may
+declare the retired literal-owner fallback. Consumers retain that distinction
+and their older-peer lookup path rather than inventing a preferred identity.
+Malformed preferred identities and unreadable storage refuse, not empty success.
+
+Use `repos account default <your-login>` to select a preferred GitHub identity,
+`repos account default` to read it, and `repos account default --unset` to
+remove that preference. Exact repository overrides win over owner maps, then
+the preferred account. With no policy, ambient authentication remains unpinned;
+neither an org nor a third-party user namespace identifies the operator.
+This changes no login, credential or machine-global active account.
+The preference is stored as the reserved `account_map["github.com:*"]` entry, preserving
+it through existing registry writers instead of adding a field they discard.
+Older runtimes do not enforce this policy. Discover the selected runtime's
+`repos account default --help` support before configuring it. New CodeSpace
+consumers require a wildcard-bearing snapshot to report the same preferred
+account and `unmapped_owner_fallback: false`; an older/inconsistent receiver
+refuses rather than selecting its legacy owner-derived login.
 
 ### Strict repository inventory (`repos list --strict --json`)
 

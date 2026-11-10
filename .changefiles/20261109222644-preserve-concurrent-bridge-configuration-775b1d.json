@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve concurrent Bridge configuration during startup migration",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

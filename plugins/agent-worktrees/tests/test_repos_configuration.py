@@ -316,6 +316,68 @@ def test_old_binding_owner_is_not_invoked_for_apply(native, monkeypatch, portabl
     assert "--configuration" not in calls[0]
 
 
+@pytest.mark.parametrize("freshness", [None, True, 0, "1", 1])
+@pytest.mark.parametrize("mode", ["baseline", "preview", "accepted-apply"])
+def test_accepted_defaults_require_writer_freshness_without_breaking_baseline(
+    native, monkeypatch, freshness, mode,
+):
+    from agent_procutil import owned_process
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    monkeypatch.setattr(binding, "owner_script", lambda _project: Path(__file__))
+    calls = []
+
+    def execute(argv, **kwargs):
+        calls.append(argv)
+        if "--capabilities" in argv:
+            value = {"version": 1, "existing_binding_configuration": 2, "portable_binding_precondition": 1}
+            if freshness is not None:
+                value["binding_precondition_freshness"] = freshness
+        else:
+            value = {
+                "version": 1, "operation": "set", "target": {"resource": "sample/sample"},
+                "status": "persisted", "pointer_committed": True,
+            }
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", execute)
+    options = (
+        {"require_preference_freshness": True} if mode == "preview" else
+        {"portable_resolution": {}, "preference_selection": {}} if mode == "accepted-apply" else {}
+    )
+    operation = "apply" if mode == "accepted-apply" else "preview"
+    if mode == "baseline" or type(freshness) is int and freshness == 1:
+        assert binding.invoke("sample", "sample", operation, **options)["version"] == 1
+        assert len(calls) == 2
+    else:
+        with pytest.raises(ConfigurationError) as caught:
+            binding.invoke("sample", "sample", operation, **options)
+        assert caught.value.code == "binding-owner-unsupported"
+        assert len(calls) == 1 and "--capabilities" in calls[0]
+
+
+def test_native_binding_capability_and_worker_share_the_caller_deadline(native, monkeypatch):
+    from agent_procutil import owned_process
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import repos_knowledge_configuration as binding
+
+    aggregate = OwnedExecutionBudget.from_timeout(4, cleanup_reserve=1)
+    budgets = []
+    monkeypatch.setattr(binding, "owner_script", lambda _project: Path(__file__))
+
+    def execute(argv, **kwargs):
+        budgets.append(kwargs["budget"])
+        value = (
+            {"version": 1, "existing_binding_configuration": 2} if "--capabilities" in argv else
+            {"version": 1, "operation": "set", "target": {"resource": "sample/sample"}}
+        )
+        return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+
+    monkeypatch.setattr(owned_process, "run_caller_owned", execute)
+    assert binding.invoke("sample", "sample", "preview", budget=aggregate)["version"] == 1
+    assert budgets == [aggregate, aggregate]
+
+
 def test_binding_apply_keeps_registration_writer_out_until_pointer_commit(native, monkeypatch):
     from agent_worktrees import repos_knowledge_configuration as binding
 

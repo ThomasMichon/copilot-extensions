@@ -152,6 +152,7 @@ repos migrate [--default-class reference|singleton|worktree]
 repos status [--tag T] [--class C] [--json]
 repos sync [<repo> ...] [--tag T] [--class C]
 repos account [list|set <owner> <login>|unset <owner>]   # org->login map
+repos account default [<login>|--unset]                 # preferred GitHub login
 repos account-for <owner|owner/name|reponame>            # print resolved login
 repos allow-edits <repo> --reason <why> [--minutes N]    # break-glass grant
 repos allow-edits --list                                 # show active grants
@@ -285,17 +286,17 @@ The registry lives at `~/.agent-worktrees/repos.yaml`. Full annotated example: <
 srcroot:
   windows: D:\Src
   wsl: ~/src
-account_map:                       # decoupled GitHub owner/org -> gh login
-  github: ThomasMichon             #   org-owned repos resolve to the right
-  example-org: example-operator #   login (not the org name)
+account_map:
+  "github.com:*": operator-work   # preferred identity, not a repository namespace
+  example-org: operator-work       # explicit owner-wide exception
 repos:
-  copilot-extensions:
+  tooling:
     class: worktree                # reference | singleton | worktree
-    remote: "https://github.com/ThomasMichon/copilot-extensions.git"
-    account: ThomasMichon          # optional; else account_map, else remote owner
+    remote: "https://github.com/publisher/tooling.git"
+    account: operator-public       # this repository only, not the publisher's identity
     default_branch: main
-    windows: D:\Src\copilot-extensions
-    wsl: ~/src/copilot-extensions
+    windows: D:\Src\tooling
+    wsl: ~/src/tooling
 ```
 
 ### Schema
@@ -304,16 +305,23 @@ repos:
 |-------|-------------|
 | `class` | `reference` \| `singleton` \| `worktree` (see above) |
 | `remote` | Git remote URL |
-| `account` | Preferred GitHub identity (a `gh` account login) this repo's git/gh ops run under. Optional — absent, it's resolved via `account_map` then the `github.com` remote owner; a non-GitHub/underivable remote means no account (ambient auth). See *Repo-scoped identity* below. |
+| `account` | Exact repository Git/gh login override. Otherwise use `account_map`, then the registry's `default_account`, then unpinned ambient auth. A non-GitHub remote gets no default GitHub account. |
 | `default_branch` | Branch `status`/`sync` track (default: current) |
 | `tags` | Filter tags for batch ops (`multi-machine system`, `work`, …) |
 | `contributing` | Path to CONTRIBUTING.md — read before editing |
 | `windows`/`wsl`/`linux` | Per-platform checkout paths |
 
-Top-level `account_map` (GitHub **owner/org → gh login**) is the decoupled
-identity layer: it maps an owner that is **not** itself a `gh` account — an org
-like `github` or `example-org` — to the login that can access it. Manage it
-with `repos account set/list/unset`; the identities it points at (host, scopes,
+The reserved `account_map["github.com:*"]` entry selects the preferred GitHub login.
+Configure it with `repos account default <your-login>`; `--unset` removes that
+preference. Existing owner-map writers preserve this entry without a new file
+format. Bulk metadata reports the selected preference as `default_account`.
+An organization or user namespace is not an operator identity. Never infer a
+consumer's public username from the publisher of a dependency or marketplace.
+Only explicit operator choices or authenticated identity evidence identify an
+operator; being a GitHub user does not make a publisher the current operator.
+
+Top-level `account_map` (GitHub **owner/org → gh login**) is explicit owner-wide
+policy, managed with `repos account set/list/unset`. The identities it points at (host, scopes,
 login flow) are catalogued separately in `~/.agent-worktrees/accounts.yaml` <!-- marketplace-isolation: allow deployed-runtime-diagnostics -->
 (`accounts …`).
 
@@ -324,17 +332,16 @@ account vs. a personal account) otherwise forces manual `gh auth switch`.
 the runtime resolves the **account from repo context** and applies it
 inline, so agents never hand-switch:
 
-- **Resolution** (`resolve_account` / `account_for_github_owner`): explicit
-  `account:` → top-level `account_map[owner]` → the remote owner itself →
-  none. None = today's ambient-`gh` behavior (additive, safe). The `account_map`
-  step is what makes an **org-owned** repo (`github/…`, `example-org/…`)
-  resolve to the correct login instead of the org name. GitHub-only in v1;
+- **Resolution:** exact repository `account:` → `account_map[owner]` →
+  `default_account` → none/ambient. Neither the remote owner nor a sibling
+  repository's account is a fallback. Explicit per-repo exceptions stay local.
+  A work account can be the preferred identity while selected repositories use
+  an explicitly designated public account. No login or global switch is implied.
+  GitHub-only in v1;
   an ADO/Gitea remote resolves no account *unless* its own registered entry
   has an explicit `account:` override, which still applies. A bare
   *registered repo name* (as opposed to an owner or `owner/name` slug)
-  resolves through the registry to that entry's own `account:` first, else
-  its remote owner (`resolve_slug_owner`), so it is never mistaken for a
-  literal owner/account key.
+  resolves through that entry's exact policy, never a publisher-derived login.
 - **Query primitive**: `repos account-for <owner|owner/name|reponame>` prints
   the resolved login (exit 1 if none). Other tools (e.g. **agent-codespaces**,
   to pick the `gh` account for `gh codespace …`) shell out to it rather than
@@ -343,19 +350,18 @@ inline, so agents never hand-switch:
   `pr-complete`, `pr-nudge`, label/GraphQL): the resolved account mints a token
   (`gh auth token --user <account>` → `GH_TOKEN`); an explicit
   `pr.token_command`/`pr.token_env` still wins. Account-token lookup is bounded
-  at 60 seconds. If an explicit repository `account:` or `account_map` choice
+  at 60 seconds. If an explicit repository, owner-map or preferred-account choice
   cannot supply a credential, execution refuses with the selected login;
   it never substitutes an inherited token or another active account. Check
   that login's authentication/credential store before retrying. Unconfigured
-  derived-owner hints retain legacy ambient behavior, and the existing
-  same-active-account Git/PR path remains unchanged. Identity and fallback
+  targets without a configured choice retain ambient behavior. Identity and fallback
   policy are selected from one registry snapshot before credential lookup;
   removing a pin during that lookup cannot authorize an ambient retry.
   Configuration changes apply to the next operation. No global switch.
 - **git push/fetch**: the account credential is injected per-invocation via
   `http.extraheader` (this tool's own commands only). A rejected explicitly
   selected credential is reported without a plain-push/ambient retry;
-  unconfigured owner hints retain the legacy retry. Registration
+  unconfigured targets retain the legacy retry. Registration
   additionally **persists** a repo-local
   `credential.https://<host>` override in `.git/config` (`username` + a
   `gh auth token`-backed `helper`) once the account resolves unambiguously,
@@ -376,15 +382,21 @@ them. Keep the scoped account route; see the
 [quoting examples](../../docs/cli-reference.md#scoped-github-passthrough-repos-gh)
 for quoted literals, string variables and combined `--search` arguments.
 
-**Clarified at registration.** When `repos add`, `repos clone`, or `register`
-(adopt) would leave a repo's account resolving *only* by falling back to a
-github **owner that isn't an authenticated `gh` account** (i.e. an org like
-`github`/`example-org`), the flow clarifies it then and there — interactively
-it lists the authenticated `gh` logins and persists your pick as an
-`account_map` entry; headless it warns with the exact remedy
-(`repos account set <owner> <login>`). A repo whose owner **is** a `gh` account
-(a personal/EMU repo) is left silent, and nothing prompts once an
-`account:`/`account_map` already resolves. (dotfiles #537)
+**Clarified at registration.** With no configured account policy, interactive
+registration lists authenticated logins and saves a choice for that repository
+only. Headless registration explains how to set a preferred identity or exact
+repo override; it never proposes signing in as the namespace. Absence from the
+authenticated accounts does not prove a namespace is an organization. Existing
+repo, owner-map and preferred-account choices remain authoritative.
+
+**Migration:** replace any intentionally relied-on publisher/owner fallback
+with an explicit repo exception or preferred account. Do not copy the
+publisher's username as the operator's identity. Existing explicit choices are
+preserved; nothing changes credentials or silently rewrites old Git pins.
+Older runtimes do not enforce the new wildcard policy. Qualify support with the
+selected runtime's `repos account default --help` before configuring it.
+A newer CodeSpace consumer refuses a receiver which sees the wildcard but
+cannot attest the matching preferred policy; it does not guess another login.
 
 **Backfilling the credential pin.** Repos registered before the pin existed,
 or whose account only became resolvable later (a fresh `account_map` entry),
@@ -394,7 +406,7 @@ don't automatically get the `.git/config` override above. Run
 Reports one of:
 
 - `pinned` — the override was written.
-- `needs_clarify` — resolve with `repos account set <owner> <login>` first.
+- `needs_clarify` — configure a preferred account or an exact repo override first.
 - `skipped` — `gh` unavailable, not a git checkout, **or** `login` is
   already the active `gh` account (the inherited default helper already
   works there; forcing this override risks a scope-limited OAuth token

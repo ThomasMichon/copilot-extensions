@@ -2609,6 +2609,19 @@ caller. Each interpreter must be absolute and outside the selected removal
 root. Changed arguments, unrelated ancestry, non-Python images and deeper
 chains remain unrecognized; this is not stop authority or a general parent
 exemption.
+Vault's fixed Windows native uninstall additionally recognizes only its
+authenticated, running `plugin-native-install` request: exact source digest,
+removal recipe, pinned participant and execution shim, and native foreground
+callers. At most seven source-bound process identities cover the callback,
+optional self-stage and original caller. Both broker admission and finite
+runtime removal revalidate that same custody and the native ancestry. Missing
+or changed custody, source, arguments or birth identities refuse; a parent PID
+or shared root argument never grants a general controller exemption.
+The original PowerShell host is attributed only through that exact pinned
+foreground child and its revalidated native identity. Interactive and `-Command`
+hosts, relative script paths and the default installation root do not need to
+imitate generated-child syntax. Generated installer/staging children still
+require the exact source file and removal recipe.
 The same live teardown proof admits at most four native installer-child
 levels matching its original or staged installer and removal root before
 classifying the exact staging watchdog. Another script, root or parent chain

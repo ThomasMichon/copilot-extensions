@@ -59,7 +59,9 @@ def select_report_target(config_path: Path, repository: str) -> dict:
         raise ValueError("native report account selection is ambiguous")
     account = (
         repos.resolve_account(matches[0], registry=registry, configured_only=True)
-        if matches else repos.account_from_map(repository.split("/", 1)[0], registry=registry)
+        if matches else repos.account_for_github_owner(
+            repository.split("/", 1)[0], registry=registry, configured_only=True,
+        )
     )
     if not account or identity(account) != account:
         raise ValueError("native report needs an explicitly configured account")

@@ -161,16 +161,15 @@ def add_parsers(sub) -> None:
         dest="owner_ref",
         help="Qualified ref (machine/project/worktree_id[#session]) of "
         "the worktree that owns this one as an outbound resource. "
-        "Usually injected by `run` via AGENT_WORKTREES_OWNER_REF; "
-        "the flag is the low-level primitive for scripts/tools "
-        "that already know both sides.",
+        "Defaults to the calling worktree resolved from CWD; "
+        "pass explicitly when the command runs from another directory.",
     )
     p.add_argument(
         "--no-owner",
         action="store_true",
         dest="no_owner",
         help="Create a deliberately top-level worktree: do NOT inherit "
-        "an owner from AGENT_WORKTREES_OWNER_REF or the CWD, or a "
+        "an owner from the CWD, or a "
         "parent session from COPILOT_AGENT_SESSION_ID, so no parent's "
         "finalize or terminal-cleanup gate is held on it (Ph6).",
     )
@@ -234,7 +233,8 @@ def add_parsers(sub) -> None:
     p.add_argument("--force", action="store_true", help=argparse.SUPPRESS)
     p.add_argument("--json", action="store_true", help="JSON output mode (stdout is JSON only)")
 
-    p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch")
+    p = sub.add_parser("sync", help="Fast-forward worktrees to the default branch", allow_abbrev=False)
+    p.add_argument("--stream", action="store_true", help="Stream D4 progress and full results (requires --json)")
     p.add_argument(
         "--paired", action="store_true",
         help="Sync both registered worktree members before preparing local plugins",
@@ -352,11 +352,7 @@ def cmd_create(args: argparse.Namespace) -> int:
     owner_ref = (
         None
         if (is_system or no_owner)
-        else (
-            getattr(args, "owner_ref", None)
-            or os.environ.get("AGENT_WORKTREES_OWNER_REF")
-            or None
-        )
+        else getattr(args, "owner_ref", None)
     )
     dispatch_fields = {
         "task_id": getattr(args, "dispatch_task_id", None),
@@ -477,6 +473,12 @@ def cmd_create(args: argparse.Namespace) -> int:
 
 def _resolve_owner_ref() -> str | None:
     """Build this worktree's qualified owner ref from the current context."""
+    from . import create_destination
+
+    cwd = _core()._INVOCATION_CWD or Path.cwd()
+    cwd_project = create_destination._cwd_project(cwd)
+    if cwd_project and cwd_project != cfg.project_name():
+        return create_destination._origin(cwd, None, standalone=False)[2]
     try:
         config = cfg.load_config()
     except Exception:
@@ -673,6 +675,9 @@ def cmd_run(args: argparse.Namespace) -> int:
     try:
         run_config = cfg.load_config()
         parsed_owner = tracking.parse_claim_ref(owner_ref)
+        if parsed_owner is not None and parsed_owner.is_qualified:
+            if parsed_owner.project != run_config.repo_name:
+                run_config = cfg.load_project_config(parsed_owner.project)
     except (OSError, RuntimeError, ValueError) as exc:
         output.err(f"run: cannot resolve owner: {exc}")
         return 1
@@ -703,9 +708,6 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not readiness.ready:
         output.err(f"run: {readiness.code}: {readiness.error}")
         return 3
-
-    child_env = dict(os.environ)
-    child_env["AGENT_WORKTREES_OWNER_REF"] = owner_ref
 
     owner_path = None
     pending_ref = ""
@@ -801,7 +803,6 @@ def cmd_run(args: argparse.Namespace) -> int:
         proc = subprocess.run(
             cmd_str,
             shell=True,
-            env=child_env,
             stdout=subprocess.PIPE,
             text=True,
         )
@@ -926,64 +927,6 @@ def finalize_one(wt_id: str) -> dict:
 
 def cmd_sync(args: argparse.Namespace) -> int:
     """Fast-forward worktrees to their upstream default branch (FF-only)."""
-    config = cfg.load_config()
-    repo = config.default_repo
-    tracking_path = cfg.tracking_dir()
-    as_json = getattr(args, "json", False)
-    single = getattr(args, "worktree_id", None)
+    from .worktree_sync import cmd_sync as synchronize
 
-    if single:
-        wt_id = worktree_identity._resolve_worktree_id(single)
-        yaml_path = tracking_path / f"{wt_id}.yaml"
-        if not yaml_path.exists():
-            res = {"worktree_id": wt_id, "updated": False, "reason": "not-found", "behind": 0}
-            if as_json:
-                output._json_output(res)
-            else:
-                print(f"{wt_id}: not-found")
-            return 1
-        records = [tracking.load_record(yaml_path)]
-    else:
-        records = tracking.list_records(
-            tracking_path,
-            status_filter="active",
-            platform_filter=cfg.detect_platform(),
-        )
-        records = [
-            r
-            for r in records
-            if r.kind not in tracking.MANAGED_KINDS
-            and r.worktree_path
-            and Path(r.worktree_path).exists()
-        ]
-
-    if git_ops.has_remote(repo.remote, cwd=repo.anchor):
-        try:
-            git_ops.fetch(repo.remote, cwd=repo.anchor)
-        except Exception:
-            pass
-        else:
-            for _synced_repo in {r.repo for r in records if r.repo}:
-                tracking.record_repo_fetch_confirmed(_synced_repo)
-
-    session_ctx = sessions.scan_sessions_fast(records)
-    active_paths = _build_active_paths(records, session_ctx)
-
-    results = []
-    for rec in records:
-        if getattr(args, "paired", False) and (rec.pair_id or rec.pair_ref):
-            from .worktree_sync import sync_pair
-
-            results.append(sync_pair(rec))
-        else:
-            results.append(_core_helper("_sync_one_record", _sync_one_record)(rec, repo, active_paths))
-
-    if as_json:
-        output._json_output(results[0] if single else {"results": results})
-    elif not results:
-        print("No worktrees to sync.")
-    else:
-        for r in results:
-            tag = f"updated ↑{r.get('behind', 0)}" if r.get("updated") else r.get("reason", "?")
-            print(f"{r['worktree_id']}: {tag}")
-    return 1 if any(result.get("ok") is False for result in results) else 0
+    return synchronize(args)

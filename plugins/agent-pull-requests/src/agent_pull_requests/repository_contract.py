@@ -18,6 +18,10 @@ MAX_REGISTRATIONS = 128
 MAX_CACHE_BYTES = 16 * 1024 * 1024
 
 
+class RepositoryBackpressure(ValueError):
+    """Unsettled state cannot be evicted to admit another projection."""
+
+
 @dataclass(frozen=True)
 class RepositoryIdentity:
     namespace: str

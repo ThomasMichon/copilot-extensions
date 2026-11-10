@@ -27,6 +27,7 @@ HEADLESS = subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0
 RESOLVERS = {
     "canonical": LIBRARY / "resolve-runtime.ps1",
     "worktrees": REPO / "plugins" / "agent-worktrees" / "scripts" / "resolve-runtime.ps1",
+    "update-driver": REPO / "libs" / "update-driver" / "scripts" / "resolve-runtime.ps1",
 }
 
 
@@ -296,7 +297,7 @@ def quote_ps(value: object) -> str:
 def resolve_in_powershell(
     host: str, owner: str, root: Path, *, pretend_posix: bool = False,
 ) -> subprocess.CompletedProcess[str]:
-    trace = "$_rtTraceSource" if owner == "canonical" else "$_awTraceSource"
+    trace = "$_awTraceSource" if owner == "worktrees" else "$_rtTraceSource"
     platform = "Set-Variable -Name IsWindows -Value $false -Force; " if pretend_posix else ""
     code = (
         "$ErrorActionPreference='Stop'; " + platform +
@@ -344,7 +345,7 @@ def test_python_and_isolated_bootstrap_read_while_delete_intent_is_open(case: Pa
 
 @WINDOWS
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh.exe"])
-@pytest.mark.parametrize("owner", ["canonical", "worktrees"])
+@pytest.mark.parametrize("owner", tuple(RESOLVERS))
 def test_actual_powershell_resolver_reads_with_delete_intent(case: Path, host: str, owner: str):
     runtime.activate(case, NEW, link_free=True)
     (case / "last-known-good").write_text(OLD, encoding="utf-8")
@@ -387,7 +388,7 @@ def test_unreadable_slot_degrades_only_for_read_only_resolution(case: Path, monk
 
 @WINDOWS
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh.exe"])
-@pytest.mark.parametrize("owner", ["canonical", "worktrees"])
+@pytest.mark.parametrize("owner", tuple(RESOLVERS))
 @pytest.mark.parametrize("blocked", ["current-version", "last-known-good"])
 def test_powershell_selector_denial_is_visible(case: Path, host: str, owner: str, blocked: str):
     runtime.activate(case, NEW, link_free=True)
@@ -639,7 +640,7 @@ def test_completed_resolver_only_degrades_callback_errors_on_non_windows(
 
 
 @WINDOWS
-@pytest.mark.parametrize("owner", ["canonical", "worktrees"])
+@pytest.mark.parametrize("owner", tuple(RESOLVERS))
 @pytest.mark.parametrize("blocked", ["current-version", "last-known-good"])
 def test_emulated_posix_powershell_preserves_error_fallback(case: Path, owner: str, blocked: str):
     if blocked == "last-known-good":
@@ -654,7 +655,7 @@ def test_emulated_posix_powershell_preserves_error_fallback(case: Path, owner: s
 
 @WINDOWS
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh.exe"])
-@pytest.mark.parametrize("owner", ["canonical", "worktrees"])
+@pytest.mark.parametrize("owner", tuple(RESOLVERS))
 def test_missing_current_selector_preserves_last_good_fallback(case: Path, host: str, owner: str):
     (case / "current-version").unlink()
     assert runtime.resolve_python(case).parent.parent.name == OLD
@@ -853,7 +854,7 @@ while (-not [IO.File]::Exists($Done)) {
     $attempts++
     try {
         . $Resolver -TraceMode 'read-only'
-        $source=if ($Owner -eq 'canonical') { $_rtTraceSource } else { $_awTraceSource }
+        $source=if ($Owner -eq 'worktrees') { $_awTraceSource } else { $_rtTraceSource }
         $version=if ($AgentRtPy) { Split-Path -Leaf (Split-Path -Parent (Split-Path -Parent $AgentRtPy)) } else { '' }
         if ($source -ne 'current-version') { $bad++ }
         elseif ($version -ceq '1.0.0') { $old++ }
@@ -898,7 +899,7 @@ print(json.dumps(counts))
 
 @WINDOWS
 @pytest.mark.parametrize("host", ["powershell.exe", "pwsh.exe"])
-@pytest.mark.parametrize("owner", ["canonical", "worktrees"])
+@pytest.mark.parametrize("owner", tuple(RESOLVERS))
 def test_actual_concurrent_resolvers_during_selection(case: Path, host: str, owner: str):
     executable = ps_host(host)
     directory = case.parent

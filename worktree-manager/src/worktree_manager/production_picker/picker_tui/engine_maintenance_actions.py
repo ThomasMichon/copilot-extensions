@@ -241,14 +241,21 @@ class PickerScreenMaintenanceActionsMixin:
         if not self.real_ops:
             return  # mock walker advances via _advance_progress
         from . import maintenance
+        executor = None
+        cancelled = threading.Event() if p["op"] == "sync" else None
         tasks = maintenance.build_tasks(
             p["op"], p["recs"], self.src,
             include_unused=p["include_unused"],
             include_conversations=p["include_conversations"],
             local=self._src_local(),
+            on_progress=lambda key, update: executor.report(key, update),
+            cancelled=cancelled,
         )
-        self.executor = maintenance.MaintenanceExecutor(p["op"], tasks)
-        self.executor.start()
+        executor = maintenance.MaintenanceExecutor(
+            p["op"], tasks, **({"cancelled": cancelled} if cancelled is not None else {}),
+        )
+        self.executor = executor
+        executor.start()
     def _poll_executor(self):
         """Pull real per-item states from the maintenance executor."""
         p = self.progress
@@ -258,6 +265,8 @@ class PickerScreenMaintenanceActionsMixin:
             it["state"] = ex.state(key)
             if p.get("op") in ("sync", "finalize"):
                 it["result"] = ex.result(key)
+            if p.get("op") == "sync":
+                it["progress"] = ex.progress(key)
         if ex.is_done():
             p["done"] = True
     def _scope_union(self, dlg):

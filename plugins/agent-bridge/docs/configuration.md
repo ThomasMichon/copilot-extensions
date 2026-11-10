@@ -187,7 +187,9 @@ existing snapshot/cache interval contract. Native `config show`, `config
 validate`, roster reads and spawn paths share the loader; changing files does
 not imply a running service has reloaded. Concurrent writers use
 `config_write.py` locks and compare-before-write behavior; session mode changes
-are preserved or refused on conflict.
+are preserved or refused on conflict. The one-time idle-reaper value migration
+re-reads under that lock, changes only its own setting, and records its marker
+after a successful write.
 
 `auth.yaml`, `active.json`, generation records, PID/process handles, session
 host descriptors, session databases and provider/credential receipts are

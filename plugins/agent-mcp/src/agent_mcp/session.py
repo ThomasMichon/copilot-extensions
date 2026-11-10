@@ -44,10 +44,21 @@ class BridgeSession:
     sink); :meth:`aclose` drains in-flight work and tears the upstream down.
     """
 
-    def __init__(self, cfg: BridgeConfig, write_to_client: ClientSink) -> None:
+    def __init__(
+        self,
+        cfg: BridgeConfig,
+        write_to_client: ClientSink,
+        *,
+        transport=None,
+        checkpoint_binding=None,
+        resume: dict | None = None,
+    ) -> None:
         self.cfg = cfg
         self._write = write_to_client
-        self._transport = None
+        self._transport = transport
+        self._checkpoint_binding = checkpoint_binding
+        self._checkpoint_identity = None
+        self._resume = resume
         self._client: UpstreamClient | None = None
         self._pipeline: Pipeline | None = None
         self._tasks: set[asyncio.Task] = set()
@@ -70,22 +81,40 @@ class BridgeSession:
 
     async def start(self) -> None:
         """Build the injector + transport + upstream client + pipeline, connect."""
+        restored = None
+        if self._checkpoint_binding is not None:
+            self._checkpoint_identity = self._checkpoint_binding.identity(self.cfg)
+        if self._resume is not None:
+            from . import checkpoint as cp
+
+            if self._transport is None or self._checkpoint_binding is None:
+                raise cp.CheckpointRefused("resume requires a custody-owned transport and binding")
+            restored = cp.unpack(self.cfg, self._resume, self._checkpoint_binding)
+            if set(restored) != {"pipeline", "client"}:
+                raise cp.CheckpointRefused("session checkpoint schema differs")
         if self.cfg.routing is not None:
+            if self._checkpoint_binding is not None:
+                from .checkpoint import CheckpointRefused
+
+                raise CheckpointRefused("routed custody has not been qualified")
             from .routing import RoutedCore
 
             self._router = RoutedCore(self.cfg)
             ctx = BridgeContext(new_id=self._router.new_id, emit_to_client=self._write)
-            self._pipeline = Pipeline(
-                build_decorators(self.cfg, ctx), self._router.handle)
+            self._pipeline = Pipeline(build_decorators(self.cfg, ctx), self._router.handle)
             return
-        injector = build_injector(self.cfg)
-        self._transport = build_transport(self.cfg, injector)
+        if self._transport is None:
+            injector = build_injector(self.cfg)
+            self._transport = build_transport(self.cfg, injector)
         self._client = UpstreamClient(self._transport)
         # Server-initiated / uncorrelated upstream messages pass straight to the
         # client; a decorator's emit_to_client does too.
         self._client.on_unsolicited(self._write)
         ctx = BridgeContext(new_id=self._client.new_id, emit_to_client=self._write)
         self._pipeline = Pipeline(build_decorators(self.cfg, ctx), self._client.request)
+        if restored is not None:
+            cp.restore_client(self._client, restored["client"])
+            cp.restore_pipeline(self._pipeline, restored["pipeline"])
         # Bound the upstream spawn/connect the same way OneShotSession does
         # (see the downstream tracker): an unbounded ``transport.start()`` here
         # doesn't wedge a shared lock the way a WarmPool entry-open would, but
@@ -98,7 +127,6 @@ class BridgeSession:
             raise RuntimeError(
                 f"upstream transport did not start within {self.cfg.timeout}s"
             ) from exc
-
 
     async def _dispatch(self, msg: dict) -> None:
         assert self._pipeline is not None
@@ -115,16 +143,46 @@ class BridgeSession:
             if res is not None:
                 await res
 
-    def submit(self, msg: dict) -> None:
+    def submit(self, msg: dict) -> asyncio.Task:
         """Dispatch a client->server message concurrently; reply goes to the sink."""
         task = asyncio.create_task(self._dispatch(msg))
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
+        return task
+
+    async def quiesce(self) -> None:
+        """Join complete dispatches, including subcalls and response transformation."""
+        while self._tasks:
+            tasks = tuple(self._tasks)
+            await asyncio.shield(asyncio.gather(*tasks, return_exceptions=True))
+            self._tasks.difference_update(task for task in tasks if task.done())
+
+    def checkpoint(self) -> dict:
+        """Export quiescent single-upstream data for this custody session only."""
+        from . import checkpoint as cp
+
+        if (
+            self._tasks
+            or self._pipeline is None
+            or self._client is None
+            or self._checkpoint_binding is None
+            or self._router is not None
+        ):
+            raise cp.CheckpointRefused("session has not quiesced with qualified custody")
+        if self._checkpoint_binding.identity(self.cfg) != self._checkpoint_identity:
+            raise cp.CheckpointRefused("execution context changed after upstream admission")
+        return cp.envelope(
+            self.cfg,
+            {
+                "pipeline": cp.pipeline_state(self._pipeline),
+                "client": cp.client_state(self._client),
+            },
+            self._checkpoint_binding,
+        )
 
     async def aclose(self) -> None:
         """Drain in-flight dispatches and tear the upstream down."""
-        if self._tasks:
-            await asyncio.gather(*self._tasks, return_exceptions=True)
+        await self.quiesce()
         if self._pipeline is not None:
             await self._pipeline.aclose()
         if self._router is not None:

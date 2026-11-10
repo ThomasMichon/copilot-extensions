@@ -43,34 +43,9 @@ def _supports_required_read(python: Path) -> bool:
 
 
 def _selected_runtime(*, budget: OwnedExecutionBudget | None = None) -> tuple[list[str], dict[str, str]]:
-    from . import _peer_launch, peer_launch_adapter, reconcile
+    from .machines_runtime import selected
 
-    if "COPILOT_EXTENSIONS_CONTEXT" in os.environ:
-        own = peer_launch_adapter.validate_context()
-        if own is None:
-            raise ValueError("Machines observation requires a valid installation context")
-        prefix, python = _peer_launch.pinned_launch_prefix(
-            "agent-worktrees", Path(own["pluginRoot"]), own["installReceipt"], "agent-machines",
-        )
-        environment = dict(os.environ)
-    else:
-        payload = reconcile.core_installed_payload_dir("agent-machines")
-        if payload is None:
-            raise ValueError("Machines payload is unavailable; use Installation & Updates")
-        selected = reconcile.resolve_runtime_installation(
-            "agent-machines", payload, **({"budget": budget} if budget is not None else {}),
-        )
-        if selected.actual_mode != "legacy" or selected.status != "ready" or selected.context is not None:
-            raise ValueError("Machines observation requires the selected installation's native context")
-        root = selected.runtime_root
-        python = _peer_launch._peer_python_inprocess({
-            "pluginId": "agent-machines", "pluginRoot": str(root),
-            "versionsRoot": str(root / "versions"), "payloadRoot": str(payload),
-        })
-        if python is None:
-            raise ValueError("Machines has no observable completed runtime")
-        prefix = [str(python), "-I", "-B", "-X", "utf8", "-m", "agent_machines"]
-        environment = _peer_launch.legacy_peer_environment(dict(os.environ))
+    prefix, environment, python = selected(budget=budget)
     if not _supports_required_read(python):
         raise ValueError("The selected Machines runtime does not support required application observation")
     return prefix, environment

@@ -15,7 +15,7 @@ import uuid
 from pathlib import Path
 
 from windows_qualification_contract import (
-    PACKETS, SUPPORT_PATH, TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
+    NATIVE_PACKETS, PACKETS, SUPPORT_PATH, TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
     canonical, request, selection, sha, validate_result,
 )
 from windows_qualification_transport import Transport, command, rejected_attempt
@@ -123,17 +123,23 @@ class Client:
         )
         files = [base + file for file in selected.get("files", [])]
         if selected["kind"] == "packet":
-            files = [
-                "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
-                "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
-                "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
-            ] if selected["name"] == "native-worktrees-embody" else [
-                "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
-                "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
-            ] if selected["name"] in {"native-driver-auth-wait", "native-driver-inflight"} else [
-                "tools/capture_bridge_http52.py", "tools/check-agent-bridge-contracts.py",
-                "tools/bridge_http52_artifact.py",
-            ]
+            native = NATIVE_PACKETS.get(selected["name"])
+            if selected["name"] == "native-worktrees-embody":
+                files = [
+                    "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
+                    "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
+                    "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
+                ]
+            elif native and native[0] == "agent-remote-driver":
+                files = [
+                    f"plugins/agent-remote-driver/tests/native/{native[1]}.py",
+                    "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
+                ]
+            else:
+                files = [
+                    "tools/capture_bridge_http52.py", "tools/check-agent-bridge-contracts.py",
+                    "tools/bridge_http52_artifact.py",
+                ]
         if files:
             entries = self.transport.git("ls-tree", candidate, "--", *files).stdout.splitlines()
             actual = {

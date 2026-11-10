@@ -7,6 +7,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +17,80 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+WRITE_ALIASES = (
+    "str_replace", "str_replace_editor", "str_replace_based_edit_tool",
+    "write", "write_file", "insert", "new_file", "multi_edit",
+)
+PATCH_NATIVE_CASES = (
+    "patch-input", "patch-patch", "patch-command", "patch-json", "patch-freeform",
+    "patch-crlf", "patch-headers", "patch-union", "patch-batch", "patch-duplicates",
+    "patch-limit", "patch-field-bound", "patch-real-policy",
+)
+PATCH_PROTECTED_CASES = (
+    "patch-protected-input", "patch-protected-patch", "patch-protected-command",
+    "patch-protected-move", "patch-protected-direct", "patch-protected-structured",
+    "patch-protected-batch", "patch-protected-freeform", "patch-protected-commented-json",
+)
+NATIVE_WRITE_PHASES = {
+    "command-entry", "script-entry", "membership-start", "membership-complete",
+    "native-proof-start", "policy-start", "prepared-event-json", "prepared-paths",
+    "prepared-marker-opened", "prepared-marker-json", "prepared-marker-decoded",
+    "json-entry", "json-utility-load", "json-utility-ready", "json-web-load",
+    "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize",
+}
+NATIVE_WRITE_PHASE_WRITER = (
+    "function Write-NativeWriteFixturePhase([string]$Name) { "
+    "[Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' + "
+    "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
+    "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name) }; "
+    "Write-NativeWriteFixturePhase 'command-entry'; "
+)
+
+
+def native_write_fixture_stderr(stderr):
+    phases, errors = [], []
+    for line in stderr.splitlines(keepends=True):
+        match = re.fullmatch(rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)\r?\n", line)
+        if match and match[2].decode("ascii") in NATIVE_WRITE_PHASES:
+            phases.append(f"{match[1].decode('ascii')} {match[2].decode('ascii')}")
+        else:
+            errors.append(line)
+    return "\n".join(phases), b"".join(errors)
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_native_write_fixture_stderr_preserves_errors(newline):
+    phase = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
+    errors = (
+        newline + b"real error\xff" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 124 unknown-stage" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE invalid json-entry" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
+    )
+    assert native_write_fixture_stderr(phase + errors) == ("123 command-entry", errors)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows timeout diagnostics")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    command = (
+        NATIVE_WRITE_PHASE_WRITER
+        + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
+    )
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+            input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
+        )
+    progress, errors = native_write_fixture_stderr(captured.value.stderr)
+    assert progress.endswith(" command-entry")
+    assert errors == b"real fixture error\r\n"
+    assert captured.value.stdout == b""
 
 
 def load(name):
@@ -890,6 +965,14 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "batch-null-args", "batch-extra-key", "batch-unknown", "batch-empty",
     "batch-not-list", "batch-limit", "batch-oversized", "batch-read-only",
     "batch-working-directory", "batch-real-policy", "batch-malformed",
+    "batch-shadowed-keys",
+    "batch-read-only-mixed", "cell-batch-read-only",
+    "batch-read-only-limit", "batch-read-only-overflow", "batch-read-only-protected",
+    "batch-read-only-unknown", "batch-read-only-shell", "batch-read-only-malformed",
+    "batch-read-only-extra-key", "batch-read-only-missing-dependencies",
+    "batch-read-only-forms-drift", "batch-read-only-old-admission",
+    "batch-read-only-working-directory", "batch-read-only-real-policy",
+    "cell-batch-read-only-real-policy",
     "cell-batch-mixed", "cell-batch-protected",
     "structured-files", "structured-changes", "structured-only", "structured-json",
     "structured-aliases", "structured-duplicates", "structured-limit",
@@ -899,6 +982,17 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "batch-structured-safe", "cell-structured", "cell-batch-structured-safe",
     "structured-real-policy", "cell-structured-real-policy",
     "batch-target-limit", "batch-target-overflow",
+    *[f"write-name-{name}" for name in WRITE_ALIASES],
+    *[f"protected-write-name-{name}" for name in WRITE_ALIASES],
+    "write-name-json", "write-name-structured", "write-name-batch",
+    "protected-write-name-batch", "write-name-real-policy",
+    "cell-write-name-real-policy", "cell-write-name-structured",
+    "cell-protected-write-name-multi_edit",
+    *PATCH_NATIVE_CASES, *PATCH_PROTECTED_CASES,
+    "patch-invalid-field", "patch-targetless", "patch-fragment", "patch-malformed-json",
+    "patch-unknown-header", "patch-overflow", "patch-foreign", "patch-nested", "patch-anchor",
+    "patch-field-oversized", "patch-union-overflow", "patch-json-nonobject",
+    "cell-patch-union", "cell-patch-protected-move", "cell-patch-real-policy",
 ])
 def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, shell, case):
     from agent_worktrees import guarded_anchors
@@ -906,6 +1000,10 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     cell = case.startswith("cell-")
     if cell:
         case = case.removeprefix("cell-")
+    real_policy = case in {
+        "real-policy", "batch-real-policy", "structured-real-policy", "write-name-real-policy",
+        "patch-real-policy", "batch-read-only-real-policy",
+    }
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -990,6 +1088,105 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             args["input"] = "*** Update File: other.py\n*** Move to: final.py\n"
     elif case == "drive-relative":
         event["toolArgs"]["path"] = workspace.drive + "source.py"
+    if "write-name-" in case:
+        alias = case.removeprefix("protected-").removeprefix("write-name-")
+        event["toolName"] = alias if alias in WRITE_ALIASES else "multi_edit"
+        if case.startswith("protected-"):
+            event["toolArgs"]["path"] = "efforts/private.md"
+        if alias == "json":
+            event["toolArgs"] = json.dumps(event["toolArgs"])
+        elif alias in {"structured", "real-policy"}:
+            event["toolArgs"] = {"files": [{"filePath": "one.py"}, {"targetFile": "two.py"}]}
+        elif alias == "batch":
+            event["toolName"] = "view"
+            event["toolCalls"] = [
+                {"name": "write", "args": {"path": "one.py"}},
+                {"name": "rg", "args": {"pattern": "read"}},
+                {"name": "multi_edit", "args": {"changes": [{"file_path": "two.py"}]}},
+                {"name": "str_replace", "args": json.dumps(event["toolArgs"])},
+            ]
+    if case.startswith("patch-"):
+        event["toolName"] = "apply_patch"
+
+        def patch(*headers):
+            return "*** Begin Patch\n" + "".join(f"*** {header}\n" for header in headers) + "*** End Patch\n"
+
+        args = {"input": patch("Update File: source-\u00e9.py")}
+        event["toolArgs"] = args
+        if case in {"patch-patch", "patch-command"}:
+            args[case.removeprefix("patch-")] = args.pop("input")
+        elif case == "patch-json":
+            event["toolArgs"] = json.dumps(args)
+        elif case == "patch-json-nonobject":
+            event["toolArgs"] = json.dumps(["not an argument object"])
+        elif case == "patch-freeform":
+            event["toolArgs"] = args["input"]
+        elif case == "patch-crlf":
+            args["input"] = args["input"].replace("\n", "\r\n")
+        elif case == "patch-headers":
+            args["input"] = patch("Add File: one.py", "Update File: two.py", "Move to: three.py", "Delete File: four.py")
+        elif case in {"patch-union", "patch-real-policy"}:
+            args.update(
+                patch=patch("Add File: two.py"), command=patch("Delete File: three.py"),
+                path="four.py", edits=[{"file_path": "five.py"}],
+                files=[{"targetFile": "six.py"}], changes=[{"filename": "seven.py"}],
+            )
+        elif case in {"patch-batch", "patch-protected-batch"}:
+            event.update(toolName="view", toolArgs={"path": "ignored.py"}, toolCalls=[
+                {"name": "write", "args": {"path": "one.py"}},
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "apply_patch", "args": args},
+                {"name": "apply_patch", "args": patch(
+                    "Add File: efforts/private.md" if case == "patch-protected-batch" else "Add File: last.py",
+                )},
+            ])
+        elif case.startswith("patch-protected-"):
+            field = case.removeprefix("patch-protected-")
+            if field in {"input", "patch", "command"}:
+                args[field] = patch("Update File: safe.py", "Delete File: efforts/private.md")
+            elif field == "move":
+                args["input"] = patch("Update File: safe.py", "Move to: efforts/private.md")
+            elif field == "direct":
+                args["targetFile"] = "efforts/private.md"
+            elif field == "freeform":
+                event["toolArgs"] = patch("Update File: safe.py", "Move to: efforts/private.md")
+            elif field == "commented-json":
+                event["toolArgs"] = (
+                    '{/*\n*** Delete File: efforts/private.md\n*/"input":'
+                    + json.dumps(args["input"]) + "}"
+                )
+            else:
+                args["changes"] = [{"filePath": "safe.py"}, {"path": "efforts/private.md"}]
+        elif case == "patch-duplicates":
+            args["input"] = patch(*(["Add File: same.py"] * 129))
+        elif case in {"patch-limit", "patch-overflow"}:
+            args["input"] = patch(*(
+                f"Add File: source-{index}.py" for index in range(129 if case == "patch-overflow" else 128)
+            ))
+        elif case == "patch-union-overflow":
+            args["input"] = patch(*(f"Add File: source-{index}.py" for index in range(127)))
+            args.update(path="direct.py", changes=[{"path": "structured.py"}])
+        elif case in {"patch-field-bound", "patch-field-oversized"}:
+            size = 131073 if case == "patch-field-oversized" else 131072
+            prefix = "*** Begin Patch\n*** Update File: safe.py\n+"
+            suffix = "\n*** End Patch\n"
+            args["input"] = prefix + "x" * (size - len(prefix) - len(suffix)) + suffix
+        elif case == "patch-invalid-field":
+            args["patch"] = ["*** Delete File: efforts/private.md"]
+        elif case == "patch-targetless":
+            args["input"] = "*** Begin Patch\n*** End Patch\n"
+        elif case == "patch-fragment":
+            args["input"] = "*** Update File: source.py\n"
+        elif case == "patch-malformed-json":
+            event["toolArgs"] = '{"input":'
+        elif case == "patch-unknown-header":
+            args["input"] = "*** Begin Patch\n*** Rename File: source.py\n*** End Patch\n"
+        elif case == "patch-foreign":
+            args["input"] = patch(f"Update File: {fixture_checkout(tmp_path / 'foreign') / 'source.py'}")
+        elif case == "patch-nested":
+            args["input"] = patch(f"Update File: {fixture_checkout(workspace / 'nested') / 'source.py'}")
+        elif case == "patch-anchor":
+            args["input"] = patch(f"Update File: {anchor / 'source.py'}")
     if case.startswith("batch-"):
         first = {"name": "create", "args": event["toolArgs"]}
         last = {"name": "edit", "args": {"path": "second.py"}}
@@ -1021,6 +1218,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             last["args"] = None
         elif case == "batch-extra-key":
             last["cwd"] = str(workspace)
+        elif case == "batch-shadowed-keys":
+            last.update(Keys=[], cwd=str(workspace))
         elif case == "batch-unknown":
             last["name"] = "unknown"
         elif case == "batch-malformed":
@@ -1035,6 +1234,32 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             event["toolCalls"] = [{"name": "view", "args": {}}]
         elif case == "batch-working-directory":
             event["workingDirectory"] = event.pop("cwd")
+        if case.startswith("batch-read-only-"):
+            event["toolName"] = "powershell"
+            event["toolArgs"] = {"command": "Set-Content efforts/private.md fixture"}
+            event["toolCalls"] = [
+                {"name": "view", "args": {"path": "efforts/private.md", "command": "write-looking data"}},
+                {"name": "rg", "args": json.dumps({"pattern": "quoted'\"\\text"})},
+                {"name": "glob", "args": None},
+            ]
+            if case in {"batch-read-only-limit", "batch-read-only-overflow"}:
+                event["toolCalls"] = [event["toolCalls"][0]] * (
+                    129 if case == "batch-read-only-overflow" else 128
+                )
+            elif case == "batch-read-only-protected":
+                event["toolCalls"].append({"name": "edit", "args": {"path": "efforts/private.md"}})
+            elif case == "batch-read-only-unknown":
+                event["toolCalls"][-1]["name"] = "unknown"
+            elif case == "batch-read-only-shell":
+                event["toolCalls"][-1] = {
+                    "name": "powershell", "args": {"command": "Get-Content source.py"},
+                }
+            elif case == "batch-read-only-malformed":
+                event["toolCalls"][-1] = None
+            elif case == "batch-read-only-extra-key":
+                event["toolCalls"][-1].update(Keys=[], cwd=str(workspace))
+            elif case == "batch-read-only-working-directory":
+                event["workingDirectory"] = event.pop("cwd")
     env = environment(tmp_path, workspace)
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
@@ -1085,7 +1310,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         guard_events = load("tool_call_forms").tool_events(event)
     except ValueError:
         guard_events = []
-    if case in {"structured-oversized", "structured-target-overflow"}:
+    if case in {"structured-oversized", "structured-target-overflow", "patch-overflow", "patch-union-overflow"}:
         with pytest.raises(ValueError):
             load("tool_call_forms").write_targets(event["toolName"], event["toolArgs"])
         guard_events = []
@@ -1095,10 +1320,10 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         for name in ("statelessness_guard", "cross_repo_guard", "anchor_write_guard", "pr_supersede_guard")
     ]
     assert any(value and value.get("permissionDecision") == "deny" for value in decisions) is (
-        case.startswith("personal-state") or case in {
-            "anchor-cwd", "anchor-target", "delegated",
+        case.startswith(("personal-state", "protected-write-name-")) or case in PATCH_PROTECTED_CASES or case in {
+            "anchor-cwd", "anchor-target", "delegated", "patch-anchor",
             "batch-protected", "batch-multiple-targets", "batch-structured",
-            "structured-protected",
+            "structured-protected", "batch-read-only-protected",
         }
     ), decisions
     map_path = reader.map_path(workspace, registry)
@@ -1146,7 +1371,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
 
     scripts = plugin / "scripts"
     scripts.mkdir(parents=True, exist_ok=True)
-    if case in {"real-policy", "batch-real-policy", "structured-real-policy"}:
+    if real_policy:
         for path in SCRIPTS.glob("*.py"):
             shutil.copyfile(path, scripts / path.name)
     for name in (
@@ -1157,12 +1382,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         shutil.copyfile(SCRIPTS / name, scripts / name)
     drift = {
         "guard-drift": "anchor_write_guard.py", "reader-drift": "guarded_anchor_map.py",
-        "forms-drift": "tool_call_forms.py",
+        "forms-drift": "tool_call_forms.py", "batch-read-only-forms-drift": "tool_call_forms.py",
     }.get(case)
     if drift:
         with (scripts / drift).open("a", encoding="utf-8") as output:
             output.write("\n# changed source\n")
-    elif case == "missing-dependencies":
+    elif case in {"missing-dependencies", "batch-read-only-missing-dependencies"}:
         policy = scripts / "hook-read-policy.json"
         value = json.loads(policy.read_text(encoding="utf-8"))
         value.pop("nativeWriteDependencies", None)
@@ -1176,7 +1401,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
             + "$global:LASTEXITCODE = 0\n", encoding="utf-8",
         )
-    if case not in {"real-policy", "batch-real-policy", "structured-real-policy"}:
+    if not real_policy:
         (scripts / "hook_policy_process.py").write_text(
             "import base64,json,sys\nfrom pathlib import Path\n"
             + f"Path({str(observed)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
@@ -1202,7 +1427,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 "        throw 'Unexpected inventory filesystem probe'\n    }\n"
                 "    return & $script:originalPreparedPath $Path\n}\n",
             )
-    if case == "old-admission":
+    if case in {"old-admission", "batch-read-only-old-admission"}:
         admission = scripts / "managed-session.ps1"
         admission.write_text(
             admission.read_text(encoding="utf-8").replace(
@@ -1210,8 +1435,13 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             )
             + "\nfunction Test-ManagedWorktreesSession {\n"
             "    param([Parameter(Mandatory = $true)][string]$Raw, [ref]$Prepared)\n"
-            "    return Test-OriginalManagedWorktreesSession -Raw $Raw -Prepared $Prepared\n"
-            "}\n",
+            + (
+                "    return Test-OriginalManagedWorktreesSession -Raw $Raw -Prepared $Prepared\n"
+                if case == "old-admission" else
+                "    $admitted = Test-OriginalManagedWorktreesSession -Raw $Raw\n"
+                "    if ($null -ne $Prepared) { $Prepared.Value = $false }\n"
+                "    return $admitted\n"
+            ) + "}\n",
             encoding="utf-8",
         )
     with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
@@ -1222,26 +1452,87 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         )
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    native_entry = scripts / "pre-tool-hook.ps1"
+    # Fixture-only markers classify a timeout without retrying or extending the child.
+    instrumented = native_entry.read_text(encoding="utf-8")
+    for boundary, source in (
+        ("script-entry", "$ErrorActionPreference = 'Stop'"),
+        ("membership-start", "    $admitted = if ($supportsFacts) {"),
+        ("membership-complete", "    if (-not $admitted) { exit 0 }"),
+        ("native-proof-start", "function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {"),
+        ("policy-start", "function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnostic) {"),
+    ):
+        assert instrumented.count(source) == 1
+        marker = f"Write-NativeWriteFixturePhase '{boundary}'"
+        instrumented = instrumented.replace(
+            source, source + "\n" + marker if source.endswith("{") else marker + "\n" + source,
+        )
+    native_entry.write_text(instrumented, encoding="utf-8")
+    admission = scripts / "managed-session.ps1"
+    instrumented = admission.read_text(encoding="utf-8")
+    prepared_function = "function Test-PreparedManagedWorktreesSession {"
+    prefix, prepared = instrumented.split(prepared_function, 1)
+    opened = "        $openedLength = $stream.Length"
+    assert prepared.count(opened) == 1
+    prepared = prepared.replace(
+        opened, "Write-NativeWriteFixturePhase 'prepared-marker-opened'\n" + opened, 1,
+    )
+    instrumented = prefix + prepared_function + prepared
+    for boundary, source in (
+        ("prepared-event-json", "        $event = ConvertFrom-ManagedWorktreesJson $Raw"),
+        ("json-entry", "    if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }"),
+        ("json-utility-load", "    if (-not $script:managedWorktreesUtilityAssembly) {"),
+        ("json-utility-ready", "    if ($PSVersionTable.PSVersion.Major -ge 6) {"),
+        ("json-web-load", "        [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')"),
+        ("json-resolver-type", "        $resolverType = $script:managedWorktreesUtilityAssembly.GetType("),
+        ("json-resolver-create", "        $resolver = [Activator]::CreateInstance($resolverType, $true)"),
+        ("json-serializer-create", "        $script:managedWorktreesJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new($resolver)"),
+        ("json-deserialize", "    return ,($script:managedWorktreesJson.DeserializeObject($Text))"),
+        ("prepared-paths", "        $workspace = Get-PreparedWorktreesPath $cwd"),
+        ("prepared-marker-json", "        $value = ConvertFrom-ManagedWorktreesJson $text.TrimStart([char]0xfeff)"),
+        ("prepared-marker-decoded", "        $scope = $value['scope']"),
+    ):
+        assert source in instrumented
+        instrumented = instrumented.replace(
+            source, f"Write-NativeWriteFixturePhase '{boundary}'\n" + source, 1,
+        )
+    admission.write_text(instrumented, encoding="utf-8")
     raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
     started = time.monotonic()
-    result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
-        input=raw, capture_output=True, timeout=10,
-        cwd=workspace, env=env, **no_window_kwargs(),
-    )
+    started_ms = time.time_ns() // 1_000_000
+    try:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
+            input=raw, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        progress, diagnostic = native_write_fixture_stderr(error.stderr or b"")
+        raise AssertionError(
+            f"{shell} native write exceeded the original 10s child limit; start_ms={started_ms}; "
+            f"phases={progress or 'no command entry'!r}; stdout={error.stdout!r}; stderr={diagnostic!r}"
+        ) from error
     native_seconds = time.monotonic() - started
+    progress, result.stderr = native_write_fixture_stderr(result.stderr)
+    assert " command-entry" in progress, result.stderr
+    phase_names = [line.split(" ", 1)[1] for line in progress.splitlines()]
+    if "prepared-marker-json" in phase_names:
+        assert "prepared-marker-opened" in phase_names, progress
+        assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert not membership.exists()
     if case == "ordinary-unrelated-inventory":
         assert native_membership.read_text() == "True"
     assert not inventory_probe.exists()
-    policy_required = not (case.startswith("ordinary") or case in {
+    policy_required = not (case.startswith(("ordinary", "write-name-")) or case in PATCH_NATIVE_CASES or case in {
         "create", "path-alias", "json-args", "real-policy", "batch",
         "batch-mixed", "batch-json-args", "batch-limit", "batch-working-directory", "batch-real-policy",
         "structured", "structured-files", "structured-changes", "structured-only", "structured-json",
         "structured-aliases", "structured-duplicates", "structured-limit", "batch-structured-safe",
         "structured-real-policy",
         "batch-target-limit",
+        "batch-read-only", "batch-read-only-mixed", "batch-read-only-limit",
+        "batch-read-only-working-directory", "batch-read-only-real-policy",
     })
     assert observed.exists() is policy_required, result.stdout
     if policy_required:
@@ -1249,31 +1540,35 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert json.loads(result.stdout)["permissionDecision"] == "deny"
     else:
         assert result.stdout == b""
-    if case in {"real-policy", "batch-real-policy", "structured-real-policy"}:
+    if real_policy:
         contract = scripts / "hook-read-policy.json"
         value = json.loads(contract.read_text(encoding="utf-8"))
         value.pop("nativeWriteDependencies")
         contract.write_text(json.dumps(value), encoding="utf-8")
         started = time.monotonic()
         fallback = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
             input=raw, capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )
         fallback_seconds = time.monotonic() - started
+        _, fallback.stderr = native_write_fixture_stderr(fallback.stderr)
         assert fallback.returncode == 0 and not fallback.stderr, fallback.stdout + fallback.stderr
         assert json.loads(fallback.stdout) == {}
         protected = {**event, "toolArgs": {"path": "efforts/private.md"}}
-        if case == "batch-real-policy":
+        if case == "patch-real-policy":
+            protected["toolArgs"] = {"input": patch("Update File: safe.py", "Move to: efforts/private.md")}
+        if case in {"batch-real-policy", "batch-read-only-real-policy"}:
             protected["toolCalls"] = [
                 *event["toolCalls"][:-1],
                 {"name": "edit", "args": {"path": "efforts/private.md"}},
             ]
         denied = subprocess.run(
-            [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
             input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
             cwd=workspace, env=env, **no_window_kwargs(),
         )
+        _, denied.stderr = native_write_fixture_stderr(denied.stderr)
         assert denied.returncode == 0 and not denied.stderr, denied.stdout + denied.stderr
         assert json.loads(denied.stdout)["permissionDecision"] == "deny"
         assert not membership.exists()

@@ -92,10 +92,33 @@ function Test-NativePreToolSources([bool]$WriteProof = $false) {
     } catch { return $false }
 }
 
+function Get-NativePreToolBatch([object]$Calls) {
+    if ($Calls -isnot [Collections.IList] -or $Calls.Count -lt 1 -or $Calls.Count -gt 128) {
+        return $null
+    }
+    foreach ($call in $Calls) {
+        if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
+            -not $call['name']) { return $null }
+        # A caller's Keys field must not shadow the dictionary's own keys.
+        foreach ($key in $call.get_Keys()) {
+            if ($key -cnotin @('name', 'args', 'id')) { return $null }
+        }
+    }
+    return ,$Calls
+}
+
 function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
     if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
         $Payload -isnot [Collections.IDictionary]) { return $false }
-    if ($Payload.ContainsKey('toolCalls')) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) {
+        if (-not $PreparedMembership) { return $false }
+        $calls = Get-NativePreToolBatch $Payload['toolCalls']
+        if ($null -eq $calls) { return $false }
+        foreach ($call in $calls) {
+            if ($call['name'] -cnotin @('view', 'rg', 'glob')) { return $false }
+        }
+        return Test-NativePreToolSources -WriteProof $true
+    }
     $name = $Payload.toolName
     if (-not $name) { $name = $Payload.tool_name }
     if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
@@ -124,28 +147,31 @@ function Read-NativePreToolText([string]$Path, [int]$Limit) {
 function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
     try {
         if ($Facts -isnot [Collections.IDictionary]) { return $false }
+        $writeTools = @(
+            'create', 'edit', 'str_replace', 'str_replace_editor', 'str_replace_based_edit_tool',
+            'write', 'write_file', 'insert', 'new_file', 'multi_edit', 'apply_patch')
+        # Source-bound tool_call_forms owns this header-target grammar.
+        $patchTarget = '^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$'
         $writeArgs = [Collections.Generic.List[object]]::new()
         $cwd = $Payload.cwd
         if ($Payload.ContainsKey('toolCalls')) {
             # tool_call_forms gives batch members precedence over top-level tool fields.
-            $calls = $Payload['toolCalls']
-            if ($calls -isnot [Collections.IList] -or $calls.Count -lt 1 -or $calls.Count -gt 128) {
-                return $false
-            }
+            $calls = Get-NativePreToolBatch $Payload['toolCalls']
+            if ($null -eq $calls) { return $false }
             foreach ($call in $calls) {
-                if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
-                    $call['name'] -cnotin @('create', 'edit', 'view', 'rg', 'glob')) { return $false }
-                foreach ($key in $call.Keys) {
-                    if ($key -cnotin @('name', 'args', 'id')) { return $false }
+                if ($call['name'] -cnotin ($writeTools + @('view', 'rg', 'glob'))) { return $false }
+                if ($call['name'] -cin $writeTools) {
+                    $writeArgs.Add(@{ name = $call['name']; args = $call['args'] })
                 }
-                if ($call['name'] -cin @('create', 'edit')) { $writeArgs.Add($call['args']) }
             }
             if (-not $Payload.ContainsKey('cwd')) { $cwd = $Payload.workingDirectory }
         } else {
             $name = $Payload.toolName
             if (-not $name) { $name = $Payload.tool_name }
-            if ($name -isnot [string] -or $name -cnotin @('create', 'edit')) { return $false }
-            $writeArgs.Add($(if ($Payload.ContainsKey('toolArgs')) { $Payload.toolArgs } else { $Payload.tool_input }))
+            if ($name -isnot [string] -or $name -cnotin $writeTools) { return $false }
+            $writeArgs.Add(@{ name = $name; args = $(if ($Payload.ContainsKey('toolArgs')) {
+                $Payload.toolArgs
+            } else { $Payload.tool_input }) })
         }
         if (-not $writeArgs.Count -or $cwd -isnot [string] -or
             (Get-PreparedWorktreesPath $cwd) -cne $Facts.workspace) { return $false }
@@ -165,8 +191,20 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
             -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'objects')) -or
             -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'refs'))) { return $false }
         $rawPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
-        foreach ($args in $writeArgs) {
-            if ($args -is [string]) { $args = ConvertFrom-PreToolJson $args }
+        foreach ($write in $writeArgs) {
+            $args = $write.args
+            if ($args -is [string]) {
+                if ($write.name -ceq 'apply_patch' -and [regex]::IsMatch($args, $patchTarget, 'Multiline')) {
+                    # A permissive JSON decoder must not discard headers inside comments.
+                    $args = @{ command = $args }
+                } else {
+                    try { $args = ConvertFrom-PreToolJson $args }
+                    catch {
+                        if ($write.name -cne 'apply_patch') { return $false }
+                        $args = @{ command = $args }
+                    }
+                }
+            }
             if ($args -isnot [Collections.IDictionary]) { return $false }
             $entries = [Collections.Generic.List[object]]::new()
             $entries.Add($args)
@@ -193,6 +231,27 @@ function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
                     if ($callPaths.Count -gt 128) { return $false }
                 }
                 if ($index -gt 0 -and -not $found) { return $false }
+            }
+            if ($write.name -ceq 'apply_patch') {
+                $foundPatch = $false
+                foreach ($field in @('input', 'patch', 'command')) {
+                    if (-not $args.ContainsKey($field)) { continue }
+                    $patch = $args[$field]
+                    if ($patch -isnot [string] -or $patch.Length -gt 131072 -or
+                        $patch -cnotmatch '\A\*\*\* Begin Patch\r?\n[\s\S]*\r?\n\*\*\* End Patch(?:\r?\n)?\z') {
+                        return $false
+                    }
+                    $headers = [regex]::Matches($patch, $patchTarget, 'Multiline')
+                    if (-not $headers.Count) { return $false }
+                    $foundPatch = $true
+                    foreach ($header in $headers) {
+                        $raw = $header.Groups[1].Value
+                        if ($raw.EndsWith("`r")) { $raw = $raw.Substring(0, $raw.Length - 1) }
+                        $null = $callPaths.Add($raw)
+                        if ($callPaths.Count -gt 128) { return $false }
+                    }
+                }
+                if (-not $foundPatch) { return $false }
             }
             if (-not $callPaths.Count) { return $false }
             foreach ($raw in $callPaths) {

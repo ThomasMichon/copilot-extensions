@@ -75,7 +75,7 @@ class ObservationCredentials:
             or getattr(binding, "repository", None) != self.repository
             or getattr(binding, "permission", None) != "observe"
             or authentication not in (
-                ("bearer",) if self.provider == "github" else ("basic", "bearer")
+                ("bearer",) if self.provider in ("github", "gitea") else ("basic", "bearer")
             )
         ):
             raise ObservationCredentialError("PR observation credential binding mismatch")

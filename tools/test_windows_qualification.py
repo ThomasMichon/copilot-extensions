@@ -142,14 +142,18 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
     assert "--allow-host-state" not in argv
 
 
-@pytest.mark.parametrize("packet,case", [
-    ("native-driver-auth-wait", "opt_in_receiver_auth_wait_and_same_session_resume"),
-    ("native-driver-inflight", "opt_in_receiver_inflight_expiry_preserves_hold"),
+@pytest.mark.parametrize("packet,module,case", [
+    ("native-driver-auth-wait", "test_native_headed_auth_wait", "opt_in_receiver_auth_wait_and_same_session_resume"),
+    ("native-driver-inflight", "test_native_headed_auth_wait", "opt_in_receiver_inflight_expiry_preserves_hold"),
+    ("native-driver-observation-loss", "test_native_headed_auth_wait", "opt_in_receiver_sdk_observation_loss_preserves_hold"),
+    ("native-driver-startup-seed", "test_headed_extension", "native_headed_startup_seed_observation_precedes_controlled_send"),
+    ("native-driver-startup-no-seed", "test_headed_extension", "native_headed_startup_no_seed_is_not_an_idle_claim"),
+    ("native-driver-startup-cold-resume", "test_headed_extension", "native_headed_startup_cold_resume_preserves_history"),
 ])
-def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(tmp_path, packet, case):
+def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(tmp_path, packet, module, case):
     argv = worker.native_command(tmp_path, tmp_path / "out", packet)
     assert argv[2] == "agent-remote-driver"
-    assert argv[argv.index("--test-file") + 1] == "tests/native/test_native_headed_auth_wait.py"
+    assert argv[argv.index("--test-file") + 1] == f"tests/native/{module}.py"
     assert argv[argv.index("-k") + 1] == case
     assert [argv[argv.index(flag) + 1] for flag in (
         "--timeout", "--plugin-timeout", "--test-timeout",
@@ -160,6 +164,9 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
 @pytest.mark.parametrize("packet,native", [
     (None, False), ("bridge-http52", False), ("native-worktrees-embody", True),
     ("native-driver-auth-wait", True), ("native-driver-inflight", True),
+    ("native-driver-observation-loss", True),
+    ("native-driver-startup-seed", True), ("native-driver-startup-no-seed", True),
+    ("native-driver-startup-cold-resume", True),
     ("native-unrecognized", None),
 ])
 def test_admission_reports_native_preparation_only_for_known_packets(
@@ -534,7 +541,8 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize("unsupported", [
-    "version", "selector", "packet", "inflight", "workflow", "unprotected",
+    "version", "selector", "packet", "inflight", "observation-loss",
+    "startup-seed", "startup-no-seed", "startup-cold-resume", "workflow", "unprotected",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
     tmp_path, monkeypatch, unsupported,
@@ -544,12 +552,15 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
     effects = []
     packet = {
         "packet": "native-driver-auth-wait", "inflight": "native-driver-inflight",
+        "observation-loss": "native-driver-observation-loss",
+        "startup-seed": "native-driver-startup-seed", "startup-no-seed": "native-driver-startup-no-seed",
+        "startup-cold-resume": "native-driver-startup-cold-resume",
     }.get(unsupported)
     selected = (
         {"kind": "packet", "name": packet} if packet else focused()
     )
     files = [
-        "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
+        f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
     ] if packet else ["plugins/sample/tests/test_sample.py"]
     client.transport = SimpleNamespace(
@@ -594,7 +605,10 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("packet", ["native-driver-auth-wait", "native-driver-inflight"])
+@pytest.mark.parametrize("packet", [
+    "native-driver-auth-wait", "native-driver-inflight", "native-driver-observation-loss",
+    "native-driver-startup-seed", "native-driver-startup-no-seed", "native-driver-startup-cold-resume",
+])
 @pytest.mark.parametrize("missing", [True, False])
 def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_transport(
     tmp_path, monkeypatch, missing, packet,
@@ -602,7 +616,7 @@ def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_trans
     client = object.__new__(client_module.Client)
     client.root = tmp_path
     files = [
-        "plugins/agent-remote-driver/tests/native/test_native_headed_auth_wait.py",
+        f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
     ]
 

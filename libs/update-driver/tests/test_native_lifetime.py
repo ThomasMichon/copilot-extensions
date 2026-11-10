@@ -171,7 +171,7 @@ def test_native_worker_survives_submitter_job_only_in_production(area, mode):
             assert pythonw.lower().endswith("pythonw.exe")
             parent, job = pu.spawn_sync_in_kill_on_close_job(
                 [pythonw, str(script), "submit", str(root), console, mode],
-                cwd=area, env=env, require_job=True, allow_breakaway=False,
+                cwd=area, env=env, require_job=True, allow_breakaway=mode == "production",
                 stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                 **pu.no_window_kwargs(),
             )

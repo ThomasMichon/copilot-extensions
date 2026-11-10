@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve service deployment platform suffixes once for already-qualified machine identifiers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

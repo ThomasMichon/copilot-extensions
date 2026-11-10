@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve shared venue supervisor ownership from CWD or explicit arguments instead of inherited owner environment state.",
+  "changes": [
+    {
+      "plugin": "agent-ssh",
+      "type": "patch"
+    }
+  ]
+}

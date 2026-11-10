@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import argparse
+import json
+import shutil
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,15 +16,22 @@ from test_squash_abort import _git, _make_repo
 
 
 def _head(path: Path) -> str:
-    return git_ops.git("rev-parse", "HEAD", cwd=path).stdout.strip()
+    # These private fixtures use loose refs; assertions need no extra Git child.
+    directory = path / ".git"
+    head = (directory / "HEAD").read_text().strip()
+    if head.startswith("ref: "):
+        return (directory / Path(*head[5:].split("/"))).read_text().strip()
+    return head
 
 
 def _pair(tmp_path, monkeypatch):
     configs, records, paths, targets = {}, {}, {}, {}
+    template = _make_repo(tmp_path)
     for role in ("harness", "knowledge"):
         parent = tmp_path / role
         parent.mkdir()
-        path = _make_repo(parent)
+        path = parent / "repo"
+        shutil.copytree(template, path)
         old = _head(path)
         (path / "f.txt").write_text("new\n")
         _git(path, "add", "f.txt")
@@ -377,3 +387,384 @@ def test_local_preparation_failure_is_not_reported_as_success_or_skipped(tmp_pat
     assert not result["ok"] and result["plugins"] == "failed"
     assert all(_head(path) == targets[role] for role, path in paths.items())
     assert calls == ([] if failure == "composition" else ["compose"])
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_streamed_sync_retains_complete_pair_result_and_reports_before_fetch(
+    tmp_path, monkeypatch, capfd, blocked,
+):
+    from agent_worktrees import worktree_identity
+
+    _records, paths, targets, overlay, calls = _pair(tmp_path, monkeypatch)
+    if blocked:
+        monkeypatch.setattr(local_cache_refresh, "prepare_for_launch",
+                            lambda *args, **kwargs: SimpleNamespace(
+                                status="failed", detail="instruction copy refused",
+                            ))
+    monkeypatch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
+    fetch = git_ops.fetch
+    before_fetch = []
+
+    def observe_fetch(*args, **kwargs):
+        before_fetch.extend(json.loads(line) for line in capfd.readouterr().out.splitlines())
+        assert any(frame.get("type") == "progress" for frame in before_fetch)
+        assert not any(frame.get("type") in {"done", "error"} for frame in before_fetch)
+        return fetch(*args, **kwargs)
+
+    monkeypatch.setattr(git_ops, "fetch", observe_fetch)
+    result_code = worktree_ops_cli.cmd_sync(SimpleNamespace(
+        worktree_id="harness", json=True, paired=True, stream=True,
+    ))
+    frames = before_fetch + [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    terminal = frames[-1]
+    assert terminal["type"] == ("error" if blocked else "done")
+    assert result_code == (1 if blocked else 0)
+    result = terminal["result"]
+    assert result["ok"] is not blocked
+    assert result["updated"] is not blocked
+    assert len(result["pair_results"]) == 2
+    assert all(member["updated"] for member in result["pair_results"])
+    assert result["plugins"] == ("failed" if blocked else "ready")
+    if blocked:
+        assert result["reason"] == "plugin-preparation-failed"
+        assert result["detail"] == "instruction copy refused"
+    assert all(_head(path) == targets[role] for role, path in paths.items())
+    assert overlay.read_text() == "updated setup"
+    assert calls == (["compose"] if blocked else ["compose", "instructions"])
+
+
+def test_sync_stream_requires_json_before_loading_configuration(monkeypatch, capfd):
+    def unexpected():
+        pytest.fail("invalid progress syntax must fail before loading configuration")
+
+    monkeypatch.setattr(cfg, "load_config", unexpected)
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(stream=True, json=False)) == 2
+    output = capfd.readouterr()
+    assert output.out == "" and "--stream requires --json" in output.err
+
+
+def test_sync_stream_parser_remains_strict():
+    parser = argparse.ArgumentParser(allow_abbrev=False)
+    worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
+    args = parser.parse_args(["sync", "--stream", "--json", "--worktree-id", "example"])
+    assert args.stream and args.json and args.worktree_id == "example"
+    for option in ("--streaming", "--str"):
+        with pytest.raises(SystemExit) as failure:
+            parser.parse_args(["sync", option, "--json"])
+        assert failure.value.code == 2
+
+
+def test_sync_stream_matches_the_complete_baseline_json_envelope(tmp_path, monkeypatch, capfd):
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=False, json=True, worktree_id="missing",
+    )) == 1
+    baseline = json.loads(capfd.readouterr().out)
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=True, json=True, worktree_id="missing",
+    )) == 1
+    frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    assert frames[-1]["type"] == "error"
+    assert frames[-1]["result"] == baseline
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=False, json=False, worktree_id="missing",
+    )) == 1
+    assert capfd.readouterr().out == "missing: not-found\n"
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_real_cli_pair_stream_matches_the_entire_ordinary_result(tmp_path, blocked):
+    import sys
+    import textwrap
+
+    from agent_procutil.owned_process import run_caller_owned
+
+    script = textwrap.dedent("""
+        import argparse,json,sys
+        from pathlib import Path
+        import pytest
+        from test_worktree_sync import _pair,_head
+        from test_squash_abort import _git
+        from agent_worktrees import git_ops,output,worktree_identity,worktree_ops_cli
+        blocked=sys.argv[2]=='True'
+        parser=argparse.ArgumentParser(allow_abbrev=False)
+        worktree_ops_cli.add_parsers(parser.add_subparsers(dest='command'))
+        with pytest.MonkeyPatch.context() as patch:
+            records,paths,targets,overlay,calls=_pair(Path(sys.argv[1]),patch)
+            patch.setattr(worktree_identity,'_resolve_worktree_id',lambda value:value)
+            original_heads={role:_head(path) for role,path in paths.items()}
+            original_file=(paths['harness']/'f.txt').read_bytes()
+            if blocked:
+                advance=git_ops.fast_forward_worktree
+                def refuse(path,**kwargs):
+                    if str(path)==str(paths['knowledge']):
+                        return git_ops.FastForwardResult(False,'ff-failed')
+                    return advance(path,**kwargs)
+                patch.setattr(git_ops,'fast_forward_worktree',refuse)
+            else:
+                for role,path in paths.items():
+                    _git(path,'update-ref','refs/heads/worktree/'+role,targets[role])
+                    _git(path,'read-tree',targets[role])
+                    (path/'f.txt').write_text('new\\n')
+            arguments=['sync','--paired','--json','--worktree-id','harness']
+            with output.capture_json_output() as captured:
+                baseline_code=worktree_ops_cli.cmd_sync(parser.parse_args(arguments))
+            baseline=json.loads(captured.getvalue())
+            if blocked:
+                assert _head(paths['harness'])==targets['harness']
+                assert _head(paths['knowledge'])==original_heads['knowledge']
+                _git(paths['harness'],'update-ref','refs/heads/worktree/harness',
+                     original_heads['harness'])
+                _git(paths['harness'],'read-tree',original_heads['harness'])
+                (paths['harness']/'f.txt').write_bytes(original_file)
+            with output.capture_json_output() as captured:
+                streamed_code=worktree_ops_cli.cmd_sync(parser.parse_args([*arguments,'--stream']))
+            frames=[json.loads(line) for line in captured.getvalue().splitlines()]
+            heads={role:_head(path) for role,path in paths.items()}
+        print(json.dumps(dict(baseline=baseline,frames=frames,
+                              baseline_code=baseline_code,streamed_code=streamed_code,
+                              heads=heads,targets=targets,original_heads=original_heads)))
+    """)
+    result = run_caller_owned(
+        [sys.executable, "-B", "-c", script, str(tmp_path), str(blocked)],
+        cwd=str(Path(__file__).parent), timeout=25,
+        max_stdout_bytes=128 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(result.stdout)
+    terminal = evidence["frames"][-1]
+    assert terminal["result"] == evidence["baseline"]
+    assert evidence["baseline_code"] == evidence["streamed_code"] == (1 if blocked else 0)
+    assert terminal["type"] == ("error" if blocked else "done")
+    native = terminal["result"]
+    assert native["version"] == 1 and len(native["pair_results"]) == 2
+    assert native["ok"] is not blocked
+    if blocked:
+        assert native["pair_results"][0]["updated"] and not native["pair_results"][1]["updated"]
+        assert native["plugins"] == "skipped" and native["reason"] == "pair-sync-blocked"
+        assert evidence["heads"]["harness"] == evidence["targets"]["harness"]
+        assert evidence["heads"]["knowledge"] == evidence["original_heads"]["knowledge"]
+    else:
+        assert not native["updated"] and native["reason"] == "up-to-date"
+        assert native["plugins"] == "ready" and evidence["heads"] == evidence["targets"]
+
+
+def test_sync_stream_malformed_tracking_has_a_terminal_result(tmp_path, monkeypatch, capfd):
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    (tmp_path / "selected.yaml").write_text("[]")
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=True, json=True, worktree_id="selected",
+    )) == 1
+    frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    assert frames[-1]["type"] == "error"
+    assert frames[-1]["result"]["ok"] is False
+    assert "YAML mapping" in frames[-1]["result"]["detail"]
+
+
+def test_sync_stream_does_not_retry_a_failed_terminal_write(tmp_path, monkeypatch):
+    import io
+    import sys
+
+    class Output(io.StringIO):
+        terminal_attempts = 0
+
+        def write(self, text):
+            if '"type": "error"' in text:
+                self.terminal_attempts += 1
+                raise OSError("fixture stdout write is unconfirmed")
+            return super().write(text)
+
+    output = Output()
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(sys, "__stdout__", output)
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    with pytest.raises(OSError, match="stdout write is unconfirmed"):
+        worktree_ops_cli.cmd_sync(SimpleNamespace(
+            stream=True, json=True, worktree_id="missing",
+        ))
+    assert output.terminal_attempts == 1
+
+
+def test_sync_stream_shutdown_flush_never_replays_a_failed_frame(monkeypatch):
+    import io
+    import sys
+
+    from agent_worktrees import output, sync_progress
+
+    class Raw(io.RawIOBase):
+        failing = True
+
+        def __init__(self):
+            super().__init__()
+            self.attempts = []
+
+        def writable(self):
+            return True
+
+        def write(self, data):
+            self.attempts.append(bytes(data))
+            if self.failing:
+                raise OSError("fixture buffered flush failed")
+            return len(data)
+
+    raw = Raw()
+    stream = io.TextIOWrapper(io.BufferedWriter(raw), encoding="utf-8")
+    native_attempts = []
+    native_write = output.os.write
+
+    def fail_native_stdout(fd, payload):
+        if fd == 1:
+            native_attempts.append(payload)
+            raise OSError("fixture unbuffered write failed")
+        return native_write(fd, payload)
+
+    frame = {"type": "error", "message": "fixture refusal"}
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(sys, "stdout", stream)
+            patch.setattr(sys, "__stdout__", stream)
+            patch.setattr(output.os, "write", fail_native_stdout)
+            progress = sync_progress.SyncProgress()
+            with pytest.raises((OSError, SystemExit)):
+                progress._write(frame)
+            raw.failing = False
+            stream.flush()
+            assert raw.attempts == []
+            with pytest.raises((OSError, SystemExit)):
+                progress.stage("must not write after failure")
+            assert len(native_attempts) == 1
+            assert json.loads(native_attempts[0]) == frame
+    finally:
+        raw.failing = False
+        stream.close()
+
+
+@pytest.mark.parametrize("selector", ["tail", "../invalid"])
+def test_streamed_sync_selector_refusal_is_a_terminal_result(tmp_path, monkeypatch, capfd, selector):
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    for name in ("first-tail", "second-tail"):
+        (tmp_path / f"{name}.yaml").write_text("{}")
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=True, json=True, worktree_id=selector,
+    )) == 1
+    frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    assert frames[-1]["type"] == "error"
+    result = frames[-1]["result"]
+    assert result["worktree_id"] == selector and result["ok"] is False
+    assert result["reason"] == "worktree-id-rejected"
+    assert ("Ambiguous short ID" if selector == "tail" else "Invalid worktree ID") in result["detail"]
+    assert result["outcome"] == "not-started"
+
+
+def test_streamed_sync_batch_exception_retains_completed_results(tmp_path, monkeypatch, capfd):
+    records = []
+    for name in ("first", "interrupted", "unstarted"):
+        path = tmp_path / name
+        path.mkdir()
+        records.append(SimpleNamespace(
+            worktree_id=name, repo="example", kind="session", worktree_path=str(path),
+            pair_id=None, pair_ref=None,
+        ))
+    monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(
+        default_repo=SimpleNamespace(remote="origin", anchor=str(tmp_path)),
+    ))
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    monkeypatch.setattr(tracking, "list_records", lambda *args, **kwargs: records)
+    monkeypatch.setattr(git_ops, "has_remote", lambda *args, **kwargs: False)
+    monkeypatch.setattr(worktree_sync.sessions, "scan_sessions_fast", lambda *args: None)
+    monkeypatch.setattr(worktree_ops_cli, "_build_active_paths", lambda *args: set())
+    completed = {"worktree_id": "first", "updated": True, "reason": "updated", "behind": 1}
+    calls = []
+
+    def synchronize(record, *_args):
+        calls.append(record.worktree_id)
+        if record.worktree_id != "first":
+            raise OSError("fixture checkout disappeared")
+        return completed
+
+    monkeypatch.setattr(worktree_ops_cli._core(), "_sync_one_record", synchronize)
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=True, json=True, worktree_id=None,
+    )) == 1
+    frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
+    assert frames[-1]["type"] == "error"
+    results = frames[-1]["result"]["results"]
+    assert results[0] == completed
+    assert results[1] == {
+        "worktree_id": "interrupted", "ok": False, "reason": "sync-interrupted",
+        "detail": "fixture checkout disappeared", "outcome": "unknown",
+    }
+    assert calls == ["first", "interrupted"]
+
+
+def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch):
+    import io
+    import sys
+    import threading
+
+    from agent_worktrees import sync_progress
+
+    received = threading.Event()
+
+    class Output(io.StringIO):
+        def write(self, text):
+            written = super().write(text)
+            if "Waiting: fixture fetch" in text:
+                received.set()
+            return written
+
+    output = Output()
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(sys, "__stdout__", output)
+    monkeypatch.setattr(sync_progress, "HEARTBEAT_SECONDS", 0.01)
+    with sync_progress.SyncProgress() as progress:
+        progress.stage("fixture fetch")
+        try:
+            assert received.wait(2), "the operation owner must report its current wait"
+        finally:
+            progress.finish({"updated": False, "reason": "up-to-date"})
+    frames = [json.loads(line) for line in output.getvalue().splitlines()]
+    assert any(frame.get("msg") == "Waiting: fixture fetch" for frame in frames)
+    assert frames[-1]["type"] == "done"
+    assert progress._thread is not None and not progress._thread.is_alive()
+
+
+def test_sync_stream_real_parser_process_retains_pair_result(tmp_path):
+    import sys
+    import textwrap
+
+    from agent_procutil.owned_process import run_caller_owned
+
+    script = textwrap.dedent("""
+        import argparse
+        import sys
+        from pathlib import Path
+        import pytest
+        from test_worktree_sync import _pair
+        from agent_worktrees import worktree_identity, worktree_ops_cli
+        parser = argparse.ArgumentParser(allow_abbrev=False)
+        worktree_ops_cli.add_parsers(parser.add_subparsers(dest="command"))
+        args = parser.parse_args(sys.argv[2:])
+        with pytest.MonkeyPatch.context() as patch:
+            _pair(Path(sys.argv[1]), patch)
+            patch.setattr(worktree_identity, "_resolve_worktree_id", lambda value: value)
+            code = worktree_ops_cli.cmd_sync(args)
+        raise SystemExit(code)
+    """)
+    result = run_caller_owned(
+        [sys.executable, "-c", script, str(tmp_path),
+         "sync", "--stream", "--json", "--paired", "--worktree-id", "harness"],
+        cwd=str(Path(__file__).parent), timeout=30,
+        max_stdout_bytes=128 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stderr
+    frames = [json.loads(line) for line in result.stdout.splitlines()]
+    assert frames[0]["type"] == "progress"
+    terminal = frames[-1]
+    assert terminal["type"] == "done"
+    assert terminal["result"]["ok"] and terminal["result"]["plugins"] == "ready"
+    assert len(terminal["result"]["pair_results"]) == 2

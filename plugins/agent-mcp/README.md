@@ -1,6 +1,7 @@
 # agent-mcp
 
-[Configuration reference](docs/configuration.md)
+[Configuration reference](docs/configuration.md) |
+[Session-generation implementation boundary](docs/session-generation.md)
 
 A reusable **MCP bridge**: wrap an upstream MCP server as a local **stdio** MCP
 server and inject host credentials. One config file describes one bridge.

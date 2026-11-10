@@ -11,7 +11,7 @@ import threading
 import pytest
 
 from agent_worktrees import config as cfg, finalize, tracking, worktree_creation
-from conftest import _published_seed_environment, _seed_directory
+from conftest import _published_seed_environment, _repair_copied_worktree, _seed_directory
 
 
 def _git(*args, cwd):
@@ -72,7 +72,10 @@ def environment(tmp_path, monkeypatch, git_only_mux, checkout_seed):
         root = tmp_path / f"{project}.worktrees"
         worktree_id = f"pair-{project}"
         checkout = root / worktree_id
-        _git("worktree", "repair", str(checkout), cwd=anchor)
+        _repair_copied_worktree(
+            checkout_seed / project, checkout_seed / f"{project}.worktrees" / worktree_id,
+            anchor, checkout,
+        )
         directory = cfg.project_dir(project)
         directory.mkdir(parents=True)
         document = {
@@ -115,6 +118,13 @@ def _finalize(record, configurations, monkeypatch):
     return finalize.validate_and_finalize(record.worktree_id, configurations[record.repo])
 
 
+def test_local_pair_fixture_uses_private_git_store(environment):
+    records, configurations = environment
+    for project, record in records.items():
+        common = _git("rev-parse", "--path-format=absolute", "--git-common-dir", cwd=record.worktree_path)
+        assert Path(common).resolve() == (Path(configurations[project].default_repo.anchor) / ".git").resolve()
+
+
 @pytest.mark.parametrize("operation", ["settle", "remove", "finalize"])
 def test_paired_claim_blocks_the_real_cli(environment, operation):
     records, configurations = environment
@@ -145,6 +155,35 @@ def test_paired_claim_settles_bottom_up(environment, monkeypatch):
     assert Path(knowledge.worktree_path).is_dir()
     claim, = tracking.load_record(harness.yaml_path).resources
     assert claim.is_at_rest
+
+
+@pytest.mark.parametrize("dirty", [
+    pytest.param(False, marks=pytest.mark.skipif(
+        sys.platform == "win32",
+        reason="Successful native Windows retirement requires a qualified private PSMux observation.",
+    )),
+    True,
+])
+def test_native_cli_finalizes_remote_free_knowledge_without_weakening_pair(
+    environment, dirty,
+):
+    records, configurations = environment
+    harness, knowledge = records["harness"], records["knowledge"]
+    _git("remote", "remove", "origin", cwd=configurations["knowledge"].default_repo.anchor)
+    if dirty:
+        (Path(knowledge.worktree_path) / "unfinished.txt").write_text("keep\n")
+    result = subprocess.run(
+        [sys.executable, "-m", "agent_worktrees", "-p", "knowledge",
+         "finalize", knowledge.worktree_id, "--json"],
+        cwd=configurations["harness"].default_repo.anchor,
+        env={**os.environ, "AGENT_WORKTREES_STATUS_MONITOR": "0"},
+        capture_output=True, text=True, timeout=25,
+    )
+    assert (result.returncode == 0) == (not dirty), result.stdout + result.stderr
+    assert tracking.load_record(knowledge.yaml_path).status == ("active" if dirty else "finalized")
+    claim, = tracking.load_record(harness.yaml_path).resources
+    assert claim.is_unsettled if dirty else claim.is_at_rest
+    assert Path(knowledge.worktree_path).is_dir()
 
 
 def _concluded_knowledge(harness, knowledge):

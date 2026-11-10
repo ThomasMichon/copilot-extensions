@@ -222,8 +222,14 @@ class QueueExecutionWakesMixin:
                     conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} TEXT")
         conn.commit()
 
-    def defer_execution_wake(self, wake: Wake, *, detail: str) -> Wake:
-        """A pre-transport custody refusal does not spend a delivery attempt."""
+    def defer_execution_wake(
+        self, wake: Wake, *, detail: str, retry_after: float | None = None,
+    ) -> Wake:
+        """A pre-transport custody refusal does not spend a delivery attempt.
+
+        ``retry_after`` reschedules the wake (``not_before``) so a drain moves on
+        to other due wakes instead of reclaiming this one immediately.
+        """
         table = wake_table(wake)
         with self._connect() as conn:
             conn.execute("BEGIN IMMEDIATE")
@@ -237,8 +243,8 @@ class QueueExecutionWakesMixin:
                 conn.execute(
                     f"UPDATE {table} SET status = 'pending', attempts = MAX(0, attempts - 1),"
                     " delivery_token = NULL, delivery_expires_at = NULL,"
-                    " last_error = ?, updated_at = ? WHERE id = ?",
-                    (detail, ts, wake.id),
+                    " not_before = MAX(not_before, ?), last_error = ?, updated_at = ? WHERE id = ?",
+                    (ts + (retry_after or 0.0), detail, ts, wake.id),
                 )
                 if table == "wake_outbox":
                     conn.execute(

@@ -194,13 +194,12 @@ repo's account or assume ambient `gh auth` applies:
 
 - **Account -- GitHub targets only.** `<agent-worktrees catalog argv[0]> repos
   account-for <owner|owner/name|reponame>` prints the resolved `gh` login for
-  a GitHub repo (explicit `account:` -> `account_map` -> the remote owner
-  itself -> none/ambient); route every `gh`/API call for it through
+  a GitHub repo (exact `account:` -> `account_map` -> `default_account` ->
+  none/ambient); route every `gh`/API call for it through
   `<agent-worktrees catalog argv[0]> repos gh <owner|owner/name|reponame> --
   <args>`, never a bare `gh <cmd>` or a machine-global `gh auth switch`. A
   bare *registered repo name* resolves through the registry to that entry's
-  own `account:` override first, else its remote owner, rather than being
-  treated as a literal owner. A non-GitHub remote (Gitea, Azure DevOps)
+  own policy, not the upstream publisher's username. A non-GitHub remote (Gitea, Azure DevOps)
   resolves **no** account through this path *unless* its registered entry has
   an explicit `account:` override, which still applies -- `related resolve`
   still surfaces the resolved account (`explicit` vs `derived`) when one

@@ -8,6 +8,7 @@ import runpy
 import shutil
 import subprocess
 import sys
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -30,6 +31,86 @@ native_genesis = pytest.mark.skipif(
 )
 
 
+def selected_service_probe(slot, environment, project):
+    probe = (
+        "import json\nfrom agent_vault.cli import send_command\n"
+        "from agent_vault.service_generation import selected_generation\n"
+        "reply=send_command({'action':'ping'},strict_endpoint=True)\n"
+        "expected=selected_generation()\n"
+        "print(json.dumps({'selected':expected,'service':"
+        "{key:reply.get(key) for key in ('ok','pid','runtime_generation','accepting_work')} "
+        "if reply else None}))\n"
+        "assert expected is not None and reply and reply.get('ok') is True\n"
+        "assert reply.get('accepting_work') is True and reply.get('runtime_generation')==expected\n"
+    )
+    env = {
+        key: value for key, value in environment.items()
+        if key not in {"AGENT_VAULT_INSTALLATION_ID", "AGENT_VAULT_PIPE"}
+    }
+    return subprocess.run(
+        [str(slot / "Scripts" / "python.exe"), "-I", "-B", "-c", probe],
+        env=env, cwd=project, capture_output=True, text=True, encoding="utf-8", timeout=30,
+        **no_window_kwargs(),
+    )
+
+
+def default_service_environment(environment):
+    env = dict(environment)
+    if os.name == "nt" and os.environ.get("UPDATE_DRIVER_NATIVE_SERVICE_LIFETIME") == "1":
+        if not env.get("COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"):
+            raise RuntimeError("Production service qualification requires the native owner's daemon lease")
+        env.pop("COPILOT_EXTENSIONS_TEST_CONTAINED", None)
+    return env
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows explicit service lifetime profile")
+@pytest.mark.parametrize("lease", [False, True])
+def test_default_service_lifetime_requires_and_preserves_its_native_lease(monkeypatch, lease):
+    monkeypatch.setenv("UPDATE_DRIVER_NATIVE_SERVICE_LIFETIME", "1")
+    env = {"COPILOT_EXTENSIONS_TEST_CONTAINED": "1"}
+    if not lease:
+        with pytest.raises(RuntimeError, match="native owner's daemon lease"):
+            default_service_environment(env)
+        return
+    env["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"] = "fixture-native-lease"
+    accepted = default_service_environment(env)
+    assert "COPILOT_EXTENSIONS_TEST_CONTAINED" not in accepted
+    assert accepted["COPILOT_EXTENSIONS_DAEMON_TEST_CONTEXT"] == "fixture-native-lease"
+    assert env["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+
+
+@pytest.mark.parametrize(("generation", "accepting", "expected"), [
+    ("selected", True, 0), ("previous", True, 1),
+    ("selected", False, 1), (None, True, 1),
+])
+def test_selected_service_probe_requires_the_selected_accepting_generation(
+    area, monkeypatch, generation, accepting, expected,
+):
+    client = ModuleType("agent_vault.cli")
+    client.send_command = lambda *_args, **_options: {
+        "ok": True, "pid": 123, "runtime_generation": generation, "accepting_work": accepting,
+    }
+    service = ModuleType("agent_vault.service_generation")
+    service.selected_generation = lambda: "selected"
+    monkeypatch.setitem(sys.modules, client.__name__, client)
+    monkeypatch.setitem(sys.modules, service.__name__, service)
+
+    def run(arguments, **options):
+        assert "AGENT_VAULT_INSTALLATION_ID" not in options["env"]
+        assert "AGENT_VAULT_PIPE" not in options["env"]
+        try:
+            exec(compile(arguments[-1], "<selected-service-probe>", "exec"), {})
+        except AssertionError:
+            return SimpleNamespace(returncode=1)
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(subprocess, "run", run)
+    result = selected_service_probe(area, {
+        "AGENT_VAULT_INSTALLATION_ID": "foreign", "AGENT_VAULT_PIPE": "foreign",
+    }, area)
+    assert result.returncode == expected
+
+
 @pytest.fixture
 def materialized_vault(owning_context):
     payload, installation, project = owning_context
@@ -50,6 +131,26 @@ def materialized_vault(owning_context):
     assert not any(line.startswith("SKIP ") for line in result), result
     assert (payload / "scripts" / "installer_engine.py").is_file()
     assert (payload / "scripts" / "installation-context" / "installation_context.py").is_file()
+    if os.environ.get("UPDATE_DRIVER_NATIVE_STACKS") == "1":
+        # The owner refuses native acceptance for these instrumented copies.
+        for name in ("__main__.py", "first_use.py"):
+            path = payload / "libs" / "update-driver" / "src" / "update_driver" / name
+            content = path.read_text(encoding="utf-8")
+            marker = 'if __name__ == "__main__":\n'
+            assert content.count(marker) == 1
+            path.write_text(content.replace(
+                marker, marker + "    import faulthandler\n"
+                "    faulthandler.dump_traceback_later(30)\n", 1,
+            ), encoding="utf-8")
+        installer = payload / "scripts" / "install.ps1"
+        content = installer.read_text(encoding="utf-8-sig")
+        marker = "Set-StrictMode -Version 2.0\n"
+        assert content.count(marker) == 1
+        transcript = str(project.parent / "native-installer.log").replace("'", "''")
+        installer.write_text(content.replace(
+            marker, marker + f"Start-Transcript -LiteralPath '{transcript}' -Force | Out-Null\n"
+            "Set-PSDebug -Trace 1\n", 1,
+        ), encoding="utf-8-sig")
     return payload, installation, project
 
 
@@ -218,7 +319,7 @@ def test_actual_cold_payload_command_uses_packaged_owner_or_refuses_without_plug
 
 
 def cold_environment(
-    installation, project, area, *, python_prerequisite=False, lifecycle_environment=None,
+    installation, project, area, *, python_prerequisite=True, lifecycle_environment=None,
 ):
     profile = installation.parent
     env = {**os.environ, **(lifecycle_environment or {})}
@@ -250,18 +351,19 @@ def cold_environment(
         env["COPILOT_EXTENSIONS_DAEMON_PYTHON"] = str(interpreter)
     env.pop("UPDATE_DRIVER_WITNESS", None)
     if os.name == "nt":
-        env["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+        system = Path(os.environ["SystemRoot"]) / "System32"
+        env["PATH"] = os.pathsep.join((str(system), str(system / "WindowsPowerShell" / "v1.0")))
         if python_prerequisite:
             env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
             assert Path(shutil.which("python", path=env["PATH"])).samefile(sys.executable)
         else:
             isolation = subprocess.run(
-                [str(Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"),
-                 "-NoLogo", "-NoProfile", "-NonInteractive", "-Command",
-                 "if (Get-Command python -CommandType Application -ErrorAction SilentlyContinue) { exit 92 }; exit 0"],
+                [str(Path(os.environ["SystemRoot"]) / "System32/where.exe"), "/Q", "python"],
                 env=env, cwd=project, capture_output=True, text=True, timeout=30, **no_window_kwargs(),
             )
-            assert isolation.returncode == 0, "native qualification must not expose host Python"
+            assert isolation.returncode == 1, (
+                "native qualification must not expose host Python: " + isolation.stdout + isolation.stderr
+            )
     else:
         tools = area / "native-tools"
         tools.mkdir()
@@ -271,11 +373,16 @@ def cold_environment(
             "rm", "cp", "flock", "grep", "sleep", "setsid", "mkfifo", "rmdir", "curl",
             "tar", "gzip", "head", "chmod", "sed", "tr", "ps", "realpath", "cut",
             "wc", "od", "id", "getent", "hostname", "ln", "touch", "tail", "diff", "base64",
+            "systemd-run", "systemctl",
         ):
             executable = shutil.which(name)
             assert executable, f"native tool unavailable: {name}"
             (tools / name).symlink_to(executable)
         env["PATH"] = str(tools)
+        if os.environ.get("UPDATE_DRIVER_NATIVE_USER_BUS"):
+            env["DBUS_SESSION_BUS_ADDRESS"] = os.environ["UPDATE_DRIVER_NATIVE_USER_BUS"]
+        assert shutil.which("python3", path=env["PATH"]) is None
+        assert shutil.which("uv", path=env["PATH"]) is None
     return env
 
 
@@ -298,6 +405,7 @@ def test_cold_environment_preserves_runner_lifetime_and_hides_product_python(
     project.mkdir()
     env = cold_environment(
         area / "profile/.agent-vault", project, area,
+        python_prerequisite=False,
         lifecycle_environment=lifetime if explicit_lifecycle else None,
     )
     assert env["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
@@ -327,6 +435,29 @@ def test_cold_environment_can_supply_windows_caller_python_without_product_runti
     assert Path(shutil.which("python", path=env["PATH"])).samefile(sys.executable)
     assert env["UV_PYTHON_PREFERENCE"] == "only-managed"
     assert not installation.exists() and not any((installation.parent / "python").iterdir())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="stock Windows application lookup")
+@pytest.mark.parametrize("python_present", [False, True])
+def test_cold_environment_native_probe_rejects_python_on_its_private_path(
+    area, monkeypatch, python_present,
+):
+    system = area / "windows" / "System32"
+    system.mkdir(parents=True)
+    shutil.copyfile(Path(os.environ["SystemRoot"]) / "System32" / "where.exe", system / "where.exe")
+    if python_present:
+        (system / "python.exe").write_bytes(b"must never be executed")
+    monkeypatch.setenv("SystemRoot", str(system.parent))
+    project = area / "project"
+    project.mkdir()
+    installation = area / "profile" / ".agent-vault"
+    if python_present:
+        with pytest.raises(AssertionError, match="must not expose host Python"):
+            cold_environment(installation, project, area, python_prerequisite=False)
+    else:
+        assert cold_environment(
+            installation, project, area, python_prerequisite=False,
+        )["PATH"].split(os.pathsep)[0] == str(system)
 
 
 @pytest.mark.parametrize("entry", ["payload", "primary"])

@@ -53,7 +53,10 @@ def owners(monkeypatch):
     sources = "plugins/agent-machines/src/agent_machines/"
     modules = {
         name: load(machines.__name__ + "." + name, sources + name + ".py")
-        for name in ("health_slots", "health_hourly", "health_collect", "health_report", "health_chart", "cli_health")
+        for name in (
+            "health_slots", "health_hourly", "health_collect", "health_run",
+            "health_report", "health_chart", "health_jobs", "cli_health",
+        )
     }
     services = package(machines.__name__ + ".service_reports")
     services.collect = lambda names, hour, **fields: [
@@ -67,6 +70,65 @@ def owners(monkeypatch):
     parser = argparse.ArgumentParser(allow_abbrev=False)
     modules["cli_health"].add_parser(parser.add_subparsers(required=True))
     return modules, parser
+
+
+def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners):
+    modules, _ = owners
+    jobs = modules["health_jobs"]
+    token = "a" * 64
+    windows = jobs.prepare(
+        platform="win32", payload=r"C:\Example Tools\payload", store=r"C:\Example Data\store",
+        policy_token=token, user_id="S-1-5-21-111-222-333-1001", windows_root=r"C:\Windows",
+    )
+    root = ElementTree.fromstring(windows["artifacts"]["agent-machines-health.xml"])
+    nodes = {"t": jobs.NS}
+    assert root.find("t:Settings/t:Enabled", nodes).text == "false"
+    assert root.find("t:Principals/t:Principal/t:LogonType", nodes).text == "InteractiveToken"
+    assert root.find("t:Principals/t:Principal/t:RunLevel", nodes).text == "LeastPrivilege"
+    assert root.find("t:Settings/t:MultipleInstancesPolicy", nodes).text == "IgnoreNew"
+    assert root.find("t:Settings/t:ExecutionTimeLimit", nodes).text == "PT1M"
+    arguments = root.find("t:Actions/t:Exec/t:Arguments", nodes).text
+    assert "--headless" in arguments and 'health run --store-dir "C:\\Example Data\\store"' in arguments
+    assert f"--apply --expect-policy {token}" in arguments
+    linux = jobs.prepare(
+        platform="linux", payload="/example/payload $one%", store="/example/store",
+        policy_token=token,
+    )
+    assert '"/example/payload $$one%%/bin/agent-machines"' in linux["artifacts"]["agent-machines-health.service"]
+    assert "WorkingDirectory=/example/payload $one%%\n" in linux["artifacts"]["agent-machines-health.service"]
+    assert "TimeoutStartSec=55s\nTimeoutStopSec=5s\n" in linux["artifacts"]["agent-machines-health.service"]
+    assert "OnCalendar=*-*-* *:00:15 UTC\nPersistent=true" in linux["artifacts"]["agent-machines-health.timer"]
+    for result in (windows, linux):
+        assert not result["registered"] and not result["enabled"]
+        assert result["qualification"] == "native-scheduler-not-qualified"
+
+
+def test_native_job_preparation_refuses_unsupported_platforms_and_unsafe_definition_values(owners):
+    modules, _ = owners
+    jobs = modules["health_jobs"]
+    fields = dict(platform="linux", payload="/example/payload", store="/example/store", policy_token="a" * 64)
+    for change in (
+        {"platform": "darwin"}, {"payload": "relative"}, {"store": "/example/\nstore"},
+        {"policy_token": "none"}, {"user_id": "S-1-5-18"}, {"windows_root": "/wrong"},
+    ):
+        with pytest.raises(ValueError):
+            jobs.prepare(**(fields | change))
+
+
+def test_native_job_preparation_preserves_the_original_path_for_owner_validation(owners, monkeypatch, capsys):
+    modules, parser = owners
+    requested = Path("/example/link/../store")
+
+    def policy_preview(store):
+        assert store == requested
+        raise modules["health_slots"].HealthError("absolute-plain-path-required")
+
+    monkeypatch.setattr(modules["health_run"], "policy_preview", policy_preview)
+    args = parser.parse_args(["health", "prepare-job", "--store-dir", str(requested)])
+    assert args.func(args) == 2
+    result = json.loads(capsys.readouterr().err)
+    assert result["error"] == "absolute-plain-path-required"
+    assert not result["registered"] and not result["enabled"]
 
 
 def view(slots):
@@ -454,3 +516,188 @@ def test_explicit_collection_orchestration_keeps_hours_and_parent_budget(owners,
     monkeypatch.setattr(collector.time, "monotonic", lambda: tick)
     with pytest.raises(slots.HealthError, match="collection-timeout"):
         collector.collect(Path("synthetic-store"), "2026-11-09T11:00:00Z")
+
+
+@pytest.fixture
+def one_shot(owners, monkeypatch):
+    modules, parser = owners
+    slots, runner, collector = (modules[name] for name in ("health_slots", "health_run", "health_collect"))
+    policy = {
+        "schema": slots.POLICY_SCHEMA, "version": 2, "publisher": "example-worker",
+        "continuity": "example-generation",
+        "collection": {"bridge_port": None, "services": ["agent-dispatch"]},
+    }
+    files = {"policy.json": policy}
+    calls = []
+    clock = SimpleNamespace(monotonic=lambda: 10.0, time_ns=lambda: STAMP * 1_000_000)
+    for module in (slots, runner, collector):
+        monkeypatch.setattr(module, "time", clock)
+
+    class Store:
+        def __init__(self, name="store"):
+            self.name = name
+
+        def __truediv__(self, name):
+            return Store(name)
+
+        def __str__(self):
+            return self.name
+
+        def stat(self):
+            return SimpleNamespace(st_dev=1, st_ino=2)
+
+    def read(path, validator, **fields):
+        value = copy.deepcopy(files.get(path.name))
+        return (None, None) if value is None else (validator(value), slots._digest(value))
+
+    def write(path, value):
+        calls.append(("write", value["hour"]))
+        files[path.name] = copy.deepcopy(value)
+
+    def admission(store, **fields):
+        calls.append(("admission",))
+        return nullcontext(lambda: calls.append(("fence",)))
+
+    monkeypatch.setattr(slots, "_plain", lambda path, **fields: path)
+    monkeypatch.setattr(slots, "_read", read)
+    monkeypatch.setattr(slots, "_write", write)
+    monkeypatch.setattr(slots, "_sync_directory", lambda path: None)
+    monkeypatch.setattr(slots, "mutation_lock", lambda *a, **k: nullcontext())
+    monkeypatch.setattr(collector, "admission", admission)
+    native = ModuleType("agent_procutil.owned_process")
+    native.OwnedCleanupError = type("OwnedCleanupError", (RuntimeError,), {})
+    monkeypatch.setitem(sys.modules, native.__name__, native)
+    return modules, Store(), files, calls, parser
+
+
+def test_one_shot_policy_preview_and_approval_are_actor_free(one_shot, monkeypatch):
+    modules, store, files, calls, _parser = one_shot
+    runner, slots = modules["health_run"], modules["health_slots"]
+    plan = runner.run(store)
+    assert plan["status"] == "preview" and calls == []
+    token = plan["policy_token"]
+    monkeypatch.setattr(runner.time, "time_ns", lambda: (STAMP + slots.HOUR_MS) * 1_000_000)
+    assert runner.run(store)["policy_token"] == token
+    for expected in ("", "0" * 64):
+        with pytest.raises(slots.HealthError):
+            runner.run(store, apply=True, expected=expected)
+    files["policy.json"]["collection"]["services"] = []
+    with pytest.raises(slots.HealthError, match="store-policy-changed"):
+        runner.run(store, apply=True, expected=token)
+    assert calls == []
+
+
+def test_one_shot_actor_free_apply_uses_real_planner_and_writer_without_candidate_files(one_shot):
+    modules, store, files, calls, _parser = one_shot
+    runner, slots = modules["health_run"], modules["health_slots"]
+    hour = STAMP // slots.HOUR_MS - 1
+    applied = runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    assert applied["status"] == "completed"
+    assert applied["targets"][0]["collection"] == "not-requested"
+    assert applied["targets"][1]["transaction"] == "recorded"
+    assert applied["targets"][1]["applied"] and applied["targets"][1]["changed"]
+    assert calls.count(("admission",)) == 1
+    assert calls.count(("write", hour)) == 1
+    assert set(files) == {"policy.json", f"{hour % slots.SLOTS:03d}.json"}
+    assert files[f"{hour % slots.SLOTS:03d}.json"]["observation"] is None
+
+
+def test_one_shot_actor_free_commit_guard_refuses_policy_drift(one_shot, monkeypatch):
+    modules, store, files, _calls, _parser = one_shot
+    slots, runner = modules["health_slots"], modules["health_run"]
+
+    @contextmanager
+    def drift(*a, **k):
+        files["policy.json"]["continuity"] = "changed"
+        yield
+
+    monkeypatch.setattr(slots, "mutation_lock", drift)
+    result = runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    assert result["status"] == "failed"
+    assert not result["targets"][1]["applied"]
+    assert set(files) == {"policy.json"}
+
+
+def test_one_shot_actor_free_partial_late_write_retains_actual_commit(one_shot, monkeypatch):
+    modules, store, files, calls, _parser = one_shot
+    slots, runner = modules["health_slots"], modules["health_run"]
+    write = slots._write
+    tick = 10.0
+    monkeypatch.setattr(runner.time, "monotonic", lambda: tick)
+
+    def late(*args):
+        nonlocal tick
+        write(*args)
+        tick = 60.0
+
+    monkeypatch.setattr(slots, "_write", late)
+    result = runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    assert result["status"] == "partial"
+    assert result["qualification"] == "collection-timeout"
+    assert result["targets"][1]["transaction"] == "recorded"
+    assert result["targets"][1]["applied"] and result["targets"][1]["changed"]
+    assert len(files) == 2 and len([call for call in calls if call[0] == "write"]) == 1
+
+
+def test_one_shot_actor_free_interruption_retains_unknown_transaction(one_shot, monkeypatch):
+    modules, store, files, _calls, _parser = one_shot
+    slots, runner = modules["health_slots"], modules["health_run"]
+    write = slots._write
+
+    def interrupted(*args):
+        write(*args)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(slots, "_write", interrupted)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    result = caught.value.health_run_result
+    assert result["qualification"] == "collection-interrupted"
+    assert result["targets"][1]["transaction"] == "unknown"
+    assert result["targets"][1]["applied"] is result["targets"][1]["changed"] is None
+    assert len(files) == 2
+
+
+def test_one_shot_actor_free_cleanup_preserves_original_exception_and_partial_result(one_shot, monkeypatch):
+    modules, store, _files, _calls, _parser = one_shot
+    runner, collector = modules["health_run"], modules["health_collect"]
+    owner_type = sys.modules["agent_procutil.owned_process"].OwnedCleanupError
+
+    def collect(*args, **kwargs):
+        raise owner_type("fixture cleanup")
+
+    monkeypatch.setattr(sys.modules[collector.__package__ + ".service_reports"], "collect", collect)
+    with pytest.raises(owner_type) as caught:
+        runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    result = caught.value.health_run_result
+    assert result["qualification"] == "collection-cleanup-unconfirmed"
+    assert result["targets"][1]["collection"] == "failed"
+    assert not result["targets"][1]["applied"]
+
+
+def test_one_shot_actor_free_final_interruption_retains_committed_facts(one_shot, monkeypatch):
+    modules, store, files, _calls, _parser = one_shot
+    runner, collector = modules["health_run"], modules["health_collect"]
+    preview = runner.policy_preview
+    after_admission = False
+
+    @contextmanager
+    def admission(*args, **kwargs):
+        nonlocal after_admission
+        yield lambda: None
+        after_admission = True
+
+    def final_check(*args):
+        if after_admission:
+            raise KeyboardInterrupt
+        return preview(*args)
+
+    monkeypatch.setattr(collector, "admission", admission)
+    monkeypatch.setattr(runner, "policy_preview", final_check)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    result = caught.value.health_run_result
+    assert result["qualification"] == "collection-interrupted"
+    assert result["targets"][1]["transaction"] == "recorded"
+    assert result["targets"][1]["applied"] and result["targets"][1]["changed"]
+    assert len(files) == 2

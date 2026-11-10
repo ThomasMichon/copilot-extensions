@@ -49,7 +49,7 @@ if [[ "$(dirname "$stage")" == "$stage_root" ]]; then
             local code=0
             if [[ "$2" == source ]]; then
                 find "$1" -type d \( -name .git -o -name .venv -o -name __pycache__ \
-                    -o -name .pytest_cache -o -name .ruff_cache -o -name build \
+                    -o -name .pytest_cache -o -name .ruff_cache -o -name .test-runs -o -name build \
                     -o -name dist -o -name node_modules -o -name '*.egg-info' \
                     -o -name '*.dist-info' \) -prune -o -type f \
                     ! -name '*.pyc' ! -name '*.pyo' -print0 || code=$?

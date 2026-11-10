@@ -37,9 +37,10 @@ def _communicate(process, argv, timeout, cancelled):
 def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
     timeout = kwargs.pop("timeout")
     cancelled = kwargs.pop("cancelled", None)
+    confirm_cleanup = kwargs.pop("confirm_cleanup", False)
     kwargs.pop("check", None)
     env = dict(kwargs["env"])
-    owns_group = not _WINDOWS and not contained_test_mode()
+    owns_group = not _WINDOWS and (confirm_cleanup or not contained_test_mode())
     if owns_group:
         env[OWNED_GROUP_ENV] = "1"
     else:
@@ -55,15 +56,27 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
         **kwargs, **(detached_kwargs() if not _WINDOWS else {}),
     )
     completed = False
+    stdout = stderr = None
     try:
         stdout, stderr = _communicate(process, argv, timeout, cancelled)
         completed = True
         return subprocess.CompletedProcess(argv, process.returncode, stdout, stderr)
     finally:
-        with cleanup_phase():
-            if job is not None:
-                job.close()
-            elif process.poll() is None:
-                process.kill()
-            if not completed:
-                process.communicate(timeout=5)
+        try:
+            with cleanup_phase():
+                if job is not None:
+                    if confirm_cleanup:
+                        job.terminate_and_wait(5)
+                    else:
+                        job.close()
+                elif process.poll() is None:
+                    process.kill()
+                if not completed:
+                    process.communicate(timeout=5)
+        except EngineCleanupError as error:
+            error.process = process
+            error.job = job
+            error.stdout = stdout
+            error.stderr = stderr
+            error.returncode = process.returncode
+            raise

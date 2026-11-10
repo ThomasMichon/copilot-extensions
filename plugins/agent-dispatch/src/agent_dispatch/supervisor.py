@@ -773,9 +773,14 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 current = self.client.get_reservation(key)
             except DispatchError:
                 continue
-            if current.get("reservation_pool_bound") is True:
+            if current.get("reservation_pool_bound") is True and (
+                current.get("reservation_pool_assignment") is not None
+                or "reservation_pool_assignment" not in current
+            ):
                 # The coordinator's retained wake requests current-worker affirmation.
                 # A local process-resume return must never perform that acceptance.
+                # An adopted legacy binding has no recovery assignment and stays here;
+                # record_spawn admits it against its bound pool's lanes first.
                 continue
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is None:
@@ -898,6 +903,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         "still held by another active reservation",
                         task.get("id"),
                     )
+                elif "waiting for a free lane" in str(exc):
+                    # An adopted pool body restarts only when its bound pool
+                    # has a free lane; the queue refuses atomically until then.
+                    log.info("deferring resume of cold task %s: pool is full", task.get("id"))
                 else:
                     log.exception(
                         "failed to finalize cold-task resume for %s",

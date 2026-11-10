@@ -65,6 +65,40 @@ def _policy(path, participant):
     return path
 
 
+def test_fresh_repository_projection_cli_uses_only_accepted_state_without_native_owner(tmp_path):
+    state = _policy(tmp_path / "state", "example-receiver")
+    (state / "accepted.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences", "version": 1,
+        "publisher": "example-publisher", "revision": 2, "parent": 1,
+        "domains": {"repositories": {"knowledge": [
+            {"harness_repository_id": "repo-first", "knowledge_repository_id": "repo-shared"},
+            {"harness_repository_id": "repo-second", "knowledge_repository_id": "repo-shared"},
+        ]}},
+        "machines": {"example-worker-wsl": {"repositories": {"knowledge": [
+            {"harness_repository_id": "repo-first", "knowledge_repository_id": "repo-guest"},
+        ]}}},
+    }), encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in state.iterdir()}
+    for harness, machine, target in (
+        ("repo-first", "example-worker", "repo-shared"),
+        ("repo-second", "example-worker", "repo-shared"),
+        ("repo-first", "example-worker-wsl", "repo-guest"),
+    ):
+        result = _cli(
+            "repositories", "--state-dir", state, "--machine", machine, "--harness", harness,
+        )
+        assert result["knowledge_preference"]["knowledge_repository_id"] == target
+        assert result["scope"]["identity_resolution"] == "not-performed"
+        assert result["read_only"] and not result["configuration_applied"] and not result["binding_changed"]
+    invalid = subprocess.run([
+        sys.executable, "-I", "-m", "agent_machines", "preferences", "repositories",
+        "--state-dir", str(state), "--machine", "example-worker", "--harness", "repo-first", "--apply",
+    ], capture_output=True, text=True, timeout=20, **no_window_kwargs())
+    assert invalid.returncode == 2
+    assert "unrecognized arguments: --apply" in invalid.stderr
+    assert {path.name: path.read_bytes() for path in state.iterdir()} == before
+
+
 def _carrier_cli(*arguments, code=0):
     child = subprocess.run(
         [sys.executable, "-I", "-m", "agent_machines", "preferences", "carrier", *map(str, arguments)],

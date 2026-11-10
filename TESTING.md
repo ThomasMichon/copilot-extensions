@@ -1,5 +1,41 @@
 # Testing copilot-extensions
 
+The manual foundation portfolio separates contained functional checks from
+Windows production caller-Job loss. After the ordinary runner prepares its
+test environment, `tools/qualify_foundation_lifetime.py foundation` or
+`first-use` (or its `vault-command` / `vault-bootstrap` service packets) uses
+the existing native test owner, renewable daemon leases and
+the unchanged 900-second aggregate boundary. Only these explicit lifetime
+fixtures permit durable children to leave their caller Jobs; each packet also
+runs the queued-installer restrictive-Job negative and bounded-child cleanup.
+Ordinary runner containment remains unchanged. Contained hook fixtures retain
+their caller Job until owned work settles and do not claim Job-loss survival.
+The native Windows owner samples only its own instance registry in the existing
+resource-poll loop and retains birth-matched process handles through strict
+daemon cleanup, within the original process-count budget. This prevents a
+released fixture PID from being reused before cleanup; it neither signals a
+process nor relaxes unknown or reused-identity holds for unpinned records.
+Default-service acceptance uses the explicit leased native profile too:
+an ordinary contained install cannot prove that its service outlives the
+constructor's cleanup Job. Service checks read the selected generation's
+actual ping endpoint, not the optional Scheduled Task registration.
+The manual `diagnostic_stacks` input instruments only copied Windows service
+fixtures with one passive traceback capture and installer line tracing. Those packets always remain
+diagnostic failures, never native acceptance; rerun without it for qualification.
+Diagnostic execution stops after 180 seconds; normal acceptance keeps its
+unchanged 900-second aggregate. Both hold the same environment-scoped admission
+lease through daemon settlement and sandbox cleanup.
+The explicit `foundation-services` residual selection runs only the two Windows
+service packets with those same owners and limits. It is not a pass of the full
+seven-job `foundation` portfolio.
+Linux daemon-scope qualification uses the actual disposable user service
+manager and its bus, not a fake bus; only a manager created by that job is
+stopped afterward. That does not admit a private-HOME default-service venue:
+the Linux Vault default-service cases remain explicitly unqualified under
+issue #9448 F9 until the venue owner supplies matching HOME/unit search paths,
+bus/cgroup lifetime and authoritative cleanup. Their separate
+`UPDATE_DRIVER_NATIVE_LINUX_SERVICE=1` selector is not proof of those conditions.
+
 ## Select the evidence first
 
 This page is a reference catalog, not a sequential checklist. Read the lane
@@ -161,6 +197,30 @@ without a configured feed. Passing the steady recovery packet does not qualify
 this negative case, all pending-work sources or productive enablement.
 The protected admission owner derives native preparation and sanitization
 from its known packet registry, never a caller-supplied flag or name prefix.
+
+`submit --packet native-driver-observation-loss` separately selects
+`test_opt_in_receiver_sdk_observation_loss_preserves_hold` from that fixture.
+After the isolated model provider observes the actual controlled request, the
+fixture closes only its authenticated SDK/control stream, not the public
+broker connection. The original observation-loss hold must survive source
+expiry and exact native retirement; a fresh lease must not create another
+incarnation or replay the interrupted input. This uses the same pins, public
+preparation, sanitization and 120/180/300/420-second limits, without a feed.
+The in-flight packet alone does not qualify loss of observation. None of these
+packets enables productive renewal or qualifies unrelated pending-work sources.
+
+The separate `native-driver-startup-seed`, `native-driver-startup-no-seed` and
+`native-driver-startup-cold-resume` packets each select one exact candidate case
+in `tests/native/test_headed_extension.py`. The seed case delays observation
+of the actual SDK startup event while the isolated provider holds the original
+response. The real retained Bridge client must observe pending readiness
+without sending, then accept one controlled enqueue after the original seed is
+observed and before its turn is idle. No-seed and cold-resume cases separately
+prove that an absent opening seed is not represented as idle or restoration.
+All retain exact history/session identity and fixture cleanup, the same native
+pins, public-only preparation, sanitization and 120/180/300/420-second limits.
+None inherits qualification from a steady recovery packet, qualifies all
+caller modes or changes productive activation authority.
 
 Before any staging or dispatch, the client reads the selected protected
 controller's `tools/windows-qualification-support.json`. Missing/unsupported
@@ -324,13 +384,44 @@ For prepared Windows file-local writes, `prepared-membership-native.yml` runs
 The controls use actual membership and guard-map publication for legacy and
 installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
+The safe/admission packet also covers complete prepared all-read batches using
+the same native envelope validator as writes. It checks legacy and selected-cell
+entries, mixed read kinds, batch-over-single precedence, working-directory
+context, 128/129 calls, later protected/unknown/shell/malformed members and
+extra keys that shadow dictionary metadata. Missing/older prepared evidence
+and missing or changed normalizer contracts retain byte-exact policy input.
+Real-worker comparisons cover the read no-op and a later protected-write deny;
+the original child/item/group bounds remain unchanged.
 Native batch cases prove all-call admission with mixed reads/writes, per-call
 arguments, batch-over-single precedence, the 128-call bound and a later
 protected/foreign member defeating an earlier safe write. The separate
 structured packet covers the direct-plus-entry alias union, JSON arguments,
 deduplication and 128-entry/target limits, with late protected/foreign/nested
-targets, incomplete entries and patch fallback. It also compares structured
+targets, incomplete entries and fragmentary patch fallback. It also compares structured
 writes with the real original policy in legacy and selected-cell fixtures.
+The disjoint positive and protected write-name packets cover each original
+non-patch write alias, its protected-state target, JSON/structured arguments
+and heterogeneous batches. Real-policy comparisons in legacy and selected-cell scopes run in
+their own packet, retaining the same child/item/group limits.
+Disjoint patch-positive, protected, fallback and real-policy packets cover
+object/JSON/freeform input, every original Add/Update/Delete/Move header,
+CRLF, all-field/direct/structured union and mixed native batches. They retain
+both move endpoints, byte-exact whole-event fallback and real protected-state
+denials in legacy and selected-cell contexts. Exact 131072/131073-character
+field and 128/129-target boundaries, combined-union overflow, malformed,
+fragmentary, targetless, non-object JSON, foreign/nested/anchor and protected
+freeform cases run without changing the existing child/item/group limits.
+The commented-JSON regression preserves strict-original/freeform behavior
+when a permissive shell decoder would otherwise discard a protected header.
+Fixture-only phase markers report shell command entry, script entry,
+membership, native proof and policy entry on a native-write child timeout;
+they use the already-captured stderr pipe instead of opening a file per stage.
+Only complete, recognized marker lines are removed from successful stderr;
+genuine errors, blank lines, malformed markers and truncated output remain.
+Registered entries assert that membership-marker opening precedes marker JSON
+decoding, so a similarly shaped content reader cannot stand in for that stage.
+They never retry the child, extend its ten-second bound or classify the
+unobserved stalled phase as a known flake.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
@@ -1710,6 +1801,19 @@ and stderr, the unchanged native nonzero result and unaffected unscoped
 passthrough controls. This proves stream delivery, not installed full-update
 success or native publication settlement.
 
+MCP's separate explicit physical-generation packet is
+`python tools/run-plugin-tests.py agent-mcp --test-file tests/test_generation_handover.py --allow-explicit-tiers --timeout 240 --plugin-timeout 260 --test-timeout 180`.
+It constructs private immutable source runtimes using the installer engine,
+then exercises a prestarted keeper and the internal launcher's real startup.
+The original conduit and upstream survive a physical backend change,
+authenticated outgoing retirement and supported rollback. Two clients share
+one keeper; actual interpreter prefix, module path, backend PID, mutation and
+initialization counts are asserted. Native Windows and POSIX source runs pass.
+The fixture uses contained,
+leased instance ownership and exact cleanup, not host credentials, installed
+services, desktop observation or a production-lifetime claim. It is not part
+of required unit-only CI and does not activate the ordinary forwarder.
+
 The optional `update_diagnostics` lane also runs MCP's focused
 `test_source_install_transactions.py -k footprint_routes` controls and
 `test_source_build.py` operational-identity and
@@ -1854,6 +1958,19 @@ approval engine is added by the pure notice controls. copilot-extensions
 
 How to run the plugin test suites, explicit development checks, and the
 **opt-in end-to-end smoke tests** that require real infrastructure.
+
+The manual `installation-context-full.yml` `foundation` portfolio runs its
+five Windows cold first-use modules in independent packets. They retain the
+existing 900-second runner aggregate and 25-minute job caps instead of sharing
+one aggregate across multiple independent cold installations. All previous
+module selections remain covered; required unit-only CI is unchanged.
+
+Linux cold first-use fixtures keep Python and uv out of the product's native
+tool PATH. The runner-owned daemon lease separately selects an existing trusted
+system interpreter for test lifecycle accounting. That control-plane selector
+does not supply the product bootstrap interpreter or bypass lease enforcement;
+these cases prove Python-free product admission, not an interpreter-free pytest
+harness.
 
 Dispatch's reversible-maintenance Windows packet uses the existing
 `installation-context-full.yml` manual workflow with
@@ -5005,6 +5122,18 @@ Windows uses the public embedding stop event; Linux exercises CLI SIGTERM.
 Windows passive-reader rename sharing is tested at the actual file boundary.
 These controls do not qualify a live provider, built container or fleet
 placement, and do not close the remaining production-performance/update gates.
+The same standalone lane discovers `services/pr/tests/test_local_foreground.py`,
+`test_local_lifetime.py` and `test_local_recovery.py`. They select the independent
+Linux `repository-local/v1` profile with no running Core/Gateway: both synthetic
+providers populate before subscriptions, actual packaged CLI processes query
+and consume continuing events, and original-root restart preserves each
+consumer's original IDs and ACK. Separate embedded foreground controls hold
+exact native/disk cleanup and inject post-replacement persistence uncertainty.
+These process fixtures remain in the manual standalone lane, not required
+unit-only PR CI. Use a short private runner scratch root: the selected Unix
+socket is an absolute child of its dedicated state root and is limited to
+100 encoded bytes. The local runtime is Linux-only; strict typing separately
+analyzes both Linux and Windows.
 The focused observer/service tests additionally exercise a four-read admission
 bound, rolling progress past a blocked target, distinct subscriber identities,
 real native-child completion order and retained writer custody until every
@@ -5680,6 +5809,40 @@ separately exercises actual retained Dispatch events, private listener,
 confirmed slot transactions and report/chart, plus competing native processes
 and normal/crash run-lock release. Required unit CI starts none of those actors;
 fixture-resolved installation admission is not deployed inventory or scheduling.
+
+The same actor-free composition packet exercises policy-approved `health run`
+preview and the shared in-memory transaction planner/writer using substituted
+storage, admission and native owners. Approval drift, independent target facts
+and late confirmed commits remain explicit. The native collection packet also
+executes one approved invocation through a real fixture listener and retained
+Dispatch export into both slots, then injects a second-target failure while
+preserving the first confirmed commit and normal report/chart. It does not
+enroll a job or qualify an installed runtime/carrier.
+Interruption controls retain an unknown transaction before writer entry;
+in-process cleanup controls recover the original retry owner and partial
+result. Native controls additionally exercise the durable fence after CLI exit,
+delayed second requests, prompt fixture cancellation and both payload entry
+points' refusal to provision a missing one-shot runtime.
+Final post-admission interruption retains already confirmed commits and any
+outstanding native cleanup owner; pre-plan cancellation fabricates no result.
+The native selected-runtime fixture copies the actual early CLI/export closure,
+not the unrelated coordinator tree, keeping preparation outside the operation
+budget and inside the unchanged test deadline.
+
+The same actor-free packet renders inert Windows/Linux native job definitions
+and refuses unsupported platforms or unsafe definition values; it never
+contacts a scheduler. Agent Machines' selected `tests/test_health_jobs.py`
+packet additionally exercises the normal preparation parser and unchanged
+store/payload state. `tests/test_health_job_payload.py` creates fresh private
+interpreter fixtures and drives the shipped PowerShell/Bash entries through
+missing, preview/apply-only, capable and rolled-back declarations. Unsupported
+providers must never execute. `tests/test_configuration_payload_readonly.py`
+also covers missing-runtime preparation without bootstrap. Select these with
+the managed runner's repeatable `--test-file` and `--allow-explicit-tiers`
+options. Bash on Windows is a script compatibility check, not native Linux
+scheduler qualification. Actual scheduler registration, two-cycle headlessness,
+late wake, deadline/storage and cleanup qualification remain explicit opt-in
+gates before enrollment; the preparation packet does not execute them.
 
 The actor-free `test_hourly_contributions.py` packet executes the canonical
 service contribution codec and collection policy with substituted native owners
