@@ -1353,7 +1353,7 @@ def mark_complete(root: Path, version: str, *, payload_hash: str | None = None,
                     )
             vdir.mkdir(parents=True, exist_ok=True)
             require_immutable_environment(vdir)
-            if not is_dev_generation(version):
+            if version != DEV_VERSION and not is_dev_generation(version):
                 _runtime_component("versioned_runtime_publication").prepare_retained_generation(vdir)
             fd, name = tempfile.mkstemp(prefix=dest.name + ".tmp-", dir=vdir)
             tmp = Path(name)

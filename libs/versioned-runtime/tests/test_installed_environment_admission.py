@@ -196,6 +196,21 @@ def test_completed_legacy_slot_is_not_backfilled_by_completion_reuse(installed):
     assert {path: path.read_bytes() for path in before} == before
 
 
+def test_mutable_dev_completion_does_not_validate_numbered_generation(tmp_path):
+    owner = "worktree:development"
+    runtime.claim_dev(tmp_path, owner)
+    slot = runtime.slot(tmp_path, "dev")
+    marker = runtime.mark_complete(tmp_path, "dev", payload_hash="first", dev_owner=owner)
+    generation = _bootstrap(slot) / "runtime-generation"
+    generation.write_bytes(b"not-a-numbered-generation\n")
+    original = generation.read_bytes(), generation.stat().st_mtime_ns
+    assert runtime.mark_complete(
+        tmp_path, "dev", payload_hash="replacement", dev_owner=owner,
+    ) == marker
+    assert runtime.read_marker(tmp_path, "dev")["payload_hash"] == "replacement"
+    assert (generation.read_bytes(), generation.stat().st_mtime_ns) == original
+
+
 def test_group_writable_bootstrap_is_protected_before_completion(installed):
     root, slot, _site = installed
     launcher = _bootstrap(slot) / "runtime_launcher.py"
