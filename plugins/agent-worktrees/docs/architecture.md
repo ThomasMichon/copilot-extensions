@@ -3265,6 +3265,12 @@ the Picker moved to `worktree-manager/`.
 standalone Python entry. Existing sessions that cached the old command keep
 using `hook_client.py`; a payload refresh is not proof their command changed.
 
+The declared scripts root, native script and admission-helper filesystem paths
+use `IO.Path.Combine` directly. A prepared native read therefore does not
+initialize `Microsoft.PowerShell.Management` merely to join these fixed child
+paths. Source/context/legacy selection and the original runtime, policy and CWD
+compatibility routes remain unchanged.
+
 For the default installation, `view`, `rg` and `glob` can return without Python,
 IPC, repository discovery or runtime selection. `hook-read-policy.json` binds
 that exemption to the exact normalized sources of all four guards. Missing,
