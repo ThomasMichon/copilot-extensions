@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import sys
 import threading
 
 from . import output
@@ -21,11 +20,10 @@ def result_ok(result: dict) -> bool:
 
 class SyncProgress:
     def __init__(self):
-        self._output = sys.stdout
         self._lock = threading.Lock()
         self._stopped = threading.Event()
         self._message = "Loading Sync configuration"
-        self._failure: Exception | None = None
+        self._failure: BaseException | None = None
         self._thread: threading.Thread | None = None
 
     def _write(self, frame):
@@ -33,9 +31,8 @@ class SyncProgress:
             raise self._failure
         payload = json.dumps(frame) + "\n"
         try:
-            self._output.write(payload)
-            self._output.flush()
-        except Exception as error:
+            output.write_real_stdout(payload)
+        except BaseException as error:
             self._failure = error
             self._stopped.set()
             raise
@@ -55,7 +52,7 @@ class SyncProgress:
                         "type": "progress", "pct": None,
                         "msg": f"Waiting: {self._message}",
                     })
-            except Exception as error:
+            except BaseException as error:
                 self._failure = error
                 self._stopped.set()
 

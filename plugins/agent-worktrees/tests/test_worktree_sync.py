@@ -484,8 +484,7 @@ def test_sync_stream_malformed_tracking_has_a_terminal_result(tmp_path, monkeypa
 
 def test_sync_stream_does_not_retry_a_failed_terminal_write(tmp_path, monkeypatch):
     import io
-
-    from agent_worktrees import sync_progress
+    import sys
 
     class Output(io.StringIO):
         terminal_attempts = 0
@@ -497,7 +496,8 @@ def test_sync_stream_does_not_retry_a_failed_terminal_write(tmp_path, monkeypatc
             return super().write(text)
 
     output = Output()
-    monkeypatch.setattr(sync_progress.sys, "stdout", output)
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(sys, "__stdout__", output)
     monkeypatch.setattr(cfg, "load_config", lambda: SimpleNamespace(default_repo=object()))
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
     with pytest.raises(OSError, match="stdout write is unconfirmed"):
@@ -505,6 +505,60 @@ def test_sync_stream_does_not_retry_a_failed_terminal_write(tmp_path, monkeypatc
             stream=True, json=True, worktree_id="missing",
         ))
     assert output.terminal_attempts == 1
+
+
+def test_sync_stream_shutdown_flush_never_replays_a_failed_frame(monkeypatch):
+    import io
+    import sys
+
+    from agent_worktrees import output, sync_progress
+
+    class Raw(io.RawIOBase):
+        failing = True
+
+        def __init__(self):
+            super().__init__()
+            self.attempts = []
+
+        def writable(self):
+            return True
+
+        def write(self, data):
+            self.attempts.append(bytes(data))
+            if self.failing:
+                raise OSError("fixture buffered flush failed")
+            return len(data)
+
+    raw = Raw()
+    stream = io.TextIOWrapper(io.BufferedWriter(raw), encoding="utf-8")
+    native_attempts = []
+    native_write = output.os.write
+
+    def fail_native_stdout(fd, payload):
+        if fd == 1:
+            native_attempts.append(payload)
+            raise OSError("fixture unbuffered write failed")
+        return native_write(fd, payload)
+
+    frame = {"type": "error", "message": "fixture refusal"}
+    try:
+        with monkeypatch.context() as patch:
+            patch.setattr(sys, "stdout", stream)
+            patch.setattr(sys, "__stdout__", stream)
+            patch.setattr(output.os, "write", fail_native_stdout)
+            progress = sync_progress.SyncProgress()
+            with pytest.raises((OSError, SystemExit)):
+                progress._write(frame)
+            raw.failing = False
+            stream.flush()
+            assert raw.attempts == []
+            with pytest.raises((OSError, SystemExit)):
+                progress.stage("must not write after failure")
+            assert len(native_attempts) == 1
+            assert json.loads(native_attempts[0]) == frame
+    finally:
+        raw.failing = False
+        stream.close()
 
 
 @pytest.mark.parametrize("selector", ["tail", "../invalid"])
@@ -568,6 +622,7 @@ def test_streamed_sync_batch_exception_retains_completed_results(tmp_path, monke
 
 def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch):
     import io
+    import sys
     import threading
 
     from agent_worktrees import sync_progress
@@ -582,7 +637,8 @@ def test_sync_stream_waiting_frames_stop_before_the_terminal(monkeypatch):
             return written
 
     output = Output()
-    monkeypatch.setattr(sync_progress.sys, "stdout", output)
+    monkeypatch.setattr(sys, "stdout", output)
+    monkeypatch.setattr(sys, "__stdout__", output)
     monkeypatch.setattr(sync_progress, "HEARTBEAT_SECONDS", 0.01)
     with sync_progress.SyncProgress() as progress:
         progress.stage("fixture fetch")

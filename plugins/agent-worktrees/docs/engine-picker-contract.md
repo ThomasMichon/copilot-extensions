@@ -155,7 +155,8 @@ invented for that item, later items are not started, and successful earlier
 mutations are not claimed rolled back. Ordinary non-streamed exception handling
 is unchanged.
 Ordinary preflight exceptions, including malformed tracking documents, also
-produce a terminal error. Unconfirmed stdout writes are never retried; loss
+produce a terminal error. Frames use the shared unbuffered, single-attempt stdout
+writer. Unconfirmed stdout writes are never retried; loss
 of a complete terminal frame remains an unknown observation, not replay authority.
 
 The producer does not add a Picker consumer, timeout policy, cancellation,

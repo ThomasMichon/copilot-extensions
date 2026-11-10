@@ -123,7 +123,7 @@ native helper seams remain available. Private test fixtures copy one fresh seed
 into independent repositories and inspect actual loose refs, retaining real Git
 synchronization, independent pair storage, failure assertions and cleanup.
 
-Windows x64 source qualification covers 36 distinct cases: 13 stream/current-owner
+Windows x64 source qualification covers 37 distinct cases: 14 stream/current-owner
 controls and 23 default/pair/freshness controls. Evidence and reuse scope are
 recorded in the [dated Journal](#journal).
 The ordinary 30-second item and 300-second group bounds remain unchanged.
@@ -172,12 +172,20 @@ live venue or rollout is admitted. No installed behavior is claimed.
 
 ### 2026-11-10 - Producer validation and refinement
 
+- A standard-library buffered-stream reproduction showed that remembering a
+  failed flush does not remove queued bytes: shutdown can attempt them again.
+  The focused case failed before repair. Frames use the shared unbuffered
+  single-attempt stdout writer, and a failure, including its terminal signal,
+  is retained across the heartbeat/main thread boundary. Shutdown flushing
+  has no queued frame, and later stages cannot write after failure.
+  All 14 affected stream/current-owner controls pass; the 23 unchanged
+  default/pair/freshness outcomes retain their qualification.
 - Three additional regressions demonstrated a missing canonical schema version,
   an unframed non-mapping tracking refusal and a second attempt after an
   unconfirmed terminal write. All failed before correction. Terminal results
   use the shared ordinary-JSON formatter; the stream boundary reports ordinary
   preflight exceptions, while default CLI handling is untouched. The progress
-  writer remembers a failed write and never attempts its bytes again.
+  writer remembers a failed write and rejects explicit subsequent frame writes.
 - All 13 affected stream/current-owner cases pass on the corrected source.
   The 23 default/pair/freshness cases retain the preceding passing qualification:
   their executed paths and fixtures are unchanged by the stream-only formatter,
