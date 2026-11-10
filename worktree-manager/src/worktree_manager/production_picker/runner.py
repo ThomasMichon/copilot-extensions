@@ -280,13 +280,14 @@ def capture(
     wait_pivot: float = 0.0,
 ) -> dict[str, str]:
     """Capture the Manager-owned production Picker headlessly."""
+    from .picker_tui import capture as picker_capture
+
+    picker_capture.validate_wait_pivot(wait_pivot)
     _prepare(project, heal=False)
     if live:
         from .picker_tui import data_ssh as source
     else:
         from .picker_tui import data_local as source
-    from .picker_tui import capture as picker_capture
-
     return picker_capture.capture(
         source,
         live=live,
