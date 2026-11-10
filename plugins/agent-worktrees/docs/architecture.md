@@ -3275,9 +3275,15 @@ contract tests also exercise each real guard's read decision, not just hashes.
 A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
-For prepared Windows membership, a single `create` or `edit` target can also
-return natively when current Git metadata proves it belongs to that same
-linked worktree. The shell reads the live stateless configuration and the
+For prepared Windows membership, `create` and `edit` can also return natively
+when each call has one direct target and current Git metadata proves every
+target belongs to that same linked worktree. A native batch may contain at most
+128 calls, limited to those writes and optional `view`, `rg` or `glob` reads,
+with at least one write. The entire envelope and every target must qualify;
+batch members take precedence over top-level tool fields, as in the original
+`tool_call_forms.py` normalizer. Membership, source identity, configuration and
+inventory checks are shared within the event, not repeated per call.
+The shell reads the live stateless configuration and the
 original complete guarded-anchor inventory and posture view; it does not
 cache an allow decision or infer anchor protection from posture rows alone.
 Inventory identities are validated lexically without filesystem probes of
@@ -3285,7 +3291,8 @@ unrelated repositories; current source and target paths retain live checks.
 Stateless checks retain the original guard's universal-newline, whitespace
 and leading-dot path normalization, including the normalized basename.
 Protected personal-state paths, anchors, foreign or nested repositories,
-batch/structured writes, unsupported paths and incomplete evidence retain
+unsupported batch members, structured writes, malformed/oversized batches,
+unsupported paths and incomplete evidence retain
 the original raw-event policy path. Eligible installation cells retain the
 same complete native membership proof; unprepared cells retain validation.
 This exemption additionally fingerprints the original target-form and map
