@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -74,7 +75,11 @@ def test_cleanup_refuses_busy_launch_before_record_or_liveness_read(
     tmp_path, monkeypatch, force,
 ):
     path = tmp_path / "one.yaml"
-    original = "worktree_id: one\nrepo: sample\n"
+    original = json.dumps({
+        "worktree_id": "one", "repo": "sample", "branch": "worktree/one",
+        "worktree_path": str(tmp_path / "one"), "machine": "fixture",
+        "platform": "windows", "status": "completed", "sessions": [],
+    })
     path.write_text(original, encoding="utf-8")
     read = Mock(side_effect=AssertionError("busy launch must precede record read"))
     real_guard = worktree_lifecycle.guard
