@@ -7,6 +7,7 @@ changes telemetry configuration, and does not discover or publish to OneDrive.
 ```text
 agent-machines health report --input <local-jsonl> --input <another-local-jsonl>
 agent-machines health report --input <local-jsonl> --chart <new-chart.svg>
+agent-machines health report --store-dir <absolute-local-health-store> --service agent-dispatch --chart <new-chart.svg>
 ```
 
 The command writes `agent-machines.health-report.v1` JSON to stdout. `--now`
@@ -68,7 +69,7 @@ agent-machines health report --service queue=agent-dispatch --hour 2026-11-09T12
 
 An explicit `--service` selects the existing same-cell installation owner,
 not PATH, a home-directory scan or a synchronized command. At least one
-`--input` or `--service` is required. `--hour` selects exactly one absolute UTC
+`--input`, `--service` or `--store-dir` is required. `--hour` selects exactly one absolute UTC
 hour inside the report's 168-hour window; the default is its current hour.
 There are at most eight selections, 30 seconds for collection, ten seconds per
 child and 64 KiB each for complete stdout/stderr. Native tree and retained-pipe
@@ -254,10 +255,65 @@ acknowledgement through stderr when available, never an untouched slot.
 
 Inspect rechecks policy bytes and namespace identity after its scan; a concurrent
 policy change requires another read, not a view qualified by the old owner.
-These are additive explicitly selected commands. Existing `health report`
-behavior is unchanged. Discover `health --help` on the selected runtime before
+These are additive explicitly selected commands. Discover `health --help` on the selected runtime before
 calling them; an older runtime's missing command does not authorize a fallback
 writer, direct slot edits, runtime update or carrier enrollment.
+
+## Composed local health view
+
+`health report --store-dir <absolute-local-store>` composes the existing
+`health inspect` reader with the report, optionally alongside explicit telemetry
+files and installed service contributions. It is one read-only report invocation,
+not a combined observe/record job: it neither calls the listener nor changes the
+store, its policy, revisions or writer lock. Observation and confirmed storage
+remain separate explicit operations. A chart destination inside the selected
+store is refused, including new paths; keep presentation artifacts outside its
+exclusive namespace. Both lexical and resolved overlap refuse. A store that
+cannot be resolved remains unavailable evidence while a valid external chart
+can still be written; an unresolvable chart is instead an output refusal.
+
+The additive `health` object has `state: available` and the complete age-qualified
+`view`, or `state: unavailable` and `reason: local-store-unavailable` if the store
+cannot be qualified. Available means readable, not healthy. A missing, invalid
+or changed store policy cannot suppress independent valid telemetry or service
+results. It creates no missing directory and includes no raw path/error content.
+An available view retains per-slot missing, invalid, expired, future and
+owner-mismatch conditions, original domain times, observed states, proof ages,
+unknown counts/directions and the reader's `input-supplied-not-verified`
+qualification. Explicit publisher/continuity identifiers remain local view data,
+not verified identity or permission to share them.
+
+The file report and health reader use the same `--now` cutoff and 168 absolute
+UTC hours. Service contributions keep their separately documented collection
+time semantics. A readable historical listener observation never becomes
+authenticated SSH, a fresh proof or evidence of active agents. Health slots are
+not added to event totals or duration statistics. The SVG displays separate
+slot/domain rows, visible gaps and stale evidence; cell titles retain observed
+state, source age, evidence and reason. A report without `--store-dir` retains
+its prior output and does not inspect a store.
+
+The reader adds at most 168 slot reads of 64 KiB each plus its bounded policy
+checks; it does not enumerate unrelated files or acquire a writer lock. These
+are work/byte bounds, not a wall-clock deadline for a blocked filesystem.
+Native job overlap, stopped storage, Windows/Linux lifetime, installed adoption,
+scheduling and carrier qualification remain open before enrollment.
+
+This expands the existing `agent-machines.health-report.v1` result with an
+opt-in field, without changing either strict v1 policy/observation schema.
+Providers expand first; no automated caller or schedule is migrated here.
+Check `health report --help` on the exact selected runtime for `--store-dir`
+before selecting this optional feature. Legacy/rolled-back providers retain
+their old report syntax; missing support means the composed view is unavailable,
+not permission to drop a required health input or write slots directly.
+
+`tools/promotion_unit_tests/test_health_composition.py` covers actual age
+projection, report/parser composition, independent unavailable evidence and
+static rendering without native actors. The selected
+`tests/native/test_health_observe_consumer.py` extends actual loopback observation
+through confirmed slot storage to the normal report/chart and verifies storage
+is untouched by reporting. `tests/native/test_health_report_consumer.py` retains
+the real measurement/sink flow when an explicitly selected store is unavailable.
+These source/fixture controls do not establish installed or activated publishing.
 
 ## Passive local Bridge listener
 
