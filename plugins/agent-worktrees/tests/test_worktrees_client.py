@@ -56,6 +56,33 @@ def request(**extra):
     return {"contract_version": 1, "project": "project", **extra}
 
 
+@pytest.mark.parametrize("saved", [False, True])
+def test_semantic_archive_from_older_selection_is_refused_without_recompute(
+    tmp_path, monkeypatch, no_caller_compute, saved,
+):
+    path = tmp_path / "current.sqlite3"
+    store = projection.WorktreesProjection(path)
+    store.publish("project", [{
+        "id": "archived", "status": "archived", "checkout_present": True,
+    }], observed_at=1)
+    payload = request(include_missing=False)
+    try:
+        if saved:
+            original = client.read_advisory
+            monkeypatch.setattr(
+                client, "read_advisory",
+                lambda db, project, **kw: original(db, project, include_missing=True),
+            )
+            with pytest.raises(projection.ProjectionUnavailable, match="selection"):
+                client.saved_result(payload, "legacy saved selection", db_path=path)
+        else:
+            result = {"ok": True, "contract_version": 1, **store.read("project")}
+            with pytest.raises(projection.ProjectionUnavailable, match="selection"):
+                client.validate_result(result, payload)
+    finally:
+        store.close()
+
+
 def test_waiting_read_starts_once_and_waits_past_old_recovery_budget(
     monkeypatch, capfd, no_caller_compute,
 ):

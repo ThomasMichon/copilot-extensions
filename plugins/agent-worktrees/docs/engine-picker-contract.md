@@ -530,6 +530,14 @@ one indexed slot; it does not backfill sessions or enumerate the fleet.
 The existing authenticated monitor control endpoint advertises
 `worktrees-current-v1`. Its request carries `contract_version: 1`, project,
 optional status/platform/ID/codename selection and Boolean `include_missing`.
+The CLI maps `--all` to `include_missing: true`, retaining complete inventory,
+including archives. Its default `false` selects present, non-archived rows:
+a retained checkout cannot make an archive active again. Publisher-built
+selection indexes apply that predicate before suffix resolution and feed
+barriers. Archived rows remain in complete publications and exact explicit
+inventory reads; an archive transition removes only their default membership.
+Clients reject an older resident or saved selection that still admits an
+archived default row, without recomputing facts or rewriting the saved store.
 An optional Boolean `passive: true` marks a demand-free read: the resident
 answers from its publication but neither renews project scan demand nor wakes
 its producer for an unpublished project, and the feed refuses it. Its

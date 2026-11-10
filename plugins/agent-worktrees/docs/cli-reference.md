@@ -15,6 +15,15 @@ ASCII-safe JSON so Unicode paths do not depend on the console's encoding.
 This changes no account/ownership
 checks, command deadlines, runtime selection or immutable slot bytes.
 
+## Worktree listing and archives
+
+Ordinary `list` output excludes semantic archives, including archived records
+whose checkouts remain. `--all` explicitly includes archived and missing
+checkouts; combine it with `--tracking-status archived` for archive inspection.
+Other status/platform/identity selectors retain their existing meaning.
+This applies to plain, JSON, cached and current/feed listings. Listing does not
+delete or rewrite archived identity, lineage or session history.
+
 ## Explicit status refresh
 
 `worktree-status-bundle --worktree <id> --force-refresh --json` requests fresh

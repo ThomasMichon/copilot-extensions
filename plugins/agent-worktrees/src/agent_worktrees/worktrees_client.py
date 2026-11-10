@@ -128,7 +128,10 @@ def validate_result(result: dict, request: dict, *, quality: str = "current") ->
                 selection["platform_filter"] is not None
                 and row.get("platform") != selection["platform_filter"]
             )
-            or (not selection["include_missing"] and row.get("checkout_present") is not True)
+            or (
+                not selection["include_missing"]
+                and (row.get("checkout_present") is not True or row.get("status") == "archived")
+            )
             or (selection["codename"] is not None and row.get("codename") != selection["codename"])
             or (
                 selection["worktree_id"] is not None
@@ -199,7 +202,7 @@ def saved_result(request: dict, reason: str, *, db_path=None) -> dict:
     )
     if request["contract_version"] == observations.VERSION:
         result["project"] = project
-    return result
+    return validate_result(result, request, quality="advisory")
 
 
 def _wait_current(request: dict, *, recover: bool) -> dict:
