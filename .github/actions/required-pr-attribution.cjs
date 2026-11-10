@@ -240,11 +240,14 @@ function snapshot(pr, peers) {
 }
 
 function ownedCheck(check, context) {
-  const runPrefix = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/`;
+  const repositoryUrl = `${context.serverUrl}/${context.repo.owner}/${context.repo.repo}`;
+  const runPrefix = repositoryUrl + "/actions/runs/";
+  const canonicalCheckUrl = Number.isSafeInteger(check.id) && check.id > 0 &&
+    check.details_url === `${repositoryUrl}/runs/${check.id}`;
   return check.name === CONTEXT && check.app?.slug === "github-actions" &&
     /^source-metadata:[a-f0-9]{64}(?::unverified)?(?::superseded)?$/.test(check.external_id || "") &&
-    typeof check.details_url === "string" && check.details_url.startsWith(runPrefix) &&
-    /^[0-9]+$/.test(check.details_url.slice(runPrefix.length));
+    typeof check.details_url === "string" && (canonicalCheckUrl ||
+      (check.details_url.startsWith(runPrefix) && /^[0-9]+$/.test(check.details_url.slice(runPrefix.length))));
 }
 
 async function reconcilePR(github, context, number, budget) {

@@ -315,6 +315,23 @@ test("scoped refresh preserves current invalid metadata and same-head collision 
   }
 });
 
+test("scoped repair recognizes provider-normalized direct check URLs without accepting a foreign check ID", async () => {
+  const { github, created } = headFixture([{ ...pr(marker), number: 1 }]);
+  const direct = {
+    name: "source-attribution", head_sha: "head", status: "completed", conclusion: "failure",
+    external_id: "source-metadata:" + "a".repeat(64) + ":superseded",
+  };
+  created.push(
+    { ...direct, details_url: "https://github.com/owner/repo/runs/1" },
+    { ...direct, details_url: "https://github.com/owner/repo/runs/999" },
+  );
+  const independent = structuredClone(created[1]);
+  await gate.backfill({ github, context, core: core(), pullRequest: 1 });
+  assert.equal(created[0].conclusion, "success");
+  assert.deepEqual(created[1], independent);
+  assert.equal(created.at(-1).conclusion, "success");
+});
+
 test("scoped rewrites fail closed on metadata races, unknown write outcomes and exhausted budgets", async () => {
   for (const stage of ["before", "rewrite", "complete", "head", "unknown", "budget"]) {
     const values = [{ ...pr(marker), number: 1 }];
