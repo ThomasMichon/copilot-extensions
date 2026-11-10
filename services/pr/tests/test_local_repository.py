@@ -89,6 +89,24 @@ def test_local_config_is_passive_strict_fresh_and_has_no_gateway_credentials(tmp
         load_service_config(path)
 
 
+def test_local_adoption_rechecks_private_serving_user_root_without_repair(tmp_path: Path) -> None:
+    path, _value, _state, log = configuration(tmp_path)
+    config = load_service_config(path)
+    assert isinstance(config, LocalHostConfig)
+    config.provision()
+    store_path = config.store().path
+    before = store_path.read_bytes()
+    config.root.chmod(0o755)
+    try:
+        with pytest.raises(ValueError, match="private"):
+            load_service_config(path)
+        assert main(["serve", "--config", str(path)]) == 1
+        assert store_path.read_bytes() == before and not log.exists()
+        assert config.root.stat().st_mode & 0o077 == 0o055
+    finally:
+        config.root.chmod(0o700)
+
+
 def test_real_local_client_continues_after_ack_with_scope_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

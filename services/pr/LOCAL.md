@@ -105,7 +105,9 @@ subscription intent and delivered/ACK identity to the current-state/event
 extension. Prior/current readers cannot silently adopt each other's layout.
 There is no production migration, deletion, reset or implicit recreation.
 Serve adopts valid selected state and qualifies the executing native contract
-before opening ingress. The existing connector configuration remains version 1,
+before opening ingress. Adoption rechecks the private serving-user root and
+refuses widened permissions without repairing them or probing credentials.
+The existing connector configuration remains version 1,
 with unchanged watch/report/workspace defaults.
 
 SIGINT/SIGTERM or the embedding stop event withdraws admission and joins native,

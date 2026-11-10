@@ -77,8 +77,8 @@ class _Connection(http.client.HTTPConnection):
         try:
             connection.budget()
             connection.connect(str(self.path))
-            peer = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-            if struct.unpack("3i", peer)[1] != os.getuid():
+            peer = connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("iII"))
+            if struct.unpack("iII", peer)[1] != os.getuid():
                 raise LocalClientError("local server OS identity differs")
         except BaseException:
             connection.close()

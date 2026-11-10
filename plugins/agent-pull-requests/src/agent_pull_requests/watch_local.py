@@ -65,13 +65,13 @@ class LocalIngress:
             self._closing = True
             self.connected.clear()
             server.close()
-            await server.wait_closed()
             for writer, lifetime in tuple(self._requests.values()):
                 lifetime.close()
                 writer.close()
                 writer.transport.abort()
             if self._tasks:
                 await asyncio.gather(*tuple(self._tasks), return_exceptions=True)
+            await server.wait_closed()
             if self.path.exists() and self.path.lstat().st_ino == owned.st_ino:
                 self.path.unlink()
 
@@ -92,9 +92,9 @@ class LocalIngress:
         monitor = pending = None
         try:
             raw_peer = writer.get_extra_info("socket").getsockopt(
-                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"),
+                socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("iII"),
             )
-            _pid, uid, _gid = struct.unpack("3i", raw_peer)
+            _pid, uid, _gid = struct.unpack("iII", raw_peer)
             principal = self.peers.get(uid)
             if principal is None:
                 await asyncio.wait_for(

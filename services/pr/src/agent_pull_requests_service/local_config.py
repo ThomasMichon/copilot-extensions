@@ -59,9 +59,21 @@ class LocalHostConfig:
     def store(self) -> ReplayStore:
         from agent_pull_requests.watch_replay_store import ReplayStore
         core()
+        self._private_root()
         return ReplayStore(
             self.root, self.namespace, repository_cache=True, repository_continuing=True,
         )
+
+    def _private_root(self) -> None:
+        try:
+            info = self.root.lstat()
+        except FileNotFoundError:
+            return
+        if not stat.S_ISDIR(info.st_mode) or (
+            info.st_uid != int(getattr(os, "getuid", lambda: -1)())
+            or stat.S_IMODE(info.st_mode) & 0o077
+        ):
+            raise ValueError("local repository root must be private and owned by the serving user")
 
     def provision(self) -> None:
         """Create only fresh selected state; no adoption/migration or provider probing."""
@@ -69,9 +81,7 @@ class LocalHostConfig:
         if self.root.is_symlink() or self.root.exists() and any(self.root.iterdir()):
             raise ValueError("local repository profile requires a fresh dedicated state root")
         self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        info = self.root.stat()
-        if info.st_uid != int(getattr(os, "getuid", lambda: -1)()) or stat.S_IMODE(info.st_mode) & 0o077:
-            raise ValueError("local repository root must be private and owned by the serving user")
+        self._private_root()
         store.provision()
 
     @classmethod

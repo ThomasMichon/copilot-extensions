@@ -5,6 +5,7 @@ import asyncio
 import json
 import os
 import sys
+import struct
 import time
 from types import SimpleNamespace
 from typing import Any, Callable
@@ -111,6 +112,53 @@ def test_original_deadline_bounds_every_actual_local_http_phase(tmp_path: Path, 
             assert calls[-1] == phase
         finally:
             release.set()
+            stop.set()
+            await asyncio.wait_for(owner, 3)
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(sys.platform != "linux", reason="Linux unsigned OS peer fields")
+@pytest.mark.parametrize("boundary", ["server", "client"])
+def test_actual_local_http_accepts_unsigned_uid_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, boundary: str,
+) -> None:
+    from agent_pull_requests.watch_local import LocalIngress
+    from fleet_manager.gateway_service_handler import BoundedServiceResponse
+    uid = int(getattr(os, "getuid", lambda: -1)())
+    high = 3_000_000_000
+    raw = struct.pack("iII", 123, high, high)
+    if boundary == "server":
+        original = asyncio.StreamWriter.get_extra_info
+        class Peer:
+            def getsockopt(self, *_args: Any) -> bytes:
+                return raw
+        def extra(writer: asyncio.StreamWriter, name: str, default: Any = None) -> Any:
+            return Peer() if name == "socket" else original(writer, name, default)
+        monkeypatch.setattr(asyncio.StreamWriter, "get_extra_info", extra)
+    else:
+        monkeypatch.setattr(local_client._DeadlineSocket, "getsockopt",
+                            lambda *_args, **_kwargs: raw)
+        monkeypatch.setattr(os, "getuid", lambda: high)
+    async def scenario() -> None:
+        stop = asyncio.Event()
+        async def handler(request: Any) -> Any:
+            return BoundedServiceResponse(200, (), json.dumps({
+                "protocol": local_client.PROTOCOL, "namespace": "test",
+                "principal": request.context.principal,
+            }).encode())
+        ingress_type: Callable[..., Any] = LocalIngress
+        ingress = ingress_type(
+            path=tmp_path / "unsigned.sock", namespace="test",
+            peers={high if boundary == "server" else uid: "reader"},
+            handler=handler, operation_seconds=2,
+        )
+        owner = asyncio.create_task(ingress.run(stop))
+        try:
+            await asyncio.wait_for(ingress.connected.wait(), 2)
+            client = LocalClient(ingress.path, "test", "repository")
+            value = await asyncio.to_thread(client._http, "GET", "list")
+            assert value["principal"] == "reader"
+        finally:
             stop.set()
             await asyncio.wait_for(owner, 3)
     asyncio.run(scenario())
