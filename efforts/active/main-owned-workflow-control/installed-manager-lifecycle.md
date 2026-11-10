@@ -817,3 +817,33 @@ used by the previous successful packet, passes all 88 lifecycle source controls
 in 106.60 seconds under unchanged limits, including the archive boundary.
 New exact-head installed qualification, fresh actual review and required CI
 remain mandatory. No parent suite/update/promotion gate closes.
+
+### 2026-11-10 - Preserve legacy identity through receipt publication
+
+Exact-source run 42888702165 at
+`1453fad0ef029d5012ff4c7904426174e0245ae0` failed earlier at initial Manager
+readiness: one test, one failure, zero errors/skips and 228.228 seconds.
+The screen remained in loading/knowledge-check setup with the host's default
+identity, not the registered project binding. Direct installed preflight reads
+had confirmed the intended project/machine and ready knowledge binding.
+The launch trace reaches `picker_live_sources_prepared`, but not
+`picker_live_loader_started`, before the original 30-second readiness boundary.
+This identifies the stalled interval, not its root cause. No readiness predicate
+or deadline is weakened, and no lifecycle pass is credited.
+
+Actual review 5848403116 flags a legacy-record receipt identity mismatch in its
+body despite the "No open issues" banner. Two real-file regressions reproduce
+terminal unavailability after an otherwise successful refresh of indexed and
+unindexed records lacking `creation_nonce`: receipt construction used the
+record's empty string, while canonical publication omits that field and the
+reader interprets it as null.
+
+The producer now derives receipt identity through the same canonical selection
+row and identity helper used by publication/completion, retaining absence rather
+than inventing a nonce. The new tests require a successful matching receipt,
+unchanged absent nonce on disk and canonical omission in the row. All 229 tests
+in the complete producer/runtime/client/projection packet pass in 54.16 seconds.
+Scoped lint, module limits and diff checks pass. The unchanged observer's 88
+source controls remain passing; this changed engine candidate still requires
+exact-source installed qualification, fresh actual review and required CI.
+The earlier startup stall remains a failed result, not an accepted flake.

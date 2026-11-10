@@ -1285,6 +1285,8 @@ Workspace matching honors Windows case/separator semantics and path-component
 boundaries, while POSIX paths remain case-sensitive. A record that becomes
 malformed after selection or during observation terminates only its Refresh
 request without a receipt; ordinary roster publication continues.
+Legacy records without a creation nonce use the same absent identity in the
+receipt and published row; Refresh does not fabricate a nonce to match them.
 Backfilling a legacy registry advances its canonical lifecycle revision so an
 older full-record save cannot erase the discovered Resume target. Strict Refresh
 also refuses if that revision changes during observation.

@@ -103,6 +103,7 @@ def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, 
 
 @pytest.mark.parametrize(("failure", "managed"), [
     (None, False), (None, True), ("registered", False), ("unindexed", False),
+    ("legacy-no-nonce", False), ("legacy-unindexed", False),
     ("bound", False), ("mux", False),
     ("later-mux", False), ("publication", False), ("ambiguous", False), ("cleanup", False),
     ("unreadable-workspace", False), ("contended", False), ("unpersisted", False),
@@ -133,12 +134,13 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
         repo="project", machine="host", platform="windows", title="Task",
         started_at="", last_resumed_at="", resume_count=0, status="active",
         completed_at=None, sessions=None if failure == "unreadable-workspace" else [],
-        creation_nonce="fixture-incarnation", bound_live=True,
+        creation_nonce="" if failure in {"legacy-no-nonce", "legacy-unindexed"} else "fixture-incarnation",
+        bound_live=True,
         bound_live_at=datetime.now().isoformat(),
     )
     if failure == "registered":
         record.sessions = [tracking.SessionEntry(session_id="registered-session", started_at="")]
-    elif failure == "unindexed":
+    elif failure in {"unindexed", "legacy-unindexed"}:
         record.sessions = None
     monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
     config_path = producer.cfg.project_dir("project") / "config.yaml"
@@ -340,7 +342,9 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
                 producer.publish_active_project(owner, **options)
             assert owner.handle(query)["error"]["code"] == "unready"
             assert owner.refreshes.pending("project")
-        elif failure and not collision and failure not in {"registered", "unindexed"}:
+        elif failure and not collision and failure not in {
+            "registered", "unindexed", "legacy-no-nonce", "legacy-unindexed",
+        }:
             count = 0 if failure in {"unreadable-record", "malformed-record"} else 1
             assert producer.publish_active_project(owner, **options) == count
             rejected = owner.handle(query)
@@ -374,7 +378,10 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
             assert result["ok"] is True and result["point_refresh"]["request_id"] == "a" * 32
             assert tracking.load_record(paths[-1]).bound_live is False
             assert result["point_refresh"]["worktree_id"] == selected_id
-            assert result["point_refresh"]["creation_nonce"] == records[-1].creation_nonce
+            assert result["point_refresh"]["creation_nonce"] == (records[-1].creation_nonce or None)
+            if failure in {"legacy-no-nonce", "legacy-unindexed"}:
+                assert "creation_nonce" not in result["worktrees"][0]
+                assert tracking.load_record(paths[-1]).creation_nonce == ""
             assert result["point_refresh"]["path"] == records[-1].worktree_path
             assert result["worktrees"][0]["id"] == selected_id
             if collision:

@@ -90,6 +90,7 @@ def _publish_active_project(
     refreshed = set()
     if refresh_requests:
         from .list_cli import _refresh_list_record
+        from .worktrees_refresh import record_identity
 
         positions = {record.worktree_id: index for index, record in enumerate(records)}
         selection_index = SelectionIndex(selection_row(record) for record in records)
@@ -124,10 +125,7 @@ def _publish_active_project(
             except (OSError, ValueError, MuxObservationUnavailable, push_timeout.ObservationUnavailable) as error:
                 runtime.refreshes.reject(request_id, str(error), code="refresh-unavailable")
                 continue
-            accepted_requests.append((request_id, {
-                "worktree_id": record.worktree_id, "creation_nonce": record.creation_nonce,
-                "path": record.worktree_path,
-            }))
+            accepted_requests.append((request_id, record_identity(selection_row(record))))
         refresh_requests = tuple(accepted_requests)
     session_ctx = sessions.scan_sessions_fast(records)
     try:
