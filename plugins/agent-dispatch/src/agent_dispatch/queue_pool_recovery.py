@@ -28,8 +28,8 @@ def pause_recovery(conn: sqlite3.Connection, task_id: str) -> None:
         " WHERE task_id=? AND recovery_requested_at IS NOT NULL", (task_id,),
     ).rowcount
     changed += conn.execute(
-        "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL"
-        " WHERE task_id=? AND lane_wait_since IS NOT NULL", (task_id,),
+        "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL,"
+        " lane_wait_wake=NULL WHERE task_id=? AND lane_wait_since IS NOT NULL", (task_id,),
     ).rowcount
     if changed:
         conn.execute("UPDATE tasks SET resume_requested=0 WHERE id=?", (task_id,))
@@ -180,8 +180,9 @@ def _wait_for_lane(
         return False
     if since is None:
         conn.execute(
-            "UPDATE task_pool_assignments SET lane_wait_since=?, lane_wait_message=?, lane_wait_wake=?"
-            " WHERE task_id=?", (ts, message, int(wake_requested), task.id),
+            "UPDATE task_pool_assignments SET lane_wait_since=?, lane_wait_message=?,"
+            " lane_wait_wake=MAX(COALESCE(lane_wait_wake, 0), ?) WHERE task_id=?",
+            (ts, message, int(wake_requested), task.id),
         )
         conn.execute("UPDATE tasks SET resume_requested=1, updated_at=? WHERE id=?", (ts, task.id))
         owner._audit(
@@ -191,7 +192,7 @@ def _wait_for_lane(
     else:
         conn.execute(
             "UPDATE task_pool_assignments SET lane_wait_message=COALESCE(?, lane_wait_message),"
-            " lane_wait_wake=MAX(lane_wait_wake, ?) WHERE task_id=?",
+            " lane_wait_wake=MAX(COALESCE(lane_wait_wake, 0), ?) WHERE task_id=?",
             (message, int(wake_requested), task.id),
         )
     return True
@@ -366,8 +367,9 @@ def _admit_cold_wake(owner: Any, wake: Any) -> None:
         # The body re-took its lane; a queued reactivation no longer waits for one.
         with owner._connect() as conn:
             conn.execute(
-                "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL"
-                " WHERE reservation_key=? AND lane_wait_since IS NOT NULL", (reservation["key"],),
+                "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL,"
+                " lane_wait_wake=NULL WHERE reservation_key=? AND lane_wait_since IS NOT NULL",
+                (reservation["key"],),
             )
 
 
@@ -442,8 +444,9 @@ def reconcile_recoveries(owner: Any, *, now: float | None = None) -> int:
                 if assignment["recovery_requested_at"] is None:
                     request_recovery(
                         owner, conn, task, ts=ts,
+                        # Only a resume that never recorded a choice keeps the legacy wake.
                         wake_requested=(
-                            assignment["lane_wait_since"] is None
+                            assignment["lane_wait_wake"] is None
                             or bool(assignment["lane_wait_wake"])
                         ),
                     )
@@ -452,7 +455,8 @@ def reconcile_recoveries(owner: Any, *, now: float | None = None) -> int:
                 _current(conn, task, assignment)
             except TaskError as exc:
                 if assignment["recovery_requested_at"] is None:
-                    # A waiter that cannot start must not keep holding its pool's lane.
+                    # A waiter that cannot start must not keep holding its pool's lane;
+                    # its recorded wake choice stays with the retained resume request.
                     changed += conn.execute(
                         "UPDATE task_pool_assignments SET lane_wait_since=NULL, lane_wait_message=NULL"
                         " WHERE task_id=? AND lane_wait_since IS NOT NULL", (task.id,),

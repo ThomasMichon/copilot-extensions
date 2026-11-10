@@ -64,7 +64,10 @@ placements, and they start in request order when recovery reconciliation
 finds a free lane. That start wakes the owner only if a request for the
 reactivation asked for a wake. A waiter whose body is release-requested,
 startup-fenced or retired holds no lane, and reconciliation drops the wait of
-any waiter that can no longer start (the resume request itself is retained).
+any waiter that can no longer start (the resume request and its wake choice
+are retained). As with an immediate start, a recovery started without a wake
+holds its lane until the owner affirms it or its startup deadline expires, and a
+later wake request for that recovery is still delivered.
 A body that never parked keeps its own lane and resumes
 without waiting. Immutable per-reservation pool bindings
 retain older attempts even when the task's current assignment advances.

@@ -42,7 +42,7 @@ def migrate_pool_startup(conn: sqlite3.Connection) -> None:
         "recovery_hold_started_at": "REAL",
         "lane_wait_since": "REAL",
         "lane_wait_message": "TEXT",
-        "lane_wait_wake": "INTEGER NOT NULL DEFAULT 0",
+        "lane_wait_wake": "INTEGER",
     }
     for name, declaration in additions.items():
         if name not in columns:
@@ -67,7 +67,7 @@ def begin_pool_episode(
         " exhaustion_reason=NULL, outcome_kind=NULL, outcome_detail=NULL,"
         " outcome_revision=NULL, outcome_at=NULL, retry_invocation=NULL,"
         " recovery_requested_at=NULL, recovery_wake_id=NULL, recovery_hold_started_at=NULL,"
-        " lane_wait_since=NULL, lane_wait_message=NULL WHERE task_id=?",
+        " lane_wait_since=NULL, lane_wait_message=NULL, lane_wait_wake=NULL WHERE task_id=?",
         (timeout, ts + timeout, task_id),
     )
 
@@ -118,7 +118,7 @@ def reset_pool_startup(conn: sqlite3.Connection, task_id: str) -> None:
         " exhaustion_reason=NULL, outcome_kind=NULL, outcome_detail=NULL,"
         " outcome_revision=NULL, outcome_at=NULL, retry_invocation=NULL,"
         " recovery_requested_at=NULL, recovery_wake_id=NULL, recovery_hold_started_at=NULL,"
-        " lane_wait_since=NULL, lane_wait_message=NULL WHERE task_id=?", (task_id,),
+        " lane_wait_since=NULL, lane_wait_message=NULL, lane_wait_wake=NULL WHERE task_id=?", (task_id,),
     )
 
 
