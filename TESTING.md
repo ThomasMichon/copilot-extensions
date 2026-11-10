@@ -843,7 +843,8 @@ engine, builds the canonical commit-bound whole-tree artifact, and acquires
 every declared payload with the actual pinned CLI. Installed engine discovery
 and complete payload-byte comparison must succeed in the private HOME, with
 the required-readiness profile enabled. A private bare Git repository serializes
-the verified materialized bytes, and the CLI registers its `file:` Git URL with
+the verified materialized bytes with a packed `git fast-import` stream, and the
+CLI registers its `file:` Git URL with
 `plugin marketplace add`. A directory marketplace would instead load live and
 copy nothing, leaving the installed engine's cache-only discovery empty.
 The transport commit/tree are recorded and rechecked separately from the source

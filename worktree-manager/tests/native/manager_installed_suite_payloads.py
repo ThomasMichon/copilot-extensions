@@ -11,6 +11,8 @@ import json
 from pathlib import Path
 import re
 import runpy
+import sys
+import time
 import tomllib
 
 REPO = Path(__file__).resolve().parents[3]
@@ -71,7 +73,7 @@ def selected_profile(
 
 def prepare_git_transport(
     artifact: Path, candidate_commit: str, *, environment: dict, project: Path,
-    diagnostics: Path, run,
+    diagnostics: Path, deadline: float, run,
 ) -> dict:
     """Serialize frozen artifact bytes for a real copied Git install, not a release."""
     _PROVENANCE["verify"](artifact, candidate_commit)
@@ -79,34 +81,57 @@ def prepare_git_transport(
     if repository.exists() or repository.is_symlink():
         raise ValueError("Frozen Git transport requires a fresh fixture-owned repository")
     date = run(
-        ["git", "show", "-s", "--format=%cI", candidate_commit],
+        ["git", "show", "-s", "--format=%ct", candidate_commit],
         environment, REPO, diagnostics, "suite-source-date", timeout=30,
     )
-    env = {**environment, "GIT_AUTHOR_DATE": date, "GIT_COMMITTER_DATE": date}
+    if not date.isdecimal():
+        raise ValueError("The frozen source commit has no valid Git timestamp")
     run(
         ["git", "init", "--bare", "--initial-branch=main", repository],
-        env, project, diagnostics, "suite-transport-init", timeout=30,
+        environment, project, diagnostics, "suite-transport-init", timeout=30,
     )
-    prefix = [
-        "git", "-C", artifact, "-c", "core.autocrlf=false", "-c", "core.longpaths=true",
-        "-c", "user.name=Suite Fixture", "-c", "user.email=fixture@example.invalid",
-        "--git-dir", repository, "--work-tree", artifact,
-    ]
+    stream = project.parent / "suite-transport.fi"
+    paths = _PROVENANCE["content_manifest"](artifact)
+    paths[_PROVENANCE["RECEIPT"]] = {"kind": "file", "executable": False}
+    message = b"Frozen materialized fixture transport\n"
+    with stream.open("xb") as output:
+        output.write(
+            b"commit refs/heads/main\n"
+            + f"committer Suite Fixture <fixture@example.invalid> {date} +0000\n".encode("ascii")
+            + f"data {len(message)}\n".encode("ascii") + message + b"\n",
+        )
+        for relative, row in sorted(paths.items()):
+            if time.monotonic() >= deadline:
+                raise TimeoutError("Frozen Git transport exceeded the existing case budget")
+            if row["kind"] == "directory":
+                continue
+            if row["kind"] != "file":
+                raise ValueError("Frozen Git transport requires regular artifact files")
+            content = (artifact / relative).read_bytes()
+            mode = "100755" if row["executable"] else "100644"
+            output.write(
+                f"M {mode} inline ".encode("ascii")
+                + json.dumps(relative, ensure_ascii=False).encode("utf-8") + b"\n"
+                + f"data {len(content)}\n".encode("ascii") + content + b"\n",
+            )
+        output.write(b"\ndone\n")
+    program = (
+        "import pathlib,subprocess,sys\n"
+        "with pathlib.Path(sys.argv[2]).open('rb') as source:\n"
+        " result=subprocess.run(['git','-c','gc.auto=0','-c','maintenance.auto=false',"
+        "'--git-dir',sys.argv[1],'fast-import','--quiet'],"
+        "stdin=source,creationflags=getattr(subprocess,'CREATE_NO_WINDOW',0))\n"
+        "raise SystemExit(result.returncode)\n"
+    )
     run(
-        [*prefix, "add", "--force", "--all"],
-        env, project, diagnostics, "suite-transport-index", timeout=120,
+        [sys.executable, "-I", "-B", "-c", program, repository, stream],
+        environment, project, diagnostics, "suite-transport-import", timeout=120,
     )
-    tree = run(
-        [*prefix, "write-tree"], env, project, diagnostics, "suite-transport-tree", timeout=30,
-    )
-    commit = run(
-        [*prefix, "commit-tree", tree, "-m", "Frozen materialized fixture transport"],
-        env, project, diagnostics, "suite-transport-commit", timeout=30,
-    )
-    run(
-        [*prefix, "update-ref", "refs/heads/main", commit],
-        env, project, diagnostics, "suite-transport-head", timeout=30,
-    )
+    stream.unlink()
+    commit, tree = run(
+        ["git", "--git-dir", repository, "rev-parse", "HEAD", "HEAD^{tree}"],
+        environment, project, diagnostics, "suite-transport-head", timeout=30,
+    ).splitlines()
     _PROVENANCE["verify"](artifact, candidate_commit)
     return {
         "repository": str(repository), "url": repository.as_uri(),

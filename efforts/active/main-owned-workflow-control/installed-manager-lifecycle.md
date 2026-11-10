@@ -971,3 +971,19 @@ This is fixture data transport only, not a release composition, publication,
 admitted baseline or promotion writer. It adds no remote repository, service,
 daemon or manual promotion. Exact native validation is still required; no
 runtime/readiness, ordinary-upgrade or parent completion is inferred.
+
+Run 42912342047 at `285a009b27fecac6085bc8bb836370d364c4f409`
+failed before CLI registration: `git add --force --all` exceeded its 120-second
+command bound while indexing the complete artifact. The case lasted 371.09
+seconds; no deadline is increased and no transport/CLI-copy success is claimed.
+The transport now writes a packed `git fast-import` stream from the verified
+artifact inventory instead of indexing and creating loose objects. Generated
+ignored files and the root materialization receipt remain included, source
+timestamps remain attributable, and stream generation checks the original case
+deadline. The real-clone preservation check still applies.
+
+Required CI independently found a missing Worktree Manager changefile: that
+guard covers these test changes too. The canonical changefile tool added the
+required patch entry; no version was hand-edited and no CI exception is used.
+The corrected head must independently clear both native qualification and
+required CI before becoming reviewable.
