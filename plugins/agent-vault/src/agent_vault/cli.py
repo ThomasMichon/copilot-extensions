@@ -373,14 +373,19 @@ def start_service(tcp_port: int | None = None) -> bool:
         return False
     if tcp_port is None:
         context = config.resolve_context()
-        if not IS_WINDOWS and context.sources.get("port") == "default" and _start_service_systemd():
-            return True
-        tcp_port = context.port
+        bind_port = os.environ.get(config.BIND_PORT_ENV)
+        if context.sources.get("port") == "default" and bind_port is not None:
+            if not bind_port.isascii() or not bind_port.isdigit() or not 0 <= int(bind_port) <= 65535:
+                raise ValueError("AGENT_VAULT_BIND_PORT must be an integer from 0 to 65535")
+            tcp_port = int(bind_port)
+        else:
+            if not IS_WINDOWS and context.sources.get("port") == "default" and _start_service_systemd():
+                return True
+            tcp_port = context.port
 
     # spawn_daemon already detaches the service; --foreground keeps POSIX's
     # self-daemonize (cwd HOME, stdio to /dev/null) from undoing that launch.
-    args = ["--tcp-port", str(tcp_port)] if tcp_port else []
-    launch.spawn_service([*args, "--foreground"])
+    launch.spawn_service(["--tcp-port", str(tcp_port), "--foreground"])
 
     for _ in range(20):
         time.sleep(0.25)

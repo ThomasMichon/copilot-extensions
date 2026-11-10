@@ -68,6 +68,7 @@ RUN_DIR_ENV = "AGENT_VAULT_RUN_DIR"
 # ``unix:/tmp/agent-vault.sock``) that a client dials before consulting the
 # rendezvous file or the legacy fixed port.
 ENDPOINT_ENV = "AGENT_VAULT_ENDPOINT"  # marketplace-isolation: allow env-var-name-declaration
+BIND_PORT_ENV = "AGENT_VAULT_BIND_PORT"
 
 
 def home_dir() -> Path:
