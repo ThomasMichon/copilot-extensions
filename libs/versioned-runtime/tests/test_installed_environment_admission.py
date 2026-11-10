@@ -225,6 +225,45 @@ def test_group_writable_bootstrap_is_protected_before_completion(installed):
         assert stat.S_IMODE(launcher.stat().st_mode) == 0o644
 
 
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("alias_kind", ["ancestor", "slot"])
+def test_completion_accepts_ancestor_alias_without_following_slot_alias(tmp_path, alias_kind):
+    physical = tmp_path / "physical"
+    physical.mkdir()
+    root = tmp_path / "runtime"
+    if alias_kind == "ancestor":
+        alias = tmp_path / "alias"
+        root = alias / "runtime"
+    else:
+        alias = runtime.slot(root, "2.0")
+        alias.rmdir()
+    if os.name == "nt":
+        subprocess.run(
+            [os.environ["COMSPEC"], "/c", "mklink", "/J", str(alias), str(physical)],
+            capture_output=True, check=True, timeout=10,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    else:
+        alias.symlink_to(physical, target_is_directory=True)
+    try:
+        slot = runtime.slot(root, "2.0") if alias_kind == "ancestor" else physical
+        _bootstrap(slot)
+        if alias_kind == "ancestor":
+            runtime.mark_complete(root, "2.0", payload_hash="same")
+            assert _retained_reader().runtime_identity(slot)
+            assert runtime.marker_path(physical / "runtime", "2.0").is_file()
+        else:
+            with pytest.raises((RuntimeError, ValueError)):
+                runtime.mark_complete(root, "2.0", payload_hash="same")
+            assert not (physical / ".install-complete.json").exists()
+            assert not (physical / ".runtime-bootstrap/runtime-generation").exists()
+    finally:
+        if os.name == "nt":
+            alias.rmdir()
+        else:
+            alias.unlink()
+
+
 @pytest.mark.timeout(60)
 @pytest.mark.parametrize("publisher", ["plugin", "embedded-toolkit"])
 def test_real_constructed_environment_launches_with_its_published_identity(tmp_path, publisher):

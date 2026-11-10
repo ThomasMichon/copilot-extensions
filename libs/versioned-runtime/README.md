@@ -555,6 +555,8 @@ for the launcher and 64 bytes for the generation file. Generation validation use
 binary reads on every platform, matching the retained reader. Exact completed
 reuse never backfills missing legacy metadata; use a distinct admitted construction instead of
 mutating an immutable completed generation.
+Ancestor aliases resolve to their physical path before helper proofs; redirects at
+the numbered slot or inside its retained bootstrap remain refused.
 Completion publication does not itself authorize package writers or retain a
 candidate after the call returns: adopting installers still need admission
 before construction and retention through their promotion/drain lifecycle.

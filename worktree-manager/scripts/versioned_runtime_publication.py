@@ -174,6 +174,8 @@ def _protect_incoming_helper(path: Path, *, max_bytes: int) -> PhysicalState | N
 
 def prepare_retained_generation(slot: Path) -> None:
     """Publish a retained build identity before its first completion marker."""
+    # Ancestor aliases are valid; the numbered slot itself must remain ordinary.
+    slot = slot.parent.resolve(strict=True) / slot.name
     bootstrap = slot / ".runtime-bootstrap"
     if not os.path.lexists(bootstrap):
         return
