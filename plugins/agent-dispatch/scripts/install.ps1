@@ -1359,7 +1359,8 @@ function Publish-ServiceLauncher {
     $fullPath = [IO.Path]::GetFullPath($Path)
     # Serialize comparison and replacement with other installer publications.
     # An unchanged script may be held open without write/delete sharing.
-    $mutex = Enter-PluginSnapshotLock -InstallDir ([IO.Path]::GetDirectoryName($fullPath))
+    $mutex = Enter-PluginSnapshotLock -InstallDir ([IO.Path]::GetDirectoryName($fullPath)) `
+        -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
     try {
         $encoding = New-Object Text.UTF8Encoding($false)
         if ([IO.File]::Exists($fullPath) -and

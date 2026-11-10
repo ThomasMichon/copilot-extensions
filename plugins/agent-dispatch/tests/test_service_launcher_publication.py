@@ -24,6 +24,7 @@ def test_generated_launcher_publication(tmp_path: Path, host: str, owner: str) -
 
     script = f"""
 $ErrorActionPreference='Stop'
+$script:GlobalActivationLockTimeoutSeconds=5
 $InstallDir={quote(tmp_path)}
 $LinkDir=Join-Path $InstallDir '.venv'
 $LinkPython=Join-Path $LinkDir 'Scripts\\python.exe'

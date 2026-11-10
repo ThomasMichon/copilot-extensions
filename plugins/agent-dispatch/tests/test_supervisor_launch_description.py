@@ -50,6 +50,7 @@ def test_generated_description_preserves_policy_and_slot_selection(tmp_path, mod
         "$ast=[Management.Automation.Language.Parser]::ParseFile("
         f"{quote(INSTALLER)},[ref]$tokens,[ref]$errors)\n"
         "if($errors.Count){throw 'Installer parse failed'}\n"
+        "$script:GlobalActivationLockTimeoutSeconds=5\n"
         "$functions=@($ast.FindAll({param($node) "
         "$node -is [Management.Automation.Language.FunctionDefinitionAst] "
         "-and $node.Name -in @('Enter-PluginSnapshotLock','Publish-FileAtomically',"
