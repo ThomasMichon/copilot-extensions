@@ -10,8 +10,6 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from packaging.version import Version
-
 from .installation_probe import strict_json_object
 
 
@@ -114,6 +112,8 @@ def check_runtime_freshness(
     Legacy manifests without source-kind metadata retain standalone compatibility;
     present source selections and malformed or lost evidence cannot use that path.
     """
+    from packaging.version import Version
+
     from . import reconcile, update_stage
 
     snapshot: dict[str, Any] = {}
