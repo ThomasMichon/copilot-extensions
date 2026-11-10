@@ -3,6 +3,7 @@
 import json
 import inspect
 import os
+import stat
 import subprocess
 
 import pytest
@@ -72,6 +73,19 @@ def test_explicit_repository_account_precedes_owner_map(target):
     assert select_report_target(path, "example/project")["account"] == "override"
 
 
+def test_checkout_free_preferred_account_keeps_repo_exceptions_local(target):
+    path, _, _, registry, write = target
+    registry["account_map"] = {"github.com:*": "operator-work"}
+    registry["repos"]["sibling"] = {
+        "remote": "https://github.com/example/other.git", "account": "sibling-only",
+    }
+    write()
+    assert select_report_target(path, "example/project")["account"] == "operator-work"
+    registry["account_map"]["example"] = "owner-choice"
+    write()
+    assert select_report_target(path, "example/project")["account"] == "owner-choice"
+
+
 @pytest.mark.parametrize("change", [
     lambda d: d["repos"].update(other={"pr": dict(d["repos"]["target"]["pr"])}),
     lambda d: d["repos"]["target"]["pr"].update(provider="gitea"),
@@ -90,7 +104,7 @@ def test_wrong_or_ambiguous_binding_refuses_before_account_acquisition(target, c
     path, _, document, _, write = target
     change(document)
     write()
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("selected account before target gate"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("selected account before target gate"))
     monkeypatch.setattr(repos, "resolve_account", lambda *a, **k: pytest.fail("selected account before target gate"))
     with pytest.raises(ValueError):
         select_report_target(path, "example/project")
@@ -149,7 +163,7 @@ def test_unreadable_target_policy_refuses_before_account_acquisition(target, tmp
         return original(source)
 
     monkeypatch.setattr(repos_configuration_sources, "read_bytes", unavailable)
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("credential policy bypass"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("credential policy bypass"))
     with pytest.raises(PermissionError):
         select_report_target(path, "example/project")
 
@@ -174,6 +188,7 @@ def committed_target(target, tmp_path):
         return git_ops.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
                            *args, cwd=anchor)
     git("init", "--template=", "-b", "main")
+    git("config", "core.autocrlf", "false")
     policy = anchor / ".agent-worktrees" / "config.yaml"
     policy.parent.mkdir()
     policy.write_text("pr: {token_command: fixture-helper}\n", encoding="utf-8")
@@ -203,7 +218,7 @@ def test_unresolved_committed_policy_never_uses_divergent_checkout(committed_tar
             raise subprocess.TimeoutExpired(args, 1)
         return original(*args, **kwargs)
     monkeypatch.setattr(git_ops, "git", unavailable)
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("stale policy acquired account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("stale policy acquired account"))
     with pytest.raises(ValueError, match="committed repository policy"):
         select_report_target(path, "example/project")
 
@@ -261,7 +276,7 @@ def test_invalid_utf8_committed_policy_refuses_on_both_read_paths(committed_targ
             raise subprocess.TimeoutExpired(args, 1)
         return original(*args, **kwargs)
     monkeypatch.setattr(git_ops, "git", unavailable)
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("corrupted policy acquired account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("corrupted policy acquired account"))
     with pytest.raises(ValueError, match="lossless UTF-8"):
         select_report_target(path, "example/project")
 
@@ -307,7 +322,7 @@ def test_duplicate_keys_in_other_config_sources_cannot_drop_credential_policy(ta
                 '{"schema_version":1,"plugin":"first@market","plugin":"other@market",'
                 '"plugin_root":"/fixture","target":"policy.yaml"}', encoding="utf-8",
             )
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("duplicate policy selected account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("duplicate policy selected account"))
     with pytest.raises(ValueError):
         select_report_target(path, "example/project")
 
@@ -336,7 +351,7 @@ def test_unreadable_policy_link_is_not_confirmed_absence(target, tmp_path, monke
     else:
         policy.parent.mkdir(parents=True, exist_ok=True)
         policy.symlink_to(policy.name if kind == "loop" else "missing-policy.yaml")
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unreadable policy selected account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("unreadable policy selected account"))
     with pytest.raises((OSError, ValueError)):
         select_report_target(path, "example/project")
 
@@ -378,7 +393,7 @@ def test_enabled_dropin_policy_must_be_available_before_account_selection(target
     if kind == "disabled":
         assert select_report_target(path, "example/project")["account"] == "selected"
     else:
-        monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unavailable dropin selected account"))
+        monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("unavailable dropin selected account"))
         with pytest.raises(ValueError):
             select_report_target(path, "example/project")
 
@@ -421,7 +436,9 @@ def test_unresolved_committed_git_state_cannot_qualify_absent_policy(committed_t
     elif kind in ("tree", "blob"):
         revision = "HEAD^{tree}" if kind == "tree" else "HEAD:.agent-worktrees/config.yaml"
         oid = git("rev-parse", revision).stdout.strip()
-        (anchor / ".git" / "objects" / oid[:2] / oid[2:]).unlink()
+        loose_object = anchor / ".git" / "objects" / oid[:2] / oid[2:]
+        loose_object.chmod(loose_object.stat().st_mode | stat.S_IWUSR)
+        loose_object.unlink()
     elif kind == "direct-head":
         git("update-ref", "--no-deref", "refs/remotes/origin/HEAD", "HEAD")
     else:
@@ -431,7 +448,7 @@ def test_unresolved_committed_git_state_cannot_qualify_absent_policy(committed_t
         git("commit", "-m", "fixture unavailable branch")
         git("update-ref", "refs/remotes/origin/main", "HEAD")
         policy.write_text("{}\n", encoding="utf-8")
-    monkeypatch.setattr(repos, "account_from_map", lambda *a, **k: pytest.fail("unresolved Git state selected account"))
+    monkeypatch.setattr(repos, "account_for_github_owner", lambda *a, **k: pytest.fail("unresolved Git state selected account"))
     with pytest.raises(ValueError, match="committed repository policy"):
         select_report_target(path, "example/project")
 

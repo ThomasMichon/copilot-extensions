@@ -1327,13 +1327,16 @@ def test_clarify_registration_account_expands_home_relative_path(monkeypatch):
     monkeypatch.setattr(
         repos, "resolve_registration_account",
         lambda remote, explicit: repos.AccountResolution(
-            owner="github", login="github", source="owner-fallback",
+            owner="github", login=None, source="none",
             authenticated=False, needs_clarify=True,
         ),
     )
     monkeypatch.setattr(git_ops, "list_gh_accounts", lambda: ["acct-a"])
     monkeypatch.setattr(m.sys.stdin, "isatty", lambda: True)
     monkeypatch.setattr("builtins.input", lambda _: "acct-a")
+    registry = repos.ReposRegistry(repos={"proj": repos.RepoEntry("proj")})
+    monkeypatch.setattr(repos, "read_registry", lambda **kwargs: registry)
+    monkeypatch.setattr(repos, "write_registry", lambda value: None)
     captured: dict[str, str] = {}
     monkeypatch.setattr(
         git_ops, "pin_git_credential",
@@ -1345,6 +1348,8 @@ def test_clarify_registration_account_expands_home_relative_path(monkeypatch):
     )
 
     assert captured["login"] == "acct-a"
+    assert registry.repos["proj"].account == "acct-a"
+    assert registry.account_map == {}
     assert captured["path"] != "~/src/proj"
     assert not captured["path"].startswith("~")
 

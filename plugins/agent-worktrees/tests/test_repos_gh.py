@@ -140,9 +140,12 @@ def test_repos_gh_allows_unregistered_bare_owner(monkeypatch):
 # dispatcher's own parsing/output/exit-status wiring needs its own coverage.
 
 
-def test_repos_account_for_bare_registered_repo_prints_owner(
+def test_repos_account_for_bare_dependency_prints_operator_preference(
     home: Path, capfd,
 ):
+    registry = repos.read_registry()
+    registry.default_account = "consumer-work"
+    repos.write_registry(registry)
     repos.add_repo(
         "copilot-extensions", str(home / "src" / "copilot-extensions"),
         repo_class="reference",
@@ -154,10 +157,13 @@ def test_repos_account_for_bare_registered_repo_prints_owner(
     rc = m.cmd_repos_dispatch(["account-for", "copilot-extensions"])
 
     assert rc == 0
-    assert capfd.readouterr().out.strip() == "ThomasMichon"
+    assert capfd.readouterr().out.strip() == "consumer-work"
 
 
 def test_repos_account_for_bare_registered_repo_json(home: Path, capfd):
+    registry = repos.read_registry()
+    registry.default_account = "consumer-work"
+    repos.write_registry(registry)
     repos.add_repo(
         "copilot-extensions", str(home / "src" / "copilot-extensions"),
         repo_class="reference",
@@ -171,7 +177,7 @@ def test_repos_account_for_bare_registered_repo_json(home: Path, capfd):
     assert rc == 0
     payload = json.loads(capfd.readouterr().out)
     assert payload["target"] == "copilot-extensions"
-    assert payload["account"] == "ThomasMichon"
+    assert payload["account"] == "consumer-work"
 
 
 def test_repos_account_for_unresolved_registered_repo_fails(home: Path, capfd):
@@ -191,15 +197,23 @@ def test_repos_account_for_unresolved_registered_repo_fails(home: Path, capfd):
     assert capfd.readouterr().out == ""
 
 
-def test_repos_account_for_unregistered_bare_owner_prints_itself(
+def test_repos_account_for_unregistered_publisher_does_not_invent_an_account(
     home: Path, capfd,
 ):
-    # An ordinary unregistered bare owner is unaffected by the #3032 fix --
-    # owner == login is still a valid, intentional fallback.
     rc = m.cmd_repos_dispatch(["account-for", "ThomasMichon"])
 
-    assert rc == 0
-    assert capfd.readouterr().out.strip() == "ThomasMichon"
+    assert rc == 1
+    assert capfd.readouterr().out == ""
+
+
+def test_unavailable_preferred_credential_never_uses_an_ambient_token(home, monkeypatch):
+    registry = repos.read_registry()
+    registry.default_account = "consumer-work"
+    repos.write_registry(registry)
+    monkeypatch.setenv("GH_TOKEN", "ambient-fixture")
+    monkeypatch.setattr(git_ops, "gh_token_for_account", lambda login: None)
+    with pytest.raises(git_ops.AccountCredentialError, match="consumer-work"):
+        m._gh_env_for_repo("Publisher/dependency")
 
 
 # --- omitted-target GitHub-only inference wiring (#3032 follow-up) --------
