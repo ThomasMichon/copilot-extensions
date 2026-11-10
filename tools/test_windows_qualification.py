@@ -142,6 +142,18 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
     assert "--allow-host-state" not in argv
 
 
+def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(tmp_path):
+    argv = worker.native_command(tmp_path, tmp_path / "out", "native-driver-auth-wait")
+    assert argv[2] == "agent-remote-driver"
+    assert argv[argv.index("--test-file") + 1] == "tests/native/test_native_headed_auth_wait.py"
+    assert argv[argv.index("-k") + 1] == "opt_in_receiver_auth_wait_and_same_session_resume"
+    assert [argv[argv.index(flag) + 1] for flag in (
+        "--timeout", "--plugin-timeout", "--test-timeout",
+    )] == ["300", "420", "180"]
+    assert "--allow-explicit-tiers" in argv and "--allow-host-state" not in argv
+
+
+@pytest.mark.parametrize("require_feed", [True, False])
 @pytest.mark.parametrize("mismatch,mux_output,failure", [
     (False, "tmux 3.3.8\r\npsmux 3.3.8 (66cf613 2026-08-18)\r\n", None),
     (True, "psmux 3.3.8", "copilot"),
@@ -151,7 +163,7 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
     (False, "psmux 3.3.8-1", "psmux"),
 ])
 def test_native_prerequisites_check_disposable_binaries_and_actual_version(
-    tmp_path, monkeypatch, mismatch, mux_output, failure,
+    tmp_path, monkeypatch, mismatch, mux_output, failure, require_feed,
 ):
     runner = tmp_path / "runner"
     runner.mkdir()
@@ -163,10 +175,17 @@ def test_native_prerequisites_check_disposable_binaries_and_actual_version(
         "RUNNER_TEMP": str(runner), "UV_DEFAULT_INDEX": "https://feed.example.invalid/simple/",
         "COPILOT_NATIVE_TEST_EXECUTABLE": str(copilot), "PSMUX_TEST_BIN": str(mux),
     }
+    if not require_feed:
+        environment.pop("UV_DEFAULT_INDEX")
     monkeypatch.setattr(worker, "os", SimpleNamespace(name="nt", environ=environment))
-    monkeypatch.setattr(worker.urllib.request, "urlopen", lambda *args, **kwargs: nullcontext(
-        SimpleNamespace(status=200, read=lambda count: b"package index"),
-    ))
+    probes = []
+
+    def probe(*args, **kwargs):
+        probes.append(args)
+        assert require_feed, "Driver must not probe the private feed"
+        return nullcontext(SimpleNamespace(status=200, read=lambda count: b"package index"))
+
+    monkeypatch.setattr(worker.urllib.request, "urlopen", probe)
     calls = []
 
     def owned(argv, timeout):
@@ -176,16 +195,17 @@ def test_native_prerequisites_check_disposable_binaries_and_actual_version(
         ) if argv[0] == str(copilot) else mux_output)
     if failure:
         with pytest.raises(ValueError, match=f"{failure} native prerequisite version mismatch"):
-            worker.native_prerequisites(owned)
+            worker.native_prerequisites(owned, require_feed=require_feed)
         assert len(calls) == (1 if failure == "copilot" else 2)
     else:
-        assert worker.native_prerequisites(owned) == contract.NATIVE_VERSIONS
+        assert worker.native_prerequisites(owned, require_feed=require_feed) == contract.NATIVE_VERSIONS
         assert calls == [([str(copilot), "--version"], 30), ([str(mux), "-V"], 30)]
+    assert bool(probes) is require_feed
     foreign = tmp_path / "foreign.exe"
     foreign.write_bytes(b"fixture")
     environment["PSMUX_TEST_BIN"] = str(foreign)
     with pytest.raises(ValueError):
-        worker.native_prerequisites(owned)
+        worker.native_prerequisites(owned, require_feed=require_feed)
 
 
 def test_junit_retains_skips_failures_and_exact_case_identities(tmp_path):
@@ -317,23 +337,28 @@ def test_foreign_partial_empty_and_skipped_results_never_qualify(mutation):
         contract.validate_result(value, request(), run_id=42, control_sha="c" * 40, run_attempt=1)
 
 
+@pytest.mark.parametrize("packet", list(contract.NATIVE_PACKETS))
 @pytest.mark.parametrize("mutation", [
     {}, {"tests": []}, {"tests": [{"name": "test_public_embody", "outcome": "skipped"}]},
     {"tests": [{"class": "foreign", "name": "test_public_embody", "outcome": "passed"}]},
+    {"tests": [{"class": "not_test_native_seed_application",
+                "name": "test_public_embody", "outcome": "passed"}]},
+    {"tests": [{"class": "native.test_native_seed_application",
+                "name": "test_public_embody", "outcome": "passed"}] * 2},
     {"native_prerequisites": {"copilot": "1.0.106", "psmux": "3.3.8"}},
     {"phases": []},
 ])
-def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation):
+def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation, packet):
     value = result()
     expected = request()
-    expected["selection"] = {"kind": "packet", "name": "native-worktrees-embody"}
+    expected["selection"] = {"kind": "packet", "name": packet}
+    _, module, case, phase = contract.NATIVE_PACKETS[packet]
     value.update(
         request=expected, native_prerequisites=contract.NATIVE_VERSIONS,
-        tests=[{"class": "native.test_native_seed_application", "name": "test_public_embody",
-                "outcome": "passed"}],
+        tests=[{"class": "native." + module, "name": case, "outcome": "passed"}],
         phases=[{"name": name, "status": "passed"} for name in (
             "source-and-selection", "native-prerequisites",
-            "native-worktrees-public-caller", "test-runtime",
+            phase, "test-runtime",
         )],
     )
     value.update(mutation)
@@ -346,8 +371,9 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation)
 
 @pytest.mark.parametrize("prerequisites", [True, False])
 @pytest.mark.parametrize("preparation", ["success", "failure", "cancelled", "skipped", "unrecognized"])
+@pytest.mark.parametrize("packet", list(contract.NATIVE_PACKETS))
 def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
-    tmp_path, monkeypatch, prerequisites, preparation,
+    tmp_path, monkeypatch, prerequisites, preparation, packet,
 ):
     root, output = tmp_path / "candidate", tmp_path / "evidence"
     root.mkdir()
@@ -358,6 +384,7 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
         git=lambda *args: SimpleNamespace(stdout="b" * 40),
     ))
     calls = []
+    plugin, module, case, phase = contract.NATIVE_PACKETS[packet]
 
     def run(argv, **kwargs):
         calls.append(argv)
@@ -365,14 +392,15 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
             return SimpleNamespace(returncode=0, stdout='{"python":"3.12","system":"Windows"}', stderr="")
         (output / "junit").mkdir()
         (output / "junit/actual.xml").write_text(
-            '<testsuite><testcase classname="native.test_native_seed_application" '
-            'name="test_public_embody"><system-out>https://feed.example.invalid/pypi/simple/'
+            f'<testsuite><testcase classname="native.{module}" '
+            f'name="{case}"><system-out>https://feed.example.invalid/pypi/simple/'
             ' https://download.example.invalid/wheel?fixture=example'
             '</system-out></testcase></testsuite>', encoding="utf-8",
         )
         return SimpleNamespace(returncode=0, stdout="selected feed.example.invalid", stderr="")
 
-    def prepare(owned):
+    def prepare(owned, *, require_feed):
+        assert require_feed is (packet == "native-worktrees-embody")
         if not prerequisites:
             raise ValueError("unavailable feed.example.invalid")
         return dict(contract.NATIVE_VERSIONS)
@@ -380,11 +408,14 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
     monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
     monkeypatch.setattr(worker, "native_prerequisites", prepare)
     value = request()
-    value["selection"] = {"kind": "packet", "name": "native-worktrees-embody"}
+    value["selection"] = {"kind": "packet", "name": packet}
     actual = worker.execute(root, value, output)
     qualified = prerequisites and preparation == "success"
     assert actual["outcome"] == ("qualified" if qualified else "failed")
     assert bool(calls) is qualified
+    if qualified:
+        assert calls[0][2] == plugin
+        assert phase in {row["name"] for row in actual["phases"]}
     if preparation != "success":
         assert actual["phases"][-1]["name"] == "native-prerequisites"
         assert actual["phases"][-1]["status"] == "failed"
@@ -465,7 +496,7 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
         client.status(state["request"]["request_id"])
 
 
-@pytest.mark.parametrize("unsupported", ["version", "selector", "workflow", "unprotected"])
+@pytest.mark.parametrize("unsupported", ["version", "selector", "packet", "workflow", "unprotected"])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
     tmp_path, monkeypatch, unsupported,
 ):
@@ -486,7 +517,8 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "request_versions": [] if unsupported == "version" else [1],
         "result_versions": [1], "workflow": contract.WORKFLOW,
         "transport_ref": contract.TRANSPORT_REF, "transport_format": contract.TRANSPORT_MARKER,
-        "selection_kinds": [] if unsupported == "selector" else ["plugin"],
+        "selection_kinds": [] if unsupported == "selector" else ["plugin", "packet"],
+        "packets": ["bridge-http52", "native-worktrees-embody"],
     }
 
     def api(endpoint):
@@ -506,7 +538,11 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         }
     monkeypatch.setattr(client, "api", api)
     with pytest.raises(ValueError):
-        client.submit(focused(), "HEAD")
+        selected = (
+            {"kind": "packet", "name": "native-driver-auth-wait"}
+            if unsupported == "packet" else focused()
+        )
+        client.submit(selected, "HEAD")
     assert effects == []
     assert list(tmp_path.iterdir()) == []
 
@@ -791,7 +827,8 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
     assert value["jobs"]["windows"]["needs"] == "admit"
     upload = value["jobs"]["windows"]["steps"][-1]
     assert upload["if"] == (
-        "${{ always() && (needs.admit.outputs.packet != 'native-worktrees-embody' || "
+        "${{ always() && ((needs.admit.outputs.packet != 'native-worktrees-embody' && "
+        "needs.admit.outputs.packet != 'native-driver-auth-wait') || "
         "steps.sanitize.outcome == 'success') }}"
     )
     for job in value["jobs"].values():
@@ -815,8 +852,14 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                 )
                 if step["name"].startswith("Sanitize"):
                     assert step["if"] == (
-                        "always() && needs.admit.outputs.packet == 'native-worktrees-embody'"
+                        "always() && (needs.admit.outputs.packet == 'native-worktrees-embody' || "
+                        "needs.admit.outputs.packet == 'native-driver-auth-wait')"
                     )
+            if step.get("id") == "native":
+                assert step["if"] == (
+                    "needs.admit.outputs.packet == 'native-worktrees-embody' || "
+                    "needs.admit.outputs.packet == 'native-driver-auth-wait'"
+                )
     promotion = yaml.safe_load(
         (Path(__file__).resolve().parents[1] / ".github/workflows/validate-and-promote.yml").read_text("utf-8"),
     )
