@@ -873,7 +873,9 @@ class TestDetachedSessionsExcluded:
         assert discovered.get("backfill-wt") == ["real-sess"]
 
 
-@pytest.mark.parametrize("workspace", ["complete", "missing", "malformed", "relative"])
+@pytest.mark.parametrize("workspace", [
+    "complete", "missing", "malformed", "relative", "record-missing", "record-relative",
+])
 def test_strict_backfill_requires_complete_attributable_workspace_data(
     tmp_session_state_dir: Path, workspace,
 ):
@@ -889,6 +891,10 @@ def test_strict_backfill_requires_complete_attributable_workspace_data(
     elif workspace == "relative":
         path.write_text("cwd: relative-worktree\n", encoding="utf-8")
     record = _make_record("backfill-wt", wt_path, sessions=None)
+    if workspace == "record-missing":
+        record.worktree_path = ""
+    elif workspace == "record-relative":
+        record.worktree_path = "relative-worktree"
     with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
         if workspace == "complete":
             assert backfill_sessions([record], strict=True) == {"backfill-wt": ["legacy"]}

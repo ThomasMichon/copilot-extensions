@@ -709,3 +709,13 @@ All 213 tests in the affected producer/runtime/client/projection files pass in
 still requires exact-source installed
 requalification, fresh actual review and required CI. No prior native pass
 qualifies this correction, and no parent acceptance gate is closed.
+
+The same class-level check also found that strict unindexed discovery could
+silently skip a record with no checkout path or compare an unqualified relative
+path. It now refuses that unattributable input before discovery; legacy
+best-effort callers keep their previous behavior. The final combined packet
+passes 222 controls in 53.36 seconds, selecting only backfill cases from the
+larger sessions file (152 unrelated cases deselected), alongside the complete
+four affected Worktrees files. Both missing and relative tracked paths have
+focused refusal controls. No installed run was dispatched for the intermediate
+raw-registry-only commit; the combined candidate must qualify as one unit.

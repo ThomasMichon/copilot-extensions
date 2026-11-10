@@ -8,6 +8,7 @@ from pathlib import Path, PurePosixPath, PureWindowsPath
 import yaml
 
 from . import sessions as session_api
+from .push_timeout import ObservationUnavailable
 
 
 def backfill_sessions(records: list, *, strict: bool = False) -> dict[str, list[str]]:
@@ -21,14 +22,20 @@ def backfill_sessions(records: list, *, strict: bool = False) -> dict[str, list[
         sessions = getattr(rec, "sessions", None)
         if sessions:
             continue
+        if strict and (
+            not isinstance(rec.worktree_path, str)
+            or not (
+                PurePosixPath(rec.worktree_path).is_absolute()
+                or PureWindowsPath(rec.worktree_path).is_absolute()
+            )
+        ):
+            raise ObservationUnavailable("Session discovery requires an absolute worktree path")
         if not rec.worktree_path:
             continue
         path_to_wt[session_api._normalize_path(rec.worktree_path)] = rec.worktree_id
 
     if not path_to_wt:
         return {}
-
-    from .push_timeout import ObservationUnavailable
 
     if strict:
         try:

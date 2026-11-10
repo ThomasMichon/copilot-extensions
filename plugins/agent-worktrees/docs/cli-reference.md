@@ -1279,7 +1279,9 @@ platform, checkout and ID/suffix selection as the response. No readable match,
 an incomplete observation, malformed session-registry metadata, or a returned
 identity differing from the receipt refuses success. Strict Refresh checks raw
 registry structure and session identities before permissive legacy parsing can
-discard or coerce them. Reusing a request ID with different filters also refuses.
+discard or coerce them. Unindexed discovery also requires an absolute selected
+checkout path so unmatched metadata cannot be mistaken for an empty registry.
+Reusing a request ID with different filters also refuses.
 It never falls back to caller-side scans or saved rows and cannot be combined
 with `--follow` or `--passive`. `--fresh` alone is still a publication read,
 not this explicit reconciliation.
