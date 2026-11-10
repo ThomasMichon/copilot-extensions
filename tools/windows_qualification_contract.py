@@ -43,7 +43,9 @@ NATIVE_PACKETS = {
         "native-driver-startup-cold-resume",
     ),
 }
-PACKETS = ("bridge-http52", *NATIVE_PACKETS)
+MCP_LIFETIME_PACKET = "mcp-caller-lifetime"
+MCP_LIFETIME_CASE = "test_native_caller_jobs_and_session_owner_lifetime"
+PACKETS = ("bridge-http52", MCP_LIFETIME_PACKET, *NATIVE_PACKETS)
 NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.3.8"}
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -177,7 +179,10 @@ def validate_result(
     if not isinstance(cases, list):
         raise ValueError("missing actual test outcomes")
     native = NATIVE_PACKETS.get(expected["selection"].get("name"))
-    if value["outcome"] == "qualified" and (expected["selection"]["kind"] != "packet" or native):
+    lifetime = expected["selection"].get("name") == MCP_LIFETIME_PACKET
+    if value["outcome"] == "qualified" and (
+        expected["selection"]["kind"] != "packet" or native or lifetime
+    ):
         if not cases or any(case.get("outcome") != "passed" for case in cases):
             raise ValueError("empty, failed or skipped selection cannot qualify")
         if native and (
@@ -186,6 +191,11 @@ def validate_result(
             or value.get("native_prerequisites") != NATIVE_VERSIONS
         ):
             raise ValueError("native caller or prerequisite identity mismatch")
+        if lifetime and (
+            len(cases) != 1 or cases[0].get("name") != MCP_LIFETIME_CASE
+            or cases[0].get("class", "").split(".")[-1] != "test_custody_native_lifetime"
+        ):
+            raise ValueError("MCP native lifetime caller identity mismatch")
     if value["outcome"] == "qualified":
         required = {
             "plugin": {"source-and-selection", "canonical-plugin-tests", "test-runtime"},
@@ -202,12 +212,17 @@ def validate_result(
                 "source-and-selection", "native-prerequisites",
                 native[3], "test-runtime",
             }
+        elif lifetime:
+            required = {
+                "source-and-selection", "prepare-mcp-test-runtime",
+                MCP_LIFETIME_PACKET, "test-runtime",
+            }
         phases = value.get("phases", [])
         if {phase.get("name") for phase in phases} != required or any(
             phase.get("status") != "passed" for phase in phases
         ):
             raise ValueError("required qualification phases are incomplete")
-        if expected["selection"]["kind"] == "packet" and not native and (
+        if expected["selection"]["kind"] == "packet" and not native and not lifetime and (
             value.get("packet", {}).get("source_commit") != expected["source_sha"]
             or value.get("packet", {}).get("generation") != 52
             or not value.get("packet", {}).get("case_count")

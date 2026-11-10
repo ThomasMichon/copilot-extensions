@@ -102,3 +102,18 @@ def attach(handle, bridge, admission, *, ensure=True):
         return connection
     except sockio.HostUnreachableError as exc:
         raise SharingUnavailable("custody unreachable; backend publication retained") from exc
+
+
+def run_adopted(handle, bridge, *, owner_pid, owner_birth):
+    """Internal opt-in caller with explicit originating-session lifetime.
+
+    The originating launcher supplies its own native identity before any shim
+    can exit. Unsupported or unverifiable ownership refuses before custody
+    startup; ordinary forwarders do not select this entrypoint yet.
+    """
+    from .custody_lifetime import SessionOwner
+
+    with SessionOwner(owner_pid, owner_birth) as owner:
+        admission = incoming.ensure_current(handle)
+        connection = attach(handle, bridge, admission)
+        return sockio.pump(connection, session_owner=owner)

@@ -298,7 +298,7 @@ def _close(sock: socket.socket) -> None:
         pass
 
 
-def pump(sock: socket.socket) -> None:
+def pump(sock: socket.socket, *, session_owner=None) -> None:
     """Bidirectionally pump line-delimited JSON-RPC between stdio and ``sock``.
 
     stdin -> socket and socket -> stdout run on two daemon threads (blocking I/O,
@@ -306,7 +306,9 @@ def pump(sock: socket.socket) -> None:
     end: on stdin EOF the client half-closes the socket (so the host drains and
     closes), and the pump keeps forwarding the host's final replies until the
     host closes the connection. A parent-death watchdog covers the case where
-    stdin EOF never arrives (the Windows ``cmd``-shim grandchild).
+    stdin EOF never arrives (the Windows ``cmd``-shim grandchild). An opt-in
+    adopted conduit instead supplies its explicitly pinned session owner;
+    intermediate ancestors are not its lifetime boundary.
     """
     # watchdog is stdlib-only and light; import here so a direct-fallback path
     # (which never calls pump) doesn't pay for it.
@@ -348,11 +350,17 @@ def pump(sock: socket.socket) -> None:
         _close(sock)  # unblock a reader parked in recv()
 
     reap_descendants_on_exit()
-    install_parent_death_watchdog(_stop)
-
-    threading.Thread(target=_client_to_host, name="agent-mcp-fwd-in",
-                     daemon=True).start()
-    threading.Thread(target=_host_to_client, name="agent-mcp-fwd-out",
-                     daemon=True).start()
-    done.wait()
-    _close(sock)
+    try:
+        if session_owner is None:
+            install_parent_death_watchdog(_stop)
+        else:
+            session_owner.start(_stop)
+        threading.Thread(target=_client_to_host, name="agent-mcp-fwd-in",
+                         daemon=True).start()
+        threading.Thread(target=_host_to_client, name="agent-mcp-fwd-out",
+                         daemon=True).start()
+        done.wait()
+    finally:
+        _close(sock)
+        if session_owner is not None:
+            session_owner.close()

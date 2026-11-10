@@ -186,13 +186,43 @@ its custody and configuration contracts, and sends complete caller-context
 admission on the same connection. It does not require the keeper's version to
 equal the backend's. The handshake uses a total deadline even for fragmented
 replies, consumes exactly its acknowledgments, then returns a blocking socket
-to the existing stdio byte pump. That pump's EOF half-close, final-output drain
-and lifetime watchdog are unchanged.
+to the existing stdio byte pump. Its EOF half-close and final-output drain
+are unchanged. Ordinary callers retain their existing parent watchdog;
+explicit adopted callers use the separate owner boundary below.
 
 Attach acknowledgment precedes early upstream notifications. Client EOF joins
 an active handover before owning teardown; failed quiescence still closes
 the exact retained transport while reporting uncertain accepted effects.
 Losing only a backend link is not evidence that the external client died.
+
+### Explicit originating-session lifetime
+
+The internal `custody_launch.run_adopted` entrypoint requires the originating
+session's explicit PID and native birth, captured before an interposed launcher
+can exit. It pins that exact process before incoming or custody startup and
+never discovers an owner by walking ancestors. The Windows pin requests only
+limited query and synchronization rights; Linux retains a birth-checked pidfd.
+Neither path signals the owner. Unsupported or unverifiable admission refuses
+before startup, and observation errors after admission retain the session
+rather than claiming owner death. This explicit path currently supports Windows
+and Linux; native macOS ownership remains unqualified.
+
+The adopted conduit observes that pin instead of the ordinary ancestor
+watchdog. A shim's exit alone therefore does not close its original stdio or
+custody connection. Verified owner exit closes only this client's connection,
+initiating the existing exact upstream/session settlement. Other attached
+clients and the shared custody host retain their independent lifetimes.
+Normal forwarders and installer selection do not invoke this internal path.
+Source controls are not native caller-Job, installed-consumer or rollout proof.
+
+The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the
+existing native test Job owner and runner-renewed daemon leases. It selects one
+functional fixture: actual custody startup, caller-Job closure with a bounded
+child control, restrictive shared-outer refusal, shim exit, physical backend
+replacement and owner death while the original input pipe remains open.
+There is no desktop observer, visible control, Copilot binary, terminal host,
+private credential or debugger prerequisite. Controller support must be
+promoted before that packet can be submitted; preparing it does not qualify it.
 
 Read-side EOF reaches custody independently of queued application admission.
 Already-read responses, including those still awaiting publication, remain
