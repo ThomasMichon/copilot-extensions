@@ -56,6 +56,40 @@ def add_parser(subparsers) -> None:
     run.add_argument("--apply", action="store_true")
     run.add_argument("--expect-policy", default="", help="approval token from the local policy preview")
     run.set_defaults(func=run_collection)
+    job = commands.add_parser(
+        "prepare-job", help="render inert native job definitions; never register or enable", allow_abbrev=False,
+    )
+    job.add_argument("--store-dir", type=Path, required=True, help="explicit preprovisioned v2 store")
+    job.add_argument("--user-id", default="", help="interactive Windows account SID for the proposed task")
+    job.set_defaults(func=run_prepare_job)
+
+
+def run_prepare_job(args) -> int:
+    from .health_jobs import JobError, prepare
+    from .health_run import policy_preview
+    from .health_slots import HealthError
+
+    try:
+        store = Path(os.path.abspath(args.store_dir))
+        _, _, token = policy_preview(store)
+        payload = Path(os.environ["AGENT_MACHINES_PAYLOAD_ROOT"])
+        if not payload.is_absolute() or not (payload / "plugin.json").is_file():
+            raise JobError("owning-payload-unavailable")
+        launcher = payload / "bin" / ("agent-machines.ps1" if sys.platform == "win32" else "agent-machines")
+        if not launcher.is_file():
+            raise JobError("owning-launcher-unavailable")
+        result = prepare(
+            platform=sys.platform, payload=str(payload), store=str(store), policy_token=token,
+            user_id=args.user_id, windows_root=os.environ.get("SystemRoot", "") if sys.platform == "win32" else "",
+        )
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 0
+    except (ValueError, OSError, KeyError) as error:
+        print(json.dumps({
+            "ok": False, "error": str(error) if isinstance(error, (HealthError, JobError)) else "job-preparation-unavailable",
+            "registered": False, "enabled": False,
+        }), file=sys.stderr)
+        return 2
 
 
 def run_collection(args) -> int:

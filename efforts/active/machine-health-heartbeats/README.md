@@ -158,7 +158,7 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   before implementing the combined hourly operation or native job.
 - [x] Prove the complete explicit local collect -> stage -> reread/report flow,
   keeping present health and prior-hour telemetry correctly attributed.
-- [ ] Review and prove the [adopted one-shot operation](local-collection.md#adopted-one-shot-operation)
+- [x] Review and prove the [adopted one-shot operation](local-collection.md#adopted-one-shot-operation)
   over current health and prior-hour telemetry, with explicit policy-scoped
   local staging authority and one shared admission/deadline.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
@@ -167,6 +167,9 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   existing owners and no remediation or new resident process.
 - [ ] Add independent native scheduled execution through Agent Machines after
   source review, retaining a separate explicit enrollment/activation gate.
+- [x] Prepare inert Windows/Linux job definitions and qualify collection
+  support from the exact selected runtime before forwarding new operations;
+  keep scheduler registration and native execution unqualified.
 - [ ] Qualify the selected carrier's delayed delivery, weekly slot reuse,
   conflicts, offline catch-up and reader-side outage reporting.
 - [ ] Obtain activation authority for the selected cohort, prove actual hourly
@@ -1203,3 +1206,51 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - Seven bounded actor-free composition nodes cover the new operation.
   Review and fresh exact-source CI still gate #11880. Parent/platform,
   installed-adoption, scheduling, carrier and activation gates remain open.
+
+### 2026-11-10 - Adopted one-shot merged; native job preparation next
+- #11880 merged as `52b200b156` after actual current-head Copilot approval with
+  no open issues, all four resolved review threads and green required CI,
+  including the actor-free units/coverage lane.
+- A superseded attribution check was reconciled through the supported
+  metadata-only workflow scoped to this PR. Its successful result preserved the
+  approved source head; no source push, review bypass of findings or CI bypass
+  was used to repair it.
+- The final focused packet passed 128 cases and the final managed
+  collection/native-consumer packet passed all 46 cases. Earlier cold payload,
+  delayed listener and native CLI-exit controls remain recorded above.
+- Pull-forward aborted safely on squash-history conflicts. All implementation
+  paths matched the confirmed merge; the only difference was four unrelated
+  upstream documentation lines. A retained backup allowed reconciliation of
+  only the three confirmed merged commits, preserving those upstream lines.
+  The source worktree is now on the merged default branch.
+- Completed only the one-shot source checkbox. Next prepare independent native
+  job definitions through Agent Machines, qualifying the exact selected
+  runtime's collection-v1 declaration before any caller can use the operation.
+  Keep preparation separate from enrollment, retain the shared bounded
+  one-shot action, and do not revive the update watchdog.
+- The parent remains Active. Native/platform and installed mixed-version
+  qualification, broader domains, preferences, carrier delivery and explicitly
+  authorized enrollment/activation remain open. No runtime was installed,
+  service activated, task enrolled or carrier written by this source slice.
+
+### 2026-11-10 - Inert native job preparation
+- Added read-only `health prepare-job` output through the normal parser. It
+  reads the selected v2 policy and owning payload launcher and returns proposed
+  definition text only. Windows task/trigger remain disabled; Linux user-unit
+  text is not installed or enabled. macOS remains unsupported.
+- Proposals use hourly UTC delayed triggers, late-run coalescing, no restart
+  storm, overlap suppression and bounded native action settings. The action
+  reuses normal policy-approved `health run`, not the update watchdog.
+- Both payload entries now execute a stdlib compatibility adapter under the
+  exact selected interpreter, reading its immutable-slot collection declaration
+  before provider import. Missing, invalid and rollback support refuse without
+  trialing new syntax; preview/apply-only runtimes cannot prepare jobs.
+- Focused source/parser/composition controls passed 75 tests. The managed
+  fresh-runtime/cold-payload packet passed all 20 tests on Windows PowerShell
+  and Bash entry paths, including zero provider calls when unsupported and
+  qualification again after rollback. Bash here does not qualify Linux.
+- Install, headless-source and documentation contracts passed. Native scheduler
+  definitions, two-cycle window/focus observation, real overlap/late wake,
+  deadline/storage/cleanup, installed adoption, carrier and explicit activation
+  remain unqualified. No registration, installed runtime change or carrier
+  effect was performed; the parent remains Active.

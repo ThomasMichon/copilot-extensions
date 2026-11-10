@@ -1,6 +1,8 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_native_job_preparation_is_actor_free_and_inert_on_both_platforms",
+        "tools/promotion_unit_tests/test_health_composition.py::test_native_job_preparation_refuses_unsupported_platforms_and_unsafe_definition_values",
         "tools/promotion_unit_tests/test_health_composition.py::test_one_shot_actor_free_final_interruption_retains_committed_facts",
         "tools/promotion_unit_tests/test_health_composition.py::test_one_shot_actor_free_interruption_retains_unknown_transaction",
         "tools/promotion_unit_tests/test_health_composition.py::test_one_shot_actor_free_cleanup_preserves_original_exception_and_partial_result",
@@ -4760,8 +4762,9 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "30960140274c035e035e25e6ef47b9889453b5c1f58f4d6f7b81debaa118ad70",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "bc32cf7b244ba2e78a356c4f1c811b6f97f7dd90fdf689ee49576149444ce053",
+        "tools/promotion_unit_tests/test_health_composition.py": "a48be65a97ffcfabbdbc82ba6ee96d4a1f9ce1f394ef7d9be916368fdb474447",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "4ac76d8c71ee23b8c1136cdee2d1ec888093833f7aa4796f7a4840efaaa606ab",
+        "plugins/agent-machines/src/agent_machines/health_jobs.py": "6fdaf4a50924bd92077cfacb0376d591458991acdb424c95943fe4358316f65a",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "9317a16c7d6d70cce4afb93b5e9fb692d2a0dc25d8b5c19797ad5d0e00bb1149",
@@ -5446,6 +5449,7 @@
         "plugins/agent-machines/src/agent_machines/health_hourly.py",
         "plugins/agent-machines/src/agent_machines/health_collect.py",
         "plugins/agent-machines/src/agent_machines/cli_health.py",
+        "plugins/agent-machines/src/agent_machines/health_jobs.py",
         "plugins/agent-machines/src/agent_machines/health_chart.py",
         "plugins/agent-machines/src/agent_machines/health_report.py",
         "plugins/agent-machines/src/agent_machines/health_slots.py",
