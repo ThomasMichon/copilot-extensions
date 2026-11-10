@@ -4,6 +4,8 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[3]
 _spec = importlib.util.spec_from_file_location(
     "peer_launch", ROOT / "libs" / "peer-launch" / "peer_launch.py"
@@ -112,3 +114,65 @@ def test_agent_dispatch_retains_authority_and_separate_shared_control() -> None:
     other = peer_launch.peer_environment(_context("agent-worktrees"), inherited)
     assert "AGENT_DISPATCH_TASK_AUTHORITY" not in other
     assert "AGENT_DISPATCH_SHARED_CONTROL_TOKEN" not in other
+
+
+def test_vault_rebinds_native_owner_without_caller_credential_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(peer_launch, "_vault_service_suffix", lambda _root: "f" * 12)
+    root = tmp_path / "Vault Owner"
+    context = {
+        **_context("agent-vault"), "pluginRoot": str(root),
+        "marketplaceId": "example-cell",
+    }
+    inherited = {
+        "AGENT_VAULT_HOME": "/foreign",
+        "AGENT_VAULT_ENDPOINT": "caller-endpoint",
+        "AGENT_VAULT_PINNED_CONTEXT": "caller-cache",
+        "AGENT_VAULT_CONFIG": "/foreign/config",
+        "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD": "1",
+        "KPDB": "/foreign/database",
+        "VAULT_GROUP": "foreign-group",
+        "AGENT_VAULT": "foreign-vault",
+        "HOME": "/user",
+    }
+    env = peer_launch.peer_environment(context, inherited)
+    suffix = env["AGENT_VAULT_PIPE"].removeprefix(r"\\.\pipe\agent-vault-")
+    assert suffix == "f" * 12
+    assert env["AGENT_VAULT_HOME"] == str(root)
+    assert env["AGENT_VAULT_VALIDATED_CONTEXT"] == context["installReceipt"]
+    assert env["AGENT_VAULT_INSTALLATION_ID"] == "example-cell/agent-vault"
+    assert env["AGENT_VAULT_RUN_DIR"] == str(root / "run")
+    assert env["AGENT_VAULT_CORE_RUN_DIR"] == str(root / "core")
+    assert env["AGENT_VAULT_CACHE_DIR"] == str(root / "cache")
+    assert env["AGENT_VAULT_SOCKET"] == str(root / "run" / "agent-vault.sock")
+    assert env["AGENT_VAULT_PIPE"] == rf"\\.\pipe\agent-vault-{suffix}"
+    assert env["AGENT_VAULT_PID"] == str(root / "run" / "agent-vault-service.pid")
+    assert env["AGENT_VAULT_LOG"] == str(root / "logs" / "agent-vault-service.log")
+    assert env["AGENT_VAULT_PORT"] == "0"
+    assert env["AGENT_VAULT_SYSTEMD_UNIT"] == f"agent-vault-{suffix}.service"
+    assert env["AGENT_VAULT_TASK_NAME"] == f"AgentVault-{suffix}"
+    assert env["AGENT_VAULT_NO_SELFPROVISION"] == "1"
+    assert env["HOME"] == "/user"
+    assert not set(inherited).difference({"AGENT_VAULT_HOME", "HOME"}) & env.keys()
+    assert not root.exists()
+
+
+def test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(peer_launch.os, "name", "posix")
+    monkeypatch.setattr(peer_launch.sys, "platform", "linux")
+    monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: None)
+    with pytest.raises(ValueError, match="SHA-256 suffix support"):
+        peer_launch._vault_service_suffix("/example/Vault")
+
+
+def test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(peer_launch.os, "name", "posix")
+    monkeypatch.setattr(peer_launch.sys, "platform", "darwin")
+    monkeypatch.setattr(peer_launch.shutil, "which", lambda _name: pytest.fail("unqualified owner lookup"))
+    with pytest.raises(ValueError, match="native Windows and Linux only"):
+        peer_launch._vault_service_suffix("/example/Vault")

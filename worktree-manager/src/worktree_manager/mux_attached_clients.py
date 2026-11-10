@@ -30,7 +30,10 @@ def mux_attached_clients(
     zero-exit ``list-clients`` call is trusted to report the real count,
     including a genuine zero (an empty-but-successful listing)."""
     if not mux_discovery.passive_cli_supported(mux_bin):
-        return None
+        if mux_args:
+            return None
+        observation = mux_discovery.observe_psmux(session, timeout=min(timeout_s, 5))
+        return observation.clients if observation.status == "present" else None
     try:
         result = subprocess.run(
             [mux_bin, *mux_args, "list-clients", "-t", session],

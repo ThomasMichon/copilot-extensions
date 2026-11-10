@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve request-budgeted terminal target capture for standalone watch delivery",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

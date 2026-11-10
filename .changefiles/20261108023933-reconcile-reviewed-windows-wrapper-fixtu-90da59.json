@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile reviewed Windows wrapper fixture producer declarations so exact-source typechecking admits the current test source without weakening sink checks.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Compose explicit standalone report bindings with the existing native owner and size-qualified connector lifetime.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

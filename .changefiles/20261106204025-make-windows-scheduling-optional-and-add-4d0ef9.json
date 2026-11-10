@@ -1,0 +1,9 @@
+{
+  "comment": "Make Windows scheduling optional and add classic-lane completed-cycle readiness",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

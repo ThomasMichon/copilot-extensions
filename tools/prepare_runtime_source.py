@@ -227,6 +227,9 @@ def materialize_consumer(
         dest_root=snapshot if destination.is_relative_to(snapshot) else destination,
         reuse_existing=True,
     ))
+    log.extend(materializer.materialize_payload_invocation_into(
+        source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=snapshot,
+    ))
     log.extend(
         f"SKIP {problem}"
         for problem in materializer.uer.materialized_local_source_problems(destination)

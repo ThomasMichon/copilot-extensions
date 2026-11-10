@@ -20,12 +20,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import threading
 
 from agent_procutil import no_window_flags
 
 from ... import engine_client
+from ...engine_progress import failed_json_result
 from .. import context
 from .source_identity import local_key
 
@@ -33,7 +35,7 @@ from .source_identity import local_key
 PENDING, RUNNING, DONE, FAILED = "pending", "running", "done", "failed"
 
 
-def _ssh_json(argv, timeout=120):
+def _ssh_json(argv, timeout=120, *, preserve_failure_detail=False):
     """Run a remote op over SSH and parse its single JSON result object."""
     kwargs = dict(
         capture_output=True, text=True,
@@ -51,12 +53,21 @@ def _ssh_json(argv, timeout=120):
     out = proc.stdout or ""
     i = out.find("{")
     if i < 0:
+        if preserve_failure_detail:
+            return failed_json_result(out, proc.stderr, reason="remote command returned no JSON")
         err = (proc.stderr or out or "").strip().splitlines()
         return {"ok": False, "reason": err[-1] if err else f"exit {proc.returncode}"}
     try:
         obj, _ = json.JSONDecoder().raw_decode(out[i:])
+        if (preserve_failure_detail and isinstance(obj, dict) and proc.stderr
+                and (proc.returncode or obj.get("success") is False or obj.get("error"))):
+            obj["detail"] = "\n".join(
+                str(part) for part in (obj.get("detail"), proc.stderr.strip()) if part
+            )
         return obj
     except ValueError:
+        if preserve_failure_detail:
+            return failed_json_result(out, proc.stderr, reason="unparseable remote result")
         return {"ok": False, "reason": "unparseable remote result"}
 
 
@@ -78,9 +89,8 @@ def _result_ok(op, res):
         return bool(res.get("ok"))
     if op == "finalize":
         # validate_and_finalize / `finalize --json`: ``success`` is authoritative
-        # (False when content is unpushed, but the picker only offers Finalize on
-        # no-commit conversation/unused worktrees, so it succeeds).
-        return bool(res.get("success"))
+        # A refusal is expected on unsettled work, not an invitation to force.
+        return res.get("success") is True
     # sync: a no-op that was already current is success; a real skip is not.
     if "ok" in res:
         return res["ok"] is True
@@ -117,6 +127,24 @@ def sync_diagnostics(result):
     return lines
 
 
+def finalize_diagnostics(result):
+    """Keep the first actual refusal, not the tail of a long claim ledger."""
+    if not isinstance(result, dict):
+        return []
+    reason = result.get("reason") or result.get("error")
+    if not reason:
+        lines = [
+            re.sub(r"\x1b\[[0-9;]*m", "", line).strip()
+            for line in str(result.get("detail") or "").splitlines() if line.strip()
+        ]
+        reason = next(
+            (line for line in lines if line.startswith(("✗", "[ERROR]", "ERROR:"))),
+            lines[0] if lines else "",
+        )
+    text = " ".join(str(reason or "").split())
+    return [text if len(text) <= 160 else text[:157] + "..."] if text else []
+
+
 def build_tasks(op, items, src, *, project=None, include_unused=False,
                 include_conversations=False,
                 local: tuple[str | None, str | None] | None = None):
@@ -147,17 +175,35 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
             w.get("source_kind", "machine-ssh") == "machine-ssh"
             and (m, e) == local
         )
+        refusal = _finalize_blocker(w) if op == "finalize" else None
         tasks.append((key, _make_task(
             op, wt_id, m, e, is_local, project=project, source_id=source_id,
             include_unused=include_unused,
             include_conversations=include_conversations,
+            refusal=refusal,
         )))
     return tasks
 
 
+def _finalize_blocker(row):
+    if row.get("managed_child"):
+        return "controller-owned workspace: return to its controller"
+    if row.get("mux_observation_unknown"):
+        return "mux observation unavailable: refresh qualified status before finalizing"
+    if any(row.get(field) for field in (
+        "mux_live", "session_bare_orphan", "session_lock_live",
+        "session_bound_live", "session_bridge_live", "session_lock_stale",
+        "session_ahp_live", "execution_leg_live",
+    )):
+        return "live session or lock residue: resolve its lifecycle before finalizing"
+    return None
+
+
 def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
-               include_unused=False, include_conversations=False):
+               include_unused=False, include_conversations=False, refusal=None):
     def _run():
+        if refusal:
+            return {"success": False, "reason": refusal}
         if not wt_id:
             return {"ok": False, "reason": "no worktree id"}
         if is_local:
@@ -179,7 +225,8 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
             else:
                 args = ["sync", "--paired", "--worktree-id", wt_id, "--json"]
             return engine_client.run_json(
-                project, args, timeout=120, allow_nonzero=True
+                project, args, timeout=120, allow_nonzero=True,
+                **({"preserve_failure_detail": True} if op == "finalize" else {}),
             )
         from . import data_ssh
         argv = data_ssh.remote_op_argv(
@@ -193,7 +240,7 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
                 "ok": False,
                 "reason": f"source does not support {op}: {source_id or f'{machine} {env}'}",
             }
-        return _ssh_json(argv)
+        return _ssh_json(argv, preserve_failure_detail=True) if op == "finalize" else _ssh_json(argv)
     return _run
 
 

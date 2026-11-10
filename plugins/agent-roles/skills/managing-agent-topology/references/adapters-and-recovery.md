@@ -1,0 +1,144 @@
+# Native adapters and interrupted-flow recovery
+
+The [dispatcher runbook](../SKILL.md) composes native owners, not their private
+databases. Qualify installed capabilities before effects. The offline helper
+never invokes an adapter and its copied observations do not authenticate one.
+
+## Adapter qualification
+
+| Concern | Existing owner and required evidence |
+|---------|--------------------------------------|
+| State home and writer | Harness/knowledge binding and native worktree/effort custody; one writable task workspace and one accepted dispatcher owner |
+| Machine selection | Machine/related-repository registry and venue owner; canonical machine IDs, purpose, permitted work, resource admission and supported transport |
+| Discovery | Worktrees' bounded status/current-head readers, plus the selected venue's inventory; preserve observation times, coverage gaps and existing obligations |
+| Allocation | Worktrees' native keyed creation; persist one logical creation key and retain remote request IDs, exact destination and returned writer/worktree association |
+| Embodiment | Bridge's supported creation into that existing worktree, including the native writer evidence required by the selected receiving path |
+| Follow-up | Current-head resolution plus Bridge's qualified exact-head/idempotent send and receipt-only read where supported |
+| Task lifecycle | Dispatch only when the adopter already uses it for this work; preserve its claims and task identity instead of inventing a second task |
+| Supervision and exit | Existing native events/watches and lifecycle/claim owners, within the charter's observation budget and original effect limits |
+
+Use `agent-worktrees`' and `agent-bridge`'s exact session command catalogs and
+their owning skills. Do not infer agent-hosting permission from a repository's
+presence or a working SSH connection. A dispatcher may prepare source or reports
+without permission to launch agents in that repository.
+
+Current advertised Worktrees contracts include `create --creation-key` for a
+logical allocation identity, `--creation-request-id` for recovery of an existing
+remote allocation, and `--bridge` for an agent-owned worktree without launching
+it. `head-session` and `worktree-status-bundle` expose native current-owner/status
+reads. Use canonical full IDs and the selected repository/machine context, not a
+short suffix resolved in the wrong project.
+
+Current Bridge contracts include existing-worktree creation with `--worktree-id`,
+keyed creation and retained `--worktree-writer-file` evidence on paths that require
+it. Obtain that writer evidence through the native Worktrees/Bridge procedure;
+never manufacture the JSON, drop the requirement or choose an untracked anchor
+instead. The receiving path may require its own minimum protocol and repository
+agent-hosting checks. Use the installed owner's complete recipe for that path.
+
+For follow-ups, the current live path exposes a stable `--idempotency-key` and
+`--expected-session-id` admission check. The ordinary native path has its own
+`--expected-native-session-id`, keyed invocation and `--receipt-only` contracts.
+These are different modes: select the one the resolved target actually supports,
+not a bag of flags to combine. A worktree handle resolves to its current live
+session; recheck it before sending, and retain exact native receipts afterward.
+Never use `--force` or an interrupt to repair a delivery uncertainty.
+
+These names are compatibility landmarks, not a frozen CLI recipe. Read current
+installed help and owner guidance. If exact keyed recovery, current-head binding
+or required receiving support is unavailable, record the missing capability and
+use an explicit owner handoff; do not build a replacement allocator or transport.
+Optional safeguards are not universal new grants, and this document does not
+authorize installing or upgrading a missing adapter.
+
+## State and effect protocol
+
+Persist intent under the existing native single writer, using the adopter's
+normal versioned save/publication flow. Do not perform an effect until its
+assignment and pending operation are durably saved. Increment document revision
+on intent changes; do not launder old observations by refreshing their timestamp.
+Store the original native source and time of each observation.
+
+Assignments are `proposed`, `active`, `completed` or `released`.
+`active` alone is not qualified coverage; `completed` alone is not release.
+An adopted existing assignment may have no allocation/launch effects in this map:
+its native owner and explicit adoption evidence still need reconciliation.
+
+Lifecycle effects (`allocate`, `retire`) use `prepared`, `unknown`, `confirmed`
+or `failed`. Message effects (`launch`, `relay`) use `prepared`, `unknown`,
+`admitted`, `consumed`, `accepted` or `failed`. Admission and consumption remain
+unsettled for this assignment's acceptance purposes. A `failed` outcome must be
+known, not inferred from a timeout. Preserve the native reference and original
+operation ID; a retry policy comes from the original grant and native owner, not
+from an offline status label.
+
+Every launch or relay effect requires `nativeRequest`: its selected native
+`mode` and `envelopeRef` to a durable, immutable/version-addressed private request
+saved **before** sending. Preserve the exact original destination and session
+identities (Bridge and native IDs where applicable), key, caller/sender, complete
+prompt with unchanged text/bytes, writer/creation evidence and mode-specific
+options such as no-resume. Use the native owner's envelope format rather than
+inventing a second transport protocol. Do not retain credentials in this record.
+Lifecycle effects may use the same reference or `null`; their native creation
+and retirement recovery requirements still apply.
+
+The helper validates only this reference's shape; it never fetches it or proves
+immutability, access, authority or receipt-reader compatibility. The dispatcher
+must confirm the original content is durably recoverable before effects.
+Missing or uncertain content blocks the affected action. Preserve the reference
+and selected mode after succession, charter revisions and observation refreshes.
+Receipt-only recovery uses the original session, sender/caller, key and exact
+prompt, not the current worktree alias or a regenerated seed. A new authorized
+follow-up gets a new envelope after unresolved prior effects are reconciled.
+
+Persist a follow-up's complete question or adjustment and link it to its own
+relay effect. Preserve the full revised charter and prior revisions. Native
+acceptance evidence qualifies a revision; a changed file, delivery receipt,
+healthy process or idle worker does not.
+
+`released` requires settled effects and confirmed native retirement in this
+contract. It never authorizes retirement. A native refusal caused by open PRs,
+claims, a live successor or incomplete objective remains unresolved; do not
+hand-delete directories or clear a claim.
+
+## Recovery cases
+
+| Observation | Required next action |
+|-------------|----------------------|
+| Empty assignment map, existing native owners | Propose adoption/reconciliation in place; no assumption of an empty fleet |
+| Competing or unknown dispatcher custody | Preserve both references and stop conflicting effects; resolve through the existing owner, not a topology-file lock |
+| Saved proposal, no allocation attempted | Recheck authority and native admission before the first keyed allocation |
+| Allocation pending or response lost | Retain creation key, destination and remote request ID; use native lookup/recovery, never a new key or machine |
+| Worktree allocated, launch not attempted | Persist launch identity and complete charter; embody only that returned worktree through the supported owner |
+| Launch/send outcome unknown | Read the saved original request envelope and inspect its exact native receipt; no resend, alternate target, replacement or new session |
+| Head succeeded inside the same worktree | Preserve old request envelopes for receipt-only recovery; after unsettled effects are reconciled, resolve the new native head and admit a new authorized follow-up with a new envelope |
+| Expected charter differs from accepted revision | Retain the owner; relay or inspect the already-pending update, and report coverage as unqualified until accepted |
+| Unreachable, stale, dormant or unaccepted owner | Retain an explicit unknown/unqualified entry; a shortfall is not automatic replacement authority |
+| New unrelated request | Separate temporary assignment and native worker; preserve standing-role coverage and custody |
+| Native task/worker complete, obligations still open | Follow native completion/cleanup gates; do not mark released |
+
+Restart first restores the document, native dispatcher custody, original grants,
+pending identities and outstanding watches/claims. Reconcile only the missing
+phase; a restart is not permission to replay the sequence. A leadership transfer
+requires acceptance through existing owners and carries the whole objective and
+unresolved effects, not just a copied JSON document.
+
+## Observation and reporting limits
+
+Coverage requires matching role ID/meaning, exact scope and accepted charter
+revision on a fresh current native owner. The runbook requires semantic changes
+to bump that charter revision. Count an owner once per role/scope lane, not once
+per alias. Freshness uses each observation's own timezone-aware timestamp;
+stale, missing and future-dated evidence are unknown.
+
+The helper's placement model supports declared slot capacity and observed used
+slots. Additional constraints (memory, locality, provider quotas or other resource
+dimensions) remain blocked for native admission, not interpreted as free capacity.
+Pending allocation effects also exclude the affected machine until reconciled.
+Candidate order is only a load-balancing suggestion, not a reservation or effect.
+Concurrent callers must still use the resource owner's native admission.
+
+An overview includes role shortfalls, unqualified owners, pending effects and
+discovery/custody holds. It is not a second dashboard database. Store decisions
+with their canonical effort/authority owner; regenerate the view from the map
+and dated native evidence.

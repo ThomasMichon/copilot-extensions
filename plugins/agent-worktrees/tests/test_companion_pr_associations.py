@@ -157,6 +157,53 @@ def test_unavailable_binding_retains_exact_record_not_empty(source, changes, rea
     assert value["associations"][0]["binding"] == {"available": False, "reason": reason}
 
 
+_OPENNESS_KEYS = {"pr_state", "state", "open", "merged", "mergeable", "provider_state"}
+
+
+@pytest.mark.parametrize("state", ["creating", "open", "active", "merged", "closed", "abandoned"])
+@pytest.mark.parametrize("claimed", [True, False])
+def test_recorded_lifecycle_and_claims_cannot_qualify_provider_openness(source, state, claimed):
+    resources = [{"kind": "pr", "id": "example/repository#7", "status": "active"}]
+    bundle = {
+        "project": "sample",
+        "worktree_id": "sample-work",
+        "as_of": 1.0,
+        "facts": {
+            "claims": {"value": {"resources": resources if claimed else []}, "confirmed": True}
+        },
+    }
+    value = source.read([_pr(state=state)], bundle=bundle)
+    assert value["available"] and value["complete"]
+    (entry,) = value["associations"]
+    assert entry["recorded_state"] == state
+    assert entry["binding"]["available"]
+    assert not _OPENNESS_KEYS & set(entry) and not _OPENNESS_KEYS & set(entry["binding"])
+
+
+def test_claim_without_ledger_entry_is_not_an_association(source):
+    bundle = {
+        "project": "sample",
+        "worktree_id": "sample-work",
+        "as_of": 1.0,
+        "facts": {
+            "claims": {
+                "value": {"resources": [{"kind": "pr", "id": "example/repository#7"}]},
+                "confirmed": True,
+            }
+        },
+    }
+    value = source.read([], bundle=bundle)
+    assert value["available"] and value["complete"] and value["associations"] == []
+    assert source.loads == []
+
+
+def test_unrecognized_recorded_lifecycle_is_incomplete_not_open(source):
+    value = source.read([_pr(state="draft")])
+    (entry,) = value["associations"]
+    assert entry["recorded_state"] == "draft"
+    assert entry["binding"] == {"available": False, "reason": "incomplete-association"}
+
+
 def test_bounded_projection_and_duplicate_outside_projection(source):
     entries = [
         _pr(

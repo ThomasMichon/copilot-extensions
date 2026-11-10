@@ -1,0 +1,9 @@
+{
+  "comment": "Keep unconditional static guidance copying without restart notices for byte-identical replacements; retain conservative late-change and failure warnings.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

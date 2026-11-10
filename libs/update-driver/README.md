@@ -93,6 +93,8 @@ creation, not an implicit permission migration or a read-only status side effect
   `context_keys` declares the adapter-approved, credential-free environment
   projection from `RequestSpec.context`: before product startup, the runner
   clears every declared key and restores only the request's saved values.
+  The declaration permits at most 128 names, including absent keys that must
+  be cleared; the request still retains at most 64 context values.
   This happens before module import and project routing, not just inside an
   eventual command handler. Absent keys cannot leak from the caller that
   happened to start the shared worker. The declaration participates in request

@@ -681,10 +681,9 @@ class TaskRunner:
         """Spawn + register a worker for a freshly dequeued (processing) task."""
         # NOTE: this per-source lock is IN-PROCESS — it serializes the worker
         # against THIS service's own ingest endpoints for the worker's lifetime.
-        # It does NOT coordinate across processes: after a cutover the new service
-        # does not hold it while the detached worker keeps writing. That narrow
-        # cross-process write window is left to the store's own file locking; a
-        # durable cross-process source lock is a follow-up.
+        # The worker separately owns the data-directory kernel writer lock across
+        # acquisition and state publication, even after this service exits.
+        # Hosted ingest/GC must join that same lock to coordinate across cutovers.
         worker_generation = self._selected_worker_generation()
         source_lock = None
         if self._source_lock_acquire is not None:

@@ -3095,18 +3095,16 @@ def _monitor_sweep(
     stale_sessions: list[str] = []
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
-        if live is None:
-            if sessions._is_psmux(mux_bin) and roster_publisher is not None:
-                # Publish independent facts without discovering, pruning or painting panes.
-                publish_project_rosters(
-                    picker_projects or set(), interval=interval, project_lock=project_lock,
-                    lifecycle_priority=lifecycle_priority, governance=governance,
-                    segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
-                    roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
-                )
-            if roster_failure is not None and not sessions._is_psmux(mux_bin):
-                roster_failure(RuntimeError("mux-session enumeration unavailable"))
-            return -1
+        observed = _smr.publish_mux_observation(
+            mux_bin, live, catalog_observer, lambda: publish_project_rosters(
+                picker_projects or set(), interval=interval, project_lock=project_lock,
+                lifecycle_priority=lifecycle_priority, governance=governance,
+                segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
+                roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
+            ) if roster_publisher is not None else None, roster_failure,
+        )
+        if observed is not None:
+            return observed
         from .status_monitor_discovery import discover_connected_worktrees
 
         registry.update(discover_connected_worktrees(
@@ -5288,8 +5286,7 @@ def _current_session_ids() -> set[str]:
 # ── Lazy dispatch (agent-cli-lazy-dispatch effort, Phase 1) ────────────────
 # Command -> (module, handler); modules expose add_parsers/register_cli. Regenerate by importing
 # agent_worktrees.__main__ once (pays the full cost, offline), then for each
-# add_parsers-owning module, building a throwaway
-# `argparse.ArgumentParser().add_subparsers()` and calling that module's own
+# parser module, building throwaway argparse subparsers and calling its own
 # `add_parsers(sub)` to see which command names land in `sub.choices`;
 # Cross-check COMMAND_MAP module/name; exclude inline build_parser parsers
 # (activity, activity-log, stage-update,
@@ -5356,6 +5353,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'handoff-head-observation': ('handoff_head_observation', 'cmd_observation'),
     'history-digest': ('session_metadata_cli', 'cmd_history_digest'),
     'hygiene': ('maintenance_cli', 'cmd_hygiene'),
+    'python-cache': ('python_cache_prune', 'cmd_python_cache'),
     'install': ('installation_cli', 'cmd_install'),
     'install-status': ('context_cli', 'cmd_install_status'),
     'installer-readiness': ('context_cli', 'cmd_installer_readiness'),
@@ -6129,6 +6127,7 @@ def _load_full_command_surface() -> None:
         "backfill-sessions": cmd_backfill_sessions,
         "doctor": cmd_doctor,
         "hygiene": cmd_hygiene,
+        "python-cache": __import__(f"{__package__}.python_cache_prune", fromlist=["cmd_python_cache"]).cmd_python_cache,
         "list-sessions": cmd_list_sessions,
         "handoff-head-observation": handoff_head_observation.cmd_observation,
         "head-session": cmd_head_session,
@@ -6474,8 +6473,8 @@ def main(argv: list[str] | None = None, *, publication: object | None = None) ->
     # Explicit one-shot reads need no deferred lifecycle helpers.
     if args_list[0] == "pr-watch":
         from . import pr_cli
-        if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads")
-                and "/" in args_list[2] and not args_list[2].startswith("-")):
+        if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads", "diff")
+                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] != ["inventory"]:
             _ensure_cluster_loaded()
         try:
             return pr_cli.cmd_pr_watch_dispatch(args_list[1:])

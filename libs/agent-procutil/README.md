@@ -1181,12 +1181,25 @@ remain read-only metadata. File access/share/disposition, binary record bytes
 and noninheritance retain their existing behavior. Portable registry imports
 still load no native bindings; Windows descriptor types are initialized lazily.
 
-`reconcile_instances(registry_root=None, limit=128, max_seconds=5)` is an explicit
-installer backstop for **expired disposable** instances and observed-exit
-finite control records. Resident production and unexpired disposable records
-are preserved. No import, status, lookup or session-start
+`reconcile_instances(registry_root=None, limit=128, max_seconds=5,
+terminate=False, runtime_root=None)` is an explicit backstop for **expired
+disposable** instances and observed-exit finite control records. It never
+signals a live process by default: expired live instances remain held, including
+their supervisors. Explicit lifecycle owners may opt into `terminate=True`;
+that retains the existing identity, lease, protection and self-cleanup checks.
+Resident production and unexpired disposable records are preserved.
+An optional absolute, unredirected `runtime_root` selects only records with that
+exact runtime anchor, not other installations or nested anchors. Cleanup checks
+the scope again under the instance lock before process queries or mutations.
+No import, status, lookup or session-start
 routine invokes it implicitly. The module CLI offers `inspect` and `reconcile`
-with `--registry-root`, `--limit`, and `--max-seconds`.
+with `--registry-root`, `--limit`, `--max-seconds`, `--runtime-root` and the
+explicit `--terminate` opt-in. `cleanup_instance` remains an explicit
+lifecycle-owner operation with its existing termination default.
+Installer adapters require their addressed runtime root, always select
+termination-free reconciliation and defer cleanup when scope is missing.
+Already-exited owned artifacts may be settled; live, protected, uncertain,
+foreign-runtime and resident-production records retain their existing holds.
 The additional finite-production control-record case requires observed native
 exit and never inherits disposable-artifact reclamation authority.
 Collectors resume lexicographically after the last visited canonical instance
@@ -1218,6 +1231,23 @@ custody covers the complete import closure rather than just one entry script.
 The archive contains only canonical `.py` files, not bytecode or native code;
 `tools/sync-versioned-runtime.py --only-installer-instances` publishes it beside
 the source-only installer adapters with non-group-writable permissions.
+
+The PowerShell facade accepts `-RuntimeRoot` and `-Terminate` (default `$false`).
+Bash accepts `reconcile_daemon_instances <limit> <seconds> <registry-root>
+<runtime-root> <terminate>`, with `false` as the termination default.
+New native callers query the executing helper's read-only `reconcile-contract`
+before cleanup: contract version 1 requires termination-policy and runtime-scope
+support. The Bash wrapper also declares `daemon_instance_reconcile_contract`;
+installer PowerShell adapters check the loaded facade's parameters before
+calling it. Bash installer adapters clear inherited contract and reconciliation
+functions in their private subshell before loading the addressed helper; only
+that helper's definitions may authorize cleanup. An inherited read-only function
+that cannot be cleared safely defers the optional backstop without changing the
+caller's bindings. Legacy or rolled-back helpers that cannot enforce these requirements
+defer reconciliation before any cleanup request, without replaying an unscoped
+or termination-enabled fallback. Older callers remain syntactically accepted by
+new providers but inherit the termination-free default. This intentional safety
+correction affects reconciliation, not owner-driven lease supervision or cleanup.
 
 The interpreter and selected source must have attributable filesystem custody.
 Missing, redirected or writable helper inputs refuse rather than downloading
@@ -1610,6 +1640,35 @@ CPU lower bound, and must never be added to it.
 CPU enforcement, consumer role aggregation and process-tree reclamation are
 not provided by this API. Run its focused and native tests with the library's
 `dev` and `metrics` extras under the adopting repository's bounded test runner.
+
+## Labeled scratch directories
+
+`agent_procutil.scratch.labeled_scratch(prefix, purpose, *, owner_refs=None,
+retention=None, cleanup=True)` creates a timestamped
+`<prefix><UTC stamp>-<random>` directory under the OS temp directory (or
+`AGENT_SCRATCH_ROOT`, or an explicit `root=`), writes a `scratch-owner.json`
+breadcrumb (schema, purpose, retention reason, creation time, PID and owner
+references such as the Copilot session, bound worktree and launch IDs taken
+from the environment) and removes the directory on exit. Removal is best
+effort and never follows symlinks or junctions: a link is unlinked, not
+traversed, and each directory is pinned before it is entered (descriptor-
+relative traversal on POSIX, a no-share-delete handle on Windows) so a
+directory swapped for a link mid-cleanup is never followed. Incomplete
+cleanup keeps the breadcrumb, so retained scratch stays labeled.
+An unreadable breadcrumb is retained even after other children are removed,
+since a failed final directory removal could not restore its contents.
+`create_labeled_scratch` / `remove_scratch` serve callers whose
+scratch outlives one `with` block. Removal rejects raw paths ending in a
+separator, `.` or `..` before inspection, since those suffixes can force
+directory-link traversal even during a no-follow lookup.
+
+`python -m agent_procutil.scratch report [--root DIR] [--json]` is a
+read-only inventory of a temp root: entries grouped by name prefix with
+counts, bytes, oldest/newest age and how many carry a breadcrumb (only a
+regular-file breadcrumb is read). It has no
+deletion capability; stale content is left for the operator to review.
+Byte accounting walks directory contents recursively and can be expensive on
+large roots; this is an explicitly invoked diagnostic, not a startup probe.
 
 ## Vendoring
 

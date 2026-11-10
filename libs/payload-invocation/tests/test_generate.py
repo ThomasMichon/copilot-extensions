@@ -64,12 +64,16 @@ def _manifest(tmp_path: Path) -> Path:
     return path
 
 
-@pytest.mark.parametrize("kind", ["sh", "ps1", "cmd", "dispatcher", "dispatcher-installed"] if os.name == "nt"
-                         else ["sh", "ps1", "dispatcher", "dispatcher-installed",
+@pytest.mark.parametrize("kind", ["sh", "sh-installed", "ps1", "ps1-installed", "cmd", "cmd-installed",
+                                  "dispatcher", "dispatcher-installed"] if os.name == "nt"
+                         else ["sh", "sh-installed", "ps1", "ps1-installed", "dispatcher", "dispatcher-installed",
                                "dispatcher-sh", "dispatcher-sh-installed"])
 def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) -> None:
     dispatcher = kind.startswith("dispatcher")
     installed = kind.endswith("-installed")
+    kind = kind.removesuffix("-installed") if not dispatcher else kind
+    # A waiting PowerShell shim removes the unsealed cache it minted; exec-style launchers cannot.
+    cleaned = not installed and kind in ("ps1", "cmd")
     manifest = _manifest(tmp_path)
     (manifest.parent / "plugin.json").write_text('{"name":"agent-example"}', encoding="utf-8")
     profile = tmp_path / "profile"
@@ -190,6 +194,11 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
             prefix = "\\\\?\\" + prefix
         cached = Path(output[1])
         assert cached.is_relative_to(Path(prefix))
+        if cleaned:
+            assert any(part.startswith("unsealed-") for part in cached.parts)
+            assert not any((root / "cache" / "python").iterdir())
+            assert snapshot() == before
+            continue
         current = (cached.read_bytes(), cached.stat().st_mtime_ns, cached.stat().st_ino)
         if cached_before is not None:
             assert (cast(Path, previous_cache).read_bytes(), cast(Path, previous_cache).stat().st_mtime_ns,
@@ -200,6 +209,9 @@ def test_generated_shim_external_cache_cold_and_warm(tmp_path: Path, kind: str) 
         assert snapshot() == before
         if installed:
             assert all(path.name.startswith("installed-") for path in (root / "cache" / "python").iterdir())
+    if cleaned:
+        assert dict(os.environ) == environment
+        return
     module = package / "__init__.py"
     previous_stat = module.stat()
     module.write_text("VALUE = 84\n", encoding="utf-8")
@@ -308,6 +320,10 @@ def test_binding_human_assets_do_not_require_worktrees_source(tmp_path: Path, mo
     project = root / "plugins/agent-machines/pyproject.toml"
     project.parent.mkdir(parents=True)
     project.write_text("", encoding="utf-8")
+    invocation = root / "libs/payload-invocation"
+    shutil.copytree(REPO / "libs/payload-invocation/templates", invocation / "templates")
+    for name in ("command_binding.py", "command_lifecycle.py"):
+        shutil.copyfile(REPO / "libs/payload-invocation" / name, invocation / name)
     monkeypatch.setattr(generator, "REPO", root)
 
     assert not (root / "plugins/agent-worktrees").exists()
@@ -1257,7 +1273,8 @@ def test_worktrees_releases_provision_lock_before_runtime_dispatch(
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout.strip()) == {
-        "lock": "released", "flags": ["prior-mode", "prior-snapshot"] if prior_flags else [None, None],
+        "lock": "released",
+        "flags": cast(list[str | None], ["prior-mode", "prior-snapshot"]) if prior_flags else [None, None],
     }
     dispatch = [
         event for event in _read_jsonl(plugin_root / "logs" / "activity.jsonl")
@@ -2522,6 +2539,25 @@ def test_check_detects_drift(tmp_path: Path) -> None:
         "stale\n", encoding="utf-8"
     )
     assert generator.process_manifest(manifest, check=True)
+
+
+@pytest.mark.parametrize("blocked", ["output-directory", "parent-file"])
+def test_source_check_rejects_unwritable_output_types(tmp_path: Path, blocked: str) -> None:
+    manifest = _manifest(tmp_path)
+    output = manifest.parent / "bin" / "agent-example.ps1"
+    if blocked == "output-directory":
+        output.mkdir(parents=True)
+    else:
+        output.parent.write_bytes(b"not a directory")
+    with pytest.raises(ValueError, match="generated output has unsafe custody"):
+        generator.source_check(manifest)
+
+
+def test_source_check_accepts_absent_generated_outputs(tmp_path: Path) -> None:
+    manifest = _manifest(tmp_path)
+    assert generator.source_check(manifest) == []
+    generator.process_manifest(manifest, check=False)
+    assert generator.process_manifest(manifest, check=True) == []
 
 
 def test_manifest_validation_fails_closed(tmp_path: Path) -> None:

@@ -1,6 +1,6 @@
 {
   "name": "agent-roles",
-  "description": "Sustained role charters over existing owners: fleet monitoring, independent pull-request review, and persistent scoped issue-backlog triage with durable harness/knowledge addenda. Guidance-only: no task queue, daemon, scheduler, watcher or grant of authority, and no required companion plugin.",
+  "description": "Sustained role charters over existing owners: fleet monitoring, pull-request review, scoped issue triage and portable topology dispatch with a versioned assignment contract and offline reports. No task queue, daemon, scheduler, launcher or grant of authority, and no required companion plugin.",
   "version": "0.1.0-dev1",
   "runtimeScope": "none",
   "author": {
@@ -19,6 +19,8 @@
     "pull-request-review",
     "issue-triage",
     "coordination",
+    "agent-topology",
+    "dispatcher",
     "copilot-extension"
   ],
   "skills": "skills/"

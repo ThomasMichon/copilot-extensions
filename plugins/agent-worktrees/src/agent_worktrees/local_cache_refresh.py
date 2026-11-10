@@ -40,6 +40,7 @@ class RefreshResult:
     publication_revision: str = ""
     counts_known: bool = True
     tool_roster_blocked: bool = field(default=False, kw_only=True)
+    restart_required: bool | None = field(default=None, kw_only=True)
 
     @property
     def diagnostic(self) -> str:
@@ -217,6 +218,7 @@ def refresh_local_cache(
             changed=published.changed, unchanged=published.unchanged, removed=published.removed,
             generation=published.generation, reused=published.reused,
             publication_revision=published.publication_revision,
+            restart_required=published.restart_required,
             blocking=len(published.failures), detail="; ".join(published.failures),
             elapsed_ns=time.monotonic_ns() - started,
         )

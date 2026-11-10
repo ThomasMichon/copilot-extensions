@@ -374,10 +374,8 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
 def _find_symlink(tree: Path, *, skip_test_runs: bool = True) -> str | None:
     """The first path (relative to ``tree``, or ``"."`` when ``tree``
     itself is the symlink) under ``tree`` that is a symlink, or ``None`` if
-    none is found. Mirrors ``materialize_main.py``'s and
-    ``sync-vendored-libs.py``'s own copies (kept separate for the same
-    hyphenated-filename reason those two already duplicate small helpers
-    between themselves). ``_find_symlinked_ancestor()`` above only catches
+    none is found. Shared with the promotion materializers.
+    ``_find_symlinked_ancestor()`` above only catches
     ``libs/<lib>`` and its ANCESTORS being a symlink -- a symlink NESTED
     somewhere below it (e.g. ``libs/<lib>/src/foo.py -> /external/file``)
     is a distinct hazard this catches: the live `uv`-editable reference
@@ -389,6 +387,21 @@ def _find_symlink(tree: Path, *, skip_test_runs: bool = True) -> str | None:
         return "."
     if not tree.is_dir():
         return None
+    try:
+        pending = [tree]
+        links = []
+        while pending:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    if skip_test_runs and entry.name == ".test-runs":
+                        continue
+                    if entry.is_symlink():
+                        links.append(Path(entry.path).relative_to(tree))
+                    elif entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+        return str(min(links)) if links else None
+    except OSError:
+        pass  # Preserve pathlib's existing scan-error handling.
     for entry in sorted(tree.rglob("*")):
         if skip_test_runs and ".test-runs" in entry.relative_to(tree).parts:
             continue

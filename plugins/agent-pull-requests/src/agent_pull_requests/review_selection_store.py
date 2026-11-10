@@ -51,6 +51,11 @@ class ReviewSelectionStore:
 
     @staticmethod
     def _previous(document: dict, original: dict) -> dict | None:
+        from .terminal_retention import require_live
+        require_live(
+            document, original["scope"], operation_id=original["operation_id"],
+            generation_id=original["generation_id"],
+        )
         if document.get("review_selection_version") != 1:
             raise ReplayStoreInvalid("pre-approval selection requires explicit storage adoption")
         previous = next(
@@ -86,6 +91,8 @@ class ReviewSelectionStore:
         scope = _scope(scope)
 
         def inspect(document: dict) -> dict:
+            from .terminal_retention import require_live
+            require_live(document, scope, operation_id=operation_id)
             if document.get("review_selection_version") != 1:
                 raise ReplayStoreInvalid("pre-approval selection requires explicit storage adoption")
             operation = next(

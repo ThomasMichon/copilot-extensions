@@ -722,7 +722,7 @@ def install_dir() -> Path:
     return dispatch_install_dir()
 
 
-def _parse_env_file(path: Path, *, strict: bool = False) -> dict[str, str]:
+def _parse_env_file(path: Path, *, strict: bool = False, content: bytes | None = None) -> dict[str, str]:
     """Parse a simple ``KEY=VALUE`` env file (``#`` comments + blanks skipped)."""
     out: dict[str, str] = {}
     try:
@@ -730,7 +730,8 @@ def _parse_env_file(path: Path, *, strict: bool = False) -> dict[str, str]:
             if strict:
                 raise RegistrarError("legacy profile requires a regular file")
             return out
-        text = path.read_text(encoding="utf-8", errors="strict" if strict else "replace")
+        errors = "strict" if strict else "replace"
+        text = path.read_text(encoding="utf-8", errors=errors) if content is None else content.decode("utf-8", errors=errors)
     except OSError:
         if strict:
             raise

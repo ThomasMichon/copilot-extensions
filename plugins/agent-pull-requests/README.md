@@ -11,6 +11,16 @@ commands into a separate, API-first surface:
 
 - `agent-worktrees` remains unchanged and fully supported.
 - `status`, `create`, `merge`, and `wait` are all implemented.
+- Native [on-demand thread reads](docs/cli-reference.md#native-threads)
+  reuse the existing configured Worktrees provider owner without a target checkout.
+- Native [unified-diff reads](docs/cli-reference.md#native-diff) use that same
+  target-qualified owner, preserving unsupported and unknown evidence.
+- Optional [selected ADO thread resolution](docs/author-operations.md#selected-native-thread-resolution)
+  uses exact candidate/thread expectations and the existing consumed-operation
+  ledger; read-only reports and legacy bulk syntax remain unchanged.
+- Optional [existing-owner HTTP reports](docs/watch-gateway.md#optional-existing-owner-report-reads)
+  preserve those native bodies and exits through the admitted Gateway; source
+  host injection is not installed HTTP adoption or principal-bound review evidence.
 
 ## Installation
 
@@ -158,7 +168,8 @@ the timeout elapses (exit code `3`).
 
 ### Explicit native provider commands
 
-Azure DevOps author-side creation, source publication and metadata-only repair
+Azure DevOps author-side creation, source publication, metadata-only repair and
+explicit draft readiness
 use the [capability-directed author workflow](docs/author-operations.md).
 Those operations keep source admission and target policy in Worktrees; source
 support is distinct from release and installed-consumer qualification.
@@ -203,6 +214,11 @@ pending auto-completion is not reported as a completed merge. `--auto`,
 `--squash`, `--merge`, `--rebase` and `--delete-branch` are refused before mutation rather
 than silently overriding repository policy. Use the central consent workflow
 for a target whose profile does not allow `--now`.
+
+The native-only [unpublished creation cancellation](docs/creation-cancellation.md)
+command uses exact worktree/creation/revision selection and actual operator
+approval. It delegates to the existing Worktrees owner without closing a remote
+PR, posting a comment or releasing source/claim custody.
 
 Each native snapshot read has a 60-second deadline; capability probes retain
 their 20-second deadline and mutations retain a 90-second deadline and bounded

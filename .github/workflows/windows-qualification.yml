@@ -24,6 +24,7 @@ jobs:
     outputs:
       source_sha: ${{ steps.admit.outputs.source_sha }}
       packet: ${{ steps.admit.outputs.packet }}
+      native: ${{ steps.admit.outputs.native }}
     steps:
       - name: Require original and rerun owner on default-branch control
         env:
@@ -82,7 +83,8 @@ jobs:
           python control/tools/seasoned_uv.py --uv uv --registry-only --
           --system pytest pytest-timeout pytest-asyncio pyyaml packaging
       - name: Prepare pinned native caller prerequisites only on this disposable runner
-        if: needs.admit.outputs.packet == 'native-worktrees-embody'
+        id: native
+        if: needs.admit.outputs.native == 'true'
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:RUNNER_TEMP "winqual-native-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
@@ -101,7 +103,8 @@ jobs:
           )
           foreach ($pin in $pins) {
             $archive = Join-Path $root "$($pin.Name).zip"
-            Invoke-WebRequest -Uri $pin.Url -OutFile $archive -TimeoutSec 120
+            Write-Host "Preparing pinned native prerequisite: $($pin.Name)"
+            & ".\control\tools\download_pinned_native.ps1" -Uri "$($pin.Url)" -OutFile "$archive" -TimeoutSeconds 120
             if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $pin.Hash) {
               throw 'Pinned native prerequisite archive digest mismatch'
             }
@@ -114,19 +117,21 @@ jobs:
           }
           "COPILOT_DRIVER_HEADED_MUX_E2E=1" >> $env:GITHUB_ENV
       - name: Execute typed selection through canonical bounded owners
+        if: ${{ success() || (failure() && needs.admit.outputs.native == 'true' && steps.native.outcome == 'failure') }}
         env:
           UV_DEFAULT_INDEX: ${{ needs.admit.outputs.packet == 'native-worktrees-embody' && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
+          WINDOWS_QUALIFICATION_NATIVE_PREPARATION: ${{ steps.native.outcome }}
         run: >-
           python control/tools/windows_qualification_worker.py execute
           --candidate candidate --output evidence
       - name: Sanitize native evidence independently after worker interruption
         id: sanitize
-        if: always() && needs.admit.outputs.packet == 'native-worktrees-embody'
+        if: always() && needs.admit.outputs.native == 'true'
         env:
           UV_DEFAULT_INDEX: ${{ needs.admit.outputs.packet == 'native-worktrees-embody' && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
         run: python control/tools/windows_qualification_worker.py sanitize --output evidence
       - name: Retain request-bound evidence even after failure
-        if: ${{ always() && (needs.admit.outputs.packet != 'native-worktrees-embody' || steps.sanitize.outcome == 'success') }}
+        if: ${{ always() && (needs.admit.outputs.native != 'true' || steps.sanitize.outcome == 'success') }}
         uses: actions/upload-artifact@v4
         with:
           name: winqual-${{ inputs.request_id }}-${{ github.run_attempt }}

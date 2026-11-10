@@ -2143,18 +2143,28 @@ function Install-Engine {
 }
 
 function Get-IndexPythonCacheArgs {
-    param([Parameter(Mandatory)][string]$Root)
+    param([Parameter(Mandatory)][string]$Root, [string]$Python)
     if (-not [IO.Path]::IsPathRooted($Root) -or
         ($env:OS -eq 'Windows_NT' -and
          $Root -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))')) {
         throw 'Python cache requires an absolute owned runtime root'
     }
-    # Without inspecting installed completion/RECORD evidence, never reuse a namespace.
+    # Reuse installed-<digest> only when the runtime itself validates its
+    # completion/RECORD evidence; otherwise never reuse a namespace.
     $cacheId = [Guid]::NewGuid().ToString('N')
     $prefix = [IO.Path]::GetFullPath((Join-Path $Root "cache\python\unsealed-$cacheId"))
     if ($env:OS -eq 'Windows_NT' -and -not $prefix.StartsWith('\\?\')) {
         $prefix = if ($prefix.StartsWith('\\')) { '\\?\UNC\' + $prefix.Substring(2) }
             else { '\\?\' + $prefix }
+    }
+    if ($Python) {
+        try {
+            $selected = & $Python -I -B -X ('pycache_prefix=' + $prefix) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" $Root 2>$null
+            if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) {
+                $selected = [string]($selected | ConvertFrom-Json)
+                if ($selected) { $prefix = $selected }
+            }
+        } catch {}
     }
     return @('-X', ('pycache_prefix=' + $prefix))
 }
@@ -2183,7 +2193,7 @@ function Restart-EngineDaemon {
         if (-not (Test-Path $managePy)) {
             throw 'Primary index runtime not installed -- explicitly install it before restarting the engine; engine runtime preserved'
         }
-        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir)
+        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir -Python $managePy)
         if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
         & $managePy -I @cacheArgs -X utf8 -m agent_index engine stop 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to stop the engine' }
@@ -2924,7 +2934,7 @@ function Invoke-Stop {
         }
     }
     if ($stopPython -and (Test-Path -LiteralPath $stopPython)) {
-        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir)
+        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir -Python $stopPython)
         & $stopPython -I @cacheArgs -X utf8 -m agent_index stop | Out-Host
         # The durable engine daemon is a SEPARATE detached process from the
         # light service stopped above (daemon.py, launched by 'engine start' /
@@ -3054,7 +3064,7 @@ if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and
 try {
 if ($Action -in @('install', 'update', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 switch ($Action) {
     'install' {

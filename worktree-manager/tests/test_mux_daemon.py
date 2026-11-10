@@ -748,6 +748,12 @@ def test_compute_reports_apply_failed(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("native", [False, True])
 def test_compute_preserves_unobservable_psmux_without_execution(tmp_path, monkeypatch, native):
+    from agent_remote_driver.mux_observation import Observation
+
+    monkeypatch.setattr(
+        mux_daemon.mux_discovery, "observe_psmux",
+        lambda *a, **k: Observation("unknown", "timeout"),
+    )
     registry = mux_daemon.MuxMappingRegistry(tmp_path / "mux-mapping.json")
     entry = _entry(mux_bin="psmux")
     if native:

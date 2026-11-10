@@ -1,0 +1,9 @@
+{
+  "comment": "Keep native installation fixture repository metadata outside vendored frozen package inputs.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Retain provider effects in the canonical resource CAS slot until explicit native-owner settlement.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

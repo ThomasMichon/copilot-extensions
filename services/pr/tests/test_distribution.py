@@ -109,8 +109,10 @@ def test_independent_wheel_has_no_source_checkout_or_marketplace_requirement(tmp
         requirements = metadata.get_all("Requires-Dist")
         assert requirements is not None
         assert any(item.startswith("agent-pull-requests[fleet]") for item in requirements)
+        assert not any(item.startswith("agent-worktrees") for item in requirements)
         assert not any("@" in item or "file:" in item for item in requirements)
         assert "agent_pull_requests_service/hosting.py" in names
+        assert "agent_pull_requests_service/reports.py" in names
         for name in ("attribution_profile.py", "comment_preparation.py"):
             assert wheel.read(f"agent_pull_requests_service/_attribution/{name}") == (
                 helpers / name

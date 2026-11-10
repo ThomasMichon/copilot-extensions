@@ -17,7 +17,7 @@ from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 from .pr_source import github_source, pull_payload, source_text
 from .observation_credentials import (
-    CredentialSource, ObservationCredentialError, ObservationCredentials,
+    MAX_SNAPSHOT_REQUESTS, CredentialSource, ObservationCredentialError, ObservationCredentials,
     github_endpoint, github_request,
 )
 
@@ -81,6 +81,9 @@ class GitHubProvider:
     """Open + query pull requests on GitHub via the ``gh`` CLI."""
 
     name = "github"
+
+    def __init__(self, *, report_capture=None):
+        self._report_capture = report_capture
 
     def confirm_no_pull_by_head_v1(self, repo, head, *, api_base="", token=None) -> bool:
         from .github_head_absence import confirm
@@ -310,6 +313,7 @@ class GitHubProvider:
             host, endpoint = github_endpoint(host)
             credentials = ObservationCredentials(
                 credential_source, provider=self.name, api_base=endpoint, repository=repo,
+                max_requests=MAX_SNAPSHOT_REQUESTS,
             )
 
         def read_env() -> dict[str, str]:
@@ -326,6 +330,7 @@ class GitHubProvider:
                 f"{credentials.api_base if credentials is not None else ''}/repos/{repo}/pulls/{number}",
             ],
             env=read_env(),
+            **({"max_stdout_bytes": 1_048_576} if credentials is not None else {}),
         )
         if proc.returncode != 0:
             detail = (proc.stderr.strip() or proc.stdout.strip())
@@ -412,6 +417,7 @@ class GitHubProvider:
             invoke=lambda argv: run_cli(
                 github_request(argv, api_base),
                 env=credential_env() if credential_env is not None else self._env(token),
+                **({"max_stdout_bytes": 1_048_576} if credential_env is not None else {}),
             ),
         )
 
@@ -433,6 +439,7 @@ class GitHubProvider:
             proc = run_cli(
                 github_request(argv, api_base),
                 env=credential_env() if credential_env is not None else self._env(token),
+                **({"max_stdout_bytes": 1_048_576} if credential_env is not None else {}),
             )
             if (
                 credential_env is not None and proc.returncode
@@ -683,6 +690,15 @@ class GitHubProvider:
         "copilot": "copilot-pull-request-reviewer[bot]",
     }
 
+    def reviewer_login(self, reviewer: str) -> str:
+        """Resolve only a configured automated-reviewer binding."""
+        return self._REVIEWER_BOT_LOGINS.get((reviewer or "").strip().lower(), "")
+
+    def request_review_target(self, repo, number, *, reviewer="", api_base="", token=None):
+        """Request one explicit active PR through the existing review transport."""
+        from .github_review_request import target
+        return target(self, repo, number, reviewer=reviewer, api_base=api_base, token=token, run=run_cli)
+
     def request_review(
         self, repo: str, number: int, *, reviewer: str = "", api_base: str = "",
         token: str | None = None,
@@ -695,35 +711,14 @@ class GitHubProvider:
         fresh verdict will land). Carries no comment body (never risks an
         ``@copilot`` mention -- see ``reject_copilot_mention``).
         """
-        token_key = (reviewer or "").strip().lower()
-        bot_login = self._REVIEWER_BOT_LOGINS.get(token_key, "")
+        bot_login = self.reviewer_login(reviewer)
         if not bot_login:
             from .base import _unsupported_review_request
             return _unsupported_review_request(self.name, reviewer)
 
-        host = self.authority_endpoint(api_base)
-        proc = run_cli(
-            [
-                "gh", "api", "--hostname", host, "-X", "POST",
-                f"repos/{repo}/pulls/{number}/requested_reviewers",
-                "-f", f"reviewers[]={bot_login}",
-            ],
-            env=self._env(token, host=host),
-        )
-        if proc.returncode != 0:
-            detail = proc.stderr.strip() or proc.stdout.strip()
-            return ReviewNudgeResult(
-                supported=True, requested=False, reviewer=bot_login,
-                error=f"gh api requested_reviewers failed for {repo}#{number}: {detail}",
-            )
-        return ReviewNudgeResult(
-            supported=True, requested=True, reviewer=bot_login,
-            detail=(
-                f"Requested a review from {bot_login}. GitHub processes this "
-                "asynchronously (observed latency: minutes) -- poll pr-status "
-                "or pr-watch afterward rather than assuming an immediate verdict."
-            ),
-        )
+        from .github_review_request import request
+        result, _ = request(self, repo, number, bot_login, api_base=api_base, token=token, run=run_cli)
+        return result
 
     def pull_review_gate(
         self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
@@ -894,6 +889,11 @@ class GitHubProvider:
         return owner, name
 
     def _graphql(self, query: str, token: str | None, **fields) -> tuple[dict, str]:
+        if self._report_capture is not None:
+            if query != self._THREADS_QUERY:
+                raise ProviderError("scoped report transport only supports thread reads")
+            from .github_report_capture import threads
+            return threads(self._report_capture, query, fields)
         args = ["gh", "api", "graphql", "-f", f"query={query}"]
         for k, v in fields.items():
             # -F coerces ints/bools; string node ids also pass fine via -F.
@@ -989,12 +989,34 @@ class GitHubProvider:
         return "; ".join(errors)
 
     def get_diff(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        preserve_line_endings: bool = False,
     ) -> PRDiff:
         """Return the PR's current unified diff via ``gh pr diff``."""
-        _ = api_base
+        if self._report_capture is not None:
+            from .github_report_capture import diff
+            return diff(self._report_capture, repo, number)
+        try:
+            if api_base:
+                configured = api_base.strip()
+                parsed = urlparse(configured if "://" in configured else "//" + configured)
+                if (
+                    not parsed.hostname or parsed.username or parsed.password
+                    or parsed.scheme not in ("", "http", "https")
+                    or any(character.isspace() for character in parsed.netloc)
+                ):
+                    raise ValueError("invalid configured endpoint")
+            host = self.authority_endpoint(api_base)
+        except ValueError:
+            return PRDiff(supported=False, error="GitHub diff endpoint is invalid")
+        env = self._env(token, host=host)
+        if token:
+            env.update({name: token for name in (
+                "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+            )})
         proc = run_cli(
-            ["gh", "pr", "diff", str(number), "--repo", repo], env=self._env(token),
+            ["gh", "pr", "diff", str(number), "--repo", repo],
+            env=env, **({"preserve_line_endings": True} if preserve_line_endings else {}),
         )
         if proc.returncode != 0:
             return PRDiff(

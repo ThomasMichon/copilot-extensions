@@ -1,0 +1,9 @@
+{
+  "comment": "Allow ordinary Open to preserve an unconfirmed prompt handoff without replaying it.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

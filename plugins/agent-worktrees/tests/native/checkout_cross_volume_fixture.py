@@ -52,7 +52,7 @@ def _crash(fixture, cut):
 def _recover(fixture, retained):
     ledger_before = fixture.record.yaml_path.read_bytes()
     journal_before = state.journal_path(fixture.record.yaml_path).read_bytes()
-    planned = relocation.plan(fixture.record.worktree_id, str(fixture.destination), fixture.config)
+    planned = relocation._action_plan(fixture.record.worktree_id, str(fixture.destination), fixture.config)
     assert planned["recovery"] and not planned["apply"]
     assert fixture.record.yaml_path.read_bytes() == ledger_before
     assert state.journal_path(fixture.record.yaml_path).read_bytes() == journal_before

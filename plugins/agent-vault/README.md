@@ -94,6 +94,38 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
 3. **For selected KeePass-backed use, install KeePassXC** with `keepassxc-cli` on PATH (or at `C:\Program Files\KeePassXC\keepassxc-cli.exe` on Windows). This is not a prerequisite for loading the plugin or inactive readiness.
 4. **Point the CLI at a database** with `KPDB`, a named vault, or a repo-local `.agent-vault.json`.
 
+## Dependency profiles
+
+Native setup can explicitly select `base` or `ssh`. SSH key generation and pair
+validation need the `ssh` profile; ordinary Vault use does not. For example:
+
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install -Profile ssh
+```
+
+```bash
+bash plugins/agent-vault/scripts/install.sh install --profile ssh
+```
+
+The same selection works with `stamp`, `provision` and `update`. Stamping records
+the desired profile without acquiring dependencies. With no active runtime,
+first use constructs it; an existing runtime remains active after stamping.
+Use `provision` or `update` to apply a changed profile before using its capabilities.
+The installation-owned `runtime-profile.json` preserves selection across ordinary
+updates. With no explicit or recorded selection, existing base setup is unchanged.
+Use `base` explicitly to select a new base runtime without the optional crypto
+dependency; existing encrypted-cache/KEK consumers may still need that dependency.
+Profile construction requires an existing Python 3.11+ bootstrap interpreter.
+
+Profiles use separate immutable version slots and the canonical retained-input
+constructor. A failed SSH build never selects a base substitute or modifies a
+completed runtime. Package metadata remains unchanged; `deploy-manifest.json`
+records the actual `runtime_version` and `runtime_profile`. Prepared deployments
+retain their original `runtime_source` receipt separately from the profile.
+Selection does not opt into runtime activation, unlock a database, configure
+credentials or change service policy. See [SSH key custody](docs/ssh-key-preparation.md)
+and the [configuration reference](docs/configuration.md#dependency-selection).
+
 ## Source-qualified runtimes
 
 Both native installers accept canonically prepared `runtime-source.json`
@@ -214,10 +246,12 @@ agent-vault show "API/OpenAI" -s
 agent-vault lock
 ```
 
-Fetch secrets **at the point of use** instead of exporting them into the shell:
+For API requests, let a supported authenticated CLI/MCP tool hold the credential.
+For generic gaps, use [URL-bound authenticated curl](docs/authenticated-http.md)
+with an owner-approved opt-in binding, never a manual token/header construction:
 
 ```bash
-curl -H "Authorization: Bearer $(agent-vault get 'API/OpenAI')" https://example.invalid/
+agent-vault curl -- -sS https://api.example.test/v1/items
 ```
 
 Supported built-in command groups:
@@ -225,6 +259,7 @@ Supported built-in command groups:
 | Area | Commands |
 |------|----------|
 | Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
+| Authenticated HTTP | `curl -- <supported curl arguments>` (explicit URL binding, no caller-visible credential) |
 | SSH keys | `import-key`, `export-key`, `ssh-key prepare --entry SSH/node-a`, `ssh-key install --entry SSH/node-a --directory <absolute-path>` |
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
 | Config | `which`, `vault list`, `vault add`, `vault set-default`, `vault remove` |

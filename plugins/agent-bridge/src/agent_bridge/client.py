@@ -24,6 +24,7 @@ from .client_live_results import LiveResultsClientMixin
 from .client_session_stop import SessionStopClientMixin
 from .client_worktree_restart import WorktreeRestartMixin
 from .client_worktrees import InventoryClientMixin
+from .client_status import StatusClientMixin
 if TYPE_CHECKING:
     from collections.abc import Callable
 DEFAULT_RESTART_GRACE = 30.0
@@ -150,7 +151,7 @@ class SseStream(Iterator[dict[str, Any]]):
             response.close()
 
 
-class BridgeClient(PromptClientMixin, AnswerClientMixin, SessionStartClientMixin, CliModeClientMixin, LiveResultsClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin, DrainClientMixin):
+class BridgeClient(StatusClientMixin, PromptClientMixin, AnswerClientMixin, SessionStartClientMixin, CliModeClientMixin, LiveResultsClientMixin, SessionStopClientMixin, WorktreeRestartMixin, InventoryClientMixin, DrainClientMixin):
     """Sync HTTP client for the agent-bridge REST API."""
 
     def __init__(

@@ -260,5 +260,21 @@ def test_cleanup_accepts_large_collection_budget_but_bounds_each_stop(
     ))
     monkeypatch.setattr(cli.store, "cleanup", cleanup)
     assert cli.main(["cleanup", str(receipt.record_path), "600"]) == 0
-    cleanup.assert_called_once_with(receipt, stop_timeout=300)
+    cleanup.assert_called_once_with(receipt, stop_timeout=300, terminate=True, runtime_root=None)
     assert capsys.readouterr().out == f"settled\tprocess-exit-observed\t{receipt.instance_id}\n"
+
+
+def test_cli_scoped_reconciliation_cleanup_never_enables_termination(tmp_path, monkeypatch, capsys):
+    from agent_procutil import _daemon_instance_cli as cli
+
+    receipt = DaemonInstanceReceipt("a" * 32, tmp_path / "registry")
+    cleanup = Mock(return_value=InstanceCleanupResult(receipt.instance_id, "held", "stop-required"))
+    monkeypatch.setattr(cli.store, "cleanup", cleanup)
+    assert cli.main([
+        "cleanup", str(receipt.record_path), "5",
+        "--no-terminate", "--runtime-root", str(tmp_path),
+    ]) == 1
+    cleanup.assert_called_once_with(receipt, stop_timeout=5, terminate=False, runtime_root=tmp_path)
+    output = capsys.readouterr()
+    assert output.out == f"held\tstop-required\t{receipt.instance_id}\n"
+    assert output.err == f"daemon instance held: {receipt.instance_id} stop-required\n"

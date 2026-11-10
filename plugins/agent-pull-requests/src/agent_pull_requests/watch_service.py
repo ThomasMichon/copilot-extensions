@@ -9,6 +9,7 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fleet_manager.gateway_service_connector import ServiceConnector
+from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_handler import RequestDisconnected
 from single_instance_lease import OperationLockedError, SingleInstance
 
@@ -36,6 +37,8 @@ class WatchService:
         gateway_ca: str | None = None, interval: float = 5,
         workspaces=None,
         attention=None,
+        reports=None,
+        response_limit: int = BODY_BYTES,
     ) -> None:
         if not callable(authority) or not callable(checkpoint):
             raise ValueError("current service authority is required")
@@ -58,6 +61,7 @@ class WatchService:
             checkpoint=self._check,
             workspaces=workspaces,
             attention=attention,
+            reports=reports,
         )
         self.observer = ReplayObserver(store, bindings=observations)
         if any(
@@ -68,7 +72,9 @@ class WatchService:
         self.connector = ServiceConnector(
             slot=slot, gateway_origin=gateway_origin,
             access_token_callback=access_token_callback, proof_key=proof_key,
-            gateway_ca=gateway_ca, handler=self.gateway.handler_binding(),
+            gateway_ca=gateway_ca, handler=self.gateway.handler_binding(
+                **({"response_limit": response_limit} if response_limit != BODY_BYTES else {}),
+            ),
         )
 
     def _check(self) -> None:

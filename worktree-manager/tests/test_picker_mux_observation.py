@@ -78,6 +78,21 @@ def test_normalized_unknown_mux_cannot_enable_attachment_controls():
     assert row["mux_live"] is False and row["attached"] is False
 
 
+def test_unknown_mux_keeps_open_but_cannot_offer_destructive_recovery():
+    from worktree_manager.production_picker.picker_tui.engine_worktree_actions import (
+        PickerScreenWorktreeActionsMixin,
+    )
+
+    row = {
+        "mux_observation_unknown": True, "session_bound_live": True,
+        "last_session_id": "original", "cleanup_bucket": "conversation",
+    }
+    actions = PickerScreenWorktreeActionsMixin._session_action_verbs(row)
+    assert "Open" in actions
+    assert not {"Reclaim", "Restore", "Stop", "Repair", "Cleanup"} & set(actions)
+    assert "Finalize" in actions
+
+
 @pytest.mark.parametrize("mux_fields", [
     {}, {"mux_clients": 0},
     {"mux_session": False, "mux_clients": 0, "mux_attached": False},

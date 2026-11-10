@@ -406,8 +406,12 @@ class SpawnReservationMixin(SpawnDeferralMixin, SpawnCompletionMixin, SpawnRelea
                         retired = conn.execute(
                             "SELECT 1 FROM spawn_reservations "
                             f"WHERE {lineage_column} = ? AND session_handle = ? "
-                            "AND release_requested = 1 AND native_release_pending = 0 "
-                            "AND state IN (?, ?, ?) LIMIT 1",
+                            "AND native_release_pending = 0 AND ("
+                            "release_requested = 1 AND state IN (?, ?, ?) "
+                            # Operator-fenced history retires in any released
+                            # state, including deferred rows.
+                            "OR conversation_retired = 1 AND startup_fenced = 1"
+                            ") LIMIT 1",
                             (
                                 lineage_value,
                                 carried_session,

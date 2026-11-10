@@ -24,17 +24,27 @@ from test_manager_runtime_install import (
 )
 
 
+def _copy_source_preparation_inputs(repo):
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        declaration = json.loads((SOURCE / filename).read_text())
+        for group in declaration.get("groups", [declaration]):
+            for name in group["files"]:
+                relative = Path(group["canonicalDir"]) / name
+                target = repo / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(SOURCE.parent / relative, target)
+    shutil.copytree(
+        SOURCE.parent / "libs/installer-engine", repo / "libs/installer-engine",
+        ignore=shutil.ignore_patterns("tests", "docs", "__pycache__", "*.pyc"),
+        dirs_exist_ok=True,
+    )
+
+
 def _repository(directory, env):
     repo = directory / "upstream"
     payload = repo / "worktree-manager"
     _prepare_materialized_source(payload)
-    declaration = json.loads((SOURCE / "packaged-assets.json").read_text())
-    groups = declaration.get("groups", [declaration])
-    for group in groups:
-        for name in group["files"]:
-            destination = repo / group["canonicalDir"] / name
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(SOURCE.parent / group["canonicalDir"] / name, destination)
+    _copy_source_preparation_inputs(repo)
     (payload / "plugin.json").write_text(json.dumps({
         "name": "worktree-manager", "version": si.payload_version(payload),
     }))
@@ -56,6 +66,42 @@ def _repository(directory, env):
         result = _run(["git", "-C", repo, *arguments], env, directory)
         assert result.returncode == 0, result.stderr
     return repo
+
+
+def test_source_repository_canonical_inputs_materialize_without_runtime_install(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(SOURCE.parent / "tools"))
+    import prepare_runtime_source
+
+    repo, destination = tmp_path / "source", tmp_path / "prepared"
+    consumer = repo / "worktree-manager"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.0.0"\n',
+        encoding="utf-8",
+    )
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        shutil.copy2(SOURCE / filename, consumer / filename)
+    _copy_source_preparation_inputs(repo)
+    before = {path.relative_to(repo): path.read_bytes()
+              for path in repo.rglob("*") if path.is_file()}
+    prepare_runtime_source._materialize(repo, "worktree-manager", destination)
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        declaration = json.loads((consumer / filename).read_text())
+        for group in declaration.get("groups", [declaration]):
+            for name in group["files"]:
+                assert (destination / group["payloadDir"] / name).read_bytes() == (
+                    SOURCE.parent / group["canonicalDir"] / name
+                ).read_bytes()
+    import materialize_installer_engine
+
+    pairs = materialize_installer_engine.derived_file_pairs(
+        repo, destination, copied_consumer=(consumer, destination),
+    )
+    assert pairs
+    for canonical, emitted in pairs:
+        assert emitted.read_bytes() == canonical.read_bytes()
+    assert before == {path.relative_to(repo): path.read_bytes()
+                      for path in repo.rglob("*") if path.is_file()}
 
 
 def _prepare_source_candidate(directory, constructed):

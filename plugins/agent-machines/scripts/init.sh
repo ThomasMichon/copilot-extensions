@@ -1135,6 +1135,7 @@ if [[ "$ACTION" == "cell-provision" ]]; then
         _fail "cell-provision context receipt is incomplete"
         exit 1
     }
+    INSTALL_DIR="$PLUGIN_ROOT"
     CURRENT_MARKER="$(dirname -- "$VERSIONS_ROOT")/current-version"
     if [[ -f "$CURRENT_MARKER" && ! -L "$CURRENT_MARKER" &&
           "$(cat "$CURRENT_MARKER")" == "$SRC_VERSION" ]]; then
@@ -1165,7 +1166,7 @@ if [[ "$ACTION" == "cell-provision" ]]; then
             exit 1
         fi
         . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"
         _write_cell_manifest \
             "$PLUGIN_ROOT" "$ORIGIN_PAYLOAD_ROOT" "$PACKAGE_VERSION" \
             "$VERSIONS_ROOT/$SRC_VERSION" "$SRC_VERSION" "$CONTEXT" \
@@ -1189,7 +1190,6 @@ if [[ "$ACTION" == "cell-provision" ]]; then
             --origin-payload-root "$ORIGIN_PAYLOAD_ROOT"
     fi
     CELL_MODE=1
-    INSTALL_DIR="$PLUGIN_ROOT"
     VENV_DIR="$VERSIONS_ROOT/$SRC_VERSION"
     VENV_PYTHON="$VENV_DIR/bin/python"
     LINK_DIR="$VENV_DIR"
@@ -1874,7 +1874,7 @@ fi
 case "$ACTION" in
     install|init|provision|cell-provision)
         . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"
         ;;
 esac
 _step 'agent-machines init'

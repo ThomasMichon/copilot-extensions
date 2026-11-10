@@ -58,46 +58,50 @@ def validate(operation: dict, *, enabled: bool) -> int:
     if not isinstance(retained, dict) or set(retained) != set(slots):
         raise ValueError("invalid acquired comment mapping actions")
     for action_id, value in retained.items():
-        if value is None:
-            continue
-        if not isinstance(value, dict) or set(value) != {
-            "generation_id", "observation", "status", "reason", "current_object_id",
-        }:
-            raise ValueError("invalid acquired comment mapping fields")
-        review_intent.identifier(value["generation_id"])
-        if (
-            not isinstance(value["status"], str) or value["status"] not in REASONS
-            or not isinstance(value["reason"], str)
-            or value["reason"] not in REASONS[value["status"]]
-        ):
-            raise ValueError("invalid acquired comment mapping outcome")
-        if value["current_object_id"] is not None:
-            review_intent.identifier(value["current_object_id"])
-        observation = value["observation"]
-        if observation is not None:
-            if not isinstance(observation, dict) or set(observation) != {
-                "observed_from", "observed_to", "complete", "error_count",
-            }:
-                raise ValueError("invalid acquired comment mapping interval")
-            for name in ("observed_from", "observed_to"):
-                review_intent.text(observation[name], 128)
-            if (
-                _instant(observation["observed_from"]) > _instant(observation["observed_to"])
-                or type(observation["complete"]) is not bool
-                or type(observation["error_count"]) is not int or observation["error_count"] < 0
-                or observation["complete"] and observation["error_count"] != 0
-            ):
-                raise ValueError("invalid acquired comment mapping observation")
-        if value["status"] == "correlated":
-            action = next(row for row in operation["actions"] if row["id"] == action_id)
-            if (
-                action["state"] != "confirmed" or value["current_object_id"] is None
-                or observation is None or observation["complete"] is not True
-            ):
-                raise ValueError("acquired correlation requires original confirmation")
-        if len(review_intent.encoded(value)) > MAX_SLOT_BYTES:
-            raise ValueError("acquired comment mapping exceeds its slot")
+        action = next(row for row in operation["actions"] if row["id"] == action_id)
+        validate_slot(value, action_state=action["state"])
     return reservation(operation)
+
+
+def validate_slot(value: object, *, action_state: str) -> None:
+    """The same bounded historical evidence is valid before and after compaction."""
+    if value is None:
+        return
+    if not isinstance(value, dict) or set(value) != {
+        "generation_id", "observation", "status", "reason", "current_object_id",
+    }:
+        raise ValueError("invalid acquired comment mapping fields")
+    review_intent.identifier(value["generation_id"])
+    if (
+        not isinstance(value["status"], str) or value["status"] not in REASONS
+        or not isinstance(value["reason"], str)
+        or value["reason"] not in REASONS[value["status"]]
+    ):
+        raise ValueError("invalid acquired comment mapping outcome")
+    if value["current_object_id"] is not None:
+        review_intent.identifier(value["current_object_id"])
+    observation = value["observation"]
+    if observation is not None:
+        if not isinstance(observation, dict) or set(observation) != {
+            "observed_from", "observed_to", "complete", "error_count",
+        }:
+            raise ValueError("invalid acquired comment mapping interval")
+        for name in ("observed_from", "observed_to"):
+            review_intent.text(observation[name], 128)
+        if (
+            _instant(observation["observed_from"]) > _instant(observation["observed_to"])
+            or type(observation["complete"]) is not bool
+            or type(observation["error_count"]) is not int or observation["error_count"] < 0
+            or observation["complete"] and observation["error_count"] != 0
+        ):
+            raise ValueError("invalid acquired comment mapping observation")
+    if value["status"] == "correlated" and (
+        action_state != "confirmed" or value["current_object_id"] is None
+        or observation is None or observation["complete"] is not True
+    ):
+        raise ValueError("acquired correlation requires original confirmation")
+    if len(review_intent.encoded(value)) > MAX_SLOT_BYTES:
+        raise ValueError("acquired comment mapping exceeds its slot")
 
 
 def invalidate(operation: dict, action_id: str) -> None:
@@ -154,6 +158,14 @@ class CommentMappingStore:
         if not isinstance(owner, ReplayStore):
             raise ValueError("existing replay owner required")
         self.owner = owner
+
+    def supported(
+        self, *, expires_at: int, checkpoint: Callable[[], None] | None = None,
+    ) -> bool:
+        return self.owner._review_transaction(
+            lambda document: document.get(EXTENSION) == 1,
+            expires_at=expires_at, checkpoint=checkpoint, persist=False,
+        )
 
     def adopt(
         self, *, lifecycle_checkpoint: Callable[[], None], expires_at: int,

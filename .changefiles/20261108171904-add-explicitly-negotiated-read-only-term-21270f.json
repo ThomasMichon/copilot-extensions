@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicitly negotiated read-only terminal workspace serving without storage adoption or write operations",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

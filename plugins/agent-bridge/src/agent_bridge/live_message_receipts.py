@@ -35,6 +35,21 @@ def record_consumption(db: Database, session_id: str, events: list[dict[str, Any
         message_id = consumed_message_id(event)
         if message_id is not None:
             db.consume_live_message(session_id, message_id, now)
+            observed = db.live_message_receipt(session_id, message_id)
+            if observed is not None and observed["consumed_at"] is not None:
+                generated = db.execute_read(
+                    "SELECT 1 FROM live_messages WHERE id=? AND sender='bridge-status' "
+                    "AND idempotency_key LIKE 'status-notice:%'", (message_id,),
+                )
+                if generated:
+                    # Notice consumption remains a receipt, not feed ACK or a
+                    # new transition that could recursively notify watchers.
+                    continue
+                from .status_store import StatusStore
+                StatusStore(db).publish(
+                    session_id, "message_consumed", f"consumed:{session_id}:{message_id}",
+                    observed_at=observed["consumed_at"], evidence="root_model_facing",
+                )
 
 
 def receipt(db: Database, session_id: str, message_id: int) -> LiveMessageReceipt:

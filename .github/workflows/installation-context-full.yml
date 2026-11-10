@@ -44,6 +44,7 @@ on:
           - pane-argv
           - generic-mux
           - resume-pane
+          - mux-continuity
           - manager-uninstall
           - komodo-recovery
           - manager-suite
@@ -380,15 +381,24 @@ jobs:
           python tools/run-plugin-tests.py agent-vault --allow-explicit-tiers
           --test-file tests/test_payload_invocation.py
           --test-file tests/test_runtime_activation.py
-          -k "scheduled_task_launcher_resolves_slot_at_every_run or cold_namespaced_capture or native_batch_reads_real_cache_without_service"
+          -k "scheduled_task_launcher_resolves_slot_at_every_run or cold_namespaced_capture or native_batch_reads_real_cache_without_service or shared_runtime_environment_replaces_every_foreign_route"
           --plugin-timeout 180 --timeout 120 --test-timeout 60
           --junit-dir vault-configuration-critical-junit
+      - name: Qualify selected Vault peer without credential or service effects
+        timeout-minutes: 5
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch
+          --test-file tests/test_procutil.py -k vault_peer
+          --plugin-timeout 180 --timeout 120 --test-timeout 30
+          --junit-dir vault-peer-junit
       - name: Retain Vault launcher and cold peer results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: vault-configuration-critical-${{ runner.os }}-${{ github.sha }}
-          path: vault-configuration-critical-junit
+          path: |
+            vault-configuration-critical-junit
+            vault-peer-junit
           if-no-files-found: warn
       - name: Measure isolated Vault bootstrap cold and current metadata
         run: >-
@@ -1821,8 +1831,8 @@ jobs:
           --timeout 300 --plugin-timeout 360 --test-timeout 60
 
   generic-mux-windows:
-    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'generic-mux' || inputs.portfolio == 'resume-pane')
-    name: PSMux 3.3.8 consumer qualification (isolated sessions)
+    if: github.event_name == 'workflow_dispatch' && (inputs.portfolio == 'generic-mux' || inputs.portfolio == 'resume-pane' || inputs.portfolio == 'mux-continuity')
+    name: PSMux ${{ inputs.portfolio == 'mux-continuity' && '3.4.0' || '3.3.8' }} consumer qualification (isolated sessions)
     runs-on: windows-latest
     timeout-minutes: 10
     steps:
@@ -1837,13 +1847,30 @@ jobs:
           version: "0.12.6"
       - name: Prepare preferred disposable PSMux
         shell: pwsh
+        env:
+          PORTFOLIO: ${{ inputs.portfolio }}
         run: |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:RUNNER_TEMP 'generic-mux-psmux'
           $null = New-Item -ItemType Directory -Path $root
           $archive = Join-Path $root 'psmux.zip'
-          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile $archive
-          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe') {
+          $version = '3.3.8'
+          $digest = '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe'
+          if ($env:PORTFOLIO -eq 'mux-continuity') {
+            $version = '3.4.0'
+            $digest = 'a66b6be7c13c6fa0dc3660a267b9e34eaa91a4eb7f07fbd55a0468018bd0f721'
+          }
+          try {
+            Invoke-WebRequest -Uri "https://github.com/psmux/psmux/releases/download/v$version/psmux-v$version-windows-x64.zip" -OutFile $archive -TimeoutSec 60
+          } catch {
+            if ([int]$_.Exception.Response.StatusCode -notin @(429, 500, 502, 503, 504)) { throw }
+            Write-Host 'Retrying pinned PSMux acquisition through its public release API'
+            $release = Invoke-RestMethod -Uri "https://api.github.com/repos/psmux/psmux/releases/tags/v$version" -TimeoutSec 30
+            $assets = @($release.assets | Where-Object name -eq "psmux-v$version-windows-x64.zip")
+            if ($assets.Count -ne 1 -or $assets[0].id -le 0) { throw 'Pinned PSMux asset is unavailable' }
+            Invoke-WebRequest -Uri ("https://api.github.com/repos/psmux/psmux/releases/assets/" + [long]$assets[0].id) -Headers @{ Accept = 'application/octet-stream' } -OutFile $archive -TimeoutSec 60
+          }
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $digest) {
             throw 'Pinned PSMux archive digest mismatch'
           }
           Expand-Archive -LiteralPath $archive -DestinationPath $root
@@ -1852,7 +1879,7 @@ jobs:
           "PSMUX_TEST_BIN=$($binaries[0].FullName)" >> $env:GITHUB_ENV
           $binaries[0].DirectoryName >> $env:GITHUB_PATH
       - name: Qualify concurrent Resume consumers before controller activation
-        if: inputs.portfolio == 'resume-pane'
+        if: inputs.portfolio == 'resume-pane' || inputs.portfolio == 'mux-continuity'
         env:
           UV_PYTHON: "3.12"
         shell: pwsh
@@ -1860,7 +1887,7 @@ jobs:
           python tools/run-plugin-tests.py worktree-manager --test-file tests/native/test_resume_pane_startup.py --allow-explicit-tiers --junit-dir "$env:RUNNER_TEMP\resume-evidence" --timeout 360 --plugin-timeout 600 --test-timeout 180
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Retain native Resume evidence
-        if: always() && inputs.portfolio == 'resume-pane'
+        if: always() && (inputs.portfolio == 'resume-pane' || inputs.portfolio == 'mux-continuity')
         uses: actions/upload-artifact@v4
         with:
           name: native-resume-${{ github.run_id }}-${{ github.run_attempt }}

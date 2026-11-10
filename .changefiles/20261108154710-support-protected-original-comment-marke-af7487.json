@@ -1,0 +1,9 @@
+{
+  "comment": "Support protected original comment-marker readback using retained content identity without a sendable body.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

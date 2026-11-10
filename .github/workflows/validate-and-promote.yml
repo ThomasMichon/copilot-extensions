@@ -416,6 +416,14 @@ jobs:
             --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/frozen-candidate" \
             --dev-sha "$DEV_SHA" --main-before "$MAIN_BEFORE" \
             --candidate-sha "$CANDIDATE_SHA" --checkout "$RUNNER_TEMP/candidate"
+      - name: Checkout protected native acquisition helper
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: native-control
+          persist-credentials: false
+          sparse-checkout: tools/download_pinned_native.ps1
+          sparse-checkout-cone-mode: false
       - name: Prepare pinned disposable PSMux
         shell: pwsh
         run: |
@@ -424,7 +432,7 @@ jobs:
           $root = Join-Path $env:RUNNER_TEMP 'resume-psmux'
           $null = New-Item -ItemType Directory -Path $root
           $archive = Join-Path $root 'psmux.zip'
-          Invoke-WebRequest -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile $archive
+          & ".\native-control\tools\download_pinned_native.ps1" -Uri 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip' -OutFile "$archive" -TimeoutSeconds 120
           if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe') {
             throw 'Pinned PSMux archive digest mismatch'
           }

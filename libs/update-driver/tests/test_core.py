@@ -545,6 +545,7 @@ def test_nonboolean_active_coalescing_refuses_before_writes(area, value):
     ("UPDATE_DRIVER_WITNESS",),
     ("PYTHONPATH",),
     ("__PYVENV_LAUNCHER__",),
+    tuple(f"FIXTURE_{index}" for index in range(129)),
 ])
 def test_runner_context_projection_rejects_invalid_or_authority_keys(area, keys):
     with pytest.raises(InvalidRequestError, match="context keys"):

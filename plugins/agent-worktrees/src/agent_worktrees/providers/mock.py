@@ -399,7 +399,8 @@ class MockPRProvider:
         )
 
     def get_diff(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        preserve_line_endings: bool = False,
     ) -> "PRDiff":
         from ..pr_contract import PRDiff
 

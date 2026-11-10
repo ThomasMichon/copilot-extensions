@@ -322,16 +322,28 @@ def _simple(payload: Path, root: Path, product: str, module: str) -> dict[str, t
     sh = _function(_engine(payload, "sh"), "write_simple_binstub")
     ps = _function(_engine(payload, "ps1"), "Write-SimpleBinstub", True)
     branch = ("agent-vault", "agent-ssh", "agent-pull-requests").index(product)
-    cold_sh = _heredocs(sh, "DISPATCH")
+    cold_sh = re.findall(
+        r"(?ms)^[ \t]*cold_dispatch=\"\$\(cat <<'DISPATCH'\n(.*?)^DISPATCH\n", sh,
+    )
     cold_ps = re.findall(r"(?ms)^\s*\$coldDispatcher = @'\n(.*?)^'@", ps)
     if len(cold_sh) != 3 or len(cold_ps) != 3:
         raise RuntimeError("Expected three declared simple-writer cold dispatchers")
+    early_sh = re.findall(
+        r"(?ms)^[ \t]*early_dispatch=\"\$\(cat <<'DISPATCH'\n(.*?)^DISPATCH\n", sh,
+    )
+    early_ps = re.findall(r"(?ms)^\s*\$earlyDispatcher = @'\n(.*?)^'@", ps)
+    if (
+        len(early_sh) != (1 if "$early_dispatch" in sh else 0)
+        or len(early_ps) != (1 if "$earlyDispatcher" in ps else 0)
+    ):
+        raise RuntimeError("Unsupported simple-writer early dispatcher declaration")
     shell_bodies = tuple(_expand(_sh(sh, "EOF"), {
         "command_name": product, "module_name": module,
         "runtime_root_literal": _bash_quote(path),
         "snapshot_installer_literal": "scripts/install.sh",
         "no_self_provision_env": no_provision,
         "cold_dispatch": cold_sh[branch].removesuffix("\n"),
+        "early_dispatch": early_sh[0].removesuffix("\n") if branch == 0 and early_sh else "",
     }) for path in _shell_paths(root))
     values = {
         "runtimeRootLiteral": str(root).replace("'", "''"),
@@ -339,6 +351,7 @@ def _simple(payload: Path, root: Path, product: str, module: str) -> dict[str, t
         "moduleLiteral": module, "commandLiteral": product,
         "NoSelfProvisionEnv": no_provision, "CommandName": product,
         "coldDispatcher": cold_ps[branch].removesuffix("\n"),
+        "earlyDispatcher": early_ps[0].removesuffix("\n") if branch == 0 and early_ps else "",
     }
     result = {
         product: shell_bodies,

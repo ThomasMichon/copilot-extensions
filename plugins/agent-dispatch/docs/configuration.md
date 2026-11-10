@@ -157,3 +157,9 @@ effects and reload timing. Portable documents exclude secrets, tokens, queue
 state, pointers/indexes, overrides, endpoints, active worker instances, claim
 receipts and installed runtime generations. Migration/relocation uses existing
 owner commands only, never a read-time rewrite.
+## Windows installation controls
+
+The optional installation-root `installation.json` separates scheduling
+(`preserve`, `enabled`, `absent`) from coordinator/supervisor start intent.
+See [Windows scheduling and readiness](windows-scheduling.md) for its bounded
+schema, task-only retirement and downlevel support limits.

@@ -580,31 +580,9 @@ def _iter_status_monitor_pids() -> set[int]:
 
 
 def _reap_abandoned_passive(record: dict | None) -> dict:
-    table = routing.read_table(routing_dir()) or {}
-    active = table.get("active") if isinstance(table, dict) else None
-    active_pid = active.get("pid") if isinstance(active, dict) else None
+    from .runtime_monitor_abort import reap_legacy_passive
 
-    def _pid_alive(pid: int) -> bool:
-        return pid in _iter_status_monitor_pids()
-
-    def _terminate(pid: int) -> bool:
-        from zdd.diagnostics import terminate_pid_if_identity
-
-        result = terminate_pid_if_identity(
-            pid, (record or {}).get("new_process_start_time"), exit_timeout=5.0,
-        )
-        return all(
-            result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
-        )
-
-    return breadcrumb.reap_abandoned_passive(
-        routing_dir(),
-        pid_alive=_pid_alive,
-        terminate=_terminate,
-        active_pid=int(active_pid) if active_pid else None,
-        record=record,
-        grace_seconds=0.0,
-    )
+    return reap_legacy_passive(routing_dir(), record, census=_iter_status_monitor_pids)
 
 
 def activate_after_update(
@@ -645,7 +623,7 @@ def activate_after_update(
     refusal = breadcrumb.recovery_refusal(
         routing_dir(), breadcrumb.read_breadcrumb(routing_dir()),
     )
-    if refusal is not None:
+    if refusal is not None and not asynchronous_retirement:
         summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
         return summary
     guarded = not asynchronous_retirement and guarded_recovery.enabled()
@@ -656,15 +634,24 @@ def activate_after_update(
         restart_arguments["spawned_handles"] = spawned_handles
     from .runtime_monitor_identity import activation_liveness
 
-    lock_live, monitor_was_live = activation_liveness(
-        monitor_was_live, retired_predecessor, asynchronous=asynchronous_retirement,
-        guard=cutover_guard, handles=spawned_handles, predecessor=retirement_predecessor,
-    )
     if asynchronous_retirement:
-        routed_live = retirement_predecessor is not None or routing.read_active_endpoint(
-            routing_dir(), verify_listener=False,
-        ) is not None
-    elif not lock_live:
+        from . import runtime_monitor_replacement as replacement
+
+        selected_predecessor = replacement.active(smr._aw_runtime_home())
+        lock_live = bool(locks.read_lock(smr._monitor_lock_path()))
+        monitor_was_live = bool(monitor_was_live or lock_live)
+        if retired_predecessor is not None:
+            lock_live, monitor_was_live = activation_liveness(
+                monitor_was_live, retired_predecessor, asynchronous=True,
+                guard=cutover_guard, handles=spawned_handles, predecessor=retirement_predecessor,
+            )
+        routed_live = replacement.active(smr._aw_runtime_home(), fallback=True) is not None or retirement_predecessor is not None
+    else:
+        lock_live, monitor_was_live = activation_liveness(
+            monitor_was_live, retired_predecessor, asynchronous=False,
+            guard=cutover_guard, handles=spawned_handles, predecessor=retirement_predecessor,
+        )
+    if not asynchronous_retirement and not lock_live:
         try:
             routed_live = (
                 guarded_recovery.routed_owner_present(routing_dir()) if guarded
@@ -676,7 +663,7 @@ def activate_after_update(
                 result={"ok": False, "error": "Routed monitor identity could not be verified"},
             )
             return summary
-    else:
+    elif not asynchronous_retirement:
         routed_live = False
     if not lock_live and not routed_live:
         if monitor_was_live and not asynchronous_retirement:
@@ -688,7 +675,9 @@ def activate_after_update(
         if not monitor_was_live and retired_predecessor is None:
             summary["reason"] = "no-live-monitor"
             return summary
-    active_url = _monitor_control_url_from_route()
+    active_url = (
+        selected_predecessor.base_url if selected_predecessor is not None else None
+    ) if asynchronous_retirement else _monitor_control_url_from_route()
     if active_url is None and guarded:
         try:
             active_url = guarded_recovery.active_endpoint(routing_dir()).base_url
@@ -728,26 +717,26 @@ def activate_after_update(
             client.transition_custody = transition_custody
             return client
     try:
-        prior = breadcrumb.read_breadcrumb(routing_dir())
-        refusal = breadcrumb.recovery_refusal(routing_dir(), prior)
-        if refusal is not None:
-            summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
-            return summary
+        publication_guard = None
         if asynchronous_retirement:
-            try:
-                from .runtime_monitor_identity import async_predecessor
+            from zdd.cutover_lock import CutoverLockedError
 
-                observed = routed_monitor_identity(
-                    smr._aw_runtime_home(), require_async_retirement=True,
-                )
-                retirement_predecessor, options = async_predecessor(
-                    smr._aw_runtime_home(), retirement_predecessor, observed=observed,
+            try:
+                publication_guard, retirement_predecessor, options, outgoing_deferred = replacement.prepare(
+                    smr._aw_runtime_home(), retirement_predecessor,
                     incumbent_expected=bool(lock_live or monitor_was_live or retirement_predecessor),
+                    custody=local_custody, timeout=health_timeout + drain_timeout + 60.0,
                 )
-            except (OSError, ValueError, ConnectionError) as error:
+            except CutoverLockedError as error:
                 summary.update(
                     action="refused", reason=str(error), result={"ok": False, "error": str(error)},
                 )
+                return summary
+        else:
+            prior = breadcrumb.read_breadcrumb(routing_dir())
+            refusal = breadcrumb.recovery_refusal(routing_dir(), prior)
+            if refusal is not None:
+                summary.update(action="refused", reason=refusal, result={"ok": False, "error": refusal})
                 return summary
         if guarded:
             predecessor = guarded_recovery.observe(routing_dir(), control_token_path())
@@ -819,10 +808,9 @@ def activate_after_update(
         if spawned_handles is not None:
             print("Monitor transition: checking prior recovery", flush=True)
         pre_recovery = breadcrumb.read_breadcrumb(routing_dir())
-        summary["recovery"] = breadcrumb.recover_stale_cutover(
-            routing_dir(),
-            make_client,
-            health_check=health_check,
+        summary["recovery"] = (
+            {"deferred": True} if asynchronous_retirement else
+            breadcrumb.recover_stale_cutover(routing_dir(), make_client, health_check=health_check)
         )
         if summary["recovery"].get("refused"):
             reason = breadcrumb.refusal_reason(summary["recovery"])
@@ -830,7 +818,9 @@ def activate_after_update(
             return summary
         if spawned_handles is not None:
             print("Monitor transition: checking abandoned passive custody", flush=True)
-        summary["passive_reap"] = _reap_abandoned_passive(pre_recovery)
+        summary["passive_reap"] = (
+            {"deferred": True} if asynchronous_retirement else _reap_abandoned_passive(pre_recovery)
+        )
         if summary["passive_reap"].get("refused"):
             reason = breadcrumb.refusal_reason(summary["passive_reap"])
             summary.update(action="refused", reason=reason, result={"ok": False, "error": reason})
@@ -841,15 +831,15 @@ def activate_after_update(
         def spawn(port: int):
             nonlocal prepared_health
             handle = spawn_passive(py, port=port)
+            if spawned_handles is not None:
+                spawned_handles.append(handle)
+                print(f"Monitor transition: passive spawned pid={getattr(handle, 'pid', None)} port={port}", flush=True)
             if asynchronous_retirement:
                 from .status_monitor_health import prepared_check
 
                 prepared_health = prepared_check(
                     handle, routing_dir(), make_client, supported_capabilities=successor_capabilities,
                 )
-            if spawned_handles is not None:
-                spawned_handles.append(handle)
-                print(f"Monitor transition: passive spawned pid={getattr(handle, 'pid', None)} port={port}", flush=True)
             return handle
 
         published_successor = None
@@ -892,13 +882,16 @@ def activate_after_update(
             health_timeout=health_timeout,
             drain_timeout=drain_timeout,
             force=False,
+            **({"held_lock": publication_guard} if asynchronous_retirement else {}),
         )
         if reserved:
             if not result.committed and not result.publication_uncertain:
                 retirements.cancel(smr._aw_runtime_home(), retirement_predecessor)
         if asynchronous_retirement:
             published = result.committed or result.publication_uncertain
-            result.retirement_pending = bool(reserved and published and not retirement_complete)
+            result.retirement_pending = bool(
+                published and (outgoing_deferred or reserved and not retirement_complete)
+            )
         summary["action"] = "cutover"
         summary["result"] = result.to_dict()
     finally:

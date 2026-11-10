@@ -29,7 +29,6 @@ import contextlib
 import json
 import os
 import sys
-import time
 from pathlib import Path
 from typing import Any
 
@@ -60,33 +59,14 @@ _spawn_route = _proxy("_spawn_route")
 _parse_label_max_attempts = _proxy("_parse_label_max_attempts")
 
 def _write_supervisor_runtime_status(scope: str, summary: Any) -> None:
-    path = _supervisor_runtime_status_path(scope)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    # Preserve cycle_started_at from the just-finished cycle's own start-marker
-    # write (below) rather than recomputing it, so a reader can diff
-    # updated_at (this, the finish time) against cycle_started_at to see the
-    # last cycle's own duration, not just "when did anything last happen."
-    previous, _err = _read_supervisor_runtime_status(scope)
-    payload = {
-        "runtime_version": __version__,
-        "updated_at": getattr(summary, "completed_at", time.time()),
-        "cycle_started_at": (previous or {}).get("cycle_started_at"),
-        "cycle_id": (previous or {}).get("cycle_id"),
-        "generation": (previous or {}).get("generation"),
-        "progress": getattr(summary, "progress", None),
-        "running": summary.running,
-        "backing_off": summary.backing_off,
-        "dead": getattr(summary, "dead", []),
-    }
-    if "owner" in (previous or {}):
-        payload["owner"] = previous["owner"]
-    temporary = path.with_suffix(f".{os.getpid()}.tmp")
-    temporary.write_text(json.dumps(payload), encoding="utf-8")
-    os.replace(temporary, path)
+    from .supervisor_status_io import write_runtime_status
+
+    write_runtime_status(scope, summary)
 
 
 def _write_supervisor_cycle_start(
     scope: str, cycle_id: int, started_at: float, *, authority_target: str | None = None,
+    readiness_identity: str | None = None,
 ) -> None:
     """Publish the master's queued cycle-start observation, not recovery authority."""
     path = _supervisor_runtime_status_path(scope)
@@ -104,6 +84,14 @@ def _write_supervisor_cycle_start(
     payload["progress"] = {"phase": "starting", "observed_at": started_at, "cycle_id": cycle_id}
     if authority_target is not None:
         payload["owner"] = {"pid": os.getpid(), "authority_target": authority_target}
+    if readiness_identity is not None:
+        from .supervisor_lane_status import CAPABILITY
+
+        payload["lane_readiness"] = {
+            "capability": CAPABILITY, "settings_identity": readiness_identity,
+        }
+    else:
+        payload.pop("lane_readiness", None)
     temporary = path.with_suffix(f".{os.getpid()}.tmp")
     temporary.write_text(json.dumps(payload), encoding="utf-8")
     os.replace(temporary, path)
@@ -417,6 +405,9 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
         from .supervisor_source import entry
 
         return entry(args)
+    from .supervisor_profile import configure_master_profile, take_master_profile
+    profile_binding = take_master_profile(source_argv)
+    readiness_identity = profile_binding.identity if profile_binding else None
     # Never hold the Copilot plugin payload dir as CWD (Windows locks it against
     # `copilot plugin update`); this daemon is lazy-started and inherits the
     # launching session's CWD. Relocate before the long-lived loop.
@@ -495,6 +486,7 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
             self_update_cooldown=_su_cooldown,
             self_update_argv=source_argv or (list(sys.argv[1:]) if _su_enabled else None),
         )
+        configure_master_profile(daemon, profile_binding)
         admission = None
         if source_guard is not None:
             from .supervisor_source import configure_admission
@@ -505,6 +497,7 @@ def _cmd_supervise_serve(args: argparse.Namespace, *, source_guard=None, source_
             daemon.queue_cycle_start(cycle_id, started_at, lambda cycle, timestamp: _write_supervisor_cycle_start(
                 supervisor_lease_scope(machine, env), cycle, timestamp,
                 authority_target=_supervisor_authority_target(args),
+                readiness_identity=readiness_identity,
             ))
 
         def _on_cycle(summary) -> None:
@@ -992,5 +985,12 @@ def _run_supervise(args: argparse.Namespace) -> int:
                     file=sys.stderr,
                 )
 
-        sup.serve(interval=args.interval, on_cycle=_on_cycle)
+        profile = os.environ.pop("AGENT_DISPATCH_SUPERVISOR_PROFILE", None)
+        profile_generation = os.environ.pop("AGENT_DISPATCH_SUPERVISOR_PROFILE_GENERATION", None)
+        if profile:
+            from .supervisor_lane_status import serve_classic
+
+            serve_classic(sup, args.interval, Path(profile), profile_generation, _on_cycle)
+        else:
+            sup.serve(interval=args.interval, on_cycle=_on_cycle)
     return 0

@@ -1,0 +1,9 @@
+{
+  "comment": "Restore fresh PSMux presence and client listings through the Driver observation owner while preserving unknown state.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

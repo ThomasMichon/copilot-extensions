@@ -116,7 +116,8 @@ def checkout(tmp_path, monkeypatch, request):
 
 
 def _plan(fixture):
-    return relocation.plan(fixture.record.worktree_id, str(fixture.destination), fixture.config)
+    """Exercise strict mutation preflight; pure CLI refusal is qualified separately."""
+    return relocation._action_plan(fixture.record.worktree_id, str(fixture.destination), fixture.config)
 
 
 def _move(fixture):
@@ -517,7 +518,7 @@ def test_malformed_workspace_yaml_returns_structured_cli_refusal(checkout):
     env = dict(os.environ, AGENT_HOME=str(checkout.home), USERPROFILE=str(checkout.home), HOME=str(checkout.home))
     result = run_caller_owned(
         [sys.executable, "-m", "agent_worktrees", "--project", "sample", "move",
-         checkout.record.worktree_id, "--to", str(checkout.destination), "--json"],
+         checkout.record.worktree_id, "--to", str(checkout.destination), "--json", "--apply"],
         env=env, cwd=checkout.home, timeout=60,
         max_stdout_bytes=1024 * 1024, max_stderr_bytes=64 * 1024,
     )

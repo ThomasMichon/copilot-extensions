@@ -65,7 +65,9 @@ prevent reuse; an unavailable segment retains the explicit UNKNOWN reason.
    Native helper-publication callbacks use the plan owner's base interpreter,
    not an independently selected bootstrap Python. Windows file-device identity
    representations differ across Python versions; the exact copy-inventory
-   identity check remains required.
+   identity check remains required. On Windows, a PowerShell Core callback uses
+   an ordinary `-File` spelling while retaining native long-path inputs for
+   Python and the authenticated copy inventory. Execution policy is unchanged.
 2. The cutover helper starts a passive monitor, waits for its bound endpoint,
    then publishes the successor route. Bound readiness is not elected serving
    readiness.

@@ -1,0 +1,9 @@
+{
+  "comment": "Discover a retained package-adjacent configuration-owner SDK for standalone consumers with independent interpreters.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

@@ -30,6 +30,93 @@ agent-pull-requests merge  --repo <owner/repo> --number <n> [--squash|--merge|--
 agent-pull-requests wait   --repo <owner/repo> --number <n> [--interval <s>] [--timeout <s>] [--json]
 ```
 
+## Native `diff`
+
+```text
+agent-pull-requests diff --repo <registered-target> --number <positive-number> --worktrees-command <attributable-command> [--json]
+```
+
+Reads a unified diff through the selected Worktrees `pr-watch diff` owner,
+without a claimant worktree or target checkout. The named target supplies
+provider, endpoint and account; managed execution retains same-cell peer
+selection. This native-only command has no default forge route, credential
+or endpoint override, workspace allocation, mutation or automatic retry.
+
+The complete `agent-worktrees.pr-diff-read` version-1 report is emitted in
+both modes, including valid failures. Exit 0 requires owner exit 0,
+`supported: true` and no report error. Extra frontend diagnostics go to
+stderr; when no valid report exists, JSON mode reports a frontend error
+with the requested repo/number instead of an invented empty diff.
+
+Completeness and candidate freshness are independent of acquisition.
+The existing provider primitive yields null completeness on success,
+false on error/unsupported acquisition and no base/head identity.
+The frontend preserves true/false/null completeness and additive evidence
+in any valid report. Empty text is not proof of no changes, and exit 0
+is not a candidate-bound review artifact or write authority. Azure DevOps
+explicitly reports unified diff unsupported; its generation/source workspace
+contract remains separate. GitHub honors the configured endpoint, retaining
+ambient/default host selection only when none is configured. No diff is
+persisted in a watch cache or journal. Unsupported old/rolled-back runtimes
+fail explicitly without another invocation.
+Malformed configured GitHub endpoints refuse, and supplied selected tokens
+override public/Enterprise aliases. Explicit capture preserves CRLF/bare CR
+and rejects invalid UTF-8; tracked diff normalization remains unchanged.
+
+## Native `threads`
+
+```text
+agent-pull-requests threads --repo <registered-target> --number <positive-number> --worktrees-command <attributable-command> [--json]
+```
+
+Reads discussion bodies on demand through the selected Worktrees
+`pr-watch threads` owner. The named target's binding supplies provider,
+endpoint and account; neither a claimant worktree nor a target checkout is
+required. Managed execution uses the existing same-cell peer selection.
+There is no default GitHub route, token/endpoint override, resolution,
+reply, mutation or automatic retry.
+
+A valid `agent-worktrees.pr-threads` version-1 report is emitted in full in
+both output modes, including valid failure reports. Exit 0 requires a
+successful owner invocation, `supported: true` and no report error; other
+outcomes exit nonzero. Additional frontend diagnostics go to stderr.
+Without a valid report, `--json` emits a frontend error with the requested
+repo/number; plain mode reports the error on stderr.
+
+Completeness and candidate freshness are independent of exit success.
+Preserve `complete: false` or null and any `candidate_changed` or native
+revision fields. An empty list or exit 0 does not prove complete/current
+evidence or authorize a write. Provider-specific IDs, bodies and iteration
+context remain unmodified; no body is added to a persistent watch cache.
+An incompatible or rolled-back runtime yields an explicit error without
+fallback or another invocation.
+
+## Source report facade
+
+Selected ADO resolution is a separate
+[native author operation](author-operations.md#selected-native-thread-resolution).
+Neither `threads` nor the report facade below mutates discussions.
+
+The optional [existing-owner report API](watch-gateway.md#optional-existing-owner-report-reads)
+has a source embedding facade:
+
+```text
+report capabilities
+report threads --request <bounded-json-file-or-stdin-dash>
+report diff --request <bounded-json-file-or-stdin-dash>
+```
+
+Invoke `agent_pull_requests.__main__.main(argv, report_host=client)` from the
+actual embedding with its selected `ReportClient`. Read JSON contains only
+`number` and `budget_seconds`. It discovers the contract before reading and
+emits the whole validated exchange. Exit 0 requires owner exit 0, supported
+acquisition and no report error. Without a host it returns unavailable; it
+does not discover an ambient Gateway, executable, credential or account.
+This is not an ordinary installed HTTP client migration. Existing native
+`threads`/`diff`, workspace and watch syntax remain unchanged.
+An explicitly injected [v2 client](report-bounded.md) can negotiate a larger
+bounded response without changing request JSON, CLI flags or the default host.
+
 ## `status`
 
 ```text

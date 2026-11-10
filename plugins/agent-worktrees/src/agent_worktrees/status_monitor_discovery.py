@@ -21,6 +21,37 @@ _retry_after: dict[tuple[str, str, str], float] = {}
 _now = time.monotonic
 
 
+def list_sessions(mux_bin: str) -> dict[str, tuple[int, str]] | None:
+    from .mux_list_result import is_empty_tmux_listing, parse_monitor_sessions
+
+    if sessions._is_psmux(mux_bin):
+        from agent_remote_driver.mux_observation import list_psmux
+
+        observed = list_psmux()
+        if observed is None or any(o.status not in {"present", "absent"} for o in observed.values()):
+            return None
+        return {
+            name: (o.clients, o.incarnation)
+            for name, o in observed.items() if o.status == "present"
+        }
+    try:
+        result = subprocess.run(
+            [mux_bin, "list-sessions", "-F",
+             "#{session_name}:#{session_attached}:#{session_id}:#{session_created}"],
+            capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+        )
+    except Exception:
+        return None
+    if result.returncode:
+        return {} if is_empty_tmux_listing(mux_bin, result) else None
+    if (result.stderr or "").strip():
+        return None
+    try:
+        return parse_monitor_sessions(result.stdout, strict=True)
+    except ValueError:
+        return None
+
+
 def _valid_native_incarnation(value) -> bool:
     if not isinstance(value, str):
         return False

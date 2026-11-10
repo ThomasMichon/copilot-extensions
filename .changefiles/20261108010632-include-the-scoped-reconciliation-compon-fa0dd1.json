@@ -1,0 +1,9 @@
+{
+  "comment": "Include the scoped reconciliation component in caller-lifetime source archives",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}

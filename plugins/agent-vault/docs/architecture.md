@@ -14,6 +14,8 @@ This document describes the implementation as it exists today. It intentionally 
 | SSH key preparation | `src/agent_vault/ssh_key.py` | Validates and reuses a whole Ed25519 pair; separately confirmed first creation uses one existing create-only protected-field write. Returns public metadata, not private material or enrollment authority. |
 | Config resolver | `src/agent_vault/config.py` | Resolves database, group, vault name, port, runtime paths, and config files from env, repo config, extension config, global named vaults, and defaults. |
 | Installer/bootstrap | `scripts/install.ps1`, `scripts/install.sh`, `scripts/bootstrap-check.*` | Creates/stamps the runtime, deploys binstubs, records a deploy manifest, installs platform supervision, and reconciles version drift. |
+| Dependency selection | `scripts/runtime_profile.py` | Persists explicit base/SSH installation policy and passes the selected extra to the canonical immutable constructor while the native lifecycle retains activation and service ownership. |
+| Prepared-source target | `scripts/runtime_source_target.py`, `runtime-source-target.json` | Declares the existing source-target contract, binds planned source/profile to the installer and records slot evidence before canonical completion. |
 | Extensions | `src/agent_vault/extensions.py`, `src/agent_vault/core_ext.py` | Provides opt-in hooks for unlock providers, daemon actions, transports, config/cache sources, CLI commands, startup hooks, and optional core delegation. |
 
 ## Runtime layout and install modes
@@ -40,6 +42,41 @@ There are two setup paths:
 2. **Stamp** writes a payload snapshot marker plus self-provisioning binstub without building the venv. The session-start hook uses this when no manifest exists so the command is available quickly; the first real command provisions the venv and then dispatches.
 
 The runtime is standalone: neither installer nor CLI requires an `agent-worktrees` repo registration.
+
+Standalone consumers with an independent interpreter retain the canonical
+`versioned_runtime*.py` SDK family in `.runtime-bootstrap/` beside the
+`agent_vault/` package. Configuration-owner discovery uses that SDK when no
+interpreter-slot SDK exists. It still requires a completed owner runtime,
+reads its configuration report without provisioning, and refuses owner
+errors or mismatched delivered projections.
+
+Explicit [base/SSH profiles](../README.md#dependency-profiles) add a separate
+immutable slot dimension (`<package>+<profile>`, or
+`<package>+<profile>.source.<commit>.<assembly>`). Unselected legacy base installs
+retain their existing slot and cheap bootstrap path. Desired selection lives
+under the installation root, while canonical completion/origin evidence binds
+the full source and selected extras. The existing attached construction adapter
+retains a completed candidate through native setup; the profile helper does not
+own service startup or credential operations.
+Prepared-source assertions, snapshots and redirects retain the original source
+identity/version. Manifest `runtime_version` names the actual profiled slot,
+`runtime_source` retains the original receipt and `source.version` remains the
+package version. No receipt is fabricated by appending a profile to it.
+Collected prepared-source updates use the existing version-1 target contract.
+An unselected legacy base keeps its original source-qualified version; explicitly
+selected profiles keep their independent dimension. Slot `runtime-profile.json`
+binds profile, original source, package version and canonical completion hash.
+Evidence is created only before completion and verified without rewriting on reuse.
+Native start/status resolve the active interpreter read-only, not desired policy.
+Common PATH/pruning finalization also runs after retained profile construction.
+Bootstrap currentness binds the marker and full original source receipt to the
+incoming payload's exact generation, including unselected prepared-source base.
+Windows ordinary stamp and direct profile construction share the same
+materialized input assembly; prepared-source profiles use the canonical source
+snapshot. Fingerprinting and construction read that same retained assembly,
+without publishing redirects merely to prepare inputs.
+Snapshot provenance remains owned by its publisher and is omitted only from
+temporary construction inputs, not removed from the retained published snapshot.
 
 ## Configuration model
 

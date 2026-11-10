@@ -13,6 +13,49 @@
 - **Resident configuration correction:** #10951 (qualified caller context)
 - **Separate prepared qualification:** #10742 under campaign #7028; not the ordinary-installer slice's publication gate
 
+## Goal
+
+Current operator reaffirmation:
+
+> Seems like there are issues with MCP we need to deal with, to fix version-over-version compat and instll success
+
+**Interpretation:** This reaffirms the unchanged Guiding Intent below, including
+fresh physical-generation execution and preserved session reattachment. It does
+not replace the original Request or waive release and installed-consumer gates.
+
+### Application-state ownership boundary
+
+> Install shouldn't be messing with a live DB or state file; this is one area where we do have to figure out lock management with the outgoing version, during boot of the incoming service versions
+
+This supplements, rather than replaces, the request above. Installation stages
+software; it does not rewrite or migrate live application DB/state files.
+Incoming boot must coordinate safe compatible access, quiescence or ownership
+transfer with the outgoing state owner before making state changes. This is
+necessary incoming readiness, distinct from optional predecessor cleanup.
+
+### Requested boot and recovery sequence
+
+> For SQLite, I assume we need the existing version to release its lock on the DB and finish pending transactions. When starting the new version of a service, we will need to:
+> 1. Check for existing service version
+> 2. Negotiate handoff with existing service
+> 3. Upon failure to negotiate, force-terminate existing service
+> 4. Check health of existing DB, perform repair/update if needed, take ownership
+> 5. In case of failure, rename existing DB to backup, create new DB in "state recovery mode".
+
+The forced fallback is an outgoing-service lifecycle policy, not permission to
+terminate separate client/session keepers or an arbitrary process tree.
+Ownership and uncertain accepted-operation outcomes remain explicit.
+
+### Durable state authority
+
+> Per my rules: all DBs fundamentally hold recoverable state that should be recomputable from file-system-based state, usually persisted in worktree/session folders, access over SSH, or Git. Only known "violation" is agent-dispatch Tasks, for which we probably should have an agent design a fallback-recover mechanism.
+
+DBs are intended to be rebuildable projections, not the sole authority.
+Dispatch Tasks is the operator-identified known exception; its filesystem
+fallback requires a separate design before DB replacement can be treated as
+lossless recovery. This intent does not claim that every existing DB's
+reconstruction path has already been qualified.
+
 ## Guiding Intent
 
 An update must make fresh `agent-mcp` invocations use the incoming runtime and
@@ -60,6 +103,7 @@ and authorized installed-consumer acceptance. No global validation rule is waive
 | lopsided-gasket | Existing handover implementation and focused qualification | Managed implementation worktree |
 | patient-spanner | Incoming/retirement architecture and acceptance amendment | Managed documentation worktree |
 | squeaky-crank | Bounded #10951 resident configuration-context implementation | Managed source worktree; coordinator owns publication and rollout |
+| stubborn-latch | #11524 Worktrees incoming-monitor publication correction | Coordinator-controlled source worktree; separate from MCP handover implementation |
 | Session-path evidence | Read-only client, host and upstream-state analysis | Coordinator delegation |
 | Activation evidence | Read-only installer, selection and retirement analysis | Coordinator delegation |
 | Keeper evidence | Read-only existing lifecycle/transport primitive analysis | Coordinator delegation |
@@ -85,6 +129,10 @@ and authorized installed-consumer acceptance. No global validation rule is waive
 - Generic SDK observation work belongs to the independent #10925 objective, not
   an MCP implementation slice. Historical journals remain here unchanged; SDK
   progress cannot block this effort's independent implementation or completion.
+- stubborn-latch owns the #11524 Worktrees installer/monitor correction under
+  the coordinator. Lopsided-gasket's MCP handover implementation and retained
+  source changes remain independently owned; this correction does not replace
+  that writer or settle its remaining work.
 
 ## Context
 
@@ -203,6 +251,32 @@ named tracked objective before the whole effort is Done.
 - [ ] **Clean measured sweep:** resolve actual incoming completion and update
   performance; a selected runtime or a successful isolated tool call does not
   make a failed full update successful.
+  - [ ] **Nested-library version coverage #11704:** release the transitive
+    consumer-map correction and affected-consumer patch changefiles, then verify
+    ordinary reconciliation against the newly versioned payloads. Coordinator
+    retains review, release and installed acceptance; source guards alone do
+    not complete the measured sweep.
+    - [x] **Source correction merged:** #11709 landed at
+      `4176aaea9a1d3dde5f3e6f924cc5542e7fce9483` after current-head approval
+      and required CI. Promotion and installed reconciliation remain open.
+- [x] **Worktrees incoming-monitor source correction:** #11673 merged the
+  #11524 correction at `2e575be1a26c789f1b5b1912df626165fb9c7158`
+  after current-head approval, required CI and Windows/Linux native acceptance.
+- [x] **Bounded Worktrees correction delivery:** #11673 was promoted to Main
+  `48556f2680f5dbbdbdf5ada65867a5feb5d85de5`; authorized Windows payload and
+  runtime phases installed `1.25.53-dev1`. Independent serving, native identity,
+  physical-runtime and selection checks passed. This is not a normal full-update,
+  outgoing-cleanup or MCP-session-reattachment result.
+- [x] **Optional installer backstop source merged:** #11550 delivers the #11534
+  termination-free, addressed-runtime correction; explicit lifecycle-owner
+  cleanup remains separate.
+- [x] **Backstop release verified:** Main
+  `2f22e1803fa7f6e5c85efee839c50881245374ec` contains the reviewed collector,
+  helpers and initializers; both MCP archives retain the matching collector.
+- [x] **Bounded installed backstop proof:** the targeted Windows MCP
+  `0.2.217-dev1` runtime phase and fresh literal bridge passed; all 18 observed
+  MCP-tree native births remained unchanged. This is not full-host or
+  adopted-session reattachment acceptance.
 
 ### Resident configuration-context correction
 
@@ -295,7 +369,10 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 - [ ] Pair with genuine incoming source-admission, authentication, build,
   permission, I/O and health failures that prevent incoming completion.
   Necessary durable-state compatibility and conflicting-work protection remain
-  enforced; do not require takeover of an unknown foreign listener.
+  enforced; do not require takeover of an unknown foreign listener. Verify that
+  installation does not mutate live application DB/state, and that incoming
+  boot establishes compatible access or an outgoing-owner handoff before state
+  changes or migration, without forcibly closing live handles.
 - [ ] The incoming-complete result leaves outgoing-deferred, handover-pending
   and whole-effort gates visibly distinct. No new selector or manifest alone
   manufactures success, and no old cleanup result reverses healthy incoming
@@ -325,6 +402,9 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
   automatic inhibition and never authorizes state-holder termination.
 - [ ] Actual consumer evidence distinguishes source qualification, released
   payload, selected runtime and the generation that handles a tool call.
+- [x] **Backstop source controls:** default live-instance preservation, exact
+  runtime scope, interleaved cursors and mixed/rolled-back helper refusal passed;
+  this is not installed MCP constructor or session-handover acceptance.
 - [x] **Deferred to [#10925](https://github.com/ThomasMichon/copilot-extensions/issues/10925):**
   SDK fixture-scoped acquisition and self-profile compatibility validation;
   not an MCP result or prerequisite.
@@ -349,6 +429,117 @@ backend execution. This plan does not assert that reattachment or legacy live
 migration already works.
 
 ## Journal
+
+### 2026-11-09 - Incoming-monitor correction resumed
+
+- Promotion run `42613130492` qualified the immutable candidate from Dev
+  `2e575be1a26c789f1b5b1912df626165fb9c7158` and landed Main
+  `48556f2680f5dbbdbdf5ada65867a5feb5d85de5`. Both corrected Worktrees
+  files exactly match the reviewed source in that generated release snapshot.
+- Authorized Worktrees-only Windows payload and runtime phases completed in
+  41.48 and 81.49 seconds respectively. The new `1.25.53-dev1` monitor
+  independently reports ready and published after installer exit; its native
+  birth, route, physical runtime, manifest, current version, last-known-good
+  selection and fresh command version agree. The imported correction bytes
+  match the reviewed release.
+- Outgoing recovery and retirement remained explicitly unconfirmed without
+  vetoing the healthy incoming monitor. Installer-instance reconciliation also
+  reported deferred native observation; no cleanup success or manual retirement
+  is claimed. Both phase requests completed and no update remained active.
+  Normal full-update performance and all MCP-wide publication, preservation and
+  adopted-wrapper reattachment gates remain open.
+- #11673 merged at `2e575be1a26c789f1b5b1912df626165fb9c7158`
+  after genuine current-head Copilot approval, zero unresolved findings and
+  green source and native CI. The live-lock and legacy-protocol installer
+  cases passed on both Windows and Linux; absent/stale-lock and
+  construct-then-reuse cases remain unqualified. The next stretch is formal
+  release promotion and authorized installed acceptance, not whole-effort
+  completion. No deployment, clean full-update performance or session
+  reattachment is claimed by this source merge.
+- Claimed #11524 as stubborn-latch, retaining the separate MCP handover owner.
+- The source correction separates outgoing native observations from incoming
+  election. It archives exact unresolved recovery bytes and retains prior code
+  without recovery or termination; structural route CAS and actual incoming
+  preparation, promotion and serving checks remain mandatory.
+- Focused source qualification passed 39 installer, actual-cutover and
+  retention cases, including unavailable outgoing birth, uncertain/corrupt
+  recovery, incoming identity mismatches and archive I/O failure. Broader
+  affected-file qualification, review, release and installed acceptance remain
+  open; this is not a clean full-update or MCP-session-handover result.
+- Final local contract qualification subsequently passed 345 tests across the
+  installer, actual-cutover, retirement and cancellation files, with verified
+  bounded-owner cleanup. Five cases from two expensive native installer
+  scenarios were deselected and remain unqualified; the earlier all-file
+  300-second timeout is not counted as a pass. Lint, install-contract,
+  unchanged module-size and whitespace guards pass. Review, release, actual
+  normal-update performance and installed consumer acceptance remain open.
+- Review of #11673 identified six blocking edge cases. Regression-first
+  corrections preserve previous-only startup with raw-active CAS, defer failed
+  outgoing reuse probes, retain exact dev-release obligations even without a
+  known outgoing slot, and use bounded atomic reference groups plus write-ahead
+  archives that survive changed observations. Current local affected-file
+  qualification passes 362 tests; the same five native cases remain
+  unqualified. The shared ZDD cutover suite passes 49 cases, including
+  unchanged legacy healing. Required CI, renewed review, release and installed
+  acceptance remain open; no new deployment or whole-objective completion is
+  claimed.
+- The intervening old-head review also exposed malformed archive envelopes,
+  unreadable breadcrumb cleanup and normalized legacy-route comparisons.
+  Added regression-first corrections, including orphan references after loss
+  of the archive directory. Final affected-file qualification passes 369
+  tests with the same five native cases unqualified; the shared cutover and
+  refusal files pass 64 tests. These are source results only, not current-head
+  review acceptance, required CI, release or installed completion.
+- Further review exposed retry ordering, prepared-claim reference repair, GC
+  between inventory and fencing, and predecessor exit after qualification.
+  Added direct installer retry and actual-GC/selection regressions. Write-ahead
+  intent now precedes the deletion fence and inventory capture, interrupted
+  inventory resumes under that fence, and archived references recover before
+  ordinary retirement reservation and prepared-claim reconciliation. Qualified
+  cleanup also preserves raw-active selection. The complete affected selection
+  passes 376 tests with verified bounded-owner cleanup; the same five native
+  cases remain unqualified. Review, required CI, release, normal full-update
+  performance and session-preserving acceptance remain open.
+- Current-head review confirmed those seven prior findings resolved, then
+  identified multi-archive recovery clearing a shared fence too early and
+  cleanup retry re-retaining already-collected slots. New failure-first
+  controls cover GC between archive commits and deletion failure after
+  reference release, with and without a dev claim. Recovery now publishes
+  combined references under one fence, and terminal cleanup intent precedes
+  their removal. CI also exposed stale generated ZDD admission copies and
+  three exact cold-start controls: regenerated the copies and restored the
+  explicit retired-predecessor native-exit checks. The combined affected and
+  legacy-custody selection passes 487 tests, with the same five native cases
+  still unqualified and bounded cleanup verified. The admitted source
+  fingerprint is refreshed without changing nodes, source inventory or budget.
+  Renewed current-head review and CI remain required; no installed or
+  whole-effort acceptance is claimed.
+- Source CI and the Linux native acceptance job then passed. Windows reached
+  the later native transport controls and exposed six obsolete expectations
+  of eager passive reaping. Updated only that assertion to require explicit
+  deferred ownership and zero reaper effects; native readiness, publication,
+  grace, refusal and rollback assertions remain intact. The exact Windows CI
+  selection reproduced six failures, then passed all eight cases with verified
+  cleanup under unchanged limits. The latest review reports no open findings
+  but remains `COMMENTED`, not a current-head approval. Renewed CI and the
+  separately required approval remain open.
+- Added a failure-first case to the existing installer-custody controls:
+  outgoing native-identity observation is unavailable, but the healthy incoming
+  runtime must publish with retirement pending and both slots preserved.
+  The current source fails this case before publication; bounded test cleanup
+  was verified. No installed correction is claimed.
+- Conditional route publication already separates the raw predecessor route
+  from native identity of the incoming writer. The remaining implementation
+  must preserve uncertain recovery records and conflicting-work protection,
+  rather than merely suppressing the first outgoing-observation exception.
+
+### 2026-11-09 - Nested-library consumer correction merged
+
+- [Source milestone, validation scope and remaining delivery gates](journal/2026/11.09%20nested-library%20consumer%20correction.md).
+
+### 2026-11-08 - Termination-free installer source merged
+
+- [Source qualification, merge and remaining delivery gates](journal/2026/11.08%20termination-free%20installer.md).
 
 ### 2026-11-04 - Kickoff
 
@@ -1459,3 +1650,46 @@ migration already works.
   acceptance remain open. The effort remains Active; full adopted-wrapper
   reattachment, historical warm-reuse uncertainty and prepared qualification
   are not closed by these corrective slices.
+
+### 2026-11-09: Nested-library version coverage blocker #11704
+
+- Logger and Machines release payloads included changed nested ZDD metadata
+  without distinct consumer versions. Replacing only the current ZDD manifest
+  with its prior released bytes reproduced the earlier completed content hash;
+  this is changed nested input, not corrupt completion metadata or permission
+  to rewrite immutable completed slots.
+- The bump-consumer map now expands canonical sibling dependencies with the
+  materializer's shared UV parser, deterministic cycle-safe traversal and
+  fail-closed invalid-manifest handling. Both indirect ZDD consumers appear
+  in the actual map; ordinary patch changefiles request distinct releases.
+- Integration also identified Remote Driver, Budget Guidance and Chat as
+  previously omitted indirect consumers. Patch changefiles cover all five
+  missed payloads, not only the two observed installer failures; no additional
+  capability activation is requested.
+- Seven focused source controls failed before the correction and passed after
+  it, covering shared/nested dependencies, consumer forms, cycles, aliases and
+  invalid manifests. This closes a bounded release-accounting gap toward
+  authoritative runtime replacement, not installer admission or lifecycle work.
+- Related bump/changefile/accumulation guards pass 88 tests; two native symlink
+  controls explicitly skip when the platform denies symlink creation. The
+  source-only nested symlink-refusal control passes without native privileges.
+- Review, promotion and actual installed reconciliation remain coordinator-owned.
+  #3654's broader pointer work and #6369's source/stamp ownership stay separate.
+  No MCP, global/full-update or session-reattachment gate is marked complete.
+
+### 2026-11-09: Changefile-only consumer coverage follow-up
+
+- Current-head review of #11709 found that a library-only bump could still
+  bypass consumer coverage because no canonical source path changed. The
+  presence guard now expands new or changed library bump intents through the
+  transitive map, retaining diff-owned consumer coverage and rejecting
+  unreadable or malformed changed intents.
+- Unchanged baseline entries, note-only edits and removed intents remain
+  unrelated to the current PR. Promotion/version allocation and immutable-slot
+  admission are unchanged. Review, required CI, release and installed acceptance
+  remain coordinator-owned; MCP, full-update and reattachment gates remain open.
+- The failure-first selection reproduced six failures. Related source guards
+  and selected admitted release decisions now pass 108 tests with two explicit
+  native-symlink capability skips and verified cleanup. Admission/source checks
+  retain 4,668 nodes, 663 sources and the 300-second budget without fingerprint
+  changes; this selected evidence is not the full required CI packet.

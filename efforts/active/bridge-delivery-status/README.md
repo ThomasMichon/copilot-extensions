@@ -128,13 +128,13 @@ and review findings; they do not extend action or deployment authority.
 - [x] Expose freshness-qualified current question/permission attention beside exact receipts.
 - [x] Add finite delivery waiting and strict CLI/current-prior capability behavior.
 - [x] Preserve default admission, reply waits, idempotency, exact targeting and retained-inbox ownership.
-- [ ] Merge the independently green provider/consumer slice after required review and checks.
+- [x] Merge the independently green provider/consumer slice after required review and checks: #11496, merged to dev; not deployed.
 
 ### Phase C - Host feed and coalescing
 
-- [ ] Add normalized bounded durable status transitions to existing authoritative producers.
-- [ ] Add selected-agent/event subscriptions, cursor-neutral reads and explicit acknowledgement.
-- [ ] Admit at most one unread existing-inbox notice; qualify race-safe rearming.
+- [x] Add normalized bounded durable status transitions to existing authoritative producers.
+- [x] Add selected-agent/event subscriptions, cursor-neutral reads and explicit acknowledgement.
+- [x] Admit at most one unread existing-inbox notice; qualify race-safe rearming.
 - [ ] Merge the local complete consumer flow after required review and checks.
 
 ### Phase D - Remote composition and adoption
@@ -164,6 +164,19 @@ Each implementation PR includes documentation/contract impact and its actual
 validation evidence, including honest reasons for unavailable native lanes.
 
 ## Journal
+
+### 2026-11-07 - Subscription prerequisite integration
+
+- Receipt source #11496 and registration identity recovery #11508 are merged
+  to dev. The subscription slice preserves their serving state, contract owners,
+  probe portfolio and retained-extension VM linker repairs.
+- Source qualification now proceeds as a production draft PR, followed by
+  canonical capture against its public head. Installed adoption, promotion
+  and deployment remain separate acceptance work under #11448.
+- Integrated qualification passed 64 isolated Python controls and the retained
+  extension VM lane with experimental module support: seven passed, zero
+  skipped. Three subsequent targeted controls qualify the generated-notice
+  feedback exclusion while preserving ordinary root receipt consumption.
 
 ### 2026-11-07 - Delivery source qualified before publication
 
@@ -197,6 +210,29 @@ validation evidence, including honest reasons for unavailable native lanes.
   explicit unsupported-before-send pending its separate provider composition.
 - Focused testing exposed old HTTP test adapters missing endpoint-pin arguments;
   repair retains and asserts that guard instead of disabling it.
+
+### 2026-11-07 - Subscription source slice
+
+- subscription-worker takes Phase C host feed/coalescing and Phase D source
+  composition, independently of delivery observation APIs.
+- This slice closes the Bridge delegation control and attention boundary.
+  Existing inbox delivery, registration recovery and roster freshness keep
+  their existing owners. No installation or consumer adoption is claimed.
+- Implemented the local durable metadata feed, selected subscriptions, explicit
+  acknowledgement and inbox-transaction notice coalescing, plus one shared
+  authenticated host carrier stream per selected remote daemon.
+- The focused source controls pass: 39 HTTP/client/carrier cases, including
+  fresh storage, retention gaps, restart, nested filtering, race-safe
+  acknowledgement, stale inbox refusal and provider rollback. An earlier
+  coupled inbox/event packet passed 148 tests.
+- First-touch schema/adoption controls pass. Candidate integration prepares its
+  idle task outside the routing fence and loads static routes before transfer
+  deadlines; focused authenticated serving and actual native IPC controls pass.
+  Windows native deadline variability was investigated with stage probes, not
+  hidden by changing production deadlines. Full installed adoption remains
+  unqualified.
+- Native installed/remote adoption remains with bridge-status-owner under
+  #11448; these isolated source results do not authorize deployment.
 
 ### 2026-11-07 - Initial proposal
 

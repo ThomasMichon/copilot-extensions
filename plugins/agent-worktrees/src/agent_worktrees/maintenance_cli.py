@@ -129,6 +129,8 @@ def add_parsers(sub) -> None:
 
     from .doctor_cli_parser import add_parser as add_doctor_parser
     add_doctor_parser(sub)
+    from .python_cache_prune import add_parsers as add_python_cache_parsers
+    add_python_cache_parsers(sub)
 
     sp = sub.add_parser(
         "hygiene",

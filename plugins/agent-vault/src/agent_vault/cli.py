@@ -373,14 +373,14 @@ def start_service(tcp_port: int | None = None) -> bool:
         return False
     if tcp_port is None:
         context = config.resolve_context()
-        if not IS_WINDOWS and context.sources.get("port") == "default" and _start_service_systemd():
+        default_target = context.sources.get("port") == "default"
+        if not IS_WINDOWS and default_target and config.BIND_PORT_ENV not in os.environ and _start_service_systemd():
             return True
-        tcp_port = context.port
+        tcp_port = config.daemon_bind_port(context)
 
     # spawn_daemon already detaches the service; --foreground keeps POSIX's
     # self-daemonize (cwd HOME, stdio to /dev/null) from undoing that launch.
-    args = ["--tcp-port", str(tcp_port)] if tcp_port else []
-    launch.spawn_service([*args, "--foreground"])
+    launch.spawn_service(["--tcp-port", str(tcp_port), "--foreground"])
 
     for _ in range(20):
         time.sleep(0.25)
@@ -1686,9 +1686,9 @@ def _main(argv: list[str] | None = None):
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=ssh_key_install_command)
 
-    from .batch_reads import add_commands as add_read_commands
-
-    add_read_commands(sub, cmd_get)
+    from . import authenticated_curl, batch_reads
+    batch_reads.add_commands(sub, cmd_get)
+    authenticated_curl.add_commands(sub)
 
     p = sub.add_parser("has", help="Check if an entry exists")
     p.add_argument("entry", help="Entry path")

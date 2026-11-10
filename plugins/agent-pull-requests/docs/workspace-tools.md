@@ -136,6 +136,7 @@ agent-pull-requests workspace allocate --request request.json
 agent-pull-requests workspace submit --request request.json
 agent-pull-requests workspace inspect --request request.json
 agent-pull-requests workspace receipt --request request.json
+agent-pull-requests workspace retained-comment --request request.json
 agent-pull-requests workspace events --request request.json
 ```
 
@@ -172,6 +173,7 @@ Original host cancellation/authority and retained unknown effects remain separat
 | inspect | number, operation_id |
 | receipt (optional prepared contract) | number, operation_id, action_id |
 | observe-comment (optional observation contract) | number, operation_id, action_id, generation_id |
+| retained-comment (optional mapping contract) | number, operation_id, action_id |
 | events (optional) | number, after (null or epoch/sequence), limit (1-16) |
 
 `allocate` selects only the executing receiver's optional
@@ -213,6 +215,49 @@ or a writer. Preserve the result's original state/receipt and observation age;
 an unavailable/conflicting result is not a request to discover equal text,
 resend a comment or advance feedback. Prior/withdrawn support refuses without
 state downgrade or fallback.
+
+### Retained acquired-comment reader
+
+`retained-comment` and `pr_workspace_retained_comment` read body-free evidence
+already retained by the [explicit acquisition mapping owner](review-owner-store.md#optional-retained-acquired-comment-metadata).
+The executing workspace must explicitly select `comment_mappings=True` with
+prepared-review and conversation support and currently adopted mapping storage.
+Discovery adds `retained-comment` and `comment_mapping_contract` only for that
+selection. Its contract is `agent-pull-requests.retained-comment-reader/v1`,
+result protocol `agent-pull-requests.retained-comment-observation/v1`, storage
+extension `review_comment_mapping_version:1`, acquisition
+`workspace-projection/v1`, and `effects: none`.
+
+Native/service clients and the tool façade require the optional declaration
+before dispatch. Required contract values are validated; additive metadata is
+ignored. The receiver rechecks its actual selection and storage, even
+for direct or stale clients. Prior, missing, malformed, withdrawn or rolled-back
+support disables only this optional reader; baseline commands retain their
+existing schemas and behavior. No baseline field is repurposed, no command
+implicitly adopts/downgrades state, and no prior form is retired in this release.
+Normal unbound hosting remains unchanged.
+
+The scoped result retains the original action identity/receipt and a nullable
+`mapping` with its acquisition generation and original discussion interval.
+It needs neither cached bodies, a writer nor fresh provider access. A null slot
+is missing retained evidence, not proof of no native effect. Later acquisitions
+may replace the slot without rewriting the original confirmed receipt.
+`effects: none`, `fresh_native_read: false`, `original_version_proven: false`
+and `feedback_progress: false` remain explicit. Reading never searches tags,
+resends comments, reconciles unknown writes or advances handled/ACK/echo state.
+The source implementation and synthetic native/CLI/Gateway controls do not
+enroll a normal installed host or qualify live provider behavior.
+
+An explicitly adopted terminal read-only host may instead offer the separate
+[`terminal-comment-mapping-reader/v1`](terminal-retention.md#optional-terminal-mapping-receiver)
+contract. The same CLI/tool command then returns a declared active/compact
+representation, minimal original prepared identity and `mapping_supported`,
+without inventing a retired source manifest. Unsupported historical retention
+and a supported null slot remain distinct. This does not append an operation
+to terminal-read/v1 or reuse retained-comment-reader/v1's result guarantees;
+the executing optional declaration, not the command spelling, selects the
+result. Prior hosts keep their baseline, and neither form falls back to native
+searches or writes.
 
 The optional [conversation event reader](conversation-journal.md) needs explicit
 owner-v3 storage and serving adoption. It is read-only and capability-selected;

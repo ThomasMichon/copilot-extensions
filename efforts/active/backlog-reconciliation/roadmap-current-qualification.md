@@ -25,6 +25,35 @@ Its current-head approval includes the corrected #4220 omitted-revert
 description below. This completes the selected qualification publication,
 not any implementation or campaign-wide acceptance.
 
+## 2026-11-09 tracking-route correction
+
+The qualifications below remain pinned historical findings, not claims about
+the current source or installed system. Two selected issue IDs have since
+received audited `NOT_PLANNED` tracking dispositions. Route their unfinished
+work through the actual receivers rather than opening another leaf or
+mistaking the closed source tracker for a completed fix:
+
+| Historical selection | Actual receiving route and evidence | First bounded contribution retained |
+|---|---|---|
+| #9323 | OPEN #9295; [audited transfer](https://github.com/ThomasMichon/copilot-extensions/issues/9323#issuecomment-6676961808) | The same permission-chain claimant retains normal bare/cross-repository permissions, known-option refusal before persistence/transport and correlated Bridge permission handling. Ordinary SSH idle/busy admission is a separate receiving lane, not a prerequisite for this slice. |
+| #3002 | OPEN #2879; [audited transfer](https://github.com/ThomasMichon/copilot-extensions/issues/3002#issuecomment-6675077664) | Existing binding/receipt/delivery owners retain routable binding OR an alternate exact-owner route OR explicit not-ready/undeliverable handling. Late binding and later exactly-once observation do not rewrite historical acceptance; unrelated monitor/status/capacity work is not a new whole-parent barrier. |
+
+Both receivers occur in the complete metadata-only inventory at
+**2026-11-09 10:31:39 UTC (02:31:39 PST)**; all ten other selected identities
+also remain OPEN there. The earlier audited transfers preserve original
+descriptions, assignments and unchecked implementation acceptance. This pass
+reuses that evidence and reads no new original, refinement or product source.
+Current creator-roster membership is not renewed nested-content qualification.
+
+These are tracking routes, not hard dependency edges, new priority rankings,
+receiving-effort appointments or source/resource transfers. The finite
+permission and steering alternatives below survive unchanged. Before an
+authorized implementation contribution, its existing owner still qualifies
+the actual current source, acceptance and applicable permissions; neither a
+metadata census nor this routing correction supplies that proof. Other
+selected rows, actual holds and the historical 145-relationship register
+retain their existing limits.
+
 ## Current decisions and retained boundaries
 
 ### #1803 - Large-response framing

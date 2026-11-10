@@ -1,0 +1,9 @@
+{
+  "comment": "Select acquired comment mappings in explicit workspaces and negotiate retained readback",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

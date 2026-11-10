@@ -120,15 +120,23 @@ def fixtures(product, root=None, root_text=None, payload_text=None, publisher=No
         # supplies fixtures, and the production helper selects payload-local.
         branch = ("agent-vault", "agent-ssh", "agent-pull-requests").index(product)
         sh_writer = engine_sh.split("write_simple_binstub() {", 1)[1]
-        cold_sh = re.findall(r"<<'DISPATCH'\n(.*?)\nDISPATCH", sh_writer, re.S)[branch]
+        cold_sh = re.findall(
+            r"cold_dispatch=\"\$\(cat <<'DISPATCH'\n(.*?)\nDISPATCH", sh_writer, re.S,
+        )[branch]
+        early_sh = re.findall(
+            r"early_dispatch=\"\$\(cat <<'DISPATCH'\n(.*?)\nDISPATCH", sh_writer, re.S,
+        )
         ps_writer = engine_ps.split("function Write-SimpleBinstub {", 1)[1]
         cold_ps = re.findall(r"\$coldDispatcher = @'\n(.*?)\n'@", ps_writer, re.S)[branch]
+        early_ps = re.findall(r"\$earlyDispatcher = @'\n(.*?)\n'@", ps_writer, re.S)
         values_sh = {
             "command_name": product, "module_name": module, "runtime_root_literal": quote(root_sh),
             "snapshot_installer_literal": "scripts/install.sh",
             "no_self_provision_env": product.replace("-", "_").upper() + "_NO_SELFPROVISION",
             "cold_dispatch": cold_sh,
         }
+        if early_sh:
+            values_sh["early_dispatch"] = early_sh[0] if product == "agent-vault" else ""
         result.append((product, interpolate(
             heredoc(engine_sh, "EOF", "write_simple_binstub"), values_sh,
         )))
@@ -137,6 +145,8 @@ def fixtures(product, root=None, root_text=None, payload_text=None, publisher=No
             "moduleLiteral": module, "commandLiteral": product, "CommandName": product,
             "NoSelfProvisionEnv": values_sh["no_self_provision_env"], "coldDispatcher": cold_ps,
         }
+        if early_ps:
+            values_ps["earlyDispatcher"] = early_ps[0] if product == "agent-vault" else ""
         result += [
             (product + ".ps1", ps_template(engine_ps, "ps1Content", "Write-SimpleBinstub", values_ps)),
             (product + ".cmd", ps_template(engine_ps, "cmdContent", "Write-SimpleBinstub", values_ps)),
@@ -284,6 +294,15 @@ def test_comments_and_marker_substrings_are_not_ownership(product):
 @pytest.mark.parametrize("product", PRODUCTS)
 def test_wrong_root_is_retained(product):
     assert owned(product, dict(fixtures(product)), root=Path.home() / "another-installation") == ()
+
+
+@pytest.mark.parametrize("name", ("agent-vault", "agent-vault.ps1"))
+def test_vault_early_dispatch_is_required_for_exact_command_ownership(name):
+    contents = dict(fixtures("agent-vault"))
+    assert name in owned("agent-vault", contents)
+    assert "invocation-contract" in contents[name]
+    contents[name] = contents[name].replace("invocation-contract", "unknown-command", 1)
+    assert name not in owned("agent-vault", contents)
 
 
 @pytest.mark.parametrize("product", ("agent-bridge", "agent-dispatch", "agent-worktrees"))
@@ -492,6 +511,79 @@ def test_changed_simple_writer_declaration_is_explicit(monkeypatch, product, ext
     monkeypatch.setattr(MODULE, "_native", changed)
     with pytest.raises(RuntimeError, match="arguments|parameter"):
         owned(product, {product: "candidate"})
+
+
+@pytest.mark.parametrize("product", ("agent-vault", "agent-ssh", "agent-pull-requests"))
+def test_canonical_simple_dispatchers_render_and_preserve_foreign_commands(monkeypatch, product):
+    monkeypatch.setattr(MODULE, "_engine", lambda payload, ext: (
+        REPO / "libs" / "installer-engine" / ("installer-engine." + ext)
+    ).read_text(encoding="utf-8"))
+    text = next(text for name, text in fixtures(product) if name == product)
+    assert owned(product, {product: text}) == (product,)
+    assert owned(product, {product: text + "\nexec foreign-command\n"}) == ()
+    assert owned(product, {product: text}, root=Path.home() / "foreign-root") == ()
+    assert ("_scope_requested=0" in text) == (product == "agent-vault")
+    assert "$early_dispatch" not in text and "$cold_dispatch" not in text
+    ps_text = next(text for name, text in fixtures(product) if name == product + ".ps1")
+    assert owned(product, {product + ".ps1": ps_text}) == (product + ".ps1",)
+    assert ("$_scopeRequested = $false" in ps_text) == (product == "agent-vault")
+    assert "$earlyDispatcher" not in ps_text and "$coldDispatcher" not in ps_text
+
+
+@pytest.mark.parametrize("ext", ("sh", "ps1"))
+@pytest.mark.parametrize("mutation", ("missing-cold", "retargeted-early", "missing-use", "retargeted-product"))
+def test_changed_dispatcher_assignments_refuse(monkeypatch, mutation, ext):
+    original = MODULE._engine
+
+    def changed(payload, selected_ext):
+        source_text = original(payload, selected_ext)
+        if selected_ext == ext:
+            mutations = {
+                "missing-cold": ('cold_dispatch="$(cat', 'foreign_dispatch="$(cat'),
+                "retargeted-early": ('early_dispatch="$(cat', 'cold_dispatch="$(cat'),
+                "missing-use": ("\n$early_dispatch\n", "\n"),
+                "retargeted-product": ('elif [[ "$command_name" == agent-ssh ]]',
+                                       'elif [[ "$command_name" == foreign-command ]]'),
+            } if ext == "sh" else {
+                "missing-cold": ("$coldDispatcher = @'", "$foreignDispatcher = @'"),
+                "retargeted-early": ("$earlyDispatcher = @'", "$coldDispatcher = @'"),
+                "missing-use": ("\n$earlyDispatcher\n", "\n"),
+                "retargeted-product": ("elseif ($CommandName -ceq 'agent-ssh')",
+                                       "elseif ($CommandName -ceq 'foreign-command')"),
+            }
+            before, after = mutations[mutation]
+            assert before in source_text
+            source_text = source_text.replace(before, after, 1)
+        return source_text
+
+    monkeypatch.setattr(MODULE, "_engine", changed)
+    with pytest.raises(RuntimeError, match="dispatch"):
+        owned("agent-vault", {"agent-vault": "candidate"})
+
+
+@pytest.mark.parametrize("ext", ("sh", "ps1"))
+def test_simple_dispatcher_writer_without_early_routing(monkeypatch, ext):
+    original = MODULE._engine
+    source_text = original(REPO / "plugins" / "agent-vault", ext)
+    pattern = (r"""(?ms)^        early_dispatch="\$\(cat <<'DISPATCH'\n.*?^DISPATCH\n\)" \|\| return 1\n"""
+               if ext == "sh" else r"(?ms)^        \$earlyDispatcher = @'\n.*?^'@\n")
+    early = re.search(pattern, source_text)
+    assert early is not None
+    legacy = source_text[:early.start()] + source_text[early.end():]
+    declaration, substitution, delimiter = (
+        ('    local early_dispatch=""\n', "\n$early_dispatch\n", "\nDISPATCH\n")
+        if ext == "sh" else ("    $earlyDispatcher = ''\n", "\n$earlyDispatcher\n", "\n'@\n")
+    )
+    legacy = legacy.replace(declaration, "").replace(substitution, "\n")
+    monkeypatch.setattr(MODULE, "_engine", lambda payload, selected_ext: (
+        legacy if selected_ext == ext else original(payload, selected_ext)
+    ))
+    command = "agent-vault" if ext == "sh" else "agent-vault.ps1"
+    current = next(text for name, text in fixtures("agent-vault") if name == command)
+    early_body = early[0].split("\n", 1)[1].rsplit(delimiter, 1)[0]
+    expected = current.replace(early_body + "\n", "", 1)
+    assert owned("agent-vault", {command: expected}) == (command,)
+    assert owned("agent-vault", {command: current}) == ()
 
 
 @pytest.mark.parametrize("product", (

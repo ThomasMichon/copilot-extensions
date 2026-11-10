@@ -400,7 +400,10 @@ def test_runtime_gates_scope_namespaced_service_environment() -> None:
 
 
 @pytest.mark.parametrize("namespaced", [False, True])
-def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, namespaced) -> None:
+@pytest.mark.parametrize("root_name", ["runtime", "runtime-\u0130\u03a3"])
+def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, namespaced, root_name) -> None:
+    from agent_vault import _peer_launch
+
     keys = (
         "AGENT_VAULT_HOME", "AGENT_VAULT_VALIDATED_CONTEXT", "COPILOT_EXTENSIONS_CONTEXT",
         "AGENT_VAULT_INSTALLATION_ID", "AGENT_VAULT_RUN_DIR", "AGENT_VAULT_CORE_RUN_DIR",
@@ -408,10 +411,9 @@ def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, names
         "AGENT_VAULT_PID", "AGENT_VAULT_LOG", "AGENT_VAULT_PORT",
         "AGENT_VAULT_SYSTEMD_UNIT", "AGENT_VAULT_TASK_NAME",
     )
-    root = tmp_path / "runtime"
+    root = tmp_path / root_name
     context = str(tmp_path / "context.json") if namespaced else ""
     identity = "fixture-market/agent-vault" if namespaced else ""
-    suffix = "fixture-suffix" if namespaced else ""
     env = {**os.environ, **dict.fromkeys(keys, "foreign")}
     if os.name == "nt":
         shell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
@@ -419,8 +421,11 @@ def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, names
         quote = lambda value: "'" + str(value).replace("'", "''") + "'"
         listed = ",".join(quote(key) for key in keys)
         code = (
-            f". {quote(helper)}; Set-RuntimeEnvironment -RuntimeRoot {quote(root)} "
-            f"-Context {quote(context)} -InstallationId {quote(identity)} -ServiceSuffix {quote(suffix)}; "
+            "[Console]::OutputEncoding=New-Object Text.UTF8Encoding($false); "
+            f". {quote(helper)}; $suffix=''; "
+            + (f"$suffix=Get-RuntimeServiceSuffix -RuntimeRoot {quote(root)}; " if namespaced else "")
+            + f"Set-RuntimeEnvironment -RuntimeRoot {quote(root)} "
+            f"-Context {quote(context)} -InstallationId {quote(identity)} -ServiceSuffix $suffix; "
             f"$result=@{{}}; foreach ($key in @({listed})) {{ "
             "$result[$key]=[Environment]::GetEnvironmentVariable($key, 'Process') }; "
             "[Console]::Out.WriteLine(($result | ConvertTo-Json -Compress))"
@@ -433,8 +438,9 @@ def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, names
         helper = PLUGIN / "scripts" / "runtime-environment.sh"
         code = "import os,json;print(json.dumps({key:os.environ.get(key) for key in " + repr(keys) + "}))"
         command = [
-            shell, "-c", '. "$1"; apply_runtime_env "$2" "$3" "$4" "$5"; exec "$6" -I -c "$7"',
-            "runtime-environment", str(helper), str(root), context, identity, suffix, sys.executable, code,
+            shell, "-c", '. "$1"; suffix=""; if [ -n "$4" ]; then suffix="$(scoped_identity_suffix "$2")"; fi; '
+            'apply_runtime_env "$2" "$3" "$4" "$suffix"; exec "$5" -I -c "$6"',
+            "runtime-environment", str(helper), str(root), context, identity, sys.executable, code,
         ]
     result = subprocess.run(
         command, env=env, capture_output=True, text=True, encoding="utf-8",
@@ -444,18 +450,26 @@ def test_shared_runtime_environment_replaces_every_foreign_route(tmp_path, names
     actual = json.loads(result.stdout)
     assert actual["AGENT_VAULT_HOME"] == str(root)
     if namespaced:
+        suffix = actual["AGENT_VAULT_PIPE"].removeprefix(r"\\.\pipe\agent-vault-")
         expected = {
             "AGENT_VAULT_VALIDATED_CONTEXT": context, "COPILOT_EXTENSIONS_CONTEXT": context,
             "AGENT_VAULT_INSTALLATION_ID": identity, "AGENT_VAULT_RUN_DIR": str(root / "run"),
             "AGENT_VAULT_CORE_RUN_DIR": str(root / "core"), "AGENT_VAULT_CACHE_DIR": str(root / "cache"),
             "AGENT_VAULT_SOCKET": str(root / "run" / "agent-vault.sock"),
-            "AGENT_VAULT_PIPE": r"\\.\pipe\agent-vault-fixture-suffix",
+            "AGENT_VAULT_PIPE": rf"\\.\pipe\agent-vault-{suffix}",
             "AGENT_VAULT_PID": str(root / "run" / "agent-vault-service.pid"),
             "AGENT_VAULT_LOG": str(root / "logs" / "agent-vault-service.log"),
-            "AGENT_VAULT_PORT": "0", "AGENT_VAULT_SYSTEMD_UNIT": "agent-vault-fixture-suffix.service",
-            "AGENT_VAULT_TASK_NAME": "AgentVault-fixture-suffix",
+            "AGENT_VAULT_PORT": "0", "AGENT_VAULT_SYSTEMD_UNIT": f"agent-vault-{suffix}.service",
+            "AGENT_VAULT_TASK_NAME": f"AgentVault-{suffix}",
         }
         assert {key: actual[key] for key in expected} == expected
+        if os.name == "nt" or sys.platform.startswith("linux"):
+            rebound = _peer_launch.peer_environment({
+                "pluginId": "agent-vault", "pluginRoot": str(root),
+                "marketplaceId": "fixture-market", "installReceipt": context,
+                "payloadRoot": str(PLUGIN),
+            }, env)
+            assert {key: rebound[key] for key in keys} == actual
     else:
         assert not actual["AGENT_VAULT_VALIDATED_CONTEXT"]
         assert all(actual[key] is None for key in keys[2:])

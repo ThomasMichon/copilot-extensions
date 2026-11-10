@@ -2919,7 +2919,7 @@ _initialize_source_runtime || exit 1
 case "$ACTION" in
     install|update|provision)
         . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"
         ;;
 esac
 case "$ACTION" in

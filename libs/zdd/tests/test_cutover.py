@@ -101,6 +101,45 @@ def _fake_clock():
 # -- happy path: old daemon present, clean drain -----------------------------
 
 
+@pytest.mark.parametrize("preserve", [False, True])
+def test_raw_active_preservation_is_opt_in_and_keeps_legacy_healing(
+    tmp_path, monkeypatch, native_birth, preserve,
+):
+    import json
+
+    previous = routing.Endpoint("127.0.0.1", 9281, 111, "old", 1, "1110")
+    routing.routing_table_path(tmp_path).write_text(json.dumps({
+        "version": 1, "active": None, "previous": previous.to_dict(),
+    }))
+    monkeypatch.setattr(routing, "_listening", lambda *a, **k: True)
+    monkeypatch.setattr(routing, "_pid_alive", lambda pid: True)
+    selected = []
+    def spawn(port):
+        selected.append(routing.read_table(tmp_path)["active"])
+        return FakeHandle()
+    options = {
+        "preserve_raw_active": preserve,
+        "self_retirement": True, "activate_successor": lambda endpoint: None,
+    }
+    if preserve:
+        options["refuse_old"] = lambda raw: None if raw is None else "raw active changed"
+    orch, _handle = _make(tmp_path, healthy_ports={9290}, registry={}, **options)
+    orch.spawn_passive = spawn
+    result = orch.run(health_timeout=1, drain_timeout=1)
+    assert result.ok and result.committed
+    if preserve:
+        assert selected == [None]
+    else:
+        assert len(selected) == 1
+        assert selected[0]["pid"] == previous.pid and selected[0]["port"] == previous.port
+        assert selected[0]["process_start_time"] == previous.process_start_time
+
+
+def test_raw_active_preservation_requires_cas_guard(tmp_path):
+    with pytest.raises(ValueError, match="publication refusal guard"):
+        _make(tmp_path, healthy_ports={9290}, registry={}, preserve_raw_active=True)
+
+
 @pytest.mark.parametrize("self_retirement", [False, True])
 def test_committed_cleanup_failure_retains_witness_and_requires_retry(
     tmp_path, monkeypatch, native_birth, self_retirement,

@@ -14,7 +14,7 @@ from .owner_membership_signal import MembershipSignal, commit as commit_membersh
 
 log = logging.getLogger("agent-bridge")
 
-SCHEMA_VERSION = 43
+SCHEMA_VERSION = 44
 
 # Post-base ``sessions`` columns ensured idempotently on every init, independent
 # of ``schema_version``. Version-gated ``ALTER TABLE ... ADD COLUMN`` migrations
@@ -370,6 +370,7 @@ class _CoreMixin:
                 from .provider_creation_launch_schema import validate_schema as validate_provider_launch_schema
                 from .creation_writer_schema import validate_schema as validate_creation_writer_schema
                 from .mux_question_schema import validate_schema as validate_mux_question_schema
+                from .status_schema import validate_schema as validate_status_schema
 
                 validate_schema(self._get_conn())
                 validate_cold_recovery_schema(self._get_conn())
@@ -382,6 +383,7 @@ class _CoreMixin:
                 validate_provider_launch_schema(self._get_conn())
                 validate_creation_writer_schema(self._get_conn())
                 validate_mux_question_schema(self._get_conn())
+                validate_status_schema(self._get_conn())
                 validate_exact_live_schema(self._get_conn())
                 after = self._db_path.stat()
                 if (before.st_dev, before.st_ino) != (after.st_dev, after.st_ino):

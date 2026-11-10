@@ -15,7 +15,7 @@ requires-python = ">=3.10"
 dependencies = ["agent-pull-requests[fleet]>=0.1.0.dev5"]
 
 [project.optional-dependencies]
-dev = ["pytest>=9.1.1", "setuptools>=83.0.0", "wheel"]
+dev = ["pytest>=9.1.1", "setuptools>=83.0.0", "wheel", "pyyaml>=6.0.3"]
 
 [project.scripts]
 agent-pull-requests-service = "agent_pull_requests_service.__main__:main"

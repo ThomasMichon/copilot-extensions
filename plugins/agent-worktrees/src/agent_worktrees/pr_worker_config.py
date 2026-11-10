@@ -138,7 +138,7 @@ def export_config(
         pr.update({
             key: getattr(repo.pr, key) for key in (
                 "enabled", "required", "automerge_label", "approval_required",
-                "allow_stale_approval", "squash", "delete_source_branch", "push_timeout_seconds",
+                "allow_stale_approval", "squash", "delete_source_branch", "push_timeout_seconds", "reviewer",
             )
         })
         pr.update(bypass_policy=False, self_approve=False, merge_actor="", roles=None)

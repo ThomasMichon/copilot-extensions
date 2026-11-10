@@ -156,6 +156,7 @@ def test_powershell_adapter_records_failures_and_preserves_native_disable(tmp_pa
     env_file = tmp_path / "supervisor.env"
     env_file.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\n")
     helper = PLUGIN / "scripts/supervisor-lifecycle.ps1"
+    scheduling = PLUGIN / "src/agent_dispatch/windows-scheduling.ps1"
     script = "\n".join([
         "$ErrorActionPreference = 'Stop'",
         f"$PluginDir='{PLUGIN}'; $InstallDir='{tmp_path}'; $VenvPython='{sys.executable}'; $LinkPython=$VenvPython",
@@ -164,10 +165,10 @@ def test_powershell_adapter_records_failures_and_preserves_native_disable(tmp_pa
         'function Write-Warn { param($msg) [Console]::Error.WriteLine($msg) }',
         'function Write-Skip { param($msg) }',
         'function Get-CimInstance { param($ClassName,$Filter) [pscustomobject]@{ParentProcessId=100} }',
-        "function Get-ScheduledTask { param($TaskName) [pscustomobject]@{State='Disabled'} }",
+        "function Get-ScheduledTask { param($TaskName) [pscustomobject]@{TaskName=$TaskName;State='Disabled'} }",
         "function Get-SupervisorMode { param($EnvFile) 'serve' }",
         "function Stop-ScheduledTask { param($TaskName) throw 'fixture stop refused' }",
-        f". '{helper}'", function,
+        f". '{helper}'", f". '{scheduling}'", function,
         "$script:SupervisorAuditCorrelation='123-456'",
         "function Invoke-ShadowedAudit { $action=[pscustomobject]@{Execute='fixture'}; Invoke-SupervisorAudit -Event selection -Reason shadow-probe -Name $SupervisorTaskName -Outcome skipped }",
         "Invoke-ShadowedAudit",
@@ -207,6 +208,9 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master
         "if($script:MasterState -eq 'OptOut'){$NoSupervisor=$true}",
         "$script:AuditReasons=@(); function Invoke-SupervisorAudit { param($Event,$Reason,$Name,$EnvFile,$Outcome) $script:AuditReasons+=$Reason }",
         "function Remove-AllSupervisorTasks { }",
+        "function Get-DispatchSchedulingPolicy { @{windows_scheduled_task='preserve';start_coordinator=$true;start_supervisor=$true} }",
+        "function Test-DispatchStartIntent {param($Kind,$Name) return ($script:MasterState -ne 'Disabled')}",
+        "function Invoke-DispatchSupervisorEnsure {param($Name,$EnvFile,$Launcher) if($Name -eq $SupervisorTaskName){if($script:MasterState -ne 'Disabled'){$script:Started+=$Name}}elseif($Name -like '*-enabled'){$script:Started+=$Name} }",
         "function Write-Skip { param($message) }",
         "function Write-Warn { param($message) }; function Write-Step { param($message) }; function Write-Ok { param($message) }",
         "function Retire-SupervisorProcesses { $script:Retired++; return 0 }",
@@ -232,14 +236,15 @@ def test_disabled_windows_master_restores_only_enabled_profiles(tmp_path, master
     result = subprocess.run(["pwsh", "-NoProfile", "-File", str(fixture)], capture_output=True, text=True, timeout=20)
     assert result.returncode == 0, result.stderr
     data = json.loads(result.stdout)
-    assert data["retired"] == 1
-    assert data["reasons"][-1] == "sequence-complete"
+    assert data["retired"] == 0
+    assert data["stopped"] == []
     if master_state == "OptOut":
         assert data["started"] == []
         return
-    assert data["started"] == ["agent-dispatch-supervisor-enabled"]
-    assert "agent-dispatch-supervisor-enabled" in data["stopped"]
-    assert "agent-dispatch-supervisor-disabled" in data["stopped"]
+    assert data["started"] == (
+        ["agent-dispatch-supervisor-enabled"] if master_state == "Disabled"
+        else ["agent-dispatch-supervisor"]
+    )
 
 
 @pytest.mark.skipif(shutil.which("pwsh") is None, reason="PowerShell is unavailable")

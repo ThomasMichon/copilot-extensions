@@ -37,6 +37,7 @@ from .lease_store import (
     GitLeaseStore,
     LeaseConflict,
     LeaseLost,
+    ProviderEffectConflict,
     ResourceSnapshot,
     ServiceCustodyConflict,
 )
@@ -212,6 +213,16 @@ def run_lease(argv: list[str]) -> int:
         print(
             json.dumps({
                 "code": "service_custody_conflict",
+                "error": str(exc),
+                "resource": exc.snapshot.to_dict(),
+            }, sort_keys=True),
+            file=sys.stderr,
+        )
+        return 3
+    except ProviderEffectConflict as exc:
+        print(
+            json.dumps({
+                "code": "provider_effect_conflict",
                 "error": str(exc),
                 "resource": exc.snapshot.to_dict(),
             }, sort_keys=True),

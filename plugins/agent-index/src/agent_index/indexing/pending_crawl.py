@@ -327,9 +327,13 @@ def recover_source(
         previous = replace(previous) if previous is not None else None
         previous_family = state.stored_families.get(source)
         previous_total = state.total_chunks
+        completed_family = manifest.accounting_family or manifest.stored_family or family or source
+        had_completed = completed_family in state.completed_family_cursors
+        previous_completed = state.completed_family_cursors.get(completed_family)
         try:
             result = application(manifest=manifest, full=full)
             state.sources.setdefault(source, SourceState()).acquisition_scope = scope
+            state.completed_family_cursors[completed_family] = manifest.commit
             state.save(state_file)
         except BaseException:
             if previous is None:
@@ -341,6 +345,10 @@ def recover_source(
             else:
                 state.stored_families[source] = previous_family
             state.total_chunks = previous_total
+            if had_completed:
+                state.completed_family_cursors[completed_family] = previous_completed
+            else:
+                state.completed_family_cursors.pop(completed_family, None)
             raise
         return result
 
@@ -358,6 +366,7 @@ def recover_source(
         totals = publish(manifest, full=pending_full, clear=True)
 
     state.require_acquisition_scope(source, scope, full=full)
+    state.require_family_cursor(source, family or source, full=full)
     manifest = acquire()
     acquired = journal.load(source, scope)
     if acquired is not None and acquired != (manifest, full):

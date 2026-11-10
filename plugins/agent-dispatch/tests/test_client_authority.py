@@ -615,7 +615,7 @@ def test_local_installer_start_and_stop_never_target_central(monkeypatch):
     monkeypatch.setattr(config, "has_live_local_coordinator", lambda: True)
     started = []
     stopped = []
-    monkeypatch.setattr(core, "_lazy_start_coordinator", lambda: started.append(True))
+    monkeypatch.setattr(core, "_lazy_start_coordinator", lambda **options: started.append(options["automatic"]))
 
     class Client:
         def __init__(self, url, **kwargs):
@@ -632,7 +632,7 @@ def test_local_installer_start_and_stop_never_target_central(monkeypatch):
 
     monkeypatch.setattr(core, "DispatchClient", Client)
     assert core._cmd_ensure_coordinator(args()) == 0
-    assert started == [True]
+    assert started == [False]
     assert core._cmd_stop_coordinator(args()) == 0
     assert stopped == [
         ("http://127.0.0.1:19847", {"token": "local-reader", "control_token": "local-control"}),

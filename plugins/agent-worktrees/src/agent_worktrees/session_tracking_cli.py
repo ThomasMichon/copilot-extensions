@@ -181,10 +181,7 @@ def add_parsers(sub) -> None:
     )
     sp.add_argument(
         "--policy",
-        choices=[
-            terminal_conclusion.DISPOSABLE_CLI_POLICY,
-            terminal_conclusion.DISPATCH_ATTEMPT_POLICY,
-        ],
+        choices=terminal_conclusion.CONCLUSION_POLICIES,
         required=True,
         help="Explicit discard policy authorizing generated checkout reconciliation",
     )
@@ -194,6 +191,7 @@ def add_parsers(sub) -> None:
         default=None,
         help="Exact dispatch reservation required by dispatch-attempt policy",
     )
+    sp.add_argument("--creation-nonce", help="Exact creation nonce for bridge-creation policy")
     sp.add_argument(
         "--owner",
         required=True,
@@ -848,6 +846,7 @@ def cmd_conclude_disposable(args: argparse.Namespace) -> int:
                 owner=args.owner,
                 policy=args.policy,
                 reservation_key=getattr(args, "reservation_key", None),
+                creation_nonce=getattr(args, "creation_nonce", None),
             )
         except FileNotFoundError:
             if getattr(args, "remove", False) and not yaml_path.exists():

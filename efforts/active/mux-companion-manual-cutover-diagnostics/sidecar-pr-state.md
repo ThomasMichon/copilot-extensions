@@ -133,26 +133,27 @@ performance, installed and archival gates remain unchanged.
 
 ## Validation Plan
 
-- [ ] Actual private tracking records and binding resolution distinguish empty,
+- [x] Actual private tracking records and binding resolution distinguish empty,
       bounded/omitted, duplicate, incomplete, wrong-owner/incarnation, reassigned,
       creating and terminal associations. Claim state and recorded lifecycle
       cannot qualify provider openness.
-- [ ] Current/prior real parser and process controls prove old caller/new owner,
+- [x] Current/prior real parser and process controls prove old caller/new owner,
       new caller/old owner, declared new/new and supported rollback behavior.
       Association discovery and optional reads perform no canonical writes,
       provider mutations, service startup or credential acquisition at discovery.
-- [ ] Exercise the actual existing snapshot construction and consumer codec for
+- [x] Exercise the actual existing snapshot construction and consumer codec for
       provider-open versus locally landed, closed-unmerged, merged, pending
       mergeability, foreign identity, malformed enums/booleans/object IDs,
       provider errors and bounded output failure. Do not mock beyond construction.
-- [ ] Real Textual controls cover explicit one-association selection, literal/
+- [x] Real Textual controls cover explicit one-association selection, literal/
       narrow rendering, Refresh, reassignment/head changes, old/unsupported
       providers, late replies and blocked-read dismissal with exact cleanup.
       All independent views remain usable; no action is performed on a PR.
       Covered by #11194: wide-viewport selection, Refresh, reassignment/head
       changes, old/unsupported providers and late replies with fixture point
-      reads. Still open: narrow PR rendering and blocked real-subprocess
-      dismissal with exact cleanup.
+      reads. The 2026-11-08 controls add 40-column rendering and Escape,
+      Refresh and deselection of a blocked real point-read subprocess (POSIX
+      source tier; see the journal).
 - [x] Record source/private-process/Textual evidence separately from installed,
       native input-ready performance and any future admitted push coverage.
       Required review, green CI, actual merge and immediate whole-parent
@@ -333,3 +334,51 @@ replies, narrow PR rendering and blocked real-subprocess dismissal with exact
 cleanup. Full live topology and every original parent gate remain
 open. No rollout, real daemon wake, live Mux binding, model/data or head/baton
 operation was performed.
+
+### 2026-11-08 - Narrow rendering and blocked-read dismissal controls
+
+`tests/test_companion_pr_panel_ui.py` closes Validation row 4's remainder
+without source changes. At a 40-column viewport the association selector and
+Re-read button stay fully on screen and side by side, and the wrapped graph
+keeps provider markup literal, the point-read state and the record-not-openness
+caveat. A selected association's point read runs the real owned read runner
+against a child process that blocks; Escape, Refresh and deselection each
+retire that child (signal-0 exit witness), leave no engine cleanup failure and,
+for the in-app paths, settle the read thread with no displayed state.
+
+The existing expected-head Escape control used `os.pidfd_open`, which the
+managed test interpreter lacks, so it always skipped; it now uses the same
+portable witness and runs. This is POSIX source/private-process evidence only:
+the Windows job-object path, installed behavior and native performance are not
+exercised. Rows 1-3, full live topology and every original parent gate remain
+open. No rollout, real daemon wake, live Mux binding or head/baton operation
+was performed.
+
+### 2026-11-08 - Actual record, cross-version process and snapshot codec controls
+
+Validation rows 1-3 close with tests only; no source changes were needed.
+`test_companion_pr_associations.py` adds actual private-record controls that
+every recorded lifecycle (creating, open, active, merged, closed, abandoned),
+with or without a matching PR claim, yields a bound association carrying only
+`recorded_state` and no provider-openness field; a claim without a ledger entry
+is no association; and an unrecognized recorded lifecycle is an incomplete
+binding rather than a guessed state.
+
+The new Manager `test_companion_pr_compat_process.py` drives the real Companion
+caller through the real engine-client subprocess path against the real
+Worktrees entry point (only its tracking-file location, status daemon,
+configuration source and provider fetch are replaced) and a frozen prior owner.
+It proves old caller/new owner keeps the prior form, new caller/old owner is
+unsupported with no association read admitted, declared new/new reads, and a
+rollback fails revalidation before any snapshot starts, then recovers on
+roll-forward. The actual snapshot payload construction feeds the real codec for
+provider-open versus recorded-landed, closed-unmerged, merged, pending
+mergeability, foreign/unknown endpoint, malformed enums/booleans/object IDs,
+contradictory merged state, provider errors and the reply byte bound. The child
+forbids canonical writes, Git observation and credential acquisition, and the
+private record bytes stay unchanged. A deliberate assertion mutation was
+detected.
+
+This is POSIX source/private-process evidence only, not installed, native or
+live topology acceptance. No rollout, real daemon wake, live Mux binding or
+head/baton operation was performed.

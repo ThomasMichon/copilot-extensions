@@ -294,6 +294,9 @@ def _background_environment() -> dict[str, str]:
 def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
     """Detached-spawn the status-bar updater for ``wt-<worktree_id>``.
 
+    PSMux registers directly with the native-observing resident monitor;
+    it never probes the CLI or starts a legacy per-session updater.
+
     The updater is the background loop that keeps a muxed session's status bar
     fresh (identity in ``@aw_ctx`` once, git disposition in ``@aw_seg`` each
     tick).  Historically it was spawned *only* by the launcher at psmux
@@ -324,6 +327,12 @@ def _spawn_status_updater(worktree_id: str, path: str | None) -> bool:
         if not mux:
             return False
         mux_bin = shutil.which(mux) or mux
+        if sessions._is_psmux(mux_bin):
+            return bool(
+                _status_monitor_enabled()
+                and _register_session_for_monitor(sess, path or os.path.expanduser("~"))
+                and _ensure_status_monitor()
+            )
         # Only seed when this session is actually under mux -- a bare/non-mux
         # Copilot has no status bar to feed, and spawning a loop that would
         # immediately see "gone" is wasteful.
@@ -510,6 +519,8 @@ def cmd_status_updater(args: argparse.Namespace) -> int:
     if _status_monitor_enabled() and _register_session_for_monitor(sess, path):
         if _ensure_status_monitor():
             return 0
+    if sessions._is_psmux(mux_bin):
+        return 0
 
     # status-updater is a no-project command, so main() never resolved a
     # project for us -- but the status renderers need one to find the

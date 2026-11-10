@@ -13,6 +13,50 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import uv_editable_ref as uer
 
 
+@pytest.mark.parametrize("skip_test_runs", [True, False])
+def test_symlink_scan_preserves_first_path_and_filter(
+    tmp_path: Path, native_file_symlink, skip_test_runs: bool,
+):
+    root = tmp_path / "source"
+    root.mkdir()
+    target = tmp_path / "target"
+    target.write_text("outside\n", encoding="utf-8")
+    for relative in ("z/link", "a/nested/link", "a-link", ".test-runs/link"):
+        link = root / relative
+        link.parent.mkdir(parents=True, exist_ok=True)
+        native_file_symlink(link, target)
+    expected = [
+        path for path in sorted(root.rglob("*"))
+        if not (skip_test_runs and ".test-runs" in path.relative_to(root).parts)
+        and path.is_symlink()
+    ]
+    assert uer._find_symlink(root, skip_test_runs=skip_test_runs) == str(
+        expected[0].relative_to(root),
+    )
+
+
+def test_symlink_scan_falls_back_after_native_scan_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "source"
+    root.mkdir()
+    link = root / "link"
+    link.write_text("link fixture\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "is_symlink", lambda path: path == link)
+    scandir = uer.os.scandir
+    calls = []
+
+    def scan(path):
+        calls.append(path)
+        if len(calls) == 1:
+            raise PermissionError("native scan unavailable")
+        return scandir(path)
+
+    monkeypatch.setattr(uer.os, "scandir", scan)
+    assert uer._find_symlink(root) == "link"
+    assert calls and calls[0] == root
+
+
 def test_uv_editable_relpath_is_always_forward_slashed(tmp_path: Path, monkeypatch):
     # os.path.relpath() returns native (backslash) separators on Windows,
     # which would embed invalid escapes into the TOML basic string this

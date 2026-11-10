@@ -12,6 +12,7 @@ The only sanctioned full walk of the state root is the explicit
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 from collections.abc import Callable, Iterable
@@ -1242,14 +1243,9 @@ class LiveVerdict:
     check this rather than assume every returned verdict is fully probed."""
 
     mux_probe_ok: bool = True
-    """False only when the MUX probe itself (``mux_status_many``) raised --
-    narrower than the aggregate ``probes_ok`` above, which also goes False on
-    an unrelated reclaim/lock-probe failure. A caller deciding whether `a live
-    mux might exist and would reattach instead of exec'ing a fresh command`
-    (e.g. seed-delivery gating) should check THIS, not the aggregate: a
-    reclaim failure with a conclusive "no mux" from the mux probe itself is
-    not mux uncertainty. Cold-start Resume prompts require the aggregate
-    ``probes_ok`` as well, because a live un-muxed Copilot also forbids them."""
+    """False when ``mux_status_many`` failed, independently of lock probes.
+    Cold-start prompts also require aggregate ``probes_ok``: an un-muxed
+    Copilot forbids them even when mux absence is confirmed."""
 
 
 def verify_worktree_active(record) -> LiveVerdict:
@@ -1274,7 +1270,8 @@ def verify_worktree_active(record) -> LiveVerdict:
     mux_probe_ok = True
     try:
         info = mux_status_many([wt_id], strict=True).get(wt_id) or MuxInfo()
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not verify worktree mux presence: %s", exc)
         info = MuxInfo()
         probes_ok = False
         mux_probe_ok = False
@@ -1291,7 +1288,8 @@ def verify_worktree_active(record) -> LiveVerdict:
         )
         live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
         bare = any(b.get("homing") == "bare" for b in bound)
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not verify registered Copilot bindings: %s", exc)
         probes_ok = False
     lock_live = bool(live_ids)
 
@@ -1376,13 +1374,21 @@ def worktree_id_from_mux_session(
 def has_mux_session(
     worktree_id: str, *, strict: bool = False, timeout: float = 5,
 ) -> bool:
-    """Probe mux presence; strict callers retain unavailable evidence."""
+    """Probe mux presence; strict callers retain unavailable evidence.
+
+    Windows strict checks cap the caller's timeout at five seconds in total.
+    """
     import subprocess
     from agent_procutil import no_window_kwargs
 
+    if strict and platform.system() == "Windows":
+        from .psmux_observation import observe
+        return mux_session_name(worktree_id) in observe(timeout=timeout)
     sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
-        cmd = ["psmux", "has-session", "-t", sess_name]
+        from agent_remote_driver.mux_observation import observe_psmux
+
+        return observe_psmux(sess_name, timeout=min(timeout, 5)).presence()
     else:
         cmd = ["tmux", "has-session", "-t", f"={sess_name}"]
     try:
@@ -1398,17 +1404,15 @@ def has_mux_session(
 
 
 def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
-    """Query all mux sessions with their attached client counts.
-
-    Returns a dict of session_name -> attached_client_count, or None if
-    the list-sessions command is unavailable or fails.
-    """
+    """Return client counts, or None when passive listing is unavailable."""
     import subprocess
     from agent_procutil import no_window_kwargs
     from .mux_list_result import is_empty_tmux_listing, parse_session_counts
 
     if platform.system() == "Windows":
-        return None
+        from .psmux_observation import list_session_counts
+
+        return list_session_counts()
     cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
@@ -1471,6 +1475,11 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
     if not worktree_ids:
         return result
 
+    if platform.system() == "Windows":
+        from .psmux_observation import session_status
+
+        return session_status(worktree_ids, strict=strict)
+
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
         for wt_id in worktree_ids:
@@ -1503,6 +1512,10 @@ def mux_status_for_display(worktree_ids: list[str]) -> dict[str, MuxInfo]:
     """Keep independent display facts usable without inventing mux negatives."""
     from .mux_list_result import MuxObservationUnavailable
 
+    if platform.system() == "Windows":
+        from .psmux_observation import display_status
+
+        return display_status(worktree_ids)
     try:
         return mux_status_many(worktree_ids)
     except MuxObservationUnavailable:
@@ -1750,6 +1763,10 @@ def has_mux_session_named(
     import subprocess
 
     mux_bin = _mux_bin(mux)
+    if _is_psmux(mux_bin):
+        from agent_remote_driver.mux_observation import observe_psmux
+
+        return observe_psmux(session_name).presence()
     target = _mux_named_session_target(session_name, mux_bin)
     try:
         result = subprocess.run(
@@ -2142,6 +2159,10 @@ def mux_active_pane_named(
     import subprocess
 
     mux_bin = _mux_bin(mux)
+    if _is_psmux(mux_bin):
+        from .psmux_observation import active_pane
+
+        return active_pane(session_name)
     target = _mux_named_session_target(session_name, mux_bin)
     if not _is_psmux(mux_bin):
         # display-message takes a pane target, not a session-only target.

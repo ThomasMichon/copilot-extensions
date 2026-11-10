@@ -18,6 +18,487 @@ def native_original_exit():
     return process_exit.observe_original_exit
 
 
+@pytest.mark.parametrize("recovery", [
+    b'{"state":"publication-uncertain","self_retirement":true}',
+    b'{"state":',
+])
+def test_unobservable_replacement_retains_code_and_exact_recovery_until_native_exit(
+    retained, monkeypatch, recovery,
+):
+    import base64
+    from zdd import breadcrumb, routing
+    from zdd.cutover_lock import CutoverLock
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, identities, alive = retained
+    directory = root / "status-monitor-routing"
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", identities.get)
+    routing.publish_active(directory, bind="127.0.0.1", port=61001, pid=101, process_start_time="1001")
+    path = breadcrumb.breadcrumb_path(directory)
+    path.write_bytes(recovery)
+    with CutoverLock(directory) as guard:
+        assert replacement.retain(root, runtime=runtime, detach_recovery=True, cutover_guard=guard)
+    archives = list((root / "status-monitor-observations").glob("*.json"))
+    assert len(archives) == 1
+    assert base64.b64decode(json.loads(archives[0].read_text())["breadcrumb"]) == recovery
+    assert not path.exists()
+    runtime.gc(root, min_age_days=0)
+    assert (root / "versions" / "legacy").is_dir()
+    identities.clear()
+    owner = retirements.ResidentRetirements(root)
+    owner.refresh()
+    assert owner.pending and owner.error is None
+    assert archives[0].is_file()
+    alive.clear()
+    owner.refresh()
+    if recovery.endswith(b'":'):
+        assert owner.pending and owner.error is None
+        assert archives[0].exists()
+        assert runtime._leases.read_runtime_references(root)
+    else:
+        assert not owner.pending and owner.error is None
+        assert not archives[0].exists()
+        assert not runtime._leases.read_runtime_references(root)
+
+
+@pytest.mark.parametrize("damage", ["{}", "[]", '{"version":2}'])
+def test_malformed_observation_is_pending_instead_of_crashing_the_resident(retained, damage):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    archive = next((root / "status-monitor-observations").glob("*.json"))
+    archive.write_text(damage)
+    owner = retirements.ResidentRetirements(root)
+    owner.refresh()
+    assert owner.pending and "observation" in owner.error.lower()
+    assert runtime._leases.read_runtime_references(root)
+
+
+@pytest.mark.parametrize("missing", ["file", "directory"])
+def test_orphaned_observation_references_never_report_completion(retained, missing):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    directory = root / "status-monitor-observations"
+    if missing == "directory":
+        directory.rename(root / "preserved-observations")
+    else:
+        next(directory.glob("*.json")).rename(root / "preserved-observation.json")
+    owner = retirements.ResidentRetirements(root)
+    owner.refresh()
+    assert owner.pending and "Unidentifiable monitor observation" in owner.error
+    assert runtime._leases.read_runtime_references(root)
+
+
+@pytest.mark.parametrize("qualified", [False, True])
+def test_replacement_refusal_compares_raw_legacy_metadata_without_normalizing(retained, monkeypatch, qualified):
+    from zdd import routing
+    from agent_worktrees import runtime_monitor_identity as identity
+    from agent_worktrees import runtime_monitor_replacement as replacement
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    root, _runtime, _identities, _alive = retained
+    route_root = root / "status-monitor-routing"
+    route_root.mkdir()
+    raw = {"bind": "127.0.0.1", "port": 61001, "pid": 101, "process_start_time": "1001", "version": None}
+    routing.routing_table_path(route_root).write_text(json.dumps({"active": raw, "previous": None}))
+    def observe(*args, **kwargs):
+        if not qualified:
+            raise ValueError("fixture old native observation unavailable")
+        return 101, "1001", "legacy"
+    monkeypatch.setattr(cutover, "routed_monitor_identity", observe)
+    monkeypatch.setattr(identity, "async_predecessor", lambda *a, **k: (None, {}))
+    _predecessor, options, _deferred = replacement.options(root, None, incumbent_expected=True)
+    assert options["refuse_old"](raw) is None
+    assert options["refuse_old"]({**raw, "generation": 0}) is not None
+
+
+def test_replacement_archive_failure_preserves_canonical_custody_and_code(retained, monkeypatch):
+    from zdd import breadcrumb, routing_persistence
+    from zdd.cutover_lock import CutoverLock
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    directory = root / "status-monitor-routing"
+    directory.mkdir()
+    path = breadcrumb.breadcrumb_path(directory)
+    content = b'{"state":"publication-uncertain"}'
+    path.write_bytes(content)
+    write = routing_persistence.write
+
+    def unavailable(target, content):
+        if target.suffix == ".json":
+            raise OSError("archive storage unavailable")
+        return write(target, content)
+
+    monkeypatch.setattr(routing_persistence, "write", unavailable)
+    with CutoverLock(directory) as guard:
+        with pytest.raises(OSError, match="archive storage"):
+            replacement.retain(root, runtime=runtime, detach_recovery=True, cutover_guard=guard)
+    assert path.read_bytes() == content
+    assert runtime._leases.read_runtime_references(root)
+    assert (root / "versions" / "legacy").is_dir()
+    monkeypatch.setattr(routing_persistence, "write", write)
+    with CutoverLock(directory) as guard:
+        assert replacement.retain(root, runtime=runtime, detach_recovery=True, cutover_guard=guard)
+    assert not path.exists()
+    assert len(list((root / "status-monitor-observations").glob("*.json"))) == 1
+
+
+def test_observation_fences_gc_before_inventory_capture(retained, monkeypatch):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    inventory = runtime.list_versions
+    collections = []
+    def collect_after_snapshot(requested):
+        versions = inventory(requested)
+        if collections:
+            return versions
+        collections.append("collecting")
+        try:
+            runtime.gc(root, min_age_days=0)
+        except ValueError as error:
+            assert "transaction is pending" in str(error)
+            collections[0] = "fenced"
+        else:
+            collections[0] = "unfenced"
+        return versions
+    monkeypatch.setattr(runtime, "list_versions", collect_after_snapshot)
+    assert replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    assert collections == ["fenced"]
+    assert (root / "versions" / "legacy").is_dir()
+    assert runtime._leases.read_runtime_references(root)
+
+
+def test_prepared_observation_repairs_failed_reference_commit_before_resident_reconciliation(
+    retained, monkeypatch,
+):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+    commit = runtime._leases.commit_runtime_reference_transaction
+    def interrupted(*args, **kwargs):
+        raise OSError("fixture reference commit interrupted")
+    monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", interrupted)
+    with pytest.raises(OSError, match="commit interrupted"):
+        replacement.retain(
+            root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+        )
+    monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", commit)
+    owner = retirements.ResidentRetirements(root)
+    owner.refresh()
+    assert owner.pending and owner.error is None
+    assert runtime.read_dev_claim(root, strict=True) == claim
+    assert runtime._leases.read_runtime_references(root)
+    runtime.gc(root, min_age_days=0)
+    assert (root / "versions" / "legacy").is_dir()
+
+
+@pytest.mark.parametrize("failure", ["capture", "mapping"])
+def test_observation_inventory_interruption_keeps_fence_and_recovers_write_ahead_mapping(
+    retained, monkeypatch, failure,
+):
+    from zdd import routing_persistence
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    inventory, write = runtime.list_versions, routing_persistence.write
+    def interrupted_inventory(requested):
+        if failure == "capture":
+            raise OSError("fixture inventory interrupted")
+        return inventory(requested)
+    def interrupted_mapping(path, record):
+        if failure == "mapping" and path.suffix == ".pending" and record["slots"]:
+            raise OSError("fixture inventory interrupted")
+        return write(path, record)
+    monkeypatch.setattr(runtime, "list_versions", interrupted_inventory)
+    monkeypatch.setattr(routing_persistence, "write", interrupted_mapping)
+    with pytest.raises(OSError, match="inventory interrupted"):
+        replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    monkeypatch.setattr(runtime, "list_versions", inventory)
+    with pytest.raises(ValueError, match="transaction is pending"):
+        runtime.gc(root, min_age_days=0)
+    directory = root / "status-monitor-observations"
+    assert json.loads(next(directory.glob("*.pending")).read_text())["slots"] == []
+    monkeypatch.setattr(routing_persistence, "write", write)
+    assert replacement.recover(root, runtime=runtime)
+    assert len(list(directory.glob("*.json"))) == 1
+    assert not list(directory.glob("*.pending"))
+    assert set(inventory(root)) <= {
+        slot for slots in runtime._leases.read_runtime_references(root).values() for slot in slots
+    }
+
+
+def test_qualified_predecessor_exit_does_not_veto_unchanged_route_selection(retained, monkeypatch):
+    from zdd import routing
+    from zdd.cutover import CutoverOrchestrator
+    from agent_worktrees import runtime_monitor_identity as identity
+    from agent_worktrees import runtime_monitor_replacement as replacement
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    root, _runtime, identities, alive = retained
+    directory = root / "status-monitor-routing"
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", identities.get)
+    old = routing.publish_active(
+        directory, bind="127.0.0.1", port=61001, pid=101, process_start_time="1001",
+    )
+    monkeypatch.setattr(cutover, "routed_monitor_identity", lambda *a, **k: (101, "1001", "legacy"))
+    monkeypatch.setattr(identity, "async_predecessor", lambda *a, **k: (None, {"expected_old": old}))
+    _predecessor, options, deferred = replacement.options(root, None, incumbent_expected=True)
+    assert not deferred
+    alive.clear()
+    identities.clear()
+    monkeypatch.setattr(routing, "_pid_alive", lambda pid: pid in alive)
+    spawned = []
+    def spawn(port):
+        spawned.append(port)
+        alive.add(202)
+        identities[202] = "2002"
+        return SimpleNamespace(
+            pid=202, process_start_time="2002", poll=lambda: None,
+            terminate=lambda: pytest.fail("qualified replacement terminated a daemon"),
+        )
+    orchestrator = CutoverOrchestrator(
+        directory, bind="127.0.0.1", version="new", spawn_passive=spawn,
+        health_check=lambda *a: True, make_client=lambda *a: SimpleNamespace(),
+        pick_free_port=lambda: 61002, self_retirement=True, activate_successor=lambda endpoint: None,
+        **options,
+    )
+    result = orchestrator.run(health_timeout=1, drain_timeout=1)
+    assert result.ok and result.committed, result.to_dict()
+    assert spawned == [61002]
+    assert routing.read_table(directory)["active"]["pid"] == 202
+
+
+def test_recovery_keeps_one_fence_until_every_pending_archive_has_an_inventory(retained, monkeypatch):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    replacement.retain(root, runtime=runtime, predecessor={"pid": 101, "start": "1001"})
+    directory = root / "status-monitor-observations"
+    completed = next(directory.glob("*.json"))
+    content = json.loads(completed.read_text())
+    later = next(
+        {"pid": 101, "start": str(start)}
+        for start in range(1002, 100000)
+        if replacement._digest({
+            **replacement._content(content),
+            "predecessor": {"pid": 101, "process_start_time": str(start)},
+        }) > completed.stem
+    )
+    (root / "versions" / "newly-retained").mkdir()
+    runtime.mark_complete(root, "newly-retained", payload_hash="new")
+    inventory = runtime.list_versions
+    def interrupted(requested):
+        raise OSError("fixture stopped before inventory")
+    monkeypatch.setattr(runtime, "list_versions", interrupted)
+    with pytest.raises(OSError, match="before inventory"):
+        replacement.retain(root, runtime=runtime, predecessor=later)
+    monkeypatch.setattr(runtime, "list_versions", inventory)
+    assert completed.name < next(directory.glob("*.pending")).name
+    commit = runtime._leases.commit_runtime_reference_transaction
+    collections = []
+    def collect_after_commit(*args, **kwargs):
+        commit(*args, **kwargs)
+        collections.append(runtime.gc(root, min_age_days=0))
+    monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", collect_after_commit)
+    assert replacement.recover(root, runtime=runtime)
+    assert collections and all("newly-retained" not in removed for removed in collections)
+    assert (root / "versions" / "newly-retained").is_dir()
+    assert "newly-retained" in {
+        slot for slots in runtime._leases.read_runtime_references(root).values() for slot in slots
+    }
+
+
+@pytest.mark.parametrize("release", [False, True])
+def test_archive_cleanup_retries_after_reference_release_gc_and_failed_unlink(
+    retained, monkeypatch, release,
+):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current") if release else None
+    replacement.retain(
+        root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+    )
+    if release:
+        replacement.settle_release(root, claim, committed=True)
+    archive = next((root / "status-monitor-observations").glob("*.json"))
+    unlink = Path.unlink
+    def interrupted(path, *args, **kwargs):
+        if path == archive:
+            raise OSError("fixture archive deletion interrupted")
+        return unlink(path, *args, **kwargs)
+    monkeypatch.setattr(Path, "unlink", interrupted)
+    alive.clear()
+    with pytest.raises(OSError, match="deletion interrupted"):
+        replacement.reconcile(root, runtime=runtime)
+    assert not runtime._leases.read_runtime_references(root)
+    assert "legacy" in runtime.gc(root, min_age_days=0)
+    monkeypatch.setattr(Path, "unlink", unlink)
+    assert not replacement.reconcile(root, runtime=runtime)
+    assert not archive.exists()
+    assert not runtime._leases.read_runtime_references(root)
+    if release:
+        assert runtime.read_dev_claim(root, strict=True) is None
+
+
+@pytest.mark.parametrize("failure", ["archive", "references"])
+def test_changed_observation_recovers_archive_failure_and_more_than_64_retained_slots(
+    retained, monkeypatch, failure,
+):
+    from zdd import routing, routing_persistence
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, identities, alive = retained
+    monkeypatch.setattr("zdd.diagnostics.process_start_time", identities.get)
+    for index in range(65):
+        version = f"old-{index}"
+        (root / "versions" / version).mkdir()
+        runtime.mark_complete(root, version, payload_hash=version)
+    directory = root / "status-monitor-routing"
+    routing.publish_active(directory, bind="127.0.0.1", port=61001, pid=101, process_start_time="1001")
+    write = routing_persistence.write
+    def interrupted(path, content):
+        if path.suffix == ".json" and path.parent.name == "status-monitor-observations":
+            raise OSError("fixture final archive failure")
+        return write(path, content)
+    monkeypatch.setattr(routing_persistence, "write", interrupted)
+    commit = runtime._leases.commit_runtime_reference_transaction
+    def uncommitted(*args, **kwargs):
+        raise OSError("fixture reference commit failure")
+    if failure == "references":
+        monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", uncommitted)
+    with pytest.raises(OSError, match="failure"):
+        replacement.retain(root, runtime=runtime)
+    if failure == "references":
+        with pytest.raises(ValueError, match="transaction is pending"):
+            runtime.gc(root, min_age_days=0)
+    else:
+        references = runtime._leases.read_runtime_references(root)
+        assert references and all(len(slots) <= 64 for slots in references.values())
+        assert set(runtime.list_versions(root)) <= {slot for slots in references.values() for slot in slots}
+        runtime.gc(root, min_age_days=0)
+    assert len(runtime.list_versions(root)) == 68
+    monkeypatch.setattr(runtime._leases, "commit_runtime_reference_transaction", commit)
+    monkeypatch.setattr(routing_persistence, "write", write)
+    routing.publish_active(directory, bind="127.0.0.1", port=61002, pid=101, process_start_time="1001")
+    assert replacement.retain(root, runtime=runtime)
+    assert replacement.reconcile(root, runtime=runtime)
+    alive.clear()
+    assert not replacement.reconcile(root, runtime=runtime)
+    assert not runtime._leases.read_runtime_references(root)
+    assert not list((root / "status-monitor-observations").glob("*.pending"))
+    assert not list((root / "status-monitor-observations").glob("*.json"))
+
+
+@pytest.mark.parametrize("foreign", [False, True])
+def test_replacement_cannot_detach_custody_without_its_held_cutover_guard(retained, foreign):
+    from zdd import breadcrumb
+    from zdd.cutover_lock import CutoverLock
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, _alive = retained
+    directory = root / "status-monitor-routing"
+    directory.mkdir()
+    path = breadcrumb.breadcrumb_path(directory)
+    path.write_bytes(b'{"state":"publication-uncertain"}')
+    with CutoverLock(root / "foreign") as guard:
+        with pytest.raises(ValueError, match="held publication cutover guard"):
+            replacement.retain(
+                root, runtime=runtime, detach_recovery=True,
+                cutover_guard=guard if foreign else None,
+            )
+    assert path.is_file()
+    assert not (root / "status-monitor-observations").exists()
+
+
+@pytest.mark.parametrize("fault", ["prepared", "selected", "changed-claim"])
+def test_observed_dev_release_keeps_original_claim_and_publication_guards(retained, fault):
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+    replacement.retain(
+        root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+    )
+    if fault != "prepared":
+        replacement.settle_release(root, claim, committed=True)
+    if fault == "selected":
+        runtime.activate(root, "dev", link_free=True, dev_owner=claim["owner"])
+    elif fault == "changed-claim":
+        runtime._release_dev(root, claim["owner"])
+        runtime.claim_dev(root, "next-owner", previous_version="current")
+    expected = runtime.read_dev_claim(root, strict=True)
+    alive.clear()
+    if fault == "prepared":
+        assert replacement.reconcile(root, runtime=runtime)
+        assert retirements.pending_claim(root, claim)
+    else:
+        with pytest.raises(RuntimeError, match="Dev runtime is selected|Dev claim changed"):
+            replacement.reconcile(root, runtime=runtime)
+    assert runtime.read_dev_claim(root, strict=True) == expected
+    assert runtime._leases.read_runtime_references(root)
+
+
+@pytest.mark.parametrize("route_changed", [False, True])
+def test_abandoned_observed_release_cancels_only_unchanged_prepublication_custody(
+    retained, route_changed,
+):
+    from single_instance_lease import SingleInstance
+    from zdd import routing
+    from agent_worktrees import runtime_monitor_replacement as replacement
+
+    root, runtime, _identities, alive = retained
+    claim = runtime.claim_dev(root, "original-owner", previous_version="current")
+    runtime.activate(root, "dev", link_free=True, dev_owner=claim["owner"])
+    replacement.retain(
+        root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+    )
+    route_root = root / "status-monitor-routing"
+    with SingleInstance(route_root, lock_name="cutover.lock") as guard:
+        if route_changed:
+            routing.routing_table_path(route_root).write_text(json.dumps({
+                "version": 1,
+                "active": routing.Endpoint("127.0.0.1", 61001, 101, "old", 1, "1001").to_dict(),
+            }))
+        assert retirements.cancel_prepared_release(root, claim, guard=guard, runtime=runtime) is not route_changed
+    assert retirements.pending_claim(root, claim) is route_changed
+    assert runtime.read_dev_claim(root, strict=True) == claim
+    if not route_changed:
+        replacement.retain(
+            root, runtime=runtime, predecessor={"pid": 101, "start": "1001"}, release_claim=claim,
+        )
+        assert retirements.pending_claim(root, claim)
+        runtime.activate(root, "current", link_free=True)
+        replacement.settle_release(root, claim, committed=True)
+        alive.clear()
+        assert not replacement.reconcile(root, runtime=runtime)
+        assert runtime.read_dev_claim(root, strict=True) is None
+
+
+def test_replacement_does_not_reclassify_malformed_route_as_outgoing_observation(retained, monkeypatch):
+    from zdd import routing
+    from agent_worktrees import runtime_monitor_replacement as replacement
+    from agent_worktrees import status_monitor_cutover as cutover
+
+    root, _runtime, _identities, _alive = retained
+    directory = root / "status-monitor-routing"
+    directory.mkdir()
+    path = routing.routing_table_path(directory)
+    path.write_text('{"active":{"pid":101}}')
+    monkeypatch.setattr(
+        cutover, "routed_monitor_identity", lambda *a, **k: pytest.fail("malformed route reached native probe"),
+    )
+    with pytest.raises(routing.ActivePublicationRefused):
+        replacement.options(root, None, incumbent_expected=True)
+    assert path.read_text() == '{"active":{"pid":101}}'
+
+
 @pytest.mark.parametrize("nested", [False, True])
 def test_retirement_runtime_helpers_follow_the_retained_slot(tmp_path, monkeypatch, nested):
     slot = tmp_path / "versions" / "current"

@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import json
+from contextlib import contextmanager
 import os
 import shutil
 import stat
 import subprocess
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import Mock
@@ -124,14 +127,41 @@ def test_failure_after_private_publication_retains_recoverable_key(tmp_path, mon
     assert ssh_key_files.install(directory, private, public)["status"] == "recovered"
 
 
-def test_same_record_concurrent_publication_does_not_overwrite(tmp_path, record):
+def test_same_record_concurrent_publication_does_not_overwrite(tmp_path, monkeypatch, record):
     directory = tmp_path / "keys"
     private, public = pair(record)
+    original_lock = ssh_key_files._publication_lock
+    original_install = ssh_key_files._install_pair
+    barrier = threading.Barrier(3)
+    counter = threading.Lock()
+    active = maximum = 0
+
+    @contextmanager
+    def synchronized_lock(folder, windows=None):
+        barrier.wait(5)
+        with original_lock(folder, windows):
+            yield
+
+    def held_install(*args):
+        nonlocal active, maximum
+        with counter:
+            active += 1
+            maximum = max(maximum, active)
+        try:
+            time.sleep(.05)
+            return original_install(*args)
+        finally:
+            with counter:
+                active -= 1
+
+    monkeypatch.setattr(ssh_key_files, "_publication_lock", synchronized_lock)
+    monkeypatch.setattr(ssh_key_files, "_install_pair", held_install)
     with ThreadPoolExecutor(max_workers=3) as pool:
         results = list(pool.map(
             lambda _: ssh_key_files.install(directory, private, public), range(3),
         ))
     assert all(result["status"] in ("installed", "recovered", "reused") for result in results)
+    assert maximum == 1
     matches(directory / "id_ed25519", private)
     assert not list(directory.glob("*.tmp"))
 

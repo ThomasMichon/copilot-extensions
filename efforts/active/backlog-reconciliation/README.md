@@ -65,6 +65,14 @@ it does not implement fixes, change product behavior, or declare deployment.
   author/editor/comment eligibility, release a source hold or renew an
   acquisition allowance. Verify the event's type, review identity and
   same-repository source; every other provenance and ownership gate remains.
+- **Non-text mention/subscription metadata:** Metadata-only `MentionedEvent`
+  and `SubscribedEvent` actors are not authorship disqualifiers. Still collect
+  their complete metadata; this exception admits no outside-authored text.
+  Original authors, editors, comment authors and edit histories retain their
+  existing qualification, source and ownership gates. Necessary complete-roster
+  and metadata completion rechecks for already-approved consolidations do not
+  require a new per-pass permission request. Body, product-source and
+  PR-description allowances and actual holds are not renewed by these checks.
 - **Baseline:** 1,458 open issues from complete paginated enumeration on
   2026-10-21. The fixed checkpoint is at most 729 open issues.
 - **Inflow:** Refresh the whole queue between batches; include new issues in the
@@ -290,8 +298,29 @@ the non-public approval conversation.
 The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
 preserves the independent retirement witness, claimed native acceptance and
 documentary coordination contracts without implementation or closure credit.
-The dated complete census is 840 whole OPEN, 111 above fixed 729; all existing
-completion check states remain unchanged and the campaign Active.
+Its follow-through discloses two repeated original acquisitions after exhausted
+scopes, withdraws unused source grants and retains metadata-only candidates as
+unfulfilled. The later dated census is 842 whole OPEN, 113 above fixed 729;
+all existing completion check states remain unchanged and the campaign remains Active.
+The next follow-through retains #11545's positive macOS lifecycle/recovery gap
+and 28 recovered prior whole-source refusals. Successful refusal-job metadata
+and a documentation-only candidate are not positive native acceptance.
+The later retained-supply study demonstrates no qualified continuation from
+235 audited identities, credits #11565's finite delivered source correction
+without claiming installed-consumer acceptance, and preserves #11570's
+independent Vault profile contract. Its dated census is 847 whole OPEN,
+118 above fixed 729; all campaign completion states remain unchanged.
+The next whole-request crosswalk verifies #11580's delivered feature in #11581
+and its acknowledged `COMPLETED` closure after the three standing final checks.
+Four other admitted contracts remain independent and #11600 stays metadata-only.
+The later census is 852 whole OPEN, 123 above fixed 729, with 1,043 audited
+dispositions; no campaign completion checkbox changes.
+The first source follow-through keeps the two installer-fixture reports related
+but distinct, retains #11595's unresolved managed caller boundary, and credits
+only the older #11601 loader candidate actually inspected. Its newer OPEN PR
+head is not qualified delivery. Ten source attempts yield eight complete
+objects and two whole refusals, no implementation or closure. The later dated
+census remains 852 whole OPEN and 123 above target.
 
 The [fulfilled-request and bridge-identity checkpoint](<journal/2026/11.07 fulfilled-requests-and-bridge-identity.md>)
 records the campaign-wide standing completion-check approval, #11445's audited
@@ -568,6 +597,42 @@ and two unchanged invalid-scope relations are not eighteen completion findings.
 - [x] Preserve the initial cohort and oldest-first cursor in structured session state.
 
 ### Phase 2 - Continuing reconciliation
+
+The [repository-boundary and fixture outcomes](<journal/2026/11.09 repository-boundary-and-fixture-outcomes.md>)
+record four further audited tracking folds: three into new OPEN #11678
+and two additional regression rows in existing OPEN #11674. Their six and
+sixteen acceptance rows remain unchecked, with all prior fixture rows and
+existing responsibilities preserved. Claimed #11629 remains untouched;
+#11610 has only partial candidate coverage; external #11664 completion
+receives no campaign credit. Two equal complete scans at 02:10:43 PST
+measure 849 whole OPEN, 510 original and 339 inflow issues, 120 above fixed
+729, with 1,055 audited dispositions. Every remaining parent gate stays open.
+
+The [canonical installer-fixture outcome](<journal/2026/11.09 canonical-installer-fixtures.md>)
+records two audited tracking folds into OPEN #11674. All six PowerShell cases,
+eight POSIX cases and three distinct POSIX failure classes remain planned,
+with fourteen unchecked acceptance rows and unchanged source responsibilities.
+No new product source, execution or whole-installation qualification follows.
+Two equal complete scans at 01:52:17 PST measure 853 whole OPEN, 510 original
+and 343 inflow issues, 124 above fixed 729, with 1,051 audited dispositions.
+The campaign and every remaining Plan/Validation gate stay Active.
+
+The [scoped-GitHub quoting and non-text provenance correction](<journal/2026/11.09 scoped-gh-quoting-and-event-provenance.md>)
+selects #810's explicit point-of-use documentation alternative, not a native
+shim or parser change. The narrow event rule admits no outside-authored text
+and renews no body/source allowance. A completed disposition still needs
+the actual reviewed delivery; all source/resource and campaign gates remain.
+
+The [canonical reliability cohort](<journal/2026/11.09 canonical-reliability-cohort.md>)
+records five audited tracking consolidations into OPEN #11663, not five
+completed fixes. Its 21 unchecked acceptance rows preserve the separate
+diagnostic, Windows lifecycle, conditional-field and handoff-lookup contracts,
+including the original owners and literal alternatives. A sixth candidate
+stopped at metadata qualification before any original text was acquired.
+Two identical complete scans at 00:54:56 PST measure 853 whole OPEN,
+511 original-cohort and 342 inflow issues, 124 above fixed 729. The five
+departures and one new canonical produce a net reduction of four;
+1,048 audited dispositions and the still-Active parent are distinct metrics.
 
 The [admitted hook-source follow-through](<journal/2026/11.07 admitted-hook-source-followthrough.md>)
 records prospective full-source inspection, a bounded resolver follow-through
@@ -3019,6 +3084,13 @@ sources, transferring owners or turning partial/planning gains into completion.
   acceptance remain continuing Phase 2 work, not silently completed coverage.
 - [ ] Identify high-priority fixes and their actual existing efforts, retained
   owners, unresolved acceptance and first bounded work slices.
+  The [2026-11-09 routing correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
+  directs two historical selected slices to their audited OPEN receivers:
+  #9323 to #9295 and #3002 to #2879. It preserves finite alternatives,
+  existing owners and independent parallel lanes; no fix, new priority,
+  implementation readiness or whole-parent prerequisite is inferred.
+  The [dated journal](<journal/2026/11.09 roadmap-receiving-routes.md>) retains
+  the 850-open census, unchanged completion gates and zero new dispositions.
   The agent-recommended [next-decision matrix](roadmap-next-slices.md)
   nominates twelve consequential first slices; their bounded qualification
   is recorded, not an exhaustive priority order or implementation assignment.
@@ -3030,6 +3102,10 @@ sources, transferring owners or turning partial/planning gains into completion.
 - [ ] Produce an evidence-backed prerequisite graph and sequencing plan for a
   stable harness that progresses toward vision, distinguishing independent
   parallel work from actual blockers.
+  The [historical-endpoint follow-through](<journal/2026/11.09 roadmap-receiving-routes.md#historical-endpoint-follow-through>)
+  routes nine retired tracking identities to their audited receiving slices
+  and leaves #9377 explicitly unqualified. Historical relationship counts,
+  scoped alternatives, actual owners and all completion gates remain unchanged.
 - [ ] _(Agent-recommended)_ Run larger, disjoint research waves, initially
   four sets of 50 issues, reusing unchanged admitted evidence and refreshing
   changed source/refinements rather than restarting the entire corpus.
@@ -3057,11 +3133,37 @@ sources, transferring owners or turning partial/planning gains into completion.
 
 ## Validation Plan
 
+The [five canonical tracking folds](<journal/2026/11.09 canonical-reliability-cohort.md>)
+have exact live acknowledgment readbacks, unchanged source assignees and
+an OPEN receiver with all 21 acceptance rows unchecked. Their metadata-only
+close mutations reacquired no original body. This establishes tracking
+consolidation only; no product, native, receiving-resource or campaign
+completion checkbox changes.
+
 The [worker-witness and safe Resume study](<journal/2026/11.08 worker-witness-and-safe-resume.md>)
 distinguishes complete prebody provenance qualification, static witness
 definitions and a verified public research comment from execution or native
-acceptance. Whole-source refusals and spent acquisition limits remain intact;
-no campaign or technical completion checkbox changes.
+acceptance. Its follow-through records seven acquisitions against each issue's
+six-object scope for #11210 and #11211, including one repeated original
+acquisition per issue. It does not reset those exhausted scopes or claim fresh
+coverage. Whole-source refusals remain intact; no campaign or technical
+completion checkbox changes.
+The same journal retains #11545's exhausted study scope and distinguishes
+complete job metadata from positive macOS lifecycle/recovery qualification.
+Its 28 recovered actual refusal records renew no acquisition allowance and
+supply no closure credit.
+The later six-object #11565 crosswalk distinguishes static source and test
+definitions from the reported process control and original installed-consumer
+qualification. Retained-supply audit conclusions renew no scope or stale
+worker claim; #11570's profile selection and existing custodians stay separate.
+The subsequent #11580 closure retains the complete six-source requirement
+crosswalk, successful final metadata checks and live acknowledgment readback.
+It authorizes no queue reconciliation, native absence attestation or custody
+transfer. The other inflow studies renew no source or roster allowance.
+The subsequent fixture/provider/loader studies distinguish complete inspected
+definitions from reported failures, withheld orchestration and a newer unstudied
+candidate head. Their closed source scopes and unchanged original allowances
+authorize no reproduction, transfer, closure or campaign completion.
 
 The [serving-owner and attribution-event study](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 distinguishes guarded source inspection, attributed native witness results,

@@ -37,6 +37,8 @@ The children refine independently meaningful subjects:
   of harness, knowledge, and product roles with scoped ownership.
 - [Operational feedback](operational-feedback/README.md): evidence-grounded
   judgments and optional fleet services that propose and route work.
+- [Agent topology](agent-topology/README.md): conversational dispatch, purposeful
+  placement, durable native-owner assignments and minimum role coverage.
 
 ## Features
 

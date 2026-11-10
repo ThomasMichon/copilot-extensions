@@ -304,6 +304,61 @@ Source tests and a captured synthetic Vault process qualify this adapter seam;
 they do not prove installed Vault, synchronized storage, live fleet enrollment
 or interactive logon. Those remain separately qualified owner operations.
 
+### Data-only installed Vault selection
+
+Declaration version `5` keeps the version-four context shape but replaces
+`ssh_key.argv` with the fixed `ssh_key.owner: "agent-vault"`. A nonnull object
+has exactly these fields:
+
+```json
+{
+  "owner": "agent-vault",
+  "configuration_root": "<absolute configuration directory>",
+  "entry": "SSH/example",
+  "directory": "<absolute dedicated key directory>",
+  "fingerprint": "SHA256:<existing public-key digest>"
+}
+```
+
+The four data fields retain their version-four validation and semantics.
+Inspection binds them to the qualified repository revision without resolving
+or invoking Vault. Version-five `ssh_key: null` retains the existing no-Vault
+path. Versions one through four remain strict and unchanged: version four
+still requires `argv`, and neither form accepts the other's selector. An older
+engine refuses version five rather than silently dropping its requirements.
+
+On explicit apply when keys are needed, the engine selects the existing
+installed Vault owner, not an executable from configuration or `PATH`.
+An explicit Worktrees installation context requires the active same-cell
+Vault through the canonical pinned peer launcher. Without an explicit context,
+the existing core payload/installation resolver must select a ready legacy
+installation. Missing, foreign, inactive, migrating or unsupported ownership
+refuses without another owner or implicit installation. A completed runtime
+with immutable retention support is required.
+
+The engine retains the selected physical runtime/build and installation
+binding across the existing invocation-contract, prepare and install calls.
+It revalidates that selection before and after each bounded child; a changed
+owner, receipt or selected runtime refuses rather than switching midway.
+The normal caller retains that same binding through the subsequent Fleet key
+inspection and rechecks it before enrollment, SSH configuration preparation
+and application installation. It never recaptures a different Vault after
+credential preparation.
+The native peer boundary also enforces its own execution-time governance.
+Native same-cell Vault invocation currently supports Windows and Linux;
+other platforms refuse rather than using another owner.
+Legacy children receive the selected runtime root and no inherited Vault
+credential/cache/endpoint selectors; same-cell children use Vault's native
+rebound environment. Both retain explicit provisioning inhibition and the
+selected `--configuration-root`.
+
+All existing source, request-digest, key-location and fingerprint checks,
+ready-application shortcuts, check-only behavior, waiting/error outcomes and
+original-operation recovery remain. This is not permission to install, start,
+unlock, initialize or replace Vault or an identity. Full installed Manager/
+repository/Fleet setup, attended storage/authentication and logon acceptance
+remain separate from source parser/selection and captured-child tests.
+
 PowerShell receives `-RequestFile <path>`; Bash receives
 `--request-file <path>`. The selected runtime must already be available.
 Execution uses the selected checkout as cwd with inherited stdio. No command

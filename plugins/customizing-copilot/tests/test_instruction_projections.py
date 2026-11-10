@@ -2916,8 +2916,11 @@ def test_customizing_copilot_ships_the_repo_wide_local_cache_catchall() -> None:
     specs, _unknown = projections._load_specs(REPO, sources, result)
 
     assert result.blocking == 0
-    assert {spec.source_id for spec in specs} == {"local-cache-catchall"}
-    spec = specs[0]
+    assert {spec.source_id for spec in specs} == {
+        "local-cache-catchall",
+        "session-guidance-writers",
+    }
+    spec = next(s for s in specs if s.source_id == "local-cache-catchall")
     assert spec.apply_to == "**"
     assert spec.skip_local_cache is False
     rendered = projections.render_projection(spec)

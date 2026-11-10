@@ -14,10 +14,12 @@ from .review_workspace import MAX_GENERATION_BYTES, _generation, _scope
 from .review_intent import identifier
 from .workspace_selection import supports_selection
 from .review_comment_observation import supports as supports_comment_observation
+from .workspace_comment_mapping import supports as supports_mapping
+from .workspace_terminal_mapping import selected as terminal_mapping_selected
 
 TOOL_PROTOCOL = "agent-pull-requests.workspace-tools/v1"
 COMMANDS = ("capabilities", "load", "sync", "materialize", "source", "source-read", "submit", "inspect", "events", "receipt",
-            "prepare", "allocate", "observe-comment")
+            "prepare", "allocate", "observe-comment", "retained-comment")
 FIELDS = {
     "capabilities": (),
     "load": ("number", "expected_current", "budget_seconds"),
@@ -29,6 +31,7 @@ FIELDS = {
     "inspect": ("number", "operation_id"),
     "receipt": ("number", "operation_id", "action_id"),
     "observe-comment": ("number", "operation_id", "action_id", "generation_id"),
+    "retained-comment": ("number", "operation_id", "action_id"),
     "prepare": ("number", "intent", "identities"),
     "allocate": ("number", "intent", "source_attachment", "budget_seconds"),
     "events": ("number", "after", "limit"),
@@ -145,11 +148,15 @@ class WorkspaceTools:
             ensure = getattr(self.client, "ensure_capabilities", None)
             backend = await self._client_call(ensure, operation=operation) if callable(ensure) else await self._client_call(
                 self.client.exchange, "capabilities", {}, operation=operation)
-            if not isinstance(backend, dict) or backend.get("protocol") != PROTOCOL:
+            from .workspace_terminal_read import supports as supports_terminal
+            if not isinstance(backend, dict) or (
+                backend.get("protocol") != PROTOCOL and not supports_terminal(backend)
+            ):
                 raise WorkspaceToolUnavailable("workspace_contract_unsupported")
             available = backend.get("operations", [])
             operations += [
-                name for name in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate", "observe-comment")
+                name for name in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate",
+                                  "observe-comment", "retained-comment")
                 if name in available and (
                     name != "receipt" or supports_prepared_review(backend.get("prepared_review_contract"))
                 ) and (name != "allocate" or supports_selection(backend.get("selection_contract")))
@@ -157,7 +164,13 @@ class WorkspaceTools:
                     supports_comment_observation(backend.get("comment_observation_contract"))
                     and supports_prepared_review(backend.get("prepared_review_contract"))
                 ))
+                and (name != "retained-comment" or (
+                    supports_mapping(backend.get("comment_mapping_contract"))
+                    and supports_prepared_review(backend.get("prepared_review_contract"))
+                ))
             ]
+            if terminal_mapping_selected(backend):
+                operations.append("retained-comment")
             if (
                 callable(self.comment_preparer) and "submit" in available
                 and supports_prepared_review(backend.get("prepared_review_contract"))
@@ -251,13 +264,16 @@ class WorkspaceTools:
         capabilities = await self.capabilities()
         if command not in capabilities["operations"]:
             raise WorkspaceToolUnavailable("workspace_operation_unsupported")
-        if needs_prepared_review(command, request) and not supports_prepared_review(
+        if needs_prepared_review(command, request) and not (
+            command == "retained-comment" and terminal_mapping_selected(capabilities["backend_contract"])
+        ) and not supports_prepared_review(
             capabilities["backend_contract"].get("prepared_review_contract")
         ):
             raise WorkspaceToolUnavailable("prepared_review_contract_unsupported")
         if command == "prepare":
             return await self._prepare_comments(request)
-        if command in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate", "observe-comment"):
+        if command in ("load", "sync", "submit", "inspect", "events", "receipt", "allocate",
+                       "observe-comment", "retained-comment"):
             return await _call(self.client.exchange, command, copy.deepcopy(request))
         required = {"number", "generation_id"}
         if command in ("source", "source-read"):

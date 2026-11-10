@@ -20,6 +20,7 @@ def author_capabilities():
     return {
         "schema": "agent-worktrees.pr-author-capabilities", "version": 1,
         "repo": "project/repo",
+        "provider": "azure-devops",
         "operations": {"metadata-update": True, "source-push": True, "qualified-create": True},
     }
 
@@ -170,6 +171,144 @@ def test_native_source_push_preserves_lease_and_unknown_effect(command, monkeypa
     assert json.loads(capsys.readouterr().out) == value
     assert calls[1][1] == "pr-push" and "--expected-remote-head=" in calls[1]
     assert "--branch=users/demo/fix" in calls[1]
+
+
+def ready_result(status="confirmed"):
+    result = {
+        "schema": "agent-worktrees.pr-ready", "version": 1,
+        "repo": "project/repo", "number": 7, "provider": "azure-devops",
+        "ok": status == "confirmed", "actions": {"draft": {"status": status}},
+    }
+    if status != "confirmed":
+        result["error"] = "Readiness not confirmed; inspect this PR before another attempt"
+    return result
+
+
+@pytest.mark.parametrize("status", ["confirmed", "failed", "unknown", "not-attempted"])
+def test_native_ready_qualifies_and_preserves_exact_outcome(command, monkeypatch, capsys, status):
+    support = author_capabilities()
+    support["operations"]["draft-ready"] = True
+    value = ready_result(status)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(
+            argv, 0 if len(calls) == 1 or value["ok"] else 1,
+            json.dumps(support if len(calls) == 1 else value), "",
+        )
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("ready", command)) == (0 if value["ok"] else 1)
+    assert json.loads(capsys.readouterr().out) == value
+    assert calls[1] == [command, "pr-author-ready", "--repo=project/repo", "--json", "--number=7"]
+
+
+@pytest.mark.parametrize("value", [None, False, "true", 1])
+def test_native_ready_old_or_malformed_support_refuses_before_mutation(command, monkeypatch, capsys, value):
+    support = author_capabilities()
+    if value is not None:
+        support["operations"]["draft-ready"] = value
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(support), "")
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("ready", command)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["number"] == 7 and result["actions"]["draft"]["status"] == "not-attempted"
+    assert result["schema"] == "agent-worktrees.pr-ready" and result["version"] == 1
+    assert result["provider"] is None
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("provider", ["missing", None, "", "   ", 7, False])
+def test_native_ready_invalid_capability_provider_refuses_before_dispatch(
+    command, monkeypatch, capsys, provider,
+):
+    support = author_capabilities()
+    support["operations"]["draft-ready"] = True
+    if provider == "missing":
+        del support["provider"]
+    else:
+        support["provider"] = provider
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(support), "")
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("ready", command)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["actions"]["draft"]["status"] == "not-attempted"
+    assert result["schema"] == "agent-worktrees.pr-ready" and result["version"] == 1
+    assert result["provider"] is None and len(calls) == 1
+
+
+@pytest.mark.parametrize("damage", [
+    {"schema": "old"}, {"version": True}, {"number": 8}, {"provider": "github"},
+    {"ok": True, "actions": {"draft": {"status": "unknown"}}}, {"actions": []},
+    {"ok": False, "actions": {"draft": {"status": "unknown"}}}, {"error": "contradictory failure"},
+])
+def test_native_ready_unconfirmed_result_never_falls_back(command, monkeypatch, capsys, damage):
+    support = author_capabilities()
+    support["operations"]["draft-ready"] = True
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(
+            support if len(calls) == 1 else {**ready_result(), **damage},
+        ), "")
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("ready", command)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["number"] == 7 and result["actions"]["draft"]["status"] == "unknown"
+    assert result["schema"] == "agent-worktrees.pr-ready" and result["version"] == 1
+    assert result["provider"] == "azure-devops"
+    assert len(calls) == 2
+
+
+def test_native_ready_lost_result_preserves_target_without_retry(command, monkeypatch, capsys):
+    support = author_capabilities()
+    support["operations"]["draft-ready"] = True
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if len(calls) > 1:
+            raise subprocess.TimeoutExpired(argv, 90)
+        return subprocess.CompletedProcess(argv, 0, json.dumps(support), "")
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("ready", command)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["number"] == 7 and result["actions"]["draft"]["status"] == "unknown"
+    assert result["schema"] == "agent-worktrees.pr-ready" and result["version"] == 1
+    assert result["provider"] == "azure-devops"
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize("error", [
+    OSError("probe executable unavailable"), subprocess.TimeoutExpired(["capability-probe"], 20),
+])
+def test_native_ready_capability_failure_is_not_an_attempt(command, monkeypatch, capsys, error):
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        raise error
+
+    monkeypatch.setattr(native_author, "run_command", run)
+    assert cli.main(arguments("ready", command)) == 1
+    result = json.loads(capsys.readouterr().out)
+    assert result["number"] == 7 and result["actions"]["draft"]["status"] == "not-attempted"
+    assert "before dispatch" in result["error"]
+    assert len(calls) == 1 and calls[0][1] == "pr-author-capabilities"
 
 
 def test_native_create_body_file_is_not_expanded_into_process_arguments(command, monkeypatch, capsys, tmp_path):
@@ -462,6 +601,7 @@ def test_native_rejects_old_powershell_before_target_execution(tmp_path, monkeyp
 
 @pytest.mark.parametrize(("verb", "with_config"), [
     ("status", False), ("wait", False), ("create", False), ("merge", False), ("create", True),
+    ("ready", False), ("ready", True), ("nudge", False), ("nudge", True),
 ])
 def test_native_front_door_crosses_real_worktrees_command_boundary(
     verb, with_config, tmp_path, monkeypatch, capsys,
@@ -481,21 +621,41 @@ def test_native_front_door_crosses_real_worktrees_command_boundary(
     elif verb == "merge":
         expected = ["pr-merge", "project/repo", "7", "--now", "--json"]
         value = {"repo": "project/repo", "pr": 7, "applied": True, "merged": False}
+    elif verb == "ready":
+        expected = ["pr-author-ready", "--repo=project/repo", "--json", "--number=7"]
+        value = ready_result()
+    elif verb == "nudge":
+        expected = ["pr-author-nudge", "--repo=project/repo", "--json", "--number=7"]
+        value = {
+            "schema": "agent-worktrees.pr-review-request", "version": 1,
+            "repo": "project/repo", "number": 7, "provider": "github",
+            "ok": True, "supported": False, "requested": False, "reviewer": "",
+            "actions": {"review_request": {"status": "no-op"}},
+        }
     extra = []
     if with_config:
         policy = tmp_path / "worker policy.json"
         policy.write_text("{}", "utf-8")
-        expected.append(f"--config={policy}")
+        if verb == "ready":
+            expected.insert(3, f"--config={policy}")
+        else:
+            expected.append(f"--config={policy}")
         extra = ["--config", str(policy)]
     command = tmp_path / ("native command.ps1" if os.name == "nt" else "native-command")
     python_script = (
         f"import sys\nassert sys.argv[1:] == {expected!r}\n"
         f"print({json.dumps(value)!r})\n"
     )
-    if with_config:
+    if with_config or verb in ("ready", "nudge"):
         capabilities = author_capabilities()
         capabilities["operations"]["worker-policy-config"] = True
-        probe = ["pr-author-capabilities", "--repo=project/repo", "--json", f"--config={policy}"]
+        capabilities["operations"]["draft-ready"] = True
+        if verb == "nudge":
+            capabilities["provider"] = "github"
+            capabilities["operations"]["reviewer-request"] = True
+        probe = ["pr-author-capabilities", "--repo=project/repo", "--json"]
+        if with_config:
+            probe.append(f"--config={policy}")
         python_script = (
             "import sys\n"
             f"if sys.argv[1:] == {probe!r}:\n    print({json.dumps(capabilities)!r})\n"

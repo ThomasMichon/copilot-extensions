@@ -79,16 +79,37 @@ def full_load_started() -> None:
     opaque_source("execution-machine")
 
 
-def source_exists(path: Path, stage: str) -> bool:
+def source_exists(path: Path, stage: str, *, strict=False) -> bool:
     """Observe the owner's existing presence check, preserving raised errors."""
     try:
-        present = path.exists()
+        if strict:
+            try:
+                path.stat()
+                present = True
+            except FileNotFoundError:
+                ancestor = path
+                while True:
+                    try:
+                        ancestor.lstat()
+                    except FileNotFoundError:
+                        if ancestor.parent == ancestor:
+                            raise
+                        ancestor = ancestor.parent
+                    else:
+                        ancestor.stat()
+                        present = False
+                        break
+        else:
+            present = path.exists()
     except Exception as exc:
         failed(current_observations(), str(path), stage, "unreadable-source", type(exc).__name__)
         raise
     if not present:
-        failed(current_observations(), str(path), stage, "presence-provenance-unavailable",
-               "legacy presence result does not expose a raw stat outcome")
+        if strict:
+            observe(current_observations(), str(path), stage, ScanAuthority.ABSENT)
+        else:
+            failed(current_observations(), str(path), stage, "presence-provenance-unavailable",
+                   "legacy presence result does not expose a raw stat outcome")
     return present
 
 
@@ -110,17 +131,22 @@ def load_config_report(
     return AcquisitionReport("load-config", value, tuple(observations))
 
 
-def yaml_value(path: Path, observations: list[SourceObservation] | None = None) -> dict[str, Any]:
+def yaml_value(path: Path, observations: list[SourceObservation] | None = None, *, strict=False) -> dict[str, Any]:
     from . import config as cfg
 
     if observations is None:
         observations = current_observations()
     try:
-        present = path.exists() if observations is None else probe_source(path, "exists", observations, "config-yaml")
+        present = (
+            source_exists(path, "config-yaml", strict=True) if strict else
+            path.exists() if observations is None else probe_source(path, "exists", observations, "config-yaml")
+        )
         if not present:
             return {}
         with open(path, encoding="utf-8") as stream:
-            raw = cfg.yaml.load(stream, Loader=cfg._YamlSafeLoader)
+            if strict:
+                from .repos_registry_reader import _UniqueRegistryLoader
+            raw = cfg.yaml.load(stream, Loader=_UniqueRegistryLoader if strict else cfg._YamlSafeLoader)
         observe(observations, str(path), "config-yaml", ScanAuthority.COMPLETE)
         if isinstance(raw, dict):
             return raw
@@ -140,13 +166,15 @@ def _load_yaml_safe_report(path: Path) -> AcquisitionReport[dict[str, Any]]:
     return AcquisitionReport("config-yaml", value, tuple(observations))
 
 
-def dropin_value(config_d: Path, *, project_name="", warn=False, observations=None):
+def dropin_value(config_d: Path, *, project_name="", warn=False, observations=None, strict=False):
     from . import config as cfg
     from .config_dropins import scan_config_dropin_registry, warn_config_dropin_findings
 
     if observations is None:
         observations = current_observations()
-    report = scan_config_dropin_registry(config_d, project_name=project_name)
+    report = scan_config_dropin_registry(
+        config_d, project_name=project_name, **({"strict": True} if strict else {}),
+    )
     if warn:
         warn_config_dropin_findings(report)
     observe(observations, str(config_d), "config-dropins", report.authority, findings=owner_findings(report.findings))
@@ -165,7 +193,9 @@ def dropin_value(config_d: Path, *, project_name="", warn=False, observations=No
                 report.authority is ScanAuthority.INDETERMINATE or decision.status is EntryStatus.INDETERMINATE
             )
             uncertain = retained or decision.status is EntryStatus.INDETERMINATE or any(
-                f.reason == "invalid-entry" for f in decision.findings
+                f.reason == "invalid-entry" or (
+                    strict and f.reason in ("missing-target", "target-unusable", "identity-mismatch")
+                ) for f in decision.findings
             )
             observe(observations, entry, "config-dropin-entry",
                     ScanAuthority.INDETERMINATE if uncertain else ScanAuthority.COMPLETE,

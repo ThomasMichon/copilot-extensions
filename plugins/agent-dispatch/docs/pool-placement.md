@@ -93,6 +93,10 @@ turn that observation into another spawn. A retained instance waits for its own
 slot or reports unsatisfiable routing instead of switching to another pool.
 An unaccounted active legacy reservation blocks new placement; the coordinator
 does not guess its pool or silently adopt its effects.
+Terminal unbound legacy history is reconciled explicitly with
+`reservations fence-history` (see
+[spawn startup fencing](spawn-startup-fencing.md#compatibility-and-graceful-cutover));
+active legacy reservations still settle through their own lifecycle.
 
 Supervisor capacity and release sweeps apply `native_release_pending` in the
 reservation query before the bounded result limit. Cleanup retries retain their

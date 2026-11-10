@@ -23,6 +23,7 @@ _REQUIRED_TOOLS = (
     "launch_wrapper_assets_ref.py",
     "materialize_installer_engine.py",
     "materialize_launch_wrapper_assets.py",
+    "materialize_payload_invocation.py",
 )
 
 
@@ -108,6 +109,69 @@ def test_promote_reports_no_change_when_dev_matches_main(repo: Path):
     report = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert report["promoted"] is False
     assert "no content change" in report["reason"]
+
+
+def test_promotion_freezes_both_copy_owners_and_imports_exact_candidate(repo: Path, tmp_path: Path):
+    from promotion_frozen_candidate import import_candidate
+    from test_sync_installer_engine import _promotion_installer_source
+
+    _git(["checkout", "-q", "dev"], repo)
+    _promotion_installer_source(repo, stale=True, consumer_names={"agent-vault"})
+    _write_plugin(repo, "agent-vault", "0.1.0-dev1")
+    _write_marketplace(repo, {"demo-plugin": "0.1.0-dev1", "agent-vault": "0.1.0-dev1"})
+    templates = repo / "libs/payload-invocation/templates"
+    templates.mkdir(parents=True)
+    for template in (_TOOLS.parent / "libs/payload-invocation/templates").glob("*.tmpl"):
+        shutil.copyfile(template, templates / template.name)
+    payload = repo / "plugins/agent-vault"
+    manifest = payload / "payload-invocation.json"
+    manifest.write_text(json.dumps({
+        "schema": "copilot-extensions.payload-invocation", "version": 1,
+        "command": "agent-vault", "module": "agent_vault", "purpose": "Vault command",
+        "runtimeRoot": ".agent-vault", "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
+    }), encoding="utf-8")
+    for suffix in ("sh", "ps1"):
+        (payload / "scripts" / f"resolve-runtime.{suffix}").write_bytes(b"# synthetic resolver\n")
+    (payload / "bin").mkdir()
+    (payload / "bin/agent-vault.ps1").write_bytes(b"# stale generated shim\n")
+    changes = repo / ".changefiles"
+    changes.mkdir()
+    (changes / "20260101-copy-owners.json").write_text(json.dumps({
+        "comment": "Compose both declared copy owners",
+        "changes": [{"plugin": "agent-vault", "type": "patch"}],
+    }), encoding="utf-8")
+    dev = _commit(repo, "canonical copy-owner inputs")
+    tracked = _git(["ls-files"], repo).splitlines()
+    before = {name: (repo / name).read_bytes() for name in tracked}
+    main = _git(["rev-parse", "main"], repo)
+    frozen = tmp_path / "frozen"
+    report = pr.promote(
+        repo=repo, dev_ref=dev, main_ref=main, push=False,
+        prepare_candidate_dir=frozen, promotion_time="2026-01-02T03:04:05Z",
+    )
+    assert report["promoted"] and not report["pushed"]
+    record = import_candidate(
+        frozen, repo=repo, dev_sha=dev, main_before=main, candidate_sha=report["commit"],
+    )
+    checkout = pr.add_scratch_worktree(record["candidate_sha"], repo=repo)
+    try:
+        candidate = checkout / "plugins/agent-vault"
+        copied = candidate / "scripts/installer_engine_commands.py"
+        assert copied.read_bytes() == before["libs/installer-engine/installer_engine_commands.py"]
+        assert copied.read_bytes() != before["plugins/agent-vault/scripts/installer_engine_commands.py"]
+        assert (candidate / "bin/agent-vault.ps1").read_bytes() != before["plugins/agent-vault/bin/agent-vault.ps1"]
+        assert json.loads((candidate / "plugin.json").read_text())["version"] == "0.1.1-dev1"
+        generator = pr._load_module(_TOOLS.parent / "libs/payload-invocation/generate.py", "frozen_invocation")
+        assert generator.process_manifest(
+            candidate / "payload-invocation.json", check=True, canonical_root=checkout,
+        ) == []
+        assert _git(["rev-parse", "HEAD"], checkout) == record["candidate_sha"]
+        assert _git(["rev-parse", "HEAD^{tree}"], checkout) == record["tree"]
+        assert _git(["status", "--porcelain"], checkout) == ""
+    finally:
+        pr.remove_scratch_worktree(checkout, repo=repo)
+    assert _git(["rev-parse", "dev"], repo) == dev
+    assert {name: (repo / name).read_bytes() for name in tracked} == before
 
 
 @pytest.mark.parametrize("bookkeeping", [(), ("state",), ("baseline",), ("state", "baseline")])

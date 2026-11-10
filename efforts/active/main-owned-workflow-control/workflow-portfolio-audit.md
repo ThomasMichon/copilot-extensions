@@ -55,9 +55,28 @@ exact attempt and fresh upload, immutable archive and canonical coverage
 packet. The credential/event-free child environment is explicit and hashed;
 only fresh execution uploads. Current-checkout contradictions fail rather
 than relabelling proof. Backend or old-proof incompatibility retains fresh
-units. This in-progress source work still needs contained packet, real consumer,
-ordinary CI/review and actual reuse/performance qualification; it is not a
-released controller or whole-flow savings claim.
+units. Source #8311 subsequently merges with actual current-head approval,
+required CI and real provider reuse. The publication packet preserves the
+independent peer additions: 1,129 current nodes, 106 closed sources and 48
+production coverage targets, with the unchanged 300-second bound.
+
+Cold CI `40039039714`, attempt one, executes those 1,129 units in 20.140
+seconds at head `0f360dab09626f7e18c9ea6ca3911aceeee220a8` and merge
+`eb048c3724be7eb621ac543a4d53f1fb5cc07117`. An evidence-description update
+triggers ordinary CI `40041585967` at the same head and merge. Every published
+context-fingerprint category matches. It verifies the original successful
+run/attempt/job, immutable artifact/archive and canonical three-file packet;
+no unit process runs again and fresh-only upload is skipped. Current guards
+and required aggregation pass. Original packet digest is
+`c8cccf8f03a037becd4d6cd4c375c391d6b43b1b51a4ae499ce09364334e3dd2`.
+
+Provider timestamps give 27/8 seconds for qualification and 49/27 seconds
+for the allocated unit job in that cold/reused pair. Overall CI takes 62/69
+seconds and remains guard-bound. This is one observational pair, not a
+controlled speedup, runner-queue saving or fewer workflow invocations.
+An earlier prior-head miss remains unclassified; no input/dependency
+binding is weakened to obtain the hit. Qualified release adoption, full
+unit-census, every-release and accountable periodic-repair gates remain open.
 
 ## October 23 historical-blob checkout candidate: not selected
 

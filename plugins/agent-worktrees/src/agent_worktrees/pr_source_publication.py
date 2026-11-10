@@ -168,53 +168,59 @@ def publish_source(worktree_id: str, config: cfg.Config, *, target_repo: str,
             machine=(config.machine, caller.machine, caller.execution_machine),
             source_attribution=repo.pr.source_attribution,
         )
-        with pr_publish.metadata_lock(worktree_id, project=config.repo_name,
-                                      timeout=publication_deadline.lock_wait(timeout)):
-            with pr_publish.publish_lock(str(workspace), push_timeout_seconds=timeout):
-                evidence = source_evidence(repo, target_repo, workspace, branch, expected_head)
-            root, remote = evidence["workspace"], evidence["remote"]
-            with pinned_destination(remote, evidence["push_urls"], evidence["transport_settings"],
-                                    fetch_url=evidence["fetch_url"]):
-                old_head = observed_ref(remote, evidence["push_urls"], f"refs/heads/{branch}", root)
-                _sha(old_head, "remote head", absent=True)
-                if expected_remote_head is not None and old_head != _sha(
-                    expected_remote_head, "expected_remote_head", absent=True,
-                ):
-                    raise SourcePublicationError("Remote head changed from expected_remote_head")
-                if old_head and not git_ops.is_commit_ancestor(old_head, expected_head, cwd=root):
-                    raise SourcePublicationError(
-                        "Existing remote history is not in the candidate; fetch and merge forward, then review again"
-                    )
-                default_branch = repo.default_branch
-                _git(root, "check-ref-format", f"refs/heads/{default_branch}")
-                base_head = observed_ref(remote, evidence["push_urls"],
-                                         f"refs/heads/{default_branch}", root)
-                local_base = _git(root, "rev-parse", "--verify",
-                                  f"refs/remotes/{remote}/{default_branch}^{{commit}}")
-                if not base_head or local_base != base_head:
-                    raise SourcePublicationError("Target base changed; fetch and review against the current base")
-                binding = {key: value for key, value in evidence.items() if key != "publication_checks"}
+        with pr_publish.publish_lock(str(workspace), push_timeout_seconds=timeout), \
+                pr_publish.metadata_lock(worktree_id, project=config.repo_name,
+                                        timeout=publication_deadline.lock_wait(timeout)):
+            evidence = source_evidence(repo, target_repo, workspace, branch, expected_head)
+        root, remote = evidence["workspace"], evidence["remote"]
+        binding = {key: value for key, value in evidence.items() if key != "publication_checks"}
+
+        def validate_transport_source():
+            with pr_publish.metadata_lock(worktree_id, project=config.repo_name,
+                                          timeout=publication_deadline.lock_wait(timeout)):
                 if validate_source_workspace(repo, target_repo, root, branch, expected_head) != binding:
                     raise SourcePublicationError("Source publication evidence changed before transport")
-                _caller(worktree_id, config)
-                result.update(publication_checks=evidence["publication_checks"],
-                              expected_remote_head=old_head, head_identity=evidence["head_identity"],
-                              publication_state="unknown")
-                with hooks.allow_pr_push():
-                    pushed = pr_publish.push_checked(
-                        None, remote, f"{expected_head}:refs/heads/{branch}", cwd=root,
-                        expected_head_repo=evidence["head_repo"],
-                        expected_head_identity=evidence["head_identity"],
-                        force_with_lease_expect=old_head, strict_lease=True,
-                        timeout=timeout, repo=repo,
-                    )
-                if not pushed:
-                    return {**result, "error": pushed.stderr or pushed.stdout or "Source push failed"}
-                result.update(publication_state="pushed", warning=pushed.stderr)
-                actual = observed_ref(remote, evidence["push_urls"], f"refs/heads/{branch}", root)
-                if actual != expected_head:
-                    return {**result, "error": "Push completed, but remote head readback differs",
-                            "observed_head": actual}
-                return {**result, "ok": True, "observed_head": actual}
+                if _caller(worktree_id, config).worktree_path != caller.worktree_path:
+                    raise SourcePublicationError("Managed caller source changed before transport")
+
+        with pinned_destination(remote, evidence["push_urls"], evidence["transport_settings"],
+                                fetch_url=evidence["fetch_url"]):
+            old_head = observed_ref(remote, evidence["push_urls"], f"refs/heads/{branch}", root)
+            _sha(old_head, "remote head", absent=True)
+            if expected_remote_head is not None and old_head != _sha(
+                expected_remote_head, "expected_remote_head", absent=True,
+            ):
+                raise SourcePublicationError("Remote head changed from expected_remote_head")
+            if old_head and not git_ops.is_commit_ancestor(old_head, expected_head, cwd=root):
+                raise SourcePublicationError(
+                    "Existing remote history is not in the candidate; fetch and merge forward, then review again"
+                )
+            default_branch = repo.default_branch
+            _git(root, "check-ref-format", f"refs/heads/{default_branch}")
+            base_head = observed_ref(remote, evidence["push_urls"],
+                                     f"refs/heads/{default_branch}", root)
+            local_base = _git(root, "rev-parse", "--verify",
+                              f"refs/remotes/{remote}/{default_branch}^{{commit}}")
+            if not base_head or local_base != base_head:
+                raise SourcePublicationError("Target base changed; fetch and review against the current base")
+            result.update(publication_checks=evidence["publication_checks"],
+                          expected_remote_head=old_head, head_identity=evidence["head_identity"],
+                          publication_state="unknown")
+            with hooks.allow_pr_push():
+                pushed = pr_publish.push_checked(
+                    None, remote, f"{expected_head}:refs/heads/{branch}", cwd=root,
+                    expected_head_repo=evidence["head_repo"],
+                    expected_head_identity=evidence["head_identity"],
+                    force_with_lease_expect=old_head, strict_lease=True,
+                    timeout=timeout, repo=repo, validate_source=validate_transport_source,
+                )
+            if not pushed:
+                return {**result, "error": pushed.stderr or pushed.stdout or "Source push failed"}
+            result.update(publication_state="pushed", warning=pushed.stderr)
+            actual = observed_ref(remote, evidence["push_urls"], f"refs/heads/{branch}", root)
+            if actual != expected_head:
+                return {**result, "error": "Push completed, but remote head readback differs",
+                        "observed_head": actual}
+            return {**result, "ok": True, "observed_head": actual}
     except (ValueError, OSError, git_ops.GitError, TimeoutError, subprocess.SubprocessError) as exc:
         return {**result, "error": str(exc)}

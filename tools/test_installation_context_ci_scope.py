@@ -2248,10 +2248,10 @@ def test_required_foundation_checks_generation_without_running_native_test_corpu
     workflow = yaml.safe_load((HERE.parent / ".github/workflows/ci.yml").read_text())
     generation = next(
         step for step in workflow["jobs"]["checks"]["steps"]
-        if step.get("name") == "Payload invocation generated files"
+        if step.get("name") == "Payload invocation canonical source"
     )
     assert generation["run"].split() == [
-        "python", "libs/payload-invocation/generate.py", "--all", "--check",
+        "python", "libs/payload-invocation/generate.py", "--all", "--source-check",
     ]
     commands = "\n".join(
         step.get("run", "") for step in workflow["jobs"]["checks"]["steps"]

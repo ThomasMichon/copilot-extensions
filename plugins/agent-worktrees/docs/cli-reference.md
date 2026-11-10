@@ -614,7 +614,7 @@ continue to work unchanged.
 |------------|-------------|
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan. `--new` creates + launches a **muxed interactive** session (refused without a TTY). `--codename <name>` selects an existing worktree by its assigned public-safe codename, as an alternative to `--worktree-id` (effort `pr-attribution-codenames`); resolved locally first, then via a cross-machine SSH scan (Phase 3) -- a match on a different machine fails closed (reports the machine, does not attempt a remote launch) |
 | `create` | Create a worktree **programmatically** -- no launch, no mux; prints id + path (add `--json`). The path for agents and daemons. Assigns the new worktree a random, public-safe **codename** (`codename.wordlist_path` configures a repo-declared vocabulary; falls back to a built-in neutral one) -- surfaced in the JSON output and usable later as an alternate lookup key via `list`/`resolve --codename` |
-| `move` | Read-only inactive-checkout relocation plan; `--apply` transfers and rebinds a qualified ordinary checkout, `--abort` cancels before publication. Discover the selected runtime with `get checkout-relocation` first. See [supported scope, original-operation recovery and mixed-root authority](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
+| `move` | Read-only inactive-checkout relocation plan; `--apply` transfers and rebinds a qualified checkout within the declared ordinary/receiving scope, `--abort` cancels before publication. Discover the selected runtime with `get checkout-relocation` first; receiving continuity does not qualify native inactivity. See [supported scope, original-operation recovery and mixed-root authority](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; for a merged PR with a missing cached head SHA, use a fresh provider-observed head only after the provider confirms the merge, and keep refusing when its boundary remains unverifiable; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
@@ -1070,9 +1070,12 @@ Repos without `pr.roles` and non-GitHub providers keep their prior behavior.
 | `set-pr` | Record PR metadata (`--url`, `--number`) when the PR was opened out of band by a provider sub-agent |
 | `pr-status` | Show tracked PR metadata + live verdict / conflict / merge state and supported native gate evidence. `--repo <slug> --pr <n> --json` reads an explicit target through the same one-shot observation as `pr-watch snapshot`. Tracked mode prints the effective actor `flow:` and flags pull-forward once merged; `--no-live` stays offline. |
 | `pr-nudge` | Ask this repo's bound automated reviewer (`pr.reviewer`, e.g. GitHub Copilot) to (re-)review the active PR. Nothing to nudge (unconfigured/unsupported) is reported, not an error; a successful request is async -- poll `pr-status`/`pr-watch` for a fresh verdict |
+| `pr-author-nudge --repo <target> --number <positive-number> --json` | Explicit target-qualified native reviewer request; optional `reviewer-request` author capability, initially enabled GitHub only. Preserves claimant and target policy; distinct from tracked `pr-nudge`. See [native author operations](../../agent-pull-requests/docs/author-operations.md#reviewer-requests-are-not-verdicts) for no-op, acceptance and unknown-result semantics |
+| `pr-thread-resolve --repo <target> --number <positive-number> --thread <native-id> --expected-candidate <fingerprint> --expected-thread <fingerprint> --operation-id <key> --json` | Optional ADO-only selected discussion closure. Preserves claimant/target policy and uses the existing consumed-before-write ledger; never calls legacy bulk resolution. See [selected native resolution](../../agent-pull-requests/docs/author-operations.md#selected-native-thread-resolution) for evidence, permission and unknown-outcome semantics |
+| `pr-thread-reopen --repo <target> --number <positive-number> --thread <native-id> --expected-candidate <fingerprint> --expected-thread <fingerprint> --operation-id <key> --json` | Optional ADO-only resolved-to-active discussion transition through the same admission, permission and consumed-ledger owners. See [selected native reopening](../../agent-pull-requests/docs/author-operations.md#selected-native-thread-reopening) for original-outcome recovery and unchanged legacy behavior |
 | `pr bar` | Check a PR against its merge bar, clause by clause, on one head: `ci_green`, `review_on_head` (the reviewer's latest review is on the head; `--reviewer`, default Copilot's), `review_findings_zero` (that review reports no open or previously missed findings, and agrees with the threads), `threads_unresolved_zero` (outdated threads are closed), `human_reviews_answered` (people only; an app reviewer is not one), `mergeable`, `merge_policy` (the repo's own policy through the shared classifier: no hold label, not a draft or WIP title, no outstanding change request (any reviewer's latest verdict, an app's too, or the provider's own review decision; a provider-required review is pending unless the provider affirms this actor may bypass it), and an approval on the head where the policy requires one -- resolved for the acting identity's role; an actor demoted by live authority needs a person's approval on the head). Every list is read to its last page; an unreadable page or an empty check list is `unknown`, never met, and a head that moves mid-read makes every clause `unknown` (mergeability the provider is still computing is not a change: the latest answer stands). The read is the repo provider's `PRProvider.get_bar_snapshot` (GitHub reads it today; a provider without one reads every clause `unknown`). `pr bar [<owner/name> <n> \| <n> \| <worktree-id>] [--reviewer <login>] [--json]`; exit 0 met (or merged), 10 pending, 11 failed, 12 unknown |
 | `pr rounds` | Is a PR's review/fix loop converging? One round per head the reviewer reviewed (its latest review in effect there), measured by the open plus previously missed findings it reported; a review stating no count is unmeasured, never zero. `done` when the latest round measured zero on the current head (a clean review of an older head is `continue`); `plateau` when none of the last `--plateau-passes` rounds (default 3) improved on the best before them; `round_cap` after `--max-rounds` (default 6); else `continue` ("round N of M"). Reads through the same `PRProvider.get_bar_snapshot` as `pr bar`, and fails closed the same way: no head, a head that moves or a PR that changes mid-read is `unknown`, never a stop or a go. `pr rounds [<owner/name> <n> \| <n> \| <worktree-id>] [--reviewer <login>] [--max-rounds N] [--plateau-passes N] [--json]`; exit 0 continue or done, 20 plateau, 21 round cap, 12 unknown |
-| `pr-watch` | `snapshot/status <repo> <pr> --json` reads configured native gate evidence once; `threads` reads discussion bodies and reply fingerprints on demand. `wait <repo> <pr> [--until …]` blocks for transitions with an opaque cursor; `cursor <repo> <pr>` captures the baseline. `subscribe/stop/ownerstatus` use the existing shared subscription owner. See [repository-configured observation](pr-observation.md) for native requirements and ownership. |
+| `pr-watch` | `snapshot/status <repo> <pr> --json` reads configured native gate evidence once; `threads` reads discussion bodies and reply fingerprints on demand; `diff` reads a unified diff without tracked reconciliation or invented completeness/candidate evidence. `wait <repo> <pr> [--until …]` blocks for transitions with an opaque cursor; `cursor <repo> <pr>` captures the baseline. `subscribe/stop/ownerstatus` use the existing shared subscription owner. See [repository-configured observation](pr-observation.md) for native requirements and ownership. |
 | `pr-watch checks` | Built-in `lenses`, `record-self-review`, `verify-self-review` and `scope-report` for an explicit repository/workspace. `export-config` writes read/check policy; optional `--include-author` also preserves author policy without self-merge/bypass grants. Workers use the delivered file through `--config`. Configured checks also gate publication mandatorily. See [publication checks](pr-publication-checks.md). |
 | `pr-watch reply/requeue` | Explicit, bounded ADO discussion replies or recovery of an existing build-policy evaluation; no new pipeline, approval or attestation. See [remediation](pr-remediation.md) for freshness, evidence, deduplication and reconciliation requirements. |
 | `pr-merge` | Signal **merge consent** on an approved PR (applies the bound `automerge_label`); the review gate merges when satisfied. `--all` / `--loop` for sweeps |
@@ -1468,6 +1471,33 @@ completion of those exact children. Older bundles still support exact source
 references; an alias-only retry without either the source ledger or durable
 proof fails explicitly rather than guessing equivalence.
 
+## Opening with a retained prompt handoff
+
+A preservation-capable Worktree Manager can reopen a stopped worktree, or
+reattach if it becomes live while the launcher resolves again, when its previous
+prompt handoff is unconfirmed. It warns and preserves the prompt
+and handoff unchanged, using admission-only execution rather than submitting
+that prompt again. Existing history selection is unchanged.
+
+The call-scoped `AGENT_WORKTREES_RETAINED_SEED_PLANS=1` hint requests a plan with
+`seed_preserved_id` and `seed_preservation_version: 1`. Manager forwards that identity as
+`resolve --worktree-id <id> --preserve-seed-id <seed-id>` when the local launcher
+resolves again. That selector never requests delivery, even if the original
+handoff has since been released. A missing, replaced or conflicting selection
+refuses before staging another intent. Combining preservation with `--restore`
+refuses before any bound-process recovery. The launchers also skip legacy prompt
+delivery for a preserved plan.
+
+Older Managers do not request these plans and keep the original safe refusal.
+Older Engines may ignore the optional hint, but reject an unsupported explicit
+preservation selector before effects; there is no weaker retry.
+
+Explicit delivery of an unconfirmed retained prompt still refuses. A changed staged
+identity between planning and execution also refuses rather than consuming the
+new intent. Opening the worktree is not a delivery receipt or permission to
+discard, restore or replay the retained prompt; reconcile its original handoff
+separately. Liveness, hosting and execution admission checks remain in force.
+
 ## Resolve previews
 
 `resolve --dry-run --worktree-id <id>` is read-only, including with `--json`
@@ -1581,6 +1611,63 @@ on a cadence at two natural lifecycle boundaries -- **picker launch** and
   locally provable simply waits for a later pass. Session-exit output reports
   only the number collected, not an unbounded list of worktree IDs. Disable entirely with
   `AGENT_WORKTREES_NO_AUTO_CLEAN=1`.
+
+### Python bytecode caches (`python-cache prune`)
+
+Plugin launchers pass `-X pycache_prefix=<runtime-root>/cache/python/<namespace>`.
+A runtime with valid install evidence (`.install-complete.json` plus package
+`RECORD`s) reuses one sealed `installed-<digest>` namespace. Without that
+evidence a launcher mints a one-off `unsealed-<id>` namespace. Launchers that
+wait for their child delete the namespace they minted afterwards. Detached
+daemons and `exec`-style launchers cannot, so some `unsealed-*` directories
+still accumulate. `python-cache prune` reclaims them:
+
+```bash
+agent-worktrees python-cache prune                    # dry run: report eligible dirs/bytes
+agent-worktrees python-cache prune --json             # same, machine-readable
+agent-worktrees python-cache prune --apply            # remove eligible dirs
+agent-worktrees python-cache prune --root ~/.agent-vault --apply
+agent-worktrees python-cache prune --apply --allow-age-only   # Windows/macOS: accept age as liveness evidence
+```
+
+By default it inspects `cache/python` under each of this account's plugin runtime
+roots (`~/.agent-*`, `~/.worktree-manager`, `~/.budget-guidance`,
+`~/.copilot-extensions/*`). `--root` (repeatable) names a runtime root instead.
+It is conservative and fails closed:
+
+- It is a dry run unless `--apply` is given.
+- It considers only `unsealed-*` directories directly under the cache root.
+  `installed-*` and every other name are never touched.
+- A candidate is skipped (`non-bytecode-content`) unless its whole tree holds
+  only directories and `.pyc` files.
+- A candidate containing any symlink, junction or other reparse point is
+  skipped (`reparse-point`). Links are never followed. A cache root whose
+  `cache/python`, `cache` or runtime-root component is itself a link is
+  reported as `cache-root-linked-or-not-directory` and not scanned.
+- A candidate whose newest entry was modified within the grace period is
+  skipped. A live process still writing bytecode keeps it fresh.
+  `--min-age-hours` defaults to 1, must be a finite number, and must be at
+  least 1 with `--apply`.
+- Liveness evidence is reported as `liveness`. On Linux every process
+  environment and command line is scanned, and a candidate named there is
+  kept (`referenced-by-live-process`). The mode is `process-scan` when every
+  process was read, `incomplete` when some were unreadable (for example
+  another account's processes), `unavailable` on platforms without a process
+  scan (Windows, macOS), and `unknown` when the scan itself failed.
+- Only `process-scan` proves a candidate unused. Under `incomplete` or
+  `unavailable` every candidate is kept (`liveness-unproven`) unless
+  `--allow-age-only` accepts the grace period as the only liveness evidence
+  (reported as `age_only_allowed`). Under `unknown` every candidate is kept
+  (`liveness-unknown`); `--allow-age-only` does not override it.
+- Each candidate is re-inventoried immediately before removal. Removal is
+  anchored to the inventoried directories (directory handles on POSIX,
+  non-delete-sharing guard handles on Windows). If any directory was replaced
+  in the meantime the candidate becomes `error` (`changed-during-removal`).
+  Any I/O error, including on the cache root itself, marks an `error` entry,
+  leaves the rest in place, and makes the command exit 1.
+  Default discovery skips absent cache paths, but reports inaccessible caches
+  through the same error entries rather than silently omitting them.
+- `python-cache` needs no project, so it runs from any directory.
 
 ## Installation & Config
 
@@ -1813,6 +1900,33 @@ to the effort after release.
 | `launch-update automatic\|bootstrap\|reconcile\|staged` | Submit fixed native maintenance to the shared installation driver (JSON result) |
 | `reconcile-plugins` | Reconcile repo-adopted plugin payloads + gated runtimes (JSON output, for launch wrappers) |
 | `uninstall-plugins` | Sweep every deployed core plugin runtime via each plugin's own uninstall action (JSON; dry-run by default) |
+
+### Scoped GitHub passthrough (`repos gh`)
+
+`repos gh <repo> -- <gh arguments...>` runs GitHub CLI with the repository's
+resolved account. Keep using this scoped entry rather than switching to an
+ambient `gh` account when a shell argument fails.
+
+**Windows PowerShell with a `.ps1` entry:** quote comma-joined values such as
+`--json 'number,title'` and `--label 'bug,triaged'`. PowerShell evaluates an
+unquoted literal `number,title` as an array before the script starts; forwarding
+`@args` cannot recover the lost grouping. This differs from a native `gh.exe`
+invocation and can also break a command that combines `--json` with a correctly
+quoted, spaced `--search` value.
+
+```powershell
+$aw = '<agent-worktrees catalog argv[0]>'
+$repo = 'example-owner/example-repo'
+& $aw repos gh $repo -- issue list --repo $repo --json 'number,title' --search 'bug in:title'
+
+$fields = 'number,title'
+& $aw repos gh $repo -- issue list --repo $repo --json $fields
+```
+
+Both a quoted literal and a string variable preserve the comma list through the
+PowerShell script boundary. Quote spaced values normally as well. This guidance
+does not claim that a native Windows shim is installed or repair arguments
+after PowerShell has already split them.
 
 ### Bulk account resolution (`repos account list --json --with-resolutions`)
 
@@ -2258,6 +2372,17 @@ the current directory's resolved worktree when omitted (matching most
 other subcommands); a caller that cannot be resolved either way fails
 loudly rather than logging a `worktree_id: null` entry invisible to
 `activity --worktree-id <id>`.
+
+**Disk growth under `~/.agent-*/cache/python`.** Thousands of `unsealed-*`
+directories there usually come from a launcher that ran without valid install
+evidence, or from a detached or `exec`-style launcher that cannot clean up
+after its child. A persistently empty `installed-*` set for a runtime suggests
+its install evidence is missing or invalid. Reinstalling or updating that
+runtime restores reuse. Run `agent-worktrees python-cache prune` (dry run) to
+size the backlog, then `--apply` to reclaim it (on Windows or macOS, where no
+process scan exists, add `--allow-age-only` once no affected runtime is
+running). See
+[Python bytecode caches](#python-bytecode-caches-python-cache-prune).
 
 ### Handoff trace (Tier C)
 

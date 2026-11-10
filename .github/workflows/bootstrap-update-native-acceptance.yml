@@ -2,6 +2,11 @@ name: Whole bootstrap update native acceptance
 
 on:
   workflow_dispatch:
+    inputs:
+      qualify_promotion_copies:
+        description: Qualify full-tree composition, freeze/import and exact generated copies without publication
+        type: boolean
+        default: false
   pull_request:
     branches: [dev]
     paths:
@@ -109,3 +114,143 @@ jobs:
     timeout-minutes: 5
     env: *bootstrap-update-env
     steps: *bootstrap-retention-steps
+
+  promotion-copies:
+    name: Full-tree promotion copies (Linux, opt-in)
+    if: github.event_name == 'workflow_dispatch' && inputs.qualify_promotion_copies
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env: *bootstrap-update-env
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - *bootstrap-update-python
+      - *bootstrap-update-uv
+      - *bootstrap-update-source
+      - name: Install seasoned composition tooling
+        run: python tools/seasoned_uv.py --uv uv -- --system packaging pyyaml
+      - name: Compose, freeze and import the actual repository without publishing
+        run: |
+          python -B - <<'PY'
+          import hashlib
+          import importlib.util
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          import tempfile
+
+          root = Path.cwd()
+          sys.path.insert(0, str(root / "tools"))
+          import materialize_main
+          import promote_release
+          from promotion_frozen_candidate import import_candidate
+
+          def git(*args: str) -> str:
+              return subprocess.check_output(
+                  ["git", *args], cwd=root, text=True, timeout=30,
+              ).strip()
+
+          def source_bytes() -> dict[str, str]:
+              names = subprocess.check_output(
+                  ["git", "ls-files", "-z"], cwd=root, timeout=30,
+              ).decode().split("\0")
+              return {
+                  name: hashlib.sha256((root / name).read_bytes()).hexdigest()
+                  for name in names if name
+              }
+
+          source = git("rev-parse", "HEAD")
+          assert source == os.environ["QUALIFICATION_SHA"]
+          main = git("rev-parse", "origin/main")
+          before = source_bytes()
+          with tempfile.TemporaryDirectory(prefix="promotion-copies-", dir=os.environ["RUNNER_TEMP"]) as raw:
+              work = Path(raw)
+              repository = work / "repository"
+              subprocess.run(
+                  ["git", "clone", "--quiet", "--shared", "--no-checkout", str(root), str(repository)],
+                  check=True, timeout=30,
+              )
+              for name, value in (("user.name", "Test"), ("user.email", "test@example.com")):
+                  subprocess.run(
+                      ["git", "config", "--local", name, value],
+                      cwd=repository, check=True, timeout=30,
+                  )
+              frozen = work / "frozen"
+              report = promote_release.promote(
+                  repo=repository, dev_ref=source, main_ref=main,
+                  push=False, prepare_candidate_dir=frozen,
+              )
+              assert report["promoted"] and not report["pushed"]
+              record = import_candidate(
+                  frozen, repo=repository, dev_sha=source, main_before=main,
+                  candidate_sha=report["commit"],
+              )
+              candidate = promote_release.add_scratch_worktree(record["candidate_sha"], repo=repository)
+              try:
+                  spec = importlib.util.spec_from_file_location(
+                      "_qualified_invocation", root / "libs/payload-invocation/generate.py",
+                  )
+                  assert spec and spec.loader
+                  generator = importlib.util.module_from_spec(spec)
+                  spec.loader.exec_module(generator)
+                  declared = generator.discover_manifests(canonical_root=root)
+                  manifests = generator.discover_manifests(canonical_root=candidate)
+                  assert {path.relative_to(candidate) for path in manifests} == {
+                      path.relative_to(root) for path in declared
+                  }
+                  for manifest in manifests:
+                      assert not generator.process_manifest(
+                          manifest, check=True, canonical_root=candidate,
+                      ), manifest
+                  sync = promote_release._load_module(
+                      root / "tools/sync-installer-engine.py", "_qualified_installer_sync",
+                  )
+                  sync.REPO = candidate
+                  sync.CANONICAL_DIR = candidate / "libs/installer-engine"
+                  problems = sync.verify()
+                  assert not problems, problems
+                  canonical_helper = sync.CANONICAL_DIR / "installer_engine_commands.py"
+                  assert materialize_main.mie.derived_path_problem(
+                      canonical_helper, candidate, required=True,
+                  ) is None
+                  original = canonical_helper.read_bytes()
+                  try:
+                      canonical_helper.write_bytes(original + b"\n# qualification canonical drift\n")
+                      assert sync.verify(), "candidate canonical drift was not rejected"
+                  finally:
+                      canonical_helper.write_bytes(original)
+                  assert not sync.verify()
+                  canonical = candidate / "libs/update-driver"
+                  consumers = set(candidate.glob("plugins/*/libs/update-driver"))
+                  consumers.update(
+                      candidate / extra / "libs/update-driver"
+                      for extra in materialize_main._EXTRA_CONSUMER_DIRS
+                      if (candidate / extra / "libs/update-driver").is_dir()
+                  )
+                  assert candidate / "plugins/agent-vault/libs/update-driver" in consumers
+                  assert candidate / "worktree-manager/libs/update-driver" in consumers
+                  copies = 0
+                  for consumer in consumers:
+                      for original, target in materialize_main.mie.derived_file_pairs(
+                          candidate, candidate, copied_consumer=(canonical, consumer),
+                      ):
+                          assert materialize_main.mie.derived_path_problem(target, candidate, required=True) is None
+                          assert target.read_bytes() == original.read_bytes()
+                          copies += 1
+                  assert not promote_release._git(["status", "--porcelain"], cwd=candidate)
+                  assert promote_release._git(["rev-parse", "HEAD"], cwd=candidate) == record["candidate_sha"]
+                  print(json.dumps({
+                      "source": source, "main": main, "candidate": record["candidate_sha"],
+                      "tree": record["tree"], "invocation_manifests": len(manifests),
+                      "transitive_installer_files": copies, "canonical_drift_rejected": True,
+                      "published": False,
+                  }, sort_keys=True))
+              finally:
+                  promote_release.remove_scratch_worktree(candidate, repo=repository)
+          assert before == source_bytes()
+          PY

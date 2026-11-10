@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import subprocess
 import sys
@@ -148,6 +150,331 @@ def test_failed_reference_publication_preserves_previous_evidence(tmp_path, monk
         replace(root, ["new", "old"], expected=["old"])
     assert json.loads((root / "runtime-references.json").read_bytes()) == before
     assert not list(root.glob("runtime-references.json.*.tmp"))
+
+
+def test_reference_transaction_survives_owner_exit_and_blocks_gc_until_commit(tmp_path):
+    root = case(tmp_path)
+    replace(root, ["old"])
+    code = """
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+runtime._leases.begin_runtime_reference_transaction(pathlib.Path(sys.argv[2]), 'fixture/component')
+os._exit(23)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(LIBRARY), str(root)],
+        timeout=15, capture_output=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 23, result.stderr
+    with pytest.raises(ValueError):
+        runtime.gc(root, min_age_days=0)
+    assert set(runtime.list_versions(root)) == {"old", "new", "spare"}
+
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
+    assert ticket["owners"] == {"fixture/component": ["old"]}
+    runtime._leases.commit_runtime_reference_transaction(
+        root, "fixture/component", ticket["token"],
+        {"fixture/component": ["old", "new"], "fixture/component/cohort": ["spare"]},
+        expected={"fixture/component": ["old"], "fixture/component/cohort": []},
+    )
+    assert runtime._leases.read_runtime_references(root) == {
+        "fixture/component": ["new", "old"], "fixture/component/cohort": ["spare"],
+    }
+    assert runtime.gc(root, min_age_days=0) == []
+
+
+def test_reference_transaction_refuses_foreign_owner_and_stale_token(tmp_path):
+    root = case(tmp_path)
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
+    path = root / "runtime-references.json"
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError):
+        runtime._leases.begin_runtime_reference_transaction(root, "other/component")
+    with pytest.raises(RuntimeError):
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/component", "0" * 64,
+            {"fixture/component": ["old"]}, expected={"fixture/component": []},
+        )
+    with pytest.raises(ValueError):
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/component", ticket["token"],
+            {"other/component": ["old"]}, expected={"other/component": []},
+        )
+    with pytest.raises(ValueError):
+        replace(root, ["old"])
+    assert path.read_bytes() == before
+    assert runtime._leases.begin_runtime_reference_transaction(root, "fixture/component") == ticket
+
+
+def test_reference_transaction_commit_is_atomic_and_retryable(tmp_path, monkeypatch):
+    root = case(tmp_path)
+    replace(root, ["old"])
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
+    path = root / "runtime-references.json"
+    before = path.read_bytes()
+    original = Path.replace
+
+    def fail(source, target):
+        if Path(target) == path:
+            raise OSError("injected reference publication failure")
+        return original(source, target)
+
+    updates = {"fixture/component": ["old", "new"], "fixture/component/cohort": ["spare"]}
+    expected = {"fixture/component": ["old"], "fixture/component/cohort": []}
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail)
+        with pytest.raises(OSError, match="publication failure"):
+            runtime._leases.commit_runtime_reference_transaction(
+                root, "fixture/component", ticket["token"], updates, expected=expected,
+            )
+    assert path.read_bytes() == before
+    with pytest.raises(ValueError):
+        runtime.gc(root, min_age_days=0)
+    assert set(runtime.list_versions(root)) == {"old", "new", "spare"}
+    runtime._leases.commit_runtime_reference_transaction(
+        root, "fixture/component", ticket["token"], updates, expected=expected,
+    )
+    assert runtime._leases.read_runtime_references(root) == {
+        "fixture/component": ["new", "old"], "fixture/component/cohort": ["spare"],
+    }
+
+
+def test_reference_transaction_preserves_fence_on_compare_or_target_failure(tmp_path):
+    root = case(tmp_path)
+    replace(root, ["old"])
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
+    path = root / "runtime-references.json"
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match="changed before publication"):
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/component", ticket["token"],
+            {"fixture/component": ["new"]}, expected={"fixture/component": ["spare"]},
+        )
+    with pytest.raises(FileNotFoundError):
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/component", ticket["token"],
+            {"fixture/component": ["missing"]}, expected={"fixture/component": ["old"]},
+        )
+    assert path.read_bytes() == before
+    with pytest.raises(ValueError):
+        runtime.gc(root, min_age_days=0)
+
+
+def test_reference_transactions_wait_for_other_owner_to_settle(tmp_path):
+    root = case(tmp_path)
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    started = threading.Event()
+
+    def begin_other():
+        started.set()
+        return runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", timeout=5,
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(begin_other)
+        assert started.wait(2)
+        assert not future.done()
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/first", ticket["token"],
+            {"fixture/first": ["old"]}, expected={"fixture/first": []},
+        )
+        other = future.result(timeout=5)
+    runtime._leases.commit_runtime_reference_transaction(
+        root, "fixture/second", other["token"],
+        {"fixture/second": ["new"]}, expected={"fixture/second": []},
+    )
+    assert runtime._leases.read_runtime_references(root) == {
+        "fixture/first": ["old"], "fixture/second": ["new"],
+    }
+
+
+def test_reference_transaction_custody_serializes_post_commit_work(tmp_path):
+    root = case(tmp_path)
+    started = threading.Event()
+
+    def acquire():
+        started.set()
+        with runtime._leases.reference_transaction_custody(root, timeout=5):
+            return True
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with runtime._leases.reference_transaction_custody(root):
+            future = pool.submit(acquire)
+            assert started.wait(2)
+            assert not future.done()
+        assert future.result(timeout=5) is True
+
+
+def test_foreign_abandoned_transaction_recovers_all_slots_before_continuing(tmp_path):
+    root = tmp_path / "runtime"
+    names = [f"slot-{number:03d}" for number in range(68)]
+    for name in names:
+        (root / "versions" / name).mkdir(parents=True)
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+
+    with runtime._leases.reference_transaction_custody(root):
+        ticket = runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+        prefix = runtime._leases.reference_recovery_prefix("fixture/first")
+        recovered = {
+            key: values for key, values in ticket["owners"].items() if key.startswith(prefix)
+        }
+        assert len(recovered) == 2
+        assert set().union(*recovered.values()) == set(names)
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/second", ticket["token"],
+            {"fixture/second": [names[0]]}, expected={"fixture/second": []},
+        )
+    assert runtime.gc(root, min_age_days=0) == []
+
+
+def test_fresh_root_fence_can_be_recovered_by_another_owner(tmp_path):
+    root = tmp_path / "fresh"
+    code = """
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+runtime._leases.begin_runtime_reference_transaction(pathlib.Path(sys.argv[2]), 'fixture/first')
+os._exit(23)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(LIBRARY), str(root)],
+        timeout=15, capture_output=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 23, result.stderr
+    assert (root / "versions").is_dir()
+    with runtime._leases.reference_transaction_custody(root):
+        ticket = runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+        assert ticket["owners"] == {}
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/second", ticket["token"],
+            {"fixture/second": []}, expected={"fixture/second": []},
+        )
+    assert runtime._leases.read_runtime_references(root) == {}
+
+
+def test_recovery_does_not_recreate_a_missing_fenced_inventory(tmp_path):
+    root = case(tmp_path)
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    shutil.rmtree(root / "versions")
+    with runtime._leases.reference_transaction_custody(root), pytest.raises(FileNotFoundError):
+        runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+    assert not (root / "versions").exists()
+    with pytest.raises(ValueError):
+        runtime._leases.read_runtime_references(root)
+
+
+def test_fresh_fence_refuses_a_non_directory_inventory(tmp_path):
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "versions").write_text("foreign", encoding="utf-8")
+    with pytest.raises(ValueError, match="ordinary directory"):
+        runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    assert not (root / "runtime-references.json").exists()
+
+
+def test_foreign_recovery_failure_keeps_fence_and_existing_references(tmp_path, monkeypatch):
+    root = case(tmp_path)
+    replace(root, ["old"], owner="unrelated/component")
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    path = root / "runtime-references.json"
+    before = path.read_bytes()
+    original = Path.replace
+
+    def fail(source, target):
+        if Path(target) == path:
+            raise OSError("injected recovery failure")
+        return original(source, target)
+
+    with runtime._leases.reference_transaction_custody(root), monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail)
+        with pytest.raises(OSError, match="recovery failure"):
+            runtime._leases.begin_runtime_reference_transaction(
+                root, "fixture/second", recover_foreign=True,
+            )
+    assert path.read_bytes() == before
+    with pytest.raises(ValueError):
+        runtime.gc(root, min_age_days=0)
+
+    with runtime._leases.reference_transaction_custody(root):
+        ticket = runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+        assert ticket["owners"]["unrelated/component"] == ["old"]
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/second", ticket["token"],
+            {"fixture/second": ["new"]}, expected={"fixture/second": []},
+        )
+    assert runtime.gc(root, min_age_days=0) == []
+
+
+def test_foreign_recovery_refuses_an_ambiguous_inventory(tmp_path):
+    root = case(tmp_path)
+    (root / "versions" / "not-a-directory").write_text("fixture", encoding="utf-8")
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    with runtime._leases.reference_transaction_custody(root), pytest.raises(ValueError):
+        runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+    with pytest.raises(ValueError):
+        runtime._leases.read_runtime_references(root)
+
+
+def test_foreign_recovery_does_not_retry_forever_after_ownership_changes(tmp_path, monkeypatch):
+    root = case(tmp_path)
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    attempts = []
+
+    def unchanged(_root):
+        attempts.append(None)
+        if len(attempts) > 2:
+            raise AssertionError("recovery retried without a bound")
+
+    monkeypatch.setattr(runtime._leases, "_recover_runtime_reference_transaction", unchanged)
+    with runtime._leases.reference_transaction_custody(root), pytest.raises(RuntimeError):
+        runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", timeout=0, recover_foreign=True,
+        )
+    assert len(attempts) == 1
+
+
+def test_reference_transaction_commits_multiple_bounded_groups_before_owner_exit(tmp_path):
+    root = tmp_path / "runtime"
+    names = [f"slot-{number:03d}" for number in range(68)]
+    for name in names:
+        (root / "versions" / name).mkdir(parents=True)
+    code = """
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+root = pathlib.Path(sys.argv[2])
+ticket = runtime._leases.begin_runtime_reference_transaction(root, 'fixture/component')
+names = [f'slot-{number:03d}' for number in range(68)]
+runtime._leases.commit_runtime_reference_transaction(
+    root, 'fixture/component', ticket['token'],
+    {'fixture/component/first': names[:64], 'fixture/component/second': names[64:]},
+    expected={'fixture/component/first': [], 'fixture/component/second': []},
+)
+os._exit(23)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(LIBRARY), str(root)],
+        timeout=30, capture_output=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 23, result.stderr
+    owners = runtime._leases.read_runtime_references(root)
+    assert set().union(*owners.values()) == set(names)
+    assert runtime.gc(root, min_age_days=0) == []
 
 
 def test_publication_holds_retention_before_selector_custody(tmp_path, monkeypatch):

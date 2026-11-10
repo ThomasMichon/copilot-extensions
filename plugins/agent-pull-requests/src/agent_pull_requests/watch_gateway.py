@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_context import identifier
@@ -16,6 +17,9 @@ from fleet_manager.gateway_service_handler import (
     HandlerBinding, RequestDisconnected, ServiceRequest, ServiceResponse,
 )
 from single_instance_lease import OperationLockedError, OperationOwnershipError
+
+if TYPE_CHECKING:
+    from fleet_manager.gateway_service_handler import BoundedServiceResponse
 
 from .watch_replay import MAX_BATCH, ConsumerScope
 from .watch_notification import positive_seconds
@@ -94,6 +98,7 @@ class WatchGateway:
         checkpoint: Callable[[], None] | None = None,
         workspaces=None,
         attention=None,
+        reports=None,
     ) -> None:
         for name in (fleet, gateway, slot):
             identifier(name)
@@ -135,13 +140,24 @@ class WatchGateway:
         ):
             raise ValueError("attention must use the admitted consumer and existing workspace owners")
         self.attention = MappingProxyType(attention)
-        self._tasks: set[asyncio.Task[ServiceResponse]] = set()
+        from .report_read import ReportReader
+        reports = {} if reports is None else dict(reports)
+        if any(
+            key not in selected or not isinstance(value, ReportReader)
+            or value.consumer_scope != selected[key]
+            for key, value in reports.items()
+        ):
+            raise ValueError("reports must use the existing admitted scope owner")
+        self.reports = MappingProxyType(reports)
+        self._tasks: set[asyncio.Task[ServiceResponse | BoundedServiceResponse]] = set()
         self._closing = False
 
-    def handler_binding(self) -> HandlerBinding:
-        return HandlerBinding(self.fleet, self.gateway, self.handle)
+    def handler_binding(self, *, response_limit: int = BODY_BYTES) -> HandlerBinding:
+        if type(response_limit) is int and response_limit == BODY_BYTES:
+            return HandlerBinding(self.fleet, self.gateway, self.handle)
+        return HandlerBinding(self.fleet, self.gateway, self.handle, response_limit=response_limit)
 
-    async def handle(self, request: ServiceRequest) -> ServiceResponse:
+    async def handle(self, request: ServiceRequest) -> ServiceResponse | BoundedServiceResponse:
         if type(request) is not ServiceRequest:
             raise TypeError("expected trusted service request")
         try:
@@ -156,6 +172,9 @@ class WatchGateway:
             return _response(403, {"error": "watch_caller_refused"})
         if request.target.startswith(("/v2/review/", "/v1/attention/")):
             return await self._handle_workspace(request)
+        if request.target.startswith(("/v1/read/", "/v2/read/")):
+            from .report_gateway import handle
+            return await handle(self, request)
         matched = _PATH.fullmatch(request.target)
         if matched is None:
             return _response(404, {"error": "watch_route_not_found"})
@@ -236,7 +255,13 @@ class WatchGateway:
             return _response(415, {"error": "workspace_json_required"})
         try:
             payload = json_object(request.body)
-            if set(payload) != {"binding", "request"} or not isinstance(payload["request"], dict):
+            if (
+                not {"binding", "request"} <= payload.keys()
+                or payload.keys() - {"binding", "request"} - (
+                    set() if is_attention else {"workspace_contract"}
+                )
+                or not isinstance(payload["request"], dict)
+            ):
                 raise ValueError
             expected = ReplayBinding.from_document(payload["binding"])
             if self._binding(request, target) != expected:
@@ -249,6 +274,7 @@ class WatchGateway:
             return _response(503, {"error": "workspace_service_unavailable"})
         task = asyncio.create_task(self._execute_workspace(
             workspace, operation, payload["request"], request, target, expected,
+            selection=payload.get("workspace_contract"),
         ))
         self._tasks.add(task)
         task.add_done_callback(self._completed)
@@ -258,7 +284,8 @@ class WatchGateway:
             request.lifetime.close()
             raise
 
-    async def _execute_workspace(self, workspace, operation, payload, request, target, expected):
+    async def _execute_workspace(self, workspace, operation, payload, request, target, expected,
+                                 *, selection=None):
         from .attention_read import AttentionUnavailable, MAX_BATCH_BYTES
         from .generation_cache import CacheInvalid
         from .owner_read import OwnerReadResponseTooLarge
@@ -291,9 +318,13 @@ class WatchGateway:
                 raise OwnerReadResponseTooLarge("prepared preview or submission exceeds transport limit")
 
         try:
+            from .workspace_terminal_read import serve
+            attention = request.target.startswith("/v1/attention/")
             value = await asyncio.to_thread(
-                workspace.execute, operation, payload,
+                workspace.execute if attention else serve,
+                *((operation, payload) if attention else (workspace, operation, payload)),
                 expires_at=request.context.expires_at, checkpoint=checkpoint,
+                **({} if attention else {"selection": selection}),
                 **({"selection_validator": validate_selection} if operation == "allocate" else {}),
             )
             checkpoint()
@@ -335,7 +366,7 @@ class WatchGateway:
         """Withdraw readiness before joining already-owned operations."""
         self._closing = True
 
-    def _completed(self, task: asyncio.Task[ServiceResponse]) -> None:
+    def _completed(self, task: asyncio.Task[ServiceResponse | BoundedServiceResponse]) -> None:
         self._tasks.discard(task)
         if not task.cancelled() and task.exception() is not None:
             _LOG.error("watch-service-failed code=unexpected-operation-failure")

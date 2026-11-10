@@ -303,7 +303,9 @@ def materialized_local_source_problems(consumer_dir: Path) -> list[str]:
     return problems
 
 
-def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]]:
+def find_uv_editable_refs(
+    consumer_dir: Path, *, data: dict | None = None, resolve_symlinks: bool = True,
+) -> list[tuple[str, str, str, bool]]:
     """Every ``[tool.uv.sources]`` entry in ``consumer_dir/pyproject.toml``
     whose ``path`` escapes ``consumer_dir``'s own root -- the `uv`-editable
     canonical-reference form (as opposed to the ordinary in-tree vendored-
@@ -328,8 +330,9 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
     returns ``[]`` (a distinct, already-explicit refusal every caller
     checks for directly via ``.is_symlink()``)."""
     pyproject = consumer_dir / "pyproject.toml"
-    sources = read_uv_sources(consumer_dir)
-    consumer_root = consumer_dir.resolve()
+    sources = read_uv_sources(consumer_dir, data=data)
+    resolve = Path.resolve if resolve_symlinks else lambda path: Path(os.path.abspath(path))
+    consumer_root = resolve(consumer_dir)
     out: list[tuple[str, str, str, bool]] = []
     for name, entry in sources.items():
         if not isinstance(entry, dict) or "path" not in entry:
@@ -344,8 +347,8 @@ def find_uv_editable_refs(consumer_dir: Path) -> list[tuple[str, str, str, bool]
                 f"{pyproject}: [tool.uv.sources] {name!r}'s path is not a "
                 f"string ({raw_path!r})"
             )
-        candidate = (consumer_dir / raw_path).resolve()
-        if escapes_root(candidate, consumer_root):
+        candidate = resolve(consumer_dir / raw_path)
+        if candidate != consumer_root and consumer_root not in candidate.parents:
             out.append((name, raw_path, Path(raw_path).name, entry.get("editable") is True))
     return out
 
@@ -374,10 +377,8 @@ def _find_symlinked_ancestor(path: Path, root: Path) -> Path | None:
 def _find_symlink(tree: Path, *, skip_test_runs: bool = True) -> str | None:
     """The first path (relative to ``tree``, or ``"."`` when ``tree``
     itself is the symlink) under ``tree`` that is a symlink, or ``None`` if
-    none is found. Mirrors ``materialize_main.py``'s and
-    ``sync-vendored-libs.py``'s own copies (kept separate for the same
-    hyphenated-filename reason those two already duplicate small helpers
-    between themselves). ``_find_symlinked_ancestor()`` above only catches
+    none is found. Shared with the promotion materializers.
+    ``_find_symlinked_ancestor()`` above only catches
     ``libs/<lib>`` and its ANCESTORS being a symlink -- a symlink NESTED
     somewhere below it (e.g. ``libs/<lib>/src/foo.py -> /external/file``)
     is a distinct hazard this catches: the live `uv`-editable reference
@@ -389,6 +390,21 @@ def _find_symlink(tree: Path, *, skip_test_runs: bool = True) -> str | None:
         return "."
     if not tree.is_dir():
         return None
+    try:
+        pending = [tree]
+        links = []
+        while pending:
+            with os.scandir(pending.pop()) as entries:
+                for entry in entries:
+                    if skip_test_runs and entry.name == ".test-runs":
+                        continue
+                    if entry.is_symlink():
+                        links.append(Path(entry.path).relative_to(tree))
+                    elif entry.is_dir(follow_symlinks=False):
+                        pending.append(Path(entry.path))
+        return str(min(links)) if links else None
+    except OSError:
+        pass  # Preserve pathlib's existing scan-error handling.
     for entry in sorted(tree.rglob("*")):
         if skip_test_runs and ".test-runs" in entry.relative_to(tree).parts:
             continue

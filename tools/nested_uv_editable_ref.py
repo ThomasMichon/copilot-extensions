@@ -25,6 +25,7 @@ import shutil
 from pathlib import Path
 
 import uv_editable_ref as uer
+import materialize_installer_engine as mie
 
 
 def _escapes_root(candidate: Path, root: Path) -> bool:
@@ -301,6 +302,13 @@ def _materialize_direct_uv_editable_refs(
                 log.append(f"SKIP {nested_dest}: {where} is a symlink -- refusing")
                 continue
             shutil.copytree(nested_canonical, nested_dest, ignore=_ignore)
+        derived_log = mie.materialize_derived_files(
+            dest_root_r, canonical_root=canonical_root_r,
+            copied_consumer=(nested_canonical, nested_dest),
+        )
+        log.extend(derived_log)
+        if any(line.startswith("SKIP") for line in derived_log):
+            continue
         verified.add(nested_dest.resolve())
         error = rewrite_nested_uv_editable_entry(
             pyproject=dest_pyproject, name=nested_name, raw_path=nested_raw_path,

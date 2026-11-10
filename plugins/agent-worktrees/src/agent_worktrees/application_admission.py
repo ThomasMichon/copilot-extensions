@@ -134,6 +134,7 @@ def new_application_preflight(config, *, source: str, checked_profile: str | Non
     if not config.default_repo.require_application_readiness:
         return LaunchPreflight()
     reason = "Required application observation is incomplete or not ready."
+    stage = "profile selection"
     try:
         budget = OwnedExecutionBudget.from_timeout(60, cleanup_reserve=5)
         profile_input = tool.observe_for_admission(config, deadline=budget.execution_deadline)
@@ -141,15 +142,18 @@ def new_application_preflight(config, *, source: str, checked_profile: str | Non
             raise KnowledgePluginError("project tool profile changed after application admission")
         if time.monotonic() >= budget.execution_deadline:
             raise TimeoutError("Required application profile selection exhausted its budget")
+        stage = "runtime selection"
         prefix, environment = _selected_runtime(budget=budget)
         remaining = budget.execution_deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("Required application selection exhausted its budget")
+        stage = "observation"
         result = run_caller_owned(
             [*prefix, "installation-repair", "--project-root", source, "--required", "--caller-owned-readiness"],
             timeout=remaining, max_stdout_bytes=1024 * 1024, max_stderr_bytes=65536,
             cwd=source, env=environment, budget=budget,
         )
+        stage = "profile revalidation"
         if (
             _ready(result, source)
             and tool.observe_for_admission(config, deadline=budget.execution_deadline) == profile_input
@@ -160,8 +164,10 @@ def new_application_preflight(config, *, source: str, checked_profile: str | Non
         raise
     except KnowledgePluginError as exc:
         reason = str(exc)
+    except (TimeoutError, subprocess.TimeoutExpired):
+        reason = f"Required application {stage} exceeded the launch admission budget."
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-        reason = "Required application observation is unavailable or unsupported by the selected runtime."
+        reason = f"Required application {stage} is unavailable or unsupported."
     boundary = "launch" if checked_profile is not None else "allocation"
     retry = "this existing worktree" if checked_profile is not None else "New"
     return LaunchPreflight(policy_error=(

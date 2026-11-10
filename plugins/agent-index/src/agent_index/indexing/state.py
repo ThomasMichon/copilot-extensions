@@ -32,6 +32,7 @@ class IndexState:
     total_chunks: int = 0
     last_full_reindex: float | None = None
     stored_families: dict[str, str] = field(default_factory=dict)
+    completed_family_cursors: dict[str, str | None] = field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> IndexState:
@@ -62,11 +63,19 @@ class IndexState:
             if source.acquisition_scope is not None and source.acquisition_scope != scope:
                 raise ValueError("conflicting persisted source acquisition scope")
             source.acquisition_scope = scope
+        completed = data.get("completed_family_cursors", {})
+        if not isinstance(completed, dict) or any(
+            not isinstance(family, str) or not family
+            or (commit is not None and not isinstance(commit, str))
+            for family, commit in completed.items()
+        ):
+            raise ValueError("invalid persisted completed family cursors")
         return cls(
             sources=sources,
             total_chunks=data.get("total_chunks", 0),
             last_full_reindex=data.get("last_full_reindex"),
             stored_families=families,
+            completed_family_cursors=completed,
         )
 
     def save(self, path: Path) -> None:
@@ -87,6 +96,8 @@ class IndexState:
                   if src.acquisition_scope is not None}
         if scopes:
             data["acquisition_scopes"] = scopes
+        if self.completed_family_cursors:
+            data["completed_family_cursors"] = self.completed_family_cursors
         temporary = path.with_name(f".{path.name}.{uuid.uuid4().hex}.tmp")
         try:
             with temporary.open("x", encoding="utf-8", newline="\n") as stream:
@@ -112,6 +123,16 @@ class IndexState:
             raise ValueError(
                 f"Source checkpoint {name!r} has a missing or different acquisition identity; "
                 "explicit full reindex required",
+            )
+
+    def require_family_cursor(self, name: str, family: str, *, full: bool) -> None:
+        """A completed alias cannot leave another alias using a divergent base."""
+        checkpoint = self.sources.get(name)
+        if (not full and checkpoint is not None and family in self.completed_family_cursors
+                and checkpoint.last_commit != self.completed_family_cursors[family]):
+            raise ValueError(
+                f"Source checkpoint {name!r} differs from the completed cursor for family "
+                f"{family!r}; explicit full reindex required",
             )
 
     def mark_source_indexed(self, name: str, commit: str | None, chunk_count: int) -> None:

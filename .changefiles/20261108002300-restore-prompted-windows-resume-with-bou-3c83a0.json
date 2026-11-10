@@ -1,0 +1,9 @@
+{
+  "comment": "Restore prompted Windows Resume with bounded non-mutating native PSMux observation; retain unknown outcomes for incomplete server evidence.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

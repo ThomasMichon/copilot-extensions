@@ -5,13 +5,20 @@ from rich.text import Text
 from .engine_helpers import C_DIM, C_TAB_ACTIVE, C_TAB_FOCUS_ON, C_TABOFF, C_WARN
 
 
+def knowledge_configuration_needed(readiness):
+    return (
+        isinstance(readiness, dict) and readiness.get("ready") is False
+        and readiness.get("code") in {"knowledge_binding_required", "state_root_resolution_failed"}
+    )
+
+
 class PickerConfigurationMixin:
     def _refresh_knowledge_readiness(self):
         reader = getattr(self.src, "knowledge_readiness", None)
         if not callable(reader):
             return
         generation = self._knowledge_read_generation = object()
-        was_ready = getattr(self, "_knowledge_readiness", {}).get("ready") is True
+        had_configuration_action = knowledge_configuration_needed(getattr(self, "_knowledge_readiness", None))
         if not getattr(self, "_knowledge_readiness", None):
             self._knowledge_readiness = {"ready": None, "code": "loading"}
 
@@ -26,7 +33,7 @@ class PickerConfigurationMixin:
                 and result["ready"] == (result["code"] == "ready")
             )
             self._knowledge_readiness = dict(result) if valid else {"ready": None, "code": "unavailable"}
-            if was_ready != (self._knowledge_readiness.get("ready") is True):
+            if had_configuration_action != knowledge_configuration_needed(self._knowledge_readiness):
                 if self._kind() == "worktrees":
                     self.btn_idx = 0
                 saved = getattr(self, "_config_return", None)

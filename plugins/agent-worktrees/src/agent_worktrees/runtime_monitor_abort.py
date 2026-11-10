@@ -13,6 +13,25 @@ from . import status_monitor_cutover as cutover
 from . import status_monitor_recovery_contract as recovery
 
 
+def reap_legacy_passive(directory, record: dict | None, *, census) -> dict:
+    table = routing.read_table(directory) or {}
+    active = table.get("active") if isinstance(table, dict) else None
+    active_pid = active.get("pid") if isinstance(active, dict) else None
+
+    def terminate(pid: int) -> bool:
+        result = diagnostics.terminate_pid_if_identity(
+            pid, (record or {}).get("new_process_start_time"), exit_timeout=5.0,
+        )
+        return all(
+            result.get(key) is True for key in ("killed", "identity_verified", "exit_confirmed")
+        )
+
+    return breadcrumb.reap_abandoned_passive(
+        directory, pid_alive=lambda pid: pid in census(), terminate=terminate,
+        active_pid=int(active_pid) if active_pid else None, record=record, grace_seconds=0.0,
+    )
+
+
 def _same_owner(left, right) -> bool:
     return left is not None and right is not None and (
         left.pid, left.process_start_time, left.bind, left.port, left.version,

@@ -4,14 +4,40 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from pathlib import Path
 
 
-def runtime_status_path(scope: str) -> Path:
+def write_runtime_status(scope: str, summary) -> None:
+    from . import __version__
+
+    path = runtime_status_path(scope)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    previous, _error = read_status(path)
+    payload = {
+        "runtime_version": __version__,
+        "updated_at": getattr(summary, "completed_at", time.time()),
+        "cycle_started_at": (previous or {}).get("cycle_started_at"),
+        "cycle_id": (previous or {}).get("cycle_id"),
+        "generation": (previous or {}).get("generation"),
+        "progress": getattr(summary, "progress", None),
+        "running": summary.running,
+        "backing_off": summary.backing_off,
+        "dead": getattr(summary, "dead", []),
+    }
+    for key in ("owner", "lane_readiness"):
+        if key in (previous or {}):
+            payload[key] = previous[key]
+    temporary = path.with_suffix(f".{os.getpid()}.tmp")
+    temporary.write_text(json.dumps(payload), encoding="utf-8")
+    os.replace(temporary, path)
+
+
+def runtime_status_path(scope: str, *, directory: Path | None = None) -> Path:
     from .config import run_dir
     from .single_instance import lock_path_for
 
-    return lock_path_for(run_dir(), scope).with_suffix(".status.json")
+    return lock_path_for(run_dir() if directory is None else directory, scope).with_suffix(".status.json")
 
 
 def read_status(path: Path) -> tuple[dict | None, str | None]:

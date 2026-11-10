@@ -310,7 +310,10 @@ def test_native_invocation_contract_is_read_only(monkeypatch, capsys):
     assert cli.main(["invocation-contract", "--json"]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "schema": "agent-vault.invocation", "version": 1,
-        "capabilities": ["configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1"],
+        "capabilities": [
+            "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
+            "authenticated-curl-v1", "daemon-bind-default-v1",
+        ],
     }
 
 
@@ -461,9 +464,9 @@ def test_native_unready_legacy_owner_preserves_vault_defaults(tmp_path, monkeypa
 @pytest.mark.parametrize("enabled,owner_code", [
     (True, 0), (False, 0), (None, 0), ("invalid", 0), (True, 126),
 ])
-@pytest.mark.parametrize("application", [False, True])
+@pytest.mark.parametrize("layout", ["versioned", "application", "adjacent"])
 def test_installed_reader_uses_retained_sdk_for_qualified_activation(
-    tmp_path, monkeypatch, capsys, enabled, owner_code, application,
+    tmp_path, monkeypatch, capsys, enabled, owner_code, layout,
 ):
     import shutil
     import subprocess
@@ -483,6 +486,8 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
     (peer / "current-version").write_text("1.0.0", encoding="utf-8")
     sdk_source = Path(configuration.__file__).parents[2] / "scripts"
     slot = home / ".agent-vault" / "versions" / "1.0.0"
+    if layout == "adjacent":
+        slot = tmp_path / "standalone consumer"
     bootstrap = slot / ".runtime-bootstrap"
     bootstrap.mkdir(parents=True)
     for source in sdk_source.glob("versioned_runtime*.py"):
@@ -491,8 +496,11 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
         bootstrap / "versioned_runtime.py", "_vault_installed_fixture_runtime",
     )
     sdk.mark_complete(peer, "1.0.0")
-    environment = slot / ".venv" if application else slot
+    environment = slot / ".venv" if layout == "application" else slot
     installed = environment / "Lib" / "site-packages" / "agent_vault" / "configuration.py"
+    if layout == "adjacent":
+        installed = slot / "agent_vault" / "configuration.py"
+        environment = tmp_path / "independent interpreter"
     monkeypatch.setattr(configuration, "__file__", str(installed))
     monkeypatch.setattr(sys, "prefix", str(environment))
     monkeypatch.setattr(Path, "home", lambda: home)
@@ -506,7 +514,7 @@ def test_installed_reader_uses_retained_sdk_for_qualified_activation(
 
     def run(argv, **kwargs):
         assert argv == [
-            str(python), "-I", "-B", "-X", "utf8", "-m", "agent_worktrees",
+            str(python), "-I", "-B", "-X", "utf8", "-B", "-m", "agent_worktrees",
             "state-root", "--configuration", "--json",
         ]
         assert kwargs["cwd"] == base

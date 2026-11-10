@@ -304,7 +304,9 @@ optional send, not shell advisory evaluation.
 
 The receiver rechecks managed-session membership, current published admission,
 governance and shutdown under the original monitor state lock, with at most
-50 ms lock contention. It rejects batches and non-native tools. Native targets
+50 ms lock contention. It rechecks the wire deadline after acquiring that lock;
+an expired notice cannot invoke the mutation callback or renew demand.
+It rejects batches and non-native tools. Native targets
 come from the guard-owned `tool_call_forms.write_targets`, including every
 structured edit and both patch-move endpoints. Relative paths use the event
 workspace. Unknown targets retain the original workspace invalidation;
@@ -571,6 +573,19 @@ complete admitted document. All original content and witness checks remain.
 The original resolver still owns cold or incompatible admission. On a valid
 old association it can publish the additive view without Git/registry traversal;
 an unchanged complete association needs no rewrite.
+
+The registered Windows pre-tool entry also uses that per-call native result
+for its existing exact `view`/`rg`/`glob` read exemption. It still checks the
+four original guard-source digests before returning without a policy child.
+Fallback admission does not qualify, even if the original resolver refreshes
+the association during that call. Changed guard sources, incomplete or changed
+cell observations, other tool names, writes and every `toolCalls` envelope
+retain the original validation and policy path, even with read-labelled
+envelope metadata. The default-installation emergency stop never governs a cell.
+This does not qualify installed or composed hook latency.
+After guard-source changes, regenerate the shipped contract with
+`python tools/render-hook-read-policy.py`. Registered-consumer fixtures copy
+that contract unchanged, so a stale digest cannot be hidden by fixture repair.
 
 New producers remain compatible with old readers, which ignore the additive
 field and retain their old cell path. New readers use an old producer's

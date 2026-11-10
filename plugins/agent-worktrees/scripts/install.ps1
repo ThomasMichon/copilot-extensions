@@ -82,6 +82,16 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+$NativeScriptRoot = $PSScriptRoot
+if ($Action -eq 'publish-runtime-helpers' -and
+    [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+    $PSVersionTable.PSVersion.Major -ge 6 -and
+    -not $NativeScriptRoot.StartsWith('\\?\')) {
+    $NativeScriptRoot = if ($NativeScriptRoot.StartsWith('\\')) {
+        '\\?\UNC\' + $NativeScriptRoot.Substring(2)
+    } else { '\\?\' + $NativeScriptRoot }
+}
+
 if ($RuntimeOnly -and (
     $Action -notin @('install', 'update') -or $PSBoundParameters.ContainsKey('ProjectName')
 )) {
@@ -295,7 +305,11 @@ print(json.dumps(sys.executable, ensure_ascii=True))
         }
         return $null
     }
-    $admissionPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    $admissionPayload = if ($Action -eq 'publish-runtime-helpers') {
+        Split-Path -Parent $NativeScriptRoot
+    } else {
+        (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
+    }
     $admissionSource = if ($env:COPILOT_EXTENSIONS_COMMAND_LIFECYCLE -and
         $env:COPILOT_PLUGIN_STAGED_FROM -and
         (($PSScriptRoot -replace '\\', '/') -notmatch '/\.copilot/installed-plugins/')) {
@@ -503,7 +517,7 @@ if ($ContextualInstall) {
         Write-Error 'Installation-context validator is unavailable.'
         exit 1
     }
-    $contextPortableHelper = Join-Path $PSScriptRoot 'installation-context\installation_context.py'
+    $contextPortableHelper = Join-Path $NativeScriptRoot 'installation-context\installation_context.py'
     if ($BootstrapPython -and -not (Test-Path -LiteralPath $contextPortableHelper -PathType Leaf)) {
         Write-Error 'Portable installation-context validator is unavailable.'
         exit 1
@@ -525,7 +539,7 @@ if ($ContextualInstall) {
             LegacyRoot = '--legacy-root'
         }
         $reader = if ($ValidateStatus) {
-            Join-Path $PSScriptRoot 'read_installation_context.py'
+            Join-Path $NativeScriptRoot 'read_installation_context.py'
         } else { $contextPortableHelper }
         if (-not [IO.File]::Exists($reader)) { throw 'Portable installation-context reader is unavailable.' }
         $nativeArguments = @('-I', '-S', '-B', '-X', 'utf8', $reader)
@@ -651,7 +665,7 @@ if ($ContextualInstall) {
             if (-not $BootstrapPython) {
                 throw 'Runtime publication management requires explicit -BootstrapPython.'
             }
-            $managementHelper = Join-Path $PSScriptRoot 'installation-context\installation_context.py'
+            $managementHelper = Join-Path $NativeScriptRoot 'installation-context\installation_context.py'
             $managementJson = @(& $BootstrapPython -I -S -B -X utf8 $managementHelper probe-management-publication `
                 --context $contextPath --durable-home $contextDurableHome `
                 --payload-root $contextPayload --plugin-id agent-worktrees `
@@ -1105,8 +1119,12 @@ function Write-Step { param([string]$Msg) Write-Host "  ...    $Msg" -Foreground
 $ServiceName     = 'Worktree Manager'
 $BinDir          = Join-Path $InstallDir 'bin'
 $LocalBin        = Join-Path $env:USERPROFILE '.local\bin'
-$ScriptDir       = Split-Path -Parent $MyInvocation.MyCommand.Path
-$PluginDir       = (Resolve-Path (Join-Path $ScriptDir '..'))
+$ScriptDir       = if ($Action -eq 'publish-runtime-helpers') {
+    $NativeScriptRoot
+} else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$PluginDir       = if ($Action -eq 'publish-runtime-helpers') {
+    Split-Path -Parent $ScriptDir
+} else { (Resolve-Path (Join-Path $ScriptDir '..')) }
 $ServiceYamlPath = Join-Path $ScriptDir 'service.yaml'
 
 # Legacy alias binstubs that earlier versions deployed into BinDir and/or
@@ -1192,8 +1210,8 @@ $SourceRuntimeIdentity = $null
 $PackageVersion = $null
 if ($true) {  # always versioned (junction-free marker model; COPILOT_EXT_NO_VERSIONED retired)
     $pyprojForVer = if ($PluginDir) { Join-Path $PluginDir 'pyproject.toml' } else { $null }
-    if ($pyprojForVer -and (Test-Path $pyprojForVer)) {
-        $vl = Select-String -Path $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
+    if ($pyprojForVer -and (Test-Path -LiteralPath $pyprojForVer)) {
+        $vl = Select-String -LiteralPath $pyprojForVer -Pattern '^\s*version\s*=' | Select-Object -First 1
         if ($vl) { $SrcVersion = ($vl.Line -replace '.*=\s*"([^"]+)".*', '$1') }
     }
     if ($SrcVersion) {
@@ -3190,7 +3208,7 @@ function Deploy-Wrappers {
             $src = Join-Path $PluginDir "src/agent_worktrees/$script"
         }
         $dst = Join-Path $BinDir $script
-        if (Test-Path $src) {
+        if (Test-Path -LiteralPath $src) {
             Publish-RuntimeFile $src $dst
             Write-ServiceOk "Hook: $script"
         }
@@ -3201,10 +3219,10 @@ function Deploy-Wrappers {
     # This replaces the per-project *.instructions.md deploy for these generic
     # fragments (dotfiles#1053 / effort instructions-to-hooks).
     $ConductSrc = Join-Path $ScriptDir 'conduct'
-    if (Test-Path $ConductSrc) {
+    if (Test-Path -LiteralPath $ConductSrc) {
         $ConductDst = Join-Path $BinDir 'conduct'
         Ensure-InstallDir $ConductDst
-        foreach ($frag in (Get-ChildItem -Path $ConductSrc -Filter '*.md' -File)) {
+        foreach ($frag in (Get-ChildItem -LiteralPath $ConductSrc -Filter '*.md' -File)) {
             Publish-RuntimeFile $frag.FullName (Join-Path $ConductDst $frag.Name)
             Write-ServiceOk "Conduct: $($frag.Name)"
         }
@@ -3228,7 +3246,7 @@ function Deploy-Wrappers {
     )) {
         $src = Join-Path $ScriptDir $setup
         $dst = Join-Path $ScriptsDir $setup
-        if (Test-Path $src) {
+        if (Test-Path -LiteralPath $src) {
             Publish-RuntimeFile $src $dst
             Write-ServiceOk "Session script: $setup"
         }
@@ -3243,7 +3261,7 @@ function Deploy-RuntimeResolvers {
     Ensure-InstallDir $BinDir
     foreach ($resolver in @('resolve-runtime.ps1', 'resolve-runtime.sh')) {
         $src = Join-Path $ScriptDir $resolver
-        if (-not (Test-Path $src)) {
+        if (-not (Test-Path -LiteralPath $src)) {
             Write-ServiceErr "Runtime resolver source not found: $src"
             return $false
         }
@@ -3325,7 +3343,7 @@ function Deploy-GlobalBinstub {
             $src = Join-Path $ScriptDir 'installation-context\json-query.awk'
         }
         $dst = Join-Path $LocalBin $name
-        if (Test-Path $src) {
+        if (Test-Path -LiteralPath $src) {
             if ((Get-Variable Action -ValueOnly -ErrorAction SilentlyContinue) -eq 'publish-runtime-helpers' -and
                 $script:RuntimePublicationCopies) {
                 Publish-RuntimeFile $src $dst -NormalizedSameContent
@@ -3333,7 +3351,7 @@ function Deploy-GlobalBinstub {
             }
             if (Test-Path -LiteralPath $dst -PathType Container) { throw "Global binstub target is a directory: $dst" }
             $srcNorm = ([System.IO.File]::ReadAllText($src)) -replace "`r`n", "`n" -replace "`r", "`n"
-            $dstNorm = if (Test-Path $dst) { ([System.IO.File]::ReadAllText($dst)) -replace "`r`n", "`n" -replace "`r", "`n" } else { $null }
+            $dstNorm = if (Test-Path -LiteralPath $dst) { ([System.IO.File]::ReadAllText($dst)) -replace "`r`n", "`n" -replace "`r", "`n" } else { $null }
             if ($srcNorm -cne $dstNorm) {
                 Publish-RuntimeFile $src $dst
                 Write-ServiceOk "Global binstub: $dst"
@@ -4395,21 +4413,24 @@ if (-not $ContextualInstall -and $Action -in @('install', 'update', 'provision',
 try {
 if ($Action -in @('install', 'update', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 switch ($Action) {
     'publish-runtime-helpers' {
         if (-not $RuntimePublicationPlan -or -not $RuntimePublicationDigest -or -not $BootstrapPython) {
             throw 'Helper publication requires its admitted plan, digest and base interpreter.'
         }
+        $nativeCallback = Join-Path $NativeScriptRoot 'runtime_install.py'
         $nativeError = ''
-        $arguments = @('-I', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'runtime_install.py'),
+        $arguments = @('-I', '-B', '-X', 'utf8', $nativeCallback,
             '--root', $InstallDir, '--plugin', $PluginDir.ToString(),
             '--inspect-helper-publication', $RuntimePublicationPlan,
             '--publication-digest', $RuntimePublicationDigest)
         $document = Invoke-Hidden -FilePath $BootstrapPython -ArgList $arguments -ErrorOutput ([ref]$nativeError)
         if ($LASTEXITCODE -ne 0) { throw "Helper publication admission failed: $document$nativeError" }
         $publication = $document | ConvertFrom-Json
+        $PluginDir = [string]$publication.content
+        $ScriptDir = Join-Path $PluginDir 'scripts'
         $script:VenvPython = [string]$publication.python
         $script:RuntimePublicationCopies = [string]$publication.copies
         if ($publication.scope -eq 'wrappers') {
@@ -4428,7 +4449,7 @@ switch ($Action) {
             }
             Deploy-GlobalBinstub
         }
-        $arguments = @('-I', '-B', '-X', 'utf8', (Join-Path $ScriptDir 'runtime_install.py'),
+        $arguments = @('-I', '-B', '-X', 'utf8', $nativeCallback,
             '--root', $InstallDir, '--plugin', $PluginDir.ToString(),
             '--complete-helper-publication', $RuntimePublicationPlan,
             '--publication-digest', $RuntimePublicationDigest)

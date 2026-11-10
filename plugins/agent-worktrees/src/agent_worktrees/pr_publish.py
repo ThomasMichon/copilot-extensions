@@ -461,13 +461,15 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                  force_with_lease_expect: str | None = None,
                  timeout: float = push_timeout.DEFAULT_PUSH_TIMEOUT,
                  allow_history_rewrite: bool = False, repo=None,
-                 strict_lease: bool = False) -> git_ops.PushResult:
+                 strict_lease: bool = False, validate_source=None) -> git_ops.PushResult:
     """Verify the destination under the short configuration lock, then push a
     pinned URL without holding the clone-wide lock through hooks/network I/O.
     When it goes to
     the PR's recorded fork, that remote must still name the fork's repo
     (``head_repo``) at push time -- another worktree's fork setup could have
-    repointed it since it was chosen."""
+    repointed it since it was chosen. Optional local source validation runs
+    under that short lock and may acquire metadata after publication; it
+    must not perform remote I/O or retain a lock through transport."""
     timeout = publication_deadline.validate(timeout)
     checked_policy = getattr(getattr(repo, "pr", None), "publication_checks", None)
     if checked_policy is not None:
@@ -519,6 +521,8 @@ def push_checked(record, remote: str, refspec: str, *, cwd: str,
                 return git_ops.PushResult(ok=False, stderr=exc.stderr)
             except ValueError as exc:
                 return git_ops.PushResult(ok=False, stderr=str(exc))
+            if validate_source is not None:
+                validate_source()
         from .git_push_transport import pinned_destination
         with pinned_destination(remote, destinations, tuple(transport_settings), fetch_url=fetch_url):
             from . import pr_creation_state

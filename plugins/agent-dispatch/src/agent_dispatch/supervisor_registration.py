@@ -151,7 +151,7 @@ def _self_update_settings() -> tuple[bool, float, float]:
     return enabled, poll, cooldown
 
 
-def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> None:
+def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str], *, profile_binding=None) -> None:
     """Fire-and-forget spawn of a successor daemon from *python_path*.
 
     ``python_path`` is the newer version's own interpreter (resolved by
@@ -187,6 +187,8 @@ def _spawn_self_update_successor(python_path: Any, respawn_argv: list[str]) -> N
     env = {
         k: v for k, v in os.environ.items() if k not in ("PYTHONPATH", "PYTHONHOME")
     }
+    if profile_binding is not None:
+        env.update(profile_binding)
     # Never the caller's ambient cwd: this respawned successor is a long-lived
     # supervised daemon that may outlive whatever checkout the current (stale)
     # process was running from. Console children: it embodies workers through

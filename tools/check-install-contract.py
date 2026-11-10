@@ -587,7 +587,7 @@ def _verify_installer_engine_sync() -> list[str]:
         return [f"unable to load {INSTALLER_ENGINE_SYNC.relative_to(REPO)}"]
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
-    return list(module.verify())
+    return list(module.verify(phase="development"))
 
 
 def _strip_quoted_strings(line: str) -> str:
@@ -966,8 +966,8 @@ def check() -> int:
     installer_engine_drift = _verify_installer_engine_sync()
     if installer_engine_drift:
         violations.append(
-            "vendored installer-engine files are out of sync -- run "
-            "'python tools/sync-installer-engine.py'"
+            "installer-engine development source declarations or owned layouts are invalid; "
+            "promotion, not contributor copy synchronization, materializes packaged bytes"
         )
         violations.extend(f"installer-engine: {problem}" for problem in installer_engine_drift)
 

@@ -26,7 +26,7 @@ def _existing_directory(path: Path) -> None:
         info = path.stat()
     except OSError:
         raise PlanError("Komodo recovery requires existing private owner custody") from None
-    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077):
+    if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077):
         raise PlanError("Komodo recovery requires existing private owner custody")
 
 
@@ -38,7 +38,7 @@ def _complete_pending(path: Path, content: bytes) -> None:
         descriptor = os.open(path, os.O_CREAT | os.O_EXCL | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     try:
         info = os.fstat(descriptor)
-        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+        if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
                 or info.st_mode & 0o077 or info.st_nlink != 1
                 or not 0 <= info.st_size <= len(content)
                 or _identity(path) != (info.st_dev, info.st_ino)):
@@ -130,7 +130,7 @@ class KomodoState:
             raise
         try:
             info = os.fstat(descriptor)
-            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
                     or info.st_mode & 0o077 or info.st_nlink != 1
                     or _identity(lock) != (info.st_dev, info.st_ino)):
                 raise PlanError("Komodo physical resource lock has foreign custody")

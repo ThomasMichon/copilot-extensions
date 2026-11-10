@@ -173,6 +173,8 @@ class PickerScreenInputMixin:
             # machine on its loader threads; fixture mode re-reads src.load()).
             self.debug = "worktree reload requested"
             self._start_setup_reload_worker()
+            if self._kind() == "worktrees":
+                self._refresh_knowledge_readiness()
             self._poll_orphan_state(force=True)
             self.sel = self.default_sel()
         elif key in ("q", "escape"):
@@ -341,7 +343,7 @@ class PickerScreenInputMixin:
                 self.executor = None
                 self.debug = f"{p['verb'].lower()} cancelled · 0 worktrees"
             return
-        if p.get("op") == "sync" and p["done"]:
+        if p.get("op") in ("sync", "finalize") and p["done"]:
             last = max(0, len(p["items"]) - 3)
             top = p.get("result_top", 0)
             offsets = {"up": -1, "down": 1, "pageup": -3, "pagedown": 3}

@@ -85,6 +85,22 @@ The columns are additive. Existing rows receive `startup_complete=false`,
 migration does not infer historical launch completion. Historical unproven
 rows stay blocked pending explicit reconciliation.
 
+Long-lived queues reconcile that history explicitly with
+`agent-dispatch reservations fence-history --before <epoch|ISO-with-offset>`.
+It previews by default. With `--apply --permit --confirm-no-live-holder
+--reason <text>` it sets `startup_fenced` (and `conversation_retired` with
+`release_requested` where a session handle is recorded) on terminal, unbound
+rows created before the cutoff, preserves every row and writes one audit event
+per task. A fenced conversation, including a deferred one, is never carried
+into a successor. A fenced handle that never proved a native identity
+(a `local-body:` transport handle or a pre-driver bare handle) retires as
+qualified-empty history rather than as a native. Rows whose recorded identity
+evidence conflicts are reported as `unclassifiable` and left untouched. It skips
+active reservations, pending native release, pending conclusions, retained
+transport, natives shared with live work or a task owner, and the latest
+native of a non-concluded task; the preview reports each exclusion count.
+Applying requires the same recovery-bridge readiness as `authorize-fresh`.
+
 The affected residents are the coordinator (`serve`), supervisor daemon
 (`supervise serve`) and its worker-lane supervisors (`supervise`). The existing
 `scripts/install.sh` / `scripts/install.ps1` install/update/activation seams own

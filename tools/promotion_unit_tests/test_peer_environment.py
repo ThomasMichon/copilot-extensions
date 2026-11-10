@@ -40,3 +40,12 @@ test_machines_peer_rebinds_its_owner_without_foreign_runtime_overrides = (
 test_agent_dispatch_retains_authority_and_separate_shared_control = (
     _original.test_agent_dispatch_retains_authority_and_separate_shared_control
 )
+test_vault_rebinds_native_owner_without_caller_credential_selection = (
+    _original.test_vault_rebinds_native_owner_without_caller_credential_selection
+)
+test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback = (
+    _original.test_vault_suffix_refuses_unsupported_posix_checksum_without_a_fallback
+)
+test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback = (
+    _original.test_vault_peer_refuses_unqualified_native_platform_without_owner_fallback
+)

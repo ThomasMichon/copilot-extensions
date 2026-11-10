@@ -1,0 +1,9 @@
+{
+  "comment": "Route seedless public Worktrees cold launches through common broker admission and qualify installed callers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

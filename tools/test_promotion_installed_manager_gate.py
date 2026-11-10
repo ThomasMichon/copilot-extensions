@@ -7,6 +7,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+import re
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
@@ -26,6 +27,36 @@ def workflow():
 
 def _step(job, name):
     return next(step for step in job["steps"] if step.get("name") == name)
+
+
+def _assert_job_env_has_no_runner_context(workflow):
+    for name, job in workflow["jobs"].items():
+        for expression in re.findall(r"\$\{\{(.*?)\}\}", json.dumps(job.get("env", {}))):
+            assert re.search(r"\brunner\s*[.\[]", expression, re.I) is None, (
+                f"runner context is unavailable in jobs.{name}.env"
+            )
+
+
+def test_runner_context_is_only_used_after_runner_allocation(workflow):
+    _assert_job_env_has_no_runner_context(workflow)
+    native = workflow["jobs"][JOB]
+    selected = _step(native, "Set the native acceptance directory")
+    assert selected["shell"] == "pwsh"
+    assert r'"ACCEPTANCE_ROOT=$env:RUNNER_TEMP\candidate\it"' in selected["run"]
+    assert "Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append" in selected["run"]
+    assert [
+        step for step in native["steps"] if "ACCEPTANCE_ROOT=" in step.get("run", "")
+    ] == [selected]
+
+
+@pytest.mark.parametrize("expression", [
+    "${{ runner.temp }}", "${{ runner['temp'] }}", "${{ Runner.Temp }}",
+])
+def test_job_env_runner_context_regression_is_rejected(workflow, expression):
+    invalid = copy.deepcopy(workflow)
+    invalid["jobs"][JOB]["env"]["ACCEPTANCE_ROOT"] = expression
+    with pytest.raises(AssertionError, match="runner context is unavailable"):
+        _assert_job_env_has_no_runner_context(invalid)
 
 
 def test_native_gate_installs_and_validates_the_same_frozen_candidate_before_publication(workflow):
@@ -48,6 +79,7 @@ def test_native_gate_installs_and_validates_the_same_frozen_candidate_before_pub
     assert native["env"]["MAIN_BEFORE"] == "${{ needs.gate.outputs.main_before }}"
     assert native["env"]["CANDIDATE_SHA"] == "${{ needs.compose-candidate.outputs.candidate_sha }}"
     assert native["env"]["CANDIDATE_TREE"] == "${{ needs.compose-candidate.outputs.tree }}"
+    assert "ACCEPTANCE_ROOT" not in native["env"]
     assert "runner." not in json.dumps(native["env"])
     directory = _step(native, "Set the native acceptance directory")
     assert directory["shell"] == "pwsh"

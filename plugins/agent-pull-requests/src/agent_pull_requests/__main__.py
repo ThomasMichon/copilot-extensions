@@ -18,7 +18,7 @@ from typing import Any
 from agent_procutil import no_window_kwargs
 
 from . import __version__
-from .cli_output import render_status as _render_status
+from .cli_output import render_status as _render_status, version as _cmd_version
 
 _STATUS_QUERY = (
     "query($owner: String!, $name: String!, $number: Int!) { "
@@ -781,11 +781,6 @@ def _cmd_serve_restart(args: argparse.Namespace) -> int:
     return 1
 
 
-def _cmd_version(_args: argparse.Namespace) -> int:
-    print(f"agent-pull-requests {__version__}")
-    return 0
-
-
 def build_parser() -> argparse.ArgumentParser:
     from .native_cli import MergeMethodAction, validate_selector
     from .watch_contract import ALL_TRANSITIONS
@@ -798,6 +793,8 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     from .workspace_cli import add_parser as add_workspace_parser
     add_workspace_parser(subparsers)
+    from .report_cli import add_parser as add_report_parser
+    add_report_parser(subparsers)
     from .attention_cli import add_parser as add_attention_parser
     add_attention_parser(subparsers)
 
@@ -867,6 +864,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     from .native_author import add_parsers as add_author_parsers
     add_author_parsers(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
+    from .native_creation_cancel import add_parser as add_cancellation_parser
+    add_cancellation_parser(subparsers, _cmd_native)
+    from .native_threads import add_parser as add_threads_parser
+    add_threads_parser(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
+    from .native_diff import add_parser as add_diff_parser
+    add_diff_parser(subparsers, repo_type=_validate_repo_slug, handler=_cmd_native)
 
     watch = subparsers.add_parser(
         "watch", help="non-blocking subscription against the shared watch daemon"
@@ -973,7 +976,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None, *, workspace_host=None, attention_host=None) -> int:
+def main(argv: list[str] | None = None, *, workspace_host=None, attention_host=None, report_host=None) -> int:
     global _WATCH_INVOCATION
     args = build_parser().parse_args(argv)
     if args.command == "workspace":
@@ -982,6 +985,9 @@ def main(argv: list[str] | None = None, *, workspace_host=None, attention_host=N
     if args.command == "attention":
         from .attention_cli import run
         return run(args, attention_host)
+    if args.command == "report":
+        from .report_cli import run
+        return run(args, report_host)
     from .watch_invocation import WatchInvocation
     _WATCH_INVOCATION = WatchInvocation.capture(
         require_selected=not (args.command == "serve" and args.passive_instance),

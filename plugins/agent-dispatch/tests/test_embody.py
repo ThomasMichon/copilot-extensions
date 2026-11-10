@@ -146,6 +146,63 @@ def test_conclude_dispatch_attempt_requests_exact_managed_removal(monkeypatch):
     assert result["action"] == "removed"
 
 
+def _nonce_conclusion_cli(monkeypatch, *outcomes):
+    calls = []
+    replies = iter(outcomes)
+    monkeypatch.setattr(embody, "resolve_worktree", lambda *_a, **_k: {
+        "project": "widgets", "path": "/fixture/wt-review",
+    })
+    monkeypatch.setattr(
+        embody, "_agent_worktrees_launch_prefix", lambda: ["/usr/bin/agent-worktrees"]
+    )
+    monkeypatch.setattr(
+        embody.subprocess, "run",
+        lambda cmd, **_kwargs: calls.append(cmd) or next(replies),
+    )
+    result = embody.conclude_dispatch_attempt(
+        "wt-review", None, "dispatch-task:task-1:1", owner="ordinary-bridge",
+        project="widgets", worktree_path="/fixture/wt-review", creation_nonce="nonce-a",
+    )
+    return result, [cmd[6:10] for cmd in calls]
+
+
+def test_conclude_dispatch_attempt_proves_bridge_creation_by_nonce(monkeypatch):
+    result, proofs = _nonce_conclusion_cli(
+        monkeypatch,
+        _completed('{"action":"skipped","reason":"dispatch-provenance-missing"}'),
+        _completed('{"action":"removed","managed_gc_eligible":false}'),
+    )
+
+    assert proofs == [
+        ["--policy", "dispatch-attempt", "--reservation", "dispatch-task:task-1:1"],
+        ["--policy", "bridge-creation", "--creation-nonce", "nonce-a"],
+    ]
+    assert result["action"] == "removed"
+
+
+def test_conclude_dispatch_attempt_keeps_dispatch_proof_for_preallocated_worker(monkeypatch):
+    result, proofs = _nonce_conclusion_cli(
+        monkeypatch, _completed('{"action":"removed","managed_gc_eligible":false}'),
+    )
+
+    assert proofs == [["--policy", "dispatch-attempt", "--reservation", "dispatch-task:task-1:1"]]
+    assert result["action"] == "removed"
+
+
+def test_conclude_dispatch_attempt_preserves_on_runtime_without_bridge_creation(monkeypatch):
+    result, proofs = _nonce_conclusion_cli(
+        monkeypatch,
+        _completed('{"action":"skipped","reason":"dispatch-provenance-missing"}'),
+        _completed("", returncode=2, stderr="usage: " + "x" * 400 + "\nerror: argument --policy: invalid choice: 'bridge-creation'"),
+    )
+
+    assert len(proofs) == 2
+    assert result == {
+        "action": "skipped", "reason": "dispatch-provenance-missing",
+        "bridge_creation": "unsupported-runtime",
+    }
+
+
 def _conclusion_retry_cli(monkeypatch, rows, record=('{"ok": false}', 1)):
     calls = []
 

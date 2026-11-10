@@ -14,7 +14,16 @@ def add_parser(subparsers) -> None:
     health = subparsers.add_parser("health", help="bounded local health observations")
     commands = health.add_subparsers(dest="health_command", required=True)
     report = commands.add_parser("report", help="summarize explicit local telemetry files")
-    report.add_argument("--input", type=Path, action="append", required=True)
+    report.add_argument("--input", type=Path, action="append", default=[])
+    report.add_argument(
+        "--store-dir", type=Path,
+        help="Read an explicit local health store; never probes, records or publishes",
+    )
+    report.add_argument(
+        "--service", action="append", default=[],
+        help="Installed same-cell service, optionally LABEL=SERVICE; read-only hourly export",
+    )
+    report.add_argument("--hour", help="UTC service hour: YYYY-MM-DDTHH:00:00Z (default: current hour)")
     report.add_argument("--now", help="aware ISO observation time (default: current UTC time)")
     report.add_argument("--chart", type=Path, help="create a new static SVG; never overwrite")
     report.set_defaults(func=run_report)
@@ -63,6 +72,21 @@ def _silence_failed_stdout() -> None:
             pass
 
 
+def _chart_overlaps_store(chart: Path, store: Path) -> bool:
+    if Path(os.path.abspath(chart)).is_relative_to(Path(os.path.abspath(store))):
+        return True
+    try:
+        destination = chart.resolve()
+    except RuntimeError:
+        raise ValueError("invalid chart path") from None
+    try:
+        namespace = store.resolve()
+    except (OSError, RuntimeError):
+        # An unresolvable store is unavailable evidence, not an output failure.
+        return False
+    return destination.is_relative_to(namespace)
+
+
 def run_slots(args) -> int:
     from . import health_slots
 
@@ -108,6 +132,13 @@ def run_report(args) -> int:
             if args.now else datetime.now(timezone.utc)
         )
         report = HourlyReport(now)
+        if not args.input and not args.service and args.store_dir is None:
+            raise ValueError("an explicit input, service or health store is required")
+        if (
+            args.store_dir is not None and args.chart is not None
+            and _chart_overlaps_store(args.chart, args.store_dir)
+        ):
+            raise ValueError("chart overlaps health store")
         seen = set()
         for path in args.input:
             descriptor = None
@@ -144,6 +175,25 @@ def run_report(args) -> int:
                 if descriptor is not None:
                     os.close(descriptor)
         result = report.result(len(args.input))
+        if args.service:
+            from .service_reports import collect
+            from process_telemetry.hourly import hour_start
+
+            hour = args.hour or now.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
+            if not report.first_hour <= hour_start(hour) // 3_600_000 <= report.last_hour:
+                raise ValueError("service hour outside report window")
+            result["services"] = collect(args.service, hour, now_ms=report.now_ns // 1_000_000)
+            result["services_collected_at_ms"] = int(datetime.now(timezone.utc).timestamp() * 1000)
+        elif args.hour:
+            raise ValueError("hour requires an explicit service")
+        if args.store_dir is not None:
+            from . import health_slots
+
+            try:
+                view = health_slots.inspect(args.store_dir, now_ms=report.now_ns // 1_000_000)
+                result["health"] = {"state": "available", "view": view}
+            except (OSError, health_slots.HealthError):
+                result["health"] = {"state": "unavailable", "reason": "local-store-unavailable"}
         if args.chart is not None:
             from .health_chart import render
 

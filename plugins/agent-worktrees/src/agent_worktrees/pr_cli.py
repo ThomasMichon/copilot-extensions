@@ -50,7 +50,7 @@ def add_parsers(sub) -> None:
 
 def _pr_watch_usage() -> None:
     out = sys.stderr
-    print("Usage: <project> pr-watch <wait|cursor|snapshot|status|threads> <repo> <pr> [options]", file=out)
+    print("Usage: <project> pr-watch <wait|cursor|snapshot|status|threads|diff> <repo> <pr> [options]", file=out)
     print(file=out)
     print("Block until a pull request moves, then wake the caller. The review", file=out)
     print("backend (host, token) is the repo's PR binding (.agent-worktrees/", file=out)
@@ -66,6 +66,7 @@ def _pr_watch_usage() -> None:
     print("  cursor <repo> <pr>  Print the current baseline cursor for a PR.", file=out)
     print("  snapshot/status <repo> <pr> --json  Read configured native gate evidence once.", file=out)
     print("  threads <repo> <pr> --json  Read discussion bodies and revision context on demand.", file=out)
+    print("  diff <repo> <pr> --json  Read a native unified diff without tracked reconciliation.", file=out)
     print("  reply/requeue <repo> <pr> --help  Bounded ADO discussion or existing-evaluation remediation.", file=out)
     print("  checks <repo> <lenses|record-self-review|verify-self-review|scope-report> --workspace PATH", file=out)
     print("  checks <repo> export-config --workspace WORKER_PATH --base origin/main --output NEW_FILE", file=out)
@@ -467,12 +468,12 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
         return 0 if argv and argv[0] in ("--help", "-h", "help") else 1
 
     verb = argv[0]
-    if verb not in ("wait", "cursor", "snapshot", "status", "threads"):
+    if verb not in ("wait", "cursor", "snapshot", "status", "threads", "diff"):
         output.err(f"Unknown pr-watch subcommand: {verb}")
         _pr_watch_usage()
         return 1
 
-    p = argparse.ArgumentParser(prog=f"pr-watch {verb}", add_help=True)
+    p = argparse.ArgumentParser(prog=f"pr-watch {verb}", add_help=True, allow_abbrev=verb != "diff")
     p.add_argument(
         "repo",
         type=_pr_parse_repo,
@@ -492,7 +493,7 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
             "--credential-command", default=None,
             help="Trusted non-secret JSON argv acquiring typed credentials per native request",
         )
-    if verb in ("snapshot", "status", "threads"):
+    if verb in ("snapshot", "status", "threads", "diff"):
         p.add_argument("--json", action="store_true")
     if verb == "wait":
         p.add_argument(
@@ -513,7 +514,10 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
     except SystemExit as exc:
         return int(exc.code or 0)
 
-    read_only = verb in ("snapshot", "status", "threads")
+    if verb == "diff" and (args.repo is None or args.pr < 1):
+        output.err("pr-watch diff requires an explicit repo and a positive PR number")
+        return 2
+    read_only = verb in ("snapshot", "status", "threads", "diff")
     if not read_only and not getattr(args, "foreground_only", False):
         _claimant_id, claimant_error = require_claimant_worktree(f"pr-watch {verb}")
         if claimant_error:
@@ -613,15 +617,12 @@ def cmd_pr_watch_dispatch(argv: list[str]) -> int:
                     )
                     return 2
 
-        if verb == "threads":
-            from .providers import get_provider, account_token_for_slug
-            from .pr_thread_report import thread_report
-            provider = get_provider(prcfg.provider)
-            tok = resolved_token if resolved_token is not None else account_token_for_slug(args.repo, prcfg)
-            report = thread_report(provider, args.repo, args.pr,
-                                   api_base=args.host or prcfg.api_base, token=tok)
+        if verb in ("threads", "diff"):
+            from .pr_read_context import read_report
+            report = read_report(verb, prcfg, args.repo, args.pr,
+                                 api_base=args.host, token=resolved_token)
             print(_json.dumps(report))
-            return 1 if report.get("error") or report.get("supported") is False else 0
+            return 1 if report.get("error") or report.get("supported") is not True else 0
         fetch = prw.build_fetch(
             prcfg,
             args.repo,

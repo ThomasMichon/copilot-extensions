@@ -7,9 +7,9 @@ from copy import deepcopy
 import json
 import os
 from pathlib import Path
-import select
 import sys
 from threading import Event
+import time
 
 import pytest
 from textual.widgets import DataTable, Static, TabbedContent
@@ -482,7 +482,19 @@ def test_optional_failure_preserves_lineage_and_other_views(monkeypatch, tmp_pat
     asyncio.run(run())
 
 
-@pytest.mark.skipif(not hasattr(os, "pidfd_open"), reason="native Linux child-exit witness")
+def _exited(pid: int, timeout: float) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            os.kill(pid, 0)
+        except ProcessLookupError:
+            return True
+        time.sleep(0.02)
+    return False
+
+
+# Signal-0 polling, not pidfd: managed test interpreters may lack os.pidfd_open.
+@pytest.mark.skipif(os.name == "nt", reason="POSIX signal-0 child-exit witness")
 def test_blocked_optional_process_is_retired_on_escape(tmp_path, monkeypatch):
     started = tmp_path / "comparison.pid"
     script = tmp_path / "blocked_comparison.py"
@@ -518,14 +530,9 @@ def test_blocked_optional_process_is_retired_on_escape(tmp_path, monkeypatch):
                     break
                 await pilot.pause(0.01)
             assert started.exists()
-            witness = os.pidfd_open(int(started.read_text()), 0)
-            try:
-                await pilot.press("escape")
-                assert await asyncio.to_thread(
-                    lambda: bool(select.select([witness], [], [], 3)[0])
-                )
-            finally:
-                os.close(witness)
+            pid = int(started.read_text())
+            await pilot.press("escape")
+            assert await asyncio.to_thread(_exited, pid, 3)
         assert not app.is_running and not app._engine_cleanup_failures
 
     try:

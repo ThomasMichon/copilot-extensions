@@ -200,6 +200,15 @@ class AuthorizeFreshBody(BaseModel):
     reason: str
 
 
+class FenceHistoryBody(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+    before: float
+    apply: bool = False
+    permitted: bool = False
+    confirmed_no_live_holder: bool = False
+    reason: str = ""
+
+
 def _reservation_dict(res: SpawnReservation) -> dict:
     return asdict(res)
 
@@ -232,6 +241,18 @@ def register_spawn_routes(
             from .acquisition_receipts import verify_recovery_bridge
             verify_recovery_bridge()
             return queue.authorize_fresh_acquisition(task_id, **body.model_dump())
+        except TaskError as exc:
+            raise HTTPException(409, detail=str(exc)) from exc
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise HTTPException(503, detail="recovery bridge readiness unavailable") from exc
+
+    @app.post("/spawn-reservations/history/fence", dependencies=[Depends(control_auth)])
+    def fence_history(body: FenceHistoryBody) -> dict:
+        try:
+            if body.apply:
+                from .acquisition_receipts import verify_recovery_bridge
+                verify_recovery_bridge()
+            return queue.fence_legacy_history(**body.model_dump())
         except TaskError as exc:
             raise HTTPException(409, detail=str(exc)) from exc
         except (OSError, subprocess.TimeoutExpired) as exc:

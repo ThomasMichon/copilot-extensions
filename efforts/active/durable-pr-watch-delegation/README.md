@@ -13,7 +13,19 @@
 - **Umbrella issue:** #6007
 - **Comment identity intent:** [Compact forge-comment provenance](../../../visions/harness-guidance/README.md#compact-forge-comment-provenance)
 - **Comment identity source:** #11128 (compact metadata and retry-stable comment/write identity)
-- **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment)
+- **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment); #11779 (first cache/event milestone planning)
+
+## Goal
+
+Deliver the first independently useful integrated PR-service milestone: a
+locally queryable durable current-PR-state cache for explicitly configured
+GitHub and Gitea repositories, plus subscribable events over one shared
+observation owner. The [M1 contract](repository-cache-events-m1.md) captures
+the selected Request, serial source exits and separate live qualification.
+M1 precedes agent consumers, Dispatch emission, a pane, complete CLI parity
+and production writer/merge cutover; it does not replace the broader Guiding
+Intent or any original, refined or inherited Plan/Validation outcome.
+This effort remains Active under its existing integration and domain owners.
 
 ## Guiding Intent
 
@@ -41,8 +53,15 @@ native/fleet switch alone does not deliver this service intake model.
 | Author-publication plan steward | Bounded author-publication proposal and vision amendment only | Public coordination issue #6007; existing runtime owners retained |
 | PR-perspectives steward | Author/Reviewer domain amendment, bounded inert attention source and isolated qualification; no live activation | #6007 and the Author/Reviewer perspectives plan |
 | Author-publication implementation driver | Finite A0-A5 authorship contribution, integration, validation and PR stewardship | Bounded implementation claim #10383; existing broader owners retained |
+| M1 plan steward | Bounded repository-cache/event contract, independent review and source reconciliation only | Source creaky-lever; planning claim #11779 |
 
 ## Coordination
+
+The [M1 cache/event contract](repository-cache-events-m1.md) under #11779
+sequences the first integrated milestone within #6007, not a second campaign.
+The plan steward owns documentation delivery only; the integration owner
+retains the whole effort and subsequent runtime assignments. Existing
+publication/completion work is neither taken over nor an M1 dependency.
 
 The [compact comment-identity extension](comment-identity.md) composes the
 existing AI-attribution profile and Worktrees source-identity owners with
@@ -156,6 +175,9 @@ existing PR-watch service; it does not introduce a parallel watch owner,
 fleet controller or credential issuer.
 
 ## Request
+
+The selected first milestone's verbatim public-safe Request and separately
+labelled recommendations are in [repository-cache-events-m1.md#request](repository-cache-events-m1.md#request).
 
 The 2026-11-03 direction expanding the service into Author and Reviewer
 perspectives is captured in public-safe form in
@@ -273,9 +295,79 @@ details, not additional operator quotations or live deployment authority.
 
 ## Plan
 
+### First integrated repository cache and event milestone
+
+- [ ] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; retain all broader outcomes.
+
 ### Author/Reviewer service perspectives
 
 _Operator-required outcome; agent-recommended slices and validation._
+
+The [CLI parity inventory](cli-parity-inventory.md) records the draft-to-ready
+contract reviewed in #11641 and its finite native source delivery in #11643.
+Windows, provider, installed and HTTP parity acceptance remain separate;
+readiness does not grant merge consent or release a hold.
+The [explicit native reviewer-request contract](native-reviewer-request.md)
+cleared review in #11645; its finite native source merged in #11647.
+Windows, provider, installed and HTTP qualification remain open;
+request acceptance is not evidence that a fresh review exists.
+The [native creation-cancellation contract](native-creation-cancellation.md)
+cleared review in #11651; its finite native source adapter merged in #11653 and selects only the
+existing unpublished-reservation owner. Remote closure, reason-comment
+publication and abandoned-claim settlement remain separate; source qualification
+is not installed support or complete `pr-abandon` parity.
+The [explicit native thread-read contract](native-thread-read.md), reviewed in
+#11655, reuses the existing checkout-free Worktrees read owner; finite native
+source merged in #11657. It adds no transport or watcher. Native-platform,
+installed/HTTP qualification, live providers and thread resolution stay open.
+The [explicit native diff-read contract](native-diff-read.md), reviewed in
+#11659, defines a bounded
+checkout-free reader over the existing provider primitive while preserving
+tracked `pr-diff`, honest ADO refusal and unknown completeness/revision
+evidence. Finite receiver/frontend source merged in #11661; installed,
+live-provider and workspace generation acceptance remain independent.
+The [existing-owner HTTP report boundary](owner-report-read.md), reviewed in #11665,
+adds a read-only thread/diff exchange through the existing authenticated
+Gateway without treating raw reports as principal-bound generations.
+The optional source embedding merged in #11668; large-report, native-command adopter,
+installed and live-provider acceptance remain separate.
+The [selected native report-owner contract](native-report-owner.md), reviewed in
+#11681 under #11680, defines a finite GitHub.com-first adopter. Implementation
+merged in #11686 without changing legacy native authentication or implying
+host adoption. Large-report, native-platform, installed/live-provider and full
+CLI/HTTP acceptance remain separate.
+The [size-qualified response contract](bounded-report-response.md), reviewed in
+#11694 under #11692,
+reuses the existing 8 MiB channel while preserving current 32 KiB caller-aware
+handler/report defaults. Its opt-in SDK prerequisite merged in #11699; the
+parallel report profile and native capture/client budget composition merged
+in #11702. Their finite source qualification is not explicit standalone
+configuration, installed hosting or provider acceptance.
+The [explicit standalone report-host contract](standalone-report-host.md), reviewed in #11705,
+selects the existing reader/native adapter and actual SDK handler ceiling
+through strict optional host configuration. The finite source implementation
+and fresh isolated controls are recorded in its linked implementation journal;
+they merged in #11712. This is not retained-host enrollment or rollout.
+The [selected native thread-resolution contract](native-thread-resolution.md),
+reviewed in #11714, defines an optional ADO-first, single-thread status change through the existing
+owner. Its [source implementation and isolated controls](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
+pass and merged in #11728 after independent review and required CI.
+Read routes stay read-only; installed/account/HTTP and three-provider
+qualification remain open. It advances #7051 without replacing its lifecycle
+owner or claiming an atomic candidate/thread write.
+Its [selected reopening refinement](native-thread-resolution.md#selected-native-reopening-proposal)
+cleared independent review in #11741. Its
+[source implementation and controls](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)
+compose the same owner for an exact resolved-to-active transition, merged in
+#11748 after independent approval and all required CI. Close-only commands and
+legacy status choices remain unchanged; installed support is not qualified.
+The [native local source-reconciliation proposal](native-source-reconciliation.md)
+under #11753 composes the existing Worktrees `pr-complete` owner with optional
+exact-source admission and a capability-directed native client. Contract review
+cleared in #11754; its [finite source qualification](journal/2026/11.09%20Native%20local%20source%20reconciliation.md)
+passes and implementation merged in #11761 after current-head independent
+approval and all actual required checks.
+No remote source mutation, merge evidence, claim settlement or finalization is implied.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -290,6 +382,26 @@ _Operator-required outcome; agent-recommended slices and validation._
   [existing-owner conversation metadata journal](../../../plugins/agent-pull-requests/docs/conversation-journal.md)
   and opt-in event reader merged in #10401; full body acquisition, coordinated terminal
   retention, notifications and normal host adoption remain separate.
+  Quiet-observation metadata expiry merged in #11574; it preserves the cursor
+  anchor and does not compact body-bearing caches, outboxes or effect receipts.
+  The [coordinated terminal-retention refinement](terminal-retention.md)
+  was reviewed in #11576. It defines the same-owner fence, notification,
+  recovery-only payload and scoped cache/materialization sequence;
+  T1 terminal intent/admission/drain and minimal replay notification merged
+  in #11605. T2a compact recovery-only operations and actual protected readback
+  merged in #11614. T2b scoped cache/materialization retirement merged in
+  #11623. The optional read-only T3 receiver source merged in #11625;
+  strict standalone selection and fresh-only source provisioning merged
+  in #11628. Finite explicit service-lifecycle source qualification merged
+  in #11631. Complete retained-reader, mapping/retention composition,
+  installed/provider and P1/P2 acceptance remain open.
+  The [mapping-preservation refinement](terminal-retention.md#retained-acquisition-mapping-composition)
+  cleared review in #11633. Explicitly adopted lossless slot transfer and
+  scoped historical library readback merged in #11634. Separately negotiated
+  terminal retained-comment serving merged in #11636. Explicit standalone
+  host selection, fresh-only adoption and foreground compact-read
+  qualification merged in #11639; installed, provider and complete T3
+  acceptance remain open.
   Existing normalized ADO load/sync acquisition feeds the explicitly enabled
   journal after confirmed cache publication (#10405); native observation and
   standalone-host adoption remain distinct prerequisites.
@@ -439,12 +551,20 @@ _Operator-required outcome; agent-recommended slices and validation._
 - [x] Review the [persisted acquisition mapping refinement](comment-observation-correlation.md#persisted-acquisition-mapping-refinement)
   before changing strict owner or serving schemas. Reuse retained intent and
   receipt identity; add only bounded acquired evidence under the same owner
-  (#11538; storage/acquisition/read implementation remains open).
-- [ ] Deliver its explicitly adopted source storage/acquisition/read leaves,
+  (#11538; finite storage and consumer delivery below).
+- [x] Deliver its finite explicitly adopted data-owner/library transaction and
+  scoped retained-read leaves (#11542; final affected packet: 100 source cases).
+  Preserve original confirmation, unknown outcomes and B3/B4 proof.
+- [x] Deliver actual explicitly selected workspace load/sync acquisition and
+  negotiated retained serving for that persisted mapping (#11556; final 56
+  actual-boundary source controls),
   preserving original confirmation, unknown outcomes and B3/B4 proof; keep
   all-publisher, provider and installed acceptance separate.
-  The finite data-owner/library transaction and scoped retained read are
-  separate from actual workspace load/sync enrollment and negotiated serving.
+- [x] Select retained mappings through the existing standalone foreground
+  host's trusted per-route configuration and fresh-only storage adoption.
+  Preserve default-off hosting, read-only native scope and retained inspection
+  after optional preparation-provider withdrawal; this is source hosting,
+  not protected publication or production enrollment (#11561).
 - [x] Review the [tracked comment/review consumer refinement](tracked-comment-consumers.md)
   before changing legacy commands (#11525).
 - [x] Qualify one explicit tracked comment/review source binding
@@ -471,7 +591,7 @@ _Agent-recommended design and validation, explicitly selected for review._
 - [x] Adopt canonical graceful-cutover primitives with installer-driven activation, passive health, exact-instance promotion and retirement, and crash-consistent marker/manifest/route recovery (source landed in #7160).
 - [x] Define and enforce one installation-scoped watch-state writer across predecessor drain and successor subscription/delivery adoption; preserve event and registration identities without overlapping live-generation delivery (source landed in #7160).
 - [x] Prove rollback, commit-forward, governance refusal, crash recovery, callback drain, and refusal of lease-only owners without verifiable same-cell ownership on Windows and Linux before landing the cutover prerequisite (exact-head native acceptance `39226209682`).
-- [ ] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation. Source landed in #7160 and is released in #7291; complete installed-contract acceptance remains pending.
+- [x] Land and deploy the governed lifecycle prerequisite as part of PR-owner adoption before enabling installation-cell dispatch delegation. Source/release credit remains #7160/#7291. Authorized unified rollout now selects PR-owner `0.3.249-dev1`; four installed-profile cases and exact-source native acceptance `42461516789` pass. macOS retains its tested fail-closed disposition with positive support tracked in #11545. Live delegation activation remains separately authorized.
 
 ### Installation-cell prerequisite
 
@@ -481,7 +601,7 @@ _Agent-recommended prerequisite, explicitly selected by the operator._
 - [x] Adopt the canonical installation-context payload, installer/runtime-resolution and state-root contract in `agent-pull-requests`, preserving supported legacy installs without silent cell-to-legacy fallback (source landed in #7160).
 - [x] Include the PR owner in the generated same-cell peer-launch contract and declare release impact for every generated consumer (source landed in #7160).
 - [x] Prove first installation, upgrade, invalid/foreign receipt refusal, state isolation, actual two-cell PR-owner invocation, and pending watch-subscription recovery using the shipped payload rather than a fabricated sibling contract (exact-head native acceptance `39226209682`).
-- [ ] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Source landed in #7160 and is released in #7291; keep dispatch delegation inactive until complete installed-contract acceptance clears.
+- [x] Land and deploy the adoption prerequisite before enabling installation-cell dispatch delegation. Source/release credit remains #7160/#7291. Release #11489, authorized unified rollout, installed-profile lifecycle/isolation/refusal and native-account acceptance `42461516789` clear this finite prerequisite. This does not enable live dispatch delegation or complete the broader service/fleet effort.
 
 ### Phase 1 - Review the recovery contract
 
@@ -699,7 +819,7 @@ _Operator-required usage; agent-recommended design, sequencing and validation._
 
 ### Phase 4 - Deploy and close _(agent-recommended)_
 
-- [ ] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Prerequisite promotion and content are confirmed in #7291. An operator-authorized local unified update installs the PR-owner runtime but exits nonzero on independent construction/profile failures. The dispatch integration source landed in #7714 and is content-confirmed in release #7751 (Dispatch `0.18.41-dev1`, PR-owner `0.3.36-dev1`); authorized rollout and complete isolated installed-contract proof remain open. No new deployed-runtime changes are authorized by the source merge or release.
+- [x] Confirm promotion of the changed source to the release branch by content, then deploy through the unified update surface. Earlier #7291/#7751 and #7714 credit remains intact. Release #11489 is content-verified; the authorized unified updater completes successfully with selected/running Dispatch `0.18.306-dev1` and selected PR-owner `0.3.249-dev1`. All 410 Dispatch production Python files match that release, and installed-profile/native-account PR-owner acceptance passes. Live consumer/delegation activation is not implied by runtime installation or this checkbox.
 - [ ] Exercise the deployed contract in isolated state without interrupting shared coordinators, watch subscriptions, or peer sessions.
 - [ ] Complete the fleet service acceptance in the linked plan on explicitly
   approved capacity, including persistent registration/delivery and the actual
@@ -1000,10 +1120,160 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
-- [ ] Qualify the [persisted acquisition mapping controls](comment-observation-correlation.md#provider-first-delivery-and-validation):
+- [x] Deliver the finite [native local source-reconciliation controls](native-source-reconciliation.md#compatibility-delivery-and-qualification)
+  after reviewed contract #11754. All five finite source-control rows pass
+  (229 coupled Worktrees and 123 frontend cases, five existing platform skips);
+  exact committed actor-free qualification passes 4,699 cases. Implementation
+  #11761 merged after current-head independent approval and every actual
+  required check. Legacy source behavior and broader
+  installed/provider/HTTP/resource/effort acceptance remain independent.
+
+- [ ] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); neither fixtures nor a healthy empty host close M1 or this effort.
+
+- [x] Qualify the finite source [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
+  after independent contract review (#11741): exact resolved-to-active transition,
+  native action authority, same candidate/thread, status-only write, original
+  consumed-operation outcomes, strict peers and unchanged close-only behavior.
+  All five linked source controls pass (414 Worktrees and 193 frontend controls,
+  five existing platform skips), merged in #11748 after current-head independent
+  approval and all actual required checks. No installed/provider/HTTP or native
+  Windows parity is claimed.
+
+- [x] Qualify the finite [selected native thread-resolution contract](native-thread-resolution.md#expansion-and-qualification) (#11728)
+  after reviewed intent: exact ADO target/principal/candidate/thread, status-only
+  mutation, consumed-key recovery, unknown outcomes and old/new runtime
+  composition. Source controls do not establish atomic CAS, other-provider
+  support, installed/HTTP adoption or the full lifecycle acceptance in #7051.
+  All five linked source controls now pass (336 Worktrees and 150 dedicated
+  frontend cases, five existing platform skips); independent current-head
+  approval, resolved findings and all actual required CI preceded merge.
+  The actor-free packet passes 4,699. This credits only the finite source leaf.
+
+- [x] Qualify finite explicit standalone report hosting (#11712): 168 full
+  standalone and 68 isolated affected plugin cases cover actual foreground
+  TLS/native delivery above 1 MiB, strict/default/prior/rollback selection,
+  request-only native identity and original writer custody through expiry,
+  withdrawal and delayed native/SDK delivery cleanup. The actor-free packet
+  passes 4,668; strict service typing covers Linux/Windows analysis.
+  All six finite host-contract source controls are resolved. Installed/live
+  providers, native Windows, retained hosts/containers, full CLI/HTTP/Dispatch,
+  activation and rollout acceptance remain open.
+
+- [x] Qualify the finite opt-in v2 report/native-budget composition (#11702):
+  259 focused cases cover actual native-child, SDK/Gateway TLS and source CLI
+  delivery above 1 MiB under an 8 MiB selection, encoded/capture/client limits,
+  mixed peers, lifetime/backpressure and joined cleanup. Ordinary native
+  1 MiB defaults and v1 raw-JSON compatibility/32 KiB encoded limits remain.
+  The actor-free packet passes 4,665; all six finite
+  [response-contract source obligations](bounded-report-response.md#serial-delivery-and-validation)
+  are resolved. Explicit standalone configuration, installed/live-provider,
+  native Windows and broader CLI/HTTP/Dispatch acceptance remain open.
+
+- [x] Qualify the finite opt-in caller-aware SDK response prerequisite (#11699):
+  152 focused handler/caller/local cases cover actual larger TLS delivery,
+  bounded construction/emission, legacy/local refusal, ACK backpressure,
+  expiry, disconnect, withdrawal and joined cleanup. The actor-free unit
+  packet passes 4,665. The report-v2/native-budget composition and combined
+  response-contract source validation subsequently merged in #11702 above;
+  installed/live-provider, native Windows and full CLI/HTTP acceptance remain open.
+
+- [x] Qualify the finite optional selected GitHub.com report owner (#11686):
+  actual configuration/strict account policy, explicit verified CLI-store
+  identity, pinned provider reads, one request budget and original cleanup
+  custody. The final target/committed-policy packet passes 97 cases and the
+  actor-free packet passes 4,665; earlier overlapping report/Gateway/TLS and
+  native-adapter packets pass 88 and 22. Linux fixtures are not native Windows,
+  installed hosting, live-provider, large-report or full CLI/HTTP acceptance.
+
+- [x] Qualify the finite optional existing-owner report boundary (#11668):
+  configured report scope before resolution/acquisition, full native report and
+  original exit preservation, epoch-safe negotiation, current owner/deadline
+  checks through worker and shielded task handoffs, and actual Gateway drain.
+  Final focused report qualification passes 62 cases; the earlier coupled
+  CLI/watch packet passes 210 with five Windows-only skips. Broader native-command
+  adoption, larger-report transport, installed/live-provider and full
+  HTTP/CLI acceptance remain open.
+
+- [x] Qualify the finite [explicit native diff-read source boundary](native-diff-read.md#compatibility-and-qualification) (#11661)
+  after contract review: 149 native cases with five Windows-only skips and
+  362 actual owner/read/provider/tracked cases. Real subprocess provider
+  methods retain target/endpoint selection, tracked compatibility and honest
+  unsupported/error/completeness evidence. Installed, live-provider, HTTP and
+  candidate-bound workspace acceptance remain separate.
+
+- [x] Qualify finite explicit-target native thread reading (#11657): 148 native
+  parser/routing cases with five Windows-only skips and 43 actual-owner
+  read/observation cases. Preserve exact reports, incomplete/null completeness,
+  candidate changes, valid failures and pre-dispatch option-prefix refusal.
+  Real subprocess old/new callers exercise actual GitHub/Gitea/ADO builders
+  with synthetic IO. Native-platform, installed/live-provider, HTTP and
+  broader CLI parity remain open.
+
+- [x] Qualify finite native unpublished-creation cancellation (#11653):
+  exact full worktree/creation selection, original revision/reason recovery,
+  actual receiver declaration and one existing-owner dispatch. The final
+  cancellation/routing packet passes 149 cases with five platform skips;
+  actual creation/status/cancellation composition and old-caller subprocess
+  pass 82. Preserve unknown committed/lost outcomes, owner evidence,
+  frontend recovery inputs and source/sibling/claim/finalization custody.
+  Windows, installed/provider/HTTP and remote abandonment/comment/claim
+  integration remain open; this is not complete legacy parity.
+
+- [x] Qualify finite explicit-target native reviewer requests (#11647).
+  Preserve tracked nudge selection, transport and no-op behavior; use the
+  actual target/provider and distinguish API acceptance from a fresh verdict.
+  The owner/provider/legacy packet passes 398 cases; the final shared
+  request/author/readiness/worker-policy packet passes 180, overlapping the
+  former packet and adding malformed reserved-worker marker controls.
+  The native packet passes 116 with five Windows-only skips and verified
+  cleanup. Source qualification is not native Windows, live-provider,
+  installed or HTTP parity.
+
+- [x] Qualify finite explicit-target native draft readiness (#11643), preserving
+  tracked ready and legacy-hold behavior. The final owner packet passes 54 cases;
+  the native frontend passes 84 with five Windows-only skips and verified
+  cleanup. Actual delivered-policy/projectless refusal, target/provider
+  validation, versioned outcomes, single draft-only mutation and uncertain
+  result no-replay controls are covered. Windows/live-provider/installed/HTTP
+  parity and the broader CLI matrix remain open.
+
+- [x] Qualify finite standalone terminal mapping selection, missing/incompatible
+  core and prior-constructor behavior, strict parser/rollback, fresh-only
+  interrupted adoption and validation-only retained serving (#11639).
+  The existing foreground Gateway/CLI/native-exporter fixture seeds synthetic
+  original history before its writer, drains before owner-side compaction and
+  populated-cache retirement, then reads exact compact metadata after restart
+  without another export or replay-store write. The final standalone packet
+  passes 132 cases; strict typing passes Linux/Windows analysis. Installed
+  hosts, providers, full retention and P1-P6 acceptance remain open.
+
+- [x] Qualify finite optional terminal mapping serving through actual adopted
+  storage, Native/Gateway/CLI negotiation, all four owner layouts, populated
+  cache/buffer retirement and fresh file-reader/service restart (#11636).
+  Preserve baseline v1 contracts, missing/withdrawn support, strict rollback,
+  unsupported historical versus null evidence and malformed-value refusal.
+  The final focused suite passes 39 cases; earlier overlapping packets pass
+  173 and 108. Standalone selection and installed/provider/full T3 acceptance
+  remain open.
+
+- [x] Qualify finite mapping data/library controls: original prepared/native
+  joins, restart, later writes, unknown/partial/divergent evidence, copied
+  targets, explicit/capacity-refused adoption, old strict readers, receipt
+  invalidation, uncertain replacement, cache-before-journal failure and
+  normalization/digest reuse (#11542; final 100 affected source cases).
+  Actual load/sync source controls follow below.
+- [x] Qualify finite [persisted acquisition mapping source controls](comment-observation-correlation.md#provider-first-delivery-and-validation):
   same-owner native joins, real-file restart/contention, monotone evidence,
   capacity and uncertain replacement, no duplicate IO or false feedback,
-  strict old/new/rollback peers and unchanged default hosting.
+  strict old/new/rollback peers, additive discovery and unchanged default
+  hosting (#11542/#11556; final 56 consumer controls). Normal installed
+  enrollment and live provider acceptance remain with P3-P5, not this source leaf.
+- [x] Qualify that standalone mapping selection through strict passive parsing,
+  fresh-only adoption, unsupported existing volumes, route isolation and the
+  real foreground/Gateway/native-exporter boundary with a synthetic prior
+  receipt. Separate retained current-content evidence from native-send,
+  original-version, feedback/handled and installed/provider acceptance
+  (#11561; final 105 standalone controls).
 - [x] Qualify the explicit tracked comment/review consumer through its actual
   resolution and workspace CLI/tool/client boundary: exact scoped selection,
   final preview and separate submission, original-key restart/lost-result
@@ -1186,7 +1456,7 @@ All items below are **agent-recommended** acceptance checks.
   (#7915; synthetic issuer and isolated real TLS/disk, not provider/deployment proof).
 - [x] Integration: real isolated watch owner and coordinator exercise subscribe/prepare/arm/finish, coordinator outage then recovery, duplicate delivery, stale-generation callback, and registration failure without a duplicate wait owner (#7714).
 - [x] Fresh state: the supported first-touch path establishes only the owning plugin's state; two independent subscribers share one PR observation stream and need no per-task waiter process (#7714; installed adoption acceptance remains a separate prerequisite).
-- [x] Platform: bounded callback launch and shutdown/restart behavior pass on Windows and Linux, using existing contained test tooling (exact-head source acceptance `39716960139`; installed native-account proof remains open).
+- [x] Platform: bounded callback launch and shutdown/restart behavior pass on Windows and Linux, using existing contained test tooling (prior source acceptance `39716960139`; current PR-owner installed-profile and exact-release native-account acceptance `42461516789`). macOS has native fail-closed evidence with positive governed support tracked in #11545, not a positive lifecycle claim.
 - [x] Source gates: touched-plugin tests, fatal Python lint, module-size, headless-launch, install-contract, and required CI pass; add a changefile for each runtime plugin changed (#7714; current unit-only required policy, not a claim that the whole periodic portfolio passed).
 - [ ] Live deployment: exercise an existing, authorized PR target with isolated subscriber/coordinator state when available; otherwise record the exact unavailable lane and a named follow-up before closure.
 - [x] Documentation: review the final diff's impact on plugin behavior, failure/retry semantics, fallback, configuration, CLI help, and source-of-truth docs (#7714).
@@ -1227,6 +1497,857 @@ This preserves functionality without making a secret-bearing durable
 callback an implicit credential store.
 
 ## Journal
+
+- [2026-11-09 - First integrated cache/event milestone selected](journal/2026/11.09%20Repository%20cache%20events%20milestone.md)
+- [2026-11-09 - Selected native thread-resolution source implementation](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
+- [2026-11-09 - Selected native reopening source implementation](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)
+- [2026-11-09 - Selected native thread-resolution proposal](journal/2026/11.09%20Selected%20native%20resolution%20proposal.md)
+- [2026-11-09 - Standalone report-host contract reviewed](journal/2026/11.09%20Standalone%20report%20host%20contract.md)
+- [2026-11-09 - Standalone report-host source implementation](journal/2026/11.09%20Standalone%20report%20host%20implementation.md)
+- [2026-11-09 - Opt-in report v2 source qualification](journal/2026/11.09%20Bounded%20report%20v2%20source.md)
+- [2026-11-09 - Bounded SDK response owner qualified for source review](journal/2026/11.09%20Bounded%20SDK%20response%20owner.md)
+- [2026-11-09 - Size-qualified response contract reviewed; SDK owner first](journal/2026/11.09%20Size-qualified%20response%20contract.md)
+- [2026-11-09 - Native report-owner source merged; parent acceptance retained](journal/2026/11.09%20Native%20report%20owner%20source.md)
+
+### 2026-11-09 - Native report boundary corrections
+
+- An empty committed batch is not policy-path absence until the existing
+  exact-candidate tree probe confirms it. Missing refs, trees or blobs,
+  non-symbolic remote HEAD and unavailable declared policy branches refuse.
+  Actual Git corruption/absence fixtures and existing source controls pass
+  together in the 97-case target/committed-policy packet.
+- Strict anchor-registry acquisition refuses before checkout-free selection;
+  a later successful account read cannot erase an earlier anchor failure.
+  Registry-derived policy and one-time read-failure controls pass within the
+  54-case target-policy suite. Ordinary anchor resolution remains fail-soft.
+- Strict selection treats enabled drop-in target loss, unusable targets and
+  identity mismatch as unavailable policy, not successful omission. Configured
+  plugin activation failures refuse; confirmed disable remains supported.
+  The 52-case target-policy suite passes with isolated registry/activation fixtures.
+- Confirming an absent policy descendant also validates its first existing
+  ancestor. A dangling policy-directory link remains unavailable rather than
+  silently removing policy. Three directory-link controls join the leaf-link
+  cases across global, repository and marketplace sources; 453 Worktrees
+  cases pass in isolation.
+- Strict presence acquisition uses raw stat outcomes rather than a fail-soft
+  existence predicate. Looping and dangling policy links refuse before account
+  selection across global, repository and marketplace sources; confirmed
+  optional absence remains supported. POSIX link fixtures pass within 450
+  Worktrees cases, and 22 actual native-adapter cases pass in isolation.
+- Any unavailable selection checkpoint or capture stays unavailable across
+  provider normalization, including transient failures whose next selection
+  succeeds. Only actual provider access errors become native error reports.
+  The expanded report/Gateway/TLS suite passes 88 isolated cases, including
+  capture and cleanup failures inside both native provider builders.
+- Strict acquisition also rejects duplicate keys in explicit/global YAML,
+  operator drop-ins and managed pointers without changing default loaders or
+  sharing retained registry state between strict and ordinary scans. Delayed
+  selection cleanup stays sticky across provider error normalization, preventing
+  an unavailable checkpoint from becoming HTTP 200. Isolated qualification
+  passes 444 Worktrees and 86 report/Gateway/TLS cases.
+- Strict committed reads decode actual bytes as UTF-8 on both batch and
+  ordered paths, rather than treating a literal replacement character as
+  decoding loss. Invalid bytes refuse; valid U+FFFD remains valid policy text.
+  The focused Worktrees suite passes 440 isolated cases with both controls.
+- Checkout-free selection uses only the target owner's account map when no
+  exact repository entry exists, never a sibling repository's account. Strict
+  committed text validation applies equally to batch and ordered recovery
+  paths. These refinements pass 438 Worktrees cases and 18 actual native-adapter
+  cases in isolation; prior 84-case report/Gateway/TLS controls remain unchanged.
+- Preserve a separate lightweight final check after the original Gateway task
+  completes: deadline, permission and current binding still apply at the last
+  event-loop handoff without starting a subprocess. Keep both prepared-response
+  and task-completion regressions, including owner replacement.
+- Strict committed policy reads refuse unresolved established head/branch/blob
+  acquisition and lossy decoding before credentials. Confirmed absence permits
+  disk policy, while bounded ordered reads may recover the same committed
+  source. Fresh Git fixtures prove a divergent checkout cannot hide a committed
+  token helper after acquisition failure.
+- The final publication/configuration refinements pass 434 focused Worktrees
+  cases and 84 report/Gateway/TLS cases in isolated fixtures.
+- Publication-time selection can perform process work and delayed cleanup.
+  Keep both asynchronous publication rechecks in shielded, tracked workers so
+  unrelated Gateway requests and drain timers remain responsive while the
+  admitted request retains cleanup custody.
+- Require strict repository policy parsing and refuse failed configuration
+  contributions before account acquisition. Preserve ordinary fail-soft
+  configuration behavior outside this optional selection path.
+- Absolute GraphQL API routes require explicitly nested variables with native
+  string/integer types. Provider access failures remain supported native error
+  reports, distinct from unavailable transport and cleanup.
+- Isolated qualification passed 724 Worktrees cases, including the existing
+  authentication suite against the extracted runner, and 80 report/Gateway/TLS
+  cases. Current-head CI and genuine approval remain required before merge.
+
+### 2026-11-09 - Native report-owner source qualification pending review
+
+- Implemented the reviewed #11681 contract under #11680 as an optional
+  GitHub.com-only source embedding. Reuse actual Worktrees configuration,
+  related-target and strict configured-account selection, the selected
+  CLI-store/authenticated-login observer and existing report normalization.
+  Selection workers and credential/provider children share one request budget;
+  absolute API routes avoid CLI auxiliary discovery and ambient routing.
+- Isolated Linux qualification passed 360 Worktrees cases and 73 report,
+  Gateway/client and TLS transport cases. The final adapter-specific suite
+  passes 15 cases, including exact configured store spelling for equivalent
+  scopes, policy replacement before publication, oversized captures and
+  original Gateway custody during delayed cleanup with and without disconnect.
+  These are new fixture resources, not live GitHub credential/provider proof.
+- The actor-free required packet passed 4,665 cases against the initial source
+  implementation revision; the later account/publication refinements have their
+  focused native qualification. Retain the required current-head CI and genuine
+  review gates before merge. No installed loader, HTTP override fields, new
+  protocol generation, default native behavior or operational enrollment changed.
+- Native Windows execution, other providers, large-report transport, retained
+  hosting and the broader Plan/Validation remain separate. The implementation
+  and its finite source issue are not complete before normal review and merge;
+  afterward return to the whole parent rather than finalizing this worktree.
+
+### 2026-11-09 - Native report-owner contract merged; implementation next
+
+- #11681 merged as `c3a404d2e61b6e50909fc13856a41a9bb4699d1e`
+  at 02:22 Pacific after genuine current-head Approval `5824491264`,
+  no inline findings and all three required CI gates green. Read the full
+  review body and native findings before managed completion; only the admitted
+  additional CODEOWNER exception applied.
+- Normal source reconciliation preserved its backup and the attribution-only
+  commit; merged contribution trailers are verified. No parent or source
+  worktree was finalized. #11680 remains open for its implementation and tests.
+- Returned to the canonical Plan/Validation; its wider acceptance remains open.
+  Next is the reviewed finite
+  GitHub.com native owner adapter with new isolated fixtures, not actual
+  credential acquisition, installed-host configuration, rollout or source
+  completion of the broader program.
+
+### 2026-11-09 - Native report-owner source trace and proposal
+
+- Claimed #11680 after checking open report-related work. Traced actual
+  Worktrees target resolution, account selection and provider execution:
+  legacy ambient authentication, relative GitHub thread routing and independent
+  child timeouts prevent treating matching callback labels as service admission.
+- Proposed one optional GitHub.com-first owner adapter through the existing
+  report embedding. Strict configured-account/store selection, authenticated
+  login matching, endpoint-pinned provider calls and the original request
+  budget precede body reads; native legacy behavior stays unchanged.
+- This is a review-first source proposal, not runtime implementation,
+  credential acquisition, installed support or parent completion. Other
+  providers, large reports and the retained operational gates remain open.
+
+### 2026-11-09 - Existing-owner report source merged; full parent return
+
+- #11668 merged as `a510df7bfcdb855caa3c121cf66ad49148febf4b`
+  after genuine current-head Approval `5824357118`, no remaining findings
+  and all three required CI gates green. Normal managed completion used
+  only the admitted additional CODEOWNER exception, not a review/check waiver.
+- Corrected four runtime findings: stale discovery failure invalidation,
+  both asynchronous publication gaps, and endpoint/provider remapping before
+  acquisition. The final focused report suite passes 62 cases with verified
+  cleanup; initial CLI/watch qualification passes 210 with five Windows-only
+  skips. A final documentation-only correction states current guarantees
+  directly rather than embedding review history in contract prose.
+- Normal source reconciliation preserved a pre-completion backup and aligned
+  to the confirmed merge. Contribution trailers remain in the merge commit.
+  The finite #11664 source issue is complete; #6007 and its parent gates remain.
+- Re-read the complete root Plan/Validation after merge. Credit only the
+  finite optional report source; native-command account
+  binding, large reports, all-publisher/protected-writer, Dispatch, installed,
+  provider, container/shadow and retained-origin acceptance remain open.
+- Next source action: trace actual Worktrees report target/account/endpoint
+  resolution and credential admission, then derive the smallest review-first
+  native report-owner adopter. Callback labels alone are not authenticated
+  native selection, and this continuation grants no operational enrollment.
+
+### 2026-11-09 - Existing-owner report source qualification
+
+- Implemented the reviewed #11665 read-only boundary under #11664:
+  fixed admitted owner/scope resolution, live checkpoints, finite synchronous
+  collection, optional existing Gateway routes, SDK client and strict source
+  host-injected facade. Whole native reports and original owner exits remain
+  distinct from principal-bound review generations.
+- Contained Linux qualification passed 210 tests; five Windows-only native
+  CLI cases skipped. Actual TLS/SDK requests and policy/channel/cancellation
+  controls retain the original Gateway task through delayed collector cleanup.
+  Real Worktrees builders/providers use only synthetic GitHub/Gitea/ADO IO;
+  ADO unified diff remains unsupported. Full encoded exchanges above 32 KiB
+  refuse instead of truncating or persisting report bodies.
+- Fatal lint, install-contract, headless-launch, module-size and docs-consistency guards
+  passed. The whole enforced typecheck stopped on an unprepared unrelated
+  checker environment, not a reported source diagnostic. No installed/native
+  binding, live provider, host activation or parent acceptance is claimed.
+  Drive the implementation through normal review/CI/merge, then reconcile the
+  complete root Plan/Validation and continue the remaining source parity work.
+
+- [2026-11-09 - HTTP report contract merged; implementation next](journal/2026/11.09%20HTTP%20report%20contract%20merged.md)
+- [2026-11-09 - Native diff-read source merged; full parent return](journal/2026/11.09%20Native%20diff-read%20source%20merged.md)
+
+### 2026-11-09 - Native diff-read source qualification
+
+- Implemented the contract reviewed in #11659 through the existing one-shot
+  read/configuration and provider owners. The additive native-only frontend
+  dispatches once, validates the exact target/report and retains complete
+  valid evidence independently of command outcome. No transport, watcher,
+  diff archive, mutation or claimant is introduced.
+- GitHub diff acquisition now honors its configured endpoint through the
+  existing provider host helper; ordinary ambient/default behavior is
+  retained when no endpoint is configured. Gitea uses its existing endpoint,
+  and ADO remains explicitly unsupported for unified diffs.
+- The native packet passes 149 cases with five existing Windows-only skips;
+  final actual-owner/read/provider/tracked qualification passes 362.
+  Real subprocess fixtures preserve UTF-8/line endings, provider refusal,
+  neutral CWD, mixed-version handling and tracked reconciliation/output.
+  An initial fixture expected the wrong Gitea API path and omitted the
+  generic tracked JSON version; actual boundaries corrected those
+  expectations without changing tracked behavior.
+- A module-size guard caught the enlarged dispatcher. Keeping on-demand
+  provider/account selection in the existing read-context module restores
+  the ceiling; the final owner packet also covers existing thread readers.
+- Validate provider return fields inside the failure-report boundary, so
+  absent or malformed results remain valid failed reports. Reject unknown
+  on-demand report verbs before selecting a provider or acquiring credentials.
+  Six focused regressions cover those failure classes.
+- Require positive support at report dispatch, bound UTF-8 sizing before
+  encoding oversized text, and expose only the exception class for an
+  unexpected provider failure. Native result errors remain intact; exception
+  text cannot become a second path for accidental secret disclosure.
+- Actual provider CLI text capture normalized CRLF and bare CR before report
+  construction. Add an optional strict UTF-8 byte-capture mode through the
+  existing process owner, selected only by explicit diff acquisition; tracked
+  calls retain their original normalization. Real subprocess controls prove
+  both modes and invalid-UTF-8 refusal, rather than mocking the capture seam.
+- Reject malformed configured GitHub endpoints before `gh` and bind supplied
+  tokens to all public/Enterprise aliases, preserving absent-configuration
+  defaults. Actual synthetic CLI processes prove the selected host/token
+  overrides unrelated ambient values. The Gitea diff helper stays under its
+  existing curl owner while preserving the module ceiling.
+- GitHub vendor-download HTTP 504s blocked disposable fixture preparation.
+  Qualification recovered with the same UV version from its canonical
+  package feed, independently SHA-256 pinned and older than seven days,
+  selected only in generated disposable configuration. Resource limits,
+  offline test execution and verified cleanup remain; no tracked bootstrap
+  or installed runtime changed. This does not qualify the GitHub bootstrap.
+- Fatal lint, install/headless/module guards and documentation consistency
+  pass. Both changed plugins remain typing-Pending under #9807; native
+  platform, installed/provider, HTTP, workspace and full parent acceptance
+  remain open.
+- Required CI identified stale exact-source admission for the changed
+  project router before running units. Bind the actual router/test bytes
+  and add two actor-free exact-command controls, preserving all packet
+  guards and budgets. The complete admitted packet passes 4,665 cases
+  with verified cleanup; no failed test or source gate is bypassed.
+
+### 2026-11-08 - Native diff-read contract merged; full parent return
+
+- #11659 merged as `02ae0268e0d1b2518d204c9d67090b2709e422f4` at
+  23:50 PT after genuine current-head Copilot Approval `5822914588` on
+  `83cea490c3099a738e25109b8a6663c760fc2439`, all three findings resolved
+  and every required check green. Normal managed completion used only the
+  documented additional-CODEOWNER exception; review and CI remained required.
+- Normal `pr-complete` retained a backup and removed three redundant local
+  commits, aligning source to the confirmed merged base. Contribution
+  trailers remain in the merge commit. The parent issue remains open.
+- Re-read the complete root Plan and Validation Plan after merge. Credit
+  only reviewed intent: receiver/frontend realization and every native,
+  provider, installed, HTTP, workspace and retained-parent exit remain open.
+- Next source action: implement the additive explicit-target diff read
+  through the existing one-shot read and provider owners, then qualify
+  actual parser/process and provider behavior. No live activation is granted.
+
+### 2026-11-08 - Native diff-read boundary proposed
+
+- The existing tracked diff operation reconciles a worktree before reading.
+  Its provider result does not carry candidate identity or completeness;
+  Azure DevOps explicitly cannot supply a unified patch. The workspace
+  generation/source reader is a different evidence and custody boundary.
+- Proposed one additive checkout-free owner and native frontend using the
+  existing provider primitive and process budget. Preserve legacy tracked
+  behavior, provider errors, unknown evidence and exact valid reports.
+  The new target-qualified path must honor configured GitHub endpoints;
+  the existing provider method currently ignores that argument.
+- This is review-first intent, not runtime support or provider/installed
+  acceptance. Complete CLI/HTTP, workspace, service and retained-origin
+  parent outcomes remain open.
+
+### 2026-11-08 - Native thread-read source merged; entire parent return
+
+- #11657 merged as `5a0aeafc01d28f3459f75a88f3462d10fe74b81d` at
+  23:22 PT after genuine current-head Copilot Approval `5822662199` on
+  `ff228eba468415eecff6567159b0ffe0e50875ad`, the one finding fixed/resolved
+  and all three required checks green. Normal managed completion used only
+  the documented additional-CODEOWNER exception. No review/CI or live-effect
+  gate was waived.
+- Normal `pr-complete` retained a backup and dropped three redundant local
+  commits, aligning the source to the confirmed merged base. Contribution
+  trailers are present in the merge commit.
+- Re-read the entire root Plan and Validation Plan after merge and credited
+  only the finite native thread-read leaf. Complete retention/attention,
+  all-publisher/protected-writer, CLI/HTTP/Dispatch, provider, installed/fleet
+  and retained-origin acceptance remain open.
+- Next bounded source action: inspect existing explicit native diff/evidence
+  read owners, parsers and consumers, then derive the smallest missing
+  read-only convergence boundary for review if a gap is confirmed. Do not
+  add a second forge transport or treat the thread adapter as full parity.
+
+### 2026-11-08 - Native thread-read source qualification
+
+- Reject option-prefixed repository values in the new native parser before
+  either launch path. The shared legacy slug parser accepts them; passing
+  one as a positional Worktrees argument could reinterpret it as a host,
+  token or config override before later result-identity validation. Direct
+  and managed parser regressions retain the pre-dispatch boundary.
+- Implemented the contract reviewed in #11655 with one bounded invocation of
+  the existing Worktrees report owner. The new native-only parser validates
+  required target/runtime selection before direct or managed launch.
+- Preserve exact valid reports, including additive/nested fields, incomplete
+  or unknown completeness, candidate changes and report errors. Keep invocation
+  failures separate on stderr without rewriting owner evidence, inferring an
+  empty discussion list, retrying or adding another forge route.
+- Isolated thread/routing qualification passes 148 cases with five existing
+  Windows-only skips. Actual checkout-free owner/observation qualification
+  passes 43, including old and new process callers, synthetic GitHub/Gitea/ADO
+  provider report construction, partial ADO reads and changed candidates.
+  Cleanup is verified. Windows/macOS, installed/live-provider, HTTP and
+  complete parent acceptance remain open.
+- Documentation lint has no errors. Both the root effort and PR-plugin
+  overview size warnings remain tracked documentation-maintenance work under
+  this parent; preserve canonical contracts when extracting linked material.
+
+### 2026-11-08 - Native thread-read contract merged; full parent return
+
+- #11655 merged as `d075b3f3b990b8ca0339948c2f3e05e961ee9dde` at
+  22:59 PT after genuine current-head Copilot Approval `5822530375` on
+  `27b25b90cf8a2aa353a865df46f1c1ba68696bdf`, no open findings and green
+  required checks. Normal managed completion used only the documented
+  additional-CODEOWNER exception; no review/CI or live-effect gate was waived.
+- Re-read the entire root Plan and Validation Plan after merge. The contract
+  clears only the finite design gate: all implementation/qualification rows
+  and complete parent retention, attention, publication, CLI/HTTP/Dispatch,
+  provider, installed and fleet acceptance remain open.
+- Next is the thin native-only thread-read adapter and focused isolated
+  owner/parser/process qualification under the reviewed boundary. No new
+  transport, watcher, persisted conversation body or thread mutation is added.
+
+### 2026-11-08 - Native thread-read boundary proposed
+
+- Inspected the existing explicit Worktrees parser, neutral-CWD entry,
+  target/configuration resolution, report builder, ADO discussion reader and
+  dedicated native CLI consumers. Worktrees already supplies the read owner;
+  the dedicated client lacks the thin adapter.
+- Proposed the existing version-1 baseline without a new capability RPC or
+  provider transport. Preserve incomplete/null completeness, changed-candidate
+  evidence, nested provider fields and valid error reports; a successful read
+  is not writeback or merge authority.
+- This is a review-first contract only. Isolated parser/process/provider
+  qualification and implementation remain open, alongside the full parent
+  Plan and Validation Plan. No runtime, host or consumer activation changed.
+- Documentation lint has no errors; its root-effort size warning remains
+  open documentation-maintenance work under this parent. Split historical
+  journal material without losing canonical Plan/Validation/approval custody.
+
+### 2026-11-08 - Native cancellation merged; entire parent return
+
+- #11653 merged as `0887674795dc64228f973f90798412842d4c536c` at
+  22:48 PT after genuine current-head Copilot Approval `5822410308` on
+  `3d8b97d923777f3c32e4f9d41c74c83507071cbc`, no open findings and all three
+  required checks green. Normal managed completion used only the documented
+  missing-CODEOWNER exception. No review/CI or live-effect gate was waived.
+- Reconciled the source through normal `pr-complete`: seven redundant local
+  commits dropped with the owner's backup retained, source aligned to the
+  merged base, required contribution trailers present.
+- Read the entire canonical Plan and Validation Plan after merge, not only
+  the cancellation sub-contract. Credited only the finite source leaf above.
+  Retention/attention, all-publisher/protected-writer, full CLI/HTTP/Dispatch,
+  three-provider, installed/container/shadow and retained-origin gates stay open.
+- Next bounded source action: inspect existing explicit native thread-read
+  parser/result and consumer contracts, then propose the smallest missing
+  read-only CLI convergence boundary for review. Remote close/reason-comment
+  work remains separate; no new forge transport, ledger or live effect is
+  authorized by this selection.
+
+### 2026-11-08 - Native cancellation source qualification
+
+- Current-head Balanced review had no open issues but requested human
+  assessment of qualification history versus current guarantees. Replaced the
+  contract's iterative test-count narrative with a current-evidence table and
+  explicit remaining qualification; retained the complete correction history
+  here. No runtime guarantee or validation result changed.
+- Full review then identified missing blank-selector admission on the
+  governed peer path. Reused the existing parser validator before peer
+  selection/discovery; three managed-peer controls reproduce that boundary.
+  Final affected isolated suite: 149 passed, five platform skips.
+- The next bounded re-review added two distinct findings, repeated at five
+  locations: missing-stderr fallback and original-target recovery evidence.
+  Centralized text-only stderr handling and added frontend-owned original
+  selectors/reason without altering receiver evidence. The final affected
+  isolated subset passed 146 tests with five platform skips.
+- A subsequent Comment review could not run its full agentic suite. Addressed
+  missing-stdout diagnostics and redundant error fallback; retained malformed
+  owner fields under the reviewed payload-preservation contract. Documented
+  and tested full-receipt success output as the existing native convention,
+  rather than silently changing it to a lossy summary. The final affected
+  isolated subset passed 143 tests with five platform skips.
+- Current-head review on #11653 found that plain owner-error output hid the
+  frontend's unknown-outcome recovery guidance. Retained the owner error and
+  printed the distinct diagnostic; the affected isolated cancellation/routing
+  subset passed 139 tests with five platform skips, including two plain-output
+  controls. A fresh review is required for the correction.
+- Implemented the contract reviewed in #11651 as a thin native-only
+  `cancel-creation` frontend. The same selected receiver supplies read-only
+  support/attempt discovery and one existing cancellation-owner dispatch.
+  Original worktree, creation, revision and reason remain selected; no forge
+  transport, cancellation algorithm, resource ledger or remote close was added.
+- Bounded isolated native routing/process controls passed 167 tests with five
+  existing platform skips. Actual creation/status/cancellation composition,
+  receipt recovery, source/sibling/claim custody and an old caller subprocess
+  passed 82 tests. A committed cancellation with a lost response remains
+  `unknown`; no fallback or automatic replay occurs.
+- Two fixture corrections preserved the real owners: select a file rather
+  than the fixture's existing worktrees directory, and supply the fixture's
+  admitted project context. The legacy output control uses the real JSON
+  output boundary. Bootstrap HTTP 504 recovery changed only a disposable
+  vendor-download URL while retaining the pinned hash and isolation.
+- Source implementation is awaiting its own review. Windows execution,
+  installed/provider/HTTP qualification, remote abandonment/comment/claim
+  integration and the complete parent acceptance remain open.
+
+### 2026-11-08 - Merge the native cancellation contract and return to implementation
+
+- #11651 merged as `50b618a194ef8a5e11e6effc30ed4d4b21184dc1`
+  after genuine current-head Copilot approval with no findings and all three
+  required checks green. Normal source completion retained the existing
+  parent and source claims; the contract does not implement its frontend.
+- Re-read the complete parent Plan and Validation Plan after merge. Continue
+  the reviewed native-only local-cancellation adapter, actual selected receiver
+  discovery and isolated owner/process qualification. Remote abandonment,
+  all-publisher comment identity, HTTP, provider, installed and operational
+  acceptance remain open.
+
+### 2026-11-08 - Merge the abandonment prerequisite and select local cancellation
+
+- #11649 merged as `d84413cc0d34c2c4300a7778f8bfc8351a19af93` after
+  current-head Copilot approval with no open findings and every required
+  CI check green. Both review findings were corrected and resolved; the
+  final 183-case isolated packet passes with verified cleanup.
+- Confirmed merged attribution and reconciled the owned source through normal
+  PR completion without finalizing or releasing parent/source custody.
+  Re-read the complete parent Plan and Validation Plan; the broader native,
+  HTTP, provider, installed and operational gates remain open.
+- Select the smallest independent continuation: review a native
+  unpublished-creation cancellation frontend over the existing v1 owner and
+  read-only status declaration. It preserves exact original revision/reason
+  recovery and does not expose remote close or silently bypass unfinished
+  reason-comment identity and partial-effect contracts.
+- The new document is a proposal, not implementation or native/platform proof.
+  No live provider, host activation, deployment or resource effect occurred.
+
+### 2026-11-08 - Preserve abandonment custody after combined provider failures
+
+- Remaining CLI inventory inspection distinguishes unpublished-attempt
+  cancellation from remote closure, its best-effort reason comment and claim
+  settlement. Neither terminal observation nor `--confirm` supplies operator
+  authority. Native successor integration remains open.
+- Found a directly coupled legacy defect: a GitHub close failure with an
+  appended comment-failure warning was accepted as success because the owner
+  searched for the warning text anywhere in the result. Recognize only the
+  existing warning-only prefixes; preserve close errors, open state and claims.
+  CLI syntax, provider result shape and successful-close semantics are unchanged.
+- The actual GitHub provider transport fixture now covers both failures and
+  confirms no abandoned history or claim release. Existing warning-only forms,
+  cancellation and provider conformance pass: 183 isolated cases with cleanup
+  verified. The initial packet found a test-owned empty-timestamp assertion and
+  a Git-only finalization fixture missing its existing no-mux binding; corrected
+  both without weakening the shared-host command guard.
+- Fatal lint, install-contract and headless-launch checks pass. This finite
+  prerequisite is not native/HTTP parity, prepared reason-comment adoption,
+  installed acceptance or permission for live closure. Continue the inventory
+  and both complete parent gates after reviewed merge.
+
+### 2026-11-08 - Merge native reviewer requests and resume the remaining CLI inventory
+
+- #11647 merged as `20cbf5c3b075162415d7f7e1e5fc129afe90df64` after
+  genuine current-head Copilot approval, both findings fixed and resolved,
+  and all required checks green. The required PR gate was explicitly
+  awaited; no review or CI waiver was used. Merged provenance is verified.
+- The final shared author-policy correction rejects reserved worker
+  bindings with missing or mismatched root markers before ambient loading,
+  including capability reporting. Review-history prose stays in this
+  Journal; the qualification document describes the current invariant.
+- Re-read both entire parent Plan/Validation sections after the actual merge.
+  Their 82 public and 11 companion unfinished rows remain open. Complete
+  CLI/HTTP, all-publisher, retention, Dispatch, provider, installed, shadow
+  and presentation acceptance are not implied by this finite source leaf.
+- Next: inspect the remaining abandonment/close CLI owner, operator-confirmed
+  intent and reason-comment behavior before selecting a compatible source
+  contract. Preserve publication identity and existing resource custody;
+  no live closure, credential work, host activation or rollout is authorized.
+
+### 2026-11-08 - Qualify the bounded explicit reviewer-request source candidate
+
+- Implement the reviewed optional target-qualified operation through the
+  existing Worktrees/GitHub provider and conditional native client. The
+  tracked nudge transport and no-op behavior remain unchanged; explicit
+  requests preflight active non-draft identity and preserve accepted,
+  rejected and unknown outcomes without retry or fallback.
+- The isolated owner/provider/legacy packet passes 398 cases; the final
+  request-owner subset passes 33, overlapping the packet and adding four
+  explicit target/policy refusals. The native packet passes 116 with five
+  Windows-only skips and real-process forwarding. Cleanup is verified.
+- The first broad provider packet exposed four old creation fixtures that
+  forbade even local authority resolution. They now allow the existing
+  reservation owner and assert zero forge creates when auto-open is off;
+  the failure control injects the actual create API instead of preventing
+  reservation. No production reservation or publication guard was weakened.
+  Two initial native assertions were corrected to expect argparse's actual
+  strict `SystemExit(2)` rather than an ordinary return code.
+- Source review, required CI, native Windows, live-provider, installed and
+  HTTP acceptance remain open. No host activation, credentials, rollout,
+  protected writer or parent completion is claimed.
+- Review found that an explicit reserved worker binding without its
+  `repo_name` marker could reach ambient policy. The shared author loader now
+  rejects that malformed shape before config resolution, for discovery and
+  every dependent author operation. Ordinary full project configurations
+  retain their supported path. Eight focused regressions and the coupled
+  request/author/readiness/worker packet pass 180 cases with verified cleanup.
+
+### 2026-11-08 - Merge the native reviewer-request contract and return to parent gates
+
+- #11645 merged as `92797be51c5006d9a59aedb2f99e02bdd32c6f29` after
+  current-head Copilot approval with no findings and all required CI green.
+  The merged commit retains its required provenance trailers.
+- Re-read both entire parent Plan/Validation sections after the actual merge.
+  The 82 public and 11 companion unfinished rows remain open; the proposal
+  does not deliver a command, activate a host or qualify provider parity.
+- Next: implement the bounded GitHub/provider and conditional native-client
+  path under the reviewed contract, then exercise actual owner composition
+  and mixed-version refusal without altering tracked nudge behavior.
+
+### 2026-11-08 - Specify explicit native reviewer requests before implementation
+
+- The existing CLI inventory's nudge gap is distinct from tracked Worktrees
+  selection. Its provider result records API acceptance, not a fresh verdict;
+  a generic subprocess failure cannot prove a request was not accepted.
+- The [finite proposed contract](native-reviewer-request.md) preserves tracked
+  syntax and no-op behavior, selects the existing target/provider owner and
+  distinguishes accepted requests, known no-ops, refusals and uncertainty.
+  Actual parser/provider, native-client and mixed-version validation remain
+  open pending review-first implementation.
+- No runtime, live request, installed adoption, legacy retirement or parent
+  acceptance row is completed by this source-only proposal.
+
+### 2026-11-08 - Merge native draft readiness and resume the CLI inventory
+
+- #11643 merged as `15601b6c7e5daa174dcfeb020fa2b7e50b6d9c3d` after
+  current-head Copilot approval with no findings, resolved threads and all
+  required CI green. The PR gate was awaited explicitly; two initially
+  reported green guards did not substitute for it.
+- The reviewed corrections preserve pre-dispatch refusals and diagnostics,
+  require provider evidence before dispatch, retain a versioned uncertain
+  result with its known provider, and cover the actual projectless dispatcher.
+  Final isolated source qualification is 54 owner and 84 native cases with
+  five Windows-only skips; source reconciliation retired only the five
+  redundant merged commits through the managed path.
+- Read both complete parent Plan/Validation sections after merge: 82 root and
+  11 companion rows remain unfinished. No provider, installed, HTTP parity,
+  full retention, all-publisher or parent completion is inferred.
+- Next: inspect the remaining native reviewer-request/nudge gap through its
+  existing Worktrees/provider owner and unsupported/no-op semantics, then
+  select the smallest compatible source refinement before changing behavior.
+  Protected credential work and host activation remain outside this slice.
+
+### 2026-11-08 - Qualify explicit native draft readiness source
+
+- The candidate implements the reviewed optional `draft-ready` operation through
+  the target's existing provider/transport owner. Explicit Worktrees and native
+  author parsers preserve the old tracked invocation, draft-only effects,
+  active/identity readback and failed-versus-unknown outcomes without replay.
+- The final isolated source selections pass 54 Worktrees and 84 native frontend
+  cases, with five Windows-only skips and verified cleanup. Initial fixture
+  failures were missing required repository fields and the expected worker-file
+  argv order; corrected fixtures retain the production semantics.
+- Review found two pre-dispatch outcome errors in the native client. Capability
+  launch/timeout failures now remain not-attempted; valid claimant refusals
+  preserve their null provider and actionable diagnostic. Actual frontend/
+  Worktrees refusal and read-only probe controls pass; attempted outcomes
+  still require the selected provider and lost write results stay unknown.
+- The next review identified missing pre-dispatch provider validation and
+  unversioned synthesized failures. Malformed declarations now refuse before
+  writes; synthesized results retain the versioned envelope and known provider.
+  The final native packet and both actual owner-result controls pass.
+- The projectless dispatcher now emits the same not-attempted result before
+  the handler runs. An actual delivered-policy capability probe followed by
+  unregistered-CWD refusal, resolution exceptions and strict syntax controls
+  pass without weakening the claimant/project gate.
+- Fatal lint and the 13-plugin installation contract pass. The typing inventory
+  keeps both changed plugins pending; the broader enforced preflight stopped at
+  an unprepared unrelated `lib-config-migrate` checker environment after its
+  preceding scopes passed. No plugin strict-typing or full-preflight pass is
+  claimed. Live/provider, Windows, installed, HTTP parity and parent acceptance
+  remain open; current-head review and required CI still gate this candidate.
+
+### 2026-11-08 - Merge the finite draft-ready contract and return to parent gates
+
+- #11641 merged as `7aa41656fc5fe0e4055defd8c4333ba89e2a119f` after
+  current-head Copilot approval, no findings and all three required checks.
+  The earlier approval addressed the pre-attribution head and was not used
+  as current-head authorization; an ordinary re-request obtained a fresh pass.
+- Read both complete parent Plan/Validation sections after the actual merge.
+  Their 82 public and 11 companion unfinished rows remain open. No runtime
+  readiness, provider, installed, HTTP parity or parent completion is claimed.
+- Next: implement the optional target-qualified provider/native author path
+  and its focused source controls under the now-reviewed contract. Existing
+  tracked ready/legacy-hold behavior and all effect/rollout gates stay intact.
+
+### 2026-11-08 - Specify draft-to-ready native convergence before implementation
+
+- The existing CLI inventory's ready row remains open: the dedicated native
+  client has no readiness verb and the Azure DevOps provider explicitly refuses
+  un-draft. Tracked ready selection cannot stand in for an explicit foreign PR.
+- The [bounded contract](cli-parity-inventory.md#draft-to-ready-native-convergence)
+  preserves all tracked syntax, adds optional target-qualified author support,
+  separates draft state from holds/consent and requires honest readback outcomes.
+  Its parser/provider, native-client and mixed-version validation remain open.
+- This is review-first source planning under #6007, not provider implementation,
+  installed adoption, a live write or closure of any parent acceptance row.
+
+### 2026-11-08 - Select the standalone terminal mapping reader
+
+- #11639 merged as `5cc6cd6d87d539866149e1d162c503f7e6a40767` after
+  current-head Copilot approval with no findings and all required CI green.
+  The first managed merge correctly refused the not-yet-reported PR gate;
+  the ordinary watcher observed success before the next managed attempt.
+- `workspaces.terminal_mapping_reads` is explicit, default-off and requires
+  terminal reads. The host checks the executing optional declaration, adopts
+  only under fresh-root lifecycle exclusion and never repairs a retained
+  volume. Prepared-intent storage preserves original metadata without
+  selecting preparation, native mutation or feedback owners.
+- The final standalone packet passes 132 cases with confirmed cleanup;
+  strict typing passes all 16 service targets for Linux and Windows analysis,
+  and fatal lint, module size, documentation and install guards pass. Earlier
+  failed fixture attempts identified live-epoch/generation seeding and the
+  cleared cache's current value; corrected fixtures use the existing owners
+  rather than weakening production admission.
+- Re-read the complete current root Plan/Validation and the companion's
+  acceptance after this merge. The root still has 82 unfinished rows; the
+  companion has 11. No phase, provider, installed/shadow, all-publisher,
+  CLI/Dispatch, fleet or whole-retention gate closes from this finite leaf.
+- Next: return to the existing publication/CLI/consumer inventories and select
+  one finite source convergence gap. Protected credential-source admission
+  stays unavailable; no host activation, retained-volume transition or rollout
+  is authorized by this source milestone.
+
+### 2026-11-08 - Land terminal intent, retirement and a read-only receiver
+
+The [terminal-retention journal](journal/2026/11.08%20terminal-retention.md)
+records T1/T2 source merges #11605/#11614/#11623, their reviewed race/replay
+corrections and still-open T3 and complete parent acceptance.
+
+### 2026-11-08 - Review coordinated terminal retention before realization
+
+The [terminal-retention record](journal/2026/11.08%20terminal-retention.md)
+records the finite plan merge and the next T1 storage/admission/notification
+source slice. P1/P2 and runtime retention acceptance remain open.
+
+### 2026-11-08 - Expire journal metadata during quiet observations
+
+- The existing P1/P2 lane now removes the aged metadata suffix on admitted
+  unchanged observations while retaining the last cursor anchor. Expiry does
+  not allocate events, acknowledge a cursor or promote feedback. Terminal
+  summaries and other replay-owner state retain their existing custody.
+- The focused journal, workspace-projection and CLI/HTTP integration packet
+  passes 53 cases under the bounded local runner. Both disposable-container
+  attempts failed during the pinned `uv` download with HTTP 504, before
+  collection, and verified cleanup; this is not container qualification.
+  Fatal lint, documentation consistency and install-contract gates pass.
+- Acquisition-owner inspection confirms that the current relay returns text,
+  not authoritative acquisition metadata. Keep protected review unavailable;
+  internal Azure CLI credential methods are not a supported relay boundary.
+  The existing enrollment contract retains that dependency without probing
+  credentials or enabling another source.
+- Source #11574 merged as `2eeb74efebd9446b53b97d8c5cae331b04133bb2`
+after current-head Copilot approval `5817530673` with no open findings and
+latest CI `42471468624` / source checks `42471468097` passed. Managed
+completion preserved the verified attribution-only bookkeeping commit and
+its pre-complete backup; the source worktree remains owned.
+Coordinated body/cache/outbox
+  retention, all-publisher/provider/installed qualification, full
+  CLI/Dispatch and shadow/presentation outcomes remain open. No activation,
+  deployment or existing resource release is implied.
+
+### 2026-11-08 - Select acquired mappings in the existing standalone host
+
+- #11561 merged as `139f39067c6b18159366550b807f8ed0f85524eb`.
+  The current-head Comment verdict was assessed under the owner-authored
+  review policy, with actionable findings fixed and explained findings
+  resolved. Required current-head checks passed; no further approval
+  round was required after that accepted condition.
+- Final standalone qualification passes 105 cases; strict service analysis
+  passes all 14 files on Linux and Windows targets. The actual foreground
+  fixture qualifies a present preparer before later withdrawal and restart,
+  using a synthetic original receipt seeded before its writer starts.
+- Re-read the parent Plan/Validation and close only the two finite host
+  leaves above. The next protected-host prerequisite is still actual
+  supported acquisition-source grant/audience and current-custodian
+  verification, not observation credentials or injected callbacks.
+  All-publisher, provider/installed, full retention/CLI/Dispatch and
+  shadow/pane acceptance remain open. No live host was activated or updated.
+
+### 2026-11-08 - Correct canonical legacy install-root negotiation
+
+- Implement the narrow #11565 source correction: capture only an absolute,
+  normalized canonical legacy home install root as intrinsic routing.
+  Namespaced receipt validation and every other caller override remain
+  unchanged; this is not a new credential-context capability.
+- The canonical contained CLI/context selection passes all 70 cases without
+  skips, including default-root negotiation and foreign, relative and
+  default-plus-token refusal. An actual source-bound Python `-I` process
+  confirms those routing decisions without mocks or service effects.
+  Ruff `F,E9`, install-contract and documentation-consistency checks pass.
+- The equivalent-root spelling control also passes: retain the original
+  environment value after proving normalized equivalence, because the
+  credential guard compares that original value exactly. The expanded
+  focused selection passes all 71 cases without skips.
+- These are unit/simple-process results, not full deployed-consumer evidence.
+  Preserve the still-open installed consumer, configured-credential,
+  live-service/fleet and retained-resource gates. No additional hosted run,
+  shared-service mutation or local adoption occurred in this correction.
+
+### 2026-11-08 - Merge the finite prerequisite record and continue deployed-consumer validation
+
+- #11555 merged at `6fb38bc450431e806fdc4b525d5f49dde5c77001`.
+  Exact-head Copilot review `5817296462` approves the documentation-only
+  prerequisite record with no open issues; required CI `42465432427` passes.
+  No runtime, dependency or CI behavior changed, and no additional native run
+  or local rollout was performed.
+- The complete parent remains Active. Current main Plan/Validation has 84
+  unchecked items; the per-origin annex retains 73 unchecked checks. The
+  finite installed-cell/lifecycle exit is qualified, not the broader
+  configured-credential, live-consumer, service/fleet or resource disposition.
+- Next, exercise the installed Dispatch/PR-owner consumer contract in isolated
+  state against an existing authorized PR target. Preserve shared coordinators,
+  subscriptions and peers; distinguish real provider/credential observations
+  from synthetic controls and do not enable production delegation.
+- The next-path preflight finds #11565: the generated native Dispatch command
+  assigns its canonical default install root, but legacy context capture gives
+  negotiation no intrinsic environment. The actual deployed `0.18.306-dev1`
+  guard accepts a clean caller and rejects that assignment alone, before any
+  owner capability probe. Current source has the same logic.
+- Correct only canonical absolute default-root routing, retaining credential,
+  nondefault-root and relative-root fallback and all namespaced ownership
+  checks. The existing source integration fixture's synthetic runtime markers
+  and source-path injection are not deployed acceptance; validate complete
+  installed bits and real intrinsic routing after the source correction.
+
+### 2026-11-08 - Clear the finite installed-owner prerequisite with exact-release native evidence
+
+- The single authorized native run `42461516789` completes successfully at
+  `c310f4b4c2d09b8cf352d4ab29477904a8f2582b`, whose tree is identical to
+  release #11489 and the locally tested PR-owner `0.3.249-dev1` payload.
+  All 15 selected jobs pass; 68 unrelated workflow entries are skipped.
+- Retained logs account for 116 passing tests. Linux's seven skips are five
+  unavailable Windows PowerShell wrapper cases and two Windows window/focus
+  controls, all of which pass on Windows. Core native-account upgrade,
+  two shipped cells, peer roundtrip and both lease-only refusals pass on both
+  OSes with native home/profile equality and fresh-state checks.
+- Controller-death boundaries pass 17 cases per OS and concurrent upgrade
+  passes one per OS. Original case, cleanup, containment and job budgets
+  remain unchanged. Together with four passing installed-profile cases and
+  independent local exact-exit readbacks, this closes the finite #6286
+  installation/lifecycle prerequisite, not the whole #6007/#7188 objective.
+- Native macOS startup refuses unsupported owner birth evidence before
+  control, signal, spawn or state publication; absent-owner stop is bounded.
+  Positive governed macOS identity, cleanup and recovery remain explicitly
+  tracked in #11545. This is the declared fail-closed disposition, not a
+  positive macOS operation or an unverified-signaling exemption.
+- Authorized runtime readback confirms Dispatch `0.18.306-dev1` selected and
+  running, with all 410 production Python files matching the same release.
+  PR-owner selection remains `0.3.249-dev1`. Next, exercise the deployed
+  consumer contract in isolated state while preserving credentials and every
+  shared-service, fleet, resource and live-activation authority boundary.
+
+### 2026-11-08 - Qualify installed lease-only refusal before native-account acceptance
+
+- Both installed `0.3.249-dev1` normal-payload lease-only variants pass:
+  reachable and unreachable endpoint cases, zero skips, 266.25 seconds,
+  within unchanged 600-second case and 1200-second containment bounds.
+  The original owner receives no installer control, no successor starts,
+  and selected metadata, routes and pending state remain unchanged.
+- Each test then gracefully stops only its exact original owner. Independent
+  non-signaling native readback confirms both originals exited.
+- Together with the original upgrade/restart scenario and two-cell isolation,
+  all four selected installed-profile cases pass. These are not fresh native
+  OS-account or shared-consumer results; both installed prerequisite gates
+  remain open for complete acceptance.
+- The existing native-account workflow can exercise Linux/Windows owner
+  scenarios and boundary cases plus macOS fail-closed behavior on disposable
+  hosted runners. Its existing release branch still names the exact qualified
+  candidate whose tree matches the locally installed release. No current
+  native run covers that release, and the earlier focused hosted grant has
+  completed. A new hosted dispatch requires separate operator authorization;
+  no new dispatch, deployment, source publication or resource release occurred.
+
+### 2026-11-08 - Qualify two independently installed PR-owner cells
+
+- The installed `0.3.249-dev1` payload's original two-normal-cell scenario
+  passes: one test, zero skips, 683.00 seconds, within its unchanged
+  1140-second test and 1200-second containment bounds.
+- Both cells use normal payload installation and invocation. State,
+  registration identities and endpoints remain separate. Foreign-context
+  reads, stop/restart/install requests and cross-cell owner-control requests
+  refuse without changing journals, routes, subscriptions or the other owner.
+  Stopping the first cell leaves the second healthy.
+- Governed cleanup passes; independent non-signaling native readback confirms
+  both exact owners exited. This is installed-payload isolated-profile
+  evidence, not native-account, shared-service, fleet or delegation activation.
+- The installed normal-payload lease-only refusal variants are qualified
+  above. Native-account acceptance remains distinct; the complete parent
+  remains active.
+
+### 2026-11-08 - Verify the released validation improvement before installed adoption
+
+- Normal promotion `42441823658` passed its frozen-candidate, source-unit,
+  Windows Resume, artifact, attestation, publication and exact-candidate merge
+  gates. Release #11489 merged at
+  `d4d48c0ea6bef6c283b221a05311058cd9956749`. All 64 production Python files
+  changed by #11472 match the admitted source byte-for-byte in that release.
+- The release stamps PR-owner `0.3.249-dev1`, Bridge `0.9.364-dev1` and
+  Worktrees `1.25.26-dev1`. The separate #11153 acquisition migration repair
+  remains present alongside the later schema migration.
+- The authorized local unified update completed successfully through its
+  existing serialized execution owner. Current payload/selection readback
+  confirms the versions above; Bridge and Worktrees also report those running
+  versions. All 16 changed PR-owner production/test files match release bytes.
+- The installed payload's original normal lifecycle scenario passes: one test,
+  zero skips, 707.63 seconds including governed cleanup. First owner startup
+  completes in 108.04 seconds. Live upgrade, same-version restart, pending
+  subscriptions, immutable history/completion and obsolete-process exits pass
+  within the original scenario, owner, cleanup and containment limits.
+  Independent non-signaling readback confirms both final transaction processes
+  exited. #11231 is closed with that finite installed-profile evidence.
+- The first fixture failed before owner startup because a 272-character build
+  working directory exceeds native Windows process-launch support. A
+  launch-only control reproduces that refusal; the accepted fresh fixture
+  uses 243 characters without changing the shipped test or payload.
+- The separate two-normal-cell contract is qualified above. This is not
+  native-account, shared-service or delegation activation proof. #6007 and the
+  broader installed, provider, fleet and retained-resource outcomes remain open.
+
+### 2026-11-08 - Repair Source workflow context and resume release qualification
+
+- The normal Dev push exposed a workflow compilation failure before execution:
+  the installed Manager job used `runner.temp` in job-level environment,
+  where that context is unavailable. #11484 moves the unchanged acceptance
+  directory into an early runner step and retains the native gate, receipt
+  requirements, permissions and budgets. All 37 focused workflow controls,
+  actual PowerShell environment handoff, fatal lint and required CI pass.
+- #11484 merged at `5e0fe365335305d51c87b3b3b5b668a83db9251f`
+  after exact-head Copilot approval `5816295430` with no open issues and
+  required CI `42441608996` passed. This is Source repair, not independently
+  governed Main controller activation or a new native qualification claim.
+- The normal promotion run `42441823658` admits source
+  `57952d35f1d98800bf8b4980d29a3d7007dbd741`, including #11472. Its
+  frozen-candidate, unit, Windows Resume and artifact validation must finish
+  before release content and authorized local adoption can be qualified.
+  The parent installed, service, provider and retained-resource outcomes remain
+  open; no operational hold or custody boundary is released.
 
 ### 2026-11-08 - Merge the qualified fresh-validation source improvement
 

@@ -20,7 +20,11 @@ _REPAIR_VERSION = re.compile(
 def effective_runtime_version(
     package_version: str, *, prefix: Path | None = None, module_path: Path | None = None,
 ) -> str:
-    from agent_procutil._daemon_instance_identity import runtime_slot_paths
+    try:
+        from agent_procutil._daemon_instance_identity import runtime_slot_paths
+    except ImportError:
+        # Venv-less payload readers (native action admission) have no runtime slot.
+        return package_version
 
     candidate = prefix or Path(sys.prefix)
     paths = runtime_slot_paths(candidate)

@@ -10,9 +10,24 @@ a live coordinator already answers.
 
 from __future__ import annotations
 
-import subprocess
+from types import SimpleNamespace
+
+import pytest
 
 import agent_dispatch.__main__ as m
+
+
+@pytest.fixture(autouse=True)
+def isolate_startup_policy(monkeypatch):
+    from agent_dispatch import action_controls, installation_policy
+
+    monkeypatch.setattr(action_controls, "action_decision", lambda *_, **__: (
+        SimpleNamespace(inhibited=False, error=None)
+    ))
+    monkeypatch.setattr(installation_policy, "windows_policy", lambda *_, **__: {
+        "windows_scheduled_task": "preserve", "start_coordinator": True,
+        "start_supervisor": True,
+    })
 
 
 def _args(argv):
@@ -112,21 +127,18 @@ def test_coordinator_spawn_uses_console_interpreter_and_no_window_flag(monkeypat
     has no console for those children to inherit, so each one would allocate
     its own fresh, visible Default Terminal window."""
     calls = []
-    daemon_kwargs_calls = []
     monkeypatch.setattr(m.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(
-        "agent_procutil.windowless_daemon_kwargs",
-        lambda **kw: daemon_kwargs_calls.append(kw) or {"creationflags": "NO_WINDOW"},
+        "agent_dispatch.procutil.spawn_dispatch_daemon",
+        lambda argv, **kwargs: calls.append((argv, kwargs)),
     )
-    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
 
     m._spawn_coordinator_process()
 
     # The interpreter is NOT substituted to a pythonw.exe sibling.
     assert calls[0][0][1:] == ["-m", "agent_dispatch", "serve"]
     assert not calls[0][0][0].lower().endswith("pythonw.exe")
-    assert daemon_kwargs_calls == [{"breakaway": True}]
-    assert calls[0][1]["creationflags"] == "NO_WINDOW"
+    assert calls[0][1]["console_children"] is True
 
 
 def test_coordinator_spawn_resolves_installed_slot_not_sys_executable(
@@ -157,10 +169,9 @@ def test_coordinator_spawn_resolves_installed_slot_not_sys_executable(
     legacy.write_text("")
 
     calls = []
-    monkeypatch.setattr(
-        "agent_dispatch.procutil.windowless_python", lambda python: python
-    )
-    monkeypatch.setattr(subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
+    monkeypatch.setattr("agent_dispatch.procutil.spawn_dispatch_daemon", lambda argv, **kwargs: (
+        calls.append((argv, kwargs))
+    ))
 
     m._spawn_coordinator_process()
 
@@ -174,15 +185,16 @@ def test_ensure_coordinator_cmd_reports_live_after_ensure(monkeypatch):
     output -- so a shell installer's `do_start` fallback can trigger it
     without depending on a data command's repo-resolution or output shape."""
     calls = []
-    monkeypatch.setattr(m, "_ensure_local_coordinator", lambda args: calls.append(args))
+    monkeypatch.setattr(m, "_ensure_local_coordinator", lambda args, **options: calls.append(options))
     monkeypatch.setattr("agent_dispatch.config.has_live_local_coordinator", lambda: True)
     rc = m._cmd_ensure_coordinator(_args(["_ensure-coordinator"]))
     assert rc == 0
     assert len(calls) == 1
+    assert calls[0] == {"automatic": False}
 
 
 def test_ensure_coordinator_cmd_reports_failure_when_still_down(monkeypatch):
-    monkeypatch.setattr(m, "_ensure_local_coordinator", lambda args: None)
+    monkeypatch.setattr(m, "_ensure_local_coordinator", lambda args, **options: None)
     monkeypatch.setattr("agent_dispatch.config.has_live_local_coordinator", lambda: False)
     rc = m._cmd_ensure_coordinator(_args(["_ensure-coordinator"]))
     assert rc == 1

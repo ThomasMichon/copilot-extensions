@@ -369,6 +369,13 @@ inline, so agents never hand-switch:
 `account:` only for a one-off where a single repo under an owner needs a
 different login.
 
+**Windows PowerShell `.ps1` calls:** quote comma-joined values through
+`repos gh`, for example `--json 'number,title'` or `--label 'bug,triaged'`.
+Unquoted commas are parsed before the wrapper runs, so forwarding cannot repair
+them. Keep the scoped account route; see the
+[quoting examples](../../docs/cli-reference.md#scoped-github-passthrough-repos-gh)
+for quoted literals, string variables and combined `--search` arguments.
+
 **Clarified at registration.** When `repos add`, `repos clone`, or `register`
 (adopt) would leave a repo's account resolving *only* by falling back to a
 github **owner that isn't an authenticated `gh` account** (i.e. an org like

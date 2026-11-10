@@ -383,6 +383,11 @@ def test_observer_preserves_unknown_or_replaced_ownership(
     before = registry.snapshot()
     monkeypatch.setattr(mux_discovery, "run_mux_child",
                         lambda argv, **kw: subprocess.CompletedProcess(argv, code, listing, diagnostic))
+    if binary == "psmux":
+        from agent_remote_driver.mux_observation import Observation
+        monkeypatch.setattr(
+            mux_discovery, "observe_psmux", lambda *a, **kw: Observation("unknown", "timeout"),
+        )
     mux_attached_clients.AttachedClientObserver().observe(registry)
     assert registry.snapshot() == before
     assert published == []
@@ -491,5 +496,9 @@ def test_passive_psmux_observation_never_executes_or_retires(
     monkeypatch.setattr(subprocess, "run", lambda *a, **kw: pytest.fail("passive PSMux execution"))
     monkeypatch.setattr(mux_discovery, "run_mux_child",
                         lambda *a, **kw: pytest.fail("passive PSMux execution"))
+    from agent_remote_driver.mux_observation import Observation
+    monkeypatch.setattr(
+        mux_discovery, "observe_psmux", lambda *a, **kw: Observation("unknown", "timeout"),
+    )
     mux_attached_clients.AttachedClientObserver().observe(registry)
     assert registry.snapshot() == before

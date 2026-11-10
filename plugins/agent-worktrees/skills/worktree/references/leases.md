@@ -113,7 +113,7 @@ records, malformed/unknown envelopes and any successor to service custody in
 this protocol generation. Retirement is not implemented.
 
 The bounded `acceptance_margin_seconds` freezes the admission-time clock policy
-for both the adoption boundary and its task predecessor history. Reading the
+for the adoption boundary and task prefixes not already frozen by an effect. Reading the
 same permanent record with another client's clock-skew configuration cannot
 invalidate it. This margin is historical validation metadata, not a custody
 TTL or authority: a future admitted writer must record its actual selected
@@ -137,3 +137,63 @@ Gateway outage, config deletion and agent finalization must never become
 authority to release service custody. Those provider/effect and installed-peer
 qualification gates remain open in the
 [custody implementation plan](../../../../../efforts/active/linux-role-fleet/runner-service-custody.md).
+
+## Provider-effect responsibility
+
+The canonical owner also recognizes `agent-provider-effect-envelope-v1` in the
+same resource ref. This is a durable in-flight claim, not a second store or a
+native platform fencing token. Its explicit `effect-unsettled` state has no TTL.
+An exact task token is consumed by CAS before the provider attempts the effect.
+Concurrent task changes or adoption can win that slot instead; the losing
+provider must not execute. While the claim is unsettled, task acquisition,
+renewal, transfer, release and service adoption all refuse, even after the
+original task expires or a caller/controller restarts.
+
+The source-level `GitLeaseStore.begin_effect` API is for an already-authorized
+provider embedding. It requires the exact live task fence, a unique attempt ID,
+provider/immutable-resource and native-owner identities, a supported action and
+the exact request digest. Those fields are bindings, not authentication.
+The owner records its actual configured admission margin; callers cannot supply
+a weaker one. Admission checks the unrounded clock before serializing a
+whole-second timestamp, so rounding cannot extend the safe interval.
+This generation does not authorize effects under service custody.
+No effect-start or settlement CLI verb is enabled.
+
+Each effect freezes its preceding task prefix with that effect's recorded
+admission policy. Restarted inspection and settlement cannot invalidate that
+prefix by choosing another clock-skew margin. Successive effects retain their
+own prefix policies; task transitions after the last effect still use ordinary
+current task-admission rules until a later effect or adoption freezes them.
+
+`settle_effect` accepts only the current claim token and original attempt/owner.
+The embedding must verify actual native/backend termination or non-start before
+supplying its terminal outcome and retained settlement-evidence digest.
+Subprocess return, a cancelled waiter, an elapsed deadline or an apparently
+absent controller is not necessarily backend settlement. An uncertain effect
+stays unsettled for its original owning recovery. Digests do not prove
+termination, and reconstructing these Python records grants no authority.
+
+Settlement appends evidence while preserving the original task record,
+generation and expiry; it does not fabricate a task renewal or release.
+The settlement commit becomes the current fencing token. `inspect_effect`
+recovers that original attempt after a lost reply and after later task changes;
+never repeat an effect because its reply was lost. Histories containing effects
+are excluded from stale-task compaction so their responsibilities and receipts
+remain recoverable.
+
+Mixed CLI inventory reports unsettled claims as `custody_type: provider-effect`
+with their actual token and bounded bindings, without task availability fields.
+Task-only operations raise `ProviderEffectConflict` (a `LeaseLost` subtype);
+the CLI returns exit **3**, `code: provider_effect_conflict`, and no success
+output. Malformed histories and unsupported envelopes remain explicit errors,
+not absence.
+
+**Expansion only:** old task syntax and ordinary task semantics are unchanged.
+This source API and receiver envelope do not establish that an independently
+installed provider uses them. Older receivers reject an effect envelope; that
+alone is insufficient when a provider falls back to local/forced operation.
+Provider migration must select a qualified executing generation and enforce
+admission internally on every managed effect, including outage and rollback
+paths, before enabling a custody writer. Current/prior installed-provider
+qualification and service-effect authorization remain open; no package-version
+comparison or source merge substitutes for them.

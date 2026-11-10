@@ -153,6 +153,24 @@ _CONCLUSION_PER_CYCLE = 10
 _COLD_RESUME_RETRY_SECONDS = 300
 _MIN_RESERVING_TIMEOUT_SECONDS = 600
 
+
+def _bridge_creation_nonce(reservation: dict) -> str | None:
+    """Bridge's retained creation nonce for an ordinary Bridge-created worker."""
+    if reservation.get("driver") != "ordinary-bridge":
+        return None
+    info = reservation.get("agent_info")
+    if isinstance(info, str):
+        try:
+            info = json.loads(info)
+        except ValueError:
+            return None
+    creation = info.get("creation") if isinstance(info, dict) else None
+    created = creation.get("worktree") if isinstance(creation, dict) else None
+    nonce = created.get("creation_nonce") if isinstance(created, dict) else None
+    if created is None or created.get("id") != reservation.get("worktree"):
+        return None
+    return nonce if isinstance(nonce, str) and nonce else None
+
 class _ReservationsUnavailable(Exception):
     """The coordinator couldn't be reached to list reservations."""
 
@@ -1378,7 +1396,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 session_id,
                 str(reservation.get("allocation_reservation_key") or reservation["key"]),
                 driver,
-                **({"project": provenance["allocation_project"], "worktree_path": provenance["worktree_path"]}
+                **({"project": provenance["allocation_project"], "worktree_path": provenance["worktree_path"],
+                    "creation_nonce": _bridge_creation_nonce(reservation)}
                    if self.attempt_conclusion_fn is _default_attempt_conclusion else {}),
             )
         except Exception as exc:
@@ -3704,6 +3723,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         *,
         interval: float = 30.0,
         on_cycle: Callable[[list[str]], None] | None = None,
+        on_cycle_start: Callable[[], None] | None = None,
     ) -> None:
         """Run :meth:`poll_once` each cycle, waiting between cycles.
 
@@ -3730,6 +3750,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         return
                     continue
                 try:
+                    if on_cycle_start is not None:
+                        on_cycle_start()
                     spawned = self.poll_once()
                     if on_cycle is not None:
                         from .spawn_diagnostics import SpawnDiagnostics

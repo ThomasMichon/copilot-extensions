@@ -76,7 +76,7 @@ class KomodoTooling:
             with os.scandir(self.client_config) as entries:
                 first = next(entries, None)
                 inert = first is not None and first.name == "config.json" and next(entries, None) is None
-            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077
+            if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077
                     or (info.st_dev, info.st_ino) != self.client_identity or not inert):
                 raise PlanError("Komodo requires private inert native client configuration")
             if read_private_file(self.client_config / "config.json", 4096) != b"{}":

@@ -57,6 +57,7 @@ needed.
 | Installer-owned stable callback entry unavailable | Existing process waiter, before preparing a delegated generation. |
 | Custom `--message` or credential-bearing command options | Existing process waiter; do not durably copy custom text or credentials into a subscription. |
 | Default local ambient context, or exactly canonical same-cell routing, and both ready protocols | Transactional delegated preparation, acknowledged subscribe, then arm. |
+| Legacy `AGENT_DISPATCH_INSTALL_DIR` is an absolute path matching the canonical home install root | Intrinsic default routing, including the native runtime gate's assignment; other caller overrides still select the process waiter. Relative or nondefault install roots remain overrides. |
 | Uncertain prepare, subscribe, or arm after preparation | Never launch a second owner. Reconcile the exact preparation/registration where provable; otherwise abort that preparing generation with a durable wake, or leave it to visible recovery. |
 
 The callback carries only the task, waiter generation, nonsecret subscription

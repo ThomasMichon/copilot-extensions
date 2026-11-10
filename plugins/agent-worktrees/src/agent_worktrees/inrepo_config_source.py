@@ -47,7 +47,7 @@ _shared_deadline: contextvars.ContextVar[float | None] = contextvars.ContextVar(
     "_agent_worktrees_inrepo_resolution_deadline", default=None
 )
 _shared_snapshots: contextvars.ContextVar[
-    dict[tuple[Path, tuple[Path, ...], str], AcquisitionReport[dict[str, Any]]] | None
+    dict[tuple[Path, tuple[Path, ...], str, bool], AcquisitionReport[dict[str, Any]]] | None
 ] = contextvars.ContextVar("_agent_worktrees_inrepo_config_snapshots", default=None)
 
 
@@ -101,46 +101,50 @@ def _parse_yaml_text_safe(text: str, source: str) -> dict[str, Any]:
     return raw if isinstance(raw, dict) else {}
 
 
-def _unavailable(source: str, stage: str, detail: str) -> None:
+def _unavailable(source: str, stage: str, detail: str, *, strict=False) -> None:
     failed(acquisition.current_observations(), source, stage, "committed-source-unavailable", detail)
+    if strict:
+        raise ValueError("committed repository policy is unavailable")
 
 
 def _offline_remote_head_branch(
-    anchor: Path, remote: str, deadline: float
+    anchor: Path, remote: str, deadline: float, *, strict=False,
 ) -> str | None:
     """The branch ``<remote>/HEAD`` currently points at, read offline from the
     local ref store (never a network call) -- or ``None`` if unset/unknown."""
     timeout = _probe_timeout(deadline)
     if timeout is None:
-        return _unavailable(str(anchor), "committed-head", "resolution budget exhausted")
+        return _unavailable(str(anchor), "committed-head", "resolution budget exhausted", strict=strict)
     try:
         proc = git_ops.git(
             "symbolic-ref", "-q", f"refs/remotes/{remote}/HEAD",
             cwd=anchor, check=False, capture=True, timeout=timeout, isolated_repository=True,
         )
     except Exception as exc:
-        return _unavailable(str(anchor), "committed-head", type(exc).__name__)
+        return _unavailable(str(anchor), "committed-head", type(exc).__name__, strict=strict)
     if proc.returncode != 0:
         if proc.returncode == 1:
+            if strict and _offline_remote_branch_exists(anchor, remote, "HEAD", deadline, strict=True):
+                raise ValueError("committed repository policy HEAD is not symbolic")
             observe(acquisition.current_observations(), str(anchor), "committed-head", ScanAuthority.ABSENT)
             return None
-        return _unavailable(str(anchor), "committed-head", "Git did not resolve remote HEAD")
+        return _unavailable(str(anchor), "committed-head", "Git did not resolve remote HEAD", strict=strict)
     ref = proc.stdout.strip()
     prefix = f"refs/remotes/{remote}/"
     if not ref.startswith(prefix):
-        return _unavailable(str(anchor), "committed-head", "unexpected remote HEAD output")
+        return _unavailable(str(anchor), "committed-head", "unexpected remote HEAD output", strict=strict)
     observe(acquisition.current_observations(), str(anchor), "committed-head", ScanAuthority.COMPLETE)
     return ref[len(prefix):]
 
 
 def _offline_remote_branch_exists(
-    anchor: Path, remote: str, branch: str, deadline: float
+    anchor: Path, remote: str, branch: str, deadline: float, *, strict=False,
 ) -> bool:
     """Cheap, offline existence check for ``<remote>/<branch>`` in the local
     ref store (no network)."""
     timeout = _probe_timeout(deadline)
     if timeout is None:
-        _unavailable(str(anchor), "committed-branch", "resolution budget exhausted")
+        _unavailable(str(anchor), "committed-branch", "resolution budget exhausted", strict=strict)
         return False
     try:
         proc = git_ops.git(
@@ -148,10 +152,10 @@ def _offline_remote_branch_exists(
             cwd=anchor, check=False, capture=True, timeout=timeout, isolated_repository=True,
         )
     except Exception as exc:
-        _unavailable(str(anchor), "committed-branch", type(exc).__name__)
+        _unavailable(str(anchor), "committed-branch", type(exc).__name__, strict=strict)
         return False
     if proc.returncode not in (0, 1):
-        _unavailable(str(anchor), "committed-branch", "Git branch probe failed")
+        _unavailable(str(anchor), "committed-branch", "Git branch probe failed", strict=strict)
     else:
         observe(acquisition.current_observations(), f"{remote}/{branch}", "committed-branch",
                 ScanAuthority.COMPLETE if proc.returncode == 0 else ScanAuthority.ABSENT)
@@ -159,7 +163,7 @@ def _offline_remote_branch_exists(
 
 
 def _read_committed_blob(
-    anchor: Path, remote: str, branch: str, rel_path: Path, deadline: float
+    anchor: Path, remote: str, branch: str, rel_path: Path, deadline: float, *, strict=False,
 ) -> str | None:
     """Text content of ``rel_path`` as committed on ``<remote>/<branch>`` --
     read via ``git show``, so it never depends on (or touches) the anchor's
@@ -172,13 +176,22 @@ def _read_committed_blob(
         proc = git_ops.git(
             "show", spec, cwd=anchor, check=False, capture=True, timeout=timeout,
             isolated_repository=True,
+            **({"input_data": b""} if strict else {}),
         )
     except Exception as exc:
         return _unavailable(spec, "committed-blob", type(exc).__name__)
     if proc.returncode != 0:
         return _unavailable(spec, "committed-blob", "Git blob read failed")
+    text = _committed_text(proc.stdout, strict=True) if strict else proc.stdout
     observe(acquisition.current_observations(), spec, "committed-blob", ScanAuthority.COMPLETE)
-    return proc.stdout
+    return text
+
+
+def _committed_text(raw: bytes, *, strict=False) -> str:
+    try:
+        return raw.decode("utf-8", errors="strict" if strict else "replace")
+    except (UnicodeError, AttributeError):
+        raise ValueError("committed repository policy is not lossless UTF-8") from None
 
 
 def _committed_candidates(
@@ -236,6 +249,7 @@ def _committed_candidates(
 
 def _read_committed_batch(
     anchor: Path, remote: str, branch: str, candidates: tuple[Path, ...], deadline: float,
+    *, strict=False,
 ) -> dict[Path, str] | None:
     timeout = _probe_timeout(deadline)
     if timeout is None:
@@ -273,8 +287,8 @@ def _read_committed_batch(
         end = position + size
         if data[end:end + 1] != b"\n":
             return _unavailable(str(anchor), "committed-batch", "batch result unavailable")
-        found[candidate] = data[position:end].decode("utf-8", errors="replace")
-        if "\ufffd" in found[candidate]:
+        found[candidate] = _committed_text(data[position:end], strict=strict and not found)
+        if not strict and "\ufffd" in found[candidate]:
             _unavailable(f"{remote}/{branch}:{candidate.as_posix()}", "committed-decoding",
                          "replacement text cannot certify lossless UTF-8 acquisition")
         position = end + 1
@@ -287,7 +301,7 @@ def _read_committed_batch(
 
 def load_inrepo_config_from_committed_ref(
     anchor: Path, rel_path_candidates: tuple[Path, ...], remote: str = "origin",
-    *, parser: Callable[[str], dict[str, Any]] = parse_yaml_text_safe,
+    *, parser: Callable[[str], dict[str, Any]] = parse_yaml_text_safe, strict=False,
 ) -> dict[str, Any]:
     """The in-repo config as actually **committed** on the resolved default
     branch, checked in ``rel_path_candidates`` order (first match wins) --
@@ -309,27 +323,39 @@ def load_inrepo_config_from_committed_ref(
     fetched tracking refs, or the anchor isn't a git repo at all); callers
     fall back to the working-tree read in that case.
     """
+    if strict:
+        markers = (anchor / ".git", anchor / "HEAD", anchor / "objects")
+        present = []
+        for marker in markers:
+            try:
+                marker.lstat()
+                present.append(True)
+            except FileNotFoundError:
+                present.append(False)
+        if not any(present):
+            return {}
     snapshots = _shared_snapshots.get()
     if snapshots is not None and parser is parse_yaml_text_safe:
-        key = (anchor, rel_path_candidates, remote)
+        key = (anchor, rel_path_candidates, remote, strict)
         if key not in snapshots:
             with acquisition.capture_config_observations() as observations:
-                value = _resolve_committed_config(anchor, rel_path_candidates, remote, parser)
+                value = _resolve_committed_config(anchor, rel_path_candidates, remote, parser, strict=strict)
             snapshots[key] = AcquisitionReport("committed-config", value, tuple(observations))
         report = snapshots[key]
         observations = acquisition.current_observations()
         if observations is not None:
             observations.extend(report.observations)
         return copy.deepcopy(report.value)
-    return _resolve_committed_config(anchor, rel_path_candidates, remote, parser)
+    return _resolve_committed_config(anchor, rel_path_candidates, remote, parser, strict=strict)
 
 
 def _resolve_committed_config(
     anchor: Path, rel_path_candidates: tuple[Path, ...], remote: str,
     parser: Callable[[str], dict[str, Any]],
+    *, strict=False,
 ) -> dict[str, Any]:
     deadline = _shared_deadline.get() or time.monotonic() + _RESOLUTION_BUDGET
-    head_branch = _offline_remote_head_branch(anchor, remote, deadline)
+    head_branch = _offline_remote_head_branch(anchor, remote, deadline, **({"strict": True} if strict else {}))
     if head_branch is None:
         return {}
 
@@ -346,11 +372,15 @@ def _resolve_committed_config(
         return value
 
     def _read_config_on(branch: str) -> dict[str, Any] | None:
-        batch = _read_committed_batch(anchor, remote, branch, rel_path_candidates, deadline)
+        batch = _read_committed_batch(
+            anchor, remote, branch, rel_path_candidates, deadline, **({"strict": True} if strict else {}),
+        )
         if batch is not None:
             for candidate in rel_path_candidates:
                 if candidate in batch:
                     return _parse(batch[candidate], branch, candidate)
+            if strict and _committed_candidates(anchor, remote, branch, rel_path_candidates, deadline) != frozenset():
+                raise ValueError("committed repository policy absence is unavailable")
             return None
         logging.getLogger("agent-worktrees").warning(
             "Committed-config batch unavailable; retaining bounded ordered reads.",
@@ -361,9 +391,13 @@ def _resolve_committed_config(
         for rel_path in rel_path_candidates:
             if present is not None and rel_path.as_posix() not in present:
                 continue
-            text = _read_committed_blob(anchor, remote, branch, rel_path, deadline)
+            text = _read_committed_blob(
+                anchor, remote, branch, rel_path, deadline, **({"strict": True} if strict else {}),
+            )
             if text is not None:
                 return _parse(text, branch, rel_path)
+            if strict:
+                raise ValueError("committed repository policy is unavailable")
         return None
 
     data = _read_config_on(head_branch)
@@ -375,11 +409,13 @@ def _resolve_committed_config(
         isinstance(declared, str)
         and declared
         and declared != head_branch
-        and _offline_remote_branch_exists(anchor, remote, declared, deadline)
     ):
-        hopped = _read_config_on(declared)
-        if hopped is not None:
-            data = hopped
+        if _offline_remote_branch_exists(anchor, remote, declared, deadline, **({"strict": True} if strict else {})):
+            hopped = _read_config_on(declared)
+            if hopped is not None:
+                data = hopped
+        elif strict:
+            raise ValueError("committed repository policy branch is unavailable")
     return data
 
 
@@ -412,10 +448,12 @@ def load_config_base(
         from .repos_configuration_sources import parse_mapping
 
         parser = parse_mapping
-    merged = load_inrepo_config_from_committed_ref(anchor, candidates, parser=parser)
+    merged = load_inrepo_config_from_committed_ref(
+        anchor, candidates, parser=parser, **({"strict": True} if strict else {}),
+    )
     if not merged:
         base = next((anchor / rel for rel in candidates
-                     if acquisition.source_exists(anchor / rel, "inrepo-disk")), None)
+                     if acquisition.source_exists(anchor / rel, "inrepo-disk", **({"strict": True} if strict else {}))), None)
         merged = load_config_file(base, strict=strict) if base is not None else {}
     if observations is not None:
         if len(observations) == start:

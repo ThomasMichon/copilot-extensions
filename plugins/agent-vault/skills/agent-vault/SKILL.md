@@ -6,7 +6,7 @@ description: >
   Git HTTPS credentials, persistent-cache entries, and envelope-KEK sealed
   values -- without hardcoding them, committing them, or exporting them into
   the environment. Use this skill for day-to-day `agent-vault` CLI usage
-  (`get`/`has`/`search`/`list`/`show`/`add`/`set-password`/`set-username`,
+  (`curl` with URL-bound auth, `get`/`has`/`search`/`list`/`show`/`add`/`set-password`/`set-username`,
   `import-key`/`export-key`, `git-credential`, `cache-*`, `seal`/`unseal`,
   `which`, `vault *`, lock/unlock behavior, and SUDO_ASKPASS wiring). For
   runtime install/update/status/uninstall, use `agent-vault-setup`.
@@ -96,17 +96,22 @@ install path (`C:\Program Files\KeePassXC\keepassxc-cli.exe`).
 
 ## Fetch-on-demand discipline
 
-Fetch secrets in place at the point of use. Do **not** export them into a long-
-lived shell environment.
+Use an authenticated domain CLI or MCP tool for API operations when one already
+owns the operation. For generic HTTP gaps, use the executing runtime's
+`authenticated-curl-v1` capability and an owner-approved URL binding:
 
 ```bash
-# Good: command substitution limits lifetime to this command.
-vault_cmd='<agent-vault catalog argv[0]>'
-curl -H "Authorization: Bearer $("$vault_cmd" get 'API/OpenAI')" https://example.invalid/
-
-# Avoid: exported values linger and leak to children.
-export OPENAI_KEY="$("$vault_cmd" get 'API/OpenAI')"
+<agent-vault catalog argv[0]> curl -- -sS https://api.example.test/v1/items
 ```
+
+Never fetch a token yourself to assemble an API header or pass it in argv or the
+environment. `get` and `batch-get` remain low-level human/tool integration
+surfaces, not agent API fallbacks. A missing binding is an owner configuration
+decision, not permission to search entries and guess a replacement credential.
+Older runtimes reject `curl`; use an existing authenticated tool or the normal
+owning update flow rather than reverting to manual token handling. See the
+[HTTP reference](../../docs/authenticated-http.md) for schema, supported arguments,
+redirect/echo refusals, exit codes and version-skew behavior.
 
 ## Common CLI verbs
 

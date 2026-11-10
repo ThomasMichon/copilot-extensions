@@ -5,7 +5,10 @@ from __future__ import annotations
 import threading
 import time
 import subprocess
+import importlib.util
+import sys
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -43,6 +46,23 @@ def test_installer_wrapper_preserves_unsuccessful_monitor_outcomes(
 @pytest.fixture(autouse=True)
 def legacy_or_posix_cutover_contract(monkeypatch):
     monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: False)
+
+
+@pytest.fixture
+def replacement_retention(tmp_path, monkeypatch):
+    from agent_worktrees import runtime_monitor_retirements as retirements
+
+    helper = Path(__file__).resolve().parents[3] / "libs/versioned-runtime/versioned_runtime.py"
+    spec = importlib.util.spec_from_file_location("replacement_test_runtime", helper)
+    runtime = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, runtime)
+    spec.loader.exec_module(runtime)
+    for version in ("legacy", "current"):
+        (tmp_path / "versions" / version).mkdir(parents=True)
+        runtime.mark_complete(tmp_path, version, payload_hash=version)
+    runtime.activate(tmp_path, "current", link_free=True)
+    monkeypatch.setattr(retirements, "_runtime", lambda: runtime)
+    return runtime
 
 
 class _Handle:
@@ -390,9 +410,11 @@ def _wait_for(predicate, *, timeout: float = 10.0, interval: float = 0.05, messa
 
 @pytest.mark.parametrize("guarded_enabled", [False, True])
 @pytest.mark.parametrize("mismatch", [None, "pid", "birth"])
+@pytest.mark.parametrize("outgoing", ["qualified", "unobservable", "uncertain", "corrupt"])
 def test_installation_promotes_successor_without_draining_busy_predecessor(
-    tmp_path, monkeypatch, guarded_enabled, mismatch,
+    tmp_path, monkeypatch, replacement_retention, guarded_enabled, mismatch, outgoing,
 ):
+    original_routed_identity = smc.routed_monitor_identity
     monkeypatch.setattr(smc.guarded_recovery, "enabled", lambda: guarded_enabled)
     monkeypatch.setattr(
         smc.guarded_recovery, "negotiate",
@@ -430,9 +452,33 @@ def test_installation_promotes_successor_without_draining_busy_predecessor(
         return _Handle(new)
 
     monkeypatch.setattr(smc, "spawn_passive", spawn)
+    recovery_path = breadcrumb.breadcrumb_path(tmp_path / "status-monitor-routing")
+    recovery_bytes = None
+    if outgoing != "qualified":
+        monkeypatch.setattr(smc, "routed_monitor_identity", original_routed_identity)
+        monkeypatch.setattr("zdd.diagnostics._pid_alive", lambda pid: True)
+        monkeypatch.setattr("zdd.process_exit.observe_original_exit", lambda pid, start: False)
+        monkeypatch.setattr(smc.locks, "process_start_time", lambda pid: None if pid == 101 else "1001")
+        monkeypatch.setattr("zdd.diagnostics.process_start_time", lambda pid: None if pid == 101 else "1001")
+        if outgoing in {"uncertain", "corrupt"}:
+            recovery_bytes = (
+                b'{"state":"publication-uncertain","self_retirement":true,"new_pid":303}'
+                if outgoing == "uncertain" else b'{"state":'
+            )
+            recovery_path.write_bytes(recovery_bytes)
+        monkeypatch.setattr(
+            breadcrumb, "recover_stale_cutover", lambda *a, **k: pytest.fail("recovered outgoing custody"),
+        )
+        monkeypatch.setattr(
+            smc, "_reap_abandoned_passive", lambda *a: pytest.fail("reaped outgoing custody"),
+        )
     try:
         result = smc.activate_after_update(
             runtime_python="python", asynchronous_retirement=True, health_timeout=0.01 if mismatch else 60,
+            retirement_predecessor=(
+                {"pid": 101, "start": "1001", "slot": "legacy", "release_claim": None}
+                if outgoing == "unobservable" else None
+            ),
         )
         if mismatch:
             assert result["result"]["ok"] is False and result["result"]["committed"] is False
@@ -446,16 +492,40 @@ def test_installation_promotes_successor_without_draining_busy_predecessor(
         assert old.alive and old.busy.is_set()
         assert not old.draining and not old.shutdown_requested
         assert routing.read_table(tmp_path / "status-monitor-routing")["active"]["pid"] == new.pid
+        if outgoing != "qualified":
+            import base64
+            import json
+
+            archives = [
+                json.loads(path.read_text())
+                for path in (tmp_path / "status-monitor-observations").glob("*.json")
+            ]
+            assert archives
+            if outgoing == "unobservable":
+                from agent_worktrees import runtime_monitor_retirements as retirements
+
+                records = retirements._records(tmp_path)
+                assert len(records) == 1 and records[0][1]["state"] == "retiring"
+            if recovery_bytes is not None:
+                assert any(
+                    base64.b64decode(record["breadcrumb"]) == recovery_bytes
+                    for record in archives if record["breadcrumb"] is not None
+                )
+            replacement_retention.gc(tmp_path, min_age_days=0)
+            assert (tmp_path / "versions" / "legacy").is_dir()
     finally:
         old.force_terminate()
         new.force_terminate()
 
 
-def test_async_installation_refuses_unrouted_predecessor_without_termination(tmp_path, monkeypatch):
+def test_async_installation_replaces_unrouted_predecessor_without_termination(
+    tmp_path, monkeypatch, replacement_retention,
+):
     from agent_worktrees import status_monitor_runtime as runtime
 
     new = _FakeDaemon(202)
-    monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: tmp_path)
+    directory = tmp_path / "status-monitor-routing"
+    monkeypatch.setattr(smc, "routing_dir", lambda runtime_home=None: directory)
     monkeypatch.setattr(runtime, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
     monkeypatch.setattr(smc, "_monitor_control_url_from_route", lambda: None)
@@ -482,10 +552,10 @@ def test_async_installation_refuses_unrouted_predecessor_without_termination(tmp
             runtime_python="python", asynchronous_retirement=True,
             retirement_predecessor={"pid": 101, "start": "1001", "slot": None, "release_claim": None},
         )
-        assert result["action"] == "refused" and not result["result"]["ok"]
-        assert "unrouted" in result["reason"]
-        assert not new.promoted and new.control is None
-        assert routing.read_table(tmp_path) is None
+        assert result["action"] == "cutover" and result["result"]["ok"], result
+        assert result["result"]["retirement_pending"]
+        assert new.promoted and new.alive
+        assert routing.read_table(directory)["active"]["pid"] == new.pid
     finally:
         new.force_terminate()
 
@@ -667,11 +737,15 @@ def test_async_predecessor_binds_publication_to_admitted_native_owner(tmp_path, 
         assert options["refuse_old"](route.to_dict()) is not None
 
 
-def test_held_cutover_guard_rechecks_async_witness_before_reservation(tmp_path, monkeypatch):
+def test_held_cutover_guard_preserves_prior_witness_before_new_attempt(
+    tmp_path, monkeypatch, replacement_retention,
+):
+    from zdd.cutover import CutoverResult
     from agent_worktrees import runtime_monitor_retirements as retirements
     from agent_worktrees import status_monitor_runtime as runtime
 
-    monkeypatch.setattr(smc, "routing_dir", lambda *a: tmp_path)
+    directory = tmp_path / "status-monitor-routing"
+    monkeypatch.setattr(smc, "routing_dir", lambda *a: directory)
     monkeypatch.setattr(runtime, "_status_monitor_enabled", lambda: True)
     monkeypatch.setattr(runtime, "_aw_runtime_home", lambda: tmp_path)
     monkeypatch.setattr(smc, "_monitor_lock_is_live", lambda: True)
@@ -679,17 +753,27 @@ def test_held_cutover_guard_rechecks_async_witness_before_reservation(tmp_path, 
     monkeypatch.setattr(smc, "load_or_create_control_token", lambda *a: "fixture-token")
 
     def acquire(*a, **k):
-        breadcrumb.write_breadcrumb(tmp_path, state="started", self_retirement=True, new_pid=202)
+        breadcrumb.write_breadcrumb(directory, state="started", self_retirement=True, new_pid=202)
         return SimpleNamespace(release=lambda: None)
 
     monkeypatch.setattr(smc, "_acquire_cutover_lock", acquire)
-    monkeypatch.setattr(retirements, "reserve", lambda *a, **k: pytest.fail("overwrote pending custody"))
+    monkeypatch.setattr(retirements, "reserve", lambda root, record, **k: (
+        pytest.fail("unobserved retirement grant") if record is not None else False
+    ))
     monkeypatch.setattr(
         breadcrumb, "recover_stale_cutover", lambda *a, **k: pytest.fail("legacy recovery reached"),
     )
-    result = smc.activate_after_update(runtime_python="python", asynchronous_retirement=True)
-    assert result["action"] == "refused"
-    assert breadcrumb.read_breadcrumb(tmp_path)["new_pid"] == 202
+    def run(**_kwargs):
+        assert list((tmp_path / "status-monitor-observations").glob("*.json"))
+        assert not breadcrumb.breadcrumb_path(directory).exists()
+        return CutoverResult(ok=False, error="controlled incoming failure")
+
+    monkeypatch.setattr(smc, "CutoverOrchestrator", lambda *a, **k: SimpleNamespace(run=run))
+    result = smc.activate_after_update(
+        runtime_python="python", asynchronous_retirement=True, monitor_was_live=True,
+    )
+    assert result["action"] == "cutover" and not result["result"]["ok"]
+    assert not breadcrumb.breadcrumb_path(directory).exists()
 
 
 @pytest.mark.parametrize("ready", [False, True])

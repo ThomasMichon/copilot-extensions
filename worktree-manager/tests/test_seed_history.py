@@ -341,7 +341,7 @@ async def _submitted_prompt_survives_failed_launch(tmp_path, monkeypatch, scope)
         assert retry.query_one(SeedPromptField).text == ""
 
 
-@pytest.mark.parametrize("option", ["Anchor repo", "Bare", "AHP", "Local model", "resume-ahp"])
+@pytest.mark.parametrize("option", ["Anchor repo", "AHP", "Local model", "resume-ahp"])
 def test_unsupported_composer_keeps_text_without_legacy_history_copy(tmp_path, monkeypatch, option):
     async def run():
         monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(tmp_path))

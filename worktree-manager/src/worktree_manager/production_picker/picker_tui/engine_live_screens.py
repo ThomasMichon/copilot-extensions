@@ -110,7 +110,7 @@ class ProgressScreen(ModalScreen[None]):
             substyle = C_HEADER
         body.append(sub + "\n\n", style=substyle)
         # Item rows, windowed around the running item when the list is long.
-        sync_details = p.get("op") == "sync" and any(it.get("result") for it in items)
+        sync_details = p.get("op") in ("sync", "finalize") and any(it.get("result") for it in items)
         maxr = 3 if sync_details else 12
         focus_state = "failed" if p["done"] and failed else "running"
         run = next((j for j, it in enumerate(items)
@@ -138,14 +138,20 @@ class ProgressScreen(ModalScreen[None]):
             body.append_text(row)
             body.append("\n")
             if sync_details:
-                from .maintenance import sync_diagnostics
+                from .maintenance import finalize_diagnostics, sync_diagnostics
 
-                for diagnostic in sync_diagnostics(it.get("result")):
+                result = it.get("result")
+                diagnostics = finalize_diagnostics if p.get("op") == "finalize" else sync_diagnostics
+                for diagnostic in diagnostics(result):
                     body.append(f"    {diagnostic}\n", style=C_WARN if st == "failed" else C_META)
         if len(items) > maxr:
             body.append(f" … {lo + 1}-{min(lo + maxr, len(items))} of {len(items)}\n", style=C_MUTED)
             if sync_details and p["done"]:
                 body.append(" Up/Down · PgUp/PgDn · Home/End: browse results\n", style=C_META)
+        if p.get("op") == "finalize" and p["done"]:
+            body.append("\n v: full result details\n", style=C_META)
+            if failed:
+                body.append(" Ask: help clean up worktree <id> (claims/obligations)\n", style=C_CAUTION)
         if p.get("op") == "profiles" and p["done"]:
             # #1368: after Apply the fragment is regenerated, but the terminal
             # app only re-reads it on a FULL restart -- spell out what changed
@@ -213,6 +219,28 @@ class ProgressScreen(ModalScreen[None]):
     def on_key(self, event) -> None:
         event.stop()
         eng = self._eng
+        if (canonical_key(event.key) == "v" and eng.progress
+                and eng.progress.get("op") == "finalize" and eng.progress["done"]):
+            from .configuration_form import CommandResultScreen
+
+            items = eng.progress["items"]
+            details = []
+            for item in items:
+                result = item.get("result") or {}
+                details.append("\n".join([
+                    str(item.get("id4") or ""),
+                    *(f"{key}: {value}" for key, value in result.items()),
+                ]))
+            details.append("Ask: help clean up worktree <id> (claims/obligations). No force cleanup.")
+            screen = CommandResultScreen(
+                "Finalize", context="Worktrees", return_label="Return to Finalize",
+            )
+            self.app.push_screen(screen)
+            self.app.call_after_refresh(
+                screen.complete, all(item["state"] == "done" for item in items),
+                "\n\n".join(details),
+            )
+            return
         # Delegate the state transition to the engine's tested core, then close
         # once it clears the run (unarmed-cancel / done-close) or refresh in
         # place (unarmed-arm keeps the dialog up, now working).

@@ -16,6 +16,8 @@
 # when called via 'pwsh -File'.
 $CopilotArgs = @($args)
 $script:LaunchProject = $null
+$script:AwMuxObservationPython = $null
+$script:AwMuxObservationProvider = $null
 
 $ErrorActionPreference = 'Stop'
 
@@ -968,38 +970,86 @@ if ($plan.action -ne 'exec') {
 # session) still updates normally. Self-contained probe (the psmux-bin resolver
 # + $noMux/$nested are defined later in the psmux-handoff block) so this stays a
 # surgical gate without reordering the rest of the launcher.
+function Invoke-AwMuxCoreProcess {
+    param(
+        [string]$Python, [string[]]$Arguments, [string]$InputText = '',
+        [int]$TimeoutMilliseconds = 40000
+    )
+    $start = [Diagnostics.ProcessStartInfo]::new()
+    $start.FileName = $Python
+    $start.UseShellExecute = $false
+    $start.CreateNoWindow = $true
+    $start.RedirectStandardInput = $true
+    $start.RedirectStandardOutput = $true
+    $start.RedirectStandardError = $true
+    $start.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
+    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
+    $process = [Diagnostics.Process]::Start($start)
+    try {
+        $stdout = $process.StandardOutput.ReadToEndAsync()
+        $stderr = $process.StandardError.ReadToEndAsync()
+        $write = $process.StandardInput.WriteAsync($InputText)
+        if (-not $write.Wait(5000)) { throw 'Mux core input timed out.' }
+        $process.StandardInput.Close()
+        if (-not $process.WaitForExit($TimeoutMilliseconds)) { throw 'Mux core result timed out.' }
+        if (-not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 5000)) {
+            throw 'Mux core output timed out.'
+        }
+        return @{ code = $process.ExitCode; output = $stdout.Result }
+    } finally {
+        if (-not $process.HasExited) { $process.Kill(); $null = $process.WaitForExit(5000) }
+        $process.Dispose()
+    }
+}
+
+function Get-AwMuxObservation {
+    param([string]$Session, [int]$TimeoutMilliseconds = 3000)
+    if ($script:AwMuxObservationPython -ne $VenvPython) {
+        $script:AwMuxObservationPython = $VenvPython
+        $script:AwMuxObservationProvider = $null
+        $reply = Invoke-AwMuxCoreProcess -Python $VenvPython -Arguments @(
+            '-I', '-X', 'utf8', '-m', 'agent_remote_driver.mux_observation', '--describe-contract'
+        ) -TimeoutMilliseconds $TimeoutMilliseconds
+        if ($reply.code -eq 0) {
+            $candidate = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
+            if ($candidate.contract -eq 'copilot-driver.mux-observation' -and
+                $candidate.version -eq 1 -and 'psmux-observe' -in $candidate.operations -and
+                [IO.Path]::IsPathFullyQualified([string]$candidate.python) -and
+                [IO.Path]::IsPathFullyQualified([string]$candidate.entrypoint) -and
+                (Test-Path -LiteralPath $candidate.python -PathType Leaf) -and
+                (Test-Path -LiteralPath $candidate.entrypoint -PathType Leaf)) {
+                $script:AwMuxObservationProvider = $candidate
+            }
+        }
+    }
+    $provider = $script:AwMuxObservationProvider
+    if (-not $provider) {
+        return [pscustomobject]@{ status = 'unsupported'; reason = 'selected-runtime-unsupported' }
+    }
+    $request = ConvertTo-Json -Compress -InputObject @{ version = 1; session = $Session }
+    $reply = Invoke-AwMuxCoreProcess -Python $provider.python -Arguments @(
+        '-I', '-X', 'utf8', [string]$provider.entrypoint, '--observe'
+    ) -InputText $request -TimeoutMilliseconds $TimeoutMilliseconds
+    $result = ConvertFrom-Json -InputObject $reply.output -ErrorAction Stop
+    if ($result.contract -ne 'copilot-driver.mux-observation' -or $result.version -ne 1 -or
+        $result.status -notin @('present', 'absent', 'unknown', 'unsupported') -or
+        ($reply.code -eq 0) -ne ($result.status -in @('present', 'absent'))) {
+        throw 'Mux core observation result is unconfirmed.'
+    }
+    return $result
+}
+
 function Test-AwJoiningLiveSession {
     # No-mux launches always (re)start Copilot directly -- the update is relevant.
     $noMuxNow = ($env:WORKTREE_NO_MUX -eq '1') -or [bool]$plan.no_mux
     if ($noMuxNow) { return $false }
-    $cmd = Get-Command psmux -ErrorAction SilentlyContinue
-    if (-not $cmd) { return $false }
-    $pathHelper = Join-Path $PSScriptRoot 'psmux-path.ps1'
-    if (Test-Path -LiteralPath $pathHelper) {
-        . $pathHelper
-        $desired = Find-AwCompatiblePsmuxPackageBinary `
-            -PackageRoot (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages')
-        if ($desired) { $cmd = Get-Command $desired.Path }
-    }
-    # Resolve the WinGet reparse-stub to the real exe (pwsh 7.4 can't launch the
-    # 0-byte App Execution Alias); mirrors Resolve-AwPsmuxBin below.
-    $bin = $cmd.Source
-    try {
-        $item = Get-Item -LiteralPath $bin -ErrorAction Stop
-        if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Length -eq 0) {
-            $real = Get-ChildItem -LiteralPath (Join-Path $env:LOCALAPPDATA 'Microsoft\WinGet\Packages') `
-                -Recurse -Filter 'psmux.exe' -ErrorAction SilentlyContinue |
-                Select-Object -First 1 -ExpandProperty FullName
-            if ($real) { $bin = $real }
-        }
-    } catch {}
     $wtId = if ([string]::IsNullOrWhiteSpace($plan.worktree_id)) { 'base' } else { $plan.worktree_id }
     # `.` is the window/pane separator in a mux target -- keep in sync with
     # `sessions.mux_session_name` (and the bash launcher).
     $wtId = $wtId -replace '\.', '_'
     try {
-        $null = & $bin has-session -t "wt-$wtId" 2>&1
-        return ($LASTEXITCODE -eq 0)
+        return (Get-AwMuxObservation "wt-$wtId").status -eq 'present'
     } catch {
         return $false
     }
@@ -1088,7 +1138,7 @@ Write-SetupLog "Runtime selected for launch: $VenvPython"
 # that's actually still on disk.
 if ($plan.cmd) {
     $planCmd = @($plan.cmd)
-    if ($plan.seed_pending -and $planCmd.Count -ge 3 -and
+    if ($planCmd.Count -ge 3 -and
         $planCmd[1] -eq '-m' -and $planCmd[2] -eq 'agent_worktrees.launch_seed_exec') {
         $planCmd[0] = $VenvPython
     }
@@ -1610,10 +1660,9 @@ function Invoke-ManagedMuxRegister {
         # the display session name alone is not unique per launch
         # incarnation. Cheap/local/synchronous, unlike the detached register
         # dispatch below.
-        $incarnation = $null
-        try {
-            $incarnation = (& $script:AwPsmuxBin display-message -t $Session -p '#{session_id}:#{session_created}' 2>$null)
-        } catch {}
+        $observed = Get-AwMuxObservation $Session
+        if ($observed.status -ne 'present') { return }
+        $incarnation = $observed.incarnation
         $registerArgs = @(
             'register',
             "--project=$($script:LaunchProject)",
@@ -1626,7 +1675,8 @@ function Invoke-ManagedMuxRegister {
             $registerArgs += "--session-incarnation=$incarnation"
         }
         if ($Created) {
-            $cliPane = (& $script:AwPsmuxBin display-message -t $Session -p '#{pane_id}' 2>$null)
+            $activePanes = @($observed.panes | Where-Object { $_.active -and -not $_.dead })
+            $cliPane = if ($activePanes.Count -eq 1) { $activePanes[0].pane_id } else { '' }
             if ([string]$cliPane -match '^%[0-9]+$') {
                 $registerArgs += "--cli-pane=$cliPane"
             }
@@ -1713,33 +1763,11 @@ function Invoke-AwMuxCompanionBindSafe {
 }
 function Test-AwMuxCreationSession {
     param([string]$Session, [int]$TimeoutMilliseconds = 2000)
-    $startInfo = [Diagnostics.ProcessStartInfo]::new()
-    $startInfo.FileName = $script:AwPsmuxBin
-    $quoted = [regex]::Replace($Session, '(\\*)"', '$1$1\"')
-    $quoted = [regex]::Replace($quoted, '(\\+)$', '$1$1')
-    $startInfo.Arguments = 'has-session -t "' + $quoted + '"'
-    $startInfo.WorkingDirectory = $HOME
-    $startInfo.UseShellExecute = $false
-    $startInfo.CreateNoWindow = $true
-    $startInfo.RedirectStandardOutput = $true
-    $startInfo.RedirectStandardError = $true
-    $process = [Diagnostics.Process]::new()
-    $process.StartInfo = $startInfo
-    try {
-        $null = $process.Start()
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutMilliseconds)) {
-            $process.Kill()
-            throw 'PSMux session discovery timed out; refusing creation.'
-        }
-        if ($process.ExitCode -notin @(0, 1)) {
-            throw 'PSMux session discovery failed; refusing creation.'
-        }
-        return $process.ExitCode -eq 0
-    } finally {
-        $process.Dispose()
+    $observed = Get-AwMuxObservation $Session -TimeoutMilliseconds $TimeoutMilliseconds
+    if ($observed.status -notin @('present', 'absent')) {
+        throw 'PSMux presence is unknown; refusing duplicate creation. Use a runtime with native mux observation.'
     }
+    return $observed.status -eq 'present'
 }
 function Invoke-AwPsmuxCreation {
     param([string[]]$CommandArgs, [IO.FileStream]$Lease)
@@ -1834,36 +1862,6 @@ function Enter-AwMuxCreation {
         }
     }
 }
-function Invoke-AwMuxCoreProcess {
-    param([string]$Python, [string[]]$Arguments, [string]$InputText = '')
-    $start = [Diagnostics.ProcessStartInfo]::new()
-    $start.FileName = $Python
-    $start.UseShellExecute = $false
-    $start.CreateNoWindow = $true
-    $start.RedirectStandardInput = $true
-    $start.RedirectStandardOutput = $true
-    $start.RedirectStandardError = $true
-    $start.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
-    $start.StandardOutputEncoding = [Text.UTF8Encoding]::new($false)
-    foreach ($argument in $Arguments) { $start.ArgumentList.Add($argument) }
-    $process = [Diagnostics.Process]::Start($start)
-    try {
-        $stdout = $process.StandardOutput.ReadToEndAsync()
-        $stderr = $process.StandardError.ReadToEndAsync()
-        $write = $process.StandardInput.WriteAsync($InputText)
-        if (-not $write.Wait(5000)) { throw 'Mux core input timed out.' }
-        $process.StandardInput.Close()
-        if (-not $process.WaitForExit(40000)) { throw 'Mux core result timed out.' }
-        if (-not [Threading.Tasks.Task]::WaitAll(@($stdout, $stderr), 5000)) {
-            throw 'Mux core output timed out.'
-        }
-        return @{ code = $process.ExitCode; output = $stdout.Result }
-    } finally {
-        if (-not $process.HasExited) { $process.Kill(); $null = $process.WaitForExit(5000) }
-        $process.Dispose()
-    }
-}
-
 function Resolve-AwMuxCore {
     $reply = Invoke-AwMuxCoreProcess -Python $VenvPython -Arguments @(
         '-I', '-X', 'utf8', '-m', 'agent_remote_driver.mux_creation', '--describe-contract'
@@ -2397,7 +2395,7 @@ if (-not $noMux) {
         # Invoke-AwMuxCompanionBindSafe's own comment for why ordering matters.
         Invoke-AwMuxCompanionBindSafe $sessName
         Invoke-ManagedMuxRegister $sessName $muxStatusPath -Created
-        if (-not $plan.seed_pending) {
+        if (-not $plan.seed_pending -and -not $plan.seed_preserved_id) {
             Invoke-SeedDeliverySafe $plan.worktree_id
         }
         if ($nested) {
@@ -2433,8 +2431,9 @@ if (-not $noMux) {
         # Only run post-exit if the session is truly gone.
         Write-SetupLog "psmux attach returned, checking session state"
         Write-ActivityLog -Event 'mux_detached' -WorktreeId $plan.worktree_id
-        $null = & $script:AwPsmuxBin has-session -t $sessName 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $detachedObservation = $null
+        try { $detachedObservation = Get-AwMuxObservation $sessName } catch {}
+        if ($detachedObservation -and $detachedObservation.status -eq 'absent') {
             Write-SetupLog "psmux session gone, running post-exit checks"
             Write-ActivityLog -Event 'copilot_exited' -WorktreeId $plan.worktree_id -Fields @('mux=psmux')
 

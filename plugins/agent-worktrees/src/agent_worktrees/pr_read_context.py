@@ -11,11 +11,14 @@ import yaml
 def scoped_read_dispatch(dispatch):
     @wraps(dispatch)
     def scoped(argv):
-        if argv[:1] and argv[0] in ("snapshot", "status", "threads"):
+        if argv[:1] and argv[0] in ("snapshot", "status", "threads", "diff", "inventory"):
             from .config_cache import ConfigCacheSession
             from .inrepo_config_source import resolution_budget
 
             with ConfigCacheSession().scope(), resolution_budget(reuse_snapshots=True):
+                if argv[0] == "inventory":
+                    from .pr_inventory_cli import dispatch as inventory_dispatch
+                    return inventory_dispatch(argv[1:])
                 return dispatch(argv)
         return dispatch(argv)
 
@@ -31,6 +34,20 @@ def resolve_read_repo_config(config, repository, *, explicit=False):
         if repo is not None or error:
             return pr_config.ForeignRepoResolution(repo, name, error=error)
     return pr_config.resolve_repo_config_for_slug(config, repository)
+
+
+def read_report(verb, prcfg, repo, number, *, api_base="", token=None):
+    """Resolve on-demand reports under the same selected target binding."""
+    from .providers import account_token_for_slug, get_provider
+    if verb == "threads":
+        from .pr_thread_report import thread_report as read
+    elif verb == "diff":
+        from .pr_diff_report import diff_report as read
+    else:
+        raise ValueError(f"Unknown on-demand report verb: {verb}")
+    provider = get_provider(prcfg.provider)
+    selected_token = token if token is not None else account_token_for_slug(repo, prcfg)
+    return read(provider, repo, number, api_base=api_base or prcfg.api_base, token=selected_token)
 
 
 def read_explicit_config(path):

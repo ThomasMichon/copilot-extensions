@@ -30,6 +30,7 @@ _NO_PROJECT_COMMANDS = {
     "picker",
     "doctor",
     "hygiene",
+    "python-cache",
     "reap-shells",
     "status-updater",
     "status-monitor",
@@ -87,7 +88,7 @@ def _is_no_project_invocation(args_list: list[str]) -> bool:
     ):
         return True
     if command == "pr-watch" and len(args_list) > 1 and args_list[1] in (
-        "snapshot", "status", "threads", "deliver",
+        "snapshot", "status", "threads", "diff", "deliver", "inventory",
     ):
         return True
     if args_list[:2] == ["pr-watch", "checks"] and all(

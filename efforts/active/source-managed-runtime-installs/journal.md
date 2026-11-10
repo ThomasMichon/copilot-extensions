@@ -3,6 +3,7 @@
 [Back to the effort](README.md). The Plan and Validation Plan remain the completion gate.
 
 - [2026-11-05 - MCP bootstrap adoption proposed](<journal/2026/11.05 mcp-bootstrap.md>)
+- [2026-11-03 - Clean-break wheel migration intent reviewed](<journal/2026/11.03 clean-break wheel migration.md>)
 - [2026-11-03 - Manager-first repository registration entry](<journal/2026/11.03 manager-register.md>)
 - [2026-10-31 - Footprint contract evolution reviewed](<journal/2026/10.31 footprint-contract-evolution.md>)
 - [2026-10-31 - Independent replacement review corrections](<journal/2026/10.31 review-corrections.md>)

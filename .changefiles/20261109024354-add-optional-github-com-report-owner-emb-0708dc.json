@@ -1,0 +1,13 @@
+{
+  "comment": "Add optional GitHub.com report-owner embedding with explicit verified CLI-store account, pinned reads and one caller-owned execution budget",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

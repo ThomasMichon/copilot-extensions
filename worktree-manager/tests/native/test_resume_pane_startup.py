@@ -29,7 +29,11 @@ import json, os, subprocess, sys
 from pathlib import Path
 
 args = sys.argv[1:]
-if args == ["-I", "-X", "utf8", "-m", "agent_remote_driver.mux_creation", "--describe-contract"]:
+if (
+    len(args) == 6 and args[:4] == ["-I", "-X", "utf8", "-m"]
+    and args[4] in {"agent_remote_driver.mux_creation", "agent_remote_driver.mux_observation"}
+    and args[5] == "--describe-contract"
+):
     result = subprocess.run(
         [sys.executable, *args], stdin=subprocess.DEVNULL, timeout=25,
         creationflags=subprocess.CREATE_NO_WINDOW,
@@ -92,7 +96,39 @@ def _wait_for(check, label, consoles, launches=()):
         root = Path(launches[0]["env"]["TEMP"])
         for path in sorted((root / "worktree-setup-logs").glob("*.log")):
             output += f"\n{path.name}:\n{path.read_text('utf-8-sig')[-4096:]}"
+        output += _native_observation_diagnostics(launches)
     raise AssertionError(f"{label}\n{output}")
+
+
+def _native_observation_diagnostics(launches):
+    """Retain bounded fixed-query replies, never authentication or pane argv."""
+    from agent_remote_driver import mux_inventory, mux_observation
+
+    output = ""
+    for launch in launches:
+        env = launch["env"]
+        if not env.get("COPILOT_DRIVER_PSMUX_NAMESPACE"):
+            continue
+        root = Path(env["PSMUX_DATA_DIR"])
+        base = env["COPILOT_DRIVER_PSMUX_NAMESPACE"] + "__" + launch["name"]
+        try:
+            port = int(mux_observation._read(root / (base + ".port")))
+            key = mux_observation._read(root / (base + ".key")).decode("utf-8").strip()
+            body = mux_observation._exchange(port, key, time.monotonic() + .25)
+            output += f"\n{launch['name']}/fixed-reply: {body[:4096]!r}"
+            observed = mux_observation._parse(body, launch["name"])
+            output += f"\n{launch['name']}/parsed: {observed!r}"
+        except (OSError, ValueError) as error:
+            output += f"\n{launch['name']}/query: {type(error).__name__}: {error}"
+    if launches and launches[0]["env"].get("COPILOT_DRIVER_PSMUX_NAMESPACE"):
+        try:
+            result = mux_inventory.observe(timeout=.5, data_dir=Path(
+                launches[0]["env"]["PSMUX_DATA_DIR"],
+            ))
+            output += f"\ncomplete-native-inventory: {result!r}"
+        except mux_observation.ObservationUnavailable as error:
+            output += f"\ncomplete-native-inventory: {error}"
+    return output
 
 
 def _private_psmux(root, binary, namespace, env):
@@ -149,6 +185,7 @@ class PrivateMux {
     )
     assert result.returncode == 0, result.stdout + result.stderr
     env["PATH"] = str(root) + os.pathsep + env["PATH"]
+    env["COPILOT_DRIVER_PSMUX_NAMESPACE"] = namespace
 
 
 @pytest.mark.parametrize("adapter", [False, True])
@@ -465,3 +502,105 @@ def test_four_simultaneous_resume_plans_acknowledge_and_reach_copied_setup(tmp_p
             for launch in launches:
                 (launch["root"] / "release").touch()
                 mux("kill-session", "-t", launch["name"])
+
+
+def test_cold_open_reattach_and_fresh_listings_preserve_other_attachment(
+    tmp_path, monkeypatch, record_property,
+):
+    from _terminal_console_fixture import Console
+    from agent_remote_driver.mux_observation import observe_psmux
+    from plugin_test_command_safety import private_mux_args
+    from worktree_manager import mux_attached_clients, mux_discovery
+
+    psmux = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux")
+    assert PWSH and psmux, "PowerShell 7 and PSMux are required for native continuity"
+    env = _test_env(tmp_path)
+    namespace = private_mux_args(tmp_path)
+    _private_psmux(tmp_path / "mux-bin", psmux, namespace[1], env)
+    manager = tmp_path / "manager"
+    slot = boundary_runtime(manager, "fixture")
+    (manager / "current-version").write_text("fixture\n", encoding="utf-8")
+    binary = slot / "payload" / "bin"
+    shutil.copytree(WRAPPER.parent, binary)
+    launch = _resume_fixture(tmp_path / "launch", env, binary, 0)
+    for key in ("PSMUX_DATA_DIR", "COPILOT_DRIVER_PSMUX_NAMESPACE"):
+        monkeypatch.setenv(key, env[key])
+    monkeypatch.syspath_prepend(str(ROOT / "plugins/agent-worktrees/src"))
+    from agent_worktrees import sessions
+
+    monkeypatch.setattr(
+        mux_discovery, "run_mux_child", lambda *a, **k: pytest.fail("Passive PSMux CLI"),
+    )
+    name = launch["name"]
+    ident = name.removeprefix("wt-")
+    consoles = []
+    with ExitStack() as stack:
+        try:
+            started = time.monotonic()
+            first = stack.enter_context(Console(
+                launch["argv"], env=launch["env"], cwd=launch["target"],
+            ))
+            consoles.append(first)
+            _wait_for(
+                lambda: launch["capture"].is_file()
+                and b"RESUME-FIXTURE-READY" in first.output,
+                "Cold Open did not reach copied setup", consoles, [launch],
+            )
+            record_property("cold_open_seconds", time.monotonic() - started)
+            original = launch["capture"].read_bytes()
+            child = first.pin(json.loads(original.decode("utf-8-sig"))["pid"])
+            def clients(count):
+                nonlocal observed
+                result = observe_psmux(name)
+                observed = result
+                return result.status == "present" and result.clients == count
+
+            observed = None
+            _wait_for(lambda: clients(1), "First attachment was not observed", consoles, [launch])
+            incarnation, panes = observed.incarnation, observed.panes
+            started = time.monotonic()
+            second = stack.enter_context(Console(
+                launch["argv"], env=launch["env"], cwd=launch["target"],
+            ))
+            consoles.append(second)
+            _wait_for(lambda: clients(2), "Open did not reattach to the live pane", consoles, [launch])
+            record_property("reattach_seconds", time.monotonic() - started)
+            assert launch["capture"].read_bytes() == original
+            assert not first.exited(child)
+            after = observe_psmux(name)
+            assert after.incarnation == incarnation and after.panes == panes
+
+            started = time.monotonic()
+            listing = sessions.mux_status_many([ident])[ident]
+            assert listing.observed and listing.exists and listing.clients == 2
+            assert sessions.has_mux_session(ident)
+            assert mux_attached_clients.mux_attached_clients("psmux.exe", name) == 2
+            assert mux_discovery.confirm_native_session({
+                "mux_bin": "psmux.exe", "mux_session": name,
+                "session_incarnation": incarnation, "worktree_path": str(launch["target"]),
+            }, connected_only=True) == {"applied": True, "attached_clients": 2}
+            elapsed = time.monotonic() - started
+            record_property("consumer_listing_seconds", elapsed)
+            assert elapsed < 5
+
+            first.send(b"\x02d")
+            assert first.wait() == 0
+            _wait_for(lambda: clients(1), "Other attachment was lost", consoles, [launch])
+            assert not first.exited(child)
+            assert launch["capture"].read_bytes() == original
+            second.send(b"\x02d")
+            assert second.wait() == 0
+            _wait_for(lambda: clients(0), "Detached live session became absent", consoles, [launch])
+            assert sessions.mux_status_many([ident], strict=True)[ident].exists
+            (launch["root"] / "release").touch()
+            _wait_for(
+                lambda: observe_psmux(name).status == "absent" and first.exited(child),
+                "Owned session did not retire after explicit release", consoles, [launch],
+            )
+        finally:
+            (launch["root"] / "release").touch()
+            subprocess.run(
+                [psmux, *namespace, "kill-session", "-t", name],
+                env=env, cwd=env["USERPROFILE"], capture_output=True, text=True,
+                timeout=10, check=False, creationflags=subprocess.CREATE_NO_WINDOW,
+            )

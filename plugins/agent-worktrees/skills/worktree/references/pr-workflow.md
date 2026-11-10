@@ -78,6 +78,9 @@ metadata-only repair. Worktrees remains the underlying owner:
 `--expected-head` inputs for current built-in publication checks; `pr-update`
 repairs an existing PR without pushing; `pr-push` publishes an admitted,
 pinned source without forcing the managed caller's branch scheme.
+Optional `pr-author-ready` addresses an explicit target's native draft state
+without changing tracked `pr-ready` selection or releasing holds/consent;
+its outcomes and support window live in that same author workflow.
 
 Query `pr-author-capabilities --repo <target> --json` on the actual selected
 runtime before relying on new operations. The target's own binding governs
@@ -85,6 +88,12 @@ checks, credentials and completion. A worker policy export, an arbitrary JSON
 receipt or an old package version cannot replace qualified source custody.
 Missing installed support blocks dependent migration, not ordinary supported
 observation and not permission to fall back to raw provider commands.
+
+The optional native [`complete` source adapter](../../../../agent-pull-requests/docs/author-operations.md#local-source-reconciliation-is-not-finalization)
+uses this managed source's existing `pr-complete` owner with exact local
+branch/head admission. Unlike checkout-free PR reads, it executes from the
+source's own Git top level; it neither imports foreign source nor finalizes
+the worktree or its effort. Unsupported receivers retain ordinary legacy calls.
 
 ADO creation forwards the native draft request and retains the returned draft
 state, including local and foreign retries of an existing PR. A contradicted

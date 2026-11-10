@@ -449,6 +449,68 @@ def test_pinned_peer_retains_runtime_across_selection_changes(tmp_path, monkeypa
     _assert_peer_refused(pinned)
 
 
+@pytest.mark.skipif(
+    os.name != "nt" and not sys.platform.startswith("linux"),
+    reason="Vault peer target supports native Windows and Linux",
+)
+def test_vault_peer_retains_native_owner_and_build_without_ambient_fallback(tmp_path, monkeypatch):
+    from agent_dispatch import peer_launch
+
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    cell = tmp_path / "marketplaces" / FIRST_MARKETPLACE_ID
+    own = _make_namespaced_context(cell)
+    first = _make_live_peer(cell, "agent-vault", "1.0.0", nested=True)
+    _make_live_peer(cell, "agent-vault", "2.0.0", nested=True)
+    peer = cell / "plugins" / "agent-vault"
+    scripts = Path(__file__).resolve().parents[2] / "agent-vault" / "scripts"
+    slot = peer / "versions" / "1.0.0"
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir()
+    for source in (scripts / "runtime_launcher.py", *scripts.glob("versioned_runtime*.py")):
+        shutil.copyfile(source, bootstrap / source.name)
+    (bootstrap / "runtime-generation").write_text("1" * 32, encoding="ascii")
+    _update_receipt(slot / ".install-complete.json", lambda data: data.update(payload_hash="a" * 64))
+    monkeypatch.setattr(peer_launch, "_peer_runtimes", {})
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(own))
+    monkeypatch.setenv("AGENT_VAULT_HOME", str(tmp_path / "foreign-vault"))
+    monkeypatch.setenv("AGENT_VAULT_ENDPOINT", "foreign-endpoint")
+    monkeypatch.setenv("KPDB", str(tmp_path / "foreign.kdbx"))
+    arguments = ("agent-dispatch", own.parent, str(own), "agent-vault")
+    (peer / "current-version").write_text("1.0.0", encoding="utf-8")
+    with monkeypatch.context() as child_free:
+        child_free.setattr(peer_launch.subprocess, "run", lambda *a, **k: pytest.fail("observer launched"))
+        assert peer_launch.observe_peer_python(*arguments) == first
+        pinned, selected = peer_launch.pinned_launch_prefix(*arguments)
+    assert selected == first
+    (peer / "current-version").write_text("2.0.0", encoding="utf-8")
+    result = subprocess.run(
+        [*pinned, "--configuration-root", str(tmp_path / "selected configuration"), "probe"],
+        capture_output=True, encoding="utf-8", timeout=20, **procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr
+    value = json.loads(result.stdout)
+    assert value["python"] == str(first)
+    assert value["argv"] == ["--configuration-root", str(tmp_path / "selected configuration"), "probe"]
+    assert value["env"]["AGENT_VAULT_HOME"] == str(peer)
+    assert value["env"]["AGENT_VAULT_VALIDATED_CONTEXT"] == str(peer / "install.json")
+    assert value["env"]["AGENT_VAULT_INSTALLATION_ID"] == f"{FIRST_MARKETPLACE_ID}/agent-vault"
+    assert value["env"]["AGENT_VAULT_RUN_DIR"] == str(peer / "run")
+    assert value["env"]["AGENT_VAULT_NO_SELFPROVISION"] == "1"
+    assert "AGENT_VAULT_ENDPOINT" not in value["env"] and "KPDB" not in value["env"]
+    assert not (peer / "run").exists() and not (peer / "state").exists()
+    sentinel = tmp_path / "unexpected-vault-execution"
+    monkeypatch.setenv("PEER_EXECUTION_SENTINEL", str(sentinel))
+    _update_receipt(peer / "installation-activation.json", lambda data: data.update(state="inactive"))
+    _assert_peer_refused(pinned)
+    _update_receipt(peer / "installation-activation.json", lambda data: data.update(state="active"))
+    _update_receipt(peer / "install.json", lambda data: data.update(marketplaceId=SECOND_MARKETPLACE_ID))
+    _assert_peer_refused(pinned)
+    assert not sentinel.exists()
+    assert not (tmp_path / "foreign-vault").exists() and not (tmp_path / "foreign.kdbx").exists()
+
+
 def test_retained_legacy_worktree_owner_uses_original_build_and_rechecks_ownership(tmp_path, monkeypatch):
     from agent_dispatch import worktree_owner_launch
 
