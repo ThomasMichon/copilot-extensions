@@ -11,6 +11,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 _owners: ContextVar[frozenset[str]] = ContextVar("checkout_relocation_owners", default=frozenset())
+RECEIVING_SCHEMA = "agent-worktrees.receiving-checkout-relocation.v1"
 
 
 def require_writer_generation() -> None:
@@ -39,7 +40,9 @@ def read(ledger: Path) -> dict | None:
     if path.is_symlink() or path.stat().st_size > 64 * 1024:
         raise ValueError("relocation journal is redirected or oversized")
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or data.get("schema") != "agent-worktrees.checkout-relocation.v1":
+    if not isinstance(data, dict) or data.get("schema") not in {
+        "agent-worktrees.checkout-relocation.v1", RECEIVING_SCHEMA,
+    }:
         raise ValueError("unsupported relocation journal")
     if (
         data.get("phase") not in {"prepared", "copying", "copied", "published", "git-repaired", "rebound", "retiring", "complete", "cancelling", "cancelled"}
@@ -103,6 +106,10 @@ def require_idle(ledger: Path) -> None:
     data = read(ledger)
     if data is not None and data.get("phase") not in {"complete", "cancelled"}:
         raise ValueError("checkout relocation is unfinished; retry the original move before launch or mutation")
+    if data is not None and data["schema"] == RECEIVING_SCHEMA:
+        from .receiving_relocation import require_retained_provenance
+
+        require_retained_provenance(ledger)
 
 
 def preserve(record, current, ledger: Path) -> None:
@@ -110,7 +117,9 @@ def preserve(record, current, ledger: Path) -> None:
     if current is None or str(ledger.resolve()) in _owners.get():
         return
     data = read(ledger)
-    if data is not None and record.worktree_path != current.worktree_path:
+    if (
+        data is not None or getattr(current, "receiving_allocation_present", False)
+    ) and record.worktree_path != current.worktree_path:
         raise ValueError("stale checkout location; reload the relocated worktree record")
 
 
