@@ -9,6 +9,7 @@ import os
 import re
 import stat
 import tempfile
+import time
 from pathlib import Path
 
 from .killswitch_mutation import mutation_lock
@@ -226,17 +227,25 @@ def _owner(record: dict, policy: dict) -> bool:
     return all(record[key] == policy[key] for key in ("publisher", "continuity"))
 
 
-def _plan(store: Path, source: Path, now_ms: int):
+def _plan(store: Path, source: Path | dict, now_ms: int):
     if not _integer(now_ms):
         raise HealthError("invalid-observation-time")
     store = _plain(store, directory=True)
     policy, policy_hash = _read(store / "policy.json", validate_policy)
     validator, maximum = _codec(policy)
-    candidate, source_hash = _read(source, validator, maximum=maximum)
+    if isinstance(source, Path):
+        candidate, source_hash = _read(source, validator, maximum=maximum)
+    else:
+        raw = json.dumps(source, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+        if len(raw) > maximum:
+            raise HealthError("input-oversize")
+        candidate = validator(json.loads(raw))
+        source_hash = hashlib.sha256(raw).hexdigest()
     target = store / f"{candidate['hour'] % SLOTS:03d}.json"
-    for protected in (store / "policy.json", store / "health.lock", store / "collection.lock", target):
-        if source == protected or protected.exists() and source.samefile(protected):
-            raise HealthError("input-overlaps-output")
+    if isinstance(source, Path):
+        for protected in (store / "policy.json", store / "health.lock", store / "collection.lock", target):
+            if source == protected or protected.exists() and source.samefile(protected):
+                raise HealthError("input-overlaps-output")
     _plain(store / "health.lock", optional=True)
     previous, previous_hash = _read(target, validator, optional=True, maximum=maximum)
     if policy["version"] == 2:
@@ -272,7 +281,8 @@ def _plan(store: Path, source: Path, now_ms: int):
     }
     info = store.stat()
     result["preview_token"] = _digest({
-        "store": str(store), "identity": [info.st_dev, info.st_ino], "source": str(source),
+        "store": str(store), "identity": [info.st_dev, info.st_ino],
+        "source": str(source) if isinstance(source, Path) else "collected-in-memory",
         "policy": policy_hash, "input": source_hash, "previous": previous_hash,
         "now_hour": now_ms // HOUR_MS, "result": result,
     })
@@ -316,19 +326,37 @@ def record(store: Path, source: Path, *, now_ms: int, apply=False, expected="") 
         raise HealthError("preview-token-required")
     if expected and not apply:
         raise HealthError("confirmation-requires-apply")
-    result, candidate, target = _plan(store, source, now_ms)
+    result, _candidate, _target = _plan(store, source, now_ms)
     if not apply:
         return result
+    return _commit(store, source, now_ms=now_ms, expected=expected, result=result)
+
+
+def record_collected(store: Path, candidate: dict, *, now_ms: int, guard, deadline: float) -> dict:
+    """Use the same revision preview and writer under the caller's policy/budget."""
+    result, frozen, _target = _plan(store, candidate, now_ms)
+    return _commit(
+        store, frozen, now_ms=now_ms, expected=result["preview_token"], result=result,
+        guard=guard, timeout=lambda: min(5.0, max(0.0, deadline - time.monotonic())),
+    )
+
+
+def _commit(store, source, *, now_ms, expected, result, guard=None, timeout=None):
     if not result["eligible"]:
         raise HealthError(result["status"])
     write_started = False
     try:
-        with mutation_lock(store / "health"):
+        if guard is not None:
+            guard()
+        lock_fields = {} if timeout is None else {"timeout": timeout()}
+        with mutation_lock(store / "health", **lock_fields):
             result, candidate, target = _plan(store, source, now_ms)
             if not hmac.compare_digest(expected, result["preview_token"]):
                 raise HealthError("preview-changed")
             if not result["eligible"]:
                 raise HealthError(result["status"])
+            if guard is not None:
+                guard()
             if result["status"] != "unchanged":
                 write_started = True
                 _write(target, candidate)

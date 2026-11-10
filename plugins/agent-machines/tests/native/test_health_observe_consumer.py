@@ -19,7 +19,7 @@ from agent_machines import health_slots
 
 
 @contextmanager
-def listener(response, *, drip=False):
+def listener(response, *, drip=False, count=1):
     requests, failures = [], []
     with socket.socket() as server:
         server.bind(("127.0.0.1", 0))
@@ -29,22 +29,23 @@ def listener(response, *, drip=False):
 
         def serve():
             try:
-                with server.accept()[0] as peer:
-                    peer.settimeout(5)
-                    request = b""
-                    while b"\r\n\r\n" not in request:
-                        chunk = peer.recv(2048)
-                        if not chunk or len(request) + len(chunk) > 2048:
-                            raise AssertionError("bounded HTTP request unavailable")
-                        request += chunk
-                    requests.append(request)
-                    if drip:
-                        peer.sendall(response)
-                        for _ in range(20):
-                            peer.sendall(b" ")
-                            time.sleep(.15)
-                    else:
-                        peer.sendall(response)
+                for _ in range(count):
+                    with server.accept()[0] as peer:
+                        peer.settimeout(5)
+                        request = b""
+                        while b"\r\n\r\n" not in request:
+                            chunk = peer.recv(2048)
+                            if not chunk or len(request) + len(chunk) > 2048:
+                                raise AssertionError("bounded HTTP request unavailable")
+                            request += chunk
+                        requests.append(request)
+                        if drip:
+                            peer.sendall(response)
+                            for _ in range(20):
+                                peer.sendall(b" ")
+                                time.sleep(.15)
+                        else:
+                            peer.sendall(response)
             except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError):
                 if not drip:
                     failures.append("unexpected closed reader")

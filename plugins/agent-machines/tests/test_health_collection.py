@@ -5,7 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import time
-from contextlib import nullcontext
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -13,6 +13,7 @@ import pytest
 
 from agent_machines import health_collect as collector, health_hourly as hourly, health_slots as slots
 from agent_machines import health_observe, service_reports
+from agent_machines import health_run as runner
 from agent_machines.__main__ import main
 
 NOW = datetime(2026, 11, 9, 12, 30, tzinfo=timezone.utc)
@@ -33,6 +34,8 @@ def store(tmp_path, monkeypatch):
     monkeypatch.setattr(collector, "time", SimpleNamespace(
         monotonic=lambda: 10.0, time_ns=lambda: STAMP * 1_000_000,
     ))
+    monkeypatch.setattr(runner, "time", collector.time)
+    monkeypatch.setattr(slots, "time", collector.time)
     monkeypatch.setattr(health_observe, "observe_bridge", lambda port, publisher, continuity: {
         "schema": slots.SCHEMA, "version": 1, "publisher": publisher, "continuity": continuity,
         "hour": HOUR, "revision": 1, "parent": None, "observed_at_ms": STAMP,
@@ -307,3 +310,290 @@ def test_read_only_storage_failure_does_not_prune_or_activate(store, tmp_path, m
     result = slots.record(store, source, now_ms=STAMP, apply=True, expected=preview["preview_token"])
     assert result["status"] == "unknown" and result["applied"] is None
     assert not list(store.glob("[0-9][0-9][0-9].json"))
+
+
+def approve(store):
+    return runner.run(store)["policy_token"]
+
+
+def apply_run(store):
+    return runner.run(store, apply=True, expected=approve(store))
+
+
+def test_one_shot_preview_is_pure_and_token_is_policy_not_hour_or_revision(
+    store, monkeypatch, capsys,
+):
+    monkeypatch.setattr(collector, "admission", lambda *a, **k: pytest.fail("preview admission"))
+    monkeypatch.setattr(health_observe, "observe_bridge", lambda *a: pytest.fail("preview observation"))
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: pytest.fail("preview export"))
+    before = {path.name: path.read_bytes() for path in store.iterdir()}
+    assert main(["health", "run", "--store-dir", str(store)]) == 0
+    preview = json.loads(capsys.readouterr().out)
+    assert preview["status"] == "preview"
+    assert preview["qualification"] == "not-executed"
+    assert all(row["applied"] is False for row in preview["targets"])
+    assert {path.name: path.read_bytes() for path in store.iterdir()} == before
+    (store / "000.json").write_text("unrelated revision", encoding="utf-8")
+    monkeypatch.setattr(runner.time, "time_ns", lambda: (STAMP + slots.HOUR_MS) * 1_000_000)
+    assert approve(store) == preview["policy_token"]
+
+
+@pytest.mark.parametrize("scenario", ["missing", "wrong", "without-apply", "policy-drift", "store-drift"])
+def test_one_shot_requires_exact_approval_before_any_effect(store, tmp_path, monkeypatch, scenario):
+    token = approve(store)
+    if scenario == "policy-drift":
+        path = store / "policy.json"
+        path.write_text(path.read_text() + "\n", encoding="utf-8")
+    if scenario == "store-drift":
+        replacement = tmp_path / "replacement"
+        replacement.mkdir()
+        (replacement / "policy.json").write_bytes((store / "policy.json").read_bytes())
+        store = replacement
+    monkeypatch.setattr(collector, "admission", lambda *a, **k: pytest.fail("unapproved admission"))
+    with pytest.raises(slots.HealthError):
+        runner.run(
+            store, apply=scenario != "without-apply",
+            expected="" if scenario == "missing" else "0" * 64 if scenario == "wrong" else token,
+        )
+    assert not list(store.glob("[0-9][0-9][0-9].json"))
+
+
+def test_one_shot_two_targets_share_admission_deadline_and_normal_writer(store, monkeypatch, capsys):
+    admissions, deadlines = [], []
+    real_admission = collector.admission
+
+    @contextmanager
+    def admitted(*args, **kwargs):
+        admissions.append(True)
+        with real_admission(*args, **kwargs) as begin:
+            yield begin
+
+    def services(names, hour, **fields):
+        assert collector._RUN_LOCK.locked()
+        deadlines.append(fields["deadline"])
+        return [{"instance": "queue", "service": "agent-dispatch", "hour": hour, "state": "unsupported"}]
+
+    monkeypatch.setattr(collector, "admission", admitted)
+    monkeypatch.setattr(service_reports, "collect", services)
+    token = approve(store)
+    assert main(["health", "run", "--store-dir", str(store), "--apply", "--expect-policy", token]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result.keys() == {
+        "schema", "version", "status", "policy_token", "current_hour", "targets", "qualification",
+        "carrier_publication",
+    }
+    assert len(admissions) == 1 and deadlines == [54.75]
+    assert result["status"] == "completed" and result["qualification"] == "within-budget"
+    assert [row["hour"] for row in result["targets"]] == [HOUR, HOUR - 1]
+    for row in result["targets"]:
+        assert row.keys() == {
+            "hour", "component", "requested", "collection", "transaction", "applied", "changed", "reason",
+        }
+        assert row["transaction"] == "recorded" and row["applied"] and row["changed"]
+    view = slots.inspect(store, now_ms=STAMP)
+    assert view["observed_hours"] == 2
+    assert view["hours"][-1]["sample"]["domains"]["local_listener"]["state"] == "ok"
+    assert view["hours"][-2]["sample"]["domains"]["local_listener"]["state"] == "unknown"
+    assert (store / "collection.lock").read_bytes() == b"\0"
+    assert approve(store) == token
+
+
+@pytest.mark.parametrize("component", ["observation", "services", "both"])
+def test_one_shot_empty_selections_are_not_requested_and_never_enumerated(store, monkeypatch, component):
+    path = store / "policy.json"
+    policy = json.loads(path.read_text())
+    if component in {"observation", "both"}:
+        policy["collection"]["bridge_port"] = None
+        monkeypatch.setattr(health_observe, "observe_bridge", lambda *a: pytest.fail("unselected probe"))
+    if component in {"services", "both"}:
+        policy["collection"]["services"] = []
+        monkeypatch.setattr(service_reports, "collect", lambda *a, **k: pytest.fail("unselected export"))
+    else:
+        monkeypatch.setattr(service_reports, "collect", lambda *a, **k: [])
+    path.write_text(json.dumps(policy), encoding="utf-8")
+    result = apply_run(store)
+    assert result["status"] == "completed"
+    for row in result["targets"]:
+        if component in {row["component"], "both"}:
+            assert row["collection"] == row["transaction"] == "not-requested"
+            assert not row["applied"] and not row["changed"]
+    assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == (0 if component == "both" else 1)
+
+
+def test_one_shot_revalidates_approval_inside_mutation_lock(store, monkeypatch):
+    token = approve(store)
+
+    @contextmanager
+    def drift(*a, **k):
+        path = store / "policy.json"
+        path.write_text(path.read_text() + "\n", encoding="utf-8")
+        yield
+
+    monkeypatch.setattr(slots, "mutation_lock", drift)
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: pytest.fail("drifted export"))
+    result = runner.run(store, apply=True, expected=token)
+    assert result["status"] == "failed"
+    assert result["qualification"] == "store-policy-changed"
+    assert result["targets"][0]["transaction"] == "refused"
+    assert not list(store.glob("[0-9][0-9][0-9].json"))
+
+
+def test_one_shot_revision_drift_is_not_overwritten_or_retried(store, monkeypatch):
+    candidate = collector.collect(store)
+    target = store / f"{HOUR % slots.SLOTS:03d}.json"
+    candidate["observed_at_ms"] -= 1
+    candidate["observation"]["observed_at_ms"] -= 1
+    candidate["observation"]["domains"]["local_listener"]["observed_at_ms"] -= 1
+    calls = 0
+
+    @contextmanager
+    def conflict(*a, **k):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            target.write_text(json.dumps(candidate), encoding="utf-8")
+        yield
+
+    monkeypatch.setattr(slots, "mutation_lock", conflict)
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: [])
+    result = apply_run(store)
+    assert result["status"] == "partial"
+    assert result["targets"][0]["reason"] == "preview-changed"
+    assert result["targets"][1]["applied"]
+    assert json.loads(target.read_text()) == candidate
+
+
+@pytest.mark.parametrize("failure", ["export", "unknown-write"])
+def test_second_target_failure_preserves_first_and_unknown_write_fences_replay(store, monkeypatch, failure):
+    original_write = slots._write
+
+    def export(*a, **k):
+        if failure == "export":
+            raise OSError("private-export-detail")
+        return []
+
+    def write(path, value):
+        if value["hour"] == HOUR - 1:
+            raise OSError("private-write-detail")
+        original_write(path, value)
+
+    monkeypatch.setattr(service_reports, "collect", export)
+    monkeypatch.setattr(slots, "_write", write)
+    result = apply_run(store)
+    assert result["status"] == "partial"
+    assert result["targets"][0]["transaction"] == "recorded"
+    assert result["targets"][0]["applied"] and result["targets"][0]["changed"]
+    assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == 1
+    if failure == "export":
+        assert result["targets"][1]["collection"] == "failed"
+        assert (store / "collection.lock").read_bytes() == b"\0"
+    else:
+        assert result["targets"][1]["transaction"] == "unknown"
+        assert result["targets"][1]["applied"] is None
+        assert result["qualification"] == "write-unconfirmed"
+        assert (store / "collection.lock").read_bytes() == b"\1"
+        again = apply_run(store)
+        assert again["qualification"] == "collection-cleanup-unconfirmed"
+        assert all(not row["applied"] for row in again["targets"])
+    assert "private-" not in json.dumps(result)
+
+
+@pytest.mark.parametrize("late", ["deadline", "hour"])
+def test_late_confirmed_first_commit_retains_fact_and_stops_new_collectors(store, monkeypatch, late):
+    original_write = slots._write
+    tick, stamp = 10.0, STAMP
+    monkeypatch.setattr(runner.time, "monotonic", lambda: tick)
+    monkeypatch.setattr(runner.time, "time_ns", lambda: stamp * 1_000_000)
+
+    def write(*args):
+        nonlocal tick, stamp
+        original_write(*args)
+        if late == "deadline":
+            tick = 60.0
+        else:
+            stamp += slots.HOUR_MS
+
+    monkeypatch.setattr(slots, "_write", write)
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: pytest.fail("late export"))
+    result = apply_run(store)
+    assert result["status"] == "partial"
+    assert result["qualification"] == ("collection-timeout" if late == "deadline" else "collection-hour-changed")
+    assert result["targets"][0]["transaction"] == "recorded"
+    assert result["targets"][0]["applied"] and result["targets"][0]["changed"]
+    assert not result["targets"][1]["applied"]
+    assert slots.inspect(store, now_ms=stamp)["observed_hours"] == 1
+
+
+def test_one_shot_unknown_cleanup_keeps_first_commit_and_original_admission_custody(store, monkeypatch):
+    ready = False
+
+    def settle(deadline):
+        if not ready:
+            raise TimeoutError("fixture not settled")
+
+    error = service_reports.OwnedCleanupError(None, cleanup_retry=settle)
+
+    def export(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(service_reports, "collect", export)
+    try:
+        result = apply_run(store)
+        assert result["status"] == "partial"
+        assert result["qualification"] == "collection-cleanup-unconfirmed"
+        assert result["targets"][0]["applied"]
+        assert not result["targets"][1]["applied"]
+        assert collector._RUN_LOCK.locked()
+        with pytest.raises(TimeoutError):
+            error.retry_cleanup(deadline=time.monotonic() + 1)
+        assert apply_run(store)["qualification"] == "collection-overlap"
+    finally:
+        ready = True
+        error.retry_cleanup(deadline=time.monotonic() + 1)
+    assert (store / "collection.lock").read_bytes() == b"\0"
+    assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == 1
+
+
+def test_one_shot_lock_budget_is_recomputed_after_planning(store, monkeypatch):
+    original_plan = slots._plan
+    tick = 10.0
+    timeouts = []
+    monkeypatch.setattr(runner.time, "monotonic", lambda: tick)
+
+    def slow_plan(*a, **k):
+        nonlocal tick
+        result = original_plan(*a, **k)
+        tick = 53.0
+        return result
+
+    @contextmanager
+    def lock(*a, **k):
+        timeouts.append(k["timeout"])
+        yield
+
+    monkeypatch.setattr(slots, "_plan", slow_plan)
+    monkeypatch.setattr(slots, "mutation_lock", lock)
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: [])
+    assert apply_run(store)["status"] == "completed"
+    assert timeouts == [1.75, 1.75]
+
+
+def test_one_shot_final_admission_settlement_cannot_hide_a_late_success(store, monkeypatch):
+    tick = 10.0
+    real_admission = collector.admission
+    monkeypatch.setattr(runner.time, "monotonic", lambda: tick)
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: [])
+
+    @contextmanager
+    def delayed_release(*args, **kwargs):
+        nonlocal tick
+        with real_admission(*args, **kwargs) as begin:
+            yield begin
+        tick = 60.0
+
+    monkeypatch.setattr(collector, "admission", delayed_release)
+    result = apply_run(store)
+    assert result["status"] == "partial" and result["qualification"] == "collection-timeout"
+    assert all(row["transaction"] == "recorded" and row["applied"] for row in result["targets"])
+    assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == 2
+    assert (store / "collection.lock").read_bytes() == b"\0"

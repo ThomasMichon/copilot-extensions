@@ -20,8 +20,9 @@ from agent_machines.__main__ import main
 from test_health_observe_consumer import QUALIFYING_BODY, listener, response
 
 
+@pytest.mark.parametrize("flow", ["manual", "one-shot"])
 def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
-    tmp_path, monkeypatch, capsys,
+    tmp_path, monkeypatch, capsys, flow,
 ):
     repo = Path(__file__).resolve().parents[4]
     monkeypatch.syspath_prepend(str(repo / "plugins" / "agent-dispatch" / "src"))
@@ -76,7 +77,7 @@ def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
     producer_bytes = retained.read_bytes()
     store = tmp_path / "store"
     store.mkdir()
-    with listener(response(QUALIFYING_BODY)) as (port, requests):
+    with listener(response(QUALIFYING_BODY), count=1 if flow == "manual" else 2) as (port, requests):
         (store / "policy.json").write_text(json.dumps({
             "schema": health_slots.POLICY_SCHEMA, "version": 2,
             "publisher": "example-worker", "continuity": "example-generation",
@@ -110,23 +111,59 @@ def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
             json.dumps(seeded), encoding="utf-8",
         )
         original = {path.name: path.read_bytes() for path in store.iterdir()}
-        assert main(["health", "collect", "--store-dir", str(store)]) == 0
-        current = json.loads(capsys.readouterr().out)
-    assert len(requests) == 1
-    assert {path.name: path.read_bytes() for path in store.iterdir()} == original
-    assert main(["health", "collect", "--store-dir", str(store), "--hour", prior]) == 0
-    historical = json.loads(capsys.readouterr().out)
+        if flow == "manual":
+            assert main(["health", "collect", "--store-dir", str(store)]) == 0
+            current = json.loads(capsys.readouterr().out)
+        else:
+            assert main(["health", "run", "--store-dir", str(store)]) == 0
+            plan = json.loads(capsys.readouterr().out)
+            assert {path.name: path.read_bytes() for path in store.iterdir()} == original
+            arguments = [
+                "health", "run", "--store-dir", str(store), "--apply", "--expect-policy", plan["policy_token"],
+            ]
+            assert main(arguments) == 0
+            completed = json.loads(capsys.readouterr().out)
+            assert completed["status"] == "completed"
+            assert all(row["applied"] for row in completed["targets"])
+            current_path = store / f"{seeded['hour'] % health_slots.SLOTS:03d}.json"
+            historical_path = store / f"{(seeded['hour'] - 1) % health_slots.SLOTS:03d}.json"
+            current = json.loads(current_path.read_text(encoding="utf-8"))
+            historical = json.loads(historical_path.read_text(encoding="utf-8"))
+            historical_bytes = historical_path.read_bytes()
+            real_collect = service_reports.collect
+
+            def unavailable(*a, **k):
+                raise OSError("fixture second target unavailable")
+
+            monkeypatch.setattr(service_reports, "collect", unavailable)
+            assert main(arguments) == 2
+            partial = json.loads(capsys.readouterr().out)
+            assert partial["status"] == "partial"
+            assert partial["targets"][0]["applied"] and partial["targets"][0]["changed"]
+            assert partial["targets"][1]["collection"] == "failed"
+            assert historical_path.read_bytes() == historical_bytes
+            confirmed = json.loads(current_path.read_text(encoding="utf-8"))
+            assert confirmed["revision"] == current["revision"] + 1
+            current = confirmed
+            monkeypatch.setattr(service_reports, "collect", real_collect)
+            assert (store / "collection.lock").read_bytes() == b"\0"
+    assert len(requests) == (1 if flow == "manual" else 2)
+    if flow == "manual":
+        assert {path.name: path.read_bytes() for path in store.iterdir()} == original
+        assert main(["health", "collect", "--store-dir", str(store), "--hour", prior]) == 0
+        historical = json.loads(capsys.readouterr().out)
     assert historical["observation"] is None and historical["hour"] == current["hour"] - 1
     contribution = historical["services"][0]["contribution"]
     assert contribution["groups"][0]["outcomes"] == {"completed": 1}
-    for index, candidate in enumerate((current, historical)):
-        source = tmp_path / f"candidate-{index}.json"
-        source.write_text(json.dumps(candidate), encoding="utf-8")
-        arguments = ["health", "record", "--store-dir", str(store), "--input", str(source)]
-        assert main(arguments) == 0
-        preview = json.loads(capsys.readouterr().out)
-        assert main([*arguments, "--apply", "--expect", preview["preview_token"]]) == 0
-        assert json.loads(capsys.readouterr().out)["applied"]
+    if flow == "manual":
+        for index, candidate in enumerate((current, historical)):
+            source = tmp_path / f"candidate-{index}.json"
+            source.write_text(json.dumps(candidate), encoding="utf-8")
+            arguments = ["health", "record", "--store-dir", str(store), "--input", str(source)]
+            assert main(arguments) == 0
+            preview = json.loads(capsys.readouterr().out)
+            assert main([*arguments, "--apply", "--expect", preview["preview_token"]]) == 0
+            assert json.loads(capsys.readouterr().out)["applied"]
     before = {path.name: path.read_bytes() for path in store.iterdir()}
     chart = tmp_path / "collected.svg"
     assert main(["health", "report", "--store-dir", str(store), "--chart", str(chart)]) == 0

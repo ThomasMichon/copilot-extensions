@@ -49,6 +49,36 @@ def add_parser(subparsers) -> None:
     collect.add_argument("--store-dir", type=Path, required=True, help="explicit preprovisioned v2 store")
     collect.add_argument("--hour", help="canonical UTC hour; current health by default, historical services only")
     collect.set_defaults(func=run_collect)
+    run = commands.add_parser(
+        "run", help="preview or apply a policy-scoped two-hour local collection", allow_abbrev=False,
+    )
+    run.add_argument("--store-dir", type=Path, required=True, help="explicit preprovisioned v2 store")
+    run.add_argument("--apply", action="store_true")
+    run.add_argument("--expect-policy", default="", help="approval token from the local policy preview")
+    run.set_defaults(func=run_collection)
+
+
+def run_collection(args) -> int:
+    from .health_run import run
+    from .health_slots import HealthError
+
+    result = None
+    try:
+        result = run(args.store_dir, apply=args.apply, expected=args.expect_policy)
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 0 if result["status"] in {"preview", "completed"} else 2
+    except (ValueError, OSError, OverflowError) as error:
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
+        print(json.dumps({
+            "ok": False,
+            "error": "response-output-unavailable" if result is not None else (
+                str(error) if isinstance(error, HealthError) else "collection-unavailable"
+            ),
+            "applied": None if result is not None and args.apply else False,
+            "carrier_publication": "not-requested",
+        }), file=sys.stderr)
+        return 2
 
 
 def run_collect(args) -> int:
