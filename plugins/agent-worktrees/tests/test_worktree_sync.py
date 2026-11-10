@@ -467,6 +467,87 @@ def test_sync_stream_matches_the_complete_baseline_json_envelope(tmp_path, monke
     frames = [json.loads(line) for line in capfd.readouterr().out.splitlines()]
     assert frames[-1]["type"] == "error"
     assert frames[-1]["result"] == baseline
+    assert worktree_ops_cli.cmd_sync(SimpleNamespace(
+        stream=False, json=False, worktree_id="missing",
+    )) == 1
+    assert capfd.readouterr().out == "missing: not-found\n"
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+def test_real_cli_pair_stream_matches_the_entire_ordinary_result(tmp_path, blocked):
+    import sys
+    import textwrap
+
+    from agent_procutil.owned_process import run_caller_owned
+
+    script = textwrap.dedent("""
+        import argparse,json,sys
+        from pathlib import Path
+        import pytest
+        from test_worktree_sync import _pair,_head
+        from test_squash_abort import _git
+        from agent_worktrees import git_ops,output,worktree_identity,worktree_ops_cli
+        blocked=sys.argv[2]=='True'
+        parser=argparse.ArgumentParser(allow_abbrev=False)
+        worktree_ops_cli.add_parsers(parser.add_subparsers(dest='command'))
+        with pytest.MonkeyPatch.context() as patch:
+            records,paths,targets,overlay,calls=_pair(Path(sys.argv[1]),patch)
+            patch.setattr(worktree_identity,'_resolve_worktree_id',lambda value:value)
+            original_heads={role:_head(path) for role,path in paths.items()}
+            original_file=(paths['harness']/'f.txt').read_bytes()
+            if blocked:
+                advance=git_ops.fast_forward_worktree
+                def refuse(path,**kwargs):
+                    if str(path)==str(paths['knowledge']):
+                        return git_ops.FastForwardResult(False,'ff-failed')
+                    return advance(path,**kwargs)
+                patch.setattr(git_ops,'fast_forward_worktree',refuse)
+            else:
+                for role,path in paths.items():
+                    _git(path,'update-ref','refs/heads/worktree/'+role,targets[role])
+                    _git(path,'read-tree',targets[role])
+                    (path/'f.txt').write_text('new\\n')
+            arguments=['sync','--paired','--json','--worktree-id','harness']
+            with output.capture_json_output() as captured:
+                baseline_code=worktree_ops_cli.cmd_sync(parser.parse_args(arguments))
+            baseline=json.loads(captured.getvalue())
+            if blocked:
+                assert _head(paths['harness'])==targets['harness']
+                assert _head(paths['knowledge'])==original_heads['knowledge']
+                _git(paths['harness'],'update-ref','refs/heads/worktree/harness',
+                     original_heads['harness'])
+                _git(paths['harness'],'read-tree',original_heads['harness'])
+                (paths['harness']/'f.txt').write_bytes(original_file)
+            with output.capture_json_output() as captured:
+                streamed_code=worktree_ops_cli.cmd_sync(parser.parse_args([*arguments,'--stream']))
+            frames=[json.loads(line) for line in captured.getvalue().splitlines()]
+            heads={role:_head(path) for role,path in paths.items()}
+        print(json.dumps(dict(baseline=baseline,frames=frames,
+                              baseline_code=baseline_code,streamed_code=streamed_code,
+                              heads=heads,targets=targets,original_heads=original_heads)))
+    """)
+    result = run_caller_owned(
+        [sys.executable, "-B", "-c", script, str(tmp_path), str(blocked)],
+        cwd=str(Path(__file__).parent), timeout=25,
+        max_stdout_bytes=128 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stderr
+    evidence = json.loads(result.stdout)
+    terminal = evidence["frames"][-1]
+    assert terminal["result"] == evidence["baseline"]
+    assert evidence["baseline_code"] == evidence["streamed_code"] == (1 if blocked else 0)
+    assert terminal["type"] == ("error" if blocked else "done")
+    native = terminal["result"]
+    assert native["version"] == 1 and len(native["pair_results"]) == 2
+    assert native["ok"] is not blocked
+    if blocked:
+        assert native["pair_results"][0]["updated"] and not native["pair_results"][1]["updated"]
+        assert native["plugins"] == "skipped" and native["reason"] == "pair-sync-blocked"
+        assert evidence["heads"]["harness"] == evidence["targets"]["harness"]
+        assert evidence["heads"]["knowledge"] == evidence["original_heads"]["knowledge"]
+    else:
+        assert not native["updated"] and native["reason"] == "up-to-date"
+        assert native["plugins"] == "ready" and evidence["heads"] == evidence["targets"]
 
 
 def test_sync_stream_malformed_tracking_has_a_terminal_result(tmp_path, monkeypatch, capfd):
