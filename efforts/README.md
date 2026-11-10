@@ -8,6 +8,9 @@ that pattern to this repository.
 
 ## Active effort index
 
+- [CWD-Owned Command Context](active/cwd-owned-command-context/README.md) -
+  #11883; remove inherited owner references and classify environment inputs.
+
 Installer/update campaigns and bug-fix slices, including already-active work,
 must cite and evaluate their objective and completion/validation gates against
 [authoritative runtime replacement](../visions/installer/README.md#authoritative-runtime-replacement).
