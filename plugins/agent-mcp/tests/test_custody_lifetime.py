@@ -175,6 +175,40 @@ def test_native_fixture_normalizes_inspected_pid_before_native_open(monkeypatch,
     assert native.pin(pid, "native:1") is process
 
 
+def test_native_fixture_owner_explicitly_forwards_redirected_streams(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import importlib.util
+    from pathlib import Path
+
+    spec = importlib.util.spec_from_file_location(
+        "custody_lifetime_stream_control",
+        Path(__file__).with_name("custody_lifetime_fixture.py"),
+    )
+    fixture = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fixture)
+    streams = {name: Mock() for name in ("stdin", "stdout", "stderr")}
+    for name, stream in streams.items():
+        monkeypatch.setattr(fixture.sys, name, stream)
+    monkeypatch.setattr(
+        fixture.sys, "argv",
+        ["fixture", "owner", "actor", "root", "fixed", "config", "private"],
+    )
+    monkeypatch.setattr(fixture, "birth_identity", lambda _: "native:1")
+
+    def launch(_argv: list[str], **kwargs: object) -> None:
+        for name, stream in streams.items():
+            assert kwargs.get(name) is stream
+        assert kwargs["require_job"] is True
+        assert kwargs["allow_breakaway"] is True
+        raise SystemExit(0)
+
+    monkeypatch.setattr(fixture.pu, "spawn_sync_in_kill_on_close_job", launch)
+    with pytest.raises(SystemExit) as result:
+        fixture.main()
+    assert result.value.code == 0
+
+
 @pytest.mark.skipif(
     os.name != "nt" and not sys.platform.startswith("linux"),
     reason="explicit session owner currently supports Windows and Linux",

@@ -29,6 +29,7 @@ def main():
             [sys.executable, "-I", __file__, "shim", actor, root, fixed, config, private,
              str(os.getpid()), birth],
             require_job=True, allow_breakaway=True,
+            stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
             **pu.no_window_kwargs(),
         )
         try:
