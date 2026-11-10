@@ -289,6 +289,9 @@ new contract and an older read-only contract, using the real caller-owned policy
 worker rather than a timing stub; they also require a real protected-state deny.
 These are finite source samples, not latency distributions or the 1-2 second
 whole-hook/throughput acceptance. Child/item/group limits stay 10/30/300 seconds.
+The boolean-only admission controls retain bounded command-entry, helper,
+input, admission and output phases; a timeout reports the partial phases
+without retrying the child or relaxing its original limit.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input

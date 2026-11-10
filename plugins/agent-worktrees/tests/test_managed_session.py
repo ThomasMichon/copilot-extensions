@@ -632,7 +632,7 @@ def environment(home, anchor):
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("linked", [False, True])
-def test_prepared_native_membership_reuses_original_association(tmp_path, monkeypatch, shell, linked):
+def test_prepared_native_membership_reuses_original_association(tmp_path, monkeypatch, capsys, shell, linked):
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -648,21 +648,42 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
     session.mkdir(parents=True)
     payload = {"sessionId": "prepared", "cwd": str(workspace), "toolName": "view"}
     assert module.admitted(payload, home=tmp_path)
+    phases = tmp_path / "native-admission-phases"
     command = (
-        ". $env:PREPARED_MEMBERSHIP_SCRIPT; "
+        "function Write-AdmissionPhase([string]$Name) { "
+        "[IO.File]::AppendAllText($env:PREPARED_MEMBERSHIP_PHASES, "
+        "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
+        "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name + [Environment]::NewLine) }; "
+        "Write-AdmissionPhase 'command-entry'; "
+        ". $env:PREPARED_MEMBERSHIP_SCRIPT; Write-AdmissionPhase 'helper-loaded'; "
         "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }; "
-        "$raw = [Console]::In.ReadToEnd(); "
-        "[Console]::Out.Write((Test-ManagedWorktreesSession -Raw $raw).ToString())"
+        "$raw = [Console]::In.ReadToEnd(); Write-AdmissionPhase 'input-complete'; "
+        "$admitted = Test-ManagedWorktreesSession -Raw $raw; Write-AdmissionPhase 'admission-complete'; "
+        "[Console]::Out.Write($admitted.ToString()); Write-AdmissionPhase 'output-complete'"
     )
     env = environment(tmp_path, workspace)
     env["PREPARED_MEMBERSHIP_SCRIPT"] = str(SCRIPTS / "managed-session.ps1")
-    result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
-        input=json.dumps(payload), text=True, capture_output=True, timeout=10,
-        cwd=workspace, env=env, **no_window_kwargs(),
-    )
+    env["PREPARED_MEMBERSHIP_PHASES"] = str(phases)
+    started_ms = time.time_ns() // 1_000_000
+    try:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+            input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        progress = phases.read_text() if phases.exists() else "no command entry"
+        raise AssertionError(
+            f"{shell} membership exceeded the original 10s child limit; start_ms={started_ms}; "
+            f"phases={progress!r}; stdout={repr(error.stdout)[:512]}; stderr={repr(error.stderr)[:512]}"
+        ) from error
     assert result.returncode == 0, result.stderr
     assert result.stdout == "True", result.stdout + result.stderr
+    with capsys.disabled():
+        print(json.dumps({
+            "shell": shell, "linked": linked, "start_ms": started_ms,
+            "phases": phases.read_text().splitlines(),
+        }))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows registered pre-tool consumer")
