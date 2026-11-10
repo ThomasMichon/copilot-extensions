@@ -49,13 +49,26 @@ def _fields(value, required: set[str]) -> None:
 
 
 def validate_policy(value: dict) -> dict:
-    _fields(value, {"schema", "version", "publisher", "continuity"})
+    version = value.get("version") if type(value) is dict else None
+    _fields(value, {"schema", "version", "publisher", "continuity", *({"collection"} if version == 2 else set())})
     if (
-        value["schema"] != POLICY_SCHEMA or type(value["version"]) is not int or value["version"] != 1
+        value["schema"] != POLICY_SCHEMA or type(version) is not int or version not in {1, 2}
         or not _identity(value["publisher"]) or not _identity(value["continuity"])
     ):
         raise HealthError("invalid-store-policy")
+    if version == 2:
+        from .health_hourly import validate_collection
+
+        validate_collection(value["collection"])
     return value
+
+
+def _codec(policy: dict):
+    if policy["version"] == 2:
+        from .health_hourly import MAX_BYTES as maximum, validate_record as validator
+
+        return validator, maximum
+    return validate_record, MAX_BYTES
 
 
 def validate_record(value: dict) -> dict:
@@ -154,7 +167,13 @@ def _float(_value):
     raise HealthError("floating-point-value")
 
 
-def _read(path: Path, validator, *, optional=False):
+def _hourly_number(value):
+    if len(value.lstrip("-")) > 19:
+        raise HealthError("integer-out-of-range")
+    return int(value)
+
+
+def _read(path: Path, validator, *, optional=False, maximum=MAX_BYTES):
     path = _plain(path, optional=optional)
     try:
         before = path.lstat()
@@ -173,7 +192,7 @@ def _read(path: Path, validator, *, optional=False):
                 or (before.st_dev, before.st_ino) != (opened.st_dev, opened.st_ino)
             ):
                 raise HealthError("input-changed")
-            raw = stream.read(MAX_BYTES + 1)
+            raw = stream.read(maximum + 1)
             after = os.fstat(stream.fileno())
         _plain(path)
         final = path.lstat()
@@ -183,13 +202,13 @@ def _read(path: Path, validator, *, optional=False):
             or (opened.st_dev, opened.st_ino) != (final.st_dev, final.st_ino)
             or (opened.st_size, opened.st_mtime_ns) != (after.st_size, after.st_mtime_ns)
             or (after.st_size, after.st_mtime_ns) != (final.st_size, final.st_mtime_ns)
-            or len(raw) > MAX_BYTES
+            or len(raw) > maximum
         ):
             raise HealthError("input-changed-or-oversize")
         try:
             value = json.loads(
                 raw.decode("utf-8"), object_pairs_hook=_pairs, parse_constant=_nonfinite,
-                parse_int=_number, parse_float=_float,
+                parse_int=_number if maximum == MAX_BYTES else _hourly_number, parse_float=_float,
             )
         except (UnicodeError, json.JSONDecodeError, RecursionError):
             raise HealthError("invalid-json") from None
@@ -212,13 +231,18 @@ def _plan(store: Path, source: Path, now_ms: int):
         raise HealthError("invalid-observation-time")
     store = _plain(store, directory=True)
     policy, policy_hash = _read(store / "policy.json", validate_policy)
-    candidate, source_hash = _read(source, validate_record)
+    validator, maximum = _codec(policy)
+    candidate, source_hash = _read(source, validator, maximum=maximum)
     target = store / f"{candidate['hour'] % SLOTS:03d}.json"
-    for protected in (store / "policy.json", store / "health.lock", target):
+    for protected in (store / "policy.json", store / "health.lock", store / "collection.lock", target):
         if source == protected or protected.exists() and source.samefile(protected):
             raise HealthError("input-overlaps-output")
     _plain(store / "health.lock", optional=True)
-    previous, previous_hash = _read(target, validate_record, optional=True)
+    previous, previous_hash = _read(target, validator, optional=True, maximum=maximum)
+    if policy["version"] == 2:
+        from .health_hourly import validate_replacement
+
+        validate_replacement(candidate, previous, policy)
     status = "pending"
     if not _owner(candidate, policy) or previous is not None and not _owner(previous, policy):
         status = "owner-mismatch"
@@ -257,7 +281,10 @@ def _plan(store: Path, source: Path, now_ms: int):
 
 def _write(path: Path, value: dict) -> None:
     raw = (json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False) + "\n").encode()
-    if len(raw) > MAX_BYTES:
+    maximum = MAX_BYTES
+    if value.get("schema") == "agent-machines.health.hourly":
+        from .health_hourly import MAX_BYTES as maximum
+    if len(raw) > maximum:
         raise HealthError("output-oversize")
     temporary = None
     try:
@@ -345,12 +372,15 @@ def inspect(store: Path, *, now_ms: int) -> dict:
         raise HealthError("invalid-observation-time")
     store = _plain(store, directory=True)
     policy, policy_hash = _read(store / "policy.json", validate_policy)
+    validator, maximum = _codec(policy)
     identity = store.stat()
     hours = []
     for hour in range(now_ms // HOUR_MS - SLOTS + 1, now_ms // HOUR_MS + 1):
         item = {"hour": hour, "state": "missing"}
         try:
-            observed, _hash = _read(store / f"{hour % SLOTS:03d}.json", validate_record, optional=True)
+            observed, _hash = _read(
+                store / f"{hour % SLOTS:03d}.json", validator, optional=True, maximum=maximum,
+            )
             if observed is not None:
                 if not _owner(observed, policy):
                     item["state"] = "owner-mismatch"
@@ -359,7 +389,13 @@ def inspect(store: Path, *, now_ms: int) -> dict:
                 elif observed["hour"] > hour or observed["observed_at_ms"] > now_ms:
                     item["state"] = "future"
                 else:
-                    item.update(state="observed", sample=_sample(observed, now_ms))
+                    if policy["version"] == 2:
+                        from .health_hourly import sample
+
+                        projection = sample(observed, now_ms)
+                    else:
+                        projection = _sample(observed, now_ms)
+                    item.update(state="observed", sample=projection)
         except (HealthError, OSError):
             item["state"] = "invalid"
         hours.append(item)

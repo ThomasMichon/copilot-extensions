@@ -313,6 +313,21 @@ def test_cleanup_reserve_is_inside_child_and_collection_deadlines(collector, pro
         now_ms=protocol.hour_start("2026-11-09T12:00:00Z"),
     )
     assert [row["state"] for row in result] == ["timeout", "timeout"] and len(calls) == 1
+    clock[0] = 0
+    calls.clear()
+    result = collector.collect(
+        ["agent-dispatch", "agent-bridge"], "2026-11-09T12:00:00Z",
+        now_ms=protocol.hour_start("2026-11-09T12:00:00Z"), deadline=29.0,
+    )
+    assert [row["state"] for row in result] == ["timeout", "timeout"] and len(calls) == 1
+    assert calls[0].deadline <= 29.0 - collector.RESPONSE_MARGIN
+    clock[0] = 0
+    calls.clear()
+    result = collector.collect(
+        ["agent-dispatch"], "2026-11-09T12:00:00Z",
+        now_ms=protocol.hour_start("2026-11-09T12:00:00Z"), deadline=27.0,
+    )
+    assert result[0]["state"] == "timeout" and not calls
 
 
 def test_reverse_snapshot_keeps_fresh_records_and_never_admits_partial_or_oversize_suffixes(
