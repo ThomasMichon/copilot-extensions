@@ -500,6 +500,15 @@ installation, credentials, sessions or service registrations are borrowed.
 Source workflow wiring alone is not activation: the preserved Main controller
 requires its own reviewed adoption and exact-candidate native run.
 
+The console fixture's `tests/test_terminal_console_fixture.py` Manager packet
+checks the Toolhelp snapshot-to-handle race. Only `OpenProcess` error 87 for a
+PID absent from a fresh process snapshot permits omission; access failures,
+still-present PIDs and failed observations remain failures. The same file's
+Windows-only control deliberately releases a snapshotted child before pinning,
+using the strict fixture-owned Job. Portable controls are not native evidence.
+Live descendant handles, creation-time checks and installed TTY assertions
+remain unchanged.
+
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
 Windows PowerShell and PowerShell 7. A controlled census verifies the real
