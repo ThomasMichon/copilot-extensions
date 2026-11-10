@@ -324,6 +324,8 @@ def test_execution_preserves_actual_collection_failure_and_skip_outcomes(
 
 
 def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_path, monkeypatch):
+    import io
+
     import agent_procutil.owned_process as owned_process
     from agent_procutil.owned_process import run_caller_owned
 
@@ -333,6 +335,9 @@ def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_
     test.touch()
     output = tmp_path / "evidence"
     monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+    stdout, stderr = io.BytesIO(), io.BytesIO()
+    monkeypatch.setattr(sys, "stdout", io.TextIOWrapper(stdout, encoding="cp1252"))
+    monkeypatch.setattr(sys, "stderr", io.TextIOWrapper(stderr, encoding="cp1252"))
 
     def run(argv, **kwargs):
         (output / "junit").mkdir()
@@ -341,7 +346,8 @@ def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_
             encoding="utf-8",
         )
         return run_caller_owned(
-            [sys.executable, "-c", "import sys;print(chr(0x2014));sys.exit(1)"],
+            [sys.executable, "-c",
+             "import sys;print(chr(0xfffd));print(chr(0x65e5),file=sys.stderr);sys.exit(1)"],
             **kwargs,
         )
 
@@ -353,7 +359,10 @@ def test_execution_preserves_real_unicode_console_output_and_failed_outcome(tmp_
     assert actual["outcome"] == "failed"
     assert actual["error"] == "selected command failed (1)"
     assert actual["tests"][0]["outcome"] == "failed"
-    assert (output / "phase-2.stdout.log").read_text("utf-8") == "\u2014\n"
+    assert (output / "phase-2.stdout.log").read_text("utf-8") == "\ufffd\n"
+    assert (output / "phase-2.stderr.log").read_text("utf-8") == "\u65e5\n"
+    assert "\ufffd" in stdout.getvalue().decode("utf-8").splitlines()
+    assert "\u65e5" in stderr.getvalue().decode("utf-8").splitlines()
 
 
 def result():
