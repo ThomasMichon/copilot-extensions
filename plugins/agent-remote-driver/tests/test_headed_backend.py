@@ -142,6 +142,66 @@ async def _peer(backend, **overrides):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("matching_identity", [True, False])
+async def test_native_observation_fault_only_closes_its_bound_sdk_stream(tmp_path, matching_identity):
+    import time
+
+    from native.test_native_headed_auth_wait import _observation_loss_backend
+    from agent_remote_driver.headed.auth_wait import AuthWaitReceiver
+
+    receiver = AuthWaitReceiver("native-fixture", {
+        "source_owner": "fixture", "source_revision": "fixture-revision",
+        "lease_revision": 1, "budget_seconds": 30, "expires_at": time.time() + 30,
+    })
+    receiver.phase = "running"
+    fault_file, receipt_file = tmp_path / "fault.json", tmp_path / "receipt.json"
+    backend = _observation_loss_backend(fault_file, receipt_file)(
+        Owner(), session_id="native-fixture", nonce="fixture-" * 8, auth_wait=receiver,
+    )
+    await backend.serve()
+    reader, writer = await _peer(backend)
+    snapshot = {
+        "controlled": True, "closed": False, "pending": True,
+        "sending": False, "outstanding": False, "waiting": False,
+    }
+    try:
+        await asyncio.wait_for(backend.bound.wait(), 2)
+        writer.write((json.dumps({
+            "contract": "copilot-driver.headed-auth-state", "version": 1,
+            "incarnation": receiver.incarnation, "state": snapshot,
+        }) + "\n").encode())
+        await writer.drain()
+        for _ in range(100):
+            if backend.auth_snapshot == snapshot:
+                break
+            await asyncio.sleep(.01)
+        assert backend.auth_snapshot == snapshot
+        fault_file.write_text(json.dumps({
+            "session_id": "native-fixture", "incarnation": receiver.incarnation,
+            "native_pid": 122 if matching_identity else 999, "extension_pid": 123,
+        }), encoding="utf-8")
+        for _ in range(100):
+            if receipt_file.exists():
+                break
+            await asyncio.sleep(.01)
+        receipt = json.loads(receipt_file.read_text(encoding="utf-8"))
+        if matching_identity:
+            assert receipt["snapshot"] == snapshot
+            assert receipt["status"]["hold"] == "native-connection-lost"
+            assert receipt["writer_closed"] and not receipt["bound"]
+            assert await asyncio.wait_for(reader.read(), 1) == b""
+        else:
+            assert receipt == {"error": "AssertionError"}
+            assert backend.bound.is_set() and not backend.lost.is_set()
+            assert receiver.hold is None
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        await backend.close()
+        await receiver.close()
+
+
+@pytest.mark.asyncio
 async def test_cli_backend_shares_ws_tcp_control_and_only_exact_owner_can_stop():
     owner = Owner()
     backend = HeadedBackend(owner, session_id="native-fixture", nonce="fixture-" * 8)
