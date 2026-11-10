@@ -241,7 +241,7 @@ permission gates.
 
 ## Source evidence map
 
-The stage-1/2/3 source deliveries are #11790, #11838 and #11866. The
+The reviewed stage-1/2/3/4 source deliveries are #11790, #11838, #11866 and #11897. The
 permanent stage-4 tests below qualify the packaged standalone foreground,
 not an injected Gateway substitute. Source review and required CI remain
 mandatory for every delivery; this map is not a merge waiver.
@@ -275,13 +275,13 @@ parity, fleet placement and production writes remain broader parent work.
 
 ## Validation and acceptance
 
-- [ ] Stage 1 decisions use actual executing provider/native and read-credential
+- [x] Stage 1 decisions use actual executing provider/native and read-credential
   seams for **both** initial providers, full target isolation, strict optional
   config, local profile/admission and declared capability/schema support. Include old/new, new/old,
   new/new, missing/invalid declarations and supported rollback at real parser
   or transport boundaries. Configuration/provisioning performs no credential
   or provider probes.
-- [ ] Launch the **actual foreground standalone host** with two synthetic
+- [x] Launch the **actual foreground standalone host** with two synthetic
   providers and fresh explicitly provisioned durable state. Through the
   supported local HTTP/CLI front door, **without running Core/Gateway**,
   discover open populations without registered
@@ -289,26 +289,26 @@ parity, fleet placement and production writes remain broader parent work.
   Prove local authentication/read-only admission, response limits,
   target/principal isolation, unconfigured refusal and old connector-profile
   compatibility. A synthetic Gateway is not the local usability proof.
-- [ ] Drive initial population, later entry, head/review/check changes,
+- [x] Drive initial population, later entry, head/review/check changes,
   authoritative terminal outcomes, nonterminal departure, unknown-to-known
   evidence, unchanged observations and timestamp-only refresh. Assert distinct
   initial/change/departure semantics, honest partial/freshness fields and no
   semantic nonevents. Provider-native facts remain attributable.
-- [ ] Inject paginated partial discovery, caps, read failure and full outage,
+- [x] Inject paginated partial discovery, caps, read failure and full outage,
   including initially empty-complete versus unavailable. Known membership
   survives uncertainty; omission alone never closes a PR. Restore service and
   reconcile through the same observer within declared budgets.
-- [ ] Use independent overlapping consumers and repeated local queries; measure
+- [x] Use independent overlapping consumers and repeated local queries; measure
   inventory/snapshot fetch counts per observation cycle, demonstrating shared
   acquisition and zero query/subscriber-triggered extra forge pollers. Explicit
   counters prove **zero forge writes and zero task emissions**, not merely
   absence of mocked writer assertions.
-- [ ] Restart the foreground owner over the same synthetic durable state:
+- [x] Restart the foreground owner over the same synthetic durable state:
   current facts, namespace, registration/event identities, independent pending
   replay and ACK positions survive. Exercise disconnect, retry, cancellation,
   expiry, history gaps/backpressure and crash between observation/state/event
   publication. Preserve unresolved effect identities without replaying writes.
-- [ ] Exercise drain/withdrawal during inventory, snapshot and persistence,
+- [x] Exercise drain/withdrawal during inventory, snapshot and persistence,
   including delayed cleanup; no later admission/publication or early writer
   release. Existing default watch/report/workspace controls remain valid,
   optional routes remain off unless selected, and strict standalone typing,
