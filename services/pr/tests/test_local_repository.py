@@ -107,6 +107,22 @@ def test_local_adoption_rechecks_private_serving_user_root_without_repair(tmp_pa
         config.root.chmod(0o700)
 
 
+@pytest.mark.parametrize("name", [
+    "service-status.json", "watch-replay.json", "watch-replay.lock", "watch-subscriptions.json",
+])
+def test_local_socket_cannot_collide_with_existing_readiness_or_store_owner(
+    tmp_path: Path, name: str,
+) -> None:
+    path, value, _state, log = configuration(tmp_path)
+    root = Path(value["root"])
+    value["repository_cache"]["socket"] = str(root / name)
+    path.write_text(json.dumps(value))
+    with pytest.raises(ValueError, match="collides"):
+        load_service_config(path)
+    assert main(["provision", "--config", str(path)]) == 1
+    assert not root.exists() and not log.exists()
+
+
 def test_real_local_client_continues_after_ack_with_scope_isolation(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
 ) -> None:

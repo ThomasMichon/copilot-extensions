@@ -101,7 +101,12 @@ class LocalHostConfig:
             _seconds(value.get("interval", 5)), _seconds(value.get("operation_seconds", 60)),
             _seconds(value.get("drain_timeout", 60)),
         )
-        config.store()
+        store = config.store()
+        if config.repositories.socket_path in {
+            config.status_path, store.path, store._lock().path,
+            config.root / "watch-subscriptions.json",
+        }:
+            raise ValueError("local repository socket collides with readiness or storage ownership")
         return config
 
 
