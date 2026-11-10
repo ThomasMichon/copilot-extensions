@@ -116,6 +116,16 @@ class ResolvedVault:
     sources: dict[str, str]
 
 
+def daemon_bind_port(context: ResolvedVault) -> int:
+    """Keep the listener default separate from explicit client selection."""
+    value = os.environ.get(BIND_PORT_ENV)
+    if context.sources.get("port") != "default" or value is None:
+        return context.port
+    if not value.isascii() or not value.isdigit() or not 0 <= int(value) <= 65535:
+        raise ValueError("AGENT_VAULT_BIND_PORT must be an integer from 0 to 65535")
+    return int(value)
+
+
 def default_config_path() -> Path:
     """Return the default JSON settings file path."""
     if IS_WINDOWS:
