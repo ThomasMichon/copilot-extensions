@@ -7,6 +7,7 @@ import json
 import pytest
 
 from agent_mcp.custody_wire import MAX_FRAME, MAX_PENDING, Peer
+from agent_mcp.custody_contract import MAX_SEQUENCE
 
 
 @asynccontextmanager
@@ -123,7 +124,7 @@ async def test_invalid_outgoing_frame_does_not_consume_a_sequence():
         assert peer._counter == remotes[0]._received == 1
 
 
-@pytest.mark.parametrize("bad_receipt", [True, 0, -1, "1"])
+@pytest.mark.parametrize("bad_receipt", [True, 0, -1, "1", MAX_SEQUENCE + 1])
 async def test_invalid_receipt_identity_cannot_acknowledge_work(bad_receipt):
     peer = Peer(None, None, echo)
     future = asyncio.get_running_loop().create_future()
@@ -216,3 +217,28 @@ async def test_concurrent_requests_publish_contiguous_sequences():
         assert responses == [{"number": number} for number in range(32)]
         assert peer._counter == remotes[0]._received == 32
         assert not peer._pending
+
+
+async def test_oversized_handler_result_refuses_without_losing_the_attachment(monkeypatch):
+    from agent_mcp import custody_wire
+
+    async def handler(operation, data):
+        return "x" * 1000 if operation == "large" else data
+
+    async with connected(handler) as (peer, _, _):
+        monkeypatch.setattr(custody_wire, "MAX_FRAME", 256)
+        with pytest.raises(RuntimeError, match="frame exceeds"):
+            await peer.request("large")
+        assert await peer.request("probe", live=True) == {"live": True}
+        assert not peer._closed and not peer._pending
+
+
+async def test_sequence_exhaustion_refuses_before_publication_without_losing_credit():
+    async with connected(echo) as (peer, remotes, _):
+        await peer.request("probe")
+        peer._counter = remotes[0]._received = MAX_SEQUENCE - 1
+        assert await peer.request("last", value=1) == {"value": 1}
+        with pytest.raises(ValueError, match="sequence exhausted"):
+            await peer.request("overflow")
+        assert peer._counter == remotes[0]._received == MAX_SEQUENCE
+        assert peer._credits._value == MAX_PENDING and not peer._closed

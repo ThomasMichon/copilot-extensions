@@ -7,7 +7,7 @@ import pytest
 
 from agent_mcp.backend import BackendSession
 from agent_mcp.config import parse_config
-from agent_mcp.custody_contract import MAX_APPLICATION
+from agent_mcp.custody_contract import MAX_APPLICATION, MAX_CONTROL
 from agent_mcp.custody_session import CustodySession
 from agent_mcp.custody_wire import MAX_FRAME
 from agent_mcp.transports.base import Transport
@@ -98,8 +98,8 @@ class Backends:
 
 
 @asynccontextmanager
-async def composed():
-    backends, upstream, output = Backends(), Upstream(), []
+async def composed(*, upstream=None):
+    backends, upstream, output = Backends(), upstream or Upstream(), []
     backends.server = await asyncio.start_server(
         backends.accept, "127.0.0.1", 0, limit=MAX_FRAME,
     )
@@ -226,3 +226,79 @@ async def test_unacknowledged_publications_are_bounded_without_spending_control_
         await asyncio.gather(*admissions)
         await settled(owner)
         assert len(upstream.messages) == MAX_APPLICATION + 1
+
+
+@pytest.mark.parametrize("failure", ["invalid-message", "server-request-overflow"])
+async def test_upstream_reader_failure_fences_and_wakes_migration_and_admission(failure):
+    async with composed() as (owner, backends, upstream, output):
+        await call(owner, 1)
+        move = asyncio.create_task(owner.handover(backends.connect))
+        while not owner.state.fenced:
+            await asyncio.sleep(0)
+        waiting = asyncio.create_task(owner.submit(
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, wait=True,
+        ))
+        await asyncio.sleep(0)
+        assert not waiting.done()
+        if failure == "server-request-overflow":
+            for mid in range(MAX_CONTROL):
+                await upstream._emit_message({
+                    "jsonrpc": "2.0", "id": f"server-{mid}", "method": "sampling/createMessage",
+                })
+            message = {"jsonrpc": "2.0", "id": "overflow", "method": "sampling/createMessage"}
+        else:
+            message = {"jsonrpc": "invalid", "method": "notifications/invalid"}
+        with pytest.raises(ValueError):
+            await upstream._emit_message(message)
+        assert owner.state.uncertain
+        with pytest.raises(ConnectionError, match="unknown"):
+            await asyncio.wait_for(waiting, 2)
+        with pytest.raises(ConnectionError, match="unknown"):
+            await asyncio.wait_for(move, 2)
+        assert len(upstream.messages) == 1 and upstream.starts == 1
+    assert upstream.ends == upstream.closes == 1
+
+
+async def test_clean_close_keeps_backend_attached_through_final_upstream_notification():
+    async with composed() as (owner, backends, upstream, output):
+        async def end_input():
+            upstream.ends += 1
+            await upstream._emit_message(
+                {"jsonrpc": "2.0", "method": "notifications/final", "params": {"data": "done"}},
+            )
+        upstream.end_input = end_input
+    assert [message["method"] for message in output] == ["notifications/final"]
+    assert not owner.state.uncertain
+    assert upstream.ends == upstream.closes == 1
+
+
+async def test_unexpected_upstream_reader_eof_terminates_waiting_backend_without_replay():
+    upstream = Upstream()
+    upstream._reader_task = asyncio.get_running_loop().create_future()
+    async with composed(upstream=upstream) as (owner, backends, upstream, output):
+        await call(owner, 1)
+        move = asyncio.create_task(owner.handover(backends.connect))
+        while not owner.state.fenced:
+            await asyncio.sleep(0)
+        upstream._reader_task.set_result(None)
+        with pytest.raises(ConnectionError, match="unknown"):
+            await asyncio.wait_for(move, 2)
+        assert owner.state.uncertain and upstream.starts == 1
+        assert len(upstream.messages) == 1 and not output
+    assert upstream.ends == upstream.closes == 1
+
+
+async def test_oversized_checkpoint_refuses_before_commit_and_preserves_owned_backend(monkeypatch):
+    from agent_mcp import custody_wire
+
+    async with composed() as (owner, backends, upstream, output):
+        monkeypatch.setattr(custody_wire, "MAX_FRAME", 1024)
+        old = owner.state.current
+        backends.instances[0].session._pipeline.decorators[0]._reverse = {"large": "x" * 1000}
+        with pytest.raises(RuntimeError, match="frame budget"):
+            await owner.handover(backends.connect)
+        assert owner.state.current is old and not owner.state.uncertain
+        assert not owner.state.fenced and len(backends.instances) == 1
+        await owner.submit({"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
+        await settled(owner)
+        assert output[-1]["id"] == 1 and upstream.starts == 1

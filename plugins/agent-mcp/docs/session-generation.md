@@ -22,6 +22,13 @@ application dispatch it was observing. Resume requires an explicitly supplied
 custody-owned transport; it cannot start a replacement upstream or replay
 initialization.
 
+Export budgets the complete checkpoint receipt and subsequent preparation
+frame, including the private binding and contract metadata. Wire sequences
+and epochs are positive signed-64-bit integers, bounding envelope overhead.
+An oversized checkpoint is refused before publication; an oversized handler
+result becomes a bounded error receipt rather than disconnecting the old
+attachment. Precommit refusal can therefore resume the unchanged owner.
+
 The private ordered attachment retains published receipts and admission credit
 after caller cancellation. Cancellation before publication consumes no
 sequence. A disconnected attachment reports accepted effects as unknown and
@@ -186,6 +193,18 @@ Attach acknowledgment precedes early upstream notifications. Client EOF joins
 an active handover before owning teardown; failed quiescence still closes
 the exact retained transport while reporting uncertain accepted effects.
 Losing only a backend link is not evidence that the external client died.
+
+Queued client responses are accounted for before EOF settlement. A retained
+server request with no remaining possible client response, including one
+arriving after EOF, terminates that session as uncertain instead of stranding
+handover. Upstream validation, ledger overflow and unexpected reader termination
+also fence execution, wake admission/migration waits and close the owned links.
+They never authorize replay or affect another client's retained upstream.
+
+Clean teardown keeps the backend attached while upstream input is closed and
+final output drains, then detaches the backend and closes the transport.
+The native half-close fixture requires the real child process's final EOF
+notification to reach the original external stdout pipe.
 
 The combined contained packet passes 224 tests with two existing
 platform-specific skips and verified cleanup. It includes two clients sharing

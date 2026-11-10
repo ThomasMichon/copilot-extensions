@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import json
 
+from .custody_contract import MAX_SEQUENCE
+
 MAX_FRAME = 8 * 1024 * 1024
 MAX_PENDING = 128
 
@@ -57,6 +59,8 @@ class Peer:
             async with self._write_lock:
                 self._check_open()
                 sequence = self._counter + 1
+                if sequence > MAX_SEQUENCE:
+                    raise ValueError("custody sequence exhausted; operation not published")
                 wire = self._encode(
                     {"sequence": sequence, "operation": operation, "data": data},
                 )
@@ -86,6 +90,7 @@ class Peer:
         try:
             result = await self.handler(packet["operation"], packet["data"])
             reply = {"receipt": sequence, "result": result}
+            self._encode(reply)
         except Exception as exc:
             reply = {"receipt": sequence, "error": str(exc)}
         await self.write(reply)
@@ -100,7 +105,7 @@ class Peer:
         sequence = packet["receipt"]
         if (
             type(sequence) is not int
-            or sequence <= 0
+            or not 0 < sequence <= MAX_SEQUENCE
             or set(packet) not in ({"receipt", "result"}, {"receipt", "error"})
             or ("error" in packet and not isinstance(packet["error"], str))
         ):
@@ -130,6 +135,7 @@ class Peer:
                 if (
                     set(packet) != {"sequence", "operation", "data"}
                     or type(packet["sequence"]) is not int
+                    or not 0 < packet["sequence"] <= MAX_SEQUENCE
                     or packet["sequence"] != self._received + 1
                     or not isinstance(packet["operation"], str)
                     or not isinstance(packet["data"], dict)

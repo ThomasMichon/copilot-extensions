@@ -143,8 +143,9 @@ async def shared(tmp_path, monkeypatch, *, early=False):
         yield state
     finally:
         for upstream in state.upstreams:
-            for mid in tuple(upstream.pending):
-                await upstream.complete(mid)
+            if not upstream.closes:
+                for mid in tuple(upstream.pending):
+                    await upstream.complete(mid)
         for _server, writer in tuple(state.writers):
             await ipc.aclose_writer(writer)
         for listener in state.listeners:
@@ -226,6 +227,45 @@ async def test_one_host_migrates_other_client_while_first_mutation_is_pending(tm
         assert await asyncio.wait_for(second.read(), 2) == b""
         await ipc.aclose_writer(writer1)
         await ipc.aclose_writer(writer2)
+
+
+@pytest.mark.parametrize("request_timing", ["before-eof", "after-eof"])
+async def test_eof_with_unanswerable_server_request_aborts_only_its_owned_session(
+    tmp_path, monkeypatch, request_timing,
+):
+    async with shared(tmp_path, monkeypatch) as fixture:
+        reader, writer, _, _ = await fixture.attach()
+        other, other_writer, _, _ = await fixture.attach()
+        upstream = fixture.upstreams[0]
+        entry = next(item for item in fixture.host.sessions if item.owner.transport is upstream)
+        await send(writer, {
+            "jsonrpc": "2.0", "id": 10, "method": "tools/call",
+            "params": {"name": "test_echo", "arguments": {}},
+        })
+        await until(lambda: upstream.pending)
+        await fixture.publish("incoming")
+        fixture.host.inspect_sessions()
+        await until(lambda: entry.owner.state.fenced)
+        request = {"jsonrpc": "2.0", "id": "unanswered", "method": "sampling/createMessage"}
+        if request_timing == "before-eof":
+            await upstream._emit_message(request)
+            assert (await receive(reader))["id"] == "unanswered"
+        writer.write_eof()
+        if request_timing == "after-eof":
+            await until(lambda: entry.closing)
+            with pytest.raises(ConnectionError, match="input is closed"):
+                await upstream._emit_message(request)
+        await until(lambda: entry not in fixture.host.sessions)
+        assert entry.owner.state.uncertain and entry.migration.done()
+        assert upstream.starts == upstream.ends == upstream.closes == 1
+        assert list(upstream.pending) == [10]
+        assert await asyncio.wait_for(reader.read(), 2) == b""
+        await send(other_writer, {"jsonrpc": "2.0", "id": 20, "method": "tools/list"})
+        assert (await receive(other))["id"] == 20
+        other_writer.write_eof()
+        assert await asyncio.wait_for(other.read(), 2) == b""
+        await ipc.aclose_writer(writer)
+        await ipc.aclose_writer(other_writer)
 
 
 @pytest.mark.parametrize("after_handshake", [False, True])

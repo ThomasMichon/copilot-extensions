@@ -222,3 +222,39 @@ async def test_cancelled_quiescence_wait_does_not_cancel_accepted_mutation():
     await session.quiesce()
     assert not call.cancelled()
     await session.aclose()
+
+
+def test_export_budgets_complete_receipt_and_prepare_frames(monkeypatch):
+    from agent_mcp import custody_wire
+    from agent_mcp.custody_contract import CONTRACT, MAX_SEQUENCE
+
+    cfg, binding = configuration(), cp.Binding.issue()
+
+    def frames(snapshot):
+        return (
+            {"receipt": MAX_SEQUENCE, "result": snapshot},
+            {
+                "sequence": MAX_SEQUENCE, "operation": "prepare",
+                "data": {
+                    "epoch": MAX_SEQUENCE, "contract": CONTRACT,
+                    "binding": {"session": binding.session, "key": binding.key},
+                    "checkpoint": snapshot,
+                },
+            },
+        )
+
+    empty = cp.envelope(cfg, {"padding": ""}, binding)
+    receipt, prepare = frames(empty)
+    receipt_size, prepare_size = (
+        len(custody_wire.Peer._encode(packet)) for packet in (receipt, prepare)
+    )
+    assert prepare_size > receipt_size
+    monkeypatch.setattr(custody_wire, "MAX_FRAME", prepare_size + 8)
+    snapshot = cp.envelope(cfg, {"padding": "x" * 8}, binding)
+    assert max(len(custody_wire.Peer._encode(packet)) for packet in frames(snapshot)) == prepare_size + 8
+    with pytest.raises(cp.CheckpointRefused, match="complete attachment frame"):
+        cp.envelope(cfg, {"padding": "x" * 9}, binding)
+    monkeypatch.setattr(custody_wire, "MAX_FRAME", receipt_size)
+    assert len(custody_wire.Peer._encode(receipt)) == receipt_size
+    with pytest.raises(cp.CheckpointRefused, match="complete attachment frame"):
+        cp.envelope(cfg, {"padding": ""}, binding)

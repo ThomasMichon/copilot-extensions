@@ -14,6 +14,14 @@ def active():
     return state, attachment
 
 
+def test_epoch_exhaustion_preserves_the_current_owner_without_preparation():
+    state, owner = active()
+    state._next_epoch = cs.MAX_SEQUENCE
+    with pytest.raises(ValueError, match="epoch exhausted"):
+        state.prepare()
+    assert state.current is owner and state.candidate is None
+
+
 def request(mid=1):
     return {"jsonrpc": "2.0", "id": mid, "method": "tools/call", "params": {}}
 

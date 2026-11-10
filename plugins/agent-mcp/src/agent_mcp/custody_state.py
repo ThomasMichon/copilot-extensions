@@ -6,7 +6,7 @@ from dataclasses import dataclass
 import json
 
 from . import checkpoint as cp
-from .custody_contract import MAX_APPLICATION, MAX_CONTROL
+from .custody_contract import MAX_APPLICATION, MAX_CONTROL, MAX_SEQUENCE
 from .pipeline import is_request
 
 MAX_BUFFERED_BYTES = 16 * 1024 * 1024
@@ -71,6 +71,8 @@ class CustodyState:
         self._known()
         if self.candidate is not None or self.activating:
             raise ValueError("a custody preparation is already outstanding")
+        if self._next_epoch >= MAX_SEQUENCE:
+            raise ValueError("custody epoch exhausted; preparation not admitted")
         self._next_epoch += 1
         self.candidate = Attachment(self._next_epoch)
         self.candidate_ready = False

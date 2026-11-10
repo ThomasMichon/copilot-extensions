@@ -194,6 +194,14 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                     label: generation for label, (generation, _) in slots.items()
                 }))
                 record_testsuite_property("shared_instances_peak", 3)
+                for process in clients:
+                    process.stdin.close()
+                for process, initial in ((held, initialization), (fresh, fresh_initialization)):
+                    final = await fixture.receive(process)
+                    assert final["method"] == "notifications/upstream-eof"
+                    assert final["params"]["pid"] == initial["pid"]
+                    assert final["params"]["initialized"] == 1
+                    assert await asyncio.wait_for(process.stdout.read(), 10) == b""
             finally:
                 for process in clients:
                     process.stdin.close()

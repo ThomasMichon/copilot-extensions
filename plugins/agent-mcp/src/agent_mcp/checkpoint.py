@@ -59,7 +59,10 @@ def data_copy(value):
 
 def envelope(cfg, state: dict, binding: Binding) -> dict:
     """Export data without embedding the private binding key or execution objects."""
-    return data_copy(
+    from .custody_contract import CONTRACT, MAX_SEQUENCE
+    from .custody_wire import Peer
+
+    snapshot = data_copy(
         {
             "schema": SCHEMA,
             "version": VERSION,
@@ -68,6 +71,19 @@ def envelope(cfg, state: dict, binding: Binding) -> dict:
             "state": state,
         }
     )
+    try:
+        Peer._encode({"receipt": MAX_SEQUENCE, "result": snapshot})
+        Peer._encode({
+            "sequence": MAX_SEQUENCE, "operation": "prepare",
+            "data": {
+                "epoch": MAX_SEQUENCE, "contract": CONTRACT,
+                "binding": {"session": binding.session, "key": binding.key},
+                "checkpoint": snapshot,
+            },
+        })
+    except ValueError as exc:
+        raise CheckpointRefused("checkpoint exceeds its complete attachment frame budget") from exc
+    return snapshot
 
 
 def unpack(cfg, snapshot: dict, binding: Binding) -> dict:

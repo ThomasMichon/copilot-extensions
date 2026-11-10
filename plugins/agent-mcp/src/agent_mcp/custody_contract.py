@@ -2,6 +2,7 @@
 
 MAX_APPLICATION = 64
 MAX_CONTROL = 32
+MAX_SEQUENCE = (1 << 63) - 1
 
 CONTRACT = {
     "name": "agent-mcp.connection-custody",

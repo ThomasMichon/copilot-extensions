@@ -55,12 +55,39 @@ class CustodySession:
         self._early = []
         self._early_bytes = 0
         self._closing = False
+        self._input_ended = False
+        self._ending_upstream = False
+
+    def _fail(self):
+        self.state.unknown()
+        self._changed.set()
+        for link in tuple(self._links.values()):
+            link.peer.writer.close()
+
+    def _unanswered(self):
+        replies = {
+            item.message["id"] for item in self.state.accepted.values()
+            if "method" not in item.message
+        }
+        return self.state.server_requests.keys() - replies
+
+    def client_eof(self):
+        """No further server responses can arrive after queued input is published."""
+        self._input_ended = True
+        if self._unanswered():
+            self._fail()
+
+    def _reader_done(self, task):
+        if not task.cancelled():
+            task.exception()
+        if not self._ending_upstream:
+            self._fail()
 
     def disconnected(self, link, task):
         if not task.cancelled():
             task.exception()
         if link.attachment is self.state.current and not self._closing:
-            self.state.unknown()
+            self._fail()
         self._changed.set()
 
     async def _open(self, link, data):
@@ -81,6 +108,9 @@ class CustodySession:
                 self.transport = build_transport(self.cfg, build_injector(self.cfg))
             self.transport.on_message(self.upstream)
             await asyncio.wait_for(self.transport.start(), self.cfg.timeout)
+            reader = getattr(self.transport, "_reader_task", None)
+            if reader is not None:
+                reader.add_done_callback(self._reader_done)
             self._opened = True
             return {"retained": False}
 
@@ -96,7 +126,7 @@ class CustodySession:
             try:
                 await self.transport.send(message)
             except BaseException:
-                self.state.unknown()
+                self._fail()
                 raise
             self.state.sent(attachment, message)
             self._changed.set()
@@ -109,7 +139,7 @@ class CustodySession:
                     if inspect.isawaitable(result):
                         await result
                 except BaseException:
-                    self.state.unknown()
+                    self._fail()
                     raise
                 self.state.delivered(attachment, delivery)
                 self._changed.set()
@@ -121,29 +151,35 @@ class CustodySession:
         raise ValueError(f"unknown custody operation: {operation}")
 
     async def upstream(self, message):
-        async with self._upstream_lock:
-            self.state._known()
-            if self.state.current is None:
-                message = data_copy(message)
-                size = len(json.dumps(message).encode())
-                if len(self._early) >= MAX_APPLICATION or self._early_bytes + size > MAX_OUTPUT_BYTES:
-                    raise ValueError("pre-activation upstream window is full")
-                self._early.append(message)
-                self._early_bytes += size
-                return
-            await self._forward_upstream(message)
+        try:
+            async with self._upstream_lock:
+                self.state._known()
+                if self.state.current is None:
+                    message = data_copy(message)
+                    size = len(json.dumps(message).encode())
+                    if len(self._early) >= MAX_APPLICATION or self._early_bytes + size > MAX_OUTPUT_BYTES:
+                        raise ValueError("pre-activation upstream window is full")
+                    self._early.append(message)
+                    self._early_bytes += size
+                    return
+                await self._forward_upstream(message)
+        except BaseException:
+            self._fail()
+            raise
 
     async def _forward_upstream(self, message):
-        message = self.state.upstream(message)
-        link = self._links[self.state.current]
         try:
+            message = self.state.upstream(message)
+            if self._input_ended and self._unanswered():
+                raise ConnectionError("client input is closed; server response cannot arrive")
+            link = self._links[self.state.current]
             result = await link.peer.request(
                 "upstream", epoch=link.attachment.epoch, message=message,
             )
             if not isinstance(result, dict) or result.get("delivered") is not True:
                 raise ConnectionError("upstream delivery outcome is unknown")
         except BaseException:
-            self.state.unknown()
+            self._fail()
             raise
         self._changed.set()
 
@@ -190,7 +226,7 @@ class CustodySession:
             self.state.activated(link.attachment)
             self._changed.set()
         except BaseException:
-            self.state.unknown()
+            self._fail()
             self._changed.set()
             raise
 
@@ -216,7 +252,7 @@ class CustodySession:
             ):
                 raise ConnectionError("backend input admission outcome is unknown")
         except BaseException:
-            self.state.unknown()
+            self._fail()
         self._changed.set()
 
     async def submit(self, message, *, wait=False):
@@ -293,7 +329,7 @@ class CustodySession:
                         self._links.pop(candidate.attachment)
                     result = await old.peer.request("resume", epoch=old.attachment.epoch)
                     if not isinstance(result, dict) or result.get("active") is not True:
-                        self.state.unknown()
+                        self._fail()
                         raise ConnectionError("outgoing epoch resumption is unknown")
                     self.state.resumed(old.attachment)
                     self._changed.set()
@@ -301,6 +337,7 @@ class CustodySession:
 
     async def close(self):
         """Only client EOF/lifetime settlement may call this owning teardown."""
+        self.client_eof()
         self._closing = True
         self._changed.set()
         try:
@@ -310,14 +347,16 @@ class CustodySession:
                 link = self._links[self.state.current]
                 await link.peer.request("quiesce", epoch=link.attachment.epoch)
         except BaseException:
-            self.state.unknown()
+            self._fail()
             raise
         finally:
             try:
-                await asyncio.gather(*(link.close() for link in tuple(self._links.values())))
-            finally:
                 if self.transport is not None:
-                    try:
-                        await self.transport.end_input()
-                    finally:
+                    self._ending_upstream = True
+                    await self.transport.end_input()
+            finally:
+                try:
+                    await asyncio.gather(*(link.close() for link in tuple(self._links.values())))
+                finally:
+                    if self.transport is not None:
                         await self.transport.aclose()

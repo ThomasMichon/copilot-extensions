@@ -206,6 +206,7 @@ class CustodyHost(Server):
             else:
                 log.warning("custody client stream ended without replay")
         finally:
+            owner.client_eof()
             try:
                 await _join_cleanup(asyncio.create_task(self._settle(entry)))
             finally:

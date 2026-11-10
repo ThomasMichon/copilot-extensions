@@ -95,6 +95,8 @@ for line in sys.stdin:
               "params":{}})
     elif mid is not None:
         emit(result(mid))
+emit({"jsonrpc":"2.0", "method":"notifications/upstream-eof",
+      "params":{"pid":os.getpid(), "initialized":initialized, "mutations":mutations}})
 """
 
 

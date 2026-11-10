@@ -9,7 +9,7 @@ import hmac
 from . import execution_context, incoming
 from .checkpoint import Binding, CheckpointRefused
 from .config import load_config
-from .custody_contract import CONTRACT, MAX_APPLICATION, MAX_CONTROL, supports
+from .custody_contract import CONTRACT, MAX_APPLICATION, MAX_CONTROL, MAX_SEQUENCE, supports
 from .custody_wire import Peer
 from .request_context import request_root
 from .session import BridgeSession
@@ -252,7 +252,7 @@ async def run_backend(server, request, reader, writer):
         if (
             not supports(request.get("contract"))
             or not isinstance(request.get("bridge"), str) or not request["bridge"]
-            or type(request.get("epoch")) is not int or request["epoch"] <= 0
+            or type(request.get("epoch")) is not int or not 0 < request["epoch"] <= MAX_SEQUENCE
         ):
             raise ValueError("unsupported custody attachment")
         qualify()

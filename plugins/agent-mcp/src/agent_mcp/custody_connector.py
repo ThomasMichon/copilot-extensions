@@ -10,7 +10,7 @@ from pathlib import Path
 
 from . import execution_context, incoming, ipc, sockio
 from .checkpoint import Binding
-from .custody_contract import CONTRACT, supports
+from .custody_contract import CONTRACT, MAX_SEQUENCE, supports
 from .custody_wire import MAX_FRAME
 from .request_context import capture_context, supports_context
 
@@ -78,7 +78,7 @@ class BackendConnector:
 
     async def __call__(self, epoch):
         """Return owned streams after admission; no application has been accepted."""
-        if type(epoch) is not int or epoch <= 0:
+        if type(epoch) is not int or not 0 < epoch <= MAX_SEQUENCE:
             raise ValueError("backend attachment requires a positive integer epoch")
         self._context()
         return await asyncio.wait_for(self._connect(epoch), self.timeout)
