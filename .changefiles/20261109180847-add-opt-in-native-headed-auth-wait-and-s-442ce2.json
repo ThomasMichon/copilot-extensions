@@ -1,9 +1,0 @@
-{
-  "comment": "Add opt-in native headed auth-wait and same-session recovery qualification.",
-  "changes": [
-    {
-      "plugin": "agent-remote-driver",
-      "type": "patch"
-    }
-  ]
-}
