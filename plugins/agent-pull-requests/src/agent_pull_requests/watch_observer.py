@@ -14,7 +14,9 @@ from .watch_replay import ConsumerScope, ObservationTarget, ReplayEventTooLarge
 from .watch_replay_store import ReplayStore
 from .repository_contract import RepositoryIdentity
 from pathlib import Path
-from .repository_native import RepositoryNativeUnsupported, inventory as fetch_inventory
+from .repository_native import (
+    RepositoryNativeUnavailable, RepositoryNativeUnsupported, inventory as fetch_inventory,
+)
 from .repository_projection import RepositoryProjection, validate_identity
 
 _MAX_READS = 4
@@ -108,6 +110,11 @@ class ReplayObserver:
         inventories = {}
         repository_targets = {}
         snapshots = {}
+        qualified = set()
+        configured = {
+            (binding.account, binding.repo) for binding in self.bindings.values()
+            if binding.repository_identity is not None
+        }
         if self.repositories is not None:
             for binding in self.bindings.values():
                 if binding.repository_identity is None:
@@ -117,13 +124,22 @@ class ReplayObserver:
                     scan = fetch_inventory(
                         binding, checkpoint=lambda: self.store.check_current(expires_at, checkpoint),
                     )
+                    qualified.add((binding.account, binding.repo))
                 except RepositoryNativeUnsupported:
                     raise
+                except RepositoryNativeUnavailable as error:
+                    if error.qualified:
+                        qualified.add((binding.account, binding.repo))
+                    scan = {"outcome": "unavailable", "numbers": [], "pages": 0,
+                            "error": "inventory_unavailable" if error.qualified else "qualification_unavailable"}
                 except ValueError:
                     scan = {"outcome": "unavailable", "numbers": [], "pages": 0,
                             "error": "inventory_unavailable"}
                 inventories[binding.repository_identity.key] = scan
             repository_targets = self.repositories.plans(inventories, **authority)
+            repository_targets = {
+                key: target for key, target in repository_targets.items() if key[:2] in qualified
+            }
             keys = sorted(repository_targets)
             if keys:
                 start = self._repository_cursor % len(keys)
@@ -132,9 +148,11 @@ class ReplayObserver:
                 self._repository_cursor = (start + len(selected)) % len(keys)
         combined = dict(repository_targets)
         for target in self.store.observation_targets(**authority):
-            combined[(target.account, target.repo, target.number)] = target
+            if (target.account, target.repo) not in configured or (target.account, target.repo) in qualified:
+                combined[(target.account, target.repo, target.number)] = target
         targets = iter(combined.values())
-        observed = unavailable = unbound = 0
+        observed = unbound = 0
+        unavailable = sum(scan["outcome"] == "unavailable" for scan in inventories.values())
         pending = {}
         exhausted = False
         stopped = threading.Event()
@@ -171,7 +189,9 @@ class ReplayObserver:
                     target = pending.pop(future)
                     self.store.check_current(expires_at, checkpoint)
                     snapshot = future.result()
-                    snapshots[(target.account, target.repo, target.number)] = snapshot
+                    key = (target.account, target.repo, target.number)
+                    if key in repository_targets:
+                        snapshots[key] = snapshot
                     if snapshot is None:
                         unavailable += 1
                     else:

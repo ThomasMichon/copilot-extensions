@@ -135,6 +135,13 @@ timeouts become unavailable coverage while existing waits continue. A native
 cleanup failure is not a settled timeout: the read-owner thread retains the exact
 cleanup object and joins its existing retry primitive before reporting loss.
 Authority withdrawal remains distinct and prevents later publication.
+Qualification and inventory coverage are separate: a failed contract probe
+suppresses all reads through that configured binding, including overlapping
+waits, until bounds are confirmed. Unrelated legacy waits continue. A qualified
+inventory outage can still refresh retained members through its bounded native
+snapshot interface. Only the selected projection reads are retained for the
+cycle commit; legacy-only snapshots are released after their ordinary observation
+instead of accumulating with the entire waiting population.
 
 Initial membership and unknown-to-known evidence use baseline events. Later
 members use entry events; semantic facts produce change or confirmed terminal

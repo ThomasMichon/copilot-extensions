@@ -348,6 +348,10 @@ def test_settled_native_timeout_records_unavailability_and_keeps_legacy_waits_se
     store.execute(scope, "register", {
         "request_id": "legacy", "issued_at": store.clock(), "number": 7, "until": ("merged",),
     }, **authority(store))
+    configured_scope = ConsumerScope("configured", identity.key, identity.repo)
+    store.execute(configured_scope, "register", {
+        "request_id": "configured", "issued_at": store.clock(), "number": 7, "until": ("merged",),
+    }, **authority(store))
     legacy = NativeObservationBinding("legacy", "other/repo", sys.executable)
     failed = True
     def run(argv, **kwargs):
@@ -376,10 +380,13 @@ def test_settled_native_timeout_records_unavailability_and_keeps_legacy_waits_se
     assert result["inventory"]["outcome"] == "unavailable"
     assert result["pulls"][0]["member"] and result["pulls"][0]["facts"]["head_sha"] == "a"
     assert reads.count("other/repo") == 1
+    assert reads.count(identity.repo) == (0 if phase == "contract" else 1)
+    assert store.execute(configured_scope, "pending", {}, **authority(store))["events"] == []
     failed = False
     owner.cycle(**authority(store))
     assert owner.repositories.query(identity.key, **authority(store))["inventory"]["outcome"] == "complete"
     assert reads.count("other/repo") == 2
+    assert reads.count(identity.repo) == (1 if phase == "contract" else 2)
 
 
 def test_native_cleanup_and_authority_failures_are_not_normalized_as_settled_timeouts(tmp_path, monkeypatch):

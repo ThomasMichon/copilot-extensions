@@ -13,7 +13,15 @@ class RepositoryNativeUnsupported(ValueError):
     """Selected executable does not implement the required observation contract."""
 
 
-def _invoke(argv, *, timeout, checkpoint):
+class RepositoryNativeUnavailable(ValueError):
+    """Settled read loss retains whether executing bounds were qualified."""
+
+    def __init__(self, *, qualified):
+        self.qualified = qualified
+        super().__init__("native repository read unavailable")
+
+
+def _invoke(argv, *, timeout, checkpoint, qualified=False):
     checkpoint()
     try:
         result = run_command(argv, timeout=timeout)
@@ -21,7 +29,7 @@ def _invoke(argv, *, timeout, checkpoint):
         raise
     except (OSError, subprocess.SubprocessError, NativeCommandUnavailable):
         checkpoint()
-        raise ValueError("native repository read unavailable") from None
+        raise RepositoryNativeUnavailable(qualified=qualified) from None
     checkpoint()
     return result
 
@@ -39,7 +47,7 @@ def inventory(binding, *, checkpoint):
     )
     try:
         support = json_object(declaration.stdout.encode())
-    except (ValueError, UnicodeError):
+    except (ValueError, UnicodeError, RecursionError):
         raise RepositoryNativeUnsupported("selected native repository observation unsupported") from None
     if (
         declaration.returncode or support.get("protocol") != "agent-worktrees.pr-inventory/v1"
@@ -58,10 +66,13 @@ def inventory(binding, *, checkpoint):
         "--config", binding.inventory_config,
         "--credential-command", json.dumps(binding.credential_command),
         "--max-pages", "4", "--max-pulls", "200", "--seconds", "60", "--json",
-    ], timeout=60, checkpoint=checkpoint)
+    ], timeout=60, checkpoint=checkpoint, qualified=True)
     if result.returncode:
-        raise ValueError("native repository inventory unavailable")
-    value = json_object(result.stdout.encode())
+        raise RepositoryNativeUnavailable(qualified=True)
+    try:
+        value = json_object(result.stdout.encode())
+    except (ValueError, UnicodeError, RecursionError):
+        raise RepositoryNativeUnavailable(qualified=True) from None
     if (
         set(value) != {"schema", "version", "provider", "api_base", "repo", "outcome",
                        "numbers", "pages", "error", "max_pages", "max_pulls"}
@@ -81,6 +92,6 @@ def inventory(binding, *, checkpoint):
         or value["outcome"] == "complete" and (value["pages"] < 1 or value["error"])
         or value["outcome"] != "complete" and not value["error"]
     ):
-        raise ValueError("invalid native repository inventory")
+        raise RepositoryNativeUnavailable(qualified=True)
     checkpoint()
     return value
