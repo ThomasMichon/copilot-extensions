@@ -296,17 +296,105 @@ def test_two_confirmed_native_applies_cannot_share_or_replace_a_destination(nati
     assert "remote-knowledge" not in repos.read_registry(strict=True).repos
 
 
-def test_unconfirmed_cleanup_is_failure_with_its_exact_native_owner(native, monkeypatch):
+@pytest.mark.parametrize("process_present", [False, True])
+def test_unconfirmed_cleanup_preserves_original_owner_through_configuration_reporting(native, monkeypatch, process_present):
     from agent_procutil.owned_process import OwnedCleanupError
+    from agent_worktrees.repos_configuration import command
+
+    process = SimpleNamespace(pid=123456) if process_present else None
+    job, resource = object(), object()
+    settled, notified = [], []
+    owner = OwnedCleanupError(
+        process, job, cleanup_resources=(("reader", resource),),
+        cleanup_retry=lambda _deadline: settled.append(resource),
+        on_settled=lambda: notified.append(True),
+    )
 
     def unconfirmed(*args, **kwargs):
-        raise OwnedCleanupError(SimpleNamespace(pid=123456))
+        raise owner
 
     monkeypatch.setattr(acquisition, "run_caller_owned", unconfirmed)
-    receipt = acquisition.apply("sample", URL, str(native / "absent"), "a" * 64)
-    assert receipt["status"] == "incomplete" and receipt["cleanup"] == "unconfirmed"
-    assert receipt["cleanup_owner"] == {"operation": "knowledge-acquisition", "pid": 123456}
-    assert receipt["target_exists"] is False
+    with pytest.raises(OwnedCleanupError) as caught:
+        command(["knowledge-acquire-apply", *fields(native / "absent"), "--preview-token", "a" * 64])
+    assert caught.value is owner and owner.process is process and owner.job is job
+    assert owner.cleanup_resources == (("reader", resource),)
+    assert settled == notified == []
+    owner.retry_cleanup(deadline=time.monotonic() + 1)
+    owner.retry_cleanup(deadline=time.monotonic() + 1)
+    assert settled == [resource] and notified == [True]
+    assert not (native / "absent").exists()
+
+
+def test_worker_does_not_convert_nested_cleanup_failure_into_a_completed_receipt(native, monkeypatch):
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    selected = {
+        "name": "remote-knowledge", "path": str(native / "absent"), "url": URL,
+        "target": acquisition.action_target("sample"),
+    }
+    owner = OwnedCleanupError(None, object(), cleanup_resources=(("reader", object()),))
+    monkeypatch.setattr(acquisition, "_selection", lambda *_args: selected)
+
+    def unconfirmed(*args, **kwargs):
+        raise owner
+
+    monkeypatch.setattr(bootstrap, "acquire", unconfirmed)
+    budget = OwnedExecutionBudget.from_timeout(26, cleanup_reserve=2)
+    request = {
+        "operation": "apply", "project": "sample", "url": URL, "path": selected["path"],
+        "token": acquisition._token(selected), "deadline": budget.deadline, "cleanup_reserve": 2,
+    }
+    with pytest.raises(OwnedCleanupError) as caught:
+        acquisition._worker(request)
+    assert caught.value is owner and owner.job is not None and owner.cleanup_resources
+
+
+@pytest.mark.parametrize("operation", ["preview", "apply"])
+def test_lost_native_completion_is_sanitized_and_preserves_partial_target(native, monkeypatch, capsys, operation):
+    from agent_worktrees.repos_configuration import command
+
+    destination = native / "partial"
+    secret = "synthetic-private-diagnostic-do-not-render"
+    attempts = []
+
+    def missing_frame(*args, **kwargs):
+        attempts.append(json.loads(kwargs["input_text"])["operation"])
+        if operation == "apply":
+            destination.mkdir()
+            (destination / "unfinished").write_text("preserved", encoding="utf-8")
+        raise RuntimeError(secret)
+
+    monkeypatch.setattr(acquisition, "run_caller_owned", missing_frame)
+    args = ["knowledge-acquire-" + operation, *fields(destination)]
+    if operation == "apply":
+        args += ["--preview-token", "a" * 64]
+    assert command(args) == 1
+    output = capsys.readouterr()
+    receipt = json.loads(output.out)
+    assert secret not in output.out + output.err and "Traceback" not in output.err
+    assert attempts == [operation]
+    if operation == "apply":
+        assert receipt["status"] == "incomplete" and receipt["cleanup"] == "unknown"
+        assert receipt["target_exists"] is True and receipt["stage"] == "worker"
+        assert (destination / "unfinished").read_text() == "preserved"
+    else:
+        assert receipt["code"] == "acquisition-preview-unavailable" and not destination.exists()
+
+
+@pytest.mark.parametrize("account", ["ghp_SYNTHETIC_DO_NOT_RENDER", "github_pat_SYNTHETIC_DO_NOT_RENDER"])
+def test_native_preview_refuses_secret_shaped_account_without_rendering_it(native, account):
+    local_knowledge(native)
+    path = repos._repos_yaml_path()
+    raw = yaml.safe_load(path.read_text())
+    raw["account_map"] = {"example": account}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    destination = native / "absent"
+    before = tree(native)
+    result = cli("knowledge-acquire-preview", *fields(destination, "https://github.com/example/remote-knowledge.git"))
+    assert result.returncode == 1
+    assert json.loads(result.stdout)["code"] == "invalid-identity"
+    assert account not in result.stdout + result.stderr
+    assert tree(native) == before
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows desktop observation")

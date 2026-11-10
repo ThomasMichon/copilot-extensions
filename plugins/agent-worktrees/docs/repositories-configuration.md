@@ -128,8 +128,12 @@ descendants; a timeout does not renew their clocks. Large/slow acquisitions
 may exceed this finite lane. Nonzero Git exit, cancellation, timeout, lost
 receipt, changed native inputs or failed final source qualification report
 failure/incomplete state with the unfinished stage and target presence
-(or unknown presence). Unconfirmed cleanup remains a failure with its
-operation/process owner. No partial checkout is deleted, reset or retried.
+(or unknown presence). Lost or invalid native completion is a sanitized failure,
+not proof that cleanup completed. An unconfirmed native cleanup propagates its
+original `OwnedCleanupError`, including process/Job, retained resources and retry
+operation, through the in-process failure boundary. Callers must retain and
+settle that owner before another attempt; it is not reduced to a PID-only receipt.
+No partial checkout is deleted, reset or retried.
 Inspect local ownership read-only with
 `repos registration inspect --anchor <destination> --default-name <intended-name>`
 before choosing recovery; that inspection does not qualify source completeness.

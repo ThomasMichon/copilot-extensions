@@ -16,7 +16,7 @@ from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
 
 from . import inrepo_config_source, repos, repository_bootstrap as bootstrap, repository_setup as protocol
 from .repos_configuration import target
-from .repos_configuration_sources import ConfigurationError
+from .repos_configuration_sources import ConfigurationError, identity
 from .repos_knowledge_registration import _token, context_selection
 from .repos_registry_transaction import registry_lock
 
@@ -33,6 +33,7 @@ def _selection(project: str, url: str, path: str) -> dict:
     context, _ = context_selection(project)
     canonical = protocol.https_url(url)
     name, checkout, account = bootstrap.acquisition_selection(canonical, path)
+    account = identity(account, allow_empty=True)
     if not binding_names_supported(project, name):
         raise ConfigurationError("invalid-registration-name", "The remote name is unsupported by local knowledge registration.")
     info = checkout.parent.stat()
@@ -121,6 +122,8 @@ def _worker(request: dict) -> dict:
                     "message": "Acquired only. Refresh, separately register the local checkout with explicit "
                     "branch/account metadata, then confirm binding. New is not ready yet.",
                 }
+            except OwnedCleanupError:
+                raise
             except (ValueError, OSError, RuntimeError, subprocess.SubprocessError, repos.RepositoryResolutionError) as error:
                 receipt = _incomplete(project, path, stage, "acquisition-incomplete")
                 if isinstance(error, (ConfigurationError, protocol.SetupError)):
@@ -152,16 +155,12 @@ def _invoke(project: str, url: str, path: str, *, token: str | None = None) -> d
         return response
     except ConfigurationError:
         raise
-    except OwnedCleanupError as error:
-        receipt = _incomplete(project, path, "worker", "acquisition-cleanup-unconfirmed", cleanup="unconfirmed")
-        receipt["cleanup_owner"] = {
-            "operation": "knowledge-acquisition", "pid": error.process.pid if error.process else None,
-        }
-        return receipt
-    except (OSError, ValueError, subprocess.SubprocessError, KeyboardInterrupt):
+    except OwnedCleanupError:
+        raise
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError, KeyboardInterrupt):
         if token is None:
             raise ConfigurationError("acquisition-preview-unavailable", "Acquisition preview did not complete.") from None
-        return _incomplete(project, path, "worker", "acquisition-receipt-unavailable")
+        return _incomplete(project, path, "worker", "acquisition-receipt-unavailable", cleanup="unknown")
 
 
 def preview(project: str, url: str, path: str) -> dict:
@@ -198,6 +197,8 @@ if __name__ == "__main__":
     try:
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             result = _worker(json.loads(sys.stdin.read(16385)))
+    except OwnedCleanupError:
+        raise
     except (ValueError, TypeError, KeyError, OSError, RuntimeError, subprocess.SubprocessError,
             repos.RepositoryResolutionError) as error:
         result = {

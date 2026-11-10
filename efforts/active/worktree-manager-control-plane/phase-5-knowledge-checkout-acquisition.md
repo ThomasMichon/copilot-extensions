@@ -199,3 +199,27 @@ because no foreground desktop window was observable. POSIX, installed
 interactive UI, live provider authentication and receiving-machine/relay
 validation remain unqualified; no runtime installation or productive
 registration/binding was performed.
+
+### 2026-11-10 - Nonsecret preview and native failure ownership
+
+The registry's nonempty account strings are not necessarily safe display
+identities. Selection validates the resolved value through the existing
+nonsecret-login owner before hashing or rendering a proposal; malformed or
+secret-shaped values refuse without echoing their content.
+
+Native cleanup failure is not a serializable PID observation. A process, Job,
+retained stream/descriptor and retry operation belong to the original
+`OwnedCleanupError`; reducing it to JSON discards the exact objects required
+for safe settlement, especially when failure occurred before a process existed.
+Worker, invocation and failure-reporting boundaries therefore propagate that
+owner intact. In-process callers retain and settle it before another attempt.
+No replacement cleanup owner, daemon or command replay is introduced.
+
+A missing or malformed native completion frame can instead raise
+`RuntimeError`. Preview returns a sanitized refusal; apply returns an
+incomplete result with preserved-target guidance and unknown cleanup, not
+a traceback or a claim that the interrupted mutation failed.
+The focused native packet passed 12 controls, including process and Job-only
+ownership through Configuration reporting, retained resources/retry/callback,
+nested cleanup propagation, lost preview/apply completion, real secret-shaped
+account refusal, HTTPS access and timeout descendant cleanup.
