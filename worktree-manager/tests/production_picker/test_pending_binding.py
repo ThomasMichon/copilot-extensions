@@ -3,16 +3,25 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import threading
+import sys
 from types import SimpleNamespace
 
 import pytest
 
 from worktree_manager.production_picker.picker_tui import engine
 from worktree_manager.production_picker.picker_tui.engine_loading import PickerBinding
+from worktree_manager.first_run import SetupState
 
 
-def test_pending_binding_paints_and_escapes_before_slow_bootstrap():
+async def _click(pilot, selector):
+    await pilot.pause()
+    assert await pilot.click(selector)
+
+
+@pytest.mark.parametrize("front_door", [False, True])
+def test_pending_binding_paints_and_escapes_before_slow_bootstrap(front_door):
     async def exercise():
         entered = threading.Event()
         release = threading.Event()
@@ -27,7 +36,9 @@ def test_pending_binding_paints_and_escapes_before_slow_bootstrap():
             finally:
                 finished.set()
 
-        app = engine.PickerApp(None, prepare=prepare, project_label="example")
+        app = engine.PickerApp(
+            None, prepare=prepare, project_label="example", front_door=front_door,
+        )
         try:
             async with app.run_test() as pilot:
                 assert await asyncio.to_thread(entered.wait, 1)
@@ -60,6 +71,294 @@ def test_binding_failure_is_visible_and_preserved():
         assert str(app.binding_error) == "unknown project: example"
 
     asyncio.run(exercise())
+
+
+def test_front_door_uses_real_setup_state_and_reload_without_operational_source():
+    async def exercise():
+        calls = []
+
+        def prepare(**kwargs):
+            calls.append(kwargs)
+            return SetupState(False, (), "Core absent. No launchable projects.")
+
+        app = engine.PickerApp(None, prepare=prepare, front_door=True)
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-status"):
+                    break
+                await pilot.pause(.02)
+            assert "Core absent" in str(app.query_one("#setup-status").render())
+            assert not app.query(engine.PickerScreen)
+            await _click(pilot, "#setup-reload")
+            for _ in range(50):
+                if len(calls) == 2 and app.query("#setup-status"):
+                    break
+                await pilot.pause(.02)
+            assert calls == [{}, {"project_override": None, "auto_open": False}]
+            assert not app.query(engine.PickerScreen)
+            await _click(pilot, "#setup-quit")
+
+    asyncio.run(exercise())
+
+
+def test_front_door_project_selection_is_explicit_and_binding_refusal_can_retry():
+    async def exercise():
+        calls = []
+
+        def prepare(**kwargs):
+            calls.append(kwargs)
+            if kwargs.get("project_override"):
+                raise RuntimeError("installed engine lacks picker-bootstrap")
+            return SetupState(True, ("alpha", "beta"), "Choose a project")
+
+        app = engine.PickerApp(None, prepare=prepare, front_door=True)
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-project-1"):
+                    break
+                await pilot.pause(.02)
+            assert calls == [{}]
+            await _click(pilot, "#setup-project-1")
+            for _ in range(50):
+                if app.query("#setup-status") and "lacks" in str(
+                    app.query_one("#setup-status").render()
+                ):
+                    break
+                await pilot.pause(.02)
+            assert calls[-1] == {"project_override": "beta", "auto_open": False}
+            assert "lacks picker-bootstrap" in str(app.query_one("#setup-status").render())
+            assert app.binding_error is None
+            assert not app.query(engine.PickerScreen)
+            await _click(pilot, "#setup-reload")
+            for _ in range(50):
+                if app.query("#setup-project-1"):
+                    break
+                await pilot.pause(.02)
+            assert app.query("#setup-project-1")
+            await pilot.press("escape")
+
+    asyncio.run(exercise())
+
+
+def test_owner_loss_before_delivery_never_activates_binding():
+    async def exercise():
+        lost = False
+        activated = []
+
+        def prepare():
+            nonlocal lost
+            lost = True
+            return PickerBinding(object(), True, lambda: activated.append(True))
+
+        app = engine.PickerApp(None, prepare=prepare, lifetime_cancelled=lambda: lost)
+        async with app.run_test() as pilot:
+            await pilot.pause(.1)
+        assert activated == []
+        assert app.result is None
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("action,exit_code", [("setup", 0), ("doctor", 7)])
+def test_setup_command_receipt_preserves_real_child_output_and_return(
+    monkeypatch, tmp_path, action, exit_code,
+):
+    from worktree_manager.production_picker.picker_tui import setup_home
+
+    script = tmp_path / "diagnostic.py"
+    script.write_text(
+        "import sys\nprint('first\\nlast')\n"
+        f"print('diagnostic detail', file=sys.stderr)\nsys.exit({exit_code})\n",
+        encoding="utf-8",
+    )
+    commands = []
+
+    def command(selected):
+        commands.append(selected)
+        return [sys.executable, "-B", str(script)]
+
+    monkeypatch.setattr(setup_home, "diagnostic_argv", command)
+
+    async def exercise():
+        calls = []
+
+        def prepare(**kwargs):
+            calls.append(kwargs)
+            return SetupState(False, (), "Core absent")
+
+        app = engine.PickerApp(None, prepare=prepare, front_door=True)
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-plan"):
+                    break
+                await pilot.pause(.02)
+            assert commands == []
+            await _click(pilot, "#setup-plan" if action == "setup" else "#setup-doctor")
+            for _ in range(200):
+                if app.screen.query("#command-result-close") and not app.screen.query_one(
+                    "#command-result-close"
+                ).disabled:
+                    break
+                await pilot.pause(.02)
+            text = str(app.screen.query_one("#command-result").render())
+            assert f"Exit status: {exit_code}" in text
+            assert commands == [action]
+            assert "first" in text and "last" in text and "diagnostic detail" in text
+            assert ("Command completed" if exit_code == 0 else "Command failed") in text
+            await pilot.press("escape")
+            for _ in range(50):
+                if len(calls) == 2 and app.query("#setup-status"):
+                    break
+                await pilot.pause(.02)
+            assert calls[-1] == {"project_override": None, "auto_open": False}
+            assert not app.query(engine.PickerScreen)
+            await pilot.press("escape")
+
+    asyncio.run(exercise())
+
+
+def test_fresh_home_real_setup_plan_is_read_only(monkeypatch, tmp_path):
+    from worktree_manager import first_run
+
+    home = tmp_path / "empty-home"
+    home.mkdir()
+    monkeypatch.chdir(home)
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(key, str(home))
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(home / "manager"))
+    monkeypatch.setenv("PATH", "")
+    for key in (
+        "AGENT_WORKTREES_ENGINE_COMMAND", "AGENT_WORKTREES_ENGINE_INSTALL_ROOT",
+        "AGENT_WORKTREES_ENGINE_VERSION", "AGENT_WORKTREES_INSTALL_DIR",
+        "COPILOT_PLUGIN_ROOT", "COPILOT_EXTENSIONS_CONTEXT",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    async def exercise():
+        app = engine.PickerApp(
+            None, prepare=lambda **_: first_run.observe(), front_door=True,
+        )
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-plan"):
+                    break
+                await pilot.pause(.02)
+            assert not app.query(engine.PickerScreen)
+            await _click(pilot, "#setup-plan")
+            for _ in range(300):
+                if app.screen.query("#command-result-close") and not app.screen.query_one(
+                    "#command-result-close"
+                ).disabled:
+                    break
+                await pilot.pause(.02)
+            text = str(app.screen.query_one("#command-result").render())
+            assert "plan / dry-run" in text
+            assert "nothing was changed" in text
+            assert "Exit status: 1" in text
+            await pilot.press("escape")
+            for _ in range(50):
+                if app.query("#setup-status"):
+                    break
+                await pilot.pause(.02)
+            await _click(pilot, "#setup-reload")
+            for _ in range(50):
+                if app.query("#setup-status"):
+                    break
+                await pilot.pause(.02)
+            await pilot.press("escape")
+        assert list(home.iterdir()) == []
+
+    asyncio.run(exercise())
+
+
+def test_setup_cleanup_failure_retains_custody_and_never_retries(monkeypatch):
+    from agent_procutil.owned_process import OwnedCleanupError
+    from worktree_manager.production_picker.picker_tui import setup_home
+
+    calls = []
+    error = OwnedCleanupError(None)
+
+    def fail(*args, **kwargs):
+        calls.append(args)
+        raise error
+
+    monkeypatch.setattr(setup_home, "run_caller_owned", fail)
+
+    async def exercise():
+        app = engine.PickerApp(
+            None, prepare=lambda **_: SetupState(False, (), "Core absent"), front_door=True,
+        )
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-plan"):
+                    break
+                await pilot.pause(.02)
+            await _click(pilot, "#setup-plan")
+            for _ in range(50):
+                if not app.screen.query_one("#command-result-close").disabled:
+                    break
+                await pilot.pause(.02)
+            assert "unconfirmed" in str(app.screen.query_one("#command-result").render())
+            await pilot.press("escape")
+            await pilot.pause()
+            assert app.binding_error is error
+            assert app.query_one("#setup-plan").disabled
+            assert "No retry" in str(app.query_one("#setup-status").render())
+            assert len(calls) == 1
+            await _click(pilot, "#setup-quit")
+
+    asyncio.run(exercise())
+
+
+def test_real_bare_entry_composes_front_door_and_binding_retry(monkeypatch):
+    from worktree_manager import __main__ as cli, first_run, process_priority
+    from worktree_manager.production_picker import runner
+
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    monkeypatch.setattr(sys, "stdin", Terminal())
+    monkeypatch.setattr(sys, "stdout", Terminal())
+    monkeypatch.setattr(process_priority, "raise_current_process_priority", lambda: None)
+    monkeypatch.setattr(process_priority, "restore_normal_process_priority", lambda: None)
+    monkeypatch.setattr(
+        first_run, "observe",
+        lambda: SetupState(True, ("alpha", "beta"), "Choose a project"),
+    )
+    monkeypatch.setattr(runner.engine_client, "engine_available", lambda: True)
+
+    def refuse(_):
+        raise RuntimeError("fixture engine capability refused")
+
+    monkeypatch.setattr(runner.engine_group_b, "picker_bootstrap", refuse)
+
+    async def exercise(app):
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-project-0"):
+                    break
+                await pilot.pause(.02)
+            await _click(pilot, "#setup-project-0")
+            for _ in range(50):
+                if app.query("#setup-status") and "capability refused" in str(
+                    app.query_one("#setup-status").render()
+                ):
+                    break
+                await pilot.pause(.02)
+            assert "capability refused" in str(app.query_one("#setup-status").render())
+            assert app.binding_error is None
+            assert not app.query(engine.PickerScreen)
+            await _click(pilot, "#setup-reload")
+            for _ in range(50):
+                if app.query("#setup-project-0"):
+                    break
+                await pilot.pause(.02)
+            assert app.query("#setup-project-0")
+            await _click(pilot, "#setup-quit")
+
+    monkeypatch.setattr(engine.PickerApp, "run", lambda app: asyncio.run(exercise(app)))
+    assert cli.main([]) == 0
 
 
 def test_successful_binding_mounts_operational_widget_in_original_app(monkeypatch):
