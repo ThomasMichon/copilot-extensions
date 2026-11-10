@@ -31,7 +31,9 @@ def report_fixture_logs(sandbox: Path) -> None:
                 stream.seek(0, 2)
                 stream.seek(max(0, stream.tell() - 16000))
                 content = stream.read(16000).decode("utf-8", errors="replace")
-            print(f"[FIXTURE] {path.relative_to(sandbox)}\n{content}", flush=True)
+            message = f"[FIXTURE] {path.relative_to(sandbox)}\n{content}"
+            encoding = sys.stdout.encoding or "utf-8"
+            print(message.encode(encoding, errors="backslashreplace").decode(encoding), flush=True)
         except OSError as error:
             print(f"[FIXTURE] log unavailable: {type(error).__name__}", flush=True)
 

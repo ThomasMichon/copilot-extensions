@@ -1737,6 +1737,28 @@ def test_foundation_failure_log_capture_is_bounded_and_read_only(tmp_path, capsy
     assert all(path.stat().st_size == 17018 for path in paths)
 
 
+def test_foundation_failure_logs_survive_windows_console_encoding(tmp_path, monkeypatch):
+    import io
+
+    spec = importlib.util.spec_from_file_location(
+        "qualified_foundation_encoding", HERE / "qualify_foundation_lifetime.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    transcript = tmp_path / "native-installer.log"
+    transcript.write_text("\ufeffinstaller phase: \u4e2d", encoding="utf-8")
+    (tmp_path / "next.log").write_text("next fixture log", encoding="utf-8")
+    output = io.BytesIO()
+    stream = io.TextIOWrapper(output, encoding="cp1252")
+    monkeypatch.setattr(sys, "stdout", stream)
+    module.report_fixture_logs(tmp_path)
+    captured = output.getvalue().decode("cp1252")
+    assert "installer phase: \\u4e2d" in captured
+    assert "\\ufeff" in captured
+    assert "next fixture log" in captured
+    assert transcript.read_text(encoding="utf-8") == "\ufeffinstaller phase: \u4e2d"
+
+
 def test_pull_requests_command_adoption_uses_explicit_native_portfolio() -> None:
     workflow = yaml.safe_load(
         (HERE.parent / ".github/workflows/installation-context-full.yml").read_text()
