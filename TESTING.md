@@ -156,8 +156,20 @@ child's environment only, so older worktree PR hooks admit the transport
 without disabling local hooks. Its command boundary rejects branch, force
 and deletion refspecs and suppresses automatic tag following. No installed
 hook, shared Git configuration or ordinary source-push policy is changed.
-Rejected pushes retain their bounded diagnostic with the original request;
-an absent or uncertain effect is not permission for automatic replay.
+Rejected pushes retain their bounded diagnostic with the original request.
+An exact Git contention rejection permits same-request recovery after an
+interrupted reconciliation read; each replacement envelope retains the prior
+attempt's identity and diagnostic. An absent or uncertain effect is not
+permission for automatic replay, even when the shared ref has advanced.
+Recovery carries the original history requirement into every append read
+and contention retry; a deleted or rewritten ref is not a new transport.
+For first-ref contention, the observed competing tip becomes that requirement;
+recovery never treats a missing competing tip as permission to recreate it.
+The first history anchor is saved before its reconciliation fetch and retained
+across interrupted operations and later resumes, not just retries in one process.
+Pending observations are saved before fetching and reconciled before another
+remote read. The retained anchor advances only to verified descendants or the
+confirmed envelope, so rewinding to an earlier retained ancestor is also refused.
 
 The client emits a request ID before effects and stores its state under the
 current worktree's Git metadata (`windows-qualification/<id>`). `status` and
@@ -499,6 +511,15 @@ Fixture diagnostics and cleanup remain privately owned and bounded; no operator
 installation, credentials, sessions or service registrations are borrowed.
 Source workflow wiring alone is not activation: the preserved Main controller
 requires its own reviewed adoption and exact-candidate native run.
+
+The console fixture's `tests/test_terminal_console_fixture.py` Manager packet
+checks the Toolhelp snapshot-to-handle race. Only `OpenProcess` error 87 for a
+PID absent from a fresh process snapshot permits omission; access failures,
+still-present PIDs and failed observations remain failures. The same file's
+Windows-only control deliberately releases a snapshotted child before pinning,
+using the strict fixture-owned Job. Portable controls are not native evidence.
+Live descendant handles, creation-time checks and installed TTY assertions
+remain unchanged.
 
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
@@ -5574,6 +5595,25 @@ receipt/parser and pending-withdrawal suites still cover malformed legacy proof;
 the new constructor must not repair it.
 
 ## Unit-only promotion packet
+
+The actor-free `test_hourly_contributions.py` packet executes the canonical
+service contribution codec and collection policy with substituted native owners
+and stage/outcome vocabularies. Exact
+source/node admission covers owner/hour/unit/population refusals, delayed native
+evidence, missing duration statistics and strict JSON/version compatibility,
+plus task-authority preservation, independent namespaces, de-duplication and
+unsettled native custody. Bounded source-selection and temporary-file snapshot
+cases preserve active/current records under saturated history, reject partial
+or oversized suffixes, and retain cleanup inside shared absolute deadlines.
+Duration cases call the actual service span adapter and shared statistical
+primitives, covering invalid spans, completion-hour boundaries and
+successful-only p50/p95/maximum with mixed outcomes, not prebuilt summaries.
+It starts no service or native actor. Dispatch's `tests/native/test_hourly_export.py`
+separately exercises producer-retained events, selected fixture package metadata
+and the normal Machines report/chart. Machines' selected
+`tests/native/test_service_report_cleanup.py` retains actual deadline, inherited
+pipe, output-limit, UTF-8 and native-settlement controls. Fixture installation
+admission is not deployed inventory, installed adoption or activation evidence.
 
 The project-routing controls distinguish the explicit `pr-watch diff` read
 from an unknown similarly named command. They exercise only the existing
