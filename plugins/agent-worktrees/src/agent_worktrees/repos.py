@@ -958,20 +958,22 @@ def _name_from_remote(remote: str) -> str | None:
     return name if name else None
 
 
-def resolve_path(name: str, plat: str | None = None) -> str | None:
+def resolve_path(
+    name: str, plat: str | None = None, *, registry: ReposRegistry | None = None,
+) -> str | None:
     """Resolve a repo name to its local path.
 
     Checks the registry first, then tries srcroot + name as a fallback.
     """
     plat = plat or _current_platform()
-    entry = find_repo(name)
+    entry = registry.repos.get(name) if registry is not None else find_repo(name)
     if entry:
         p = entry.local_path(plat)
         if p:
             return p
 
     # Fallback: srcroot / name
-    root = get_srcroot(plat)
+    root = registry.srcroot.get(plat) if registry is not None else get_srcroot(plat)
     if root:
         candidate = Path(root).expanduser() / name
         if candidate.exists():

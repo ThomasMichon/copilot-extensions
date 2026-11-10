@@ -164,6 +164,7 @@ def test_native_image_query_exit_uses_the_retained_handle(console_type, tmp_path
             time.sleep(.01)
         handle = console.process.process
         assert not console.exited(handle)
+        assert console.exit_code(handle) is None
         assert native._live_image(console, handle).resolve() == Path(python).resolve()
         failure = _failure(5)
         calls = []
@@ -178,4 +179,5 @@ def test_native_image_query_exit_uses_the_retained_handle(console_type, tmp_path
         monkeypatch.setattr(native, "_image", query)
         assert native._live_image(console, handle) is None
         assert calls == [handle] and console.exited(handle)
+        assert console.exit_code(handle) == 0
         assert console.wait() == 0

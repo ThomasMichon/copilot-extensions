@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify complete native shell-policy entry with original worker and bounded fixture attribution.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
