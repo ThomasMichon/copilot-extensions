@@ -35,6 +35,10 @@ Both preserve stdout, stderr and the actual exit status before returning.
 An incomplete setup can return a nonzero status even though no changes were
 applied. Diagnostics are explicit, bounded child commands, never startup probes.
 The result screen waits for command settlement before allowing Return.
+The Manager-owned setup child retains the selected installation context; general
+contributed-command identity scrubbing is unchanged. Timeouts keep bounded
+partial stdout/stderr and do not invent a normal exit status. Unconfirmed
+cleanup retains its original custody and blocks another diagnostic attempt.
 
 This is navigation and diagnostic entry, not a complete onboarding wizard.
 Installation, repository trust/adoption, machines, plugins, knowledge binding

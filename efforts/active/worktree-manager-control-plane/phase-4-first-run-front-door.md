@@ -110,7 +110,8 @@ No probe loops, automatic retries or new background workers.
 
 F1's Review setup plan uses existing `worktree-manager setup` without `--apply`
 or a repository/trust argument. The result view mounts before the bounded child
-starts and retains stdout, stderr and actual exit status. Failure is a failed
+starts and retains stdout, stderr and actual exit status when observed. Timeout
+reports retain bounded partial streams without inventing a normal exit. Failure is a failed
 observation, not a partial install or success. Return/reload works after success,
 failure and cancellation. Do not execute arbitrary rendered command strings.
 
@@ -187,6 +188,11 @@ the canonical finite caller-owned process primitive and existing result screen;
 Return waits for settlement, preserves stdout/stderr and the exit code, then
 re-observes state without automatic Worktrees entry. Cleanup uncertainty retains
 its exact exception/custody and disables retry, rather than replaying a command.
+The setup child retains the caller's selected installation-context pointer after
+the general child-environment scrub; unrelated contributed commands retain that
+scrub, and Doctor retains its owner-provided argv handoff. A timeout preserves
+bounded partial stdout/stderr, including byte captures, without a normal exit
+status.
 
 Source controls exercised:
 
@@ -206,6 +212,13 @@ Source controls exercised:
 - The final 28-case model/Setup packet also drives actual bare `main` through
   the production runner and TUI into the real app's contained terminal driver,
   proving project selection, bootstrap refusal, Reload and Quit compose together.
+- The scope/timeout packet's 31 cases passed across its selected packet and a
+  focused rerun of the Windows namespaced report case. That case supplies a real
+  namespaced-only observation to the home, executes the actual setup child and
+  compares all fixture files/directories before and after. The initial core
+  observation is recorded separately from UI dispatch, not treated as a native
+  discovery latency budget. Portable scope transport, byte-output timeout and
+  a real printing-then-stalling owned child cover the remaining corrections.
 - Changed Python `F,E9` lint, the install-contract guard and headless-launch
   guard passed. No dependencies or version fields were changed.
 

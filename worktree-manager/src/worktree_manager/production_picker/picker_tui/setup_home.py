@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
@@ -13,6 +14,19 @@ from textual.widgets import Button, Static
 from ...first_run import diagnostic_argv
 from .command_transport import child_process_env, command_result
 from .configuration_form import CommandResultScreen
+
+DIAGNOSTIC_TIMEOUT = 30.0
+
+
+def _timeout_report(error):
+    parts = [
+        f"Diagnostic timed out after {error.timeout:g}s; no normal exit status was observed."
+    ]
+    for label, output in (("stdout", error.stdout), ("stderr", error.stderr)):
+        if output:
+            text = output.decode("utf-8", errors="replace") if isinstance(output, bytes) else output
+            parts.append(f"{label} (partial):\n{text}")
+    return "\n\n".join(parts)
 
 
 class SetupHome(Widget):
@@ -85,9 +99,12 @@ class SetupHome(Widget):
         async def execute():
             try:
                 argv = diagnostic_argv(action)
+                environment = child_process_env()
+                if action == "setup" and (context := os.environ.get("COPILOT_EXTENSIONS_CONTEXT")):
+                    environment["COPILOT_EXTENSIONS_CONTEXT"] = context
                 proc = await asyncio.to_thread(
-                    run_caller_owned, argv, timeout=30,
-                    env=child_process_env(),
+                    run_caller_owned, argv, timeout=DIAGNOSTIC_TIMEOUT,
+                    env=environment,
                     max_stdout_bytes=8 * 1024 * 1024, max_stderr_bytes=256 * 1024,
                 )
                 ok, message = command_result(proc, preserve_output=True)
@@ -99,6 +116,8 @@ class SetupHome(Widget):
                     "Diagnostic cleanup is unconfirmed. No retry is offered; "
                     "return and Quit to surface the original failure."
                 )
+            except subprocess.TimeoutExpired as error:
+                ok, message = False, _timeout_report(error)
             except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
                 ok, message = False, str(error)
             if result.is_mounted:

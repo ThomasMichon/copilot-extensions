@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import io
+import os
+import subprocess
 import threading
 import sys
 from types import SimpleNamespace
@@ -167,11 +169,13 @@ def test_setup_command_receipt_preserves_real_child_output_and_return(
 
     script = tmp_path / "diagnostic.py"
     script.write_text(
-        "import sys\nprint('first\\nlast')\n"
+        "import os, sys\nprint('first\\nlast')\n"
+        "print('installation scope=' + os.environ.get('COPILOT_EXTENSIONS_CONTEXT', '(missing)'))\n"
         f"print('diagnostic detail', file=sys.stderr)\nsys.exit({exit_code})\n",
         encoding="utf-8",
     )
     commands = []
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "fixture-context")
 
     def command(selected):
         commands.append(selected)
@@ -203,6 +207,10 @@ def test_setup_command_receipt_preserves_real_child_output_and_return(
             text = str(app.screen.query_one("#command-result").render())
             assert f"Exit status: {exit_code}" in text
             assert commands == [action]
+            assert (
+                "installation scope=fixture-context" if action == "setup" else
+                "installation scope=(missing)"
+            ) in text
             assert "first" in text and "last" in text and "diagnostic detail" in text
             assert ("Command completed" if exit_code == 0 else "Command failed") in text
             await pilot.press("escape")
@@ -267,6 +275,122 @@ def test_fresh_home_real_setup_plan_is_read_only(monkeypatch, tmp_path):
                 await pilot.pause(.02)
             await pilot.press("escape")
         assert list(home.iterdir()) == []
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.skipif(os.name != "nt", reason="real child profile selection uses Windows USERPROFILE")
+def test_namespaced_only_home_and_actual_setup_report_use_same_scope(
+    monkeypatch, tmp_path, record_property,
+):
+    import json
+    import time
+
+    from _installation_context_fixtures import namespaced_fixture
+    from worktree_manager import first_run
+
+    home = tmp_path / "cell-home"
+    home.mkdir()
+    context, _ = namespaced_fixture(home, windows=True)
+    (home / ".copilot-extensions" / "installation-mode.json").write_text(json.dumps({
+        "schema": "copilot-extensions.installation-mode", "version": 1,
+        "installationMode": {"enabled": True},
+    }), encoding="utf-8")
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME", "APPDATA", "LOCALAPPDATA"):
+        monkeypatch.setenv(key, str(home))
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", str(context))
+    monkeypatch.setenv("WORKTREE_MANAGER_ROOT", str(home / "manager"))
+    monkeypatch.setenv("PATH", "")
+    monkeypatch.setattr(first_run, "engine_available", lambda: False)
+    monkeypatch.chdir(home)
+    assert not (home / ".agent-worktrees").exists()
+
+    def snapshot():
+        return {
+            str(path.relative_to(home)): path.read_bytes() if path.is_file() else None
+            for path in home.rglob("*")
+        }
+
+    before = snapshot()
+    started = time.monotonic()
+    state = first_run.observe()
+    record_property("namespaced_observation_seconds", time.monotonic() - started)
+    assert "core: installed" in state.summary
+
+    async def exercise():
+        app = engine.PickerApp(None, prepare=lambda **_: state, front_door=True)
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-plan"):
+                    break
+                await pilot.pause(.02)
+            assert "core: installed" in str(app.query_one("#setup-status").render())
+            await _click(pilot, "#setup-plan")
+            for _ in range(300):
+                if not app.screen.query_one("#command-result-close").disabled:
+                    break
+                await pilot.pause(.02)
+            text = str(app.screen.query_one("#command-result").render())
+            assert "plan / dry-run" in text
+            assert "already installed" in text
+            assert "Exit status: 1" in text
+            await pilot.press("escape")
+            for _ in range(50):
+                if app.query("#setup-quit"):
+                    break
+                await pilot.pause(.02)
+            await _click(pilot, "#setup-quit")
+        assert snapshot() == before
+
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("real_child", [False, True])
+def test_diagnostic_timeout_keeps_partial_streams_without_exit_status(
+    monkeypatch, tmp_path, real_child,
+):
+    from worktree_manager.production_picker.picker_tui import setup_home
+
+    if real_child:
+        script = tmp_path / "slow-diagnostic.py"
+        script.write_text(
+            "import sys, time\nprint('report before stall', flush=True)\n"
+            "print('detail before stall', file=sys.stderr, flush=True)\ntime.sleep(30)\n",
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            setup_home, "diagnostic_argv", lambda _: [sys.executable, "-B", str(script)],
+        )
+        monkeypatch.setattr(setup_home, "DIAGNOSTIC_TIMEOUT", 5.0)
+    else:
+        def timeout(argv, **kwargs):
+            raise subprocess.TimeoutExpired(
+                argv, 5, output=b"report before stall \xff", stderr=b"detail before stall",
+            )
+        monkeypatch.setattr(setup_home, "run_caller_owned", timeout)
+
+    async def exercise():
+        app = engine.PickerApp(
+            None, prepare=lambda **_: SetupState(False, (), "Core absent"), front_door=True,
+        )
+        async with app.run_test() as pilot:
+            for _ in range(50):
+                if app.query("#setup-plan"):
+                    break
+                await pilot.pause(.02)
+            await _click(pilot, "#setup-plan")
+            for _ in range(400):
+                if not app.screen.query_one("#command-result-close").disabled:
+                    break
+                await pilot.pause(.02)
+            text = str(app.screen.query_one("#command-result").render())
+            assert "timed out" in text
+            assert "stdout (partial)" in text and "report before stall" in text
+            assert "stderr (partial)" in text and "detail before stall" in text
+            assert "Exit status:" not in text
+            await pilot.press("escape")
+            await pilot.pause()
+            await _click(pilot, "#setup-quit")
 
     asyncio.run(exercise())
 
