@@ -2917,6 +2917,9 @@ own scopes. No source/resource/physical custody or updater authority transfers.
 
 - #11858 merged after exact-head approval, no inline findings and all three
   required checks. F2a is accepted source, not release/native/installed proof.
+  The merge to `dev` was `37ebdd70acca93b10bfdeddec8108221afe25d7c`;
+  Copilot approval `5836953954` covered exact head
+  `98e79fe34008b74219098f415f999a2596f4ab80`.
 - #11847 accepted the concrete four-action owner matrix and read-only F2a
   sequencing before implementation. The [Phase 4 source record](phase-4-first-run-front-door.md#f2a-source-implementation-and-validation)
   records guide navigation, real setup-plan and source-preservation controls.

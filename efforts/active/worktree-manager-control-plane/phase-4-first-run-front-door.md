@@ -333,13 +333,10 @@ installer clean-room/apply lane was selected. No admitted live TTY venue,
 shared-service probe, installation or rollout was exercised. F2a does not
 complete the original F2 effectful handoffs, F3 or #542.
 
-#11858 merged to `dev` on 2026-11-10 as
-`37ebdd70acca93b10bfdeddec8108221afe25d7c`. Genuine Copilot approval
-`5836953954` covers exact head `98e79fe34008b74219098f415f999a2596f4ab80`
-with no active issues or inline findings; all three required checks passed
-before the managed merge. #542 remains open. Next: reconcile the original F3
-source matrix against the accumulated consumer proof, retaining effectful
-owner handoffs and native/installed acceptance as separate unmet gates.
+F2a is source-accepted in #11858; its review/merge receipt is retained in the
+[parent Journal](README.md#2026-11-10---first-run-owner-guidance-and-retained-effectful-gates).
+#542 remains open. The original F3 matrix retains effectful owner handoffs
+and native/installed acceptance as separate unmet gates.
 
 ## F3 original-matrix reconciliation and source recovery controls
 
