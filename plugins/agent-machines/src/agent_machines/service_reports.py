@@ -57,7 +57,7 @@ def select(service: str) -> SelectedService:
     return SelectedService(context["installReceipt"], service, command, environment)
 
 
-def collect(services: list[str], hour: str, *, now_ms: int) -> list[dict]:
+def collect(services: list[str], hour: str, *, now_ms: int, deadline: float | None = None) -> list[dict]:
     """Collect once per installation/hour, isolate gaps, never merge percentiles."""
     if hour_start(hour) > now_ms:
         raise ValueError("future service hour")
@@ -75,7 +75,7 @@ def collect(services: list[str], hour: str, *, now_ms: int) -> list[dict]:
             raise ValueError("ambiguous service presentation identity")
         labels[label] = service
         requests.append((label, service))
-    deadline = time.monotonic() + COLLECTION_SECONDS
+    deadline = min(deadline, time.monotonic() + COLLECTION_SECONDS) if deadline is not None else time.monotonic() + COLLECTION_SECONDS
     results = []
     seen = {}
     presented = {}

@@ -1,6 +1,12 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_closed_hourly_envelope_retains_service_namespace_and_unknown_health",
+        "tools/promotion_unit_tests/test_health_composition.py::test_hourly_envelope_refuses_mismatched_or_unknown_components[owner]",
+        "tools/promotion_unit_tests/test_health_composition.py::test_hourly_envelope_refuses_mismatched_or_unknown_components[hour]",
+        "tools/promotion_unit_tests/test_health_composition.py::test_hourly_envelope_refuses_mismatched_or_unknown_components[field]",
+        "tools/promotion_unit_tests/test_health_composition.py::test_hourly_envelope_refuses_mismatched_or_unknown_components[service]",
+        "tools/promotion_unit_tests/test_health_composition.py::test_explicit_collection_orchestration_keeps_hours_and_parent_budget",
         "tools/promotion_unit_tests/test_health_composition.py::test_normal_report_composes_actual_age_projection_without_promoting_health_to_events",
         "tools/promotion_unit_tests/test_health_composition.py::test_store_failure_is_a_visible_gap_without_suppressing_independent_service_report[invalid]",
         "tools/promotion_unit_tests/test_health_composition.py::test_store_failure_is_a_visible_gap_without_suppressing_independent_service_report[unavailable]",
@@ -4739,14 +4745,14 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "4070409b213677412c8e86daf16d93ab6fa02f4e992c883b9c592631d31a039f",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "5070388c16be05706707137a07c49fdeafc2ad59333ad6ff7c7790a0df2bd246",
-        "plugins/agent-machines/src/agent_machines/health_chart.py": "740366846cb17ceaf92db8e949082512cc674babd480539da8e36e3c62ac788b",
+        "tools/promotion_unit_tests/test_health_composition.py": "65f0387b1279de59f62e5b5eff9bb29def0be95bb213ebe8a98d56d4e403461b",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "5c0324a222a5c860184df757f67cdff8080db871c4ffc3673bf5d84cd422e522",
+        "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
-        "plugins/agent-machines/src/agent_machines/health_slots.py": "dd9bcc255a4d1d1751dd4da91da46fde39d469c13473ea6ede2a04a8b0f31ac6",
+        "plugins/agent-machines/src/agent_machines/health_slots.py": "45087840504c3bf04894c19a13ff273953ca51a82674f4cde8402a5ecbdd269d",
         "libs/process-telemetry/src/process_telemetry/hourly.py": "d67b389059d202755a5020b2591a89d4882a3eb6cc774c39bf83b8072b967a47",
-        "tools/promotion_unit_tests/test_hourly_contributions.py": "c7aaa789f1534564cdc07446e5d13e0205e821f0de44919fbeb77afaf856ded5",
-        "plugins/agent-machines/src/agent_machines/service_reports.py": "5767c6e0c020d4dbdc0063ee51918ee1ba79da9271b7c8459132e689f9b64f02",
+        "tools/promotion_unit_tests/test_hourly_contributions.py": "d3b6c39c0c02c26800afa6ac87d74ae835d043e536859dfc3f86469b9f4160d6",
+        "plugins/agent-machines/src/agent_machines/service_reports.py": "a7f0b460af2c656a326193624cd074336ba9f3a3ceeb52d8c3f6d77d9206cd0a",
         "libs/process-telemetry/src/process_telemetry/hourly_scan.py": "1ca7d1d293f5aa9822d7d2cc703964ea1bef0db524e120050d71fc36ea3e528d",
         "plugins/agent-dispatch/src/agent_dispatch/hourly_reporting.py": "073e30c151a17ccfefff0025be3fad48d8f5aac5619a60da72ab8df2f0e4c6d8",
         "libs/process-telemetry/src/process_telemetry/report.py": "3eb084042c69cb2cdd31d7cb14c94bc764f681ddbe3375b5680a2fe1b6033339",
@@ -5414,9 +5420,13 @@
         "plugins/agent-bridge/src/agent_bridge/client_status.py": "1d6a2a05e68d3208244dac65b700db5234c5b351bf39900b66539f0210ba5d52",
         "plugins/agent-bridge/src/agent_bridge/status_schema.py": "ee1657cc5af74c24f502665abc9a68e66190a1529bc95069f597e283308f6242",
         "tools/materialize_payload_invocation.py": "33ee1beba351737a40507d3f478a793ca6fab3df1126c7114c4297f99c1e7325",
-        "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130"
+        "tools/promotion_unit_tests/test_invocation_materialization.py": "27c092183f2f6d408a674514f15aba2947c0584027d622f575bbeee1c19c4130",
+        "plugins/agent-machines/src/agent_machines/health_hourly.py": "ebb3998638afe0d12b21735a0af0815b6bf3d7349e5eb0c8feb2f4b40d977d3d",
+        "plugins/agent-machines/src/agent_machines/health_collect.py": "0ac0cb3b414477ed7580b85336baeeb69ddd224f79f36b0df5966665d6d0ef03"
     },
     "coverage_targets": [
+        "plugins/agent-machines/src/agent_machines/health_hourly.py",
+        "plugins/agent-machines/src/agent_machines/health_collect.py",
         "plugins/agent-machines/src/agent_machines/cli_health.py",
         "plugins/agent-machines/src/agent_machines/health_chart.py",
         "plugins/agent-machines/src/agent_machines/health_report.py",

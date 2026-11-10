@@ -1,0 +1,179 @@
+"""Fixture producers through normal collection, confirmed slots and report."""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import venv
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
+
+from agent_procutil import no_window_kwargs
+from agent_machines import _peer_launch, health_collect, health_slots
+from agent_machines.__main__ import main
+from test_health_observe_consumer import QUALIFYING_BODY, listener, response
+
+
+def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
+    tmp_path, monkeypatch, capsys,
+):
+    repo = Path(__file__).resolve().parents[4]
+    monkeypatch.syspath_prepend(str(repo / "plugins" / "agent-dispatch" / "src"))
+    for path in (repo / "libs").glob("*/src"):
+        monkeypatch.syspath_prepend(str(path))
+    from agent_dispatch import telemetry
+    from process_telemetry.hourly import hour_start
+
+    fixture = tmp_path / "selected-runtime"
+    venv.EnvBuilder(with_pip=False).create(fixture)
+    if os.name == "nt":
+        python, site = fixture / "Scripts" / "python.exe", fixture / "Lib" / "site-packages"
+    else:
+        python = fixture / "bin" / "python"
+        site = fixture / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
+    site.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        Path(telemetry.__file__).parent, site / "agent_dispatch",
+        ignore=shutil.ignore_patterns("__pycache__"),
+    )
+    (site / "fixture-dependencies.pth").write_text(
+        "\n".join(str(Path(path).resolve()) for path in sys.path if path and Path(path).is_dir()) + "\n",
+        encoding="utf-8",
+    )
+    producer = tmp_path / "dispatch"
+    producer.mkdir()
+    capture = tmp_path / "capture"
+    (capture / "retained").mkdir(parents=True)
+    (producer / "telemetry.json").write_text(json.dumps({
+        "retained_spool": {"directory": str(capture)},
+    }), encoding="utf-8")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(producer))
+    monkeypatch.delenv(telemetry.SINK_ENV_VAR, raising=False)
+    monkeypatch.setenv(_peer_launch.CONTEXT_ENV, "fixture-owner-context")
+    monkeypatch.setattr(_peer_launch, "_resolve_peer", lambda *a, **k: (
+        {"pluginRoot": str(producer), "installReceipt": str(producer / "install.json")},
+        dict(os.environ), python,
+    ))
+    monkeypatch.setattr(_peer_launch, "retained_runtime_identity", lambda *a: "fixture-retention")
+    monkeypatch.setattr(_peer_launch, "retained_runtime_prefix", lambda *a, **k: [
+        str(python), "-I", "-B", "-X", "utf8", "-m", "agent_dispatch",
+    ])
+    now = datetime.now(timezone.utc)
+    prior = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:00:00Z")
+    sink = telemetry.make_retained_spool_sink(capture)
+    sink({
+        **telemetry.task_lifecycle_event("task.completed", {
+            "id": "private-task", "repo": "private-repository", "payload": "private-prompt",
+        }), "ts": hour_start(prior),
+    })
+    retained = capture / "retained" / "agent-dispatch-telemetry.jsonl"
+    producer_bytes = retained.read_bytes()
+    store = tmp_path / "store"
+    store.mkdir()
+    with listener(response(QUALIFYING_BODY)) as (port, requests):
+        (store / "policy.json").write_text(json.dumps({
+            "schema": health_slots.POLICY_SCHEMA, "version": 2,
+            "publisher": "example-worker", "continuity": "example-generation",
+            "collection": {"bridge_port": port, "services": ["queue=agent-dispatch"]},
+        }), encoding="utf-8")
+        (store / "collection.lock").write_bytes(b"\0")
+        original = {path.name: path.read_bytes() for path in store.iterdir()}
+        assert main(["health", "collect", "--store-dir", str(store)]) == 0
+        current = json.loads(capsys.readouterr().out)
+    assert len(requests) == 1
+    assert {path.name: path.read_bytes() for path in store.iterdir()} == original
+    assert main(["health", "collect", "--store-dir", str(store), "--hour", prior]) == 0
+    historical = json.loads(capsys.readouterr().out)
+    assert historical["observation"] is None and historical["hour"] == current["hour"] - 1
+    contribution = historical["services"][0]["contribution"]
+    assert contribution["groups"][0]["outcomes"] == {"completed": 1}
+    for index, candidate in enumerate((current, historical)):
+        source = tmp_path / f"candidate-{index}.json"
+        source.write_text(json.dumps(candidate), encoding="utf-8")
+        arguments = ["health", "record", "--store-dir", str(store), "--input", str(source)]
+        assert main(arguments) == 0
+        preview = json.loads(capsys.readouterr().out)
+        assert main([*arguments, "--apply", "--expect", preview["preview_token"]]) == 0
+        assert json.loads(capsys.readouterr().out)["applied"]
+    before = {path.name: path.read_bytes() for path in store.iterdir()}
+    chart = tmp_path / "collected.svg"
+    assert main(["health", "report", "--store-dir", str(store), "--chart", str(chart)]) == 0
+    report = json.loads(capsys.readouterr().out)
+    view = report["health"]["view"]
+    assert view["observed_hours"] == 2
+    assert view["hours"][-1]["sample"]["domains"]["local_listener"]["state"] == "ok"
+    assert view["hours"][-2]["sample"]["domains"]["local_listener"]["state"] == "unknown"
+    assert view["hours"][-2]["sample"]["services"][0]["contribution"] == contribution
+    assert report["coverage"]["accepted_records"] == 0
+    assert "queue/agent-dispatch: observed" in chart.read_text(encoding="utf-8")
+    assert "private-" not in json.dumps(report)
+    assert retained.read_bytes() == producer_bytes
+    assert {path.name: path.read_bytes() for path in store.iterdir()} == before
+    assert not (producer / "rendezvous.json").exists()
+    assert not list(store.glob("*.tmp.*"))
+    metadata = site / "agent_dispatch" / "hourly-reporting.json"
+    support = json.loads(metadata.read_text(encoding="utf-8"))
+    metadata.write_text(json.dumps({**support, "version": 2}), encoding="utf-8")
+    assert main(["health", "collect", "--store-dir", str(store), "--hour", prior]) == 0
+    rollback = json.loads(capsys.readouterr().out)
+    assert rollback["coverage"]["services"] == "partial"
+    assert rollback["services"][0]["contribution"] == contribution
+    assert {path.name: path.read_bytes() for path in store.iterdir()} == before
+    with health_collect.admission(store):
+        pass
+
+
+@pytest.mark.parametrize("release", ["normal", "crash"])
+def test_native_run_lock_refuses_a_second_process_and_releases_after_owner_exit(
+    tmp_path, monkeypatch, release,
+):
+    store = tmp_path / "store"
+    store.mkdir()
+    (store / "policy.json").write_text(json.dumps({
+        "schema": health_slots.POLICY_SCHEMA, "version": 2,
+        "publisher": "example-worker", "continuity": "example-generation",
+        "collection": {"bridge_port": None, "services": []},
+    }), encoding="utf-8")
+    (store / "collection.lock").write_bytes(b"\0")
+    held, signal = tmp_path / "held", tmp_path / "release"
+    code = """
+import os, sys, time
+from pathlib import Path
+from agent_machines.health_collect import admission
+store, held, signal = map(Path, sys.argv[1:4])
+with admission(store):
+    held.write_text("admitted")
+    deadline = time.monotonic() + 8
+    while not signal.exists() and time.monotonic() < deadline:
+        time.sleep(.02)
+    if not signal.exists():
+        raise SystemExit(3)
+    if sys.argv[4] == "crash":
+        os._exit(19)
+"""
+    child = subprocess.Popen(
+        [sys.executable, "-I", "-c", code, str(store), str(held), str(signal), release],
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, **no_window_kwargs(),
+    )
+    try:
+        deadline = time.monotonic() + 5
+        while not held.exists() and child.poll() is None and time.monotonic() < deadline:
+            time.sleep(.02)
+        assert held.exists(), "fixture did not acquire the run lock"
+        with pytest.raises(health_slots.HealthError, match="collection-overlap"):
+            health_collect.collect(store)
+        signal.write_text("release", encoding="utf-8")
+        _stdout, stderr = child.communicate(timeout=10)
+        assert child.returncode == (19 if release == "crash" else 0), stderr
+    finally:
+        if child.poll() is None:
+            child.kill()
+            child.communicate(timeout=5)
+    with health_collect.admission(store):
+        pass

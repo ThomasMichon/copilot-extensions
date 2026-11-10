@@ -154,7 +154,7 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   export, selected-runtime declaration and normal machine report consumer (#11823).
 - [x] Compose the existing age-qualified local health reader alongside telemetry
   and service namespaces in the normal report/chart, without a new writer or job (#11843).
-- [ ] Review the [bounded local collection/staging amendment](local-collection.md)
+- [x] Review the [bounded local collection/staging amendment](local-collection.md)
   before implementing the combined hourly operation or native job.
 - [ ] Prove the complete explicit local collect -> stage -> reread/report flow,
   keeping present health and prior-hour telemetry correctly attributed.
@@ -1041,3 +1041,44 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   slots rather than backdating a check or claiming an early snapshot is a total.
 - The amendment is pending review. Runtime, native qualification, carrier and
   activation remain unimplemented/unqualified by this design-only change.
+
+### 2026-11-09 - Local collection design reviewed; consumer implementation next
+- #11850 merged as `a45651933a` after current-head Copilot approval with no
+  active issues and green required CI. No parent closing reference was present;
+  #10873 remains open. The source worktree pulled forward successfully.
+- Re-read the parent Plan/Validation Plan. Only the amendment's review gate is
+  complete: explicit local collection/staging, native/platform and storage
+  qualification, broader domains, preferences, carrier and activation remain.
+- Next implement the explicit local consumer flow through the existing health
+  owner. Preserve strict v1 behavior, attribute current health and prior-hour
+  telemetry separately, and prove collect -> confirmed stage -> reread/report.
+  Do not register a native job or touch installed services/carrier state.
+
+### 2026-11-09 - Explicit one-hour collection consumer implemented
+- Added opt-in local-store v2 and a closed hourly-envelope reader/writer through
+  the existing health transaction. Strict observation/store v1 remains unchanged.
+  The new explicit collect command emits one candidate, never stages it or
+  registers a job. Current health and historical service export use separate
+  invocations/hours; automatic two-target execution remains future job work.
+- Retained/unselected components and revision checks are enforced at the record
+  mutation boundary, not just by the collector. Collection uses a preprovisioned
+  nonblocking native run lock and inherited service deadlines. Old/unsupported
+  stores refuse without creating state.
+- The focused collection/slot/service/native packet passed 66 cases, including
+  actual retained producer -> native export -> candidate -> confirmed slot ->
+  report/chart, distinct source hours and two-process normal/crash lock release.
+  Fifteen actor-free development controls pass separately. Their exact source
+  and node admission is expanded without weakening the unit portfolio.
+- Native scheduling, installed adoption, broader domain adapters, carrier,
+  preferences and activation remain parent gates. Review and final source
+  checks for this implementation are pending.
+- Final selected native controls pass three cases, including retained service
+  evidence after incompatible provider metadata and normal/crash overlap release.
+  The combined actor-free development packets pass 43 cases; Ruff, all 41
+  admitted strict projects on both target platforms, install contracts and
+  documentation consistency pass. Agent Machines' broader type-admission scope
+  remains unchanged.
+- The local full raw-byte admission check refuses six untouched template files
+  with Windows CRLF bytes; every mismatch matches the admitted hash after LF
+  normalization. No template or acceptance rule was changed to manufacture a
+  pass. Canonical full unit/coverage evidence remains owed by required CI.

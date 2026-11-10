@@ -132,6 +132,83 @@ runner:
 python tools/run-plugin-tests.py agent-machines --test-file tests/test_health_report.py --test-file tests/native/test_health_report_consumer.py --allow-explicit-tiers
 ```
 
+## Explicit local collection candidates
+
+`health collect` adds an explicit one-hour candidate flow; it does not change
+the read-only report command or register a recurring job. Prepare a **new**
+exclusive unsynchronized store through the local configuration owner with:
+
+```json
+{
+  "schema": "agent-machines.health.store",
+  "version": 2,
+  "publisher": "example-worker",
+  "continuity": "example-generation",
+  "collection": {
+    "bridge_port": null,
+    "services": ["queue=agent-dispatch"]
+  }
+}
+```
+
+The store also needs a preprovisioned one-byte `collection.lock` regular file.
+Preparation is explicit: collection creates neither the directory, policy nor
+lock, and does not migrate an existing v1 store. Select an existing admitted
+loopback Bridge listener by numeric `bridge_port` when wanted; null means do
+not probe. Service selections use the same installed-owner contract as report,
+with at most eight unique presentation labels and no executable configuration.
+
+```text
+agent-machines health collect --store-dir <absolute-v2-store>
+agent-machines health collect --store-dir <absolute-v2-store> --hour 2026-11-09T11:00:00Z
+agent-machines health record --store-dir <absolute-v2-store> --input <candidate.json>
+agent-machines health record --store-dir <absolute-v2-store> --input <candidate.json> --apply --expect <preview-token>
+agent-machines health report --store-dir <absolute-v2-store> --chart <new-chart.svg>
+```
+
+Collect writes one `agent-machines.health.hourly` v1 envelope to stdout. Save it
+outside the store as the explicit record input. Current-hour collection runs
+only the selected local listener check; an explicit older hour within the
+168-hour window exports retained services only, never present-time probes.
+Run the two explicit commands to obtain current health and previous-hour
+telemetry; automatic two-target execution and native periodic enrollment are
+not implemented. An early/current-hour export from the separate report command
+remains its existing bounded snapshot, not a complete-hour total.
+
+Collection holds a nonblocking OS-backed run lock, uses a 45-second admission
+budget and passes the remaining ceiling to existing 30-second/ten-second
+service collection. It reserves response time and refuses on a changed policy,
+clock/hour boundary or expired budget. The native process owner retains cleanup
+custody. Lock, provider and filesystem failures never start a replacement
+service, change credentials or write a slot. Filesystem stalls defeating the
+budget remain a native qualification failure, not a hard-real-time guarantee.
+
+The candidate retains existing unselected components and its target revision;
+confirmed `health record` revalidates the policy, input and previous revision
+under its existing mutation lock before atomic replacement. There is no
+multi-slot transaction or automatic replay after an unknown write outcome.
+The new closed envelope holds only same-hour observation v1 and namespaced
+service contribution v1 data, with collection time separate from evidence
+times. A valid older service contribution survives a later failed export.
+Components without evidence remain unknown; a fresh envelope does not refresh
+their source ages. Supplied input remains unverified, not an attested probe.
+
+V2 slots have a 768 KiB per-envelope limit and the same 168-name ring. The ring
+accounts for at most 126 MiB; failed writes or unrelated filesystem usage are
+not disk-quota enforcement. Old v1 observations/stores retain their original
+schema and 64 KiB limit; an older runtime cannot read or write the new format.
+Use explicit store selection for adoption/rollback, never dual writers or
+synchronized execution policy. The report/chart shows stored service namespaces
+separately from direct-file totals without launching exports.
+
+`tests/test_health_collection.py` covers candidate, clock, overlap, old-format,
+revision and storage-failure controls. The selected native
+`tests/native/test_health_collection_consumer.py` exercises actual retained
+Dispatch events and a private listener through collect, confirmed staging,
+reread and chart, plus two-process overlap and normal/crash lock release.
+Its installation admission is fixture-resolved. Native scheduler qualification,
+installed adoption, carrier publication and activation remain separate gates.
+
 ## Explicit local hourly observations
 
 `health record` and `health inspect` are a separate typed local-storage flow,

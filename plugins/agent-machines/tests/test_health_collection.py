@@ -1,0 +1,184 @@
+"""Local candidate/transaction controls; native producers have a separate lane."""
+
+from __future__ import annotations
+
+import copy
+import json
+from contextlib import nullcontext
+from datetime import datetime, timezone
+from types import SimpleNamespace
+
+import pytest
+
+from agent_machines import health_collect as collector, health_hourly as hourly, health_slots as slots
+from agent_machines import health_observe, service_reports
+from agent_machines.__main__ import main
+
+NOW = datetime(2026, 11, 9, 12, 30, tzinfo=timezone.utc)
+STAMP = int(NOW.timestamp() * 1000)
+HOUR = STAMP // slots.HOUR_MS
+
+
+@pytest.fixture
+def store(tmp_path, monkeypatch):
+    root = tmp_path / "store"
+    root.mkdir()
+    (root / "policy.json").write_text(json.dumps({
+        "schema": slots.POLICY_SCHEMA, "version": 2,
+        "publisher": "example-worker", "continuity": "example-generation",
+        "collection": {"bridge_port": 1234, "services": ["queue=agent-dispatch"]},
+    }), encoding="utf-8")
+    (root / "collection.lock").write_bytes(b"\0")
+    monkeypatch.setattr(collector, "time", SimpleNamespace(
+        monotonic=lambda: 10.0, time_ns=lambda: STAMP * 1_000_000,
+    ))
+    monkeypatch.setattr(health_observe, "observe_bridge", lambda port, publisher, continuity: {
+        "schema": slots.SCHEMA, "version": 1, "publisher": publisher, "continuity": continuity,
+        "hour": HOUR, "revision": 1, "parent": None, "observed_at_ms": STAMP,
+        "domains": {"local_listener": {
+            "state": "ok", "evidence": "listener-check", "reason": "none", "observed_at_ms": STAMP,
+        }},
+    })
+    return root
+
+
+def stage(store, tmp_path, candidate):
+    source = tmp_path / "candidate.json"
+    source.write_text(json.dumps(candidate), encoding="utf-8")
+    preview = slots.record(store, source, now_ms=STAMP)
+    return slots.record(store, source, now_ms=STAMP, apply=True, expected=preview["preview_token"])
+
+
+def test_current_collection_never_exports_or_stages_and_confirmed_record_reuses_owner(
+    store, tmp_path, monkeypatch, capsys,
+):
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: pytest.fail("current-hour service export"))
+    before = {path.name: path.read_bytes() for path in store.iterdir()}
+    assert main(["health", "collect", "--store-dir", str(store)]) == 0
+    candidate = json.loads(capsys.readouterr().out)
+    assert candidate["hour"] == HOUR and candidate["services"] == []
+    assert {path.name: path.read_bytes() for path in store.iterdir()} == before
+    assert stage(store, tmp_path, candidate)["applied"]
+    view = slots.inspect(store, now_ms=STAMP)
+    assert view["hours"][-1]["sample"]["domains"]["local_listener"]["state"] == "ok"
+    assert view["hours"][-1]["sample"]["domains"]["logical_agents"]["count"] is None
+    assert view["observation_qualification"] == "input-supplied-not-verified"
+
+
+def test_historical_collection_does_not_probe_and_cannot_relabel_current_health(
+    store, tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(health_observe, "observe_bridge", lambda *a: pytest.fail("historical probe"))
+    calls = []
+
+    def services(names, hour, **fields):
+        calls.append((names, hour, fields))
+        return [{"instance": "queue", "service": "agent-dispatch", "hour": hour, "state": "unsupported"}]
+
+    monkeypatch.setattr(service_reports, "collect", services)
+    candidate = collector.collect(store, "2026-11-09T11:00:00Z")
+    assert candidate["hour"] == HOUR - 1 and candidate["observation"] is None
+    assert calls == [(["queue=agent-dispatch"], "2026-11-09T11:00:00Z", {
+        "now_ms": STAMP, "deadline": 54.75,
+    })]
+    assert stage(store, tmp_path, candidate)["applied"]
+    sample = slots.inspect(store, now_ms=STAMP)["hours"][-2]["sample"]
+    assert sample["domains"]["local_listener"]["state"] == "unknown"
+    assert sample["services"][0]["state"] == "unsupported"
+    forged = copy.deepcopy(candidate)
+    forged["observation"] = {
+        "schema": slots.SCHEMA, "version": 1, "publisher": forged["publisher"],
+        "continuity": forged["continuity"], "hour": HOUR, "observed_at_ms": STAMP,
+        "revision": 1, "parent": None, "domains": {},
+    }
+    with pytest.raises(slots.HealthError, match="hourly-observation-mismatch"):
+        hourly.validate_record(forged)
+
+
+def test_new_candidate_preserves_unselected_components_and_obeys_revision_conflicts(
+    store, tmp_path, monkeypatch,
+):
+    original = collector.collect(store)
+    original["services"] = [{
+        "instance": "queue", "service": "agent-dispatch",
+        "hour": "2026-11-09T12:00:00Z", "state": "unsupported",
+    }]
+    original["coverage"]["services"] = "collected"
+    assert stage(store, tmp_path, original)["applied"]
+    candidate = collector.collect(store)
+    assert candidate["services"] == original["services"]
+    assert (candidate["revision"], candidate["parent"]) == (2, 1)
+    assert stage(store, tmp_path, candidate)["applied"]
+    source = tmp_path / "stale.json"
+    source.write_text(json.dumps(original), encoding="utf-8")
+    assert slots.record(store, source, now_ms=STAMP)["status"] == "revision-conflict"
+
+
+def test_record_boundary_refuses_component_erasure_even_for_a_forged_candidate(store, tmp_path):
+    original = collector.collect(store)
+    assert stage(store, tmp_path, original)["applied"]
+    forged = collector.collect(store)
+    forged["observation"] = None
+    source = tmp_path / "forged.json"
+    source.write_text(json.dumps(forged), encoding="utf-8")
+    with pytest.raises(slots.HealthError, match="observation-replacement-refused"):
+        slots.record(store, source, now_ms=STAMP)
+    assert slots.inspect(store, now_ms=STAMP)["hours"][-1]["sample"]["domains"]["local_listener"]["state"] == "ok"
+
+
+def test_collection_overlap_refuses_before_native_owners_and_releases_on_exit(store, monkeypatch):
+    monkeypatch.setattr(health_observe, "observe_bridge", lambda *a: pytest.fail("overlapping probe"))
+    with collector.admission(store):
+        with pytest.raises(slots.HealthError, match="collection-overlap"):
+            collector.collect(store)
+    with collector.admission(store):
+        pass
+
+
+def test_old_store_refuses_collection_without_creating_a_lock(store):
+    policy = json.loads((store / "policy.json").read_text())
+    policy.pop("collection")
+    policy["version"] = 1
+    (store / "policy.json").write_text(json.dumps(policy), encoding="utf-8")
+    (store / "collection.lock").unlink()
+    with pytest.raises(slots.HealthError, match="collection-store-unsupported"):
+        collector.collect(store)
+    assert {path.name for path in store.iterdir()} == {"policy.json"}
+
+
+@pytest.mark.parametrize("clock", ["regression", "boundary", "deadline"])
+def test_changed_hour_or_budget_does_not_produce_a_candidate(store, monkeypatch, clock):
+    times = iter([STAMP, STAMP - 1 if clock == "regression" else STAMP + slots.HOUR_MS])
+    ticks = iter([10, 10, 60]) if clock == "deadline" else iter([10, 10])
+    monkeypatch.setattr(collector, "time", SimpleNamespace(
+        monotonic=lambda: next(ticks, 60), time_ns=lambda: next(times, STAMP) * 1_000_000,
+    ))
+    if clock == "deadline":
+        monkeypatch.setattr(collector.time, "time_ns", lambda: STAMP * 1_000_000)
+    with pytest.raises(slots.HealthError, match="collection-(hour-changed|timeout)"):
+        collector.collect(store)
+    assert not list(store.glob("[0-9][0-9][0-9].json"))
+
+
+def test_lock_and_policy_failures_are_bounded_cli_errors(store, capsys):
+    (store / "collection.lock").write_bytes(b"")
+    assert main(["health", "collect", "--store-dir", str(store)]) == 2
+    result = json.loads(capsys.readouterr().err)
+    assert result["error"] == "invalid-collection-lock" and result["applied"] is False
+    assert str(store) not in json.dumps(result)
+
+
+def test_read_only_storage_failure_does_not_prune_or_activate(store, tmp_path, monkeypatch):
+    candidate = collector.collect(store)
+    source = tmp_path / "candidate.json"
+    source.write_text(json.dumps(candidate), encoding="utf-8")
+    preview = slots.record(store, source, now_ms=STAMP)
+    monkeypatch.setattr(slots, "mutation_lock", lambda *a, **k: nullcontext())
+
+    def unavailable(*args):
+        raise OSError("private-storage-detail")
+
+    monkeypatch.setattr(slots, "_write", unavailable)
+    result = slots.record(store, source, now_ms=STAMP, apply=True, expected=preview["preview_token"])
+    assert result["status"] == "unknown" and result["applied"] is None
+    assert not list(store.glob("[0-9][0-9][0-9].json"))

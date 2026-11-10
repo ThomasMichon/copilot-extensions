@@ -43,6 +43,31 @@ def add_parser(subparsers) -> None:
     observe.add_argument("--publisher", required=True)
     observe.add_argument("--continuity", required=True)
     observe.set_defaults(func=run_observe)
+    collect = commands.add_parser(
+        "collect", help="collect one local hourly candidate; never stage or enroll a job", allow_abbrev=False,
+    )
+    collect.add_argument("--store-dir", type=Path, required=True, help="explicit preprovisioned v2 store")
+    collect.add_argument("--hour", help="canonical UTC hour; current health by default, historical services only")
+    collect.set_defaults(func=run_collect)
+
+
+def run_collect(args) -> int:
+    from .health_collect import collect
+    from .health_slots import HealthError
+
+    result = None
+    try:
+        result = collect(args.store_dir, args.hour)
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 0
+    except (ValueError, OSError, OverflowError) as error:
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
+        reason = str(error) if isinstance(error, HealthError) else "collection-unavailable"
+        print(json.dumps({
+            "ok": False, "error": reason, "applied": False, "carrier_publication": "not-requested",
+        }), file=sys.stderr)
+        return 2
 
 
 def run_observe(args) -> int:

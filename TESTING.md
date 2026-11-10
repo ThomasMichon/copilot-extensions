@@ -5649,6 +5649,16 @@ configured measurement/sink packet proves valid telemetry remains usable when
 an explicitly selected health store is unavailable. Neither qualifies a native
 scheduled job, installed publisher or carrier.
 
+The same packet admits the hourly-envelope validator, write-boundary component
+preservation and explicit collection orchestration with substituted clock,
+storage, admission and native providers. Current health and historical service
+results keep separate absolute hours and one inherited collection budget.
+The selected Machines `tests/native/test_health_collection_consumer.py` packet
+separately exercises actual retained Dispatch events, private listener,
+confirmed slot transactions and report/chart, plus competing native processes
+and normal/crash run-lock release. Required unit CI starts none of those actors;
+fixture-resolved installation admission is not deployed inventory or scheduling.
+
 The actor-free `test_hourly_contributions.py` packet executes the canonical
 service contribution codec and collection policy with substituted native owners
 and stage/outcome vocabularies. Exact
