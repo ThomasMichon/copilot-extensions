@@ -74,6 +74,12 @@ The operator subsequently endorsed Agent Machines ownership. The detailed
 division and first-slice sequencing below remain **agent recommendations**
 submitted for review, not additional operational authority.
 
+The 2026-11-09 continuation adds a by-convention way for installable services to
+surface hourly data and telemetry for aggregation. The verbatim follow-up is in
+the [request capture](inception-transcript.md#installable-service-contribution-follow-up);
+the proposed [service contribution contract](service-contributions.md) is a
+review-before-code amendment, not a new resident collector or activation grant.
+
 ## Scope Approvals
 
 The operator authorizes source planning, review and implementation. The adopter
@@ -143,6 +149,9 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 - [x] Prove the first passive local owner-listener observation through the
   normal CLI and existing local record/reader flow (#11157), keeping all other
   domains unknown and installed-provider qualification separate.
+- [ ] Review the installable-service hourly contribution/discovery amendment.
+- [ ] Prove a bounded versioned contribution through an actual service-owned
+  export, selected-runtime declaration and normal machine report consumer.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
@@ -173,6 +182,9 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 - [ ] Preferences: separate typed input, permitted settings only, existing
   validation/precedence and local authority, with visible conflicts rather than
   last-write-wins or command execution from synchronized data.
+- [ ] Service contributions: installed-owner capability, schema/time/metric
+  semantics, partial/unsupported coverage, bounded export/cleanup, privacy
+  reduction, namespaced aggregation and a real producer-to-report flow.
 - [ ] Acceptance: required review/CI, source merge, release availability,
   configured state, active capture and carrier receipt remain separate facts.
 
@@ -808,3 +820,23 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
 - Next source work is native maintenance-preference preview, using the existing
   resource/authority owner without turning `automatic` data into execution
   consent. The existing independent live-carrier and activation holds remain.
+
+### 2026-11-09 - Resume hourly service contributions
+- The operator resumed the parent effort and requested a by-convention way
+  for installable services to surface hourly data and telemetry for aggregation.
+  The verbatim follow-up is preserved in the request capture.
+- This reorders the next source slice from maintenance preferences to
+  Phase 5 service contributions; the remaining Phase 4 items are not dropped.
+  The Health implementation owner retains custody in the same source worktree.
+- The proposed service-contribution amendment reuses installation and native
+  service owners, retained telemetry and the bounded report consumer. It defines
+  selected-runtime capability, a common hourly data envelope and a real
+  producer-to-report acceptance flow, without a second registry, collector,
+  writer or service lifecycle authority.
+- Claimed this continuation on #10873 after checking open reporting work.
+  Existing producer and process-registry owners retain their scope; no
+  still-open contributor PR is superseded or pre-patched.
+- This is a review-before-code source amendment. Its first protocol/provider
+  implementation follows review and required CI; scheduling, real carrier
+  writes, installed adoption, service activation and the rest of the parent
+  completion gate remain open.

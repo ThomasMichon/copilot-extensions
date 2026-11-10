@@ -2996,7 +2996,8 @@ Unreachable residents permit only explicitly labeled, independently indexed
 advisory rows or an unavailable error, never caller-side reconstruction.
 
 Plugin-contributed interactive surfaces are discovered independently from each
-enabled plugin's installed payload. `worktree-manager contracts` validates the
+enabled plugin's resolved active payload, including directory marketplaces.
+`worktree-manager contracts` validates the
 versioned manifest contract and reports disabled, malformed, duplicate, legacy,
 or missing-command contributions without importing plugin code or requiring a
 plugin installer to write into Manager-owned state. See
