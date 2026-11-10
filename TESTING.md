@@ -1825,6 +1825,21 @@ leased instance ownership and exact cleanup, not host credentials, installed
 services, desktop observation or a production-lifetime claim. It is not part
 of required unit-only CI and does not activate the ordinary forwarder.
 
+The separate owner-only `mcp-caller-lifetime` hosted Windows packet selects
+`test_custody_native_lifetime.py::test_native_caller_jobs_and_session_owner_lifetime`.
+It prepares the canonical MCP test environment, then uses the existing native
+test owner, private physical runtimes and renewable daemon leases with a
+600-second case and unchanged 900-second aggregate boundary. Actual caller-Job
+closure, bounded-child termination, restrictive shared-outer refusal, shim exit,
+post-replacement traffic and exact owner-death settlement are distinct checks.
+The original stdin writer stays open through owner death. Cleanup belongs to
+that native owner; a failed settlement cannot qualify the packet.
+No Copilot/terminal binary, credentials, desktop observer or visible control is
+required. Ordinary local/plugin tests remain contained and cannot opt into this
+lane by setting its fixture flag. Controller support must first reach the
+protected default branch before submitting `--packet mcp-caller-lifetime`.
+Packet preparation or a platform skip is not qualification or activation.
+
 The optional `update_diagnostics` lane also runs MCP's focused
 `test_source_install_transactions.py -k footprint_routes` controls and
 `test_source_build.py` operational-identity and
