@@ -151,3 +151,31 @@ def test_ambiguous_owner_or_presentation_namespace_is_not_silently_replaced(
     ))
     result = reports.collect(requests, HOUR, now_ms=STAMP)
     assert result[1]["state"] == "invalid" and len(calls) == 1
+
+
+def test_late_timeout_reserves_cleanup_inside_both_deadlines_without_renewal(monkeypatch):
+    clock = [0.0]
+    calls = []
+    monkeypatch.setattr(reports, "time", SimpleNamespace(
+        monotonic=lambda: clock[0], time=lambda: STAMP / 1000,
+    ))
+
+    def select(service):
+        if clock[0] == 0:
+            clock[0] = 28.0
+        return selected(service, identity=service)
+
+    def timeout(*args, **kwargs):
+        budget = kwargs["budget"]
+        calls.append(budget)
+        assert budget.deadline <= 30 - reports.RESPONSE_MARGIN
+        assert budget.deadline <= clock[0] + reports.SERVICE_SECONDS
+        assert 0 < budget.cleanup_reserve < budget.deadline - clock[0]
+        assert budget.execution_deadline < budget.deadline
+        clock[0] = budget.deadline
+        raise subprocess.TimeoutExpired("owned-runtime", kwargs["timeout"])
+
+    monkeypatch.setattr(reports, "select", select)
+    monkeypatch.setattr(reports, "run_caller_owned", timeout)
+    result = reports.collect(["agent-dispatch", "agent-bridge"], HOUR, now_ms=STAMP)
+    assert [row["state"] for row in result] == ["timeout", "timeout"] and len(calls) == 1

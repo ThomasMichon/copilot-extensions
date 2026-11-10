@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from agent_procutil.owned_process import OwnedCleanupError, run_caller_owned
+from agent_procutil.owned_budget import OwnedExecutionBudget
 from process_telemetry.hourly import declaration, decode, hour_start, validate
 
 from . import _peer_launch
@@ -17,6 +18,7 @@ from . import _peer_launch
 MAX_SERVICES = 8
 COLLECTION_SECONDS = 30
 SERVICE_SECONDS = 10
+RESPONSE_MARGIN = .25
 
 
 @dataclass(frozen=True)
@@ -93,14 +95,19 @@ def collect(services: list[str], hour: str, *, now_ms: int) -> list[dict]:
                 continue
             seen[selected.identity] = service
             presented[label] = selected.identity
-            remaining = deadline - time.monotonic()
+            started = time.monotonic()
+            child_deadline = min(deadline - RESPONSE_MARGIN, started + SERVICE_SECONDS)
+            remaining = child_deadline - started
             if remaining <= 0:
                 row["state"] = "timeout"
             else:
+                budget = OwnedExecutionBudget(
+                    deadline=child_deadline, cleanup_reserve=min(2.0, remaining / 4),
+                )
                 response = run_caller_owned(
                     [*selected.command, hour], timeout=min(SERVICE_SECONDS, remaining),
                     max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
-                    env=selected.environment, binary=True,
+                    env=selected.environment, binary=True, budget=budget,
                 )
                 if response.returncode != 0:
                     raise ValueError("service export failed")

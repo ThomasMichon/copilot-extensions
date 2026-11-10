@@ -32,9 +32,11 @@ def test_native_export_failures_settle_through_the_caller_owned_boundary(monkeyp
     ))
     owned = reports.run_caller_owned
     settled = []
+    deadlines = []
 
     def run(*args, **kwargs):
-        return owned(*args, **kwargs, on_settled=lambda: settled.append(True))
+        deadlines.append(kwargs["budget"].deadline)
+        return owned(*args, **kwargs, on_settled=lambda: settled.append(time.monotonic()))
 
     monkeypatch.setattr(reports, "run_caller_owned", run)
     started = time.monotonic()
@@ -42,4 +44,5 @@ def test_native_export_failures_settle_through_the_caller_owned_boundary(monkeyp
     assert result[0]["state"] == state
     assert "contribution" not in result[0]
     assert time.monotonic() - started < 15
-    assert settled == [True]
+    assert len(settled) == len(deadlines) == 1
+    assert settled[0] <= deadlines[0]

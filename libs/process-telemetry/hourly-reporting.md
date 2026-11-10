@@ -102,7 +102,17 @@ labels and raw error content before producing the contribution.
 The shared read-only scan considers at most 256 directory entries, 16 files,
 8 MiB, 20,000 records and 64 KiB per record. Limits, partial tails, replacement,
 unavailable files, outside-hour/future events and repeated file identity remain
-explicit. It does not tail, repair, prune or write source files. Concurrent
+explicit. A direct active-file lookup precedes bounded archive enumeration,
+so directory/file limits cannot omit the known active source. Archives are
+prioritized by rotation near the requested hour, with an overflow sentinel
+marking incomplete enumeration. Rotation time is only a selection heuristic;
+it never assigns an event to an hour.
+
+Each size-qualified byte window is read once and reduced newest-line first,
+so old archives or an old prefix within the active file cannot consume the
+record budget before its recent tail. A clipped prefix, partial tail or
+oversized record never becomes an admitted suffix. This is a bounded snapshot,
+not continuous following. It does not repair, prune or write source files. Concurrent
 append/rotation can make coverage partial; scan completion is not lossless
 capture. Historical availability cannot be inferred from silence.
 
@@ -110,7 +120,11 @@ Machines admits at most eight explicit service selections per report, with
 one 30-second collection deadline and at most ten seconds per native child.
 Complete stdout and stderr each have a 64 KiB cap. The existing caller-owned
 process primitive owns native descendants and stream settlement, including
-root exit with a retained pipe. Unconfirmed cleanup propagates its original
+root exit with a retained pipe. One `OwnedExecutionBudget` caps execution and
+settlement by both the child and collection deadlines, reserving up to two
+seconds for cleanup inside that lifetime and a separate collection response
+margin. Cleanup waits and later providers do not renew that deadline.
+Unconfirmed cleanup propagates its original
 custody error rather than becoming an ordinary missing-provider result.
 Independent unsupported, invalid, unavailable or timed-out providers are gaps.
 The machine slot/revision/publisher owner remains separate.
@@ -124,4 +138,6 @@ Installation admission/retention selections in that flow are fixture-resolved;
 it is not deployed-host inventory, installed adoption or activation evidence.
 Machines' separate native cleanup packet exercises deadlines, actual inherited
 streams after root exit, byte limits, strict UTF-8 and native settlement callbacks.
+Saturated archive and active-prefix controls retain current-hour observations;
+late-timeout controls verify cleanup/response reserves and no renewed lifetime.
 No test touches an operator service, real carrier or credentials.

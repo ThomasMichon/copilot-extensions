@@ -65,7 +65,7 @@ def export(hour: str) -> dict:
                 or getattr(info, "st_file_attributes", 0) & 0x400
             ):
                 raise OSError("retained namespace unavailable")
-            paths, limited = retained_sources(directory, "agent-dispatch-telemetry")
+            paths, limited = retained_sources(directory, "agent-dispatch-telemetry", hour=hour)
     except FileNotFoundError:
         unavailable = True
     except (ValueError, KeyError, TypeError, OSError):

@@ -11,6 +11,8 @@ import venv
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pytest
+
 from agent_procutil import no_window_kwargs
 from agent_dispatch import telemetry
 from agent_dispatch.__main__ import main
@@ -164,3 +166,64 @@ def test_scan_bounds_partial_tail_and_repeated_file_remain_explicit(tmp_path):
     assert result["coverage"]["observations"] == 1
     assert result["coverage"]["partial"] == 1 and result["coverage"]["duplicates"] == 1
     assert result["health"] == []
+
+
+@pytest.mark.parametrize("history", ["archives", "active-prefix"])
+def test_saturated_retained_history_cannot_hide_current_hour_events(
+    tmp_path, monkeypatch, capsys, history,
+):
+    from process_telemetry import hourly_scan
+    from process_telemetry.hourly import HOUR_MS
+
+    root = tmp_path / "dispatch"
+    root.mkdir()
+    capture = tmp_path / "capture"
+    retained = capture / "retained"
+    retained.mkdir(parents=True)
+    (root / "telemetry.json").write_text(json.dumps({
+        "retained_spool": {"directory": str(capture)},
+    }))
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
+    monkeypatch.delenv(telemetry.SINK_ENV_VAR, raising=False)
+    hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
+    stamp = hour_start(hour)
+    old = {
+        "kind": "state_transition", "name": "task", "event": "task.created",
+        "ts": stamp - HOUR_MS,
+    }
+    data = (json.dumps(old) + "\n").encode() * hourly_scan.MAX_RECORDS
+    component = "agent-dispatch-telemetry"
+    if history == "active-prefix":
+        (retained / f"{component}.jsonl").write_bytes(data)
+    sink = telemetry.make_retained_spool_sink(capture)
+    sink({**telemetry.task_lifecycle_event("task.completed", {}), "ts": stamp})
+    if history == "archives":
+        rotated = datetime.fromtimestamp((stamp - HOUR_MS) / 1000, timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
+        for index in range(hourly_scan.MAX_FILES + 1):
+            archive = retained / f"{component}.{rotated}-{index:032x}.jsonl"
+            archive.write_bytes(data if index == 0 else b"")
+    assert main(["telemetry", "hourly", "--hour", hour]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["coverage"]["observations"] == 1
+    assert result["coverage"]["scan_limited"]
+    assert result["groups"][0]["outcomes"] == {"completed": 1}
+    assert result["source"]["last_ms"] == stamp
+
+
+def test_reverse_snapshot_does_not_parse_a_suffix_of_an_oversized_record(tmp_path):
+    from agent_dispatch.hourly_reporting import observation
+    from process_telemetry import hourly_scan
+
+    hour = "2026-11-09T12:00:00Z"
+    stamp = hour_start(hour)
+    record = (json.dumps({
+        "kind": "state_transition", "name": "task", "event": "task.completed", "ts": stamp,
+    }) + "\n").encode()
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(b"x" * hourly_scan.MAX_LINE + record + record)
+    result = hourly_scan.reduce(
+        [path], service="agent-dispatch", hour=hour,
+        generated_at_ms=stamp + 1000, observation=observation,
+    )
+    assert result["coverage"]["observations"] == 1
+    assert result["coverage"]["malformed"] == 1

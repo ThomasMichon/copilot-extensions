@@ -72,7 +72,9 @@ not PATH, a home-directory scan or a synchronized command. At least one
 hour inside the report's 168-hour window; the default is its current hour.
 There are at most eight selections, 30 seconds for collection, ten seconds per
 child and 64 KiB each for complete stdout/stderr. Native tree and retained-pipe
-cleanup use the existing caller-owned process primitive.
+cleanup use the existing caller-owned process primitive and a shared absolute
+execution budget. Cleanup is reserved inside both deadlines, not added after
+the child timeout; a collection response margin is retained.
 
 The selected immutable runtime must contain a supported
 [hourly reporting declaration](../../../libs/process-telemetry/hourly-reporting.md).

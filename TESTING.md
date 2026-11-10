@@ -5554,7 +5554,9 @@ and stage/outcome vocabularies. Exact
 source/node admission covers owner/hour/unit/population refusals, delayed native
 evidence, missing duration statistics and strict JSON/version compatibility,
 plus task-authority preservation, independent namespaces, de-duplication and
-unsettled native custody.
+unsettled native custody. Bounded source-selection and temporary-file snapshot
+cases preserve active/current records under saturated history, reject partial
+or oversized suffixes, and retain cleanup inside shared absolute deadlines.
 It starts no service or native actor. Dispatch's `tests/native/test_hourly_export.py`
 separately exercises producer-retained events, selected fixture package metadata
 and the normal Machines report/chart. Machines' selected

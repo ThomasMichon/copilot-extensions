@@ -902,3 +902,28 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   The ongoing full-packet run uses a canonical committed-source snapshot;
   no source admission hash or machine Git configuration was changed to accept
   those checkout transformations. Required PR CI remains an independent gate.
+
+### 2026-11-09 - Native history priority and deadline corrections
+- #11823 opened on the rebased source. Its first current-head required CI was
+  green, while two Medium findings correctly blocked review acceptance.
+- Archive ordering and early file truncation could hide the active source;
+  an old prefix within that active file could likewise exhaust record work.
+  Selection now reserves the known active source before archive/directory
+  limits, prioritizes archive rotation near the requested hour, and reduces
+  bounded snapshot windows newest-line first. Only source event time assigns
+  the hour; clipped/partial/oversized fragments remain excluded and explicit.
+- Native execution timeout alone did not include retirement/pipe waits.
+  Collection now passes the existing absolute `OwnedExecutionBudget`, capped
+  by child and aggregate deadlines with cleanup and response reserves inside
+  those limits. Unconfirmed native custody still propagates unchanged.
+- The corrected Dispatch packet passed 60 cases, including saturated archives
+  and active prefixes. Machines passed 19 focused policy/native-cleanup cases;
+  native settlement callbacks occurred before their actual absolute deadlines.
+  Eighteen actor-free codec/selection/collection/snapshot controls pass, and
+  the changed shared library passes both strict target configurations.
+- The full prior Windows source packet produced 4,705 passes and three skips;
+  its no-skip evidence gate correctly refused completion. A minimal control
+  identified exactly the intentionally POSIX-only filesystem/kernel-lease and
+  existing-mode cases. No skip, hash or permission was changed to claim a
+  Windows all-pass result. Current-head Linux PR CI is the independent full
+  unit gate; the new source head still needs fresh CI and review acceptance.

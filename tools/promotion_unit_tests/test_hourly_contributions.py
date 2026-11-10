@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+from contextlib import nullcontext
 from pathlib import Path
 import sys
 from types import ModuleType, SimpleNamespace
@@ -133,6 +134,10 @@ def collector(protocol, monkeypatch):
     process.__path__ = []
     native = ModuleType("agent_procutil.owned_process")
     native.OwnedCleanupError = type("OwnedCleanupError", (subprocess.SubprocessError,), {})
+    budget = ModuleType("agent_procutil.owned_budget")
+    budget.OwnedExecutionBudget = lambda **fields: SimpleNamespace(
+        **fields, execution_deadline=fields["deadline"] - fields["cleanup_reserve"],
+    )
 
     def forbidden(*args, **kwargs):
         raise AssertionError("an actor-free contribution test reached a native owner")
@@ -141,7 +146,7 @@ def collector(protocol, monkeypatch):
     peer._resolve_peer = forbidden
     telemetry = ModuleType("process_telemetry")
     telemetry.__path__ = []
-    for module in (package, peer, process, native, telemetry):
+    for module in (package, peer, process, native, budget, telemetry):
         monkeypatch.setitem(sys.modules, module.__name__, module)
     monkeypatch.setitem(sys.modules, "process_telemetry.hourly", protocol)
     name = package.__name__ + ".service_reports"
@@ -208,3 +213,128 @@ def test_collection_cannot_hide_unsettled_native_custody_as_an_independent_gap(c
             now_ms=protocol.hour_start("2026-11-09T12:00:00Z"),
         )
     assert caught.value is error
+
+
+@pytest.fixture
+def scanner(protocol, monkeypatch):
+    report = ModuleType(protocol.__package__ + ".report")
+    report.summarize = lambda *a, **k: pytest.fail("source selection does not summarize")
+    monkeypatch.setitem(sys.modules, report.__name__, report)
+    name = protocol.__package__ + ".hourly_scan"
+    source = ROOT / "libs/process-telemetry/src/process_telemetry/hourly_scan.py"
+    spec = importlib.util.spec_from_file_location(name, source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+class LogicalPath(str):
+    @property
+    def name(self):
+        return self.rsplit("\\", 1)[-1]
+
+    def __truediv__(self, name):
+        return LogicalPath(f"{self}\\{name}")
+
+    def lstat(self):
+        return SimpleNamespace()
+
+
+def directory(scanner, names):
+    visited = []
+    root = LogicalPath("fixture")
+
+    def entries():
+        for name in names:
+            visited.append(name)
+            yield SimpleNamespace(name=name, path=root / name)
+
+    scanner.Path = LogicalPath
+    scanner.os = SimpleNamespace(scandir=lambda _: nullcontext(entries()))
+    return root, visited
+
+
+@pytest.mark.parametrize("saturation", ["archives", "entries"])
+def test_current_active_source_survives_archive_and_directory_cutoffs(scanner, saturation):
+    component = "agent-dispatch-telemetry"
+    if saturation == "archives":
+        names = [
+            f"{component}.20261109T110000000000Z-{index:032x}.jsonl"
+            for index in range(scanner.MAX_FILES + 3)
+        ]
+    else:
+        names = [f"unrelated-{index}" for index in range(scanner.MAX_ENTRIES + 1)]
+    root, visited = directory(scanner, names)
+    selected, limited = scanner.retained_sources(root, component, hour="2026-11-09T12:00:00Z")
+    assert selected[0].name == f"{component}.jsonl" and limited
+    assert len(selected) <= scanner.MAX_FILES and len(visited) <= scanner.MAX_ENTRIES + 1
+
+
+def test_archive_selection_prioritizes_rotation_near_the_requested_hour(scanner):
+    component = "agent-dispatch-telemetry"
+    names = [
+        f"{component}.{stamp}-{'0' * 32}.jsonl"
+        for stamp in ("20261109T110000000000Z", "20261109T130000000000Z", "20261109T123000000000Z")
+    ]
+    root, _ = directory(scanner, names)
+    selected, limited = scanner.retained_sources(root, component, hour="2026-11-09T12:00:00Z")
+    assert [path.name for path in selected[1:]] == [names[2], names[1], names[0]]
+    assert not limited
+
+
+def test_cleanup_reserve_is_inside_child_and_collection_deadlines(collector, protocol):
+    clock = [0.0]
+    calls = []
+    collector.time = SimpleNamespace(monotonic=lambda: clock[0])
+
+    def select(service):
+        clock[0] = max(clock[0], 28.0)
+        return collector.SelectedService(service, service, ["native"], {})
+
+    def timeout(*args, **kwargs):
+        budget = kwargs["budget"]
+        calls.append(budget)
+        assert clock[0] < budget.execution_deadline < budget.deadline <= 30 - collector.RESPONSE_MARGIN
+        assert budget.deadline <= clock[0] + collector.SERVICE_SECONDS
+        clock[0] = budget.deadline
+        raise subprocess.TimeoutExpired("owned-runtime", kwargs["timeout"])
+
+    collector.select = select
+    collector.run_caller_owned = timeout
+    result = collector.collect(
+        ["agent-dispatch", "agent-bridge"], "2026-11-09T12:00:00Z",
+        now_ms=protocol.hour_start("2026-11-09T12:00:00Z"),
+    )
+    assert [row["state"] for row in result] == ["timeout", "timeout"] and len(calls) == 1
+
+
+def test_reverse_snapshot_keeps_fresh_records_and_never_admits_partial_or_oversize_suffixes(
+    scanner, protocol, tmp_path,
+):
+    hour = "2026-11-09T12:00:00Z"
+    stamp = protocol.hour_start(hour)
+    path = tmp_path / "events.jsonl"
+    old = (json.dumps({"ts": stamp - protocol.HOUR_MS}) + "\n").encode()
+    current = (json.dumps({"ts": stamp}) + "\n").encode()
+    path.write_bytes(old * 3 + current + b'{"partial":')
+    scanner.MAX_RECORDS = 3
+
+    def observe(record):
+        return record["ts"], "task-lifecycle", "lifecycle", "completed", None
+
+    def reduce():
+        return scanner.reduce(
+            [path], service="example-service", hour=hour,
+            generated_at_ms=stamp + 1000, observation=observe,
+        )
+
+    result = reduce()
+    assert result["coverage"]["observations"] == 1
+    assert result["coverage"]["scan_limited"] and result["coverage"]["partial"] == 1
+    assert result["source"]["first_ms"] == stamp
+    scanner.MAX_LINE = 128
+    path.write_bytes(b"x" * scanner.MAX_LINE + current + current)
+    result = reduce()
+    assert result["coverage"]["observations"] == 1 and result["coverage"]["malformed"] == 1
