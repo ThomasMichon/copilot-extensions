@@ -23,6 +23,39 @@ Current operator reaffirmation:
 fresh physical-generation execution and preserved session reattachment. It does
 not replace the original Request or waive release and installed-consumer gates.
 
+### Application-state ownership boundary
+
+> Install shouldn't be messing with a live DB or state file; this is one area where we do have to figure out lock management with the outgoing version, during boot of the incoming service versions
+
+This supplements, rather than replaces, the request above. Installation stages
+software; it does not rewrite or migrate live application DB/state files.
+Incoming boot must coordinate safe compatible access, quiescence or ownership
+transfer with the outgoing state owner before making state changes. This is
+necessary incoming readiness, distinct from optional predecessor cleanup.
+
+### Requested boot and recovery sequence
+
+> For SQLite, I assume we need the existing version to release its lock on the DB and finish pending transactions. When starting the new version of a service, we will need to:
+> 1. Check for existing service version
+> 2. Negotiate handoff with existing service
+> 3. Upon failure to negotiate, force-terminate existing service
+> 4. Check health of existing DB, perform repair/update if needed, take ownership
+> 5. In case of failure, rename existing DB to backup, create new DB in "state recovery mode".
+
+The forced fallback is an outgoing-service lifecycle policy, not permission to
+terminate separate client/session keepers or an arbitrary process tree.
+Ownership and uncertain accepted-operation outcomes remain explicit.
+
+### Durable state authority
+
+> Per my rules: all DBs fundamentally hold recoverable state that should be recomputable from file-system-based state, usually persisted in worktree/session folders, access over SSH, or Git. Only known "violation" is agent-dispatch Tasks, for which we probably should have an agent design a fallback-recover mechanism.
+
+DBs are intended to be rebuildable projections, not the sole authority.
+Dispatch Tasks is the operator-identified known exception; its filesystem
+fallback requires a separate design before DB replacement can be treated as
+lossless recovery. This intent does not claim that every existing DB's
+reconstruction path has already been qualified.
+
 ## Guiding Intent
 
 An update must make fresh `agent-mcp` invocations use the incoming runtime and
@@ -218,6 +251,14 @@ named tracked objective before the whole effort is Done.
 - [ ] **Clean measured sweep:** resolve actual incoming completion and update
   performance; a selected runtime or a successful isolated tool call does not
   make a failed full update successful.
+  - [ ] **Nested-library version coverage #11704:** release the transitive
+    consumer-map correction and affected-consumer patch changefiles, then verify
+    ordinary reconciliation against the newly versioned payloads. Coordinator
+    retains review, release and installed acceptance; source guards alone do
+    not complete the measured sweep.
+    - [x] **Source correction merged:** #11709 landed at
+      `4176aaea9a1d3dde5f3e6f924cc5542e7fce9483` after current-head approval
+      and required CI. Promotion and installed reconciliation remain open.
 - [x] **Worktrees incoming-monitor source correction:** #11673 merged the
   #11524 correction at `2e575be1a26c789f1b5b1912df626165fb9c7158`
   after current-head approval, required CI and Windows/Linux native acceptance.
@@ -328,7 +369,10 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 - [ ] Pair with genuine incoming source-admission, authentication, build,
   permission, I/O and health failures that prevent incoming completion.
   Necessary durable-state compatibility and conflicting-work protection remain
-  enforced; do not require takeover of an unknown foreign listener.
+  enforced; do not require takeover of an unknown foreign listener. Verify that
+  installation does not mutate live application DB/state, and that incoming
+  boot establishes compatible access or an outgoing-owner handoff before state
+  changes or migration, without forcibly closing live handles.
 - [ ] The incoming-complete result leaves outgoing-deferred, handover-pending
   and whole-effort gates visibly distinct. No new selector or manifest alone
   manufactures success, and no old cleanup result reverses healthy incoming
@@ -488,6 +532,10 @@ migration already works.
   from native identity of the incoming writer. The remaining implementation
   must preserve uncertain recovery records and conflicting-work protection,
   rather than merely suppressing the first outgoing-observation exception.
+
+### 2026-11-09 - Nested-library consumer correction merged
+
+- [Source milestone, validation scope and remaining delivery gates](journal/2026/11.09%20nested-library%20consumer%20correction.md).
 
 ### 2026-11-08 - Termination-free installer source merged
 
@@ -1602,3 +1650,46 @@ migration already works.
   acceptance remain open. The effort remains Active; full adopted-wrapper
   reattachment, historical warm-reuse uncertainty and prepared qualification
   are not closed by these corrective slices.
+
+### 2026-11-09: Nested-library version coverage blocker #11704
+
+- Logger and Machines release payloads included changed nested ZDD metadata
+  without distinct consumer versions. Replacing only the current ZDD manifest
+  with its prior released bytes reproduced the earlier completed content hash;
+  this is changed nested input, not corrupt completion metadata or permission
+  to rewrite immutable completed slots.
+- The bump-consumer map now expands canonical sibling dependencies with the
+  materializer's shared UV parser, deterministic cycle-safe traversal and
+  fail-closed invalid-manifest handling. Both indirect ZDD consumers appear
+  in the actual map; ordinary patch changefiles request distinct releases.
+- Integration also identified Remote Driver, Budget Guidance and Chat as
+  previously omitted indirect consumers. Patch changefiles cover all five
+  missed payloads, not only the two observed installer failures; no additional
+  capability activation is requested.
+- Seven focused source controls failed before the correction and passed after
+  it, covering shared/nested dependencies, consumer forms, cycles, aliases and
+  invalid manifests. This closes a bounded release-accounting gap toward
+  authoritative runtime replacement, not installer admission or lifecycle work.
+- Related bump/changefile/accumulation guards pass 88 tests; two native symlink
+  controls explicitly skip when the platform denies symlink creation. The
+  source-only nested symlink-refusal control passes without native privileges.
+- Review, promotion and actual installed reconciliation remain coordinator-owned.
+  #3654's broader pointer work and #6369's source/stamp ownership stay separate.
+  No MCP, global/full-update or session-reattachment gate is marked complete.
+
+### 2026-11-09: Changefile-only consumer coverage follow-up
+
+- Current-head review of #11709 found that a library-only bump could still
+  bypass consumer coverage because no canonical source path changed. The
+  presence guard now expands new or changed library bump intents through the
+  transitive map, retaining diff-owned consumer coverage and rejecting
+  unreadable or malformed changed intents.
+- Unchanged baseline entries, note-only edits and removed intents remain
+  unrelated to the current PR. Promotion/version allocation and immutable-slot
+  admission are unchanged. Review, required CI, release and installed acceptance
+  remain coordinator-owned; MCP, full-update and reattachment gates remain open.
+- The failure-first selection reproduced six failures. Related source guards
+  and selected admitted release decisions now pass 108 tests with two explicit
+  native-symlink capability skips and verified cleanup. Admission/source checks
+  retain 4,668 nodes, 663 sources and the 300-second budget without fingerprint
+  changes; this selected evidence is not the full required CI packet.

@@ -1471,31 +1471,6 @@ completion of those exact children. Older bundles still support exact source
 references; an alias-only retry without either the source ledger or durable
 proof fails explicitly rather than guessing equivalence.
 
-## Opening with a retained prompt handoff
-
-A preservation-capable Worktree Manager can reopen a confirmed stopped worktree
-whose previous prompt handoff is unconfirmed. It warns and preserves the prompt
-and handoff unchanged, using admission-only execution rather than submitting
-that prompt again. Existing history selection is unchanged.
-
-The call-scoped `AGENT_WORKTREES_RETAINED_SEED_PLANS=1` hint requests a plan with
-`seed_preserved_id` and `seed_preservation_version: 1`. Manager forwards that identity as
-`resolve --worktree-id <id> --preserve-seed-id <seed-id>` when the local launcher
-resolves again. That selector never requests delivery, even if the original
-handoff has since been released. A missing, replaced or conflicting selection
-refuses before staging another intent. The launchers also skip legacy prompt
-delivery for a preserved plan.
-
-Older Managers do not request these plans and keep the original safe refusal.
-Older Engines may ignore the optional hint, but reject an unsupported explicit
-preservation selector before effects; there is no weaker retry.
-
-Explicit delivery of an unconfirmed retained prompt still refuses. A changed staged
-identity between planning and execution also refuses rather than consuming the
-new intent. Opening the worktree is not a delivery receipt or permission to
-discard, restore or replay the retained prompt; reconcile its original handoff
-separately. Liveness, hosting and execution admission checks remain in force.
-
 ## Resolve previews
 
 `resolve --dry-run --worktree-id <id>` is read-only, including with `--json`

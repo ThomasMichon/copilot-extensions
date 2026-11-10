@@ -139,7 +139,7 @@ def configured_snapshot(
     credentials = {}
     if credential_source is not None:
         from .providers.base import ProviderError
-        if token is not None or provider.name not in ("github", "azure-devops"):
+        if token is not None or provider.name not in ("github", "gitea", "azure-devops"):
             raise ProviderError("Renewable observation credentials require a supported read-only binding")
         credentials["credential_source"] = credential_source
     method = getattr(provider, "get_configured_snapshot", None)

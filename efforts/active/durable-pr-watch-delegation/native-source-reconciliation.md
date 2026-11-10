@@ -5,7 +5,8 @@ Back to the [CLI parity inventory](cli-parity-inventory.md) and
 
 **Agent-recommended contract reviewed in #11754; source qualification is
 recorded in the [implementation journal](journal/2026/11.09%20Native%20local%20source%20reconciliation.md).
-Independent implementation review and delivery remain open.**
+Implementation merged in #11761 after current-head independent approval and
+all actual required checks; installed and broader acceptance remain open.**
 This source-only slice advances the PR-domain
 [one-service-contract direction](../../../visions/plugins/agent-pull-requests/README.md#cli-through-one-service-contract)
 and [preserved source custody](../../../visions/plugins/agent-pull-requests/README.md#delegated-source-with-preserved-custody).
