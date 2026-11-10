@@ -132,10 +132,11 @@ def test_plugin_adapter_preserves_typed_argv_and_default_budget(tmp_path):
     assert "--all" not in argv and "--allow-host-state" not in argv
 
 
-def test_native_packet_preserves_public_caller_selection_and_functional_bounds(tmp_path):
-    argv = worker.native_command(tmp_path, tmp_path / "out")
+@pytest.mark.parametrize("caller", ["embody", "copilot"])
+def test_native_packet_preserves_public_caller_selection_and_functional_bounds(tmp_path, caller):
+    argv = worker.native_command(tmp_path, tmp_path / "out", "native-worktrees-" + caller)
     assert argv[argv.index("--test-file") + 1] == "tests/native/test_native_seed_application.py"
-    assert argv[argv.index("-k") + 1] == "public_embody"
+    assert argv[argv.index("-k") + 1] == "public_" + caller
     assert [argv[argv.index(flag) + 1] for flag in (
         "--timeout", "--plugin-timeout", "--test-timeout",
     )] == ["900", "1200", "900"]
@@ -163,7 +164,7 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
 
 @pytest.mark.parametrize("packet,native", [
     (None, False), ("bridge-http52", False), ("mcp-caller-lifetime", False),
-    ("native-worktrees-embody", True),
+    ("native-worktrees-embody", True), ("native-worktrees-copilot", True),
     ("native-driver-auth-wait", True), ("native-driver-inflight", True),
     ("native-driver-observation-loss", True),
     ("native-driver-startup-seed", True), ("native-driver-startup-no-seed", True),
@@ -414,6 +415,22 @@ def test_native_result_requires_actual_caller_and_pinned_prerequisites(mutation,
         contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
 
 
+@pytest.mark.parametrize("caller,other", [("copilot", "embody"), ("embody", "copilot")])
+def test_worktrees_packets_cannot_qualify_the_other_public_caller(caller, other):
+    value, expected = result(), request()
+    expected["selection"] = {"kind": "packet", "name": "native-worktrees-" + caller}
+    _, module, _, phase = contract.NATIVE_PACKETS[expected["selection"]["name"]]
+    value.update(
+        request=expected, native_prerequisites=contract.NATIVE_VERSIONS,
+        tests=[{"class": "native." + module, "name": "test_public_" + other, "outcome": "passed"}],
+        phases=[{"name": name, "status": "passed"} for name in (
+            "source-and-selection", "native-prerequisites", phase, "test-runtime",
+        )],
+    )
+    with pytest.raises(ValueError, match="native caller"):
+        contract.validate_result(value, expected, run_id=42, control_sha="c" * 40, run_attempt=1)
+
+
 @pytest.mark.parametrize("mutation", [
     {}, {"tests": []}, {"tests": [{"outcome": "skipped"}]}, {"phases": []},
     {"tests": [{"class": "other", "name": contract.MCP_LIFETIME_CASE, "outcome": "passed"}]},
@@ -549,7 +566,7 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
         return SimpleNamespace(returncode=0, stdout="selected feed.example.invalid", stderr="")
 
     def prepare(owned, *, require_feed):
-        assert require_feed is (packet == "native-worktrees-embody")
+        assert require_feed is (plugin == "agent-worktrees")
         if not prerequisites:
             raise ValueError("unavailable feed.example.invalid")
         return dict(contract.NATIVE_VERSIONS)
@@ -647,7 +664,7 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
 
 @pytest.mark.parametrize("unsupported", [
     "version", "selector", "packet", "inflight", "observation-loss",
-    "startup-seed", "startup-no-seed", "startup-cold-resume", "workflow", "unprotected",
+    "startup-seed", "startup-no-seed", "startup-cold-resume", "copilot", "workflow", "unprotected",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
     tmp_path, monkeypatch, unsupported,
@@ -660,11 +677,16 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "observation-loss": "native-driver-observation-loss",
         "startup-seed": "native-driver-startup-seed", "startup-no-seed": "native-driver-startup-no-seed",
         "startup-cold-resume": "native-driver-startup-cold-resume",
+        "copilot": "native-worktrees-copilot",
     }.get(unsupported)
     selected = (
         {"kind": "packet", "name": packet} if packet else focused()
     )
     files = [
+        "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
+        "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
+        "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
+    ] if packet == "native-worktrees-copilot" else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
     ] if packet else ["plugins/sample/tests/test_sample.py"]
@@ -1045,7 +1067,8 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     {"UV_DEFAULT_INDEX", "WINDOWS_QUALIFICATION_NATIVE_PREPARATION"}
                 )
                 assert step["env"]["UV_DEFAULT_INDEX"] == (
-                    "${{ needs.admit.outputs.packet == 'native-worktrees-embody' && "
+                    "${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || "
+                    "needs.admit.outputs.packet == 'native-worktrees-copilot') && "
                     "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
                 )
                 if step["name"].startswith("Sanitize"):

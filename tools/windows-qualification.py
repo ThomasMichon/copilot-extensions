@@ -124,7 +124,7 @@ class Client:
         files = [base + file for file in selected.get("files", [])]
         if selected["kind"] == "packet":
             native = NATIVE_PACKETS.get(selected["name"])
-            if selected["name"] == "native-worktrees-embody":
+            if native and native[0] == "agent-worktrees":
                 files = [
                     "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
                     "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
