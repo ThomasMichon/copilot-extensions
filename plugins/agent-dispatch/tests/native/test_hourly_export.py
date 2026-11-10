@@ -116,6 +116,16 @@ def test_service_events_selected_runtime_metadata_and_normal_machine_report(
     sink({**telemetry.task_lifecycle_event("task.completed", {
         "id": "private-task", "repo": "private-repository",
     }), "ts": hour_start(hour)})
+    from process_telemetry.measurement import begin
+
+    telemetry.set_telemetry_sink(sink)
+    try:
+        measurement = begin(telemetry._slot, "agent-dispatch", "preparation")
+        assert measurement is not None
+        measurement.wall_ns = hour_start(hour) * 1_000_000 + 100
+        measurement.finish("ok")
+    finally:
+        telemetry.clear_telemetry_sink()
     before = (capture / "retained" / "agent-dispatch-telemetry.jsonl").read_bytes()
     arguments = [
         "health", "report", "--service", "agent-dispatch",
@@ -126,11 +136,15 @@ def test_service_events_selected_runtime_metadata_and_normal_machine_report(
     report = json.loads(capsys.readouterr().out)
     result = report["services"][0]
     assert len(report["hours"]) == 168 and result["state"] == "observed"
-    assert result["contribution"]["groups"][0]["outcomes"] == {"completed": 1}
+    groups = result["contribution"]["groups"]
+    assert next(group for group in groups if group["metric"] == "task-lifecycle")["outcomes"] == {"completed": 1}
+    timing = next(group for group in groups if group["metric"] == "operation-duration")
+    assert timing["successful_durations"] == 1 and timing["p95"] >= 0
     assert result["contribution"]["coverage"]["producer_loss"] == "unknown"
     assert report["services"][1]["state"] == "duplicate"
     assert "agent-dispatch/agent-dispatch" in chart.read_text()
     assert "task-lifecycle/lifecycle: 1 observed events" in chart.read_text()
+    assert "operation-duration/preparation: 1 observed events" in chart.read_text()
     assert "private-" not in json.dumps(report)
     assert before == (capture / "retained" / "agent-dispatch-telemetry.jsonl").read_bytes()
     metadata = site / "agent_dispatch" / "hourly-reporting.json"
@@ -227,3 +241,46 @@ def test_reverse_snapshot_does_not_parse_a_suffix_of_an_oversized_record(tmp_pat
     )
     assert result["coverage"]["observations"] == 1
     assert result["coverage"]["malformed"] == 1
+
+
+def test_normal_export_reduces_mixed_performance_outcomes_in_the_completion_hour(
+    tmp_path, monkeypatch, capsys,
+):
+    root = tmp_path / "dispatch"
+    root.mkdir()
+    capture = tmp_path / "capture"
+    (capture / "retained").mkdir(parents=True)
+    (root / "telemetry.json").write_text(json.dumps({
+        "retained_spool": {"directory": str(capture)},
+    }))
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(root))
+    monkeypatch.delenv(telemetry.SINK_ENV_VAR, raising=False)
+    hour = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:00:00Z")
+    stamp = hour_start(hour)
+    boundary = stamp * 1_000_000
+    sink = telemetry.make_retained_spool_sink(capture)
+    telemetry.set_telemetry_sink(sink)
+    try:
+        for start, duration, outcome in (
+            (boundary - 10, 10, "ok"), (boundary + 100, 30, "ok"),
+            (boundary + 100, 999, "error"), (boundary + 100, 50, "cancelled"),
+            (boundary + 100, 70, "unavailable"), (boundary - 11, 10, "ok"),
+        ):
+            telemetry.emit({
+                "schema": "agent.performance.v1", "kind": "span",
+                "component": "agent-dispatch", "stage": "preparation",
+                "start_time_ns": start, "duration_ns": duration, "outcome": outcome,
+                "trace_id": "private-correlation",
+            })
+    finally:
+        telemetry.clear_telemetry_sink()
+    assert main(["telemetry", "hourly", "--hour", hour]) == 0
+    result = json.loads(capsys.readouterr().out)
+    group = result["groups"][0]
+    assert group["metric"] == "operation-duration" and group["unit"] == "ns"
+    assert group["observations"] == 5 and group["successful_durations"] == 2
+    assert group["outcomes"] == {"ok": 2, "error": 1, "cancelled": 1, "unavailable": 1}
+    assert (group["p50"], group["p95"], group["maximum"]) == (10, 30, 30)
+    assert result["coverage"]["outside_hour"] == 1
+    assert result["source"]["first_ms"] == stamp
+    assert "private-correlation" not in json.dumps(result)

@@ -927,3 +927,21 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   existing-mode cases. No skip, hash or permission was changed to claim a
   Windows all-pass result. Current-head Linux PR CI is the independent full
   unit gate; the new source head still needs fresh CI and review acceptance.
+
+### 2026-11-09 - Duration producer/reducer qualification
+- The corrected-head review confirms both runtime fixes and their resolved
+  threads. Its remaining Medium observation identifies missing qualification
+  of the advertised duration path, not another runtime change.
+- Added actual adapter admission cases for missing/boolean/negative/overflow
+  timing, foreign components and unsupported stage/outcome/kind; completion
+  time rather than start or emit time determines the absolute source hour.
+- The required packet now executes the actual span adapter, snapshot reducer
+  and shared percentile primitive on raw events with successful, error,
+  cancelled and unavailable outcomes. Only the successful population affects
+  p50/p95/maximum; a span completing immediately before the hour is excluded.
+  All 28 actor-free cases pass.
+- The targeted Dispatch adapter/native packet passes 35 cases. The existing
+  measurement producer reaches the normal machine report/chart, and native
+  retained mixed-outcome export independently confirms the duration summary
+  without leaking correlation fields. Fixture source hours are controlled;
+  no production performance, service activation or deployed adoption is claimed.

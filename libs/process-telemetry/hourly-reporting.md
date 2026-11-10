@@ -134,6 +134,10 @@ The machine slot/revision/publisher owner remains separate.
 The Dispatch native packet exercises real service-produced retained events,
 the normal export/parser, installed package data in a fresh fixture interpreter,
 the normal Machines report and static chart, and rollback to absent metadata.
+The existing measurement producer also reaches the normal report/chart.
+Controlled retained span cases qualify completion-hour attribution and
+successful-only duration percentiles across mixed outcomes; invalid timing
+and vocabulary are explicitly refused.
 Installation admission/retention selections in that flow are fixture-resolved;
 it is not deployed-host inventory, installed adoption or activation evidence.
 Machines' separate native cleanup packet exercises deadlines, actual inherited

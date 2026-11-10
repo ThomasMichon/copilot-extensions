@@ -105,3 +105,20 @@ def test_package_versions_never_substitute_for_explicit_runtime_declarations():
     for update in ({"version": 2}, {"operation": "ensure"}, {"metrics": ["private-metric"]}):
         with pytest.raises(ValueError):
             hourly.declaration({**metadata, **update}, "agent-dispatch")
+
+
+def test_performance_admission_uses_completion_hour_not_start_or_emit_time():
+    boundary = hourly.hour_start(HOUR) * 1_000_000
+    event = {
+        "schema": "agent.performance.v1", "kind": "span", "component": "agent-dispatch",
+        "stage": "preparation", "outcome": "ok", "start_time_ns": boundary - 10,
+        "duration_ns": 10, "ts": STAMP + hourly.HOUR_MS,
+    }
+    assert observation(event) == (boundary // 1_000_000, "operation-duration", "preparation", "ok", 10)
+    assert observation({**event, "duration_ns": 9})[0] == boundary // 1_000_000 - 1
+    for update in (
+        {"duration_ns": None}, {"duration_ns": True}, {"start_time_ns": -1},
+        {"start_time_ns": 2**63 - 1, "duration_ns": 1},
+        {"component": "another-service"}, {"stage": "unknown"}, {"outcome": []},
+    ):
+        assert observation({**event, **update}) is None

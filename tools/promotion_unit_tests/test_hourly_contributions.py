@@ -217,9 +217,14 @@ def test_collection_cannot_hide_unsettled_native_custody_as_an_independent_gap(c
 
 @pytest.fixture
 def scanner(protocol, monkeypatch):
-    report = ModuleType(protocol.__package__ + ".report")
-    report.summarize = lambda *a, **k: pytest.fail("source selection does not summarize")
+    report_name = protocol.__package__ + ".report"
+    report_spec = importlib.util.spec_from_file_location(
+        report_name, ROOT / "libs/process-telemetry/src/process_telemetry/report.py",
+    )
+    assert report_spec and report_spec.loader
+    report = importlib.util.module_from_spec(report_spec)
     monkeypatch.setitem(sys.modules, report.__name__, report)
+    report_spec.loader.exec_module(report)
     name = protocol.__package__ + ".hourly_scan"
     source = ROOT / "libs/process-telemetry/src/process_telemetry/hourly_scan.py"
     spec = importlib.util.spec_from_file_location(name, source)
@@ -338,3 +343,87 @@ def test_reverse_snapshot_keeps_fresh_records_and_never_admits_partial_or_oversi
     path.write_bytes(b"x" * scanner.MAX_LINE + current + current)
     result = reduce()
     assert result["coverage"]["observations"] == 1 and result["coverage"]["malformed"] == 1
+
+
+@pytest.fixture
+def adapter(protocol, scanner, monkeypatch):
+    telemetry = ModuleType("process_telemetry")
+    telemetry.__path__ = []
+    configured = ModuleType("process_telemetry.configured_spool")
+    configured.retained_directory = lambda *a: pytest.fail("admission does not discover configuration")
+    package = ModuleType("promotion_dispatch")
+    package.__path__ = []
+    owner = ModuleType(package.__name__ + ".telemetry")
+    owner.SINK_ENV_VAR = "AGENT_DISPATCH_TELEMETRY_SINK"
+    owner._default_config_path = lambda: pytest.fail("admission does not read native configuration")
+    for module in (telemetry, configured, package, owner):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setitem(sys.modules, "process_telemetry.hourly", protocol)
+    monkeypatch.setitem(sys.modules, "process_telemetry.hourly_scan", scanner)
+    monkeypatch.setitem(
+        sys.modules, "process_telemetry.measurement",
+        sys.modules[protocol.__package__ + ".measurement"],
+    )
+    name = package.__name__ + ".hourly_reporting"
+    source = ROOT / "plugins/agent-dispatch/src/agent_dispatch/hourly_reporting.py"
+    spec = importlib.util.spec_from_file_location(name, source)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, name, module)
+    spec.loader.exec_module(module)
+    return module
+
+
+def span(start, duration=20, outcome="ok", **fields):
+    return {
+        "schema": "agent.performance.v1", "kind": "span", "component": "agent-dispatch",
+        "stage": "preparation", "start_time_ns": start, "duration_ns": duration,
+        "outcome": outcome, **fields,
+    }
+
+
+@pytest.mark.parametrize("fields", [
+    {"duration_ns": None}, {"duration_ns": True}, {"start_time_ns": -1},
+    {"start_time_ns": 2**63 - 1, "duration_ns": 1}, {"component": "another-service"},
+    {"stage": "unknown"}, {"outcome": []}, {"kind": "event"},
+], ids=["missing", "boolean", "negative", "overflow", "owner", "stage", "outcome", "kind"])
+def test_service_span_admission_refuses_invalid_timing_and_vocabulary(adapter, protocol, fields):
+    stamp = protocol.hour_start("2026-11-09T12:00:00Z") * 1_000_000
+    assert adapter.observation({**span(stamp), **fields}) is None
+
+
+def test_service_span_admission_uses_completion_not_emit_time(adapter, protocol):
+    stamp = protocol.hour_start("2026-11-09T12:00:00Z")
+    value = span(stamp * 1_000_000 - 10, duration=10, ts=stamp + protocol.HOUR_MS)
+    assert adapter.observation(value) == (stamp, "operation-duration", "preparation", "ok", 10)
+    assert adapter.observation({**value, "duration_ns": 9})[0] == stamp - 1
+
+
+def test_duration_reduction_preserves_success_population_with_mixed_outcomes(
+    scanner, adapter, protocol, tmp_path,
+):
+    hour = "2026-11-09T12:00:00Z"
+    stamp = protocol.hour_start(hour)
+    boundary = stamp * 1_000_000
+    records = [
+        span(boundary - 10, duration=10), span(boundary + 100, duration=30),
+        span(boundary + 100, duration=999, outcome="error"),
+        span(boundary + 100, duration=50, outcome="cancelled"),
+        span(boundary + 100, duration=70, outcome="unavailable"),
+        span(boundary - 11, duration=10),
+    ]
+    path = tmp_path / "events.jsonl"
+    path.write_bytes(b"".join((json.dumps(record) + "\n").encode() for record in records))
+    result = scanner.reduce(
+        [path], service="agent-dispatch", hour=hour,
+        generated_at_ms=stamp + 1000, observation=adapter.observation,
+    )
+    protocol.validate(
+        result, service="agent-dispatch", hour=hour,
+        metrics=["operation-duration"], now_ms=stamp + 1000,
+    )
+    group = result["groups"][0]
+    assert group["observations"] == 5 and group["successful_durations"] == 2
+    assert group["outcomes"] == {"ok": 2, "error": 1, "cancelled": 1, "unavailable": 1}
+    assert (group["p50"], group["p95"], group["maximum"]) == (10, 30, 30)
+    assert result["coverage"]["outside_hour"] == 1
