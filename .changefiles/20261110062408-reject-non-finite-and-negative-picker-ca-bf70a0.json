@@ -1,0 +1,9 @@
+{
+  "comment": "Reject non-finite and negative Picker capture waits before source access or UI creation.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
