@@ -628,3 +628,103 @@ def test_interrupted_post_replace_sync_preserves_unknown_target_and_replay_fence
     assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == 1
     assert (store / "collection.lock").read_bytes() == b"\1"
     assert apply_run(store)["qualification"] == "collection-cleanup-unconfirmed"
+
+
+def test_cli_preplan_interruption_preserves_cancellation_without_inventing_a_result(store, monkeypatch):
+    before = {path.name: path.read_bytes() for path in store.iterdir()}
+
+    def interrupt(*args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(runner, "policy_preview", interrupt)
+    monkeypatch.setattr(collector, "admission", lambda *a, **k: pytest.fail("preplan admission"))
+    with pytest.raises(KeyboardInterrupt):
+        main(["health", "run", "--store-dir", str(store)])
+    assert {path.name: path.read_bytes() for path in store.iterdir()} == before
+
+
+@pytest.mark.parametrize("surface", ["python", "cli"])
+def test_final_guard_interruption_preserves_both_confirmed_commits(store, monkeypatch, capsys, surface):
+    real_admission, preview = collector.admission, runner.policy_preview
+    after_admission = interrupted = False
+    monkeypatch.setattr(service_reports, "collect", lambda *a, **k: [])
+
+    @contextmanager
+    def admission(*args, **kwargs):
+        nonlocal after_admission
+        try:
+            with real_admission(*args, **kwargs) as begin:
+                yield begin
+        finally:
+            after_admission = True
+
+    def final_check(*args):
+        nonlocal interrupted
+        if after_admission and not interrupted:
+            interrupted = True
+            raise KeyboardInterrupt
+        return preview(*args)
+
+    monkeypatch.setattr(collector, "admission", admission)
+    monkeypatch.setattr(runner, "policy_preview", final_check)
+    token = approve(store)
+    if surface == "python":
+        with pytest.raises(KeyboardInterrupt) as caught:
+            runner.run(store, apply=True, expected=token)
+        result = caught.value.health_run_result
+    else:
+        assert main([
+            "health", "run", "--store-dir", str(store), "--apply", "--expect-policy", token,
+        ]) == 2
+        result = json.loads(capsys.readouterr().out)
+    assert result["status"] == "partial" and result["qualification"] == "collection-interrupted"
+    assert all(row["transaction"] == "recorded" and row["applied"] and row["changed"] for row in result["targets"])
+    assert slots.inspect(store, now_ms=STAMP)["observed_hours"] == 2
+    assert not collector._RUN_LOCK.locked()
+    assert (store / "collection.lock").read_bytes() == b"\0"
+
+
+def test_final_guard_interruption_cannot_discard_a_retained_cleanup_owner(store, monkeypatch):
+    ready = after_admission = False
+    owner = None
+    real_admission, preview = collector.admission, runner.policy_preview
+
+    def settle(deadline):
+        if not ready:
+            raise TimeoutError("fixture not settled")
+
+    def export(*args, **kwargs):
+        raise service_reports.OwnedCleanupError(None, cleanup_retry=settle)
+
+    @contextmanager
+    def admission(*args, **kwargs):
+        nonlocal after_admission
+        try:
+            with real_admission(*args, **kwargs) as begin:
+                yield begin
+        finally:
+            after_admission = True
+
+    def final_check(*args):
+        if after_admission:
+            raise KeyboardInterrupt
+        return preview(*args)
+
+    monkeypatch.setattr(collector, "admission", admission)
+    monkeypatch.setattr(runner, "policy_preview", final_check)
+    monkeypatch.setattr(service_reports, "collect", export)
+    try:
+        with pytest.raises(service_reports.OwnedCleanupError) as caught:
+            apply_run(store)
+        owner = caught.value
+        assert isinstance(owner.__cause__, KeyboardInterrupt)
+        assert owner.health_run_result["qualification"] == "collection-interrupted"
+        assert owner.health_run_result["targets"][0]["applied"]
+        assert owner.health_run_result["targets"][1]["reason"] == "collection-cleanup-unconfirmed"
+        assert collector._RUN_LOCK.locked()
+    finally:
+        ready = True
+        if owner is not None:
+            owner.retry_cleanup(deadline=time.monotonic() + 1)
+    assert not collector._RUN_LOCK.locked()
+    assert (store / "collection.lock").read_bytes() == b"\0"

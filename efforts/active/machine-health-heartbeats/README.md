@@ -1185,3 +1185,21 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   passed. Six focused actor-free composition nodes cover the orchestration;
   native matrices remain opt-in. Fresh exact-source CI and review still gate
   #11880; no enrollment, installed update, carrier write or activation occurred.
+
+### 2026-11-09 - Preserve facts through final admission checks
+- Interruption-result handling now covers the complete apply/finalization
+  boundary, including the final post-admission guard. Confirmed commits are
+  retained; an outstanding original cleanup owner still propagates with its
+  retry handle and the interruption as its cause. Cancellation before planning
+  propagates normally, without replacing it with an attribute error or an
+  invented operation result.
+- Focused controls passed 128 cases, including Python/CLI final-guard
+  interruption and final interruption while native cleanup remains retained.
+  The managed collection/native-consumer packet passed all 46 cases.
+- One native preparation run exhausted its unchanged test deadline copying the
+  entire coordinator package, before collection started. The fixture now copies
+  the real early CLI/export dependency closure only; the passing rerun uses the
+  same test and collection deadlines, real exporter and selected metadata.
+- Seven bounded actor-free composition nodes cover the new operation.
+  Review and fresh exact-source CI still gate #11880. Parent/platform,
+  installed-adoption, scheduling, carrier and activation gates remain open.

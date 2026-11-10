@@ -1,6 +1,7 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_one_shot_actor_free_final_interruption_retains_committed_facts",
         "tools/promotion_unit_tests/test_health_composition.py::test_one_shot_actor_free_interruption_retains_unknown_transaction",
         "tools/promotion_unit_tests/test_health_composition.py::test_one_shot_actor_free_cleanup_preserves_original_exception_and_partial_result",
         "tools/promotion_unit_tests/test_health_composition.py::test_one_shot_policy_preview_and_approval_are_actor_free",
@@ -4759,12 +4760,12 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "8c891a464f61c83495d71eb62e696fc34d9fd52b569be4a82dc05c45b5f01349",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "91eebae0e38f4cbcc12385ef5c4ea87cc615035e284bf0685d98c969a93ce3ea",
+        "tools/promotion_unit_tests/test_health_composition.py": "30960140274c035e035e25e6ef47b9889453b5c1f58f4d6f7b81debaa118ad70",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "bc32cf7b244ba2e78a356c4f1c811b6f97f7dd90fdf689ee49576149444ce053",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",
         "plugins/agent-machines/src/agent_machines/health_slots.py": "9317a16c7d6d70cce4afb93b5e9fb692d2a0dc25d8b5c19797ad5d0e00bb1149",
-        "plugins/agent-machines/src/agent_machines/health_run.py": "f91c801b7beab22e9ed0b359e8bd8d19be2e29fc6eb956320be876d002998d31",
+        "plugins/agent-machines/src/agent_machines/health_run.py": "68a1cd656e2ceb65b48a0d6a7dcada95d088a973a2f7ee60739ead4e9c4fb1df",
         "libs/process-telemetry/src/process_telemetry/hourly.py": "d67b389059d202755a5020b2591a89d4882a3eb6cc774c39bf83b8072b967a47",
         "tools/promotion_unit_tests/test_hourly_contributions.py": "d3b6c39c0c02c26800afa6ac87d74ae835d043e536859dfc3f86469b9f4160d6",
         "plugins/agent-machines/src/agent_machines/service_reports.py": "a7f0b460af2c656a326193624cd074336ba9f3a3ceeb52d8c3f6d77d9206cd0a",

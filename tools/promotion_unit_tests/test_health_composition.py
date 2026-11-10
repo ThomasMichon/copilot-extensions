@@ -614,3 +614,31 @@ def test_one_shot_actor_free_cleanup_preserves_original_exception_and_partial_re
     assert result["qualification"] == "collection-cleanup-unconfirmed"
     assert result["targets"][1]["collection"] == "failed"
     assert not result["targets"][1]["applied"]
+
+
+def test_one_shot_actor_free_final_interruption_retains_committed_facts(one_shot, monkeypatch):
+    modules, store, files, _calls, _parser = one_shot
+    runner, collector = modules["health_run"], modules["health_collect"]
+    preview = runner.policy_preview
+    after_admission = False
+
+    @contextmanager
+    def admission(*args, **kwargs):
+        nonlocal after_admission
+        yield lambda: None
+        after_admission = True
+
+    def final_check(*args):
+        if after_admission:
+            raise KeyboardInterrupt
+        return preview(*args)
+
+    monkeypatch.setattr(collector, "admission", admission)
+    monkeypatch.setattr(runner, "policy_preview", final_check)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        runner.run(store, apply=True, expected=runner.run(store)["policy_token"])
+    result = caught.value.health_run_result
+    assert result["qualification"] == "collection-interrupted"
+    assert result["targets"][1]["transaction"] == "recorded"
+    assert result["targets"][1]["applied"] and result["targets"][1]["changed"]
+    assert len(files) == 2

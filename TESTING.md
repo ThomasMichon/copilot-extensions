@@ -5705,6 +5705,11 @@ in-process cleanup controls recover the original retry owner and partial
 result. Native controls additionally exercise the durable fence after CLI exit,
 delayed second requests, prompt fixture cancellation and both payload entry
 points' refusal to provision a missing one-shot runtime.
+Final post-admission interruption retains already confirmed commits and any
+outstanding native cleanup owner; pre-plan cancellation fabricates no result.
+The native selected-runtime fixture copies the actual early CLI/export closure,
+not the unrelated coordinator tree, keeping preparation outside the operation
+budget and inside the unchanged test deadline.
 
 The actor-free `test_hourly_contributions.py` packet executes the canonical
 service contribution codec and collection policy with substituted native owners

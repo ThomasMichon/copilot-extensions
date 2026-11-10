@@ -69,7 +69,9 @@ def run_collection(args) -> int:
         try:
             result = run(args.store_dir, apply=args.apply, expected=args.expect_policy)
         except (OwnedCleanupError, KeyboardInterrupt) as error:
-            result = error.health_run_result
+            result = getattr(error, "health_run_result", None)
+            if result is None:
+                raise
         print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
         return 0 if result["status"] in {"preview", "completed"} else 2
     except (ValueError, OSError, OverflowError) as error:

@@ -94,65 +94,70 @@ def run(store: Path, *, apply=False, expected="") -> dict:
     active = cleanup_error = None
     result["qualification"] = "within-budget"
     try:
-        with collector.admission(
-            store, uncertain=lambda: any(row["transaction"] == "unknown" for row in targets),
-        ) as begin_exports:
+        try:
+            with collector.admission(
+                store, uncertain=lambda: any(row["transaction"] == "unknown" for row in targets),
+            ) as begin_exports:
+                guard()
+                for active in targets:
+                    if not active["requested"]:
+                        continue
+                    try:
+                        guard()
+                        candidate = collector.collect_target(
+                            store, active["hour"], current_hour=current_hour, started_ms=started_ms,
+                            deadline=deadline, policy=policy, policy_hash=policy_hash, begin_exports=begin_exports,
+                        )
+                        active["collection"] = candidate["coverage"][active["component"]]
+                        guard()
+                        # A crash/unknown commit must fence automatic invocations too.
+                        begin_exports()
+                        active.update(transaction="unknown", applied=None, changed=None)
+                        transaction = slots.record_collected(
+                            store, candidate, now_ms=time.time_ns() // 1_000_000, guard=guard,
+                            deadline=deadline - RESPONSE_MARGIN,
+                        )
+                        active.update(
+                            transaction=transaction["status"], applied=transaction["applied"],
+                            changed=transaction["changed"],
+                        )
+                        if transaction["status"] == "unknown":
+                            result["qualification"] = "write-unconfirmed"
+                            break
+                    except OwnedCleanupError:
+                        raise
+                    except (ValueError, OSError, OverflowError) as error:
+                        active["reason"] = _reason(error)
+                        if active["collection"] == "not-attempted":
+                            active["collection"] = "failed"
+                        else:
+                            active.update(transaction="refused", applied=False, changed=False)
+                        guard()
+                guard()
+        except (ValueError, OSError, OverflowError, OwnedCleanupError) as error:
+            reason = _reason(error)
+            if isinstance(error, OwnedCleanupError):
+                cleanup_error = error
+                cleanup_error.health_run_result = result
+            result["qualification"] = reason
+            if active is not None and active["requested"]:
+                active["reason"] = reason
+                if active["collection"] == "not-attempted":
+                    active["collection"] = "failed"
+        try:
             guard()
-            for active in targets:
-                if not active["requested"]:
-                    continue
-                try:
-                    guard()
-                    candidate = collector.collect_target(
-                        store, active["hour"], current_hour=current_hour, started_ms=started_ms,
-                        deadline=deadline, policy=policy, policy_hash=policy_hash, begin_exports=begin_exports,
-                    )
-                    active["collection"] = candidate["coverage"][active["component"]]
-                    guard()
-                    # A crash/unknown commit must fence automatic invocations too.
-                    begin_exports()
-                    active.update(transaction="unknown", applied=None, changed=None)
-                    transaction = slots.record_collected(
-                        store, candidate, now_ms=time.time_ns() // 1_000_000, guard=guard,
-                        deadline=deadline - RESPONSE_MARGIN,
-                    )
-                    active.update(
-                        transaction=transaction["status"], applied=transaction["applied"],
-                        changed=transaction["changed"],
-                    )
-                    if transaction["status"] == "unknown":
-                        result["qualification"] = "write-unconfirmed"
-                        break
-                except OwnedCleanupError:
-                    raise
-                except (ValueError, OSError, OverflowError) as error:
-                    active["reason"] = _reason(error)
-                    if active["collection"] == "not-attempted":
-                        active["collection"] = "failed"
-                    else:
-                        active.update(transaction="refused", applied=False, changed=False)
-                    guard()
-            guard()
-    except (ValueError, OSError, OverflowError, OwnedCleanupError) as error:
-        reason = _reason(error)
-        if isinstance(error, OwnedCleanupError):
-            cleanup_error = error
-        result["qualification"] = reason
-        if active is not None and active["requested"]:
-            active["reason"] = reason
-            if active["collection"] == "not-attempted":
-                active["collection"] = "failed"
+        except (ValueError, OSError, OverflowError) as error:
+            # Settlement and filesystem calls may finish late; retain committed facts.
+            result["qualification"] = _reason(error)
+        _finish(result)
+        if cleanup_error is not None:
+            raise cleanup_error
+        return result
     except BaseException as error:
+        if error is cleanup_error:
+            raise
         result["qualification"] = "collection-interrupted"
         error.health_run_result = _finish(result)
+        if cleanup_error is not None:
+            raise cleanup_error from error
         raise
-    try:
-        guard()
-    except (ValueError, OSError, OverflowError) as error:
-        # Settlement and filesystem calls may finish late; retain committed facts.
-        result["qualification"] = _reason(error)
-    _finish(result)
-    if cleanup_error is not None:
-        cleanup_error.health_run_result = result
-        raise cleanup_error
-    return result

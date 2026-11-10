@@ -39,10 +39,15 @@ def test_real_service_and_listener_reach_distinct_slots_and_read_only_report(
         python = fixture / "bin" / "python"
         site = fixture / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"
     site.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(
-        Path(telemetry.__file__).parent, site / "agent_dispatch",
-        ignore=shutil.ignore_patterns("__pycache__"),
-    )
+    selected_package = site / "agent_dispatch"
+    selected_package.mkdir()
+    # Keep the real early CLI/export closure without copying coordinator code.
+    for name in (
+        "__init__.py", "__main__.py", "source_build.py", "early_cli.py",
+        "delegated_waiter_contract.py", "telemetry_cli.py", "telemetry.py",
+        "install_paths.py", "hourly_reporting.py", "hourly-reporting.json",
+    ):
+        shutil.copyfile(Path(telemetry.__file__).parent / name, selected_package / name)
     (site / "fixture-dependencies.pth").write_text(
         "\n".join(str(Path(path).resolve()) for path in sys.path if path and Path(path).is_dir()) + "\n",
         encoding="utf-8",

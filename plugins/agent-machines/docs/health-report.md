@@ -265,6 +265,10 @@ its durable fence. Interrupted commits are marked unknown before entering the
 writer and preserve the fence even when a `KeyboardInterrupt` escapes.
 Python interruption errors also carry `health_run_result`; the CLI emits it
 for a keyboard interruption rather than claiming no write happened.
+This includes interruption during final post-admission validation: confirmed
+commits retain their facts. Any outstanding original cleanup owner still
+propagates, with the interruption as its cause. Cancellation before planning
+propagates unchanged instead of inventing a partial operation result.
 
 Independently installed callers must first qualify the exact selected Machines
 runtime's packaged `agent_machines/health-collection-v1.json` declaration:
