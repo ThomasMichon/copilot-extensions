@@ -170,6 +170,16 @@ for the recorded native versions, not the operator's installed build, attached
 or new-window use, or survival across caller cleanup Jobs. New packet support
 must be reviewed and promoted to the protected controller before submission.
 
+`submit --packet native-worktrees-copilot` separately selects the candidate's
+`test_public_copilot` in the same application fixture module. It requires the
+real installed public `copilot` entrypoint and an owned private controlling
+terminal, with fresh/resume/reuse, broker/history, seed non-replay and exact
+cleanup evidence. It uses the same pinned prerequisites, Worktrees-only feed,
+sanitization and unchanged functional/preparation bounds as the detached
+packet. Controller support does not supply or qualify the candidate fixture.
+Neither packet qualifies new-window/no-mux modes or survival after all caller
+cleanup Jobs close; a detached `embody` result cannot qualify the TTY caller.
+
 `submit --packet native-driver-auth-wait` selects only the Driver receiver's
 `test_opt_in_receiver_auth_wait_and_same_session_resume` in
 `tests/native/test_native_headed_auth_wait.py`. The candidate must supply that

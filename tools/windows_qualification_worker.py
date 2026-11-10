@@ -332,7 +332,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                     status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
                     raise ValueError(f"Pinned native prerequisite acquisition did not succeed ({status})")
                 return native_prerequisites(
-                    owned, require_feed=selected["name"] == "native-worktrees-embody",
+                    owned, require_feed=native[0] == "agent-worktrees",
                 )
             result["native_prerequisites"] = phase(
                 "native-prerequisites", prepare_native,
