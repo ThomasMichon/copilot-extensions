@@ -285,7 +285,7 @@ does not become a cleanup bypass. Exact fixture processes and upstreams are
 settled through their contained lifecycle owner.
 
 The combined native Windows and existing custody regression packet passes
-256 tests with two existing platform skips and verified cleanup. Both native
+259 tests with two existing platform skips and verified cleanup. Both native
 keeper-start variants pass physical replacement and rollback.
 
 Both native POSIX variants also pass, using real AF_UNIX connections and
