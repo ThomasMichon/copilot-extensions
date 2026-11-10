@@ -6,7 +6,7 @@ import os
 import subprocess
 import sys
 import time
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 import pytest
@@ -144,7 +144,9 @@ def test_capability_probe_is_available_before_repository_selection_without_effec
 
 
 @pytest.mark.parametrize("original", [None, b"repo_name: harness\r\n", b"knowledge_repo: knowledge\n"])
-def test_callback_change_preserves_external_config_without_commit_receipt(tmp_path: Path, original) -> None:
+def test_callback_change_preserves_external_config_without_commit_receipt(
+    tmp_path: Path, original: bytes | None,
+) -> None:
     config = tmp_path / "config.yaml"
     if original is not None:
         config.write_bytes(original)
@@ -159,12 +161,14 @@ def test_callback_change_preserves_external_config_without_commit_receipt(tmp_pa
     assert {path.name for path in tmp_path.iterdir()} == {"config.yaml", ".knowledge-binding.lock"}
 
 
-def test_change_during_render_is_rechecked_before_replace(tmp_path: Path, monkeypatch) -> None:
+def test_change_during_render_is_rechecked_before_replace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     config = tmp_path / "config.yaml"
     config.write_bytes(b"repo_name: harness\n")
-    original = binding.set_top_yaml_key
+    original: Callable[[str, str, str], str] = binding.set_top_yaml_key
 
-    def render(text, key, value):
+    def render(text: str, key: str, value: str) -> str:
         config.unlink()
         return original(text, key, value)
 
