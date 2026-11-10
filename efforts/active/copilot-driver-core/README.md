@@ -3183,3 +3183,36 @@ source `91e1316540584922d288b20dd5c941bbfc32ca3f` and evidence-journal commit
 `88de6715e80228eee456f9328ff276b61e872187`. Reconcile the owned local stack
 against its original base without dropping the native fixes or reverting
 controller corrections already upstream, then continue normal publication.
+
+The owned 17-commit stack was squashed against its original base with a
+byte-identical tree check and all backups retained, then reconciled once onto
+current Dev. Already-merged controller copies keep the upstream versions;
+the public caller, native fixtures and journal remain. Reconciled source
+`759e2739e7b78df521ccd60d44829589b2b0adc6` passes the combined 118-case
+focused packet, F/E9, whitespace and all 13 install contracts. Its exact
+native requalification request is `f6c576c52d9d4e48a4e440f5f852092e`.
+The shared append-only ref moved during compare-and-swap; the push was
+explicitly rejected, then the read-only reconciliation fetch timed out.
+The original request is preserved, not replaced. The supported resume path
+currently refuses that unconfirmed envelope; resolve this client recovery
+gap without replaying unknown effects or editing admission/request state.
+No native test has been dispatched for this reconciled candidate.
+
+Delta-reviewed receiver revision
+`9cca7e19af416b103c4e571aeacd1e0e40898dd6`: lease replacements wake the
+deadline watcher, sub-reserve grants close authorization before a new launch,
+and active source renewal preserves native lifetime without clearing a
+broker-control hold. Three independent bounded Python/loopback probes confirm
+the two reported source blockers are addressed and recovery remains refused
+after a genuine stop with a hold. This is source-level review, not native
+acceptance or permission to enable anything.
+
+The actual protected controller declaration at
+`9324da33891644180b0237cccaadf8d9aa086a4b` still admits only the HTTP-52
+and public-Worktrees native packets; its pinned binary preparation is exclusive
+to the latter. Generic plugin/file selection does not provide those native
+prerequisites. Prepare the smallest separately reviewed receiver-native fixture
+and controller selection in the qualification workspace, without changing
+receiver implementation, widening secret exposure, installing on a productive
+host or relabeling the public-caller pass. Native receiver proof remains an
+independent gate before positive renewal.
