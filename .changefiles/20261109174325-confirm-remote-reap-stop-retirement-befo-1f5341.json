@@ -1,0 +1,9 @@
+{
+  "comment": "Confirm remote reap-stop retirement before success and release only the retired connection",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

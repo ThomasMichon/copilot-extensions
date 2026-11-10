@@ -2084,6 +2084,160 @@ async def test_end_session_codespace_boundary_raises_on_inconclusive_reap(
     assert manager._host_index.get(session.session_id) is not None
 
 
+@pytest.fixture
+def remote_reap_stop(tmp_db, tmp_path, monkeypatch):
+    from ssh_manager import TargetLock
+
+    manager = SessionManager(tmp_db)
+    target = SpawnTarget(
+        type="command", codespace={"name": "example-codespace"},
+        caller_worktree=str(tmp_path),
+    )
+    session = Session("reap-stop", "retained", target)
+    session.status = SessionStatus.IDLE
+    session.acp_session_id = "retained-conversation"
+    session.turn_count = 1
+    manager._sessions[session.session_id] = session
+    tmp_db.create_session(
+        session.session_id, session.name, None, target.cwd, target.type,
+        session.status.value, time.time(), target_json=target.to_json(),
+        acp_session_id=session.acp_session_id,
+    )
+    manager._host_index.register(HostRecord(
+        session_id=session.session_id, port=5000, host_pid=300, child_pid=123,
+        boundary="codespace", endpoint={"kind": "codespace"},
+    ))
+    monkeypatch.setattr("ssh_manager.locks.locks_dir", lambda: tmp_path / "locks")
+    manager._acquire_codespace_lock(session.session_id, "example-codespace")
+    other_lock = TargetLock("unrelated-codespace").acquire()
+    release_claim = Mock(side_effect=AssertionError("stop must retain the durable claim"))
+    monkeypatch.setattr("agent_bridge.session_manager._release_codespace_claim", release_claim)
+    try:
+        yield manager, session, other_lock
+    finally:
+        manager._release_codespace_lock(session.session_id)
+        other_lock.release()
+
+
+@pytest.mark.asyncio
+async def test_remote_reap_stop_waits_for_confirmation_and_releases_only_connection(
+    remote_reap_stop, monkeypatch,
+) -> None:
+    manager, session, other_lock = remote_reap_stop
+    entered, finish = asyncio.Event(), asyncio.Event()
+    manager._remote_recovery_inconclusive.add(session.session_id)
+    reap_calls = 0
+    lock_dir = manager._codespace_locks["example-codespace"][0].path.parent
+
+    def probe_connection():
+        return subprocess.run(
+            [sys.executable, "-c",
+             "import sys\nfrom pathlib import Path\n"
+             "from ssh_manager import TargetLock, TargetBusyError\n"
+             "try:\n"
+             " with TargetLock('example-codespace', directory=Path(sys.argv[1])): pass\n"
+             "except TargetBusyError: sys.exit(75)\n",
+             str(lock_dir)],
+            capture_output=True, timeout=5,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+        ).returncode
+
+    async def confirm(*_args, **_kwargs):
+        nonlocal reap_calls
+        reap_calls += 1
+        entered.set()
+        await finish.wait()
+        return SimpleNamespace(exit_code=0, stdout="__REAPED__")
+
+    monkeypatch.setattr("ssh_manager.ConnectionManager", lambda: SimpleNamespace(
+        ensure_connected=AsyncMock(), disconnect=AsyncMock(), exec_command=confirm,
+    ))
+    monkeypatch.setattr(
+        "agent_bridge.session_host.endpoints.ssh_config_from_endpoint",
+        lambda endpoint: SimpleNamespace(host_alias="synthetic"),
+    )
+    operation = asyncio.create_task(manager.stop_session(session.session_id, reap_host=True))
+    try:
+        await asyncio.wait_for(entered.wait(), 2)
+        assert not operation.done()
+        assert manager._host_index.get(session.session_id) is not None
+        assert session.session_id in manager._codespace_lock_sessions
+        assert probe_connection() == 75
+        finish.set()
+        await operation
+        assert session.status == SessionStatus.STOPPED
+        assert manager._host_index.get(session.session_id) is None
+        assert session.session_id not in manager._codespace_lock_sessions
+        assert probe_connection() == 0
+        assert other_lock.read_holder().pid == os.getpid()
+        row = manager.db.get_session(session.session_id)
+        assert row["acp_session_id"] == "retained-conversation"
+        assert SpawnTarget.from_json(row["target_json"]).caller_worktree == session.target.caller_worktree
+        assert not manager._remote_reap_tasks
+        await manager.stop_session(session.session_id, reap_host=True)
+        assert reap_calls == 1
+    finally:
+        finish.set()
+        await asyncio.gather(operation, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_remote_reap_stop_cancellation_preserves_custody(
+    remote_reap_stop, monkeypatch,
+) -> None:
+    manager, session, _other_lock = remote_reap_stop
+    monkeypatch.setattr(manager, "_remote_reap", AsyncMock(side_effect=asyncio.CancelledError))
+    with pytest.raises(asyncio.CancelledError):
+        await manager.stop_session(session.session_id, reap_host=True)
+    assert manager._host_index.get(session.session_id) is not None
+    assert session.session_id in manager._codespace_lock_sessions
+    assert session.status != SessionStatus.STOPPED
+    assert session.background_recovery_enabled is False
+    assert not manager._remote_reap_tasks
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record_present", [True, False])
+@pytest.mark.parametrize("reap_raises", [True, False])
+async def test_remote_reap_stop_retains_unconfirmed_custody(
+    remote_reap_stop, monkeypatch, record_present, reap_raises,
+) -> None:
+    manager, session, other_lock = remote_reap_stop
+    if not record_present:
+        manager._host_index.remove(session.session_id)
+    reap = AsyncMock(return_value=False, side_effect=ValueError("invalid endpoint") if reap_raises else None)
+    monkeypatch.setattr(manager, "_remote_reap", reap)
+
+    with pytest.raises(RemoteHostRecoveryPendingError, match="retained session"):
+        await manager.stop_session(session.session_id, reap_host=True)
+
+    assert session.status != SessionStatus.STOPPED
+    assert manager.db.get_session(session.session_id)["acp_session_id"] == "retained-conversation"
+    assert (manager._host_index.get(session.session_id) is not None) == record_present
+    assert session.session_id in manager._codespace_lock_sessions
+    assert other_lock.read_holder().pid == os.getpid()
+    assert not manager._remote_reap_tasks
+    assert reap.await_count == int(record_present)
+
+
+@pytest.mark.asyncio
+async def test_remote_reap_stop_refuses_active_background_tasks(
+    remote_reap_stop, monkeypatch,
+) -> None:
+    from agent_bridge.session_manager import SessionBusyError
+
+    manager, session, _other_lock = remote_reap_stop
+    monkeypatch.setattr(type(session), "has_active_background_tasks", property(lambda _: True))
+    monkeypatch.setattr(type(session), "active_background_tasks", property(lambda _: ["active-task"]))
+    reap = AsyncMock()
+    monkeypatch.setattr(manager, "_remote_reap", reap)
+    with pytest.raises(SessionBusyError):
+        await manager.stop_session(session.session_id, reap_host=True)
+    reap.assert_not_awaited()
+    assert manager._host_index.get(session.session_id) is not None
+    assert session.session_id in manager._codespace_lock_sessions
+
+
 @pytest.mark.asyncio
 async def test_container_recreate_post_removal_failure_marks_predecessor_failed(
     tmp_db,

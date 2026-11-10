@@ -261,6 +261,16 @@ class _SessionLifecycleMixin:
                 if self._sessions.get(session_id) is not session:
                     return
             require_automatic_reap()
+            rec = self._host_index.get(session_id) if self._host_index is not None else None
+            if reap_host and rec is None and (
+                session_id in self._codespace_lock_sessions
+                or session_id in self._container_lock_sessions
+                or session_id in self._remote_recovery_inconclusive
+            ):
+                raise RemoteHostRecoveryPendingError(
+                    "Remote Session Host retirement has no verifiable Host record; "
+                    f"retained session {session_id} and target ownership"
+                )
             await self._quiesce_session(
                 session, cancel_turn=cancel_turn,
                 preserve_host=allow_background_recovery and not reap_host,
@@ -273,13 +283,31 @@ class _SessionLifecycleMixin:
                 with contextlib.suppress(Exception):
                     await self._stop_relays(session_id)
 
-            # Idle-reaper only: free the Session Host child (a plain stop
-            # detaches to keep it reattachable, safe since the session is idle).
-            if reap_host and self._host_index is not None:
-                rec = self._host_index.get(session_id)
-                if rec is not None:
-                    require_automatic_reap()
+            if reap_host and rec is not None:
+                require_automatic_reap()
+                if rec.boundary == "local":
                     self._reap_host_record(rec, "idle reap (#1826)")
+                else:
+                    self._kill_forward_sync(session_id, release_container_lock=False)
+                    try:
+                        confirmed_dead = await self._remote_reap(rec, getattr(rec, "endpoint", None) or {})
+                    except Exception:
+                        log.warning("Remote stop retirement failed for %s", session_id, exc_info=True)
+                        confirmed_dead = False
+                    if not confirmed_dead:
+                        self._mark_session_failed(session, trigger="remote_reap_inconclusive")
+                        raise RemoteHostRecoveryPendingError(
+                            "Remote Session Host reap is inconclusive; "
+                            f"retained session {session_id} and target ownership"
+                        )
+                    self._host_index.remove(session_id)
+                    with contextlib.suppress(Exception):
+                        from . import bridge_lock
+                        bridge_lock.remove_sync(session_id)
+                    # The conversation and provider claim remain reserved;
+                    # only its confirmed-retired connection is now free.
+                    self._release_codespace_lock(session_id)
+                    self._remote_recovery_inconclusive.discard(session_id)
 
             session.status = SessionStatus.STOPPED
             session._stop_requested = False  # the stop a notice announced has happened
