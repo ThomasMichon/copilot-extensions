@@ -95,17 +95,21 @@ The following implementation decomposition is **agent-recommended**.
 - [ ] Reuse the canonical candidate installation, provenance and native
   terminal owners in fresh private HOME, config, registry and mux state.
   Keep configured feed/security policy; do not borrow selected host runtimes.
-- [ ] Invoke generated project entry points, observe the installed Manager,
+- [x] Invoke generated project entry points, observe the installed Manager,
   and use normal UI controls for Create. Prove an actual Git worktree,
   installed launch resolution, real Copilot readiness and a deterministic
   request/response through the local inference endpoint.
-- [ ] Exit Copilot through its normal user flow, close and reopen Manager,
+  Installed-core proof: #11864, exact-source run 42892225611. Complete selected
+  suite installation remains a separate open item above.
+- [x] Exit Copilot through its normal user flow, close and reopen Manager,
   select Resume, and prove the same worktree and durable conversation with a
   further endpoint-backed turn. Do not repair tracking or rewrite session IDs.
-- [ ] Keep a CLI session active while starting a second Manager, select Open
+  The same installed-core run retains the original durable conversation.
+- [x] Keep a CLI session active while starting a second Manager, select Open
   and prove attachment to that exact native process incarnation/session/pane.
   Closing Manager or detaching its view preserves the original owner and its
   ability to complete another turn; no duplicate Copilot is admitted.
+  The same installed-core run verifies native birth/lock ownership and detach.
 - [ ] Exercise the relevant cold and retained/warm backend states without
   allowing accidental reuse of a host server to supply success.
 
@@ -150,15 +154,17 @@ The following implementation decomposition is **agent-recommended**.
 - [ ] Native Windows entry points traverse installed path resolution, actual
   admission, generated launch assets, real terminal and private PSMux. A Linux
   scenario alone cannot qualify the reported Windows failure classes.
-- [ ] Real Manager Create yields the expected Git worktree and real Copilot
+- [x] Real Manager Create yields the expected Git worktree and real Copilot
   conversation. The endpoint records an actual request and deterministic
   response; UI rendering, ready files or process existence are insufficient.
-- [ ] Normal Copilot exit and a fresh Manager invocation reach Resume through
+- [x] Normal Copilot exit and a fresh Manager invocation reach Resume through
   real discovery. The original conversation survives and another turn completes
   without duplicate history, stale-path repair or manual session-state edits.
-- [ ] A second Manager's Open attaches to the exact active owner rather than
+- [x] A second Manager's Open attaches to the exact active owner rather than
   creating a replacement. Original process birth, session and pane identity
   remain consistent; detach/Manager exit leaves that session usable.
+  These three action/continuity items are verified by #11864's installed-core
+  run 42892225611; they do not close selected-suite or promotion acceptance.
 - [ ] Install-success/entry-launch failure, launch/path-resolution refusal and
   fixture-scoped mux connection failure each fail the appropriate lifecycle
   phase. Expected-negative classification requires its specific observed
@@ -847,3 +853,70 @@ Scoped lint, module limits and diff checks pass. The unchanged observer's 88
 source controls remain passing; this changed engine candidate still requires
 exact-source installed qualification, fresh actual review and required CI.
 The earlier startup stall remains a failed result, not an accepted flake.
+
+### 2026-11-10 - Installed core accepted; complete-suite execution started
+
+#11864 merged into Dev as `fa93ea37c295da6b4096e87cafb42f58c98af718`
+after actual current-head Copilot approval 5848798419, all three live-required
+checks passing and all review threads resolved. The configured Maintainer
+completion path verified the merge; no CI gate or unresolved finding was waived.
+
+Exact-source run 42892225611, attempt 1, qualifies
+`4feb77db2944b54cddcdd949faab166013a417bb`, tree
+`5161d5d7fcb8495527ec805dec3b8b6df1c434a5`. Retained JUnit records one test,
+zero failures/errors/skips and 381.634 seconds; the complete receipt measures
+370.75 seconds. Installed origins and exact candidate bytes are verified across
+303 Manager and 697 engine modules. Actual Create, same-owner active Open,
+detach preservation, normal native exit, same-conversation Resume in a different
+native incarnation, all four persisted assistant replies, unusable-entry refusal
+and settled owned cleanup pass. The evidence-aware re-review explicitly
+approved that unchanged source. This closes the action/continuity items marked
+above, not the complete acceptance matrix.
+
+The next active slice is complete selected-suite construction and actual Machines
+readiness through the canonical normal updater, using the accepted readiness
+profile. The existing suite fixture's synthetic V1/V2 versions and substituted
+delivery are not an authentic admitted-baseline update. Reuse its lifecycle and
+disposable Windows venue boundaries, not that synthetic baseline as evidence.
+Inspect the current profile, suite constructor and source/feed owners before
+implementing the independently owned companion; agree concrete shared-helper or
+runner/result edits with their existing owners. Preserve the 1800-second
+preparation and 900-second exercise boundaries.
+
+Ordinary upgrade from an authentic admitted baseline, frozen-candidate mandatory
+enforcement, separately governed Main adoption and the wider parent campaign
+remain open. The worktree remains active for this next slice; merged installed
+core is not effort completion or permission to roll out on an operator machine.
+
+### 2026-11-10 - Complete payload acquisition separated from runtime acceptance
+
+Live ownership reconciliation found #11377 closed and its completion #11814
+and Main adoption #11478 merged. Those historical PRs are not live content
+overlaps or prerequisites for this parent extension. Coordination comments
+6779028766 on #11377 and 6779134232 on #6237 reserve the independently owned
+payload companion and bounded preflight in the existing manual Dev lane.
+No whole-suite runner/result, Main controller or promotion transaction changed.
+
+The companion consumes the canonical whole-tree materializer's commit-bound
+artifact and the accepted complete required-readiness profile. It invokes the
+actual CLI for every declared payload, discovers selected paths through the
+installed engine, and compares private installed payload bytes with the frozen
+artifact. It rejects incomplete discovery, foreign or changed payloads, changed
+CLI/artifact inputs and reduced activation. Inventory hashing is shared per
+parent rather than repeated per payload; nested receipt files remain covered.
+Its result explicitly reports runtime installation as unobserved.
+
+The existing optional `manager-lifecycle` Windows lane now runs that preflight
+before the unchanged installed-core witness, using the existing pinned CLI and
+native engine constructor. It requires one successful, non-skipped test and one
+complete, exact-commit/run/attempt payload receipt, retained separately from the
+core receipt. The same 720-second case, 900-second runner and 30-minute shared
+job envelope remain; no deadline, required CI or release gate is expanded.
+
+The contained payload/profile controls pass all 28 cases. Workflow refusal
+controls, Python lint and alias-aware Actions lint are checked separately.
+Actual CLI acquisition still needs the exact published source's disposable-VM
+run; source controls are not native evidence. Complete runtime construction,
+actual Machines/required-readiness discovery and New after an authentic
+admitted-baseline ordinary update remain open, as do mandatory frozen-candidate
+enforcement, this extension's separate Main adoption and the parent campaign.

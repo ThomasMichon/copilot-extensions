@@ -838,11 +838,20 @@ The existing manual `installation-context-full.yml` workflow accepts
 `portfolio=manager-lifecycle` for this installed-core case on a fresh
 GitHub-hosted Windows VM. Dispatch the published source branch and optionally
 provide its same exact commit as `source_sha`; a mismatched request fails.
+Before the unchanged core case, a separate preflight constructs the installed
+engine, builds the canonical commit-bound whole-tree artifact, and acquires
+every declared payload with the actual pinned CLI. Installed engine discovery
+and complete payload-byte comparison must succeed in the private HOME, with
+the required-readiness profile enabled. Its separate
+`installed-manager-suite-payloads` receipt explicitly reports runtime
+installation as unobserved: payload delivery is not runtime construction,
+actual Machines readiness, an authentic update or lifecycle acceptance.
 The job reuses the bounded pinned downloader and the existing Copilot 1.0.105 /
 PSMux 3.3.8 prerequisite pins, verifies checkout identity, and preserves the
 900-second runner and 720-second case limits. Its 30-minute job envelope also
 covers checkout, tooling, prerequisite acquisition and artifact retention.
-This changes no existing portfolio, schedule, required PR CI or release gate.
+The preflight shares that job envelope; it adds no schedule, required PR CI
+or release gate.
 The evidence checker rejects absent, skipped, failed, duplicate, stale,
 TTY-only and incomplete lifecycle results. Passing this development lane still
 does not establish complete-suite, actual Machines, authentic ordinary-update

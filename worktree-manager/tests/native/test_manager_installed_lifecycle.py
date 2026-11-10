@@ -2100,6 +2100,74 @@ def test_lifecycle_process_observation_uses_owned_handles_and_omits_inline_code(
         assert records[-1]["complete"] is False
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Actual native Windows suite payload acquisition")
+@pytest.mark.timeout(900)
+def test_installed_suite_payload_closure_uses_the_real_cli(record_testsuite_property):
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+    from manager_installed_suite_payloads import (
+        _PROVENANCE, install_payload_closure, selected_profile,
+    )
+    from manager_suite_fixture import require_venue
+    from plugin_test_containment import SANDBOX_ENV, TestSandbox
+
+    require_venue()
+    copilot = Path(os.environ.get("COPILOT_NATIVE_TEST_EXECUTABLE", ""))
+    assert copilot.is_absolute() and copilot.is_file(), "Select the pinned real native CLI"
+    identity = _identity()
+    budget = OwnedExecutionBudget.from_timeout(720, cleanup_reserve=30)
+    previous_deadline = installed._WORK_DEADLINE
+    installed._WORK_DEADLINE = budget.execution_deadline
+    before_host = installed._host_state()
+    try:
+        with (
+            TestSandbox(prefix="sp-", dir=Path(os.environ[SANDBOX_ENV])) as raw,
+            _capture_failure(Path(raw), record_testsuite_property),
+        ):
+            root = Path(raw)
+            installed.prepare(root, identity)
+            installed.construct(root, identity, "engine")
+            env = _case_environment(root)
+            prepared = json.loads((root / "prepared.json").read_text(encoding="utf-8"))
+            _origin, engine = installed._installed(
+                Path(env["AGENT_WORKTREES_HOME"]),
+                Path(prepared["payloads"]["agent-worktrees"]),
+                "agent-worktrees", env, root / "diagnostics",
+            )
+            artifact = root / "suite-artifact"
+            _PROVENANCE["build"](artifact, source_root=installed.REPO)
+            configuration = {
+                "project": PROJECT, "expose_agent": True, "stateless": True,
+            }
+            profile = selected_profile(artifact, identity["candidate_commit"], configuration)
+            project = root / PROJECT
+            config = project / ".agent-worktrees" / "config.yaml"
+            config.parent.mkdir(parents=True)
+            config.write_text(yaml.safe_dump(profile["repository_config"]), encoding="utf-8")
+            settings = project / ".github" / "copilot" / "settings.json"
+            settings.parent.mkdir(parents=True)
+            settings.write_text(json.dumps(profile["settings"]), encoding="utf-8")
+            copilot_home = Path(env["USERPROFILE"]) / ".copilot"
+            copilot_home.mkdir(exist_ok=True)
+            (copilot_home / "config.json").write_text(
+                json.dumps({"trustedFolders": [str(root)], "experimental": True}),
+                encoding="utf-8",
+            )
+            env["COPILOT_HOME"] = str(copilot_home)
+            result = install_payload_closure(
+                artifact, identity["candidate_commit"],
+                repository_config=profile["repository_config"], copilot=copilot,
+                engine=engine, environment=env, project=project,
+                diagnostics=root / "diagnostics", run=installed._run,
+            )
+            record_testsuite_property(
+                "installed-manager-suite-payloads",
+                json.dumps({"identity": identity, **result}),
+            )
+    finally:
+        installed._WORK_DEADLINE = previous_deadline
+        assert installed._host_state() == before_host
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native installed Windows Manager lifecycle")
 @pytest.mark.timeout(900)
 def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsuite_property):
