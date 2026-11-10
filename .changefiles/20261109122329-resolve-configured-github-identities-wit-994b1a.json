@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve configured GitHub identities without inferring operator logins from repository namespaces",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

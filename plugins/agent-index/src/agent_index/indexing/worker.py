@@ -139,6 +139,7 @@ def run_worker(
     from agent_index.indexing import engine as indexing_engine
     from agent_index.indexing.change_hints_contract import WORKER_HINT_REFUSAL, execution_versions
     from agent_index.indexing.runner import IndexingCancelled
+    from agent_index.indexing.source_ownership import source_writer
     from agent_index.indexing.task_store import TaskStatus, TaskStore
     from agent_index.runtime_version import current_runtime_version
 
@@ -206,7 +207,8 @@ def run_worker(
             kwargs["config"] = config
         if task.change_hints is not None:
             kwargs["change_hints"] = task.change_hints
-        result = run_reindex(**kwargs)
+        with source_writer(config.data_dir, wait=True, cancel_check=cb.check_cancelled):
+            result = run_reindex(**kwargs)
         if isinstance(result, dict):
             store.set_result_stats(task_id, result)
         sources_failed = result.get("sources_failed") if isinstance(result, dict) else None

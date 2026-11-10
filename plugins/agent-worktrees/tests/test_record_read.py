@@ -57,6 +57,32 @@ def invoke(*args):
     return rc, json.loads(captured.getvalue())
 
 
+def test_exact_record_never_falls_back_to_matching_foreign_head(record_fixture, monkeypatch):
+    data, path = record_fixture
+    foreign_dir = path.parents[2] / ".other-project" / "worktrees"
+    foreign_dir.mkdir(parents=True)
+    foreign = {
+        **data, "repo": "other-project", "head_session": "matching-caller",
+        "sessions": [{"session_id": "matching-caller", "state": "active"}],
+    }
+    foreign_path = foreign_dir / path.name
+    foreign_path.write_text(yaml.safe_dump(foreign), encoding="utf-8")
+    foreign_bytes = foreign_path.read_bytes()
+    monkeypatch.setattr(session_tracking_cli, "_all_tracking_dirs", lambda: [
+        path.parent, foreign_dir,
+    ])
+    before = path.read_bytes()
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 0 and result["worktree"]["repo"] == "example-project"
+    assert result["worktree"]["last_session_id"] is None
+    assert path.read_bytes() == before
+    path.unlink()
+    assert session_tracking_cli._find_tracking_file(data["worktree_id"]) == foreign_path
+    rc, result = invoke(data["worktree_id"])
+    assert rc == 1 and result["error"]["code"] == "record-missing"
+    assert foreign_path.read_bytes() == foreign_bytes
+
+
 def test_closeout_discovery_and_incomplete_requests_use_actual_record_parser(record_fixture, monkeypatch):
     from agent_worktrees import dispatch_closeout_observation
 

@@ -175,8 +175,10 @@ async def run_headed(
     )
     if auth_wait is None:
         return await _run_headed_once(child_argv, **arguments)
+    from .auth_child import require_auth_custody
     from .auth_wait import AuthWaitReceiver
 
+    require_auth_custody()
     _native_request(child_argv, session_id)
     resumed_argv = _seedless_resume(child_argv, session_id)
     receiver = AuthWaitReceiver(session_id, auth_wait)
@@ -215,6 +217,8 @@ def _seedless_resume(argv: list[str], session_id: str) -> list[str]:
             if not separator:
                 index += 1
         else:
+            if not name.startswith("-") or name.startswith("-i") and not name.startswith("--"):
+                raise ValueError("Auth recovery cannot replay positional launch input")
             result.append(argument)
             if not separator and (name in VALUE_OPTIONS or name == "-C"):
                 index += 1
@@ -274,8 +278,7 @@ async def _run_headed_once(
         await auth_receiver.expiry()
         publish("auth_stopping")
         await backend.freeze_auth()
-        await owner.terminate()
-        await backend.finish_auth_stop()
+        await backend.retire_auth()
         publish("auth_wait" if auth_receiver.hold is None else "auth_held")
 
     try:
@@ -293,7 +296,9 @@ async def _run_headed_once(
             startup.check(child_argv, cwd, session_id, {**os.environ, **(env or {})})
         if before_exec is not None:
             before_exec()
-        if os.name == "nt" and not contained_test_mode():
+        if os.name == "nt" and not contained_test_mode() and not (
+            auth_receiver is not None and auth_resume
+        ):
             from ..winjob import setup_kill_on_close_job
 
             if not setup_kill_on_close_job(allow_breakaway=False):
@@ -368,6 +373,12 @@ async def _run_headed_once(
             auth_receiver is None or not auth_receiver.stopped_for_auth
         ):
             publish("control_unavailable")
+        if expiry_task is not None and not native_exit.done():
+            done, _ = await asyncio.wait(
+                (native_exit, expiry_task), return_when=asyncio.FIRST_COMPLETED,
+            )
+            if expiry_task in done:
+                await expiry_task
         result = await native_exit
         if auth_receiver is not None and auth_receiver.stopped_for_auth:
             await expiry_task
@@ -393,23 +404,28 @@ async def _run_headed_once(
             pass
         return await owner.wait()
     finally:
-        if startup is not None:
-            startup.close()
-        for task in tasks:
-            task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
         try:
-            if websocket is not None:
-                await websocket.close(drain=True)
+            if auth_receiver is not None and owner.proc is not None:
+                # Cancellation must not leave the native scope alive during transport drainage.
+                await owner.terminate()
         finally:
+            if startup is not None:
+                startup.close()
+            for task in tasks:
+                task.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             try:
-                if host is not None:
-                    await host.close()
+                if websocket is not None:
+                    await websocket.close(drain=True)
             finally:
                 try:
-                    await backend.close()
+                    if host is not None:
+                        await host.close()
                 finally:
-                    if owner.proc is not None and (
-                        auth_receiver is not None or owner.returncode is None
-                    ):
-                        await owner.terminate()
+                    try:
+                        await backend.close()
+                    finally:
+                        if owner.proc is not None and (
+                            auth_receiver is not None or owner.returncode is None
+                        ):
+                            await owner.terminate()

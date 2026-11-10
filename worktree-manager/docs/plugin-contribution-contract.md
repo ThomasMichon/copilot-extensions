@@ -10,9 +10,16 @@ shipping static JSON under its own payload:
 <installed-plugins>/<marketplace>/<plugin>/pivots/<name>.json
 ```
 
-The Manager scans those payloads directly for plugins enabled user-global or for
-the selected project. A plugin installer does not copy into Manager-owned state,
-and neither side imports or declares a package dependency on the other.
+The Manager resolves active payloads through the shared plugin-activation owner,
+including directory marketplaces declared user-global or by the selected project,
+with their local settings overrides, and scans their `pivots/*.json` directly.
+Project lookup uses its resolved anchor, including anchor-only registrations.
+The selected scope's root wins over a
+cached copy of the same plugin; marketplace and plugin identity come from that
+resolution, not the directory's name. Source-resolution failures remain typed
+`activation-*` findings, including when the resolver selects an installed fallback.
+A plugin installer does not copy into Manager-owned state, and neither side
+imports or declares a package dependency on the other.
 
 ## Manifest
 
@@ -567,7 +574,9 @@ than becoming a mutation performed merely by browsing Configuration.
 - During the migration window, the report also compares the old
   `~/.agent-worktrees/pivots` copy registry with enabled payloads and reports
   stale or orphaned legacy entries. The Manager never uses those copies as its
-  source of truth.
+  source of truth. Inspection is read-only and includes owned declarations whose
+  `visible_when.state_root_file` condition currently hides their UI pivot; a
+  hidden pivot is not an orphan.
 - The contribution file is inert when Worktree Manager is absent. A plugin's
   own CLI/service behavior is unchanged.
 

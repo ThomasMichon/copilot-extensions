@@ -90,8 +90,12 @@ an operator actually intends for the repo in play: the `gh`/git identity
 own inference identity (the account Copilot itself authenticates its own
 requests as, tracked independently of `gh`). agent-worktrees is the durable
 owner of both resolutions. The `gh` identity resolves through an explicit
-per-repo `account` override or the decoupled owner-keyed `account_map` where
-policy declares one. Operations governed by that explicit choice never depend
+per-repo `account` override, the decoupled owner-keyed `account_map`, or an
+explicit preferred GitHub account where policy declares one. An organization
+or user namespace describes repository ownership, not the operator's identity.
+A dependency publisher must never become the consumer's inferred public login,
+and a repository-only account exception must not spread to its siblings.
+Operations governed by an explicit choice never depend
 on whichever account happens to be globally active. Without an explicit
 preference, ambient authentication remains a supported default, visibly
 distinct from a pinned identity. The Copilot identity resolves separately and is

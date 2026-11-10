@@ -225,6 +225,333 @@ def invoke(fixture, *, apply=False, digest=None, selection=("child",)):
     )
 
 
+def _ready_read(module, owner, platform, *, readonly, timeout):
+    from agent_machines.installation_repair_process import ActionResult
+
+    assert readonly
+    return ActionResult("exited", 0, json.dumps({
+        "schema": "copilot-extensions.module-readiness", "version": 1,
+        "module": module.module_id, "state": "ready",
+    }).encode())
+
+
+def test_readiness_only_never_walks_payload_or_qualifies_installers(repair_fixture, monkeypatch):
+    home, project, _, _, _ = repair_fixture
+    monkeypatch.setattr(admission_api, "payload_identity", lambda *a: pytest.fail("payload walk"))
+    monkeypatch.setattr(repair_api, "_invoke", _ready_read)
+    original = repair_api._admit_invocation
+    actions = []
+
+    def qualify(invocation, platform):
+        actions.append(invocation.arguments[0])
+        return original(invocation, platform)
+
+    monkeypatch.setattr(repair_api, "_admit_invocation", qualify)
+    result = repair_api.repair(project, home=home, required=True, readiness_only=True)
+    assert result["requiredSatisfied"]
+    assert actions and set(actions) == {"probe"}
+    assert not any(row["attempted"] for row in result["outcomes"])
+    owner = next(iter(admit_host(project, home=home, readiness_only=True).bindings.values()))
+    assert "payloadDigest" not in owner.evidence()
+    assert "readinessDeclarationDigest" in owner.evidence()
+
+
+@pytest.mark.parametrize("linked", ["declaration", "action", "directory"])
+@pytest.mark.parametrize("reparse", [False, True])
+def test_readiness_only_refuses_original_linked_paths_before_resolution(
+    repair_fixture, monkeypatch, linked, reparse,
+):
+    import stat
+    from types import SimpleNamespace
+
+    home, project, payload, _, _ = repair_fixture
+    mirror = payload / "plain"
+    mirror.mkdir()
+    if linked == "declaration":
+        source = payload / "installer-readiness.json"
+        destination = mirror / source.name
+        shutil.copyfile(source, destination)
+    elif linked == "action":
+        source = payload / "scripts" / ("action.ps1" if os.name == "nt" else "action.sh")
+        destination = mirror / source.name
+        shutil.copyfile(source, destination)
+    else:
+        source = payload / "scripts"
+        destination = mirror / "scripts"
+        shutil.copytree(source, destination)
+    original_lstat, original_resolve = Path.lstat, Path.resolve
+
+    def lstat(path, *args, **kwargs):
+        if path == source:
+            return SimpleNamespace(
+                st_mode=original_lstat(path).st_mode if reparse else stat.S_IFLNK,
+                st_file_attributes=0x400 if reparse else 0,
+                st_reparse_tag=0,
+            )
+        return original_lstat(path, *args, **kwargs)
+
+    def resolve(path, *args, **kwargs):
+        if path == source:
+            return destination
+        if linked == "directory" and path.is_relative_to(source):
+            return destination / path.relative_to(source)
+        return original_resolve(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(Path, "resolve", resolve)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("linked probe executed"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True, readiness_only=True)
+
+
+def test_readiness_only_skips_capabilities_but_retains_declared_runtime_claims(
+    repair_fixture, monkeypatch,
+):
+    home, project, payload, _, _ = repair_fixture
+    capability = payload.parent / "tool-only"
+    write_json(capability / "plugin.json", {
+        "name": "tool-only", "version": "1.0.0", "runtimeScope": "none",
+    })
+    catalog = payload.parent / ".claude-plugin" / "marketplace.json"
+    data = json.loads(catalog.read_text())
+    data["plugins"].append({"name": "tool-only", "source": "./tool-only"})
+    write_json(catalog, data)
+    settings = project / ".github" / "copilot" / "settings.json"
+    data = json.loads(settings.read_text())
+    data["enabledPlugins"]["tool-only@fixture"] = True
+    write_json(settings, data)
+    original = admission_api.context.resolve_payload_source
+
+    def resolve(**kwargs):
+        if kwargs["plugin_id"] == "tool-only":
+            assert (capability / "payload-invocation.json").exists(), "non-application qualified"
+        return original(**kwargs)
+
+    monkeypatch.setattr(admission_api.context, "resolve_payload_source", resolve)
+    monkeypatch.setattr(repair_api, "_invoke", _ready_read)
+    assert repair_api.repair(project, home=home, required=True, readiness_only=True)["requiredSatisfied"]
+    shutil.copyfile(payload / "payload-invocation.json", capability / "payload-invocation.json")
+    result = repair_api.repair(project, home=home, required=True, readiness_only=True)
+    assert not result["requiredSatisfied"], "a second declared runtime claimant was omitted"
+    assert all(row["observedBefore"]["state"] == "unknown" for row in result["outcomes"])
+
+
+def test_readiness_only_incomplete_enabled_inventory_still_refuses(repair_fixture, monkeypatch):
+    home, project, _, _, _ = repair_fixture
+    settings = project / ".github" / "copilot" / "settings.json"
+    data = json.loads(settings.read_text())
+    data["enabledPlugins"]["missing-provider@fixture"] = True
+    write_json(settings, data)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("incomplete inventory probe"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True, readiness_only=True)
+
+
+@pytest.mark.parametrize("dependency", [False, True])
+def test_readiness_only_qualifies_only_owners_in_the_required_closure(
+    repair_fixture, monkeypatch, dependency,
+):
+    home, project, payload, _, _ = repair_fixture
+    optional = payload.parent / "optional-addon"
+    shutil.copytree(payload, optional)
+    (optional / "payload-invocation.json").unlink()
+    for name in ("plugin.json", "installer-readiness.json"):
+        data = json.loads((optional / name).read_text().replace("agent-example", "optional-addon"))
+        for module in data.get("modules", []):
+            module["classification"] = "optional"
+        write_json(optional / name, data)
+    catalog = payload.parent / ".claude-plugin" / "marketplace.json"
+    data = json.loads(catalog.read_text())
+    data["plugins"].append({"name": "optional-addon", "source": "./optional-addon"})
+    write_json(catalog, data)
+    settings = project / ".github" / "copilot" / "settings.json"
+    data = json.loads(settings.read_text())
+    data["enabledPlugins"]["optional-addon@fixture"] = True
+    write_json(settings, data)
+    if dependency:
+        declaration = payload / "installer-readiness.json"
+        data = json.loads(declaration.read_text())
+        data["modules"][1]["dependsOn"].append("optional-addon/base")
+        write_json(declaration, data)
+    invoked = []
+
+    def observe(module, owner, platform, **kwargs):
+        invoked.append(module.module_id)
+        return _ready_read(module, owner, platform, **kwargs)
+
+    monkeypatch.setattr(repair_api, "_invoke", observe)
+    result = repair_api.repair(project, home=home, required=True, readiness_only=True)
+    assert result["requiredSatisfied"] is (not dependency)
+    assert all(name.startswith("agent-example/") for name in invoked)
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True)
+
+
+@pytest.mark.parametrize("empty", [False, True])
+def test_readiness_only_digest_cannot_authorize_apply(repair_fixture, monkeypatch, empty):
+    home, project, _, _, _ = repair_fixture
+    if empty:
+        settings = project / ".github" / "copilot" / "settings.json"
+        data = json.loads(settings.read_text())
+        data["enabledPlugins"]["agent-example@fixture"] = False
+        write_json(settings, data)
+    monkeypatch.setattr(repair_api, "_invoke", _ready_read)
+    observed = repair_api.repair(project, home=home, required=True, readiness_only=True)
+    monkeypatch.setattr(repair_api, "_observe", lambda *a: pytest.fail("apply reached observation"))
+    with pytest.raises(RepairAdmissionError, match="plan inputs changed"):
+        repair_api.repair(
+            project, home=home, required=True, apply=True,
+            expected_plan_digest=observed["planDigest"],
+        )
+
+
+@pytest.mark.parametrize("changed", ["readiness", "declaration", "documentation"])
+def test_readiness_only_revalidates_its_execution_and_declaration_scope(
+    repair_fixture, monkeypatch, changed,
+):
+    home, project, payload, _, _ = repair_fixture
+
+    def observe(module, owner, platform, **kwargs):
+        if changed == "readiness":
+            path = module.readiness[platform].target
+            path.write_text(path.read_text() + "\n# changed\n", encoding="utf-8")
+        elif changed == "declaration":
+            path = payload / "installer-readiness.json"
+            declaration = json.loads(path.read_text())
+            declaration["modules"][0]["readiness"]["configurationEmpty"] = "unsatisfied"
+            write_json(path, declaration)
+        else:
+            (payload / "README.md").write_text("unrelated documentation", encoding="utf-8")
+        return _ready_read(module, owner, platform, **kwargs)
+
+    monkeypatch.setattr(repair_api, "_invoke", observe)
+    result = repair_api.repair(project, home=home, required=True, readiness_only=True)
+    assert result["requiredSatisfied"] is (changed == "documentation")
+    assert result["selectionRefusal"] == (
+        None if changed == "documentation" else "required-inventory-changed"
+    )
+    assert not any(row["attempted"] for row in result["outcomes"])
+
+
+@pytest.mark.parametrize("options", [
+    {"required": True, "apply": True}, {"required": False},
+    {"required": True, "confirm_restart": "unselected"},
+])
+def test_readiness_only_refuses_effectful_or_unrequired_scope_before_state(monkeypatch, options):
+    monkeypatch.setattr(repair_api, "RestartJournal", lambda *a: pytest.fail("state accessed"))
+    with pytest.raises(RepairAdmissionError, match="read-only required selection"):
+        repair_api.repair(Path("unused"), readiness_only=True, **options)
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.contract("agent_machines.caller_owned_required_readiness")
+@pytest.mark.parametrize("generic", [False, True])
+def test_readiness_only_actual_caller_observes_without_constructing_an_install_plan(repair_fixture, generic):
+    from agent_procutil.owned_process import run_caller_owned
+
+    home, project, payload, _, _ = repair_fixture
+    plugin = "service-example" if generic else "agent-example"
+    if generic:
+        payload = payload.rename(payload.with_name(plugin))
+        for path in (
+            payload / "plugin.json", payload / "payload-invocation.json",
+            payload / "installer-readiness.json",
+            payload.parent / ".claude-plugin" / "marketplace.json",
+            project / ".github" / "copilot" / "settings.json",
+        ):
+            path.write_text(path.read_text().replace("agent-example", plugin), encoding="utf-8")
+        invocation = payload / "payload-invocation.json"
+        data = json.loads(invocation.read_text())
+        data["version"] = 1
+        data["runtimeRoot"] = data.pop("legacyRuntimeRoot")
+        data.pop("installationContext")
+        write_json(invocation, data)
+        declaration = payload / "installer-readiness.json"
+        data = json.loads(declaration.read_text())
+        for module in data["modules"]:
+            for action in module["readiness"]["invocations"].values():
+                action.pop("path")
+                action.update(kind="payload-command", command=plugin)
+        write_json(declaration, data)
+        (payload / "bin").mkdir()
+        (payload / "bin" / (plugin + ".ps1")).write_text(
+            '& (Join-Path $PSScriptRoot "..\\scripts\\action.ps1") @args\nexit $LASTEXITCODE\n',
+            encoding="utf-8",
+        )
+        command = payload / "bin" / plugin
+        command.write_text(
+            '#!/usr/bin/env bash\nexec bash "$(dirname "$0")/../scripts/action.sh" "$@"\n',
+            encoding="utf-8",
+        )
+        command.chmod(0o755)
+    for name in ("base", "child"):
+        (home / f"{plugin}-{name}.ready").write_text("ready")
+    with (payload / "unrelated.bin").open("wb") as stream:
+        stream.truncate(8 * 1024 * 1024 + 1)
+    result = run_caller_owned(
+        [sys.executable, "-m", "agent_machines", "installation-repair",
+         "--project-root", str(project), "--required", "--caller-owned-readiness"],
+        cwd=project, env=ordinary_environment(os.environ, home=home, payload=payload),
+        timeout=15, max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["requiredSatisfied"] and observed["callerOwnedReadiness"]
+    assert not observed["apply"] and not any(row["attempted"] for row in observed["outcomes"])
+    assert not (home / ("." + plugin)).exists()
+
+
+@pytest.mark.timeout(75)
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.contract("agent_machines.caller_owned_required_readiness_budget")
+def test_readiness_only_roster_respects_the_original_caller_budget(repair_fixture):
+    from agent_procutil.owned_process import OwnedExecutionBudget, run_caller_owned
+
+    home, project, payload, _, _ = repair_fixture
+    names = ["agent-example", *(f"agent-example-{index}" for index in range(1, 12))]
+    for name in names[1:]:
+        target = payload.with_name(name)
+        shutil.copytree(payload, target)
+        for path in target.glob("*.json"):
+            path.write_text(path.read_text().replace("agent-example", name), encoding="utf-8")
+    for name in names:
+        target = payload.with_name(name)
+        declaration = target / "installer-readiness.json"
+        data = json.loads(declaration.read_text())
+        data["modules"] = data["modules"][:1]
+        write_json(declaration, data)
+        (home / (name + "-base.ready")).write_text("ready")
+    capabilities = [f"capability-{index}" for index in range(128)]
+    for name in capabilities:
+        write_json(payload.with_name(name) / "plugin.json", {
+            "name": name, "version": "1.0.0", "runtimeScope": "none",
+        })
+    catalog = payload.parent / ".claude-plugin" / "marketplace.json"
+    data = json.loads(catalog.read_text())
+    data["plugins"] = [{"name": name, "source": "./" + name} for name in [*names, *capabilities]]
+    write_json(catalog, data)
+    settings = project / ".github" / "copilot" / "settings.json"
+    data = json.loads(settings.read_text())
+    data["enabledPlugins"] = {name + "@fixture": True for name in [*names, *capabilities]}
+    write_json(settings, data)
+    started = time.monotonic()
+    result = run_caller_owned(
+        [sys.executable, "-m", "agent_machines", "installation-repair",
+         "--project-root", str(project), "--required", "--caller-owned-readiness"],
+        cwd=project, env=ordinary_environment(os.environ, home=home, payload=payload),
+        timeout=55, max_stdout_bytes=65536, max_stderr_bytes=65536,
+        budget=OwnedExecutionBudget.from_timeout(60, cleanup_reserve=5),
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    assert observed["requiredSatisfied"] and len(observed["outcomes"]) == len(names)
+    assert time.monotonic() - started < 60
+    assert not observed["apply"] and not any(row["attempted"] for row in observed["outcomes"])
+
+
 def test_installation_repair_discovery_and_plan_never_install(repair_fixture):
     home, project, _, _, _ = repair_fixture
     discovery = repair_api.repair(project, home=home)

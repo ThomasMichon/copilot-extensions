@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify standalone repository cache and continuing events through packaged foreground, client, drain and recovery controls.",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

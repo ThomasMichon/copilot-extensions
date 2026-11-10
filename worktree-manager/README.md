@@ -19,6 +19,40 @@ plugins. It is the one piece that must work *before* the plugins do.
 > [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165) and
 > [#1174](https://github.com/ThomasMichon/copilot-extensions/issues/1174).
 
+## Bare entry and first-run diagnostics
+
+Run `worktree-manager` without arguments in an interactive terminal to open
+Worktrees when exactly one launchable project and an engine command are available.
+Otherwise the same app opens **Setup / Doctor**, without inventing a project or
+loading operational worktree data. Multiple registered projects require an
+explicit selection; knowledge-only repositories are not standalone targets.
+Unreadable or malformed registries remain visible errors, not an empty first-run
+roster. **Reload** re-observes state without installing or adopting anything.
+
+**Review setup plan** runs the real `worktree-manager setup` dry run, and
+**Inspect Manager setup** uses the existing read-only Manager diagnostics.
+Both preserve stdout, stderr and the actual exit status before returning.
+An incomplete setup can return a nonzero status even though no changes were
+applied. Diagnostics are explicit, bounded child commands, never startup probes.
+The result screen waits for command settlement before allowing Return.
+The Manager-owned setup child retains the selected installation context; general
+contributed-command identity scrubbing is unchanged. Timeouts keep bounded
+partial stdout/stderr and do not invent a normal exit status. Unconfirmed
+cleanup retains its original custody and blocks another diagnostic attempt.
+
+This is navigation and diagnostic entry, not a complete onboarding wizard.
+Installation, repository trust/adoption, machines, plugins, knowledge binding
+and authentication retain their existing owners and explicit commands.
+**Install core**, **Add machine**, **Adopt repo** and **Enable plugins** open
+read-only guides with prerequisites, effects, owning references and supported
+next steps. Install core can open the same real setup-plan command. Applying
+setup or adoption still uses the named CLI outside the TUI; retain its result
+and follow restart instructions before returning and selecting Reload. Machine
+creation and plugin enablement have no in-app writer here. Browsing a guide
+does not execute its displayed commands, open links or change readiness.
+Redirected/noninteractive bare invocation still prints installation status;
+explicit verbs, project launch and launcher JSON output keep their contracts.
+
 ## Picker notices and diagnostics
 
 Mux uncertainty is separate from process liveness: `MUX(?)` means last-known
@@ -2996,7 +3030,8 @@ Unreachable residents permit only explicitly labeled, independently indexed
 advisory rows or an unavailable error, never caller-side reconstruction.
 
 Plugin-contributed interactive surfaces are discovered independently from each
-enabled plugin's installed payload. `worktree-manager contracts` validates the
+enabled plugin's resolved active payload, including directory marketplaces.
+`worktree-manager contracts` validates the
 versioned manifest contract and reports disabled, malformed, duplicate, legacy,
 or missing-command contributions without importing plugin code or requiring a
 plugin installer to write into Manager-owned state. See

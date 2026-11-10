@@ -1,0 +1,9 @@
+{
+  "comment": "Prepare inert hourly health job definitions and qualify collection support from the exact selected runtime.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

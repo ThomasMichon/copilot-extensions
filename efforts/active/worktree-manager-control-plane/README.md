@@ -93,6 +93,8 @@ item in this umbrella.
 | Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 | Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
+| First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
+| Optional Sync-progress implementer | Proposed #4183 LP1-LP3/LPV Sync producer and local ProgressScreen consumer only; no PK/WI ownership or runtime rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
 
 ## Context
 
@@ -453,6 +455,15 @@ the same effort Journal/open bounded-source process preserves current owners.
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
+### Optional built-in lifecycle progress
+
+- [ ] Review and deliver the bounded Sync producer/local ProgressScreen consumer
+      in [phase-3c-optional-sync-progress.md](phase-3c-optional-sync-progress.md),
+      under #4183 LP1-LP3/LPV (received #4274). Preserve CLI defaults, exact
+      selected-runtime support, complete paired results and existing process
+      ownership. Other verbs, remote streaming and original PK/WI acceptance
+      remain separate; this does not reopen completed Phase 3c.
+
 ### Phase 3d — Retire the production Picker's in-process engine-module boundary (production slice Done)
 
 Production Picker conversion is delivered. The complete original #3360
@@ -790,6 +801,15 @@ legacy Picker's terminal-mirroring call site) now lives solely in
 worktree-manager.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
+- [ ] #542 Manager first-run front door: review and deliver the
+      [bounded entry/setup-home sequence](phase-4-first-run-front-door.md).
+      Preserve #356/#8545 repository setup, native Configuration/readiness
+      writers and the full original acceptance matrix; an F1 navigation flow
+      is not completion of F2/F3 or the parent issue. F1 source flow is
+      accepted in #11837 and F2 owner sequencing in #11847. F2a read-only
+      guides are source-accepted in #11858. The Phase 4 source matrix now
+      distinguishes real registry recovery from provisioning; effectful F2b, F3 and
+      release/native/installed acceptance remain open.
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
       trigger; a stale/incompatible `worktree-manager` stub can never capture the
@@ -2527,6 +2547,11 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
 
 ## Validation Plan
 
+- [ ] Qualify the [#542 first-run front-door matrix](phase-4-first-run-front-door.md#validation-and-promotion-gates):
+  real no-project navigation/diagnostic flow, TTY/text routing, source-safe
+  owner handoffs, recovery and original empty/partial/provisioned acceptance.
+  Preserve independent native/installed gates; a plan merge is not implementation.
+
 - [ ] G1: Resolve EVERY directly retained #4096 original
   confirmation-OR-force/accepted-disposition and validation/continuing Coordination
   clause at its finite tier, preserving delivered class repair, independent axes and
@@ -2887,6 +2912,74 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-10 - Optional Sync-progress proposal
+
+- `patient-knob` claims only the bounded #4183 LP Sync-progress proposal.
+  [The proposed plan](phase-3c-optional-sync-progress.md) reuses the D4
+  envelope while preserving structured Sync results, paired diagnostics and
+  selected-runtime compatibility. Review precedes implementation.
+- Existing contributed streaming is not built-in progress proof. PK/WI,
+  remaining verbs, remote support and native/installed acceptance stay open;
+  no channel, host operation, installation or custody transfer occurred.
+
+### 2026-11-10 - First-run original-matrix source audit
+
+- #11865 merged to `dev` as `c0601e44dca9508cab3b10462d0dc8eae260d065`.
+  Copilot approval `5837314932` covered exact head
+  `f0ecb761d0697ed036538a98959d1776d5e82602`, the journal-placement thread
+  was resolved and exact-head CI passed before the managed merge.
+- Reconciled the original #542 body in the [Phase 4 source matrix](phase-4-first-run-front-door.md#f3-original-matrix-reconciliation-and-source-recovery-controls).
+  Three contained production-runner/Textual cases exercise actual registry
+  partial/empty/malformed recovery, unchanged observation inputs and explicit
+  selection after Reload. Engine/core observations remain inert fixtures.
+- This advances source validation only. F2b provisioning actions, pristine-profile
+  diagnostic qualification, full native/platform and installed acceptance stay
+  open; no new writer, installation, service probe or rollout is admitted.
+
+### 2026-11-10 - First-run owner guidance and retained effectful gates
+
+- #11858 merged after exact-head approval, no inline findings and all three
+  required checks. F2a is accepted source, not release/native/installed proof.
+  The merge to `dev` was `37ebdd70acca93b10bfdeddec8108221afe25d7c`;
+  Copilot approval `5836953954` covered exact head
+  `98e79fe34008b74219098f415f999a2596f4ab80`.
+- #11847 accepted the concrete four-action owner matrix and read-only F2a
+  sequencing before implementation. The [Phase 4 source record](phase-4-first-run-front-door.md#f2a-source-implementation-and-validation)
+  records guide navigation, real setup-plan and source-preservation controls.
+  Existing Configuration detail defaults retain their consumer coverage.
+- F2b effectful composition, F3, release/native/installed qualification and
+  the original #542 checklist remain open. No installer, writer, trust,
+  maintenance or rollout authority moves to the guide screen.
+
+### 2026-11-10 - First-run F1 source accepted; F2 owner composition next
+
+- #11837 merged after exact-head approval, resolved scope/timeout findings and
+  all required checks. The [Phase 4 acceptance record](phase-4-first-run-front-door.md#f1-acceptance-and-next-slice)
+  retains source/consumer proof and names F2 adapter reconciliation next.
+  #542 and the full matrix stay open; no release or installed rollout is claimed.
+
+### 2026-11-10 - First-run F1 source flow and contained consumer proof
+
+- The [Phase 4 source record](phase-4-first-run-front-door.md#f1-source-implementation-and-validation)
+  records the genuine no-project Setup / Doctor flow, strict fresh selection,
+  real read-only child receipts and focused validation. F2/F3, review/CI,
+  native/installed qualification and #542 remain open; no rollout or writer
+  takeover is claimed.
+
+### 2026-11-10 - Bounded first-run front-door design reservation
+
+- `patient-knob` claims only the Manager-owned #542 entry/no-project
+  presentation and existing-owner composition slice. Its public reservation
+  preserves first-repository setup/trust, knowledge/authentication writers,
+  provider-policy, runtime construction and all existing native/rollout owners.
+- The production pending-binding screen already paints before discovery, but
+  ordinary absent-engine and no-project states currently become binding errors.
+  Keep the nonempty project bootstrap contract; do not substitute a fake source.
+- The linked Phase 4 proposal sequences an independently useful real
+  navigation/diagnostic flow before complete missing-source action composition
+  and original-matrix qualification. No production code, live service probe,
+  installation, source-claim transfer or parent completion is claimed.
 
 ### 2026-11-09 - Truthful Knowledge readiness and explicit Reload retry
 

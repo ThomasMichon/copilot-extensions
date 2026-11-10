@@ -9,11 +9,19 @@ from pathlib import Path
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "plugins" / "agent-worktrees" / "scripts"
 GUARDS = ("statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py")
+WRITE_DEPENDENCIES = ("tool_call_forms.py", "guarded_anchor_map.py")
 
 
 def render(scripts: Path = SCRIPTS) -> str:
     guards = {name: hashlib.sha256((scripts / name).read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest() for name in GUARDS}
-    return json.dumps({"schema": "agent-worktrees.native-read-policy", "version": 1, "guards": guards}, indent=2) + "\n"
+    dependencies = {
+        name: hashlib.sha256((scripts / name).read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest()
+        for name in WRITE_DEPENDENCIES
+    }
+    return json.dumps({
+        "schema": "agent-worktrees.native-read-policy", "version": 1, "guards": guards,
+        "nativeWriteDependencies": dependencies,
+    }, indent=2) + "\n"
 
 
 def main() -> int:

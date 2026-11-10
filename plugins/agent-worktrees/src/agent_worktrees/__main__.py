@@ -1938,7 +1938,7 @@ from .worktree_creation import (  # noqa: E402 -- re-export position matches ori
 )
 
 
-from .launch_environment import _build_env, _self_owner_ref  # noqa: E402,F401 -- compatibility exports
+from .launch_environment import _build_env  # noqa: E402,F401 -- compatibility export
 
 
 def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
@@ -6474,7 +6474,7 @@ def main(argv: list[str] | None = None, *, publication: object | None = None) ->
     if args_list[0] == "pr-watch":
         from . import pr_cli
         if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads", "diff")
-                and "/" in args_list[2] and not args_list[2].startswith("-")):
+                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] != ["inventory"]:
             _ensure_cluster_loaded()
         try:
             return pr_cli.cmd_pr_watch_dispatch(args_list[1:])

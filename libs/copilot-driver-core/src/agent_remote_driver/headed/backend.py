@@ -5,9 +5,42 @@ from __future__ import annotations
 import asyncio
 import json
 import secrets
-from typing import Protocol
+from typing import Callable, Protocol
 
 from agent_procutil.daemon_instances import admit_daemon_instance
+
+
+def _invalid_constant(_value: str) -> None:
+    raise ValueError("Non-finite native observation")
+
+
+def _rpc_observation(value: object) -> bool:
+    if not isinstance(value, dict) or value.get("jsonrpc") != "2.0":
+        return False
+    if "method" in value:
+        return (
+            set(value) == {"jsonrpc", "method", "params"}
+            and isinstance(value["method"], str) and bool(value["method"])
+            and isinstance(value["params"], dict)
+        )
+    kind = "result" if "result" in value else "error"
+    if set(value) != {"jsonrpc", "id", kind}:
+        return False
+    identity = value["id"]
+    if not (
+        isinstance(identity, str)
+        or type(identity) is int and abs(identity) <= 2**53 - 1
+        or identity is None and kind == "error"
+    ):
+        return False
+    if kind == "error":
+        error = value["error"]
+        return (
+            isinstance(error, dict)
+            and set(error) in ({"code", "message"}, {"code", "message", "data"})
+            and type(error["code"]) is int and isinstance(error["message"], str)
+        )
+    return True
 
 
 class NativeOwner(Protocol):
@@ -22,6 +55,19 @@ class NativeOwner(Protocol):
     async def wait(self) -> int: ...
 
     async def terminate(self) -> None: ...
+
+
+class _AuthStopReader(asyncio.StreamReader):
+    def __init__(self, retiring: Callable[[], bool]) -> None:
+        super().__init__(limit=1_000_000)
+        self._retiring = retiring
+
+    def set_exception(self, exc: BaseException) -> None:
+        if isinstance(exc, ConnectionResetError) and self._retiring():
+            # Owned Windows retirement resets TCP; retain buffered records for normal draining.
+            self.feed_eof()
+        else:
+            super().set_exception(exc)
 
 
 class HeadedBackend:
@@ -45,6 +91,7 @@ class HeadedBackend:
         self.auth_snapshot: dict | None = None
         self._auth_frozen = asyncio.Event()
         self._stream_closed = asyncio.Event()
+        self._stream_clean = False
         self.auth_stopping = False
         self.stdout = asyncio.StreamReader(limit=1_000_000)
         self.stdin = self
@@ -67,6 +114,13 @@ class HeadedBackend:
     @property
     def returncode(self) -> int | None:
         return self._owner.returncode
+
+    @property
+    def auth_retiring(self) -> bool:
+        return (
+            self.auth_stopping
+            and getattr(self._owner, "retirement_started", False) is True
+        )
 
     async def wait(self) -> int:
         return await self._owner.wait()
@@ -118,7 +172,15 @@ class HeadedBackend:
                 await asyncio.wait_for(self._stream_closed.wait(), 1)
             except asyncio.TimeoutError:
                 self._auth_wait.preserve_hold("native-observation-incomplete")
+            if not self._stream_clean:
+                self._auth_wait.preserve_hold("native-observation-incomplete")
         self._auth_wait.stopped(self.auth_snapshot)
+
+    async def retire_auth(self) -> None:
+        if self._auth_wait is None or not self.auth_stopping:
+            raise RuntimeError("Auth retirement requires the original freeze boundary")
+        await self._owner.terminate()
+        await self.finish_auth_stop()
 
     async def serve(self) -> None:
         guard = admit_daemon_instance(
@@ -127,9 +189,18 @@ class HeadedBackend:
         try:
             if self._server is not None or self._closed:
                 raise RuntimeError("The headed backend is already started or closed")
-            self._server = await asyncio.start_server(
-                self._accept, "127.0.0.1", 0, limit=1_000_000,
-            )
+            if self._auth_wait is None:
+                self._server = await asyncio.start_server(
+                    self._accept, "127.0.0.1", 0, limit=1_000_000,
+                )
+            else:
+                def protocol():
+                    reader = _AuthStopReader(lambda: self.auth_retiring)
+                    return asyncio.StreamReaderProtocol(reader, self._accept)
+
+                self._server = await asyncio.get_running_loop().create_server(
+                    protocol, "127.0.0.1", 0,
+                )
             self._guard = guard
             self._monitor = asyncio.create_task(self._observe_exit())
         except BaseException:
@@ -145,6 +216,7 @@ class HeadedBackend:
         task.add_done_callback(lambda done: self._connections.pop(done, None))
 
     async def _receive(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        clean_eof = False
         try:
             hello = json.loads(await asyncio.wait_for(reader.readline(), 3))
             if (
@@ -170,7 +242,9 @@ class HeadedBackend:
             self.bound.set()
             while line := await reader.readline():
                 if self._auth_wait is not None:
-                    value = json.loads(line)
+                    if not line.endswith(b"\n"):
+                        raise ValueError("Incomplete native observation record")
+                    value = json.loads(line, parse_constant=_invalid_constant)
                     if isinstance(value, dict) and value.get("contract") == "copilot-driver.headed-auth-state":
                         snapshot = value.get("state")
                         if (
@@ -192,16 +266,23 @@ class HeadedBackend:
                             if any(snapshot[key] for key in ("pending", "sending", "outstanding")):
                                 self._auth_wait.preserve_hold("native-operation-unsettled")
                         continue
+                    if not _rpc_observation(value):
+                        raise ValueError("Invalid native observation envelope")
                 self.stdout.feed_data(line)
-        except (OSError, ValueError, asyncio.TimeoutError):
+            clean_eof = True
+        except (OSError, ValueError, asyncio.TimeoutError, AssertionError, RuntimeError):
             pass
         finally:
             if self._writer is writer:
+                if self._auth_wait is not None:
+                    if not clean_eof:
+                        self._auth_wait.preserve_hold("native-observation-incomplete")
+                    if not self.auth_retiring:
+                        self._auth_wait.preserve_hold("native-connection-lost")
+                self._stream_clean = clean_eof
                 self._writer = None
                 self.bound.clear()
                 self.lost.set()
-                if self._auth_wait is not None and not self.auth_stopping:
-                    self._auth_wait.preserve_hold("native-connection-lost")
                 self._stream_closed.set()
             writer.close()
             try:
@@ -211,6 +292,11 @@ class HeadedBackend:
 
     async def _observe_exit(self) -> None:
         await self._owner.wait()
+        if self._auth_wait is not None and self._admitted:
+            try:
+                await asyncio.wait_for(self._stream_closed.wait(), 1)
+            except asyncio.TimeoutError:
+                self._auth_wait.preserve_hold("native-observation-incomplete")
         self.stdout.feed_eof()
 
     async def close(self) -> None:

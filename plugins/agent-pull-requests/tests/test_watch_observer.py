@@ -51,6 +51,26 @@ def cycle(owner, **kwargs):
     return owner.cycle(expires_at=int(owner.store.clock()) + 60, **kwargs)
 
 
+def test_legacy_only_cycle_releases_completed_snapshots_instead_of_retaining_entire_population(
+    store, monkeypatch,
+):
+    import weakref
+    references, peaks = [], []
+    lock = threading.Lock()
+    for number in range(1, 25):
+        register(store, request=f"request-{number}", number=number)
+    def fetch(*_args, **_kwargs):
+        snapshot = PRSnapshot(pr_state="open", head_sha="head")
+        with lock:
+            references.append(weakref.ref(snapshot))
+            peaks.append(sum(reference() is not None for reference in references))
+        return snapshot
+    monkeypatch.setattr(observer, "fetch_snapshot", fetch)
+    owner = ReplayObserver(store, bindings=(binding(),))
+    assert cycle(owner)["observed"] == 24
+    assert max(peaks) <= 12
+
+
 def start_cycle(owner, **kwargs):
     result = Future()
 

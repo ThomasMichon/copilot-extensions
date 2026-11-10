@@ -92,9 +92,11 @@ def test_publish_records_checked_head_when_local_ref_advances_during_lock(pr_rep
 
 
 def test_foreign_creation_with_local_receipt_requirement_refuses_before_provider(monkeypatch):
-    config = SimpleNamespace()
+    from agent_worktrees.config import PRConfig
+
     repo = SimpleNamespace(default_branch="main",
-                           pr=SimpleNamespace(enabled=True, publication_checks=PublicationChecksConfig()))
+                           pr=PRConfig(enabled=True, publication_checks=PublicationChecksConfig()))
+    config = SimpleNamespace(default_repo=repo)
     monkeypatch.setattr(pr_config, "resolve_repo_config_for_slug",
                         lambda *args: SimpleNamespace(resolved=True, same_as_active=False, repo_config=repo))
     result = pr_foreign_create.create_foreign_pr_from_branch(

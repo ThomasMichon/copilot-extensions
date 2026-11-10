@@ -34,7 +34,7 @@ _VALUES = {"idle", "stopped", "running", "awaiting_first_prompt", "delivered",
 _PHRASES = ("connection refused", "permission denied", "timed out", "unrecognized arguments",
             "no such file or directory", "not recognized as", "traceback (most recent call last)")
 _CONTEXT_ENV = {
-    "session_id": "COPILOT_AGENT_SESSION_ID", "owner_ref": "AGENT_WORKTREES_OWNER_REF",
+    "session_id": "COPILOT_AGENT_SESSION_ID",
     "pane": "TMUX_PANE", "terminal_session": "WT_SESSION",
 }
 

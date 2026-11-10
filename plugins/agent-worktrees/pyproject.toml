@@ -159,4 +159,4 @@ select = ["E", "F", "W", "I", "UP", "B", "RUF"]
 where = ["src"]
 
 [tool.setuptools.package-data]
-agent_worktrees = ["pre_push.sh", "repository-authentication-v1.json", "new-admission-v1.json"]
+agent_worktrees = ["pre_push.sh", "repository-authentication-v1.json", "new-admission-v1.json", "sync-progress-v1.json"]

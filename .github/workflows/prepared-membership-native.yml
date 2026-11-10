@@ -8,6 +8,11 @@ on:
       - ".github/workflows/prepared-membership-native.yml"
       - "plugins/agent-worktrees/scripts/managed-session.ps1"
       - "plugins/agent-worktrees/scripts/managed_session.py"
+      - "plugins/agent-worktrees/scripts/pre-tool-hook.ps1"
+      - "plugins/agent-worktrees/scripts/hook-read-policy.json"
+      - "plugins/agent-worktrees/scripts/guarded_anchor_map.py"
+      - "plugins/agent-worktrees/scripts/tool_call_forms.py"
+      - "tools/render-hook-read-policy.py"
       - "plugins/agent-worktrees/scripts/registry_root.py"
       - "plugins/agent-worktrees/tests/test_managed_session.py"
       - "plugins/agent-worktrees/scripts/hook-facts.ps1"
@@ -20,6 +25,47 @@ permissions:
   contents: read
 
 jobs:
+  prepared-write-windows:
+    name: Prepared file-local write (${{ matrix.packet }})
+    runs-on: windows-latest
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - packet: admission-and-safe
+            select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell) and not (structured or write-name))"
+          - packet: fallback
+            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or structured or write-name)"
+          - packet: structured
+            select: "registered_file_local_write_reuses_original_guard_facts and structured and not write-name"
+          - packet: write-names
+            select: "registered_file_local_write_reuses_original_guard_facts and write-name and not (real-policy or protected)"
+          - packet: write-name-fallback
+            select: "registered_file_local_write_reuses_original_guard_facts and write-name and protected"
+          - packet: write-name-policy
+            select: "registered_file_local_write_reuses_original_guard_facts and write-name and real-policy"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: astral-sh/setup-uv@v9.0.0
+      - name: Qualify native writes and original policy fallback
+        env:
+          AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
+          PYTHONUTF8: "0"
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_managed_session.py
+          -k "${{ matrix.select }}"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+
   prepared-membership-windows:
     name: Prepared cell membership (Windows)
     runs-on: windows-latest

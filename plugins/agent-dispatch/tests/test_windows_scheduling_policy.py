@@ -270,6 +270,7 @@ $SupervisorProfileDir=Join-Path $Root 'supervisors'
 $LinkDir=Join-Path $Root 'versions\\fixture'; $LinkPython='Invoke-FixturePython'
 $utf8NoBom=[Text.UTF8Encoding]::new($false)
 $DefaultPort=9847
+$script:GlobalActivationLockTimeoutSeconds=5
 $NoService=$false; $NoSupervisor=$false; $Interactive=$false
 $script:CoordinatorEnsures=0; $script:SupervisorEnsures=0; $script:TaskStarts=0
 function Assert-DispatchActions { param($Actions) }
@@ -297,6 +298,7 @@ function Write-Warn {param($Message)}
 function Invoke-SupervisorAudit {param($Event,$Reason,$Name,$EnvFile,$Outcome)}
 """
     functions = (
+        "Enter-PluginSnapshotLock", "Publish-FileAtomically", "Publish-ServiceLauncher",
         "Install-CoordinatorTask", "Install-SupervisorTask", "Write-SupervisorDefaultEnv",
         "Write-SupervisorLauncher", "Get-SupervisorMode", "Test-SupervisorLabelsConfigured",
         "Get-SupervisorProfileFiles", "Test-SupervisorProfileName", "Get-SupervisorTaskName",

@@ -68,6 +68,50 @@ compatibility credential, ADO operations reuse the existing Azure CLI/Entra
 authentication path. This workflow does not acquire a PAT, change credentials
 or require new token configuration.
 
+## Local source reconciliation is not finalization
+
+```text
+<PR command> complete --repo owner/repository --expected-branch <local-branch> --expected-head <full-commit> --worktrees-command <Worktrees command> --json
+```
+
+Run this optional native operation from the exact Git top level of the managed
+source worktree to reconcile. The selected receiver must advertise
+`operations.local-source-complete: true` in its version-1 author capabilities.
+The current source owner's configuration must resolve the explicit target to
+that same repository. No arbitrary workspace, positional worktree, PR number
+or delivered `--config` is accepted. The owner checks the existing record,
+repository, clean source and exact branch/full lowercase commit ID under the
+existing publication/metadata locks. A worktree-local completion lock excludes
+overlapping completions; publication and metadata admission locks are released
+before fetches and Git hooks, then reacquired in that order for source rechecks.
+Provider-aware repository comparison accepts equivalent Azure HTTPS/SSH URLs
+without accepting another repository. Request-scoped Git isolation prevents
+inherited repository/index selectors from redirecting nested Git helpers
+without changing the caller's environment.
+
+The adapter invokes Worktrees' existing `pr-complete` algorithm. It preserves
+post-merge work, proof-checked squash boundaries and original-tip recovery refs;
+it does not push, mark a PR merged, settle claims or finalize a worktree/effort.
+Legacy `pr-complete [worktree]` retains its existing result and behavior when
+none of the new guarded fields is supplied.
+
+`--dry-run` returns a `preview`: fetching may update remote-tracking refs, but
+the source branch/index/files are not reconciled and no completion backup is
+created. A successful non-preview result is `confirmed`. Neither is evidence
+of a forge merge: the existing owner can also preserve unmerged work through
+rebase. `not-attempted` means admission refused before reconciliation;
+`unknown` means completion/source state is unconfirmed. Errors after invoking
+the Git owner retain its complete original result and any recovery ref.
+
+The version-1 `agent-worktrees.pr-source-complete` envelope preserves the
+selected repo, admitted source, expected branch/head, mode and original owner
+result. JSON mode preserves valid owner evidence even on failure; nonzero exit
+never becomes client success. Lost, malformed, mismatched or oversized results
+remain unconfirmed. Inspect the same source and retained recovery refs before
+another intentional attempt; there is no replay, raw Git/forge fallback or
+automatic runtime update. Unsupported/rolled-back receivers refuse before
+the new effectful syntax. Source support is not installed/platform acceptance.
+
 ## Draft readiness is not merge consent
 
 Native `ready` requires the selected Worktrees runtime's optional

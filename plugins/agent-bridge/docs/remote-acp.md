@@ -117,9 +117,13 @@ qualified host owner; `BridgeClient.start_session` and the session API accept
 normalizes to its worktree: a successor caller session retains the same owner.
 Caller affinity, caller-session provenance, the Bridge handle and the
 target-scoped native conversation ID remain separate identities.
-An owner declaration in `AGENT_WORKTREES_OWNER_REF` is not authority by itself:
-if the CLI cannot resolve its qualified owner, it refuses rather than silently
-starting unowned, even when its caller-ID probe also failed.
+The CLI resolves the qualified host owner from its current working directory,
+not an inherited owner environment variable. If a managed caller is resolved
+but its qualified owner cannot be obtained, the CLI refuses rather than silently
+starting unowned. Native callers of project-addressed machine agents must also
+match the resolved worktree's current active head. Use explicit command-line
+context when a caller runs outside its worktree. Intentionally detached CLI
+sessions are standalone owners; launcher/supervisor metadata is not their owner.
 
 Managed requests require the compatible Worktrees
 [`resource-relationship` authority](../../agent-worktrees/docs/resource-relationship.md)

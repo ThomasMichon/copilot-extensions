@@ -51,7 +51,7 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
     from . import config_migrations
     from .repos_registry_transaction import read_bytes, revision
     from .repos import (
-        VALID_CLASSES, _LEGACY_TYPE_MAP, RepoEntry, ReposRegistry,
+        DEFAULT_ACCOUNT_OWNER, VALID_CLASSES, _LEGACY_TYPE_MAP, RepoEntry, ReposRegistry,
         normalize_class, normalize_visibility,
     )
 
@@ -123,6 +123,21 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
             for owner, login in raw_map.items()
         )):
             failed(observations, str(path), "registry-fields", "invalid-shape", "account_map")
+        preferred = [
+            login for owner, login in raw_map.items()
+            if isinstance(owner, str) and owner.casefold() == DEFAULT_ACCOUNT_OWNER
+        ] if isinstance(raw_map, dict) else []
+        if any(
+            not isinstance(login, str) or any(char.isspace() for char in login)
+            for login in preferred
+        ):
+            raise RepositoryResolutionError(
+                "repository registry preferred account must be a login string"
+            )
+        if len({login.casefold() for login in preferred}) > 1:
+            raise RepositoryResolutionError(
+                "repository registry has conflicting preferred account entries"
+            )
         account_map: dict[str, str] = {}
         if isinstance(raw_map, dict):
             for owner, login in raw_map.items():

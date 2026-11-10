@@ -17,7 +17,7 @@ from ..pr_checks import ChecksReport
 from .base import ProviderError, PRScope, PullResult, reject_copilot_mention, run_cli
 from .pr_source import github_source, pull_payload, source_text
 from .observation_credentials import (
-    CredentialSource, ObservationCredentialError, ObservationCredentials,
+    MAX_SNAPSHOT_REQUESTS, CredentialSource, ObservationCredentialError, ObservationCredentials,
     github_endpoint, github_request,
 )
 
@@ -313,6 +313,7 @@ class GitHubProvider:
             host, endpoint = github_endpoint(host)
             credentials = ObservationCredentials(
                 credential_source, provider=self.name, api_base=endpoint, repository=repo,
+                max_requests=MAX_SNAPSHOT_REQUESTS,
             )
 
         def read_env() -> dict[str, str]:
@@ -329,6 +330,7 @@ class GitHubProvider:
                 f"{credentials.api_base if credentials is not None else ''}/repos/{repo}/pulls/{number}",
             ],
             env=read_env(),
+            **({"max_stdout_bytes": 1_048_576} if credentials is not None else {}),
         )
         if proc.returncode != 0:
             detail = (proc.stderr.strip() or proc.stdout.strip())
@@ -415,6 +417,7 @@ class GitHubProvider:
             invoke=lambda argv: run_cli(
                 github_request(argv, api_base),
                 env=credential_env() if credential_env is not None else self._env(token),
+                **({"max_stdout_bytes": 1_048_576} if credential_env is not None else {}),
             ),
         )
 
@@ -436,6 +439,7 @@ class GitHubProvider:
             proc = run_cli(
                 github_request(argv, api_base),
                 env=credential_env() if credential_env is not None else self._env(token),
+                **({"max_stdout_bytes": 1_048_576} if credential_env is not None else {}),
             )
             if (
                 credential_env is not None and proc.returncode

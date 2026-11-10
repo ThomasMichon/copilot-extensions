@@ -15,4 +15,12 @@ def run(args):
 
 
 def register(sub):
-    register_commands(sub, run)
+    commands = register_commands(sub, run)
+    from .hourly_reporting import run as run_hourly
+
+    hourly = commands.add_parser(
+        "hourly", help="Read one UTC hour of retained telemetry without starting a service",
+        allow_abbrev=False,
+    )
+    hourly.add_argument("--hour", required=True, help="Absolute UTC hour: YYYY-MM-DDTHH:00:00Z")
+    hourly.set_defaults(func=run_hourly)

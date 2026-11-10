@@ -1008,6 +1008,17 @@ pruning, with an explicit process-group reap if the owned child survived.
 Startup inspection never wakes a stopped CodeSpace; explicit resume may wake
 and revalidate it.
 
+Plain `stop` retains a reattachable Host. Explicit `stop --reap-host` instead
+waits for remote Host/child retirement confirmation before reporting success
+and removing the Host record. A failed or unverifiable reap returns an error
+and retains the conversation, record and target ownership for recovery. A
+missing Host record with retained connection custody is also inconclusive,
+not evidence of retirement. After confirmation, the connection lock is freed;
+the resumable conversation and its provider claim remain reserved. Active
+background work still blocks non-forced stopping, and unrelated sessions are
+not retired. This does not change redeploy detach or authorize a fresh
+conversation when same-session recovery fails.
+
 For a stopped trusted-container session, resume first re-resolves the provider's
 current serving generation. If credential relay is enabled, it replaces the
 session's reverse-forward against the daemon's current live relay and proves the

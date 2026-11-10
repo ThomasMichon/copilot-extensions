@@ -12,6 +12,7 @@ import sqlite3
 import stat
 import sys
 import time
+from contextlib import nullcontext
 from pathlib import Path
 
 from . import checkout_permission_relocation as permission_paths
@@ -41,6 +42,11 @@ def capabilities() -> dict:
         "recovery": "forward",
         "cancel_before_publication": _native_supported(),
         "scope": "completed-sessionless-unpaired-plain-linked-checkout",
+        "receiving_location": {
+            "schema": state.RECEIVING_SCHEMA, "version": 1, "revisions": 1,
+            "scope": "finalized-sessionless-unpaired-same-project-settled-origin",
+            "native_owner_qualification": False,
+        },
         "writer_generation": 1,
         "max_entries": transfer.MAX_ENTRIES, "max_bytes": transfer.MAX_BYTES,
     }
@@ -89,14 +95,14 @@ def _stopped(record, checkout: Path) -> None:
         raise ValueError(blocker)
 
 
-def _ordinary_shape(record, ledger: Path) -> None:
+def _ordinary_shape(record, ledger: Path, *, allow_receiving: bool = False) -> None:
     if (
         record.kind != "session" or not record.checkout_managed
         or not isinstance(record.creation_nonce, str) or not record.creation_nonce
         or record.worktree_id == "@anchor" or record.status not in {"complete", "completed", "finalized"}
         or record.sessions or record.head_session or record.handoffs
         or any((record.pair_id, record.pair_role, record.pair_ref, record.pair_kind))
-        or record.receiving_allocation_present
+        or record.receiving_allocation_present and not allow_receiving
         or record.session_backend is not None or record.session_backend_opaque
         or record.execution_leg is not None or record.execution_leg_opaque
         or record.profile_assignments or record.pending_seed
@@ -162,15 +168,23 @@ def _strict_glob(root: Path, pattern: str):
                         pending.append((path, depth + 1))
 
 
-def _ordinary(record, ledger: Path, config) -> None:
-    _ordinary_shape(record, ledger)
+def _ordinary(record, ledger: Path, config) -> dict | None:
+    _ordinary_shape(record, ledger, allow_receiving=True)
+    receiving_proof = None
+    if record.receiving_allocation_present:
+        from .receiving_relocation import inspect as inspect_receiving
+
+        receiving_proof = inspect_receiving(record, config)
+        if record.worktree_path != receiving_proof["original_identity"]["path"]:
+            raise ValueError("receiving relocation supports one current-location revision; inspect the original move")
     execution_spaces.require_record_mutation(record, config, recover_receiving=False)
     journal = ledger.parent.parent / "workspace-creation.sqlite3"
-    if journal.exists() and _references(journal, [
+    if receiving_proof is None and journal.exists() and _references(journal, [
         ("SELECT 1 FROM creations WHERE json_extract(worktree, '$.worktree.id')=? "
          "OR json_extract(worktree, '$.id')=? LIMIT 1", (record.worktree_id, record.worktree_id)),
     ]):
         raise ValueError("relocation v1 refuses immutable creation receipts; location evolution remains unqualified")
+    return receiving_proof
 
 
 def _check_data(checkout: Path, config, branch: str) -> str:
@@ -318,7 +332,7 @@ def _action_plan(worktree_id: str, destination: str, config) -> dict:
                 raise ValueError("unfinished move has a different destination; recover the original operation")
             if previous["phase"] == "cancelling":
                 raise ValueError("relocation cancellation is unfinished; repeat --abort")
-            _ordinary_shape(record, ledger)
+            _ordinary_shape(record, ledger, allow_receiving=True)
             return {**previous, "apply": False, "recovery": True}
         if (
             previous["phase"] == "complete" and previous["destination"] == str(target)
@@ -329,7 +343,7 @@ def _action_plan(worktree_id: str, destination: str, config) -> dict:
     source = Path(record.worktree_path)
     if record.worktree_path != str(source) or source.name != worktree_id or source.absolute() != source.resolve():
         raise ValueError("relocation source location is redirected or noncanonical")
-    _ordinary(record, ledger, config)
+    receiving_proof = _ordinary(record, ledger, config)
     if ledger.resolve().is_relative_to(source):
         raise ValueError("relocation requires checkout-independent tracking state")
     if target.exists():
@@ -354,6 +368,9 @@ def _action_plan(worktree_id: str, destination: str, config) -> dict:
         "ledger_sha256": hashlib.sha256(original_record).hexdigest(),
         "permissions": permissions, "phase": "planned", "apply": False,
     }
+    if receiving_proof is not None:
+        report["schema"] = state.RECEIVING_SCHEMA
+        report["receiving_location"] = receiving_proof
     if previous is not None:
         report["previous_journal"] = hashlib.sha256(state.journal_path(ledger).read_bytes()).hexdigest()
     _require_receiver(record, report, config)
@@ -385,16 +402,38 @@ def _require_receiver(record, report: dict, config) -> None:
         raise ValueError("relocation receiving Git family changed")
 
 
+def _receiving_admission(ledger: Path, config):
+    from .checkout_relocation_plan import read_record
+
+    passive = read_record(ledger)
+    if passive.worktree_id != ledger.stem or passive.repo != config.repo_name:
+        raise ValueError("relocation record does not match the receiving ledger identity/project")
+    if passive.receiving_allocation_present:
+        from .receiving_relocation import guard as receiving_owner, inspect as inspect_receiving
+
+        proof = inspect_receiving(passive, config)
+        return passive, proof, receiving_owner(ledger, proof)
+    elif passive.owner_ref and passive.creation_nonce:
+        raise ValueError("read-only proof cannot recover missing receiving allocation metadata; inspect through its owner")
+    return passive, None, nullcontext()
+
+
 def move(worktree_id: str, destination: str, config) -> dict:
     _require_native_support()
     state.require_writer_generation()
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
         raise ValueError("move requires one exact managed worktree ID")
+    passive, proof, receiving_guard = _receiving_admission(ledger, config)
+    if (
+        proof is not None and passive.worktree_path != proof["original_identity"]["path"]
+        and str(Path(destination).expanduser()) != passive.worktree_path
+    ):
+        raise ValueError("receiving relocation supports one current-location revision; inspect the original move")
     with FinalizeLock(
         Path(config.default_repo.worktree_root) / ".finalize.lock", timeout=3,
         on_stale=lambda message: print(message, file=sys.stderr),
-    ), (
+    ), receiving_guard, (
         worktree_lifecycle.guard(ledger, relocation=True)
     ), launch_admission.guard(ledger), state.owner(ledger):
         report = _action_plan(worktree_id, destination, config)
@@ -527,10 +566,11 @@ def abort(worktree_id: str, destination: str, config) -> dict:
     if Path(worktree_id).name != worktree_id or "/" in worktree_id or "\\" in worktree_id:
         raise ValueError("abort requires one exact managed worktree ID")
     ledger = cfg.tracking_dir(config.repo_name) / f"{worktree_id}.yaml"
+    _passive, _proof, receiving_guard = _receiving_admission(ledger, config)
     with FinalizeLock(
         Path(config.default_repo.worktree_root) / ".finalize.lock", timeout=3,
         on_stale=lambda message: print(message, file=sys.stderr),
-    ), (
+    ), receiving_guard, (
         worktree_lifecycle.guard(ledger, relocation=True)
     ), launch_admission.guard(ledger), state.owner(ledger):
         report = state.read(ledger)

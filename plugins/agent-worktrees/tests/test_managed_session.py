@@ -16,6 +16,10 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+WRITE_ALIASES = (
+    "str_replace", "str_replace_editor", "str_replace_based_edit_tool",
+    "write", "write_file", "insert", "new_file", "multi_edit",
+)
 
 
 def load(name):
@@ -632,7 +636,7 @@ def environment(home, anchor):
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("linked", [False, True])
-def test_prepared_native_membership_reuses_original_association(tmp_path, monkeypatch, shell, linked):
+def test_prepared_native_membership_reuses_original_association(tmp_path, monkeypatch, capsys, shell, linked):
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -648,21 +652,42 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
     session.mkdir(parents=True)
     payload = {"sessionId": "prepared", "cwd": str(workspace), "toolName": "view"}
     assert module.admitted(payload, home=tmp_path)
+    phases = tmp_path / "native-admission-phases"
     command = (
-        ". $env:PREPARED_MEMBERSHIP_SCRIPT; "
+        "function Write-AdmissionPhase([string]$Name) { "
+        "[IO.File]::AppendAllText($env:PREPARED_MEMBERSHIP_PHASES, "
+        "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
+        "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name + [Environment]::NewLine) }; "
+        "Write-AdmissionPhase 'command-entry'; "
+        ". $env:PREPARED_MEMBERSHIP_SCRIPT; Write-AdmissionPhase 'helper-loaded'; "
         "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }; "
-        "$raw = [Console]::In.ReadToEnd(); "
-        "[Console]::Out.Write((Test-ManagedWorktreesSession -Raw $raw).ToString())"
+        "$raw = [Console]::In.ReadToEnd(); Write-AdmissionPhase 'input-complete'; "
+        "$admitted = Test-ManagedWorktreesSession -Raw $raw; Write-AdmissionPhase 'admission-complete'; "
+        "[Console]::Out.Write($admitted.ToString()); Write-AdmissionPhase 'output-complete'"
     )
     env = environment(tmp_path, workspace)
     env["PREPARED_MEMBERSHIP_SCRIPT"] = str(SCRIPTS / "managed-session.ps1")
-    result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
-        input=json.dumps(payload), text=True, capture_output=True, timeout=10,
-        cwd=workspace, env=env, **no_window_kwargs(),
-    )
+    env["PREPARED_MEMBERSHIP_PHASES"] = str(phases)
+    started_ms = time.time_ns() // 1_000_000
+    try:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+            input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        progress = phases.read_text() if phases.exists() else "no command entry"
+        raise AssertionError(
+            f"{shell} membership exceeded the original 10s child limit; start_ms={started_ms}; "
+            f"phases={progress!r}; stdout={repr(error.stdout)[:512]}; stderr={repr(error.stderr)[:512]}"
+        ) from error
     assert result.returncode == 0, result.stderr
     assert result.stdout == "True", result.stdout + result.stderr
+    with capsys.disabled():
+        print(json.dumps({
+            "shell": shell, "linked": linked, "start_ms": started_ms,
+            "phases": phases.read_text().splitlines(),
+        }))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows registered pre-tool consumer")
@@ -841,7 +866,7 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
     assert membership.exists() is (case in {"incomplete", "receipt"})
     policy_required = case not in {"view", "rg", "glob"}
-    assert validation.exists() is policy_required
+    assert validation.exists() is policy_required, (result.stdout, result.stderr)
     assert policy.exists() is policy_required
     if policy_required:
         assert policy.read_bytes() == raw
@@ -849,6 +874,443 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     else:
         assert result.stdout == b""
     assert not (legacy / "cache").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered file-local write consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "ordinary", "create", "path-alias", "json-args", "personal-state", "anchor-cwd",
+    "anchor-target", "foreign", "nested", "batch", "structured", "drive-relative",
+    "missing-map", "partial-map", "wrong-scope", "array-schema", "oversized-config",
+    "guard-drift", "reader-drift", "forms-drift", "missing-dependencies", "git-pointer-aba",
+    "delegated", "invalid-elevation", "noncanonical-map", "dot-segment-map", "real-policy", "old-admission",
+    "cell-ordinary", "cell-create", "cell-personal-state", "cell-guard-drift",
+    "personal-state-cr", "personal-state-crlf", "personal-state-dot-prefix",
+    "personal-state-dot-file", "personal-state-dot-assignments",
+    "personal-state-control-space", "ordinary-nested-dot-file",
+    "ordinary-unrelated-inventory",
+    "batch-mixed", "batch-json-args", "batch-protected", "batch-foreign",
+    "batch-multiple-targets", "batch-structured", "batch-missing-args",
+    "batch-null-args", "batch-extra-key", "batch-unknown", "batch-empty",
+    "batch-not-list", "batch-limit", "batch-oversized", "batch-read-only",
+    "batch-working-directory", "batch-real-policy", "batch-malformed",
+    "cell-batch-mixed", "cell-batch-protected",
+    "structured-files", "structured-changes", "structured-only", "structured-json",
+    "structured-aliases", "structured-duplicates", "structured-limit",
+    "structured-protected", "structured-foreign", "structured-nested",
+    "structured-oversized", "structured-target-overflow", "structured-incomplete",
+    "structured-invalid-list", "structured-nested-entries", "structured-patch",
+    "batch-structured-safe", "cell-structured", "cell-batch-structured-safe",
+    "structured-real-policy", "cell-structured-real-policy",
+    "batch-target-limit", "batch-target-overflow",
+    *[f"write-name-{name}" for name in WRITE_ALIASES],
+    *[f"protected-write-name-{name}" for name in WRITE_ALIASES],
+    "write-name-json", "write-name-structured", "write-name-batch",
+    "protected-write-name-batch", "write-name-real-policy",
+    "cell-write-name-real-policy", "cell-write-name-structured",
+    "cell-protected-write-name-multi_edit",
+])
+def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, shell, case):
+    from agent_worktrees import guarded_anchors
+
+    cell = case.startswith("cell-")
+    if cell:
+        case = case.removeprefix("cell-")
+    real_policy = case in {
+        "real-policy", "batch-real-policy", "structured-real-policy", "write-name-real-policy",
+    }
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
+        pytest.skip(f"{shell} is unavailable")
+    anchor, registry = fixture_project(tmp_path)
+    workspace, admin = fixture_linked_worktree(tmp_path, anchor)
+    if case == "anchor-cwd":
+        workspace = anchor
+    config = workspace / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("stateless: false\n" if case == "anchor-cwd" else "stateless: true\n", encoding="utf-8")
+    if case in {"personal-state-cr", "personal-state-crlf"}:
+        newline = "\r" if case == "personal-state-cr" else "\r\n"
+        config.write_bytes(f"default_branch: main{newline}stateless: true{newline}".encode("utf-8"))
+    session = tmp_path / ".copilot" / "session-state" / "pre-write"
+    session.mkdir(parents=True)
+    event = {
+        "sessionId": "pre-write", "cwd": str(workspace), "toolName": "edit",
+        "toolArgs": {
+            "path": {
+                "personal-state-dot-prefix": ".efforts/private.md",
+                "personal-state-dot-file": ".ownership.yml",
+                "personal-state-dot-assignments": "..dev-assignments.yml",
+                "ordinary-nested-dot-file": "source/.ownership.yml",
+            }.get(case, "efforts/private.md" if case.startswith("personal-state") else "source-\u00e9.py"),
+            "text": "quote'\"\\\n\t",
+        },
+    }
+    if case == "create":
+        event["toolName"] = "create"
+    elif case == "path-alias":
+        event["toolArgs"]["file_path"] = event["toolArgs"].pop("path")
+    elif case == "json-args":
+        event["toolArgs"] = json.dumps(event["toolArgs"])
+    elif case == "anchor-target":
+        event["toolArgs"]["path"] = str(anchor / "source.py")
+    elif case == "foreign":
+        event["toolArgs"]["path"] = str(fixture_checkout(tmp_path / "foreign") / "source.py")
+    elif case == "nested":
+        event["toolArgs"]["path"] = str(fixture_checkout(workspace / "nested") / "source.py")
+    elif case == "batch":
+        event["toolCalls"] = [{"name": "edit", "args": event["toolArgs"]}]
+    elif case == "structured":
+        event["toolArgs"]["edits"] = [{"path": "other.py"}]
+    elif case.startswith("structured-"):
+        args = event["toolArgs"]
+        args["edits"] = [{"path": "other.py"}]
+        if case in {"structured-files", "structured-changes"}:
+            args[case.removeprefix("structured-")] = args.pop("edits")
+        elif case == "structured-only":
+            args.pop("path")
+        elif case == "structured-json":
+            event["toolArgs"] = json.dumps(args)
+        elif case == "structured-aliases":
+            args["edits"] = [{"file_path": "one.py", "targetFile": "two.py"}]
+            args["files"] = [{"fileName": "three.py"}]
+            args["changes"] = [{"filename": "four.py", "target_file": "five.py"}]
+        elif case == "structured-duplicates":
+            args["edits"] = [{"path": "other.py"}] * 128
+        elif case == "structured-limit":
+            args["edits"] = [{"path": f"other-{index}.py"} for index in range(127)]
+        elif case == "structured-protected":
+            args["edits"].append({"filePath": "efforts/private.md"})
+        elif case == "structured-foreign":
+            args["edits"].append({"path": str(fixture_checkout(tmp_path / "foreign") / "source.py")})
+        elif case == "structured-nested":
+            args["edits"].append({"path": str(fixture_checkout(workspace / "nested") / "source.py")})
+        elif case in {"structured-oversized", "structured-target-overflow"}:
+            args["edits"] = [
+                {"path": f"other-{index}.py"}
+                for index in range(129 if case == "structured-oversized" else 128)
+            ]
+        elif case == "structured-incomplete":
+            args["edits"].append({})
+        elif case == "structured-invalid-list":
+            args["edits"] = {"path": "efforts/private.md"}
+        elif case == "structured-nested-entries":
+            args["edits"].append({"path": "last.py", "files": [{"path": "efforts/private.md"}]})
+        elif case == "structured-patch":
+            event["toolName"] = "apply_patch"
+            args["input"] = "*** Update File: other.py\n*** Move to: final.py\n"
+    elif case == "drive-relative":
+        event["toolArgs"]["path"] = workspace.drive + "source.py"
+    if "write-name-" in case:
+        alias = case.removeprefix("protected-").removeprefix("write-name-")
+        event["toolName"] = alias if alias in WRITE_ALIASES else "multi_edit"
+        if case.startswith("protected-"):
+            event["toolArgs"]["path"] = "efforts/private.md"
+        if alias == "json":
+            event["toolArgs"] = json.dumps(event["toolArgs"])
+        elif alias in {"structured", "real-policy"}:
+            event["toolArgs"] = {"files": [{"filePath": "one.py"}, {"targetFile": "two.py"}]}
+        elif alias == "batch":
+            event["toolName"] = "view"
+            event["toolCalls"] = [
+                {"name": "write", "args": {"path": "one.py"}},
+                {"name": "rg", "args": {"pattern": "read"}},
+                {"name": "multi_edit", "args": {"changes": [{"file_path": "two.py"}]}},
+                {"name": "str_replace", "args": json.dumps(event["toolArgs"])},
+            ]
+    if case.startswith("batch-"):
+        first = {"name": "create", "args": event["toolArgs"]}
+        last = {"name": "edit", "args": {"path": "second.py"}}
+        event["toolCalls"] = [first, {"name": "view", "args": {"path": "read.txt"}}, last]
+        # A top-level read must not hide a later write or supply its arguments.
+        event["toolName"] = "view"
+        event["toolArgs"] = {"path": "ignored.py"}
+        event["tool_input"] = {"path": "efforts/ignored.md"}
+        if case == "batch-json-args":
+            last["args"] = json.dumps(last["args"])
+        elif case == "batch-protected":
+            last["args"]["path"] = "efforts/private.md"
+        elif case == "batch-foreign":
+            last["args"]["path"] = str(fixture_checkout(tmp_path / "foreign") / "source.py")
+        elif case == "batch-multiple-targets":
+            last["args"]["file_path"] = "efforts/private.md"
+        elif case == "batch-structured":
+            last["args"]["edits"] = [{"path": "efforts/private.md"}]
+        elif case == "batch-structured-safe":
+            last["args"] = {"files": [{"path": "second.py"}, {"target_file": "third.py"}]}
+        elif case in {"batch-target-limit", "batch-target-overflow"}:
+            last["args"] = {"files": [
+                {"path": f"other-{index}.py"}
+                for index in range(127 if case == "batch-target-limit" else 128)
+            ]}
+        elif case == "batch-missing-args":
+            last.pop("args")
+        elif case == "batch-null-args":
+            last["args"] = None
+        elif case == "batch-extra-key":
+            last["cwd"] = str(workspace)
+        elif case == "batch-unknown":
+            last["name"] = "unknown"
+        elif case == "batch-malformed":
+            event["toolCalls"][-1] = None
+        elif case == "batch-empty":
+            event["toolCalls"] = []
+        elif case == "batch-not-list":
+            event["toolCalls"] = {"name": "edit", "args": {"path": "source.py"}}
+        elif case in {"batch-limit", "batch-oversized"}:
+            event["toolCalls"] = [first] * (128 if case == "batch-limit" else 129)
+        elif case == "batch-read-only":
+            event["toolCalls"] = [{"name": "view", "args": {}}]
+        elif case == "batch-working-directory":
+            event["workingDirectory"] = event.pop("cwd")
+    env = environment(tmp_path, workspace)
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
+        monkeypatch.delenv(key, raising=False)
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
+        monkeypatch.setenv(key, str(tmp_path))
+    plugin = tmp_path / "payload"
+    if cell:
+        from types import SimpleNamespace
+        import test_registry_paths as fixtures
+
+        native_run = subprocess.run
+        monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+            run=lambda *args, **kwargs: native_run(
+                *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
+            ),
+        ))
+        plugin = fixtures._payload(tmp_path, "selected")
+        with (registry / "repos.yaml").open("a", encoding="utf-8") as output:
+            output.write('    remote: "https://github.com/example/project.git"\n')
+        context, selected_registry = fixtures._stamp(
+            tmp_path / "durable", plugin, marketplace="selected", repository="example/selected",
+        )
+        for name in ("projects.yaml", "repos.yaml"):
+            (selected_registry / name).write_bytes((registry / name).read_bytes())
+        registry = selected_registry
+        fixtures._select(monkeypatch, context, plugin)
+        from agent_worktrees import project_state
+
+        project_state.ensure_project_state("example")
+        env.update(
+            COPILOT_EXTENSIONS_CONTEXT=str(context), AGENT_WORKTREES_PAYLOAD_ROOT=str(plugin),
+            COPILOT_PLUGIN_ROOT=str(plugin),
+        )
+    if case == "delegated":
+        from agent_worktrees import related
+
+        related.write_related(workspace, related.RelatedConfig(
+            related={"example": related.RelatedEntry(name="example", delegate="agent-bridge")},
+        ))
+    assert guarded_anchors.refresh([workspace], registry_root=registry)["published"] == 1
+    reader = load("guarded_anchor_map")
+    facts = reader.read_map(workspace, registry)
+    assert facts.status == "ready" and not facts.posture_errors
+    if case == "personal-state-control-space":
+        config.write_bytes(b"default_branch: main\n\x1cstateless: true\n")
+    assert load("managed_session").admitted(event, home=tmp_path)
+    try:
+        guard_events = load("tool_call_forms").tool_events(event)
+    except ValueError:
+        guard_events = []
+    if case in {"structured-oversized", "structured-target-overflow"}:
+        with pytest.raises(ValueError):
+            load("tool_call_forms").write_targets(event["toolName"], event["toolArgs"])
+        guard_events = []
+    decisions = [
+        load(name).decide(guard_event, env=env, home=tmp_path)
+        for guard_event in guard_events
+        for name in ("statelessness_guard", "cross_repo_guard", "anchor_write_guard", "pr_supersede_guard")
+    ]
+    assert any(value and value.get("permissionDecision") == "deny" for value in decisions) is (
+        case.startswith(("personal-state", "protected-write-name-")) or case in {
+            "anchor-cwd", "anchor-target", "delegated",
+            "batch-protected", "batch-multiple-targets", "batch-structured",
+            "structured-protected",
+        }
+    ), decisions
+    map_path = reader.map_path(workspace, registry)
+    if case == "ordinary-unrelated-inventory":
+        value = json.loads(map_path.read_text(encoding="utf-8"))
+        for index in range(128):
+            root = f"z:\\inventory-{index}"
+            value["postures"].append({
+                "name": f"inventory-{index}", "delegate": "none", "path": root,
+                "posture": "worktree", "elevated": False,
+                "identity": {"root": root, "git_dir": root + "\\.git", "common_dir": root + "\\.git"},
+            })
+        map_path.write_text(json.dumps(value), encoding="utf-8")
+        assert reader.read_map(workspace, registry).status == "ready"
+        assert load("cross_repo_guard").decide(event, env=env, home=tmp_path) is None
+    elif case == "missing-map":
+        map_path.unlink()
+    elif case in {
+        "partial-map", "wrong-scope", "array-schema", "invalid-elevation", "noncanonical-map", "dot-segment-map",
+    }:
+        value = json.loads(map_path.read_text(encoding="utf-8"))
+        if case == "partial-map":
+            value["posture_authority"] = "partial"
+        elif case == "wrong-scope":
+            value["source_root"] = str(anchor)
+        elif case == "array-schema":
+            value["schema"] = [value["schema"]]
+        elif case == "invalid-elevation":
+            value["postures"][0]["elevated"] = 0
+        elif case == "noncanonical-map":
+            value["postures"][0]["identity"]["common_dir"] = str(anchor / ".git").upper()
+        else:
+            value["postures"][0]["identity"]["common_dir"] += "\\."
+        map_path.write_text(json.dumps(value), encoding="utf-8")
+    elif case == "oversized-config":
+        config.write_text("#" * 16385, encoding="utf-8")
+    elif case == "git-pointer-aba":
+        alternate = admin.with_name("example-worktrex")
+        shutil.copytree(admin, alternate)
+        marker = workspace / ".git"
+        before = marker.stat()
+        text = marker.read_text(encoding="utf-8")
+        marker.write_text(text.replace("example-worktree", "example-worktrex"), encoding="utf-8")
+        os.utime(marker, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    if real_policy:
+        for path in SCRIPTS.glob("*.py"):
+            shutil.copyfile(path, scripts / path.name)
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+        "pr_supersede_guard.py", "guarded_anchor_map.py", "tool_call_forms.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    drift = {
+        "guard-drift": "anchor_write_guard.py", "reader-drift": "guarded_anchor_map.py",
+        "forms-drift": "tool_call_forms.py",
+    }.get(case)
+    if drift:
+        with (scripts / drift).open("a", encoding="utf-8") as output:
+            output.write("\n# changed source\n")
+    elif case == "missing-dependencies":
+        policy = scripts / "hook-read-policy.json"
+        value = json.loads(policy.read_text(encoding="utf-8"))
+        value.pop("nativeWriteDependencies", None)
+        policy.write_text(json.dumps(value), encoding="utf-8")
+    observed = tmp_path / "policy-input"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    if cell:
+        (scripts / "installation-context" / "installation-context.ps1").write_text(
+            "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
+            + "$global:LASTEXITCODE = 0\n", encoding="utf-8",
+        )
+    if not real_policy:
+        (scripts / "hook_policy_process.py").write_text(
+            "import base64,json,sys\nfrom pathlib import Path\n"
+            + f"Path({str(observed)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
+            + "print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+            encoding="utf-8",
+        )
+    membership = tmp_path / "membership-interpreter"
+    inventory_probe = tmp_path / "inventory-probe"
+    native_membership = tmp_path / "native-membership"
+    if case == "ordinary-unrelated-inventory":
+        admission = scripts / "managed-session.ps1"
+        admission.write_text(admission.read_text(encoding="utf-8").replace(
+            "return $hasGitMarker",
+            "[IO.File]::WriteAllText('" + str(native_membership).replace("'", "''")
+            + "', $hasGitMarker.ToString()); return $hasGitMarker",
+        ), encoding="utf-8")
+        with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+            output.write(
+                "\n$script:originalPreparedPath = ${function:Get-PreparedWorktreesPath}\n"
+                "function Get-PreparedWorktreesPath {\n    param([object]$Path)\n"
+                "    if ($Path -is [string] -and $Path.StartsWith('z:\\inventory-')) {\n"
+                + "        [IO.File]::WriteAllText('" + str(inventory_probe).replace("'", "''") + "', 'called')\n"
+                "        throw 'Unexpected inventory filesystem probe'\n    }\n"
+                "    return & $script:originalPreparedPath $Path\n}\n",
+            )
+    if case == "old-admission":
+        admission = scripts / "managed-session.ps1"
+        admission.write_text(
+            admission.read_text(encoding="utf-8").replace(
+                "function Test-ManagedWorktreesSession {", "function Test-OriginalManagedWorktreesSession {",
+            )
+            + "\nfunction Test-ManagedWorktreesSession {\n"
+            "    param([Parameter(Mandatory = $true)][string]$Raw, [ref]$Prepared)\n"
+            "    return Test-OriginalManagedWorktreesSession -Raw $Raw -Prepared $Prepared\n"
+            "}\n",
+            encoding="utf-8",
+        )
+    with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+        output.write(
+            "\nfunction Get-ManagedWorktreesPython { "
+            + "[IO.File]::WriteAllText('" + str(membership).replace("'", "''") + "', 'called'); "
+            + "return '" + sys.executable.replace("'", "''") + "' }\n"
+        )
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
+    started = time.monotonic()
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+        input=raw, capture_output=True, timeout=10,
+        cwd=workspace, env=env, **no_window_kwargs(),
+    )
+    native_seconds = time.monotonic() - started
+    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    assert not membership.exists()
+    if case == "ordinary-unrelated-inventory":
+        assert native_membership.read_text() == "True"
+    assert not inventory_probe.exists()
+    policy_required = not (case.startswith(("ordinary", "write-name-")) or case in {
+        "create", "path-alias", "json-args", "real-policy", "batch",
+        "batch-mixed", "batch-json-args", "batch-limit", "batch-working-directory", "batch-real-policy",
+        "structured", "structured-files", "structured-changes", "structured-only", "structured-json",
+        "structured-aliases", "structured-duplicates", "structured-limit", "batch-structured-safe",
+        "structured-real-policy",
+        "batch-target-limit",
+    })
+    assert observed.exists() is policy_required, result.stdout
+    if policy_required:
+        assert observed.read_bytes() == raw
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    else:
+        assert result.stdout == b""
+    if real_policy:
+        contract = scripts / "hook-read-policy.json"
+        value = json.loads(contract.read_text(encoding="utf-8"))
+        value.pop("nativeWriteDependencies")
+        contract.write_text(json.dumps(value), encoding="utf-8")
+        started = time.monotonic()
+        fallback = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+            input=raw, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+        fallback_seconds = time.monotonic() - started
+        assert fallback.returncode == 0 and not fallback.stderr, fallback.stdout + fallback.stderr
+        assert json.loads(fallback.stdout) == {}
+        protected = {**event, "toolArgs": {"path": "efforts/private.md"}}
+        if case == "batch-real-policy":
+            protected["toolCalls"] = [
+                *event["toolCalls"][:-1],
+                {"name": "edit", "args": {"path": "efforts/private.md"}},
+            ]
+        denied = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+            input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+        assert denied.returncode == 0 and not denied.stderr, denied.stdout + denied.stderr
+        assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+        assert not membership.exists()
+        print(json.dumps({
+            "shell": shell, "same_fixture": True, "native_entry_seconds": native_seconds,
+            "real_policy_entry_seconds": fallback_seconds,
+        }))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared cell membership")

@@ -37,24 +37,38 @@ class CurlResult:
     code: int
 
 
+def _configuration_failure(error: Exception) -> BindingError:
+    safe_messages = {
+        "AGENT_VAULT_PORT environment override: port must be an integer from 1 to 65535",
+        "delivered configuration has no matching qualified owner",
+        "Vault configuration belongs to another installation cell",
+    }
+    detail = str(error) if str(error) in safe_messages else "repair the selected vault configuration"
+    return BindingError(f"Vault configuration failed ({type(error).__name__}): {detail}")
+
+
 def _credential(binding: HttpBinding, field: str, prompt: bool) -> str:
     with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
         previous_logging = logging.root.manager.disable
         logging.disable(logging.CRITICAL)
         try:
-            config.resolve_context(strict=True)
-            result = read_credential(
-                SimpleNamespace(
-                    entry=binding.entry,
-                    field=field,
-                    strict_cache=True,
-                    prompt=prompt,
+            try:
+                config.resolve_context(strict=True)
+            except Exception as error:
+                raise _configuration_failure(error) from None
+            try:
+                result = read_credential(
+                    SimpleNamespace(
+                        entry=binding.entry,
+                        field=field,
+                        strict_cache=True,
+                        prompt=prompt,
+                    )
                 )
-            )
-        except Exception:
-            raise BindingError(
-                "Credential lookup failed; repair or unlock the selected vault"
-            ) from None
+            except Exception:
+                raise BindingError(
+                    "Credential lookup failed; repair or unlock the selected vault"
+                ) from None
         finally:
             logging.disable(previous_logging)
     if (

@@ -6,6 +6,8 @@ execution and compact receiving export. It does not import Bridge, Worktrees
 or Manager. Install it as an ordinary first-party distribution and run
 `python -m agent_remote_driver.session_host --support-json`; plugin enablement
 is not required.
+Session Host shutdown closes attached clients before awaiting its cancelled
+server task, so child exit does not depend on a client disconnecting first.
 
 The [Driver application and extension connector](../../plugins/agent-remote-driver/README.md)
 provides the ordinary application front door. Bridge consumes this same
@@ -173,6 +175,15 @@ still-valid source grant or retire its native CLI. Active source renewal can
 preserve that CLI without clearing its hold; recovery after actual source
 expiry or revocation still refuses while the control hold remains.
 No credentials are read, copied or accepted by the receiver.
+An idle freeze acknowledgement does not mark owned retirement. SDK loss
+before retirement, malformed records or incomplete observation drains preserve
+an irreversible hold. Broker EOF follows the admitted SDK stream's bounded
+drain rather than racing the final native replies.
+An owned-retirement TCP reset is delivered as EOF to the auth stream reader
+so complete buffered records still drain; an incomplete record remains held.
+The retirement marker follows the owned native Job termination request, before
+asynchronous settlement is queued; merely scheduling a worker cannot suppress
+a connection-loss hold.
 
 The private host-state file's `auth_wait` member declares the **running**
 contract/version, loopback `port`, random `nonce`, `session_id`, receiving
@@ -194,13 +205,24 @@ Once expired/revoked, renewal is refused until exact owned stop and old
 observation-stream drain finish.
 
 Expiry first freezes adapter sends and captures pending/sending/native-input
-state, then terminates and settles the retained Windows Job or Linux private
-process group, including ordinary inherited descendants. It does not kill a
-shared mux, remove Job limits or resolve a process by name. Other platforms
-are explicitly unsupported. Linux retains the caller's pane descriptors in
-a private session; productive terminal behavior still needs native qualification.
-Processes that deliberately escape a POSIX group are outside that containment
-contract; no unqualified host-wide descendant cleanup is attempted.
+state, then terminates and settles the retained Windows Job, including ordinary
+inherited descendants. It does not kill a shared mux, remove Job limits or
+resolve a process by name. The opt-in auth-wait launch refuses POSIX before
+opening its endpoint: a private process group alone cannot enforce owner death
+or source expiry after coordinator failure. Independent POSIX owner-death custody
+and native qualification are still required; no guardian is inferred from group
+creation. Ordinary `auth_wait=None` execution remains unchanged.
+
+The admitted SDK output is a strict auth-state record or a complete JSON-RPC
+response/notification envelope. Complete but invalid envelopes and non-finite
+wire JSON hold recovery just like truncated observation. Expiry-task failure
+remains monitored after SDK loss and reaches exact owned cleanup. A Windows
+auth resume reuses the coordinator Job already armed by that same launch.
+Coordinator cancellation retires the auth-owned native scope before cancelling
+the expiry watcher or draining client transports. A connected client cannot
+extend native execution while transport shutdown waits; final cleanup retains
+the same exact retirement fallback. Legacy execution without `auth_wait` keeps
+its existing shutdown order.
 
 A confirmed idle, controlled stop enters `auth_wait`; a fresh source grant
 then creates a new receiving incarnation and cold-starts `--resume` with the
@@ -209,6 +231,9 @@ positional launch input is refused, no request is buffered/replayed, and the
 old endpoint binding cannot act on the new incarnation. Previous Host/client
 connections close; callers must select the new private declaration, not
 replay an uncertain send. Actual native history restoration remains unqualified.
+Bare positional input before `--` and ambiguous attached short-seed forms
+also refuse before endpoint or native creation; option values keep their
+declared boundaries.
 Missing/invalid observation, native input, closed/uncontrolled state,
 pending/sending/outstanding work, connection loss or cleanup uncertainty
 cannot be cleared by a lease. These remain held or terminally unavailable.

@@ -7,6 +7,7 @@ changes telemetry configuration, and does not discover or publish to OneDrive.
 ```text
 agent-machines health report --input <local-jsonl> --input <another-local-jsonl>
 agent-machines health report --input <local-jsonl> --chart <new-chart.svg>
+agent-machines health report --store-dir <absolute-local-health-store> --service agent-dispatch --chart <new-chart.svg>
 ```
 
 The command writes `agent-machines.health-report.v1` JSON to stdout. `--now`
@@ -59,6 +60,62 @@ health or successful capture. Exit 2 means invalid invocation or an unavailable
 output. Configuration, selected writer, actual persisted events, source release,
 running adoption and synchronized peer receipt are separate facts.
 
+## Installed service contributions
+
+```text
+agent-machines health report --service agent-dispatch
+agent-machines health report --service queue=agent-dispatch --hour 2026-11-09T12:00:00Z --chart <new-chart.svg>
+```
+
+An explicit `--service` selects the existing same-cell installation owner,
+not PATH, a home-directory scan or a synchronized command. At least one
+`--input`, `--service` or `--store-dir` is required. `--hour` selects exactly one absolute UTC
+hour inside the report's 168-hour window; the default is its current hour.
+There are at most eight selections, 30 seconds for collection, ten seconds per
+child and 64 KiB each for complete stdout/stderr. Native tree and retained-pipe
+cleanup use the existing caller-owned process primitive and a shared absolute
+execution budget. Cleanup is reserved inside both deadlines, not added after
+the child timeout; a collection response margin is retained.
+
+The selected immutable runtime must contain a supported
+[hourly reporting declaration](../../../libs/process-telemetry/hourly-reporting.md).
+Missing metadata is unsupported without trying new flags. The operation
+starts no producer, capture, credential acquisition, installer or periodic job.
+Legacy/unconfigured installation contexts report unavailable. Other-cell and
+standalone-service inventory adapters are not implemented by this first seam.
+
+The additive `services` array keeps each presentation label, native service,
+requested hour, state and admitted contribution together. Local installation
+identity stays local. Repeated selections of the same installation are marked
+duplicate, not executed twice; presentation aliases do not create instances.
+Independently qualified same-named selections retain their own namespace.
+Invalid/unsupported/unavailable/timed-out providers do not suppress independent
+valid results. Unknown cleanup custody remains a command failure.
+
+`services_collected_at_ms` records collection completion separately from
+`generated_at_ms` inside a contribution and its first/last source times.
+`--now` remains the explicit-file cutoff and service-hour window selector;
+service exports summarize their complete requested hour at collection time,
+not a reconstructed within-hour cutoff in the past.
+Dispatch's first exporter reduces only its own retained typed telemetry.
+No current service health, authenticated access or logical-agent population
+is inferred. No observations remain a gap, never a healthy zero.
+
+Service contributions remain separate from explicit-file totals and from each
+other. The static chart lists their namespace, source hour, coverage state and
+observed metric groups separately; it never averages percentiles or double-adds
+potentially overlapping direct-file/export observations.
+
+The focused Dispatch packet
+`tests/test_hourly_reporting.py` + `tests/native/test_hourly_export.py` proves
+actual producer events, native export, fixture-selected installed metadata,
+the normal machine report/chart and rollback to absent metadata.
+Machines' `tests/test_service_reports.py` +
+`tests/native/test_service_report_cleanup.py` cover independent gaps, wrong
+owners/hours, namespaces, strict UTF-8, output/deadline limits and retained
+streams after root exit. These are isolated source/fixture controls, not
+deployed installed-owner inventory or activated hourly publication.
+
 ## Reproducible validation
 
 Pure tests cover time units, mixed event families, malformed/partial input,
@@ -74,6 +131,243 @@ runner:
 ```text
 python tools/run-plugin-tests.py agent-machines --test-file tests/test_health_report.py --test-file tests/native/test_health_report_consumer.py --allow-explicit-tiers
 ```
+
+## Explicit local collection candidates
+
+`health collect` adds an explicit one-hour candidate flow; it does not change
+the read-only report command or register a recurring job. Prepare a **new**
+exclusive unsynchronized store through the local configuration owner with:
+
+```json
+{
+  "schema": "agent-machines.health.store",
+  "version": 2,
+  "publisher": "example-worker",
+  "continuity": "example-generation",
+  "collection": {
+    "bridge_port": null,
+    "services": ["queue=agent-dispatch"]
+  }
+}
+```
+
+The store also needs a preprovisioned one-byte `collection.lock` regular file,
+initially containing a zero byte.
+Preparation is explicit: collection creates neither the directory, policy nor
+lock, and does not migrate an existing v1 store. Select an existing admitted
+loopback Bridge listener by numeric `bridge_port` when wanted; null means do
+not probe. Service selections use the same installed-owner contract as report,
+with at most eight unique presentation labels and no executable configuration.
+
+```text
+agent-machines health collect --store-dir <absolute-v2-store>
+agent-machines health collect --store-dir <absolute-v2-store> --hour 2026-11-09T11:00:00Z
+agent-machines health record --store-dir <absolute-v2-store> --input <candidate.json>
+agent-machines health record --store-dir <absolute-v2-store> --input <candidate.json> --apply --expect <preview-token>
+agent-machines health report --store-dir <absolute-v2-store> --chart <new-chart.svg>
+```
+
+Collect writes one `agent-machines.health.hourly` v1 envelope to stdout. Save it
+outside the store as the explicit record input. Current-hour collection runs
+only the selected local listener check; an explicit older hour within the
+168-hour window exports retained services only, never present-time probes.
+Run the two explicit commands to obtain current health and previous-hour
+telemetry, or use the separately approved one-shot operation below.
+Native periodic enrollment is not implemented. An early/current-hour export from the separate report command
+remains its existing bounded snapshot, not a complete-hour total.
+
+Collection holds a nonblocking OS-backed run lock, uses a 45-second admission
+budget and passes the remaining ceiling to existing 30-second/ten-second
+service collection. It reserves response time and refuses on a changed policy,
+clock/hour boundary or expired budget. The native process owner retains cleanup
+custody. Before exporting, collection durably changes the existing lock byte
+to one; confirmed settlement clears it to zero. Unconfirmed native cleanup
+retains both admission locks and registers their release with that exact
+native owner's settlement callback. A failed cleanup retry cannot release them.
+If the CLI exits before settlement, the byte remains a fail-closed fence:
+later invocations refuse `collection-cleanup-unconfirmed` even after the OS
+lock releases. There is no automatic fence reset or recovery command; the
+original native owner must confirm settlement, or an explicit containment
+handoff must reconcile that exact custody before store recovery. File age,
+an exited CLI or a missing PID is not confirmation. Thus collection never writes
+evidence or slots, but can change this existing admission metadata.
+The final deadline and hour checks run after admission cleanup; late successful
+fence clearing cannot produce an on-time candidate.
+Lock, provider and filesystem failures never start a replacement
+service, change credentials or write a slot. Filesystem stalls defeating the
+budget remain a native qualification failure, not a hard-real-time guarantee.
+
+The candidate retains existing unselected components and its target revision;
+confirmed `health record` revalidates the policy, input and previous revision
+under its existing mutation lock before atomic replacement. There is no
+multi-slot transaction or automatic replay after an unknown write outcome.
+The new closed envelope holds only same-hour observation v1 and namespaced
+service contribution v1 data, with collection time separate from evidence
+times. A valid older service contribution survives a later failed or
+evidence-free export, even when the response contains a valid contribution
+wrapper. This rule is also enforced for directly supplied record candidates.
+Components without evidence remain unknown; a fresh envelope does not refresh
+their source ages. Supplied input remains unverified, not an attested probe.
+
+## Policy-approved one-shot collection
+
+```text
+agent-machines health run --store-dir <absolute-v2-store>
+agent-machines health run --store-dir <absolute-v2-store> --apply --expect-policy <policy-token>
+```
+
+Without `--apply`, this reads only the selected store identity and exact local
+policy. It returns an `agent-machines.health.run` v1 plan and `policy_token`;
+no observation, export, admission lock, slot write, provisioning or job
+registration occurs. The token binds the canonical store path, filesystem
+identity, exact policy bytes (including publisher/continuity), and collection
+operation v1. It deliberately does not bind the hour or slot revision.
+Missing, wrong or changed approval refuses before effects; a token without
+`--apply` also refuses. Keep this local policy and approval outside synchronized
+report data. They authorize neither service changes nor carrier writes.
+Both payload entry points select an already provisioned runtime read-only for
+`health run`, including apply, and `health prepare-job`. A missing runtime refuses with the existing
+launcher failure status before calling an installer, stamping diagnostics or
+creating runtime/store state; use the normal setup owner separately.
+
+Apply holds one existing admission lock and one 45-second parent budget for
+two independent targets: current-hour listener health first, then the preceding
+complete hour's selected service exports. Empty selections are explicitly
+`not-requested`, not permission to enumerate providers. Both candidates pass
+through the same policy/revision planner, mutation lock and atomic writer as
+manual record; no intermediate candidate file is created. Policy approval and
+the frozen hour/deadline are rechecked under each mutation lock. Lock waiting,
+collection and native settlement share the remaining parent budget.
+
+The closed `targets` results retain absolute `hour`, `component`, `requested`,
+`collection`, `transaction`, `applied`, `changed` and bounded `reason`.
+The top-level `qualification` distinguishes an on-time response from a timeout,
+hour/policy change or unconfirmed effect. A second target's failure cannot
+erase or relabel the first commit. A late successful write retains its actual
+applied/changed facts with timeout qualification, never an on-time success.
+Exit 0 means preview or an on-time completed run; exit 2 retains partial/failed
+results on stdout, or a bounded pre-execution/output error on stderr.
+Collected service rows still retain their independent unsupported/unavailable
+coverage: a completed staging transaction is not healthy service evidence.
+
+Unknown write outcomes stop the invocation without replaying the target.
+Apply sets the existing admission fence before each transaction too; an unknown
+write leaves that byte at one after releasing the native lock. Subsequent
+invocations refuse rather than automatically retry a potentially committed
+write. Reconcile the exact returned hour and transaction through the original
+owner before any explicit store recovery; there is no automatic fence reset.
+Unconfirmed exporter cleanup preserves the existing native owner's callback
+and admission custody. Neither outcome rolls back earlier confirmed slots.
+In-process Python callers receive the original `OwnedCleanupError` with a
+bounded `health_run_result` attribute, retaining access to `retry_cleanup()`.
+The CLI emits that partial result and exits 2; a process exit does not clear
+its durable fence. Interrupted commits are marked unknown before entering the
+writer and preserve the fence even when a `KeyboardInterrupt` escapes.
+Python interruption errors also carry `health_run_result`; the CLI emits it
+for a keyboard interruption rather than claiming no write happened.
+This includes interruption during final post-admission validation: confirmed
+commits retain their facts. Any outstanding original cleanup owner still
+propagates, with the interruption as its cause. Cancellation before planning
+propagates unchanged instead of inventing a partial operation result.
+
+Independently installed callers must first qualify the exact selected Machines
+runtime's packaged `agent_machines/health-collection-v1.json` declaration:
+
+```json
+{"schema":"agent-machines.health.collection","version":1,"operations":["preview","apply","prepare-job"]}
+```
+
+This declaration is separate from the package version and from service-export
+metadata. Missing, changed or unsupported metadata is unavailable support,
+never permission to trial a new command, resolve PATH, provision or update.
+Runtime replacement/rollback invalidates the selection and requires fresh
+qualification. The payload-owned stdlib compatibility entry runs with `-I`
+under that selected interpreter. It reads the declaration from that
+interpreter's `purelib`, verifies that the package selected for import is
+the same package, then forwards the operation in-process. No extra negotiation
+subprocess, PATH lookup or trial invocation is used. Missing/invalid support
+returns exit 2 with `collection-contract-unsupported` before importing the
+provider or touching the store. A prior declaration with only preview/apply
+retains those operations but cannot prepare jobs.
+
+The focused one-shot controls cover pure preview/approval, empty selections,
+mutation-time policy/revision drift, shared lock budget, partial outcomes,
+late commits and unconfirmed native cleanup. The opt-in collection consumer
+packet exercises a real fixture-owned listener and retained Dispatch data
+through both slots and the ordinary reread/report/chart, plus a failed second
+export preserving the confirmed first transaction. Required actor-free CI
+substitutes native/storage owners and starts none of those actors. Installed
+adoption, Linux/Windows job qualification, carrier behavior and activation
+remain separate gates.
+
+## Inert native job preparation
+
+```text
+agent-machines health prepare-job --store-dir <absolute-v2-store>
+agent-machines health prepare-job --store-dir <absolute-v2-store> --user-id <interactive-Windows-SID>
+```
+
+Use the first form on Linux, the second on Windows. The command reads the
+existing policy and owning payload launcher and returns
+`agent-machines.health.job-preparation` v1 JSON on stdout. Its `artifacts`
+map contains definition text only: no files, task registration, unit installation,
+enable/start, lingering, runtime provisioning or carrier write occurs.
+Keep this output local: it contains absolute paths and policy-scoped approval.
+The original absolute store path goes directly through the existing plain-path
+owner; preparation never normalizes traversal or resolves links into a
+different store before policy validation.
+macOS is unsupported.
+
+The Windows proposal uses the explicitly named interactive account at
+LeastPrivilege, an hourly UTC repetition at 15 seconds after the boundary,
+IgnoreNew overlap handling, late-start coalescing, no restart policy, a
+60-second outer task limit and the existing headless `conhost` launch shape.
+Both task and trigger are disabled. The Linux proposal contains a systemd-user
+oneshot and hourly UTC persistent timer, no retries, control-group cleanup and
+55-second start/five-second stop limits, retaining the same 60-second outer
+containment bound. WorkingDirectory uses literal directive-specific path
+rendering and percent-specifier escaping, not ExecStart argument quoting.
+Paths with parent traversal, edge whitespace or a trailing continuation
+backslash refuse rather than silently changing the directory.
+Returned unit text is not an installed
+or enabled unit. Neither definition depends on the update watchdog.
+
+The action calls the owning payload's normal `health run --apply` entry with
+the previewed policy token. Selection and capability qualification happen again
+at invocation, and normal collection revalidates the token at each mutation.
+A changed policy refuses; a late invocation only targets current health and the
+preceding complete service hour, never replays every missed hour.
+The enclosing scheduler budget leaves startup/settlement headroom around the
+unchanged 45-second collection budget, including Linux stop time; native timing and
+termination behavior are **not qualified by rendering these definitions**.
+
+`registered: false`, `enabled: false` and
+`qualification: native-scheduler-not-qualified` are preparation results, not
+queries of an existing task. Registration/enrollment is deliberately absent.
+Before a future owner registers anything, it must verify the actual interactive
+identity, current installation selection, policy adoption, existing-definition
+conflicts and the native first/reconcile, two-cycle headlessness, overlap,
+late-wake, deadline/storage and exact-cleanup gates in the reviewed local
+collection plan. Obtain separate activation authority; preparation is not it.
+Listener-only recollection replaces only `local_listener`; retained SSH,
+session and other unselected domains keep their exact evidence and source
+timestamps. The record boundary also refuses changes to those domains.
+
+V2 slots have a 768 KiB per-envelope limit and the same 168-name ring. The ring
+accounts for at most 126 MiB; failed writes or unrelated filesystem usage are
+not disk-quota enforcement. Old v1 observations/stores retain their original
+schema and 64 KiB limit; an older runtime cannot read or write the new format.
+Use explicit store selection for adoption/rollback, never dual writers or
+synchronized execution policy. The report/chart shows stored service namespaces
+separately from direct-file totals without launching exports.
+
+`tests/test_health_collection.py` covers candidate, clock, overlap, old-format,
+revision and storage-failure controls. The selected native
+`tests/native/test_health_collection_consumer.py` exercises actual retained
+Dispatch events and a private listener through collect, confirmed staging,
+reread and chart, plus two-process overlap and normal/crash lock release.
+Its installation admission is fixture-resolved. Native scheduler qualification,
+installed adoption, carrier publication and activation remain separate gates.
 
 ## Explicit local hourly observations
 
@@ -198,10 +492,65 @@ acknowledgement through stderr when available, never an untouched slot.
 
 Inspect rechecks policy bytes and namespace identity after its scan; a concurrent
 policy change requires another read, not a view qualified by the old owner.
-These are additive explicitly selected commands. Existing `health report`
-behavior is unchanged. Discover `health --help` on the selected runtime before
+These are additive explicitly selected commands. Discover `health --help` on the selected runtime before
 calling them; an older runtime's missing command does not authorize a fallback
 writer, direct slot edits, runtime update or carrier enrollment.
+
+## Composed local health view
+
+`health report --store-dir <absolute-local-store>` composes the existing
+`health inspect` reader with the report, optionally alongside explicit telemetry
+files and installed service contributions. It is one read-only report invocation,
+not a combined observe/record job: it neither calls the listener nor changes the
+store, its policy, revisions or writer lock. Observation and confirmed storage
+remain separate explicit operations. A chart destination inside the selected
+store is refused, including new paths; keep presentation artifacts outside its
+exclusive namespace. Both lexical and resolved overlap refuse. A store that
+cannot be resolved remains unavailable evidence while a valid external chart
+can still be written; an unresolvable chart is instead an output refusal.
+
+The additive `health` object has `state: available` and the complete age-qualified
+`view`, or `state: unavailable` and `reason: local-store-unavailable` if the store
+cannot be qualified. Available means readable, not healthy. A missing, invalid
+or changed store policy cannot suppress independent valid telemetry or service
+results. It creates no missing directory and includes no raw path/error content.
+An available view retains per-slot missing, invalid, expired, future and
+owner-mismatch conditions, original domain times, observed states, proof ages,
+unknown counts/directions and the reader's `input-supplied-not-verified`
+qualification. Explicit publisher/continuity identifiers remain local view data,
+not verified identity or permission to share them.
+
+The file report and health reader use the same `--now` cutoff and 168 absolute
+UTC hours. Service contributions keep their separately documented collection
+time semantics. A readable historical listener observation never becomes
+authenticated SSH, a fresh proof or evidence of active agents. Health slots are
+not added to event totals or duration statistics. The SVG displays separate
+slot/domain rows, visible gaps and stale evidence; cell titles retain observed
+state, source age, evidence and reason. A report without `--store-dir` retains
+its prior output and does not inspect a store.
+
+The reader adds at most 168 slot reads of 64 KiB each plus its bounded policy
+checks; it does not enumerate unrelated files or acquire a writer lock. These
+are work/byte bounds, not a wall-clock deadline for a blocked filesystem.
+Native job overlap, stopped storage, Windows/Linux lifetime, installed adoption,
+scheduling and carrier qualification remain open before enrollment.
+
+This expands the existing `agent-machines.health-report.v1` result with an
+opt-in field, without changing either strict v1 policy/observation schema.
+Providers expand first; no automated caller or schedule is migrated here.
+Check `health report --help` on the exact selected runtime for `--store-dir`
+before selecting this optional feature. Legacy/rolled-back providers retain
+their old report syntax; missing support means the composed view is unavailable,
+not permission to drop a required health input or write slots directly.
+
+`tools/promotion_unit_tests/test_health_composition.py` covers actual age
+projection, report/parser composition, independent unavailable evidence and
+static rendering without native actors. The selected
+`tests/native/test_health_observe_consumer.py` extends actual loopback observation
+through confirmed slot storage to the normal report/chart and verifies storage
+is untouched by reporting. `tests/native/test_health_report_consumer.py` retains
+the real measurement/sink flow when an explicitly selected store is unavailable.
+These source/fixture controls do not establish installed or activated publishing.
 
 ## Passive local Bridge listener
 

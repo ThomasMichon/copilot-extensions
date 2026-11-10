@@ -17,7 +17,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from windows_qualification_contract import (
-    NATIVE_VERSIONS, VERSION, admit, canonical, request, validate_files, validate_result,
+    NATIVE_PACKETS, NATIVE_VERSIONS, VERSION, admit, canonical, request,
+    validate_files, validate_result,
 )
 from windows_qualification_transport import Transport
 
@@ -62,38 +63,43 @@ def plugin_command(root: Path, selected: dict, output: Path) -> list[str]:
     return argv
 
 
-def native_command(root: Path, output: Path) -> list[str]:
-    """Select only the installed public caller with its existing functional bounds."""
+def native_command(
+    root: Path, output: Path, packet: str = "native-worktrees-embody",
+) -> list[str]:
+    """Select exactly one native consumer with its existing functional bounds."""
+    plugin, module, case, _ = NATIVE_PACKETS[packet]
+    limits = ("900", "1200", "900") if plugin == "agent-worktrees" else ("300", "420", "180")
     return [
-        sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-worktrees",
-        "--test-file", "tests/native/test_native_seed_application.py",
-        "--allow-explicit-tiers", "-k", "public_embody",
-        "--timeout", "900", "--plugin-timeout", "1200", "--test-timeout", "900",
+        sys.executable, str(root / "tools/run-plugin-tests.py"), plugin,
+        "--test-file", f"tests/native/{module}.py",
+        "--allow-explicit-tiers", "-k", case.removeprefix("test_"),
+        "--timeout", limits[0], "--plugin-timeout", limits[1], "--test-timeout", limits[2],
         "--junit-dir", str(output / "junit"),
     ]
 
 
-def native_prerequisites(owned) -> dict:
-    """Require disposable native binaries and anonymous configured feed access."""
-    from governed_feed_trust import _validated_trusted_index_url
+def native_prerequisites(owned, *, require_feed: bool = True) -> dict:
+    """Require disposable native binaries; only Worktrees needs its governed feed."""
     if (
         os.name != "nt" or os.environ.get("GITHUB_ACTIONS") != "true"
         or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1"
         or not os.environ.get("RUNNER_TEMP")
     ):
         raise ValueError("native packet requires its disposable hosted Windows owner")
-    selected = _validated_trusted_index_url(dict(os.environ))
-    if selected is None:
-        raise ValueError("native packet requires the configured governed HTTPS feed")
-    index = urllib.parse.urlsplit(selected[0])
-    if index.username or index.password or index.query or index.fragment:
-        raise ValueError("native packet admits only a credential-free feed URL")
-    try:
-        with urllib.request.urlopen(selected[0].rstrip("/") + "/packaging/", timeout=20) as response:
-            if response.status != 200 or not response.read(256):
-                raise ValueError("package index unavailable")
-    except Exception as exc:
-        raise ValueError(f"hosted governed feed unavailable ({type(exc).__name__})") from None
+    if require_feed:
+        from governed_feed_trust import _validated_trusted_index_url
+        selected = _validated_trusted_index_url(dict(os.environ))
+        if selected is None:
+            raise ValueError("native packet requires the configured governed HTTPS feed")
+        index = urllib.parse.urlsplit(selected[0])
+        if index.username or index.password or index.query or index.fragment:
+            raise ValueError("native packet admits only a credential-free feed URL")
+        try:
+            with urllib.request.urlopen(selected[0].rstrip("/") + "/packaging/", timeout=20) as response:
+                if response.status != 200 or not response.read(256):
+                    raise ValueError("package index unavailable")
+        except Exception as exc:
+            raise ValueError(f"hosted governed feed unavailable ({type(exc).__name__})") from None
     versions = {}
     for name, variable, flag in (
         ("copilot", "COPILOT_NATIVE_TEST_EXECUTABLE", "--version"),
@@ -163,7 +169,7 @@ def tool_tests(root: Path, selected: dict, output: Path) -> int:
 def execute(root: Path, value: dict, output: Path) -> dict:
     """Run selected source, retaining a truthful manifest even after failure."""
     request(value)
-    native = value["selection"] == {"kind": "packet", "name": "native-worktrees-embody"}
+    native = NATIVE_PACKETS.get(value["selection"].get("name"))
     output.mkdir(parents=True, exist_ok=True)
     result = {
         "version": VERSION, "request": value,
@@ -273,11 +279,13 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                 if preparation != "success":
                     status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
                     raise ValueError(f"Pinned native prerequisite acquisition did not succeed ({status})")
-                return native_prerequisites(owned)
+                return native_prerequisites(
+                    owned, require_feed=selected["name"] == "native-worktrees-embody",
+                )
             result["native_prerequisites"] = phase(
                 "native-prerequisites", prepare_native,
             )
-            phase("native-worktrees-public-caller", lambda: owned(native_command(root, output), 1800))
+            phase(native[3], lambda: owned(native_command(root, output, selected["name"]), 1800))
         else:
             phase("bridge-http52-canonical-capture", lambda: owned([
                 sys.executable, str(root / "tools/capture_bridge_http52.py"),
@@ -299,7 +307,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             def test_runtime():
                 from plugin_test_resources import venv_root
                 target = selected["plugin"] if selected["kind"] == "plugin" else (
-                    "agent-worktrees" if native else "agent-bridge"
+                    native[0] if native else "agent-bridge"
                 )
                 python = venv_root(root) / target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
                 metadata = owned([
@@ -363,6 +371,7 @@ def main() -> int:
         with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as stream:
             stream.write("source_sha=" + value["source_sha"] + "\n")
             stream.write("packet=" + value["selection"].get("name", "") + "\n")
+            stream.write("native=" + str(value["selection"].get("name") in NATIVE_PACKETS).lower() + "\n")
         return 0
     if args.operation == "tools":
         candidate = args.candidate.resolve()
@@ -372,7 +381,7 @@ def main() -> int:
             raise ValueError("tool worker requires a tools request")
         return tool_tests(candidate, value["selection"], args.output.resolve())
     if args.operation == "sanitize":
-        if value["selection"] != {"kind": "packet", "name": "native-worktrees-embody"}:
+        if value["selection"].get("name") not in NATIVE_PACKETS:
             raise ValueError("native sanitization requires its named packet")
         output = args.output.resolve()
         omitted = sanitize_native_files(output)

@@ -97,7 +97,8 @@ into a successor. A fenced handle that never proved a native identity
 qualified-empty history rather than as a native. Rows whose recorded identity
 evidence conflicts are reported as `unclassifiable` and left untouched. It skips
 active reservations, pending native release, pending conclusions, retained
-transport, natives shared with live work or a task owner, and the latest
+transport, natives shared with live work or the owner of a task that is not
+completed or abandoned (a submitted task still protects its owner), and the latest
 native of a non-concluded task; the preview reports each exclusion count.
 Applying requires the same recovery-bridge readiness as `authorize-fresh`.
 

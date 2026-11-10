@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify first-run registry recovery and retain original onboarding acceptance gates",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

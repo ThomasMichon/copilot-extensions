@@ -131,7 +131,90 @@ def native_provider():
         assert not thread.is_alive()
 
 
-def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight=False):
+def _diagnostic_publisher(error_file):
+    import sys
+    from agent_remote_driver.headed import launcher
+
+    publish = launcher._write_host_state
+
+    def write(path, state):
+        kind, error, frame = sys.exc_info()
+        if state.get("state") == "auth_held" and kind is not None:
+            frames = []
+            while frame is not None and len(frames) < 20:
+                frames.append({
+                    "file": Path(frame.tb_frame.f_code.co_filename).name[:80],
+                    "function": frame.tb_frame.f_code.co_name[:80], "line": frame.tb_lineno,
+                })
+                frame = frame.tb_next
+            diagnostic = {"exception": kind.__name__[:80], "frames": frames}
+            for name in ("errno", "winerror"):
+                value = getattr(error, name, None)
+                diagnostic[name] = value if type(value) is int else None
+            try:
+                error_file.write_text(json.dumps(diagnostic), encoding="utf-8")
+            except OSError:
+                pass
+        publish(path, state)
+
+    return write
+
+
+def _observation_loss_backend(fault_file, receipt_file):
+    from agent_remote_driver.headed.backend import HeadedBackend
+
+    class ObservationLossBackend(HeadedBackend):
+        async def serve(self):
+            self._fixture_fault = None
+            await super().serve()
+            self._fixture_fault = asyncio.create_task(self._lose_observation())
+
+        async def _lose_observation(self):
+            await self.bound.wait()
+            while True:
+                try:
+                    request = json.loads(fault_file.read_text(encoding="utf-8"))
+                    break
+                except (FileNotFoundError, json.JSONDecodeError):
+                    await asyncio.sleep(.01)
+            try:
+                assert request == {
+                    "session_id": self._session_id,
+                    "incarnation": self._auth_wait.incarnation,
+                    "native_pid": self.native_pid,
+                    "extension_pid": self.extension_pid,
+                }
+                assert self.bound.is_set() and not self.auth_stopping
+                assert self._auth_wait.authorized() and self._auth_wait.hold is None
+                snapshot = dict(self.auth_snapshot)
+                assert snapshot["controlled"] and not snapshot["closed"]
+                assert any(snapshot[key] for key in ("pending", "sending", "outstanding"))
+                writer = self._writer
+                assert writer is not None and not writer.is_closing()
+                # Drop the authenticated SDK/control stream, not the public broker client.
+                writer.close()
+                await asyncio.wait_for(writer.wait_closed(), 1)
+                await asyncio.wait_for(self.lost.wait(), 1)
+                receipt = {
+                    **request, "snapshot": snapshot, "status": self._auth_wait.status(),
+                    "writer_closed": writer.is_closing(), "bound": self.bound.is_set(),
+                }
+            except Exception as error:
+                receipt = {"error": type(error).__name__}
+            receipt_file.write_text(json.dumps(receipt), encoding="utf-8")
+
+        async def close(self):
+            if self._fixture_fault is not None:
+                self._fixture_fault.cancel()
+                await asyncio.gather(self._fixture_fault, return_exceptions=True)
+            await super().close()
+
+    return ObservationLossBackend
+
+
+def _qualify_native_receiver(
+    tmp_path, monkeypatch, native_provider, *, inflight=False, observation_loss=False,
+):
     import sys
 
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
@@ -183,11 +266,29 @@ def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight
         "state_file": str(state_file), "cwd": str(checkout),
     }), encoding="utf-8")
     driver = tmp_path / "receiver.py"
+    fault_file, receipt_file = tmp_path / "lose-sdk.json", tmp_path / "lost-sdk.json"
+    error_file = tmp_path / "coordinator-error.json"
+    diagnostic_hook = (
+        inspect.getsource(_diagnostic_publisher)
+        + "\nimport agent_remote_driver.headed.launcher as launcher\n"
+        + "launcher._write_host_state=_diagnostic_publisher("
+        + f"Path({str(error_file)!r}))\n"
+    )
+    fault_hook = ""
+    if observation_loss:
+        fault_hook = (
+            inspect.getsource(_observation_loss_backend)
+            + "\nimport agent_remote_driver.headed.launcher as launcher\n"
+            + "launcher.HeadedBackend=_observation_loss_backend("
+            + f"Path({str(fault_file)!r}),Path({str(receipt_file)!r}))\n"
+        )
     driver.write_text(
         "import asyncio,json,sys,time\n"
         "from pathlib import Path\n"
         "from agent_remote_driver.headed.launcher import run_headed\n"
-        "value=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\n"
+        + diagnostic_hook
+        + fault_hook
+        + "value=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\n"
         "value['auth_wait']={'source_owner':'native-fixture',"
         "'source_revision':'native-fixture-revision','lease_revision':1,"
         "'budget_seconds':90,'expires_at':time.time()+90}\n"
@@ -223,6 +324,8 @@ def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight
             key: observed.get("auth_wait", {}).get(key)
             for key in ("phase", "hold", "lease_revision", "native_qualification")
         })
+        if error_file.exists():
+            diagnostic += "\n" + error_file.read_text(encoding="utf-8")[:4096]
         if mux is not None:
             diagnostic += "\n" + mux.query("capture-pane", "-p", "-t", mux.target).stdout[-8192:]
         raise AssertionError(label + "\n" + diagnostic)
@@ -236,7 +339,7 @@ def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight
     async def flow():
         first = await until(
             lambda: value if (value := state())["state"] == "running" else None,
-            "The actual SDK extension did not bind the opted-in receiver",
+            "The opted-in receiver did not reach running after native startup",
         )
         assert first["session_id"] == session_id and first["mode"] == "headed"
         assert first["host_process_start_time"] == process_start_time(first["pid"])
@@ -248,7 +351,7 @@ def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight
             "The original literal launch turn did not finish before controlled input",
         )
         binding = first["auth_wait"]
-        if inflight:
+        if inflight or observation_loss:
             provider.pause_response.set()
             operation = asyncio.create_task(_prompt(first, prompts[1]))
             try:
@@ -256,18 +359,43 @@ def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight
                     provider.response_started.is_set,
                     "The actual native model request did not remain in flight",
                 )
+                expected_hold = "native-operation-unsettled"
+                if observation_loss:
+                    fault = {
+                        "session_id": session_id, "incarnation": binding["incarnation"],
+                        "native_pid": first["child_pid"], "extension_pid": first["extension_pid"],
+                    }
+                    fault_file.write_text(json.dumps(fault), encoding="utf-8")
+                    receipt = await until(
+                        lambda: json.loads(receipt_file.read_text(encoding="utf-8")),
+                        "The fixture did not close the actual authenticated SDK stream",
+                    )
+                    assert "error" not in receipt, receipt
+                    assert all(receipt[key] == value for key, value in fault.items())
+                    assert receipt["writer_closed"] and not receipt["bound"]
+                    expected_hold = "native-connection-lost"
+                    assert receipt["status"]["hold"] == expected_hold
+                    assert receipt["status"]["phase"] == "running"
+                    unknown = await _auth(binding, "status")
+                    assert unknown["ok"] and unknown["hold"] == expected_hold
+                    assert unknown["incarnation"] == binding["incarnation"]
+                    assert pid_alive(original[0][0])
+                    assert process_start_time(original[0][0]) == original[0][1]
                 shortened_at = time.monotonic()
                 shortened = await _auth(
                     binding, "renew", lease_revision=2,
                     budget_seconds=3, expires_at=time.time() + 30,
                 )
                 assert shortened["ok"]
+                if observation_loss:
+                    assert shortened["hold"] == expected_hold
+                    assert shortened["incarnation"] == binding["incarnation"]
                 stopped = await until(
                     lambda: value if (value := state())["state"] == "auth_held" else None,
                     "In-flight native work did not preserve a hold after source expiry", timeout=3,
                 )
                 assert time.monotonic() - shortened_at < 3 and _retired(original)
-                assert stopped["auth_wait"]["hold"] == "native-operation-unsettled"
+                assert stopped["auth_wait"]["hold"] == expected_hold
                 assert stopped["auth_wait"]["incarnation"] == binding["incarnation"]
                 assert not (await _auth(
                     binding, "renew", lease_revision=3,
@@ -277,7 +405,13 @@ def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight
                     asyncio.gather(operation, return_exceptions=True), 2,
                 )
                 assert isinstance(outcome, Exception), "An interrupted native turn cannot succeed"
+                await asyncio.sleep(.15)
+                unchanged = state()
+                assert unchanged["auth_wait"]["incarnation"] == binding["incarnation"]
+                assert unchanged["auth_wait"]["hold"] == expected_hold
+                assert unchanged["child_pid"] == first["child_pid"] and _retired(original)
                 assert history() == prompts[:2] and len(requests) == 2
+                assert list((home / "session-state").glob("*/events.jsonl")) == [history_file]
             finally:
                 provider.release_response.set()
                 if not operation.done():
@@ -363,7 +497,15 @@ def _qualify_native_receiver(tmp_path, monkeypatch, native_provider, *, inflight
             assert launched.returncode == 0, launched.stderr
             incarnation = launched.stdout.strip()
             assert re.fullmatch(r"\$[0-9]+:[0-9]+\|%[0-9]+", incarnation), incarnation
-            asyncio.run(flow())
+            try:
+                asyncio.run(flow())
+            except Exception as error:
+                if error_file.exists():
+                    raise AssertionError(
+                        "Fixture coordinator diagnostic:\n"
+                        + error_file.read_text(encoding="utf-8")[:4096]
+                    ) from error
+                raise
         finally:
             present = mux.query("has-session", "-t", mux.target)
             assert present.returncode in (0, 1), present.stderr
@@ -394,3 +536,14 @@ def test_opt_in_receiver_auth_wait_and_same_session_resume(tmp_path, monkeypatch
 )
 def test_opt_in_receiver_inflight_expiry_preserves_hold(tmp_path, monkeypatch, native_provider):
     _qualify_native_receiver(tmp_path, monkeypatch, native_provider, inflight=True)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
+    reason="Explicitly select the disposable pinned Windows receiver qualification lane",
+)
+def test_opt_in_receiver_sdk_observation_loss_preserves_hold(
+    tmp_path, monkeypatch, native_provider,
+):
+    _qualify_native_receiver(tmp_path, monkeypatch, native_provider, observation_loss=True)

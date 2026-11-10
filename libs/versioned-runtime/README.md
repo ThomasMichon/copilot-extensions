@@ -543,6 +543,20 @@ failures refuse publication without an overwrite fallback. Temporary files
 are removed on normal/error paths. A crash before publication leaves no
 completion assertion; a crash after linking leaves the complete marker intact.
 Only an explicitly claimed `dev` slot permits atomic marker replacement.
+For a numbered slot with a retained bootstrap, first completion also validates
+the ordinary launcher and creates its private `runtime-generation` identity
+before publishing the marker. The actual retained reader can then bind that
+generation and exact completion bytes. Invalid or linked incoming identity
+metadata refuses without overwriting it. Publication removes group/other write
+permission from its owned incoming launcher and any existing generation file
+through revalidated descriptors, preserving content and identity without changing
+the caller's umask. Proof capture bounds opened files and growing reads to 1 MiB
+for the launcher and 64 bytes for the generation file. Generation validation uses
+binary reads on every platform, matching the retained reader. Exact completed
+reuse never backfills missing legacy metadata; use a distinct admitted construction instead of
+mutating an immutable completed generation.
+Ancestor aliases resolve to their physical path before helper proofs; redirects at
+the numbered slot or inside its retained bootstrap remain refused.
 Completion publication does not itself authorize package writers or retain a
 candidate after the call returns: adopting installers still need admission
 before construction and retention through their promotion/drain lifecycle.

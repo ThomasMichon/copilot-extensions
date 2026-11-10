@@ -13,7 +13,26 @@
 - **Umbrella issue:** #6007
 - **Comment identity intent:** [Compact forge-comment provenance](../../../visions/harness-guidance/README.md#compact-forge-comment-provenance)
 - **Comment identity source:** #11128 (compact metadata and retry-stable comment/write identity)
-- **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment)
+- **Sub-issues:** #6286 (PR-owner installation-cell adoption); #7188 (first-class PR service and fleet deployment); #11779 (first cache/event milestone planning)
+
+## Goal
+
+Deliver the first independently useful integrated PR-service milestone: a
+locally queryable durable current-PR-state cache for explicitly configured
+GitHub and Gitea repositories, plus subscribable events over one shared
+observation owner. The [M1 contract](repository-cache-events-m1.md) captures
+the selected Request, serial source exits and separate live qualification.
+M1 precedes agent consumers, Dispatch emission, a pane, complete CLI parity
+and production writer/merge cutover; it does not replace the broader Guiding
+Intent or any original, refined or inherited Plan/Validation outcome.
+This effort remains Active under its existing integration and domain owners.
+
+The [M1 source evidence map](repository-cache-events-m1.md#source-evidence-map)
+separates the standalone synthetic vertical from still-open release,
+installed/running and authorized real-target qualification. Completing that
+source slice does not complete M1 or this effort. The reviewed source stages
+1–4 have landed; the combined Plan and Validation items below remain open
+because they also require the separate live qualification.
 
 ## Guiding Intent
 
@@ -41,8 +60,15 @@ native/fleet switch alone does not deliver this service intake model.
 | Author-publication plan steward | Bounded author-publication proposal and vision amendment only | Public coordination issue #6007; existing runtime owners retained |
 | PR-perspectives steward | Author/Reviewer domain amendment, bounded inert attention source and isolated qualification; no live activation | #6007 and the Author/Reviewer perspectives plan |
 | Author-publication implementation driver | Finite A0-A5 authorship contribution, integration, validation and PR stewardship | Bounded implementation claim #10383; existing broader owners retained |
+| M1 plan steward | Bounded repository-cache/event contract, independent review and source reconciliation only | Source creaky-lever; planning claim #11779 |
 
 ## Coordination
+
+The [M1 cache/event contract](repository-cache-events-m1.md) under #11779
+sequences the first integrated milestone within #6007, not a second campaign.
+The plan steward owns documentation delivery only; the integration owner
+retains the whole effort and subsequent runtime assignments. Existing
+publication/completion work is neither taken over nor an M1 dependency.
 
 The [compact comment-identity extension](comment-identity.md) composes the
 existing AI-attribution profile and Worktrees source-identity owners with
@@ -156,6 +182,9 @@ existing PR-watch service; it does not introduce a parallel watch owner,
 fleet controller or credential issuer.
 
 ## Request
+
+The selected first milestone's verbatim public-safe Request and separately
+labelled recommendations are in [repository-cache-events-m1.md#request](repository-cache-events-m1.md#request).
 
 The 2026-11-03 direction expanding the service into Author and Reviewer
 perspectives is captured in public-safe form in
@@ -273,6 +302,10 @@ details, not additional operator quotations or live deployment authority.
 
 ## Plan
 
+### First integrated repository cache and event milestone
+
+- [ ] Deliver [M1's serial standalone discovery/projection/query/subscription stages](repository-cache-events-m1.md#serial-implementation-roster), then separately qualify authorized read-only live shadow; retain all broader outcomes.
+
 ### Author/Reviewer service perspectives
 
 _Operator-required outcome; agent-recommended slices and validation._
@@ -338,8 +371,10 @@ legacy status choices remain unchanged; installed support is not qualified.
 The [native local source-reconciliation proposal](native-source-reconciliation.md)
 under #11753 composes the existing Worktrees `pr-complete` owner with optional
 exact-source admission and a capability-directed native client. Contract review
-precedes implementation; no remote source mutation, merge evidence, claim
-settlement or finalization is implied.
+cleared in #11754; its [finite source qualification](journal/2026/11.09%20Native%20local%20source%20reconciliation.md)
+passes and implementation merged in #11761 after current-head independent
+approval and all actual required checks.
+No remote source mutation, merge evidence, claim settlement or finalization is implied.
 
 - [x] Complete [P0 - reviewed intent](author-reviewer-perspectives.md#plan-and-exit-evidence)
   (merged in #10380; implementation, provider and adoption gates remain).
@@ -1092,6 +1127,16 @@ or silently expanding a bounded source claim.
 
 ## Validation Plan
 
+- [x] Deliver the finite [native local source-reconciliation controls](native-source-reconciliation.md#compatibility-delivery-and-qualification)
+  after reviewed contract #11754. All five finite source-control rows pass
+  (229 coupled Worktrees and 123 frontend cases, five existing platform skips);
+  exact committed actor-free qualification passes 4,699 cases. Implementation
+  #11761 merged after current-head independent approval and every actual
+  required check. Legacy source behavior and broader
+  installed/provider/HTTP/resource/effort acceptance remain independent.
+
+- [ ] Prove [M1's synthetic foreground/client/persistence/subscriber vertical and separate released/installed/running qualification](repository-cache-events-m1.md#validation-and-acceptance); neither fixtures nor a healthy empty host close M1 or this effort.
+
 - [x] Qualify the finite source [selected native reopening refinement](native-thread-resolution.md#reopening-source-controls-after-review)
   after independent contract review (#11741): exact resolved-to-active transition,
   native action authority, same candidate/thread, status-only write, original
@@ -1460,6 +1505,7 @@ callback an implicit credential store.
 
 ## Journal
 
+- [2026-11-09 - First integrated cache/event milestone selected](journal/2026/11.09%20Repository%20cache%20events%20milestone.md)
 - [2026-11-09 - Selected native thread-resolution source implementation](journal/2026/11.09%20Selected%20native%20resolution%20implementation.md)
 - [2026-11-09 - Selected native reopening source implementation](journal/2026/11.09%20Selected%20native%20reopening%20implementation.md)
 - [2026-11-09 - Selected native thread-resolution proposal](journal/2026/11.09%20Selected%20native%20resolution%20proposal.md)

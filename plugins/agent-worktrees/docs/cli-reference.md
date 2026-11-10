@@ -214,6 +214,18 @@ cannot be settled through generic release, at-rest, sweep or abandon commands.
 
 ## Source-only destination allocation
 
+Owner identity is resolved from the invoking CWD, or supplied with
+`--owner-ref`; a destination `--project` does not change the creator's project.
+Launch environments do not publish an owner identity. `create --no-owner`
+deliberately creates a standalone worktree without a parent owner or session.
+
+`run --owner-ref REF "<command>"` reserves and journals the produced resource
+against that explicit owner; it does not export ownership into the command's
+environment. If the inner producer runs outside the owner's directory and
+requires creator context, pass its own supported owner argument explicitly.
+Detached CLI sessions resolve their own worktree/head rather than inheriting
+the launching session as owner.
+
 `create [--machine EXECUTION_SPACE] [--repo REPOSITORY] [--creation-key KEY]
 [--creation-request-id EXISTING_REQUEST]
 --json` selects a destination while preserving the original CWD creator.
@@ -614,7 +626,7 @@ continue to work unchanged.
 |------------|-------------|
 | `resolve` | Interactive picker -- select or create a worktree, emit JSON launch plan. `--new` creates + launches a **muxed interactive** session (refused without a TTY). `--codename <name>` selects an existing worktree by its assigned public-safe codename, as an alternative to `--worktree-id` (effort `pr-attribution-codenames`); resolved locally first, then via a cross-machine SSH scan (Phase 3) -- a match on a different machine fails closed (reports the machine, does not attempt a remote launch) |
 | `create` | Create a worktree **programmatically** -- no launch, no mux; prints id + path (add `--json`). The path for agents and daemons. Assigns the new worktree a random, public-safe **codename** (`codename.wordlist_path` configures a repo-declared vocabulary; falls back to a built-in neutral one) -- surfaced in the JSON output and usable later as an alternate lookup key via `list`/`resolve --codename` |
-| `move` | Read-only inactive-checkout relocation plan; `--apply` transfers and rebinds a qualified ordinary checkout, `--abort` cancels before publication. Discover the selected runtime with `get checkout-relocation` first. See [supported scope, original-operation recovery and mixed-root authority](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
+| `move` | Read-only inactive-checkout relocation plan; `--apply` transfers and rebinds a qualified checkout within the declared ordinary/receiving scope, `--abort` cancels before publication. Discover the selected runtime with `get checkout-relocation` first; receiving continuity does not qualify native inactivity. See [supported scope, original-operation recovery and mixed-root authority](checkout-relocation.md); not general inactive-session/WIP migration or finalization. |
 | `push-changes` | Push worktree changes to remote default branch (squash, rebase, push). Aborts if the pre-squash fails (`--allow-unsquashed` to opt into individual commits) |
 | `finalize` | Validate the branch's content is on upstream; for a merged PR with a missing cached head SHA, use a fresh provider-observed head only after the provider confirms the merge, and keep refusing when its boundary remains unverifiable; prune the worktree/branch only when idle (deferred while a session is live). The creating agent owns child cleanup; `--abandon` is refused without an operator-directed `--handoff-to <recipient-or-flow>`, recorded on each re-homed obligation |
 | `mark-complete` | Manual recovery -- set tracking status flag only (hidden from help) |
@@ -1471,6 +1483,33 @@ completion of those exact children. Older bundles still support exact source
 references; an alias-only retry without either the source ledger or durable
 proof fails explicitly rather than guessing equivalence.
 
+## Opening with a retained prompt handoff
+
+A preservation-capable Worktree Manager can reopen a stopped worktree, or
+reattach if it becomes live while the launcher resolves again, when its previous
+prompt handoff is unconfirmed. It warns and preserves the prompt
+and handoff unchanged, using admission-only execution rather than submitting
+that prompt again. Existing history selection is unchanged.
+
+The call-scoped `AGENT_WORKTREES_RETAINED_SEED_PLANS=1` hint requests a plan with
+`seed_preserved_id` and `seed_preservation_version: 1`. Manager forwards that identity as
+`resolve --worktree-id <id> --preserve-seed-id <seed-id>` when the local launcher
+resolves again. That selector never requests delivery, even if the original
+handoff has since been released. A missing, replaced or conflicting selection
+refuses before staging another intent. Combining preservation with `--restore`
+refuses before any bound-process recovery. The launchers also skip legacy prompt
+delivery for a preserved plan.
+
+Older Managers do not request these plans and keep the original safe refusal.
+Older Engines may ignore the optional hint, but reject an unsupported explicit
+preservation selector before effects; there is no weaker retry.
+
+Explicit delivery of an unconfirmed retained prompt still refuses. A changed staged
+identity between planning and execution also refuses rather than consuming the
+new intent. Opening the worktree is not a delivery receipt or permission to
+discard, restore or replay the retained prompt; reconcile its original handoff
+separately. Liveness, hosting and execution admission checks remain in force.
+
 ## Resolve previews
 
 `resolve --dry-run --worktree-id <id>` is read-only, including with `--json`
@@ -1904,16 +1943,32 @@ after PowerShell has already split them.
 ### Bulk account resolution (`repos account list --json --with-resolutions`)
 
 This optional read-only form adds versioned `repository_accounts`,
-`owner_accounts` and `unmapped_owner_fallback` metadata to `account_map`.
+`owner_accounts` and `unmapped_owner_fallback` metadata to `account_map` and
+the configured `default_account` (null when unpinned).
 It uses one strict registry snapshot and the canonical `account-for` policy,
 with per-snapshot first-match indexes rather than repeated registry scans.
 Malformed account mappings are refused, not treated as an empty map.
 Exact registered targets take precedence over owner policy; bare registry names
 remain case-sensitive, while GitHub slugs and owners match case-insensitively.
-The explicit fallback flag means an otherwise unknown owner resolves to its
-literal name. Unreadable or malformed registry storage fails rather than
-certifying missing targets. Without the flag, the legacy JSON shape is unchanged.
-Consumers of older peers must retain their individual `account-for` fallback.
+Current snapshots set `unmapped_owner_fallback: false`: namespaces are not
+accounts, and a repo exception never becomes owner-wide policy. Older peers may
+declare the retired literal-owner fallback. Consumers retain that distinction
+and their older-peer lookup path rather than inventing a preferred identity.
+Malformed preferred identities and unreadable storage refuse, not empty success.
+
+Use `repos account default <your-login>` to select a preferred GitHub identity,
+`repos account default` to read it, and `repos account default --unset` to
+remove that preference. Exact repository overrides win over owner maps, then
+the preferred account. With no policy, ambient authentication remains unpinned;
+neither an org nor a third-party user namespace identifies the operator.
+This changes no login, credential or machine-global active account.
+The preference is stored as the reserved `account_map["github.com:*"]` entry, preserving
+it through existing registry writers instead of adding a field they discard.
+Older runtimes do not enforce this policy. Discover the selected runtime's
+`repos account default --help` support before configuring it. New CodeSpace
+consumers require a wildcard-bearing snapshot to report the same preferred
+account and `unmapped_owner_fallback: false`; an older/inconsistent receiver
+refuses rather than selecting its legacy owner-derived login.
 
 ### Strict repository inventory (`repos list --strict --json`)
 

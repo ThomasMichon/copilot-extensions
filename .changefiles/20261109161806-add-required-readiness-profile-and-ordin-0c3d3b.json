@@ -1,0 +1,9 @@
+{
+  "comment": "Add required-readiness profile and ordinary-upgrade inputs for installed lifecycle qualification",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
