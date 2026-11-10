@@ -56,9 +56,13 @@ class PendingBindingScreen(Widget):
         self._inbox = Inbox(self)
 
     def compose(self):
+        resolving = (
+            "Observing installation and registered projects..."
+            if getattr(self.app, "_front_door", False) else "Resolving project binding…"
+        )
         yield Static(
             f"Worktree Picker · {self._project_label}\n"
-            "Resolving project binding…\nEscape to cancel",
+            f"{resolving}\nEscape to cancel",
             id="binding-status",
             markup=False,
         )
@@ -81,11 +85,32 @@ class PendingBindingScreen(Widget):
             def apply():
                 if self._cancel.is_set():
                     return
+                owner_cancelled = getattr(self.app, "_lifetime_cancelled", None)
+                if owner_cancelled is not None and owner_cancelled():
+                    self.action_cancel()
+                    return
                 if error is not None:
+                    from agent_procutil.owned_process import OwnedCleanupError
+                    from ...engine_client import EngineCleanupError
+
+                    if getattr(self.app, "_front_door", False) and not isinstance(
+                        error, (OwnedCleanupError, EngineCleanupError),
+                    ):
+                        from ...first_run import SetupState
+
+                        self.app.install_setup(SetupState(
+                            False, None, f"Project binding unavailable: {error}\nReload to retry.",
+                        ))
+                        return
                     self.app.binding_error = error
                     self.query_one("#binding-status", Static).update(
                         f"Project binding failed: {error}\nEscape to close"
                     )
+                    return
+                from ...first_run import SetupState
+
+                if isinstance(binding, SetupState):
+                    self.app.install_setup(binding)
                     return
                 try:
                     binding.activate()

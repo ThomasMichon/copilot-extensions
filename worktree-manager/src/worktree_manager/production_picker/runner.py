@@ -130,6 +130,7 @@ def run(
     bootstrap_payload: dict | None = None,
     bootstrap_supplier=None,
     lifetime_cancelled=None,
+    front_door: bool = False,
 ) -> Mapping[str, object] | None:
     """Run the production Picker against an adopted project.
 
@@ -149,12 +150,32 @@ def run(
         {"lifetime_cancelled": lifetime_cancelled} if lifetime_cancelled is not None else {}
     )
 
-    def prepare():
+    def prepare(*, project_override=None, auto_open=True):
         nonlocal prepared_source
+        requested = project_override if project_override is not None else project
+        if front_door and not project:
+            from ..first_run import SetupState, observe
+
+            state = observe()
+            if project_override is not None:
+                if not state.engine_available or state.projects is None:
+                    return state
+                if project_override not in state.projects:
+                    return SetupState(
+                        state.engine_available, state.projects,
+                        f"Selected project is no longer launchable: {project_override}\n{state.summary}",
+                    )
+            elif (
+                not auto_open or not state.engine_available or state.projects is None
+                or len(state.projects) != 1
+            ):
+                return state
+            else:
+                requested = state.projects[0]
         if bootstrap_supplier is not None:
             selected, payload = bootstrap_supplier()
         else:
-            selected = project if bootstrap_payload is not None or resolved_mock and project else _select_project(project)
+            selected = requested if bootstrap_payload is not None or resolved_mock and requested else _select_project(requested)
             try:
                 payload = bootstrap_payload if bootstrap_payload is not None else (
                     picker_review.bootstrap(selected) if picker_review.active()
@@ -226,16 +247,20 @@ def run(
             return run_tui_picker(
                 source=binding.source, live=binding.live, mock_mode=resolved_mock,
                 after_first_refresh=after_binding,
+                **({"front_door": True} if front_door else {}),
                 **lifetime_kwargs,
             )
         return run_tui_picker(
             prepare=prepare,
             project_label=(
                 f"READ-ONLY {picker_review.current().candidate} · {project}"
-                if picker_review.active() else project or "selecting project"
+                if picker_review.active() else project or (
+                    "Setup / Doctor" if front_door else "selecting project"
+                )
             ),
             mock_mode=resolved_mock,
             after_first_refresh=after_binding,
+            **({"front_door": True} if front_door else {}),
             **lifetime_kwargs,
         )
     finally:

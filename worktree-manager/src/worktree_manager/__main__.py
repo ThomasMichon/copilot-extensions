@@ -1008,7 +1008,7 @@ def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
     return decision.get("machine") or None, decision.get("env") or None
 
 
-def _run_production_picker(project: str, *, initial_decision=None) -> int:
+def _run_production_picker(project: str, *, initial_decision=None, front_door=False) -> int:
     """Run the transplanted production UX and act on its launch decision.
 
     ``"refresh"``/``"manager-update"`` apply an update and loop back to
@@ -1033,7 +1033,7 @@ def _run_production_picker(project: str, *, initial_decision=None) -> int:
         else:
             raise_current_process_priority()
             try:
-                decision = runner.run(project)
+                decision = runner.run(project, **({"front_door": True} if front_door else {}))
             except runner.ProjectSelectionError as error:
                 print(f"error: {error}")
                 return 2
@@ -1587,6 +1587,13 @@ def main(argv: list[str] | None = None) -> int:
             print("error: --project needs exactly one project name")
             return 2
         return _cmd_picker([args[1]])
+    if not args:
+        from .production_picker.picker_tui import _interactive_stdin
+
+        if _interactive_stdin(sys.stdin) and (
+            _interactive_stdin(sys.stdout) or _interactive_stdin(sys.stderr)
+        ):
+            return _run_production_picker("", front_door=True)
     _print_intro()
     return 0
 
