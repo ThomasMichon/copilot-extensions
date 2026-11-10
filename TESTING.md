@@ -422,6 +422,14 @@ Registered entries assert that membership-marker opening precedes marker JSON
 decoding, so a similarly shaped content reader cannot stand in for that stage.
 They never retry the child, extend its ten-second bound or classify the
 unobserved stalled phase as a known flake.
+On PS5.1, the copied admission helper records process CPU ticks (100 ns units)
+and whether Utility/Web assemblies are already loaded immediately before and
+after the original `System.Web.Extensions` load. Enumeration uses only the
+current AppDomain; it does not load an assembly or warm another child.
+The `patch-protected-input` control retains those successful-call phases too.
+Snapshots include their observer work and cannot establish why an earlier
+unobserved load stalled. Malformed or out-of-bound snapshot markers remain
+real stderr; native timeout controls preserve valid snapshots alongside errors.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.

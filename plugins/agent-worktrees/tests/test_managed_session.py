@@ -50,14 +50,42 @@ NATIVE_WRITE_PHASE_WRITER = (
     "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name) }; "
     "Write-NativeWriteFixturePhase 'command-entry'; "
 )
+NATIVE_WRITE_LOAD_WRITER = """
+function Write-NativeWriteFixtureAssemblyState([string]$Name) {
+    $utility = 0
+    $web = 0
+    foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
+        $assemblyName = $assembly.GetName().Name
+        if ($assemblyName -ceq 'Microsoft.PowerShell.Commands.Utility') { $utility = 1 }
+        if ($assemblyName -ceq 'System.Web.Extensions') { $web = 1 }
+    }
+    $process = [Diagnostics.Process]::GetCurrentProcess()
+    try { $cpu = $process.TotalProcessorTime.Ticks }
+    finally { $process.Dispose() }
+    [Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' +
+        [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString(
+            [Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name +
+        ' cpu_ticks=' + $cpu.ToString([Globalization.CultureInfo]::InvariantCulture) +
+        ' utility=' + $utility.ToString() + ' web=' + $web.ToString())
+}
+"""
 
 
 def native_write_fixture_stderr(stderr):
     phases, errors = [], []
     for line in stderr.splitlines(keepends=True):
-        match = re.fullmatch(rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)\r?\n", line)
-        if match and match[2].decode("ascii") in NATIVE_WRITE_PHASES:
-            phases.append(f"{match[1].decode('ascii')} {match[2].decode('ascii')}")
+        match = re.fullmatch(
+            rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)"
+            rb"( cpu_ticks=[0-9]{1,20} utility=[01] web=[01])?\r?\n", line,
+        )
+        if (
+            match and match[2].decode("ascii") in NATIVE_WRITE_PHASES
+            and (not match[3] or match[2] in {b"json-web-load", b"json-resolver-type"})
+        ):
+            phases.append(
+                f"{match[1].decode('ascii')} {match[2].decode('ascii')}"
+                + (match[3].decode("ascii") if match[3] else "")
+            )
         else:
             errors.append(line)
     return "\n".join(phases), b"".join(errors)
@@ -87,10 +115,12 @@ def instrument_prepared_admission(source):
         ("prepared-marker-decoded", "        $scope = $value['scope']"),
     ):
         assert statement in source
-        source = source.replace(
-            statement, f"Write-NativeWriteFixturePhase '{boundary}'\n" + statement, 1,
+        writer = (
+            "Write-NativeWriteFixtureAssemblyState"
+            if boundary in {"json-web-load", "json-resolver-type"} else "Write-NativeWriteFixturePhase"
         )
-    return source
+        source = source.replace(statement, f"{writer} '{boundary}'\n" + statement, 1)
+    return NATIVE_WRITE_LOAD_WRITER + source
 
 
 def qualify_complete_native_entry(scripts, entry, executable, event, env, workspace, capsys):
@@ -274,13 +304,22 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
 @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
 def test_native_write_fixture_stderr_preserves_errors(newline):
     phase = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
+    before = b"NATIVE_WRITE_FIXTURE_PHASE 124 json-web-load cpu_ticks=250000 utility=1 web=0" + newline
+    after = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-resolver-type cpu_ticks=500000 utility=1 web=1" + newline
     errors = (
         newline + b"real error\xff" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 124 unknown-stage" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE invalid json-entry" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 127 json-web-load cpu_ticks=NaN utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 128 command-entry cpu_ticks=1 utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 129 json-web-load cpu_ticks=1 utility=1 web=2" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 130 json-web-load cpu_ticks=" + b"1" * 21 + b" utility=1 web=0" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
     )
-    assert native_write_fixture_stderr(phase + errors) == ("123 command-entry", errors)
+    assert native_write_fixture_stderr(phase + before + after + errors) == (
+        "123 command-entry\n124 json-web-load cpu_ticks=250000 utility=1 web=0\n"
+        "126 json-resolver-type cpu_ticks=500000 utility=1 web=1", errors,
+    )
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -292,7 +331,8 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
     if not executable:
         pytest.skip(f"{shell} is unavailable")
     command = (
-        NATIVE_WRITE_PHASE_WRITER
+        NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LOAD_WRITER
+        + "Write-NativeWriteFixtureAssemblyState 'json-web-load'; "
         + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
     )
     with pytest.raises(subprocess.TimeoutExpired) as captured:
@@ -301,7 +341,9 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
             input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
         )
     progress, errors = native_write_fixture_stderr(captured.value.stderr)
-    assert progress.endswith(" command-entry")
+    assert re.fullmatch(
+        r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+ utility=[01] web=[01]", progress,
+    ), progress
     assert errors == b"real fixture error\r\n"
     assert captured.value.stdout == b""
 
@@ -1746,6 +1788,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert json.loads(result.stdout)["permissionDecision"] == "deny"
     else:
         assert result.stdout == b""
+    if case == "patch-protected-input":
+        with capsys.disabled():
+            print(json.dumps({
+                "shell": shell, "case": case, "start_ms": started_ms,
+                "native_entry_seconds": native_seconds, "phases": progress.splitlines(),
+            }))
     if real_policy:
         contract = scripts / "hook-read-policy.json"
         value = json.loads(contract.read_text(encoding="utf-8"))
