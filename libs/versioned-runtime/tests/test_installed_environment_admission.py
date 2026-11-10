@@ -165,7 +165,7 @@ def test_completion_is_usable_by_retained_reader_and_preserves_exact_reuse(insta
     } == before
 
 
-@pytest.mark.parametrize("damage_case", ["malformed", "hardlink", "missing-launcher", "oversized"])
+@pytest.mark.parametrize("damage_case", ["malformed", "hardlink", "missing-launcher", "oversized", "binary-eof"])
 def test_invalid_incoming_identity_is_not_certified_or_overwritten(installed, damage_case):
     root, slot, _site = installed
     bootstrap = _bootstrap(slot)
@@ -176,6 +176,8 @@ def test_invalid_incoming_identity_is_not_certified_or_overwritten(installed, da
         content = b"not-a-generation\n" if damage_case == "malformed" else b"a" * (
             65 if damage_case == "oversized" else 32
         )
+        if damage_case == "binary-eof":
+            content += b"\x1a"
         generation.write_bytes(content)
         if damage_case == "hardlink":
             os.link(generation, slot / "foreign-generation")

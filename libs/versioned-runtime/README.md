@@ -551,7 +551,8 @@ metadata refuses without overwriting it. Publication removes group/other write
 permission from its owned incoming launcher and any existing generation file
 through revalidated descriptors, preserving content and identity without changing
 the caller's umask. Proof capture bounds opened files and growing reads to 1 MiB
-for the launcher and 64 bytes for the generation file. Exact completed
+for the launcher and 64 bytes for the generation file. Generation validation uses
+binary reads on every platform, matching the retained reader. Exact completed
 reuse never backfills missing legacy metadata; use a distinct admitted construction instead of
 mutating an immutable completed generation.
 Completion publication does not itself authorize package writers or retain a

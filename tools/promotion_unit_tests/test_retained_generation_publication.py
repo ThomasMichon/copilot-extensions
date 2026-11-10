@@ -86,3 +86,26 @@ def test_incoming_generation_proof_bounds_reads(tmp_path, monkeypatch, growth, p
         assert stream.tell() == 0
         assert original_fstat(stream.fileno()).st_size == (64 if growth else 65)
     assert reads == ([65] if growth else [])
+
+
+def test_incoming_generation_rejects_binary_eof(tmp_path, monkeypatch):
+    source = ROOT / "libs/versioned-runtime/versioned_runtime_publication.py"
+    spec = importlib.util.spec_from_file_location("_unit_binary_generation", source)
+    publication = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, publication)
+    spec.loader.exec_module(publication)
+    slot = tmp_path / "versions/1.0"
+    bootstrap = slot / ".runtime-bootstrap"
+    bootstrap.mkdir(parents=True)
+    launcher = bootstrap / "runtime_launcher.py"
+    launcher.write_bytes(b"retained construction input\n")
+    launcher.chmod(0o600)
+    generation = bootstrap / "runtime-generation"
+    content = b"a" * 32 + b"\x1a"
+    generation.write_bytes(content)
+    generation.chmod(0o600)
+    if os.name == "nt":
+        monkeypatch.setattr(publication, "_windows_owned", lambda _fd: True)
+    with pytest.raises(publication.PublicationProofError, match="invalid or changed"):
+        publication.prepare_retained_generation(slot)
+    assert generation.read_bytes() == content

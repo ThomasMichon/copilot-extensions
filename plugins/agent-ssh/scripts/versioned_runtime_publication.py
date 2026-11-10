@@ -190,7 +190,10 @@ def prepare_retained_generation(slot: Path) -> None:
         before = state_path(path, private=True, max_bytes=64)
     if before is None or before.size > 64:
         raise PublicationProofError("Retained runtime generation is missing or oversized")
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+    fd = os.open(
+        path, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+    )
     try:
         if state_fd(fd, max_bytes=64) != before:
             raise PublicationProofError("Retained runtime generation changed before read")
