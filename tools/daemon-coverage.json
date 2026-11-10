@@ -205,6 +205,7 @@
       "cd:session_host/host.py::SessionHost.serve::create_server": 1,
       "cd:session_host/host.py::SessionHost.serve_forever::serve_forever": 1,
       "cd:headed/backend.py::HeadedBackend.serve::start_server": 1,
+      "cd:headed/backend.py::HeadedBackend.serve::create_server": 1,
       "c:owner_startup.py::spawn_owner_process::spawn_daemon": 1,
       "k:docker_proxy.py::ensure_broker::spawn_daemon": 1,
       "k:forward_keeper.py::ensure_running::spawn_keeper": 1,

@@ -274,8 +274,7 @@ async def _run_headed_once(
         await auth_receiver.expiry()
         publish("auth_stopping")
         await backend.freeze_auth()
-        await owner.terminate()
-        await backend.finish_auth_stop()
+        await backend.retire_auth()
         publish("auth_wait" if auth_receiver.hold is None else "auth_held")
 
     try:

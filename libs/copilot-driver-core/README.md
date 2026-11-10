@@ -173,6 +173,12 @@ still-valid source grant or retire its native CLI. Active source renewal can
 preserve that CLI without clearing its hold; recovery after actual source
 expiry or revocation still refuses while the control hold remains.
 No credentials are read, copied or accepted by the receiver.
+An idle freeze acknowledgement does not mark owned retirement. SDK loss
+before retirement, malformed records or incomplete observation drains preserve
+an irreversible hold. Broker EOF follows the admitted SDK stream's bounded
+drain rather than racing the final native replies.
+An owned-retirement TCP reset is delivered as EOF to the auth stream reader
+so complete buffered records still drain; an incomplete record remains held.
 
 The private host-state file's `auth_wait` member declares the **running**
 contract/version, loopback `port`, random `nonce`, `session_id`, receiving

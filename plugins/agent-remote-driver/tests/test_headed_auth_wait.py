@@ -348,9 +348,13 @@ async def test_real_native_scope_stops_preserves_and_resumes_without_seed(tmp_pa
         endpoint = first["auth_wait"]
         if pending:
             assert (await request(endpoint, "revoke"))["ok"]
-        stopped = await eventually(
-            read_state, lambda value: value.get("state") == ("auth_held" if pending else "auth_wait"),
-        )
+
+        def stopped_state(value):
+            if not pending and value.get("state") == "auth_held":
+                raise AssertionError("Idle auth stop held: " + str(value["auth_wait"]["hold"]))
+            return value.get("state") == ("auth_held" if pending else "auth_wait")
+
+        stopped = await eventually(read_state, stopped_state)
         assert not pid_alive(first_child["pid"])
         assert not pid_alive(first_child["descendant"])
         assert unrelated.returncode is None and not task.done()

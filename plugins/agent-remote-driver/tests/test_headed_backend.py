@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import shutil
+from contextlib import asynccontextmanager
 
 import pytest
 from websockets.asyncio.client import connect
@@ -139,6 +140,129 @@ async def _peer(backend, **overrides):
     }) + "\n").encode())
     await writer.drain()
     return reader, writer
+
+
+@asynccontextmanager
+async def _auth_peer():
+    from agent_remote_driver.headed.auth_wait import AuthWaitReceiver
+    from test_headed_auth_wait import configuration
+
+    owner = Owner()
+    receiver = AuthWaitReceiver("native-fixture", configuration())
+    receiver.phase = "running"
+    await receiver.serve()
+    backend = HeadedBackend(
+        owner, session_id="native-fixture", nonce="fixture-" * 8, auth_wait=receiver,
+    )
+    await backend.serve()
+    reader, writer = await _peer(backend)
+    try:
+        await asyncio.wait_for(backend.bound.wait(), 2)
+        yield owner, receiver, backend, reader, writer
+    finally:
+        writer.close()
+        await writer.wait_closed()
+        await backend.close()
+        await receiver.close()
+
+
+async def _freeze_idle(receiver, backend, reader, writer):
+    from test_headed_auth_wait import IDLE, request
+
+    assert (await request(receiver, "revoke"))["ok"]
+    await receiver.expiry()
+    freezing = asyncio.create_task(backend.freeze_auth())
+    try:
+        assert json.loads(await reader.readline())["contract"] == "copilot-driver.headed-auth-freeze"
+        writer.write((json.dumps({
+            "contract": "copilot-driver.headed-auth-state", "version": 1,
+            "incarnation": receiver.incarnation, "state": IDLE,
+        }) + "\n").encode())
+        await writer.drain()
+    finally:
+        await freezing
+    assert backend.auth_snapshot == IDLE
+
+
+@pytest.mark.asyncio
+async def test_idle_freeze_then_sdk_loss_before_owned_retirement_cannot_resume():
+    import time
+    from test_headed_auth_wait import request
+
+    async with _auth_peer() as (owner, receiver, backend, reader, writer):
+        await _freeze_idle(receiver, backend, reader, writer)
+        writer.close()
+        await writer.wait_closed()
+        await asyncio.wait_for(backend.lost.wait(), 1)
+        assert owner.returncode is None and owner.stops == 0
+        await owner.terminate()
+        await backend.finish_auth_stop()
+        assert receiver.phase == "held" and receiver.hold == "native-connection-lost"
+        assert not (await request(
+            receiver, "renew", lease_revision=2, budget_seconds=5, expires_at=time.time() + 5,
+        ))["ok"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("record,forward_failure", [
+    (b'{"jsonrpc":', False),
+    (b'{"jsonrpc":"2.0"}', False),
+    (b'{"jsonrpc":"2.0","id":8,"result":{}}\n', True),
+])
+async def test_abnormal_sdk_drain_cannot_reuse_an_old_idle_snapshot(record, forward_failure):
+    import time
+    from test_headed_auth_wait import request
+
+    async with _auth_peer() as (owner, receiver, backend, reader, writer):
+        await _freeze_idle(receiver, backend, reader, writer)
+        backend.auth_retiring = True
+        await owner.terminate()
+        if forward_failure:
+            backend.stdout.feed_eof()
+        writer.write(record)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+        await backend.finish_auth_stop()
+        assert receiver.phase == "held" and receiver.hold == "native-observation-incomplete"
+        assert not (await request(
+            receiver, "renew", lease_revision=2, budget_seconds=5, expires_at=time.time() + 5,
+        ))["ok"]
+
+
+@pytest.mark.asyncio
+async def test_owned_exit_drains_queued_sdk_reply_before_broker_eof():
+    async with _auth_peer() as (owner, receiver, backend, reader, writer):
+        await _freeze_idle(receiver, backend, reader, writer)
+        backend.auth_retiring = True
+        await owner.terminate()
+        await asyncio.sleep(.01)
+        assert not backend.stdout.at_eof()
+        reply = b'{"jsonrpc":"2.0","id":9,"result":{"late":true}}\n'
+        writer.write(reply)
+        await writer.drain()
+        writer.close()
+        await writer.wait_closed()
+        await backend.finish_auth_stop()
+        assert await asyncio.wait_for(backend.stdout.read(), 1) == reply
+        assert receiver.phase == "auth_wait" and receiver.hold is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retiring", [False, True])
+async def test_only_owned_retirement_reset_drains_buffered_native_records(retiring):
+    from agent_remote_driver.headed.backend import _AuthStopReader
+
+    reader = _AuthStopReader(lambda: retiring)
+    reader.feed_data(b"complete\nincomplete")
+    reader.set_exception(ConnectionResetError())
+    if not retiring:
+        with pytest.raises(ConnectionResetError):
+            await reader.readline()
+    else:
+        assert await reader.readline() == b"complete\n"
+        assert await reader.readline() == b"incomplete"
+        assert await reader.readline() == b""
 
 
 @pytest.mark.asyncio
