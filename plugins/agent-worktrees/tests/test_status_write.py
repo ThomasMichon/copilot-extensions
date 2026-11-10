@@ -10,6 +10,183 @@ from agent_worktrees import __main__ as main
 from agent_worktrees import tracking, worktree_identity
 
 
+@pytest.mark.parametrize("raw,expected", [
+    ("\n" + "x" * 512 + "\t", "x" * 512),
+    ("\x07  " + "R\u00e9sum\u00e9 phase " * 12 + "\nconsumer  ",
+     "R\u00e9sum\u00e9 phase " * 12 + " consumer"),
+], ids=["normalized-boundary", "unicode-controls"])
+def test_full_title_survives_ordinary_writer_history_export_and_short_display(
+    status_env, capfd, raw, expected,
+):
+    import json
+    from agent_worktrees import disposition_history, effort_focus, sessions, status_bar_cli
+
+    record = tracking.load_record(status_env)
+    record.codename = "fixture-title"
+    record.active_effort = effort_focus.make_active_effort(
+        "efforts/active/example/README.md", "Driver", "Declared slice",
+    )
+    binding = record.active_effort
+    tracking.save_record(record, status_env)
+    disposition_history.append(
+        record.worktree_id, at="old", title="old capped\u2026", summary="old",
+        follow_up=False, changed=["title"], tracking_path=status_env.parent,
+    )
+    assert main._cmd_status_write(
+        argparse.Namespace(worktree_id=None), summary=None, title=raw,
+    ) == 0
+    loaded = tracking.load_record(status_env)
+    assert loaded.title == expected and loaded.title_asserted
+    assert loaded.active_effort == binding and loaded.status == record.status
+    history = disposition_history.read(loaded.worktree_id, tracking_path=status_env.parent)
+    assert [entry["title"] for entry in history] == ["old capped\u2026", expected]
+    assert main._worktree_to_dict(loaded, session_ctx=sessions.SessionContext())["title"] == expected
+    compact = status_bar_cli._resolve_segment_title(
+        loaded, loaded.worktree_path,
+        main.git_ops.WorktreeStateInfo(state=main.git_ops.WorktreeState.UNUSED),
+    )
+    assert len(compact) <= 48 and compact.endswith("\u2026")
+    assert tracking.load_record(status_env).title == expected
+    capfd.readouterr()
+    assert main._cmd_status_history(
+        argparse.Namespace(worktree_id=None, limit=None, json=True),
+    ) == 0
+    assert json.loads(capfd.readouterr().out)["history"][-1]["title"] == expected
+
+
+def test_over_bound_title_rejects_before_any_status_side_effect(status_env, capfd):
+    from agent_worktrees import disposition_history
+
+    before = status_env.read_bytes()
+    assert main._cmd_status_write(
+        argparse.Namespace(worktree_id=None), title="x" * 513,
+        summary="must not change", follow_up=True, paused=True,
+    ) == 1
+    assert "512" in "".join(capfd.readouterr())
+    assert status_env.read_bytes() == before
+    assert disposition_history.read("wt-status", tracking_path=status_env.parent) == []
+
+
+def test_full_title_caller_selects_the_qualified_receiver(status_env, monkeypatch):
+    from agent_worktrees import tracking_write
+
+    seen = []
+    real_dispatch = tracking_write.dispatch
+
+    def dispatch(verb, payload, **kwargs):
+        seen.append((payload.get("retain_full_title"), kwargs.get("min_version")))
+        return real_dispatch(verb, payload, **kwargs)
+
+    monkeypatch.setattr(tracking_write, "dispatch", dispatch)
+    assert main._cmd_status_write(
+        argparse.Namespace(worktree_id=None), summary=None, title="full " * 20,
+    ) == 0
+    assert seen == [(True, 3)]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+@pytest.mark.parametrize("title_only", [False, True])
+def test_legacy_title_entry_retains_full_current_and_new_history(
+    status_env, monkeypatch, existing, title_only,
+):
+    from agent_worktrees import disposition_history, finalize_cli
+
+    if not existing:
+        status_env.unlink()
+    monkeypatch.setattr(finalize_cli.git_ops, "get_current_branch", lambda *_: "fixture-branch")
+    monkeypatch.setattr(finalize_cli.cfg, "project_name", lambda: "example")
+    title = "Identify the complete title-only source flow and retained history"
+    assert finalize_cli.cmd_mark_complete(argparse.Namespace(
+        worktree_id=None, title=title, title_only=title_only,
+    )) == 0
+    record = tracking.load_record(status_env)
+    assert record.title == title and record.title_asserted
+    assert record.status == (
+        ("finalized" if existing else "active") if title_only else "complete"
+    )
+    assert [entry["title"] for entry in disposition_history.read(
+        record.worktree_id, tracking_path=status_env.parent,
+    )] == [title]
+
+
+@pytest.mark.parametrize("command", ["mark-complete", "push-changes"])
+def test_title_only_over_bound_refusal_has_no_record_or_history_effect(status_env, command):
+    from agent_worktrees import disposition_history, finalize_cli
+
+    args = main.build_parser().parse_args([command, "--title-only", "--title", "x" * 513])
+    before = status_env.read_bytes()
+    handler = finalize_cli.cmd_mark_complete if command == "mark-complete" else finalize_cli.cmd_push_changes
+    assert handler(args) == 1
+    assert status_env.read_bytes() == before
+    assert disposition_history.read("wt-status", tracking_path=status_env.parent) == []
+
+
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+def test_fresh_profile_cli_retains_full_title_in_record_history_and_list(tmp_path):
+    import json
+    import os
+    import sys
+    from native_shell_support import run_headless
+
+    home = tmp_path / "home"
+    project = "title-fixture"
+    root = home / f".{project}"
+    records = root / "worktrees"
+    records.mkdir(parents=True)
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    (root / "config.yaml").write_text(json.dumps({
+        "repo_name": project, "srcroot": str(tmp_path), "machine": "fixture",
+        "repos": {project: {"anchor": str(checkout), "worktree_root": str(tmp_path),
+                            "remote": "", "default_branch": "main"}},
+    }), encoding="utf-8")
+    path = records / "fixture-title.yaml"
+    record = tracking.WorktreeRecord(
+        worktree_id="fixture-title", branch="worktree/fixture-title",
+        worktree_path=str(checkout), repo=project, machine="fixture", platform=main.cfg.detect_platform(),
+        started_at="", last_resumed_at="", resume_count=0, title="old", status="active",
+        codename="fixture-title", completed_at=None,
+    )
+    tracking.save_record(record, path)
+    env = {
+        **os.environ, "HOME": str(home), "USERPROFILE": str(home), "AGENT_HOME": str(home),
+        "COPILOT_HOME": str(home / ".copilot"), "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONIOENCODING": "utf-8", "AGENT_WORKTREES_STATUS_MONITOR": "0",
+        "AGENT_WORKTREES_NO_SELFPROVISION": "1", "WORKTREE_NO_UPDATE": "1",
+        **{f"XDG_{kind}_HOME": str(home / kind.lower()) for kind in ("CONFIG", "DATA", "CACHE", "STATE")},
+    }
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "COPILOT_AGENT_SESSION_ID"):
+        env.pop(key, None)
+
+    def invoke(*args, expected=0):
+        result = run_headless(
+            [sys.executable, "-m", "agent_worktrees", "--project", project, *args],
+            cwd=checkout, env=env, capture_output=True, text=True, encoding="utf-8", timeout=30,
+        )
+        assert result.returncode == expected, (result.stdout, result.stderr)
+        assert "Traceback" not in result.stderr and "::agent-provisioning::" not in result.stderr
+        return result.stdout if expected == 0 else result.stdout + result.stderr
+
+    title = "Full identifying title for an independent fresh-profile source consumer " * 3
+    invoke("status", "--worktree-id", record.worktree_id, "--title", title)
+    assert tracking.load_record(path).title == title.strip()
+    history = json.loads(invoke(
+        "status", "--worktree-id", record.worktree_id, "--history", "--json",
+    ))
+    assert [entry["title"] for entry in history["history"]] == [title.strip()]
+    listing = json.loads(invoke("list", "--all", "--json"))
+    assert next(row for row in listing["worktrees"] if row["id"] == record.worktree_id)["title"] == title.strip()
+    before = {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()}
+    assert "512" in invoke(
+        "status", "--worktree-id", record.worktree_id, "--title", "x" * 513,
+        "--summary", "must not change", "--follow-up", expected=1,
+    )
+    assert {str(p.relative_to(home)): p.read_bytes() for p in home.rglob("*") if p.is_file()} == before
+    assert not list(home.rglob("*status-monitor*"))
+
+
 @pytest.mark.parametrize("json_output", [False, True])
 def test_maintenance_refusal_preserves_status_and_normal_output(
     status_env, monkeypatch, capfd, json_output,
@@ -124,7 +301,7 @@ def status_env(tmp_path, tmp_tracking_dir, monkeypatch):
     )
     path = tmp_tracking_dir / f"{record.worktree_id}.yaml"
     tracking.save_record(record, path)
-    monkeypatch.setattr(main.cfg, "load_config", lambda: object())
+    monkeypatch.setattr(main.cfg, "load_config", lambda *_args, **_kwargs: object())
     monkeypatch.setattr(main.cfg, "tracking_dir", lambda: tmp_tracking_dir)
     monkeypatch.setattr(
         worktree_identity,

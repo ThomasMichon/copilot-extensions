@@ -53,6 +53,125 @@ def test_importing_the_module_registers_the_verb():
     assert "status_disposition_write" in tracking_write.registered_verbs()
 
 
+@pytest.mark.parametrize("version", [None, 2, 3, "invalid"])
+def test_full_title_selects_the_real_supported_receiver_or_same_code_fallback(
+    record_path, monkeypatch, version,
+):
+    from agent_worktrees import disposition_history
+
+    sent = []
+    real_send = tracking_write._send_tracking_write_request
+
+    def send(*args, **kwargs):
+        sent.append(True)
+        return real_send(*args, **kwargs)
+
+    monkeypatch.setattr(tracking_write, "_send_tracking_write_request", send)
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    title = "A complete title crossing the real disposition transport " * 3
+    try:
+        fields = tracking_write.rendezvous_fields(server)
+        if version is None:
+            fields.pop("tracking_write_verb_versions", None)
+        else:
+            fields["tracking_write_verb_versions"]["status_disposition_write"] = version
+        result = tracking_write.dispatch(
+            "status_disposition_write", {
+                "worktree_id": "wt-disp", "yaml_path": str(record_path),
+                "title": title, "retain_full_title": True,
+            },
+            read_lock_data=lambda: fields, ensure_monitor=None,
+            boot_wait_s=0, min_version=3,
+        )
+        if version == 3:
+            fields["tracking_write_verb_versions"]["status_disposition_write"] = 2
+            result = tracking_write.dispatch(
+                "status_disposition_write", {
+                    "worktree_id": "wt-disp", "yaml_path": str(record_path),
+                    "title": title, "retain_full_title": True,
+                },
+                read_lock_data=lambda: fields, ensure_monitor=None,
+                boot_wait_s=0, min_version=3,
+            )
+    finally:
+        server.close()
+    assert result["ok"] and result["title"] == title.strip()
+    assert sent == ([True] if version == 3 else [])
+    assert tracking.load_record(record_path).title == title.strip()
+    assert [entry["title"] for entry in disposition_history.read(
+        "wt-disp", tracking_path=record_path.parent,
+    )] == [title.strip()] * (2 if version == 3 else 1)
+
+
+def test_legacy_request_to_current_receiver_retains_its_short_contract_and_clear(record_path):
+    title = "A legacy caller's title still uses its declared short projection"
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    try:
+        fields = tracking_write.rendezvous_fields(server)
+        for value, expected in ((title, tracking.cap_title(title)), (" \n ", None)):
+            result = tracking_write.dispatch(
+                "status_disposition_write", {
+                    "worktree_id": "wt-disp", "yaml_path": str(record_path), "title": value,
+                },
+                read_lock_data=lambda: fields, ensure_monitor=None, min_version=2,
+            )
+            assert result["ok"] and result["title"] == expected
+            assert tracking.load_record(record_path).title == expected
+    finally:
+        server.close()
+
+
+def test_full_title_sent_then_unknown_does_not_repeat_the_committed_write(record_path, monkeypatch):
+    from agent_worktrees import disposition_history
+
+    real_send = tracking_write._send_tracking_write_request
+    sent = []
+
+    def lose_response(*args, **kwargs):
+        sent.append(True)
+        assert real_send(*args, **kwargs)["title"] == title
+        raise tracking_write.AmbiguousWriteOutcome("response lost after admission")
+
+    monkeypatch.setattr(tracking_write, "_send_tracking_write_request", lose_response)
+    server = tracking_write.start_server(tracking_write.compute)
+    server.start()
+    title = "The title was committed once before its response became unavailable"
+    try:
+        fields = tracking_write.rendezvous_fields(server)
+        with pytest.raises(tracking_write.AmbiguousWriteOutcome):
+            tracking_write.dispatch(
+                "status_disposition_write", {
+                    "worktree_id": "wt-disp", "yaml_path": str(record_path),
+                    "title": title, "retain_full_title": True,
+                },
+                read_lock_data=lambda: fields, ensure_monitor=None, min_version=3,
+            )
+    finally:
+        server.close()
+    assert sent == [True]
+    assert tracking.load_record(record_path).title == title
+    assert len(disposition_history.read("wt-disp", tracking_path=record_path.parent)) == 1
+
+
+@pytest.mark.parametrize("extra", [
+    {"retain_full_title": True, "title": "x" * 513},
+    {"retain_full_title": "true", "title": "not accepted"},
+])
+def test_invalid_full_title_request_refuses_before_other_disposition_effects(record_path, extra):
+    from agent_worktrees import disposition_history
+
+    before = record_path.read_bytes()
+    result = tracking_disposition_write.apply_status_disposition({
+        "worktree_id": "wt-disp", "yaml_path": str(record_path),
+        "summary": "must not change", "follow_up": True, "paused": True, **extra,
+    })
+    assert result["error"] == "invalid_title"
+    assert record_path.read_bytes() == before
+    assert disposition_history.read("wt-disp", tracking_path=record_path.parent) == []
+
+
 def test_reactivates_finalized_worktree_on_follow_up(record_path):
     result = tracking_disposition_write.apply_status_disposition(
         {

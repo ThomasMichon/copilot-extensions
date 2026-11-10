@@ -2480,6 +2480,11 @@ def _cmd_status_write(
     state; see the worktree-status-core effort and the agent-fabric vision
     (disposition-is-asserted-pulse-is-derived).
     """
+    try:
+        tracking.normalize_asserted_title(title)
+    except ValueError as error:
+        output.err(str(error))
+        return 1
     config = cfg.load_config()
     worktree_id = worktree_identity._infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:
@@ -2492,14 +2497,8 @@ def _cmd_status_write(
     if not yaml_path.exists():
         output.err(f"Tracking file not found at {yaml_path}. Cannot annotate an unknown worktree.")
         return 1
-    # pr-attribution-codenames Phase 2 (#2838): an explicit status touch is
-    # exactly the "first touch" the backfill plan describes -- lazily assign
-    # a pre-Phase-2 record's missing codename. Done as its OWN independent
-    # locked step, strictly before the disposition RMW below, so the
-    # project-wide allocation lock and the per-record lock are never held
-    # nested/simultaneously in either order (a lock-ordering/deadlock hazard
-    # flagged in review: `create` acquires them allocation-lock-then-record-
-    # lock via `create_new_record`'s own `save_record`).
+    # Backfill codenames before the disposition RMW: the allocation and
+    # per-record locks must not nest in opposite order.
     peek = tracking.load_record(yaml_path)
     # Republish the effective agenda policy for the post-tool reminder hooks,
     # so a running session picks up an `agendas.default` change on its next
@@ -2523,12 +2522,7 @@ def _cmd_status_write(
             # preserve, but a plain traceback is still a defect).
             output.err(str(e))
             return 1
-    # agent-worktrees-authoritative-daemon Phase 3: the whole load ->
-    # set_disposition -> save transaction (formerly a foreground
-    # `tracking._RecordLock` block here, #4547) now runs as the registered
-    # `status_disposition_write` verb (`tracking_disposition_write.py`),
-    # funneled through the resident daemon when reachable, or the identical
-    # code in-process (logged) via `tracking_write.dispatch` when it is not.
+    # Dispatch the whole locked transaction, with the same-code pre-send fallback.
     session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     # Resolved here (mirrors session_id): the status_reported durable trace
     # must use THIS project, never a resident daemon's own ambient one.
@@ -2553,6 +2547,7 @@ def _cmd_status_write(
                 "yaml_path": str(yaml_path),
                 "summary": summary,
                 "title": title,
+                "retain_full_title": title is not None,
                 "activity": activity,
                 "follow_up": follow_up,
                 "paused": paused,
@@ -2561,11 +2556,14 @@ def _cmd_status_write(
             },
             read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
-            min_version=2,  # unconditional: a v1 daemon drops paused on ANY write
+            min_version=3 if title is not None else 2,
         )
     except tracking_write.ResidentRecoveryHeld as e: return tracking_write.refuse_recovery(e, json_output=getattr(args, "json", False))
     except tracking_write.AmbiguousWriteOutcome as e:
         output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")
+        return 1
+    if result.get("error") == "invalid_title":
+        output.err(result["detail"])
         return 1
     if result.get("error") == "terminal_managed":
         output.err(

@@ -67,6 +67,17 @@ def apply_status_disposition(args: dict) -> dict:
     paused = args.get("paused")
     session_id = args.get("session_id")
     project = args.get("project")
+    retain_full_title = args.get("retain_full_title", False)
+    try:
+        if type(retain_full_title) is not bool:
+            raise ValueError("retain_full_title must be a boolean.")
+        if title is not None:
+            if retain_full_title:
+                tracking.normalize_asserted_title(title)
+            else:
+                title = tracking.cap_title(title) or ""
+    except (ValueError, TypeError) as error:
+        return {"error": "invalid_title", "detail": str(error)}
 
     with tracking._RecordLock(yaml_path):
         record = tracking.load_record(yaml_path)
@@ -123,11 +134,6 @@ def apply_status_disposition(args: dict) -> dict:
     }
 
 
-# version=2: `paused` is part of this verb's payload, added after this verb
-# first shipped at version 1. A pre-upgrade daemon process still running
-# the version-1 `fn` would accept a request carrying `paused` (the name
-# check alone can't see the shape change) and silently ignore it while
-# reporting success -- see `tracking_write`'s own `_VERB_VERSIONS`
-# docstring for why this requires a version bump rather than relying on
-# the pre-existing by-name capability check.
-tracking_write.register_verb("status_disposition_write", apply_status_disposition, version=2)
+# v2 preserves paused fields; v3 explicitly selects full-title retention.
+# Requests without the selector retain the legacy short-title contract.
+tracking_write.register_verb("status_disposition_write", apply_status_disposition, version=3)
