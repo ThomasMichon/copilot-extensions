@@ -913,3 +913,15 @@ def test_dropped_lane_wait_keeps_the_callers_no_wake_choice(q: TaskQueue) -> Non
     reconcile_recoveries(q, now=120)
     assert q.pool_startup(task_id).recovery_requested_at == 120
     assert q.list_wakes(task_id) == []
+
+
+def test_lane_waiter_admitted_by_a_later_no_wake_resume_still_wakes(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    q.resume(task_id, "host-a/worktree", wake_requested=True, now=103)
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    _cold(q, running.key)
+    q.resume(task_id, "host-a/worktree", wake_requested=False, now=110)
+    assert q.pool_startup(task_id).recovery_requested_at == 110
+    assert len(q.list_wakes(task_id)) == 1

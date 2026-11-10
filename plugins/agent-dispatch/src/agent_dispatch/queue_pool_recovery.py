@@ -234,6 +234,9 @@ def request_recovery(
         return owner._fetch(conn, task.id)
     if message is None:
         message = assignment["lane_wait_message"]
+    # begin_pool_episode() clears the saved choice; an earlier waiting request
+    # that asked for a wake must still wake the owner.
+    wake_requested = wake_requested or bool(assignment["lane_wait_wake"])
     begin_pool_episode(conn, task.id, ts, assignment["startup_timeout"])
     revision = assignment["recovery_revision"] + 1
     conn.execute(
