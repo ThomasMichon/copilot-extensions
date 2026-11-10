@@ -101,8 +101,8 @@ def configuration_context(
 ) -> dict:
     """Read owner-qualified composer context, without enrollment or state writes.
 
-    Legacy registrations use the same normalized remote digest as namespaced
-    registrations; an installation cell never supplies repository identity.
+    Legacy and namespaced registrations share the identity owner's remote or
+    local-path digest; an installation cell never supplies repository identity.
     """
     from configuration_layers import ConfigurationError, plan_layers
 

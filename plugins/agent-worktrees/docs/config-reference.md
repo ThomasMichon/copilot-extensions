@@ -47,7 +47,7 @@ and are not changed by the related-source graft.
 
 | Field | Type and meaning |
 |---|---|
-| `context.repository_id` | Exact `repo-<normalized-remote-digest>` from the registered repository identity owner, never a directory basename. |
+| `context.repository_id` | Exact `repo-<identity-digest>` from the registered repository identity owner: normalized remote, or the absolute registered local path for a remote-free repository; never a directory basename. |
 | `context.execution_machine` | Owner-resolved logical execution-machine identity. |
 | `context.installation_cell` | Validated selected cell root; legacy mode uses its registry root. |
 | `context.binding` | `bound` or `unbound`; unresolved explicit bindings fail rather than invent a source. |
@@ -64,6 +64,14 @@ query/target selectors must not reuse another repository's projection.
 Malformed projections and explicit binding/cell failures are errors; absence
 of an optional legacy owner retains standalone defaults without fabricated IDs.
 Source roots and JSON-pointer provenance are data, not trust or execution authority.
+
+Remote-free registrations use their current platform's absolute registered path
+for local identity, without adding a Git remote or changing the registry.
+Legacy configuration context and namespaced project state use the same digest.
+Changing that path changes the local identity; it is not portable across
+machines and is never offered as a portable knowledge-preference ID.
+Remote-backed identities remain unchanged. Missing or relative local paths
+refuse rather than borrowing the current directory.
 
 agent-worktrees merges configuration from the layers below at load time.
 **Highest precedence wins**, per key (deep merge):
