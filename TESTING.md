@@ -430,6 +430,17 @@ new contract and an older read-only contract, using the real caller-owned policy
 worker rather than a timing stub; they also require a real protected-state deny.
 These are finite source samples, not latency distributions or the 1-2 second
 whole-hook/throughput acceptance. Child/item/group limits stay 10/30/300 seconds.
+The `batch-read-only-attribution` cases retain the unchanged packaged contract
+while comparing phase-free/read-attributed/phase-free calls and an attributed
+later protected write through the real worker. Both Windows shell engines run
+in legacy and selected-cell fixtures. Successful output records the executable
+hash and actual child version, registered-command/source hashes, outer elapsed
+time and same-occurrence monotonic command, script, admission and read/source
+proof phases. Only fixture copies are instrumented; the existing fixture runtime
+selector and context-validator substitutes remain, so this is not installed
+runtime qualification. Phase times include their instrumentation, and the
+outside-command startup/exit envelope is not isolated startup. Ordered controls
+do not establish exact subtractive attribution or a latency distribution.
 The boolean-only admission controls retain bounded command-entry, helper,
 input, admission and output phases; a timeout reports the partial phases
 without retrying the child or relaxing its original limit.
