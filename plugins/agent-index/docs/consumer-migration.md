@@ -91,10 +91,7 @@ or compact as though reconciliation had completed.
 External stale-generation collectors can call
 `run_source_gc(config, multi_store, policy=..., dry_run=False, compact=False)`.
 It acquires ownership before loading state and holds it through saved state,
-requested compaction and final FTS preparation when a real purge occurs.
-When compaction runs, its store statistics are returned in the optional
-`compaction` result field; dry runs, zero-deletion results and calls without
-compaction omit that field. Dry runs
+FTS preparation and requested compaction when a real purge occurs. Dry runs
 publish no checkpoint, path-index schema or maintenance. Existing low-level
 `gc_stale_sources`/`gc_unconfigured_sources` calls remain available to owners
 already holding `source_writer` across their own state load/save; locking only

@@ -5,10 +5,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import shutil
-import subprocess
 import sys
-import venv
 
 import pytest
 
@@ -127,115 +124,6 @@ def test_standard_bootstrap_hooks_and_slot_local_paths(installed):
     assert runtime.check_admission(root, "2.0", payload_hash="same") == runtime.ADMIT_REUSE
     assert runtime.mark_complete(root, "2.0", payload_hash="same") == marker
     assert marker.read_bytes() == before
-
-
-def _retained_reader():
-    source = LIBRARY.parents[1] / "libs/installer-engine/runtime_launcher.py"
-    spec = importlib.util.spec_from_file_location("_completion_retained_reader", source)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _bootstrap(slot):
-    directory = slot / ".runtime-bootstrap"
-    directory.mkdir()
-    shutil.copyfile(
-        LIBRARY.parents[1] / "libs/installer-engine/runtime_launcher.py",
-        directory / "runtime_launcher.py",
-    )
-    return directory
-
-
-def test_completion_is_usable_by_retained_reader_and_preserves_exact_reuse(installed):
-    root, slot, _site = installed
-    bootstrap = _bootstrap(slot)
-    marker = runtime.mark_complete(root, "2.0", payload_hash="same")
-    reader = _retained_reader()
-    identity = reader.runtime_identity(slot)
-    before = {
-        path: (path.read_bytes(), path.stat().st_mtime_ns)
-        for path in (marker, bootstrap / "runtime-generation")
-    }
-    assert runtime.mark_complete(root, "2.0", payload_hash="same") == marker
-    assert reader.runtime_identity(slot) == identity
-    assert {
-        path: (path.read_bytes(), path.stat().st_mtime_ns) for path in before
-    } == before
-
-
-@pytest.mark.parametrize("damage_case", ["malformed", "hardlink", "missing-launcher"])
-def test_invalid_incoming_identity_is_not_certified_or_overwritten(installed, damage_case):
-    root, slot, _site = installed
-    bootstrap = _bootstrap(slot)
-    generation = bootstrap / "runtime-generation"
-    if damage_case == "missing-launcher":
-        (bootstrap / "runtime_launcher.py").unlink()
-    else:
-        generation.write_bytes(b"not-a-generation\n" if damage_case == "malformed" else b"a" * 32)
-        if damage_case == "hardlink":
-            os.link(generation, slot / "foreign-generation")
-    before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
-    with pytest.raises((OSError, ValueError, RuntimeError)):
-        runtime.mark_complete(root, "2.0", payload_hash="same")
-    assert not runtime.marker_path(root, "2.0").exists()
-    assert {path: path.read_bytes() for path in before} == before
-
-
-def test_completed_legacy_slot_is_not_backfilled_by_completion_reuse(installed):
-    root, slot, _site = installed
-    marker = runtime.mark_complete(root, "2.0", payload_hash="same")
-    bootstrap = _bootstrap(slot)
-    before = {path: path.read_bytes() for path in slot.rglob("*") if path.is_file()}
-    assert runtime.mark_complete(root, "2.0", payload_hash="same") == marker
-    assert not (bootstrap / "runtime-generation").exists()
-    assert {path: path.read_bytes() for path in before} == before
-
-
-@pytest.mark.timeout(60)
-def test_real_constructed_environment_launches_with_its_published_identity(tmp_path):
-    root = tmp_path / "runtime"
-    slot = runtime.slot(root, "2.0")
-    environment = slot / ".venv"
-    venv.EnvBuilder(with_pip=False).create(environment)
-    source = LIBRARY.parents[1] / "plugins/agent-worktrees/scripts/versioned_runtime.py"
-    spec = importlib.util.spec_from_file_location("_native_completion_owner", source)
-    owner = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(owner)
-    owner._runtime_component("versioned_runtime_construction").retain_helpers(slot, complete=False)
-    site = environment / (
-        "Lib/site-packages" if os.name == "nt"
-        else f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
-    )
-    sentinel = tmp_path / "executed"
-    (site / "completion_fixture.py").write_text(
-        "from pathlib import Path\n"
-        f"Path({str(sentinel)!r}).write_text('ran')\n",
-    )
-    owner.mark_complete(root, "2.0", payload_hash="same")
-    identity = _retained_reader().runtime_identity(slot)
-    python = environment / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
-    command = [
-        str(python), "-I", "-S", "-B", str(slot / ".runtime-bootstrap/runtime_launcher.py"),
-        "--runtime-identity", identity, "-m", "completion_fixture",
-    ]
-
-    def invoke():
-        return subprocess.run(
-            command, executable=str(python), capture_output=True, text=True, timeout=15,
-            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
-        )
-
-    completed = invoke()
-    assert completed.returncode == 0, completed.stdout + completed.stderr
-    assert sentinel.read_text() == "ran"
-    sentinel.unlink()
-    generation = slot / ".runtime-bootstrap/runtime-generation"
-    generation.write_text(("b" if not identity.startswith("b" * 32) else "c") * 32)
-    refused = invoke()
-    assert refused.returncode != 0
-    assert "build identity changed" in refused.stderr
-    assert not sentinel.exists()
 
 
 def test_packaged_pywin32_bootstrap_is_validated_without_execution(installed):

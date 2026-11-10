@@ -1,9 +1,0 @@
-{
-  "comment": "Resolve contract inspection from active directory and installed plugin sources while retaining hidden declaration ownership.",
-  "changes": [
-    {
-      "plugin": "worktree-manager",
-      "type": "patch"
-    }
-  ]
-}

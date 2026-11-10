@@ -1109,9 +1109,8 @@ calls refuse contention with `SourcePipelineBusy`. `run_worker` waits cancellabl
 before invoking its selected indexer, retaining its processing task rather than
 requeueing it; the worker, not its service monitor, owns the lock.
 `run_source_gc` owns stale-generation collection from state load through saved
-state, requested compaction and final FTS preparation. When compaction runs,
-its store statistics are returned in the optional `compaction` result field.
-Dry runs publish no checkpoint, path-index schema or derived maintenance.
+state, FTS preparation and requested compaction. Dry runs publish no checkpoint,
+path-index schema or derived maintenance.
 
 Search reads do not join this writer lock; selected-store reader/publication
 fences remain independent. Hosted ingest, deletion and low-level GC callers

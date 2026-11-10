@@ -143,36 +143,6 @@ def state_path(path: Path, *, private: bool = False, owned: bool = True) -> Phys
         os.close(fd)
 
 
-def prepare_retained_generation(slot: Path) -> None:
-    """Publish a retained build identity before its first completion marker."""
-    bootstrap = slot / ".runtime-bootstrap"
-    if not os.path.lexists(bootstrap):
-        return
-    if state_path(bootstrap / "runtime_launcher.py", private=True) is None:
-        raise PublicationProofError("Retained runtime launcher is missing")
-    path = bootstrap / "runtime-generation"
-    before = state_path(path, private=True)
-    if before is None:
-        with os.fdopen(_created_file(path), "wb") as stream:
-            stream.write((uuid.uuid4().hex + "\n").encode("ascii"))
-            stream.flush()
-            os.fsync(stream.fileno())
-        before = state_path(path, private=True)
-    if before is None or before.size > 64:
-        raise PublicationProofError("Retained runtime generation is missing or oversized")
-    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
-    try:
-        if state_fd(fd) != before:
-            raise PublicationProofError("Retained runtime generation changed before read")
-        content = os.read(fd, 65)
-        if state_fd(fd) != before:
-            raise PublicationProofError("Retained runtime generation changed during read")
-    finally:
-        os.close(fd)
-    if state_path(path, private=True) != before or re.fullmatch(b"[0-9a-f]{32}", content.strip()) is None:
-        raise PublicationProofError("Retained runtime generation is invalid or changed")
-
-
 def group(root: Path, target: Path) -> str:
     if target.name.lower() in ("payload-dir", "stamped-version", "payload-origin"):
         return "redirects"
