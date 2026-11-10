@@ -1,0 +1,9 @@
+{
+  "comment": "Add bundled Podman runtime driver with configured image acquisition and immutable member routing",
+  "changes": [
+    {
+      "plugin": "agent-containers",
+      "type": "patch"
+    }
+  ]
+}
