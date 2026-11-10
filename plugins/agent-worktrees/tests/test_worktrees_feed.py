@@ -561,6 +561,41 @@ def test_worktrees_feed_filter_membership_and_deletes_are_committed(owner):
     stream.close()
 
 
+def test_semantic_archive_transition_leaves_default_socket_feed_but_not_explicit_inventory(owner):
+    row = {"id": "retained", "status": "active", "checkout_present": True}
+    owner.publish("project", [row], observed_at=2)
+    payload = request(include_missing=False)
+    server = control.ControlServer(
+        lambda action, body: owner.health() if action == "health" else owner.handle(body),
+        token="fixture",
+        stream_handle=lambda action, body, disconnected: owner.feed.stream(body, disconnected),
+    )
+    server.start()
+    frames = client.transport(
+        control.ControlClient(f"http://127.0.0.1:{server.port}", token="fixture"), payload,
+    )
+    receiver = client.FeedReceiver(payload)
+    try:
+        assert apply(receiver, transaction(frames))["worktrees"] == [row]
+        archived = {**row, "status": "archived"}
+        owner.publish("project", [archived], observed_at=3)
+        update = transaction(frames)
+        result = apply(receiver, update)
+        assert any(frame["type"] == "delete" for frame in update)
+        assert result["worktrees"] == []
+        assert result["projection"]["selected_count"] == 0
+        assert result["projection"]["roster_count"] == 1
+        assert owner.handle(request(worktree_id="retained"))["worktrees"] == [archived]
+        owner.publish("project", [row], observed_at=4)
+        assert apply(receiver, transaction(frames))["worktrees"] == [row]
+    finally:
+        frames.close()
+        owner.close_admission()
+        assert owner.feed.wait_closed(1)
+        server.close()
+    assert owner.feed.active_count() == 0
+
+
 def test_worktrees_feed_heartbeat_never_redecodes_the_unchanged_roster(owner, monkeypatch):
     monkeypatch.setattr(feed, "HEARTBEAT_SECONDS", 0.001)
     original = owner.handle
