@@ -2114,7 +2114,9 @@ def test_lifecycle_process_observation_uses_owned_handles_and_omits_inline_code(
 
 def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_them(tmp_path):
     import test_installed_suite_payloads as controls
-    from manager_installed_suite_payloads import _PROVENANCE, prepare_git_transport
+    from manager_installed_suite_payloads import (
+        _PROVENANCE, prepare_git_transport, serve_git_transport,
+    )
 
     artifact = controls._artifact(tmp_path)
     (artifact / ".gitignore").write_text("generated.txt\n")
@@ -2122,7 +2124,10 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
     environment = {
         key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
     }
-    environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    environment.update(
+        GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+        NO_PROXY="127.0.0.1,localhost", no_proxy="127.0.0.1,localhost",
+    )
 
     def run(argv, env, cwd, diagnostics, label, *, timeout):
         return subprocess.run(
@@ -2142,10 +2147,11 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
         deadline=time.monotonic() + 30, run=run,
     )
     copied = tmp_path / "copied"
-    run(
-        ["git", "clone", transport["url"], copied],
-        environment, project, tmp_path, "clone", timeout=30,
-    )
+    with serve_git_transport(transport) as served:
+        run(
+            ["git", "clone", served["url"], copied],
+            environment, project, tmp_path, "clone", timeout=30,
+        )
     for relative, row in before.items():
         if row["kind"] == "file":
             assert (copied / relative).read_bytes() == (artifact / relative).read_bytes()
@@ -2158,6 +2164,9 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
     ) == transport["commit"]
     assert _PROVENANCE["content_manifest"](artifact) == before
     assert not (artifact / ".git").exists()
+    with pytest.raises(RuntimeError, match="controlled acquisition failure"):
+        with serve_git_transport(transport):
+            raise RuntimeError("controlled acquisition failure")
     with pytest.raises(ValueError, match="fresh fixture-owned"):
         prepare_git_transport(
             artifact, commit, environment=environment, project=project, diagnostics=tmp_path,
@@ -2171,6 +2180,7 @@ def test_installed_suite_payload_closure_uses_the_real_cli(record_testsuite_prop
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from manager_installed_suite_payloads import (
         _PROVENANCE, install_payload_closure, prepare_git_transport, selected_profile,
+        serve_git_transport,
     )
     from manager_suite_fixture import require_venue
     from plugin_test_containment import SANDBOX_ENV, TestSandbox
@@ -2187,6 +2197,7 @@ def test_installed_suite_payload_closure_uses_the_real_cli(record_testsuite_prop
         with (
             TestSandbox(prefix="sp-", dir=Path(os.environ[SANDBOX_ENV])) as raw,
             _capture_failure(Path(raw), record_testsuite_property),
+            ExitStack() as transports,
         ):
             root = Path(raw)
             installed.prepare(root, identity)
@@ -2210,6 +2221,7 @@ def test_installed_suite_payload_closure_uses_the_real_cli(record_testsuite_prop
                 diagnostics=root / "diagnostics", deadline=budget.execution_deadline,
                 run=installed._run,
             )
+            transport = transports.enter_context(serve_git_transport(transport))
             profile = selected_profile(
                 artifact, identity["candidate_commit"], configuration, transport=transport,
             )

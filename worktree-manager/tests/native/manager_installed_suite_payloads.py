@@ -6,14 +6,19 @@ native cleanup. Its command executor must be the witness's bounded native owner.
 """
 from __future__ import annotations
 
+from contextlib import contextmanager
 import hashlib
+import http.server
 import json
 from pathlib import Path
 import re
 import runpy
 import sys
+import threading
 import time
 import tomllib
+from urllib.parse import urlsplit
+import urllib.request
 
 REPO = Path(__file__).resolve().parents[3]
 _PROVENANCE = runpy.run_path(
@@ -56,8 +61,12 @@ def selected_profile(
     )
     if transport is not None:
         repository = Path(transport["repository"])
+        url = urlsplit(transport["url"])
         if (
-            not repository.is_absolute() or transport["url"] != repository.as_uri()
+            not repository.is_absolute()
+            or url.scheme != "http" or url.hostname != "127.0.0.1"
+            or not url.port or url.path != "/suite-transport.git"
+            or url.username is not None or url.password is not None or url.query or url.fragment
             or any(
                 not isinstance(transport.get(key), str)
                 or not re.fullmatch(r"[0-9a-f]{40}", transport[key])
@@ -132,11 +141,60 @@ def prepare_git_transport(
         ["git", "--git-dir", repository, "rev-parse", "HEAD", "HEAD^{tree}"],
         environment, project, diagnostics, "suite-transport-head", timeout=30,
     ).splitlines()
+    run(
+        ["git", "--git-dir", repository, "update-server-info"],
+        environment, project, diagnostics, "suite-transport-http-info", timeout=30,
+    )
     _PROVENANCE["verify"](artifact, candidate_commit)
     return {
-        "repository": str(repository), "url": repository.as_uri(),
+        "repository": str(repository),
         "commit": commit, "tree": tree,
     }
+
+
+@contextmanager
+def serve_git_transport(transport: dict):
+    """Serve actual Git object data for the caller's bounded acquisition scope."""
+    repository = Path(transport["repository"])
+    prefix = "/suite-transport.git"
+
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(repository), **kwargs)
+
+        def setup(self):
+            super().setup()
+            self.connection.settimeout(5)
+
+        def log_message(self, *_):
+            pass
+
+        def translate_path(self, path):
+            path = urlsplit(path).path
+            if path != prefix and not path.startswith(prefix + "/"):
+                return str(repository / ".no-such-git-endpoint")
+            return super().translate_path(path[len(prefix):] or "/")
+
+    server = http.server.HTTPServer(("127.0.0.1", 0), Handler)
+    thread = threading.Thread(target=server.serve_forever, kwargs={"poll_interval": 0.05})
+    started = False
+    try:
+        thread.start()
+        started = True
+        url = f"http://127.0.0.1:{server.server_port}{prefix}"
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+        with opener.open(url + "/HEAD", timeout=5) as response:
+            if response.read(1024) != (repository / "HEAD").read_bytes():
+                raise RuntimeError("The private Git transport did not serve its owned repository")
+        yield {**transport, "url": url}
+    finally:
+        if started:
+            server.shutdown()
+        server.server_close()
+        if started:
+            thread.join(5)
+        if thread.is_alive() or server.socket.fileno() != -1:
+            raise RuntimeError("The private Git transport did not stop")
 
 
 def install_payload_closure(
@@ -166,6 +224,7 @@ def install_payload_closure(
     if settings != profile["settings"]:
         raise ValueError("The representative harness does not enable the complete frozen suite")
     executable_hash = hashlib.sha256(copilot.read_bytes()).hexdigest()
+    environment = {**environment, "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
     marketplace = next(iter(profile["settings"]["extraKnownMarketplaces"]))
     names = sorted(profile["inventory"])
 

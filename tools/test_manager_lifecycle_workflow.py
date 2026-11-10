@@ -22,7 +22,7 @@ WORKFLOW = (
 
 @pytest.mark.parametrize("outcome", [
     "passed", "failed", "skipped", "missing", "partial", "stale", "wrong-run", "runtime-claim",
-    "requested-mismatch",
+    "requested-mismatch", "foreign-transport",
 ])
 def test_payload_preflight_cannot_claim_runtime_or_accept_incomplete_evidence(
     tmp_path, monkeypatch, outcome,
@@ -46,7 +46,7 @@ def test_payload_preflight_cannot_claim_runtime_or_accept_incomplete_evidence(
         "runtime_installation": "not-observed", "copilot_sha256": "c" * 64,
         "transport": {
             "repository": str(tmp_path / "transport.git"),
-            "url": (tmp_path / "transport.git").as_uri(),
+            "url": "http://127.0.0.1:12345/suite-transport.git",
             "commit": "d" * 40, "tree": "e" * 40,
         },
     }
@@ -58,6 +58,8 @@ def test_payload_preflight_cannot_claim_runtime_or_accept_incomplete_evidence(
         data["identity"]["run_id"] = 122
     elif outcome == "runtime-claim":
         data["runtime_installation"] = "complete"
+    elif outcome == "foreign-transport":
+        data["transport"]["url"] = "http://example.invalid/suite-transport.git"
 
     def run(arguments, **limits):
         assert limits["timeout"] == 1200

@@ -987,3 +987,19 @@ guard covers these test changes too. The canonical changefile tool added the
 required patch entry; no version was hand-edited and no CI exception is used.
 The corrected head must independently clear both native qualification and
 required CI before becoming reviewable.
+
+Run 42915011065 at `215428d79df3a78749f55b0f3fadf051fbfc6e03`
+completed real packed import in 10.750 seconds, well within its unchanged
+120-second limit. It then failed actual CLI registration because the pinned
+CLI interprets a `file:` URL as a local path rather than a Git transport.
+The 276.57-second case is not copied-install or lifecycle success.
+
+The same real private Git repository is now exported with `git update-server-info`
+and served through a context-owned loopback HTTP server for normal Git clone.
+This is actual Git object/ref delivery, not a successful acquisition callback.
+Only the bare repository is exposed, the owned HEAD response is checked before
+use, connection reads are bounded and the server thread/listener must retire
+before success. The small real-Git preservation check now exercises that HTTP
+route. The profile/receipt require that exact loopback Git source; foreign
+origins and invalid identities refuse. No host service, persistent daemon,
+remote repository, release admission or upgrade baseline is introduced.

@@ -843,13 +843,15 @@ engine, builds the canonical commit-bound whole-tree artifact, and acquires
 every declared payload with the actual pinned CLI. Installed engine discovery
 and complete payload-byte comparison must succeed in the private HOME, with
 the required-readiness profile enabled. A private bare Git repository serializes
-the verified materialized bytes with a packed `git fast-import` stream, and the
-CLI registers its `file:` Git URL with
-`plugin marketplace add`. A directory marketplace would instead load live and
+the verified materialized bytes with a packed `git fast-import` stream. A
+context-owned loopback HTTP server serves only that real Git repository, and the
+CLI registers its HTTP Git URL with `plugin marketplace add`. The pinned CLI
+does not recognize `file:` as a Git transport. A directory marketplace would load live and
 copy nothing, leaving the installed engine's cache-only discovery empty.
 The transport commit/tree are recorded and rechecked separately from the source
 commit; they are not a release, supported upgrade baseline or admission receipt.
-No remote repository, daemon or promotion transaction is created. Its separate
+The Git HTTP thread/listener must stop before success. No remote repository,
+host service, persistent daemon or promotion transaction is created. Its separate
 `installed-manager-suite-payloads` receipt explicitly reports runtime
 installation as unobserved: payload delivery is not runtime construction,
 actual Machines readiness, an authentic update or lifecycle acceptance.

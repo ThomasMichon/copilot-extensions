@@ -70,6 +70,22 @@ def test_suite_profile_refuses_incomplete_or_substituted_artifact(tmp_path, defe
         _SUITE["selected_profile"](artifact, commit, {"stateless": True})
 
 
+@pytest.mark.parametrize("defect", ["foreign-origin", "invalid-tree"])
+def test_suite_profile_refuses_nonfixture_git_transport(tmp_path, defect):
+    artifact = _artifact(tmp_path)
+    transport = {
+        "repository": str(tmp_path / "transport.git"),
+        "url": "http://127.0.0.1:12345/suite-transport.git",
+        "commit": "b" * 40, "tree": "c" * 40,
+    }
+    if defect == "foreign-origin":
+        transport["url"] = "http://example.invalid/suite-transport.git"
+    else:
+        transport["tree"] = "not-a-tree"
+    with pytest.raises(ValueError):
+        _SUITE["selected_profile"](artifact, _COMMIT, {}, transport=transport)
+
+
 @pytest.mark.parametrize("defect", [None, "partial-discovery", "foreign-payload", "changed-payload",
                                    "changed-nested-receipt",
                                    "changed-artifact", "changed-cli", "reduced-settings", "command-failed",
@@ -81,12 +97,11 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
     config = {"project": "example", "stateless": True, "require_application_readiness": True}
     repository = tmp_path / "suite-transport.git"
     transport = {
-        "repository": str(repository), "url": repository.as_uri(),
+        "repository": str(repository), "url": "http://127.0.0.1:12345/suite-transport.git",
         "commit": "b" * 40, "tree": "c" * 40,
     }
     if defect == "foreign-transport":
         transport["repository"] = str(tmp_path.parent / "foreign.git")
-        transport["url"] = (tmp_path.parent / "foreign.git").as_uri()
     profile = _SUITE["selected_profile"](artifact, _COMMIT, config, transport=transport)
     project = tmp_path / "project"
     settings = project / ".github" / "copilot" / "settings.json"
