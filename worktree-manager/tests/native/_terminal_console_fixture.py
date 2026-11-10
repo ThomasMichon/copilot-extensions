@@ -210,7 +210,7 @@ class Console:
             "threads": result.stdout.strip(), "error": result.stderr.strip(),
         }
 
-    def pin_descendants(self):
+    def _process_entries(self):
         snapshot = self.api.CreateToolhelp32Snapshot(2, 0)
         if snapshot == w.HANDLE(-1).value:
             raise ctypes.WinError(ctypes.get_last_error())
@@ -226,6 +226,10 @@ class Console:
                     break
         finally:
             self._check(self.api.CloseHandle(snapshot))
+        return entries
+
+    def pin_descendants(self):
+        entries = self._process_entries()
         births = {self.process.pid: self.birth(self.process.process)}
         frontier = [self.process.pid]
         pinned = {}
@@ -233,7 +237,15 @@ class Console:
             for pid, (ancestor, name) in entries.items():
                 if ancestor != parent or pid in births:
                     continue
-                handle = self.pin(pid)
+                try:
+                    handle = self.pin(pid)
+                except OSError as error:
+                    # Toolhelp is a snapshot, not a process lifetime reference.
+                    # Only a now-absent PID explains OpenProcess's invalid PID.
+                    if getattr(error, "winerror", None) == 87 and pid not in self._process_entries():
+                        continue
+                    error.add_note(f"Could not pin snapshot descendant {pid} of {parent} ({name})")
+                    raise
                 born = self.birth(handle)
                 # Toolhelp parent PIDs can refer to an older, reused incarnation.
                 if born < births[parent]:
