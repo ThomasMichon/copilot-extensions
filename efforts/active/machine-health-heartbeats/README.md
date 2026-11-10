@@ -1262,3 +1262,8 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   Edge whitespace refuses instead of silently selecting a different directory.
   The focused post-correction preparation/composition packet passed all 36
   cases; required source pins and documentation were refreshed together.
+- A follow-up review correction passes the original store path directly to the
+  existing policy owner, preserving its absolute/plain/traversal rejection
+  before token generation or rendering. Normal CLI controls reject both
+  traversal and relative paths without changing the store; an actor-free
+  contract ensures the original path reaches that owner unchanged.

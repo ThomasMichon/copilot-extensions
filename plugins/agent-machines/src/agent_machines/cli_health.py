@@ -70,7 +70,7 @@ def run_prepare_job(args) -> int:
     from .health_slots import HealthError
 
     try:
-        store = Path(os.path.abspath(args.store_dir))
+        store = args.store_dir
         _, _, token = policy_preview(store)
         payload = Path(os.environ["AGENT_MACHINES_PAYLOAD_ROOT"])
         if not payload.is_absolute() or not (payload / "plugin.json").is_file():

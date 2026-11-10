@@ -150,6 +150,14 @@ def test_preparation_cli_reads_policy_and_never_touches_store_or_scheduler(tmp_p
     assert result["status"] == "prepared" and not result["registered"] and not result["enabled"]
     assert {path.name: path.read_bytes() for path in store.iterdir()} == before
     assert sorted(path.name for path in payload.iterdir()) == ["bin", "plugin.json"]
+    for invalid in (str(store / ".." / "store"), "relative-store"):
+        invalid_arguments = [*arguments]
+        invalid_arguments[invalid_arguments.index("--store-dir") + 1] = invalid
+        assert main(invalid_arguments) == 2
+        error = json.loads(capsys.readouterr().err)
+        assert error["error"] == "absolute-plain-path-required"
+        assert not error["registered"] and not error["enabled"]
+        assert {path.name: path.read_bytes() for path in store.iterdir()} == before
     from agent_machines import cli_health
 
     monkeypatch.setattr(cli_health, "sys", SimpleNamespace(platform="darwin", stderr=sys.stderr))

@@ -1,6 +1,7 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_native_job_preparation_preserves_the_original_path_for_owner_validation",
         "tools/promotion_unit_tests/test_health_composition.py::test_native_job_preparation_is_actor_free_and_inert_on_both_platforms",
         "tools/promotion_unit_tests/test_health_composition.py::test_native_job_preparation_refuses_unsupported_platforms_and_unsafe_definition_values",
         "tools/promotion_unit_tests/test_health_composition.py::test_one_shot_actor_free_final_interruption_retains_committed_facts",
@@ -4762,8 +4763,8 @@
         "tools/promotion_unit_tests/test_release_helper_decisions.py::test_native_installer_copy_is_verified_before_entrypoint_rewrite[source-drift-sh]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "8a0b8e0079d69d58f32b5d06bc7f43f3f975fbd9e8468665ac5e1f21a0daf3b3",
-        "plugins/agent-machines/src/agent_machines/cli_health.py": "4ac76d8c71ee23b8c1136cdee2d1ec888093833f7aa4796f7a4840efaaa606ab",
+        "tools/promotion_unit_tests/test_health_composition.py": "a92aa05dc88c500de54daddb66fd4ff0484ba3abb4d15a38194315a04a3c4da2",
+        "plugins/agent-machines/src/agent_machines/cli_health.py": "84aaf17e7e282252d42a368f02547a74deb2a4425abb43648c435ccccff9b70c",
         "plugins/agent-machines/src/agent_machines/health_jobs.py": "9c881f8b2fd78363a505c7a54278c29c4ee86288ebbaa7f946f92487f8709a4e",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
         "plugins/agent-machines/src/agent_machines/health_report.py": "8e1684c9466b2d0d2a3065787ab2ffcc0232c14b0b01ae25f11605e70260f2da",

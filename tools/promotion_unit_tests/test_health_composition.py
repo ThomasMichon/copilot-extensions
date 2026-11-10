@@ -115,6 +115,22 @@ def test_native_job_preparation_refuses_unsupported_platforms_and_unsafe_definit
             jobs.prepare(**(fields | change))
 
 
+def test_native_job_preparation_preserves_the_original_path_for_owner_validation(owners, monkeypatch, capsys):
+    modules, parser = owners
+    requested = Path("/example/link/../store")
+
+    def policy_preview(store):
+        assert store == requested
+        raise modules["health_slots"].HealthError("absolute-plain-path-required")
+
+    monkeypatch.setattr(modules["health_run"], "policy_preview", policy_preview)
+    args = parser.parse_args(["health", "prepare-job", "--store-dir", str(requested)])
+    assert args.func(args) == 2
+    result = json.loads(capsys.readouterr().err)
+    assert result["error"] == "absolute-plain-path-required"
+    assert not result["registered"] and not result["enabled"]
+
+
 def view(slots):
     record = slots.validate_record({
         "schema": slots.SCHEMA, "version": 1, "publisher": "example-worker",

@@ -313,6 +313,9 @@ existing policy and owning payload launcher and returns
 map contains definition text only: no files, task registration, unit installation,
 enable/start, lingering, runtime provisioning or carrier write occurs.
 Keep this output local: it contains absolute paths and policy-scoped approval.
+The original absolute store path goes directly through the existing plain-path
+owner; preparation never normalizes traversal or resolves links into a
+different store before policy validation.
 macOS is unsupported.
 
 The Windows proposal uses the explicitly named interactive account at
