@@ -62,7 +62,7 @@ _UNKNOWN = HeadInfo(
 )
 
 
-def resolve_head(worktree_id: str) -> HeadInfo:
+def resolve_head(worktree_id: str, *, project: str | None = None) -> HeadInfo:
     """Return the ground-layer head for ``worktree_id`` (fail-open).
 
     Shells to ``agent-worktrees head-session --worktree-id <id> --json`` and
@@ -80,7 +80,10 @@ def resolve_head(worktree_id: str) -> HeadInfo:
         from .acquisition_contract import AcquisitionRefused
         from .worktree_lineage import _run
 
-        if worktree_id != writer.request.worktree_id:
+        if (
+            worktree_id != writer.request.worktree_id
+            or (project is not None and project != writer.request.project)
+        ):
             raise AcquisitionRefused("worktree_writer_unconfirmed", "head read changed the original workspace")
         result = _run(
             ["--project", writer.request.project, "head-session",
@@ -106,8 +109,12 @@ def resolve_head(worktree_id: str) -> HeadInfo:
         if k not in ("VIRTUAL_ENV", "PYTHONHOME", "__PYVENV_LAUNCHER__", "PYTHONPATH")
     }
     try:
+        command = [exe]
+        if project is not None:
+            command += ["--project", project]
+        command += ["head-session", "--worktree-id", worktree_id, "--json"]
         proc = subprocess.run(  # noqa: S603 -- fixed argv, exe via shutil.which
-            [exe, "head-session", "--worktree-id", worktree_id, "--json"],
+            command,
             capture_output=True,
             text=True,
             timeout=_HEAD_QUERY_TIMEOUT_S,

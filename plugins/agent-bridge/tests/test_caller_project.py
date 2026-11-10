@@ -14,7 +14,7 @@ def isolate_caller(monkeypatch):
     monkeypatch.delenv("COPILOT_AGENT_SESSION_ID", raising=False)
     monkeypatch.setattr(cli, "_PROJECT_OVERRIDE", None)
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: None)
-    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: HeadInfo(
+    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: HeadInfo(
         tracked=True, active=True, head_session="child",
     ))
 
@@ -25,7 +25,13 @@ def test_detached_child_uses_cwd_head_despite_stale_inherited_parent(monkeypatch
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: {
         "owner-ref": "host/harness/worktree#child", "project": "knowledge",
     }.get(key))
+    calls = []
+    def head(wid, *, project):
+        calls.append((wid, project))
+        return HeadInfo(tracked=True, active=True, head_session="child")
+    monkeypatch.setattr(worktree_head, "resolve_head", head)
     assert cli._sender_repo() == "harness"
+    assert calls == [("worktree", "harness")]
 
 
 @pytest.mark.parametrize("qualifier", ["", "#parent"])
@@ -52,7 +58,7 @@ def test_explicit_project_override_wins(monkeypatch):
 def test_stale_or_unknown_head_refuses_dispatch(monkeypatch, capsys, head):
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "child")
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/worktree#child")
-    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: head)
+    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: head)
     with pytest.raises(CallerProjectContextError):
         owning_project()
     with pytest.raises(SystemExit) as error:
@@ -95,7 +101,7 @@ def test_plain_terminal_can_resolve_a_worktree_without_native_session(monkeypatc
 def test_singleton_owner_has_no_worktree_head(monkeypatch):
     monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "child")
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: "host/harness/@anchor#child")
-    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: pytest.fail("not a worktree"))
+    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: pytest.fail("not a worktree"))
     assert owning_project() == "harness"
 
 

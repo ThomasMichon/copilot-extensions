@@ -2499,7 +2499,7 @@ class TestSenderRepoFallback:
         monkeypatch.setattr(cli, "_worktrees_get", lambda key: (
             "host/harness-fixture/wt" + qualifier if key == "owner-ref" else None
         ))
-        monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: worktree_head.HeadInfo(
+        monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: worktree_head.HeadInfo(
             tracked=True, active=True, head_session="session",
         ))
         sender_repo = cli._sender_repo()

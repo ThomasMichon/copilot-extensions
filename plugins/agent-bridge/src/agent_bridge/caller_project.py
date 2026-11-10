@@ -42,7 +42,7 @@ def owning_project() -> str | None:
             "rebind the worktree before dispatch."
         )
     if session_id and match.group("worktree") != "@anchor":
-        head = resolve_head(match.group("worktree"))
+        head = resolve_head(match.group("worktree"), project=match.group("project"))
         if not head.tracked or not head.active or head.head_session != session_id:
             raise CallerProjectContextError(
                 "Managed caller is not the current worktree head; "

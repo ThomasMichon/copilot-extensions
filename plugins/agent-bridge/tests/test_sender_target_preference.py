@@ -20,7 +20,7 @@ def invalid_owner(monkeypatch):
     monkeypatch.setattr(cli, "_worktrees_get", lambda key: (
         "host/harness/wt#new" if key == "owner-ref" else None
     ))
-    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: worktree_head.HeadInfo(
+    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: worktree_head.HeadInfo(
         tracked=True, active=True, head_session="old",
     ))
 
@@ -69,7 +69,7 @@ def test_known_colon_machine_alias_still_consumes_preference():
 
 
 def test_valid_bare_machine_preserves_harness_preference(monkeypatch):
-    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid: worktree_head.HeadInfo(
+    monkeypatch.setattr(worktree_head, "resolve_head", lambda wid, **kwargs: worktree_head.HeadInfo(
         tracked=True, active=True, head_session="new",
     ))
     inventory = [
