@@ -7,7 +7,7 @@ class AcpError extends Error {
   }
 }
 
-export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }) {
+export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, observeState = null }) {
   const sessionId = session.sessionId;
   if (typeof sessionId !== "string" || !sessionId || typeof emit !== "function") {
     throw new TypeError("Headed SDK binding requires its native session and output");
@@ -16,10 +16,23 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
   let sending = false;
   let controlled = true;
   let closed = false;
+  let waiting = false;
+  let nativeActive = startupPrompt !== null;
   let scheduled = false;
   let events = [];
   const seenInputs = new Set();
   const sources = new Set();
+
+  function snapshot() {
+    return {
+      controlled, closed, pending: Boolean(pending), sending,
+      outstanding: nativeActive || sources.size !== 0, waiting,
+    };
+  }
+
+  function report() {
+    if (observeState) observeState(snapshot());
+  }
 
   function finish(error) {
     const operation = pending;
@@ -27,6 +40,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
     pending = null;
     if (error) operation.reject(error);
     else operation.resolve({ stopReason: operation.cancelled ? "cancelled" : "end_turn" });
+    report();
   }
 
   function observe(event) {
@@ -35,6 +49,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
       controlled = false;
       finish(new AcpError(-32001, "Native session outcome is unavailable"));
     }
+    if (event?.type === "session.idle" && sources.size === 0) nativeActive = false;
     if (event?.type === "user.message" &&
         ![event.agentId, event.data?.agentId, event.data?.parentToolCallId].some(Boolean)) {
       if (event.id && seenInputs.has(event.id)) return;
@@ -55,6 +70,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
     if (events.length >= 2_000) {
       controlled = false;
       finish(new AcpError(-32001, "Native observation overflow; control is unavailable"));
+      report();
       return;
     }
     events.push({ event, operation: pending, started: Boolean(pending?.started) });
@@ -62,6 +78,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
       scheduled = true;
       setImmediate(flush);
     }
+    report();
   }
 
   function flush() {
@@ -93,7 +110,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
   }
 
   function requireControl() {
-    if (closed || !controlled) throw new AcpError(-32001, "Headed control is unavailable");
+    if (closed || !controlled || waiting) throw new AcpError(-32001, "Headed control is unavailable");
   }
 
   async function prompt(params) {
@@ -116,6 +133,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
     });
     const operation = pending;
     sources.add(source);
+    report();
     // Install the completion handler before an SDK send can synchronously emit.
     const result = completion.then((value) => value);
     result.catch(() => {});
@@ -149,7 +167,9 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
     const source = `agent-remote-driver-${randomUUID()}`;
     sources.add(source);
     sending = true;
+    nativeActive = true;
     startupPrompt = null;
+    report();
     try {
       const messageId = await session.send({
         prompt: params.prompt, mode: params.mode, source,
@@ -164,6 +184,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
       throw new AcpError(-32001, "Native send outcome is unknown; it will not be replayed");
     } finally {
       sending = false;
+      report();
     }
   }
 
@@ -213,6 +234,11 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
 
   return {
     sessionId,
+    authWait() {
+      waiting = true;
+      report();
+      return snapshot();
+    },
     async handle(message) {
       const request = message && typeof message === "object" && !Array.isArray(message);
       const hasId = request && Object.hasOwn(message, "id");
@@ -231,6 +257,8 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
           error: { code: error instanceof AcpError ? error.code : -32603,
             message: error instanceof AcpError ? error.message : "Native SDK operation failed" },
         } : null;
+      } finally {
+        report();
       }
     },
     close() {
@@ -239,6 +267,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null }
       events = [];
       unsubscribe();
       finish(new AcpError(-32001, "Headed connection closed; no operation will be replayed"));
+      report();
     },
   };
 }
