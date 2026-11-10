@@ -3069,6 +3069,22 @@ disconnected no-op. Passing this control is not positive auth recovery or
 qualification of another pinned native runtime; unexpected SDK EOF remains
 an independent hold.
 
+The explicit T3 file `tests/native/test_native_pending_work.py` qualifies
+nonempty client-task and schedule snapshots through the selected native CLI.
+One control registers a client task, observes the same task as running, idle
+and completed, and verifies that the terminal record remains until exact
+removal. The Windows terminal control uses the real `/every 2h` command in a
+private mux pane, then the joined SDK's public schedule list/stop methods to
+observe and remove that exact future prompt before it fires. It checks one
+conversation, no extension-permission grant and birth-matched native/extension
+retirement. Select it with `COPILOT_DRIVER_HEADED_MUX_E2E=1` and an existing
+`PSMUX_TEST_BIN`; the client-task control needs only the explicitly selected
+`COPILOT_NATIVE_TEST_EXECUTABLE`. The file requires `--allow-explicit-tiers`.
+These controls do not call the SDK's internal schedule-add API or assume a
+prompt-mode model exposes `manage_schedule`. They do not qualify agent/shell
+coverage, complete pending snapshots, ACP idle grace, another pinned runtime,
+or survival after caller cleanup Jobs.
+
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied
 launch commands. Inline and split resume arguments must be replaced, not duplicated;
