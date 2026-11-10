@@ -278,6 +278,38 @@ def serve_git_transport(
             raise failures[0]
 
 
+def payload_manifest_difference(expected: dict, actual: dict) -> dict:
+    """Describe a bounded sample of manifest differences without file contents."""
+    missing = expected.keys() - actual.keys()
+    extra = actual.keys() - expected.keys()
+    changed = {
+        path for path in expected.keys() & actual.keys() if expected[path] != actual[path]
+    }
+
+    def metadata(row):
+        if row is None:
+            return None
+        return {
+            key: value[:256] if isinstance(value, str) else value
+            for key, value in row.items()
+            if key in {"kind", "sha256", "executable", "target"}
+        }
+
+    samples = []
+    for kind, paths in (("missing", missing), ("extra", extra), ("changed", changed)):
+        for path in sorted(paths)[:20 - len(samples)]:
+            samples.append({
+                "difference": kind, "path": path[:256], "path_truncated": len(path) > 256,
+                "expected": metadata(expected.get(path)), "actual": metadata(actual.get(path)),
+            })
+    return {
+        "expected_count": len(expected), "actual_count": len(actual),
+        "missing_count": len(missing), "extra_count": len(extra), "changed_count": len(changed),
+        "omitted_count": len(missing) + len(extra) + len(changed) - len(samples),
+        "samples": samples,
+    }
+
+
 def install_payload_closure(
     artifact: Path, candidate_commit: str, *, repository_config: dict,
     copilot: Path, engine: Path, environment: dict, project: Path,
@@ -368,7 +400,13 @@ def install_payload_closure(
             if key.startswith(prefix)
         }
         if actual != expected:
-            raise ValueError(f"{name}: installed payload differs from the frozen candidate")
+            difference = json.dumps(payload_manifest_difference(expected, actual), sort_keys=True)
+            (diagnostics / f"suite-payload-difference-{name}.json").write_text(
+                difference + "\n", encoding="utf-8",
+            )
+            raise ValueError(
+                f"{name}: installed payload differs from the frozen candidate: {difference}",
+            )
         closure[name] = {
             "path": str(payload), "version": profile["inventory"][name]["version"],
             "manifest_sha256": hashlib.sha256(

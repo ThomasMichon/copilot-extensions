@@ -1022,3 +1022,18 @@ The payload receipt reader also now matches the existing core reader's refusal
 of duplicate JSON fields, including identical duplicate values. Its focused
 malformed-receipt control passes; a complete result must be unambiguous before
 any later release-contract adoption.
+
+Run 42922216324 at `dc8daf766ecc27a0d6bbfa465b956238271cf930`
+completed actual shallow Git HTTP acquisition and all 24 CLI installations.
+The CLI reported copied, enabled installations, and the actual installed engine
+discovered all 24 canonical private-home payload paths. The 460.147-second
+case then refused the first payload, `agent-bridge`, because its full content
+manifest differed from the frozen candidate. No runtime, readiness or lifecycle
+pass follows from this partial acquisition evidence; the core step was skipped.
+
+The comparison previously retained no differing paths, so the cause remains
+unknown. It now retains expected/actual entry counts and up to 20 differing
+relative paths with bounded metadata and hashes, both in the owned diagnostics
+and in the failure. File contents are not reported. Focused controls retain
+strict rejection of changed, missing and extra files, including nested receipts;
+no exclusions, content normalization or acceptance rule changed.
