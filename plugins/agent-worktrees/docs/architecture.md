@@ -3276,8 +3276,11 @@ A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
 For prepared Windows membership, `create` and `edit` can also return natively
-when each call has one direct target and current Git metadata proves every
-target belongs to that same linked worktree. A native batch may contain at most
+when current Git metadata proves every target belongs to that same linked
+worktree. Targets include the original direct path aliases and one-level
+`edits`, `files` and `changes` entry aliases. Each structured list and each
+call's distinct raw targets retain the original 128 limit; the complete event
+also has a conservative 128-distinct-raw-target ceiling. A native batch may contain at most
 128 calls, limited to those writes and optional `view`, `rg` or `glob` reads,
 with at least one write. The entire envelope and every target must qualify;
 batch members take precedence over top-level tool fields, as in the original
@@ -3291,7 +3294,8 @@ unrelated repositories; current source and target paths retain live checks.
 Stateless checks retain the original guard's universal-newline, whitespace
 and leading-dot path normalization, including the normalized basename.
 Protected personal-state paths, anchors, foreign or nested repositories,
-unsupported batch members, structured writes, malformed/oversized batches,
+unsupported batch members, patches, nested or incomplete structured entries,
+malformed/oversized batches,
 unsupported paths and incomplete evidence retain
 the original raw-event policy path. Eligible installation cells retain the
 same complete native membership proof; unprepared cells retain validation.
