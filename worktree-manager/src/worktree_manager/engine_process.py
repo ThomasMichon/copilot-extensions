@@ -56,6 +56,7 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
         **kwargs, **(detached_kwargs() if not _WINDOWS else {}),
     )
     completed = False
+    stdout = stderr = None
     try:
         stdout, stderr = _communicate(process, argv, timeout, cancelled)
         completed = True
@@ -75,4 +76,7 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
         except EngineCleanupError as error:
             error.process = process
             error.job = job
+            error.stdout = stdout
+            error.stderr = stderr
+            error.returncode = process.returncode
             raise

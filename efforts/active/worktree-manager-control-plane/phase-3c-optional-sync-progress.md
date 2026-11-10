@@ -138,7 +138,7 @@ Communication silence is observed separately from the finite execution budget.
 Escape preserves an active Sync rather than claiming cancellation or rollback.
 Unconfirmed cleanup retains exact process custody and stops subsequent items.
 
-Source qualification covers 50 distinct Manager controls, including real parser,
+Source qualification covers 59 distinct Manager controls, including real parser,
 private Git pair and Textual consumer cases for a no-op and blocked partial pair.
 Source review/CI, complete validation disposition, native/installed and release
 qualification remain open. No host installation or runtime Sync is claimed.
@@ -175,6 +175,36 @@ qualification remain open. No host installation or runtime Sync is claimed.
   test. The complete #4183 issue stays open for its remaining original lanes.
 
 ## Journal
+
+### 2026-11-10 - S2 review refinements
+
+- #11914's first exact-head review identified two real blockers: application
+  exit could leave the one-hour operation without a visible screen, and
+  retirement failure could discard an already received terminal result.
+  Neither finding was dismissed.
+- Picker teardown now requests executor stop before provider disposal, settles
+  the current owned local command and joins its worker/observer even if another
+  provider's disposal fails. Queued items are not started. The legacy JSON
+  fallback retains its syntax and execution budget while using the same owned
+  lifetime when invoked by the application. Escape remains non-cancelling.
+- Stream and baseline cleanup exceptions carry their observed result and
+  bounded stderr into the existing executor, alongside exact native custody
+  and retained output files. Overall status is unknown/cleanup-pending; prior
+  member progress, plugin state and refusal diagnostics are not erased.
+- The affected packet passed 55 named controls, including both real Git-pair
+  flows, two terminal-then-cleanup-failure regressions and existing provider
+  teardown controls. Four new application-lifetime cases initially exposed
+  fixture defects, not waived outcomes: incomplete first-paint/progress state
+  and an unconditional fake-provider loop that confused read and Sync receipts.
+  The fixture now uses actual first-paint chrome and the production progress
+  entry, with operation-qualified private child evidence.
+- All four corrected real PickerApp idle/owner exit cases pass for current
+  stream and legacy JSON, with settled workers/observers, stopped child
+  heartbeats, unchanged first-item identity, unknown interruption and no later
+  item invocation. Together with the 55 unchanged passing controls, this is a
+  59-case source union, not a full rerun after fixture/legend-only correction.
+  Item/group bounds remain unchanged. Required new-head review and CI still
+  gate acceptance; no runtime deployment occurred.
 
 ### 2026-11-10 - S2 local consumer source qualification
 

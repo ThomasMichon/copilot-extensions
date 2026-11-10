@@ -150,7 +150,7 @@ def finalize_diagnostics(result):
 def build_tasks(op, items, src, *, project=None, include_unused=False,
                 include_conversations=False,
                 local: tuple[str | None, str | None] | None = None,
-                on_progress=None):
+                on_progress=None, cancelled=None):
     """Build ``(key, callable)`` tasks for *items* under data source *src*.
 
     *items* are engine record dicts (collision-safe ``selection_id`` +
@@ -185,6 +185,7 @@ def build_tasks(op, items, src, *, project=None, include_unused=False,
             include_conversations=include_conversations,
             refusal=refusal,
             report=(lambda update, key=key: on_progress(key, update)) if on_progress else None,
+            cancelled=cancelled,
         )))
     return tasks
 
@@ -204,7 +205,8 @@ def _finalize_blocker(row):
 
 
 def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
-               include_unused=False, include_conversations=False, refusal=None, report=None):
+               include_unused=False, include_conversations=False, refusal=None, report=None,
+               cancelled=None):
     def _run():
         if refusal:
             return {"success": False, "reason": refusal}
@@ -216,6 +218,7 @@ def _make_task(op, wt_id, machine, env, is_local, *, project, source_id=None,
 
                 return engine_sync.run(
                     project, wt_id, **({"report": report} if report is not None else {}),
+                    **({"cancelled": cancelled} if cancelled is not None else {}),
                 )
             if op == "cleanup":
                 args = ["cleanup", "--worktree-id", wt_id, "--clean", "--json"]
@@ -262,7 +265,7 @@ class MaintenanceExecutor:
     crashes the UI.
     """
 
-    def __init__(self, op, tasks):
+    def __init__(self, op, tasks, *, cancelled=None):
         self.op = op
         self._tasks = list(tasks)
         self._lock = threading.Lock()
@@ -271,13 +274,35 @@ class MaintenanceExecutor:
         self._progress = {}
         self._cleanup_errors = {}
         self._done = False
+        self._cancelled = cancelled if cancelled is not None else threading.Event()
+        self._thread = None
 
     def start(self):
-        threading.Thread(target=self._run, name="maint-exec", daemon=True).start()
+        self._thread = threading.Thread(target=self._run, name="maint-exec", daemon=True)
+        self._thread.start()
+
+    def request_stop(self):
+        self._cancelled.set()
+
+    def close(self):
+        """Stop queued work and settle the current owned Sync before UI teardown."""
+        self.request_stop()
+        if self._thread is not None:
+            self._thread.join(15)
+            if self._thread.is_alive():
+                error = engine_client.EngineCleanupError("Sync worker settlement is unconfirmed")
+                error.executor = self
+                error.thread = self._thread
+                raise error
+        with self._lock:
+            if self._cleanup_errors:
+                raise next(iter(self._cleanup_errors.values()))
 
     def _run(self):
         for key, fn in self._tasks:
             with self._lock:
+                if self._cancelled.is_set():
+                    break
                 self._state[key] = RUNNING
             try:
                 res = fn()
@@ -287,7 +312,11 @@ class MaintenanceExecutor:
                 if self.op == "sync" and isinstance(exc, engine_client.EngineCleanupError):
                     with self._lock:
                         self._cleanup_errors[key] = exc
-                    res.update(outcome="unknown", cleanup_pending=True)
+                    res = dict(getattr(exc, "sync_result", {}) or res)
+                    res.update(ok=False, outcome="unknown", cleanup_pending=True)
+                    res["detail"] = "\n".join(str(part) for part in (
+                        res.get("detail"), f"cleanup: {exc}",
+                    ) if part)
             with self._lock:
                 self._result[key] = res
                 self._state[key] = st

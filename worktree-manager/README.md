@@ -74,6 +74,14 @@ Escape does not dismiss an active Sync or claim cancellation/rollback. Completed
 results keep the existing diagnostic browsing controls. This does not install,
 update or automatically synchronize a worktree.
 
+Application teardown is different from Escape: idle expiry, owner-lifetime exit
+and normal Picker shutdown stop queued items, settle the current owned local
+Sync and join its worker/observer. Both streamed and legacy JSON local Sync use
+the application-owned lifetime; baseline syntax and its 120-second execution
+bound remain unchanged. Interrupted execution is unknown, not rolled back or
+safe to replay. If retirement fails after a terminal result, complete member/
+plugin results and bounded stderr remain attached to the retained cleanup error.
+
 ## Picker notices and diagnostics
 
 Mux uncertainty is separate from process liveness: `MUX(?)` means last-known

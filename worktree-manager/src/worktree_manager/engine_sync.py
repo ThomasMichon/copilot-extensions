@@ -175,11 +175,18 @@ def run(
     worktree_id,
     *,
     report=lambda _update: None,
+    cancelled=None,
     communication_timeout=COMMUNICATION_TIMEOUT,
     execution_timeout=EXECUTION_TIMEOUT,
 ):
     """Run once, preserving the selected command, complete result and ownership."""
     picker_review.require_writable()
+    if cancelled is not None and cancelled.is_set():
+        return {
+            "ok": False,
+            "reason": "Sync owner closed before execution",
+            "outcome": "not-started",
+        }
     if any(
         type(value) not in (int, float) or not math.isfinite(value) or value <= 0
         for value in (communication_timeout, execution_timeout)
@@ -188,20 +195,65 @@ def run(
     command = engine_client.engine_base_command()
     args = ["sync", "--paired", "--worktree-id", worktree_id, "--json"]
     if not supports_progress(command):
-        return engine_client.run_json(
-            project,
-            args,
-            timeout=120,
-            allow_nonzero=True,
-            **({"engine_command": command} if command is not None else {}),
-        )
+
+        def owned_baseline(argv, timeout):
+            try:
+                return engine_process.run(
+                    argv,
+                    timeout=timeout,
+                    cancelled=cancelled,
+                    confirm_cleanup=True,
+                    env=_engine_environment(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+                )
+            except engine_process.EngineCleanupError as error:
+                from .engine_progress import json_with_failure_detail
+
+                error.sync_result = json.loads(
+                    json_with_failure_detail(
+                        getattr(error, "stdout", None),
+                        str(getattr(error, "stderr", "") or "")[:_MAX_STDERR],
+                        failed=True,
+                    )
+                )
+                raise
+
+        try:
+            return engine_client.run_json(
+                project,
+                args,
+                timeout=120,
+                allow_nonzero=True,
+                **({"engine_command": command} if command is not None else {}),
+                **({"runner": owned_baseline} if cancelled is not None else {}),
+            )
+        except engine_client.EngineRetirementError as error:
+            if isinstance(error.__cause__, engine_process.EngineCleanupError):
+                raise error.__cause__ from None
+            raise
+        except engine_client.EngineError:
+            if cancelled is None or not cancelled.is_set():
+                raise
+            return {
+                "ok": False,
+                "reason": "Sync owner closed; execution interrupted",
+                "outcome": "unknown",
+            }
     argv = [*command, *(["--project", project] if project else []), *args, "--stream"]
     frames = _Frames(report, communication_timeout)
     stopped = threading.Event()
     overflow = threading.Event()
+    stop_requested = threading.Event()
     failure = None
     reader_errors = []
     returncode = None
+    cleanup_error = None
     # Files drain both streams without a pipe-pressure deadlock. The existing
     # process owner retains its Job/group and finite execution/teardown budget.
     with _output_directory() as directory:
@@ -212,6 +264,8 @@ def run(
                 try:
                     with out_path.open("rb") as reader:
                         while True:
+                            if cancelled is not None and cancelled.is_set():
+                                stop_requested.set()
                             chunk = reader.read(65536)
                             if chunk:
                                 frames.feed(chunk)
@@ -221,6 +275,7 @@ def run(
                                 or err_path.stat().st_size > _MAX_STDERR
                             ):
                                 overflow.set()
+                                stop_requested.set()
                                 return
                             if stopped.is_set() and not chunk:
                                 return
@@ -228,6 +283,7 @@ def run(
                 except Exception as error:
                     reader_errors.append(str(error))
                     overflow.set()
+                    stop_requested.set()
 
             reader = threading.Thread(target=receive, name="sync-progress", daemon=False)
             reader.start()
@@ -235,7 +291,7 @@ def run(
                 result = engine_process.run(
                     argv,
                     timeout=execution_timeout,
-                    cancelled=overflow,
+                    cancelled=stop_requested,
                     confirm_cleanup=True,
                     env=_engine_environment(),
                     stdin=subprocess.DEVNULL,
@@ -249,7 +305,14 @@ def run(
                     f"Sync execution budget expired after {execution_timeout}s; outcome unknown"
                 )
             except InterruptedError:
-                failure = "Sync output exceeded its byte budget; outcome unknown"
+                failure = (
+                    "Sync owner closed; execution interrupted; outcome unknown"
+                    if cancelled is not None and cancelled.is_set()
+                    else "Sync output exceeded its byte budget; outcome unknown"
+                )
+            except engine_process.EngineCleanupError as error:
+                cleanup_error = error
+                returncode = getattr(error, "returncode", None)
             except OSError as error:
                 failure = f"Sync process unavailable: {error}; outcome unknown"
             finally:
@@ -257,6 +320,13 @@ def run(
                 reader.join()
         with err_path.open("rb") as reader:
             detail = reader.read(_MAX_STDERR).decode("utf-8", errors="replace")
+        if cleanup_error is not None:
+            cleanup_error.sync_result = frames.result(
+                returncode,
+                detail,
+                f"Sync cleanup unconfirmed: {cleanup_error}",
+            )
+            raise cleanup_error
     if reader_errors:
         failure = "Sync progress observation failed; outcome unknown"
         detail = "\n".join((detail, *reader_errors))

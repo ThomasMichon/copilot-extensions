@@ -155,6 +155,8 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE,
             start_new_session=True, pass_fds=(output.fileno(),), **kwargs,
         )
+        stdout = stderr = None
+        receipt = None
         try:
             receipt = read_completion_receipt(
                 owner.stdout, argv=argv, timeout=timeout, cancelled=cancelled,
@@ -188,4 +190,7 @@ def run(argv: list[str], **kwargs) -> subprocess.CompletedProcess:
             except EngineCleanupError as error:
                 error.process = owner
                 error.group_id = owner.pid
+                error.stdout = stdout
+                error.stderr = stderr
+                error.returncode = receipt.get("returncode") if receipt else None
                 raise

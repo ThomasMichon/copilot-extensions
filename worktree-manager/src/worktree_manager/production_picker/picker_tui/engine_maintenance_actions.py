@@ -242,14 +242,18 @@ class PickerScreenMaintenanceActionsMixin:
             return  # mock walker advances via _advance_progress
         from . import maintenance
         executor = None
+        cancelled = threading.Event() if p["op"] == "sync" else None
         tasks = maintenance.build_tasks(
             p["op"], p["recs"], self.src,
             include_unused=p["include_unused"],
             include_conversations=p["include_conversations"],
             local=self._src_local(),
             on_progress=lambda key, update: executor.report(key, update),
+            cancelled=cancelled,
         )
-        executor = maintenance.MaintenanceExecutor(p["op"], tasks)
+        executor = maintenance.MaintenanceExecutor(
+            p["op"], tasks, **({"cancelled": cancelled} if cancelled is not None else {}),
+        )
         self.executor = executor
         executor.start()
     def _poll_executor(self):

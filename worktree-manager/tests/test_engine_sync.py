@@ -350,6 +350,57 @@ def test_cleanup_failure_is_not_swallowed_as_a_sync_result(monkeypatch):
     assert "custody is retained" in screen.debug
 
 
+@pytest.mark.parametrize("stream", [False, True])
+def test_cleanup_failure_retains_complete_partial_result_and_stderr(monkeypatch, stream):
+    from worktree_manager.engine_posix_process import EngineCleanupError
+
+    partial = {
+        "ok": False,
+        "reason": "pair-sync-blocked",
+        "detail": "knowledge: ff-failed",
+        "plugins": "skipped",
+        "pair_results": [
+            {"role": "harness", "updated": True, "reason": "updated"},
+            {"role": "knowledge", "updated": False, "reason": "ff-failed"},
+        ],
+    }
+    _provider(monkeypatch, "pass")
+    monkeypatch.setattr(engine_sync, "supports_progress", lambda _command: stream)
+    error = EngineCleanupError("fixture retirement unconfirmed")
+    error.returncode = 1
+
+    def failed_owner(argv, **kwargs):
+        if stream:
+            kwargs["stdout"].write((_done(partial, "error") + "\n").encode())
+            kwargs["stdout"].flush()
+            kwargs["stderr"].write(b"bounded child diagnostic")
+            kwargs["stderr"].flush()
+        else:
+            error.stdout = json.dumps(partial)
+            error.stderr = "bounded child diagnostic"
+        raise error
+
+    monkeypatch.setattr(engine_sync.engine_process, "run", failed_owner)
+    executor = maintenance.MaintenanceExecutor(
+        "sync",
+        [
+            ("selected", lambda: engine_sync.run("demo", "selected", cancelled=threading.Event())),
+        ],
+    )
+    executor._run()
+    result = executor.result("selected")
+    assert result["pair_results"] == partial["pair_results"] and result["plugins"] == "skipped"
+    assert "knowledge: ff-failed" in result["detail"]
+    assert "bounded child diagnostic" in result["detail"]
+    assert not result["ok"] and result["outcome"] == "unknown" and result["cleanup_pending"]
+    assert executor._cleanup_errors["selected"] is error
+    with pytest.raises(EngineCleanupError) as caught:
+        executor.close()
+    assert caught.value is error
+    if stream:
+        shutil.rmtree(error.output_directory)
+
+
 def test_remote_sync_keeps_its_existing_json_path(monkeypatch):
     from worktree_manager.production_picker.picker_tui import data_ssh
 
