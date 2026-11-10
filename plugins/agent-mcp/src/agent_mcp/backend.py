@@ -73,7 +73,7 @@ class BackendSession:
         self._application = 0
         self._control = 0
         self._quiescence = asyncio.Lock()
-        self._quiescence_token = object()
+        self._quiescence_token = asyncio.Event()
 
     async def output(self, message):
         result = await self.peer.request(
@@ -167,6 +167,18 @@ class BackendSession:
 
     async def _quiesce(self):
         token = self._quiescence_token
+        worker = asyncio.create_task(self._finish_quiesce(token))
+        invalidated = asyncio.create_task(token.wait())
+        try:
+            await asyncio.wait((worker, invalidated), return_when=asyncio.FIRST_COMPLETED)
+            self._require_quiescence(token)
+            return await worker
+        finally:
+            worker.cancel()
+            invalidated.cancel()
+            await asyncio.gather(worker, invalidated, return_exceptions=True)
+
+    async def _finish_quiesce(self, token):
         async with self._quiescence:
             self._require_quiescence(token)
             if not self.committed or self.state not in {"active", "quiescing", "quiescent"}:
@@ -174,7 +186,9 @@ class BackendSession:
             self.state = "quiescing"
             while self._settlers:
                 tasks = tuple(self._settlers)
-                await asyncio.shield(asyncio.gather(*tasks))
+                await asyncio.wait(tasks)
+                for task in tasks:
+                    task.result()
                 self._require_quiescence(token)
             await self.session.quiesce()
             self._require_quiescence(token)
@@ -218,7 +232,8 @@ class BackendSession:
                 raise ValueError("backend epoch cannot resume")
             if self.transport.binding.identity(self.session.cfg) != self.session._checkpoint_identity:
                 raise CheckpointRefused("execution context changed before epoch resumption")
-            self._quiescence_token = object()
+            self._quiescence_token.set()
+            self._quiescence_token = asyncio.Event()
             self.state = "active"
             return {"active": True, "epoch": self.epoch}
         raise ValueError(f"unknown backend operation: {operation}")

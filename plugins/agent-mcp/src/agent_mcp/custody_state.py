@@ -135,9 +135,7 @@ class CustodyState:
                 raise ValueError("invalid custody method")
         elif "id" not in message or ("result" in message) == ("error" in message):
             raise ValueError("invalid custody response")
-        if "id" in message and (
-            type(message["id"]) not in {str, int} or message["id"] == ""
-        ):
+        if "id" in message and type(message["id"]) not in {str, int}:
             raise ValueError("invalid custody request identity")
         size = len(json.dumps(message, separators=(",", ":")).encode())
         return message, size

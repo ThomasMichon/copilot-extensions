@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 import pytest
 
 from agent_mcp.backend import BackendSession
+from agent_mcp import custody_wire
 from agent_mcp.config import parse_config
 from agent_mcp.custody_contract import MAX_APPLICATION, MAX_CONTROL
 from agent_mcp.custody_session import CustodySession
@@ -162,6 +163,50 @@ async def test_handover_waits_for_mutation_and_server_response_then_uses_new_pip
     assert upstream.ends == upstream.closes == 1
 
 
+async def test_empty_string_request_ids_survive_reply_and_handover():
+    async with composed() as (owner, backends, upstream, output):
+        await owner.submit({"jsonrpc": "2.0", "id": "", "method": "initialize"})
+        await settled(owner)
+        await upstream._emit_message(
+            {"jsonrpc": "2.0", "id": "", "method": "sampling/createMessage"},
+        )
+        response = {"jsonrpc": "2.0", "id": "", "result": {}}
+        await owner.submit(response)
+        await settled(owner)
+        await owner.handover(backends.connect)
+        await owner.submit({"jsonrpc": "2.0", "id": "", "method": "tools/list"})
+        await settled(owner)
+        assert [item["id"] for item in output] == ["", "", ""]
+        assert upstream.messages.count(response) == 1
+        assert sum(item.get("method") == "initialize" for item in upstream.messages) == 1
+        assert upstream.starts == 1 and not owner.state.uncertain
+
+
+async def test_capacity_one_replenishes_backend_credit_before_next_input(monkeypatch):
+    from agent_mcp import backend, custody_session, custody_state
+
+    for module in (backend, custody_session, custody_state):
+        monkeypatch.setattr(module, "MAX_APPLICATION", 1)
+    async with composed() as (owner, backends, upstream, output):
+        await call(owner, 1)
+        for mid in range(2, 10):
+            waiting = asyncio.create_task(owner.submit(
+                {"jsonrpc": "2.0", "id": mid, "method": "tools/call",
+                 "params": {"name": "test_echo", "arguments": {}}}, wait=True,
+            ))
+            await asyncio.sleep(0)
+            assert not waiting.done()
+            await upstream.complete(mid - 1)
+            await asyncio.wait_for(waiting, 1)
+            while mid not in upstream.pending:
+                await asyncio.sleep(0)
+            assert backends.instances[0]._application == 1
+        await upstream.complete(9)
+        await settled(owner)
+        assert [item["id"] for item in output] == list(range(1, 10))
+        assert upstream.starts == 1 and not owner.state.uncertain
+
+
 async def test_failed_preparation_restores_owned_epoch_without_reopening_or_replaying():
     async with composed() as (owner, backends, upstream, output):
         backends.refuse = 2
@@ -252,7 +297,8 @@ async def test_cancelled_handover_before_quiesce_settles_fence(resume_failure):
                 await asyncio.gather(move, return_exceptions=True)
 
 
-async def test_repeated_cancelled_handovers_invalidate_remote_quiesce_waiters():
+async def test_repeated_cancelled_handovers_invalidate_remote_quiesce_waiters(monkeypatch):
+    monkeypatch.setattr(custody_wire, "MAX_PENDING", 3)
     async with composed() as (owner, backends, upstream, output):
         await call(owner, 1)
         instance = backends.instances[0]
@@ -269,18 +315,18 @@ async def test_repeated_cancelled_handovers_invalidate_remote_quiesce_waiters():
                 finished.append(None)
 
         instance.peer.handler = handler
-        for count in (1, 2):
+        for count in (1, 2, 3):
             move = asyncio.create_task(owner.handover(backends.connect))
             while len(entered) < count:
                 await asyncio.sleep(0)
             move.cancel()
             with pytest.raises(asyncio.CancelledError):
-                await move
+                await asyncio.wait_for(move, 1)
             assert instance.state == "active" and not owner.state.fenced
             assert not instance.accepted[1].done()
         await upstream.complete(1)
         await settled(owner)
-        while len(finished) < 2:
+        while len(finished) < 3:
             await asyncio.sleep(0)
         assert instance.state == "active"
         await owner.submit({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})

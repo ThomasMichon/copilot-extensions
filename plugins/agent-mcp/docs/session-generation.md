@@ -209,6 +209,10 @@ unconfirmed resumption makes custody uncertain and wakes blocked admission;
 it cannot leave a known session permanently fenced.
 Resumption invalidates earlier quiesce tokens, including lock waiters, so a
 stale operation cannot refence the backend after repeated cancellations.
+Invalidation also wakes and settles those protocol operations promptly,
+without cancelling their accepted mutations or retaining canceled waiters'
+wire credit until the mutations finish. Request IDs retain the MCP
+string-or-integer contract, including an empty string.
 
 The watcher compares the last successfully adopted slot and endpoint
 publication identity. Republishing a different backend from the same
