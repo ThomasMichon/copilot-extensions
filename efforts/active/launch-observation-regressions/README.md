@@ -91,6 +91,10 @@ retained resources. Source completion does not claim installed recovery.
 - [ ] Land the bounded correction after passing review and required CI.
 - [ ] Record source results and any separately owned operational acceptance; archive this effort only after every item is resolved or transferred to a named tracker.
 
+### Phase 5 - Reopen without replaying an uncertain prompt
+- [x] Let ordinary Open preserve an unconfirmed prompt handoff without submitting it again; retain explicit-delivery refusal and final intent revalidation.
+- [ ] Validate both planning surfaces and the real admission-only preparation boundary, then land through review and required CI.
+
 ## Validation Plan
 
 - [ ] Prove the payload digest remains content-sensitive and deterministic, and linked/reparse/nonregular/oversized inputs still refuse.
@@ -125,6 +129,46 @@ current/prior providers retain the same required observation contract. Runtime
 replacement and rollout remain with their existing owners.
 
 ## Journal
+
+### 2026-11-09 - Ordinary Open and retained prompt custody
+- A subsequent report shows ordinary Open refusing because a prior creation
+  prompt handoff is unconfirmed. Metadata confirms retained typed intent;
+  no prompt content, liveness probe, live launch or replay is needed to diagnose
+  the planner's unconditional refusal.
+- Reuse the existing admission-only path with the retained seed identity.
+  Opening must not claim, finish, restore, discard or resubmit that prompt.
+  Explicit delivery remains refused and a changed identity before execution
+  remains blocking. This is a targeted routing correction, not new launch syntax,
+  wire generation, receipt authority or replay permission.
+- The readiness-only correction remains separately reviewed in #11782; its
+  required-check recognition blocker does not authorize bypass or rollout.
+- Both planning/preview files completed 140 assertions with one platform skip.
+  The local Windows ARM64 wrapper then failed deleting a copied x64 fixture
+  interpreter (WinError 5), matching the failure class tracked in #7643. This
+  is not a green whole-run result or an identification of the current lock
+  owner. Preserve the runner's retained artifacts and obtain disposable native
+  Windows qualification; do not alter host services to clear the mapping.
+- Ruff F/E9 and the install contract pass. No installation or first-provision
+  behavior changed; fresh native caller fixtures cover the existing admission
+  boundary rather than a new installer clean-room scenario.
+- Disposable Windows exercised the published planner source: 140 passed and
+  the existing POSIX-only case skipped, with clean native cleanup. The strict
+  qualification packet therefore remains incomplete, not qualified.
+- Local shell delegation re-resolves a plan, so preserving intent only inside
+  its first command was insufficient: a replacement could become a new delivery.
+  Carry the retained identity through both resolves and final preparation.
+  Qualify preserved plans through an optional caller hint so older Managers keep
+  the safe refusal, and refuse unsupported explicit selectors before effects.
+- Both launchers must skip legacy prompt delivery for a preserved plan and
+  refresh recognized admission-only module commands after runtime selection,
+  just as they already refresh prompt-delivery commands.
+- The corrected Worktrees packet passed 17 focused cases with clean containment
+  and cleanup. The Manager packet passed 179 cases but exposed five failures
+  where adding an environment hint changed selected-engine resolution.
+  Pinning the already-selected command fixes that class; all 116 engine-client
+  cases then passed with clean cleanup, including an explicit wrong-engine
+  refusal control. Final native qualification of the complete corrected source
+  and versioned preservation declaration remains pending.
 
 ### 2026-11-09 - Native scope review corrections
 - Review identified creation-namespace drift and a scrubbed teammate flag that

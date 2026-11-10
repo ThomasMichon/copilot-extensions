@@ -1,0 +1,9 @@
+{
+  "comment": "Separate daemon bind defaults from strict client selection and retain safe HTTP configuration diagnostics",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

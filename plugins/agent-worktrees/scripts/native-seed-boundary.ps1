@@ -120,16 +120,7 @@ function Invoke-AwNativeSeedPhase {
         if (-not [Threading.Tasks.Task]::WaitAll(
             [Threading.Tasks.Task[]]@($stdout, $stderr), 1000
         )) { return $null }
-        if ($process.ExitCode -ne 0) {
-            $diagnostic = $stderr.GetAwaiter().GetResult()
-            [Console]::Error.Write($diagnostic)
-            if ($env:WORKTREE_SETUP_LOG) {
-                try {
-                    [IO.File]::AppendAllText($env:WORKTREE_SETUP_LOG, $diagnostic)
-                } catch {}
-            }
-            return $null
-        }
+        if ($process.ExitCode -ne 0) { return $null }
         $raw = $stdout.GetAwaiter().GetResult()
         $reply = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
         $document = [System.Text.Json.JsonDocument]::Parse($raw)

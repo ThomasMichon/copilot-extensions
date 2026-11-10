@@ -917,7 +917,7 @@ if [[ "$ACTION" == "exec" ]]; then
     admit_launch_target "${STATUS_PATH:-$WORK_DIR}" || exit 3
     initialize_launch_diagnostics
     _SEEDED_LAUNCH=$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('seed_claimed') or d.get('seed_pending') else '0')")
-    _PENDING_NEW_SEED=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print('1' if json.load(sys.stdin).get('seed_pending') else '0')")
+    read -r _PENDING_NEW_SEED _PRESERVED_LAUNCH_SEED <<< "$(echo "$JSON" | "$PYTHON" -c "import sys,json; d=json.load(sys.stdin); print('1' if d.get('seed_pending') else '0', '1' if d.get('seed_preserved_id') else '0')")"
     _SEEDED_WORKTREE_ID=$(echo "$JSON" | "$PYTHON" -c "import sys,json; print(json.load(sys.stdin).get('worktree_id') or '')")
     for _launch_arg in "${FILTERED_ARGS[@]+"${FILTERED_ARGS[@]}"}"; do
         [[ "$_launch_arg" != "--seed" && "$_launch_arg" != "--seed-id" ]] || _SEEDED_LAUNCH=1
@@ -1097,8 +1097,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
     fi
     PYTHON="$_REFRESHED_PYTHON"
     setup_log INFO "Runtime selected for launch: $PYTHON"
-    if [[ "$_PENDING_NEW_SEED" == "1" &&
-        "${CMD_ARRAY[1]:-}" == "-m" &&
+    if [[ "${CMD_ARRAY[1]:-}" == "-m" &&
         "${CMD_ARRAY[2]:-}" == "agent_worktrees.launch_seed_exec" ]]; then
         CMD_ARRAY[0]="$PYTHON"
     fi
@@ -1517,7 +1516,7 @@ print(str(leg.get('state', '')) if isinstance(leg, dict) and leg.get('provider')
                 "attempts=$TMUX_CREATE_TOTAL_ATTEMPTS"
             _aw_apply_session_opts "$TMUX_SESS"
             _aw_publish_managed_mux_live "$TMUX_SESS" "${STATUS_PATH:-${WORK_DIR:-$PWD}}" created
-            if [[ "$_PENDING_NEW_SEED" != "1" ]]; then
+            if [[ "$_PENDING_NEW_SEED" != "1" && "$_PRESERVED_LAUNCH_SEED" != "1" ]]; then
                 _aw_deliver_pending_seed "$WORKTREE_ID"
             fi
             if [[ -n "${TMUX:-}" ]]; then

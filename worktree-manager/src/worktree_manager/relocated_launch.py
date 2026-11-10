@@ -68,6 +68,17 @@ def _run_relocated_mux_launch(req, plan, script) -> int:
             args.append("--first-launch")
         staged = getattr(plan, "raw", None) or {}
         seed_id = staged.get("seed_id")
+        preserved = staged.get("seed_preserved_id")
+        if preserved is not None:
+            if (
+                not isinstance(preserved, str) or not preserved or req.mode != "resume"
+                or staged.get("seed_pending") or getattr(req, "seed_prompt", None)
+                or type(staged.get("seed_preservation_version")) is not int
+                or staged["seed_preservation_version"] != 1
+            ):
+                print("error: the engine returned conflicting retained prompt ownership; refresh and retry.")
+                return 1
+            args += ["--preserve-seed-id", preserved]
         if getattr(req, "seed_prompt", None) and not staged.get("seed_pending"):
             print("error: the engine did not stage the requested prompt; update and retry.")
             return 1

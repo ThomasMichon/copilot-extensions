@@ -2720,33 +2720,6 @@ This is installed execution-owner evidence, not the public Worktrees command,
 Manager integration, desktop attachment or survival across caller cleanup Jobs.
 The existing managed-environment controls remain separate and unchanged.
 
-Select `-k public_embody` with the same installed-broker prerequisites and
-900/1200/900 runner bounds for the public detached caller. That case builds and
-installs both real applications, deletes their disposable source inputs, and invokes
-the installed `agent-worktrees.exe --project <fixture> embody` against a private
-project configuration and worktree record. Worktrees must discover the installed
-current Manager's native pane wrapper; a Worktrees-only fixture does not
-qualify this public Windows launch path. The packaged default setup selects
-the native executable; recovery mode suppresses unrelated host reconciliation.
-The fixture declares its private mux adapter through `session_path` and uses
-the normal user-home `.copilot` layout. With no installed sessionStart hook,
-it explicitly registers the observed native session through the installed
-`bind-session` command and verifies that it becomes the worktree head;
-this is not evidence for automatic hook adoption.
-Fresh launch uses a literal explicit seed, cold resume selects the existing
-conversation without a supplied resume argument, and live reuse must preserve
-the mux incarnation without creating another attempt or replaying a seed.
-The same broker, history, process-birth and exact retirement checks remain.
-This checks the public detached-command boundary, not attached `copilot`, desktop
-new-window behavior, setup-hook adoption or survival across caller cleanup Jobs.
-The functional public-caller case has separate 420-second Worktrees preparation,
-300-second Manager preparation and 180-second caller-owned native bounds.
-Measured wheel/profile preparation can consume most of the original admission
-case's clock before this distinct consumer even starts; this case is not a
-300-second Worktrees construction-performance check. The existing 300-second
-admission case and 300+180 installed execution-owner case remain unchanged,
-as do the native startup and cleanup limits.
-
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone
 source/profile owners, removes disposable source inputs, and exercises the

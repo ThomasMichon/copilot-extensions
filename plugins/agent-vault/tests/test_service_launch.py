@@ -58,6 +58,41 @@ def test_start_service_launches_through_spawn_service(monkeypatch, recorded_spaw
     assert recorded_spawns == [["--tcp-port", "4242", "--foreground"]]
 
 
+@pytest.mark.parametrize("configured_port,source,explicit,expected", [
+    (19999, "default", None, 0),
+    (4242, "env", None, 4242),
+    (4242, "repo", None, 4242),
+    (19999, "default", 4343, 4343),
+    (19999, "default", 0, 0),
+])
+def test_daemon_bind_default_does_not_change_client_context(
+    monkeypatch, recorded_spawns, configured_port, source, explicit, expected,
+):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(config.BIND_PORT_ENV, "0")
+    monkeypatch.setattr(
+        config, "resolve_context",
+        lambda: SimpleNamespace(port=configured_port, sources={"port": source}),
+    )
+    assert cli.start_service(explicit)
+    assert recorded_spawns == [["--tcp-port", str(expected), "--foreground"]]
+
+
+@pytest.mark.parametrize("value", ["-1", "65536", "1.5", " 0", "０", ""])
+def test_invalid_daemon_bind_default_refuses_before_launch(monkeypatch, recorded_spawns, value):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv(config.BIND_PORT_ENV, value)
+    monkeypatch.setattr(
+        config, "resolve_context",
+        lambda: SimpleNamespace(port=19999, sources={"port": "default"}),
+    )
+    with pytest.raises(ValueError, match="AGENT_VAULT_BIND_PORT"):
+        cli.start_service()
+    assert recorded_spawns == []
+
+
 def test_start_service_waits_for_credential_work_admission(monkeypatch, recorded_spawns):
     replies = iter(({"ok": True, "accepting_work": False}, {"ok": True, "accepting_work": True}))
     seen = []
