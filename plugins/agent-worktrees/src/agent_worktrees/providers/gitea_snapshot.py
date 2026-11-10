@@ -4,7 +4,7 @@ import json
 
 from ..pr_contract import PRSnapshot
 from .base import ProviderError
-from .observation_credentials import ObservationCredentials
+from .observation_credentials import MAX_SNAPSHOT_REQUESTS, ObservationCredentials
 
 
 def snapshot(owner, repo, number, *, api_base="", token=None, credential_source=None):
@@ -14,6 +14,7 @@ def snapshot(owner, repo, number, *, api_base="", token=None, credential_source=
         token = ObservationCredentials(
             credential_source, provider="gitea",
             api_base=owner.authority_endpoint(api_base), repository=repo,
+            max_requests=MAX_SNAPSHOT_REQUESTS,
         )
     if not token:
         raise ProviderError("Gitea provider needs a token to query a PR.")

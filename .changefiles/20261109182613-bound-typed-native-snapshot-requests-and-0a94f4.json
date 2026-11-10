@@ -1,0 +1,9 @@
+{
+  "comment": "Bound typed native snapshot requests and capture for configured observation",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

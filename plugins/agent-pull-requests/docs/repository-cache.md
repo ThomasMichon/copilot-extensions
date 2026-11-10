@@ -88,6 +88,60 @@ migration, reset or deletion, nor rollback of adopted data into a prior reader.
 Rollback means retaining the compatible reader/state or selecting a separately
 fresh root, never discarding original replay/effect identities.
 
+## Configured observation and current-state projection
+
+The existing `ReplayObserver` accepts repository-qualified native bindings and
+discovers their configured open population even when ReplayStore contains no
+registered waits. It invokes only the selected native inventory/snapshot
+processes, including the trusted explicit native configuration. An unsupported
+selected inventory receiver refuses rather than substituting an ambient source.
+
+One cycle unions those configured targets with existing registered waits.
+The existing four-reader executor shares each account-qualified PR read across
+overlapping interests. At most 32 configured-only snapshot targets join each cycle,
+with a rotating cursor so unread members are not permanently hidden behind the
+first page; existing legacy-wait admission remains unchanged. Inventory remains
+bounded by the native page/member/time limits. A finite cycle's supplied expiry
+and checkpoint govern every persistence boundary; a stale cycle cannot publish
+after authority withdrawal, and the executor still joins actual native cleanup.
+
+The executing native inventory declaration must additionally expose a finite
+snapshot request/capture budget. Typed GitHub/Gitea snapshots cap native
+credential-backed requests at 64 per snapshot and capture each provider response
+at no more than 1,048,584 bytes (including Gitea's status suffix). This bounds
+nonterminating review-page responses before another request or unbounded capture,
+without changing legacy token/default or unrelated provider behavior. The
+declaration is selected from the actual executable; a prior receiver missing
+these bounds refuses only the selected repository feature. Inventory adds at
+most four forge pages per configured repository; queries add zero forge reads.
+These are worst-case source bounds, not production rate-limit qualification or
+authority to exercise them against real targets.
+
+`RepositoryProjection` uses ReplayStore's existing owner transaction, operation
+lock and atomic replacement. Normalized current facts and corresponding
+repository events commit together. Cache-only bounded reads do not call the
+forge. Current facts preserve unknown mergeability/check completeness and
+include lifecycle/head, review identities/state, normalized failed checks and
+native observation fingerprints—not report, diff or chat bodies.
+
+Coverage is `unknown`, `complete`, `partial` or `unavailable`, with observation
+and last-complete timestamps. Failed/capped inventory retains known membership.
+A complete omission emits selection departure, never an inferred closure.
+Bounded native reads confirm terminal facts or preserve departed stale facts.
+Cross-provider/endpoint snapshot mismatches cannot replace last-confirmed facts.
+
+Initial membership and unknown-to-known evidence use baseline events. Later
+members use entry events; semantic facts produce change or confirmed terminal
+events; coverage and departure remain separately typed. Submitted-time/cursor
+refreshes alone produce no PR-change event. Event sequence and IDs are durable.
+Current facts, event identities and coverage survive restart. The fixed current
+summary/event capacities apply backpressure rather than erasing unsettled state.
+
+This is the internal observation/projection source seam. Supported local
+query/subscription clients, continuing registration/ACK/cancel handlers and their
+foreground host integration remain separate source work, not an advertised CLI
+or a permission to read the state file directly.
+
 ## Local ingress selection
 
 `RepositoryConfig.parse` is a passive source parser, not a listening host.

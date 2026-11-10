@@ -14,9 +14,12 @@ from .watch_replay import ConsumerScope, ObservationTarget, ReplayEventTooLarge
 from .watch_replay_store import ReplayStore
 from .repository_contract import RepositoryIdentity
 from pathlib import Path
+from .repository_native import RepositoryNativeUnsupported, inventory as fetch_inventory
+from .repository_projection import RepositoryProjection
 
 _MAX_READS = 4
 _CHECK_INTERVAL = 0.1
+_MAX_REPOSITORY_READS = 32
 
 
 @dataclass(frozen=True)
@@ -79,6 +82,9 @@ class ReplayObserver:
             selected[key] = binding
         self.store = store
         self.bindings = MappingProxyType(selected)
+        identities = tuple(b.repository_identity for b in bindings if b.repository_identity is not None)
+        self.repositories = RepositoryProjection(store, identities) if identities else None
+        self._repository_cursor = 0
         self._cycle = threading.Lock()
 
     def cycle(
@@ -99,7 +105,35 @@ class ReplayObserver:
         result = self.store.sweep_timeouts(**authority)
         if result["status"] == "uncertain":
             return result
-        targets = iter(self.store.observation_targets(**authority))
+        inventories = {}
+        repository_targets = {}
+        snapshots = {}
+        if self.repositories is not None:
+            for binding in self.bindings.values():
+                if binding.repository_identity is None:
+                    continue
+                self.store.check_current(expires_at, checkpoint)
+                try:
+                    scan = fetch_inventory(
+                        binding, checkpoint=lambda: self.store.check_current(expires_at, checkpoint),
+                    )
+                except RepositoryNativeUnsupported:
+                    raise
+                except ValueError:
+                    scan = {"outcome": "unavailable", "numbers": [], "pages": 0,
+                            "error": "inventory_unavailable"}
+                inventories[binding.repository_identity.key] = scan
+            repository_targets = self.repositories.plans(inventories, **authority)
+            keys = sorted(repository_targets)
+            if keys:
+                start = self._repository_cursor % len(keys)
+                selected = (keys[start:] + keys[:start])[:_MAX_REPOSITORY_READS]
+                repository_targets = {key: repository_targets[key] for key in selected}
+                self._repository_cursor = (start + len(selected)) % len(keys)
+        combined = dict(repository_targets)
+        for target in self.store.observation_targets(**authority):
+            combined[(target.account, target.repo, target.number)] = target
+        targets = iter(combined.values())
         observed = unavailable = unbound = 0
         pending = {}
         exhausted = False
@@ -123,7 +157,8 @@ class ReplayObserver:
                     if binding is None:
                         unbound += 1
                         continue
-                    target = self.store.waiting_target(target, **authority)
+                    if (target.account, target.repo, target.number) not in repository_targets:
+                        target = self.store.waiting_target(target, **authority)
                     if target is not None:
                         future = readers.submit(
                             self._read, target, binding, stopped=stopped, **authority,
@@ -136,11 +171,14 @@ class ReplayObserver:
                     target = pending.pop(future)
                     self.store.check_current(expires_at, checkpoint)
                     snapshot = future.result()
+                    snapshots[(target.account, target.repo, target.number)] = snapshot
                     if snapshot is None:
                         unavailable += 1
                     else:
                         try:
-                            result = self.store.observe(target, snapshot, **authority)
+                            result = self.store.observe(target, snapshot, **authority) if (
+                                target.registration_ids
+                            ) else {"status": "observed"}
                         except ReplayEventTooLarge:
                             unavailable += 1
                         else:
@@ -154,6 +192,8 @@ class ReplayObserver:
             stopped.set()
             readers.shutdown(wait=True, cancel_futures=True)
         self.store.check_current(expires_at, checkpoint)
+        if self.repositories is not None:
+            self.repositories.apply(inventories, snapshots, **authority)
         return {
             "status": "observed", "observed": observed,
             "unavailable": unavailable, "unbound": unbound,
@@ -174,6 +214,7 @@ class ReplayObserver:
                     list(binding.credential_command)
                     if binding.credential_command is not None else None
                 ),
+                **({"config_file": binding.inventory_config} if binding.inventory_config else {}),
             )
         except ValueError:
             return None

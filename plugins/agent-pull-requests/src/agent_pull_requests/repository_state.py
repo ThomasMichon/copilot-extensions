@@ -23,6 +23,48 @@ def _integer(value, minimum=0):
         raise ValueError("invalid repository cache integer")
 
 
+def facts(value):
+    _fields(value, "provider pr_state merged head_sha base_ref base_sha mergeable checks_state "
+            "checks_complete title draft author reviews check_failures fingerprints")
+    if value["provider"] not in ("github", "gitea") or value["pr_state"] not in ("open", "closed"):
+        raise ValueError("invalid normalized provider or lifecycle")
+    if any(type(value[name]) is not bool for name in ("merged", "draft")) or any(
+        not isinstance(value[name], str)
+        for name in ("head_sha", "base_ref", "checks_state", "title")
+    ):
+        raise ValueError("invalid normalized current facts")
+    for name in ("mergeable", "checks_complete"):
+        if value[name] is not None and type(value[name]) is not bool:
+            raise ValueError("invalid normalized nullable evidence")
+    for name in ("base_sha", "author"):
+        if value[name] is not None and not isinstance(value[name], str):
+            raise ValueError("invalid normalized nullable identity")
+    if not isinstance(value["reviews"], list) or len(value["reviews"]) > 1000:
+        raise ValueError("invalid normalized reviews")
+    for review in value["reviews"]:
+        _fields(review, "id state user commit_id dismissed")
+        if review["id"] is not None:
+            _integer(review["id"])
+        if any(review[name] is not None and not isinstance(review[name], str)
+               for name in ("state", "user", "commit_id")) or (
+            review["dismissed"] is not None and type(review["dismissed"]) is not bool
+        ):
+            raise ValueError("invalid normalized review")
+    if not isinstance(value["check_failures"], list) or len(value["check_failures"]) > 1000:
+        raise ValueError("invalid normalized checks")
+    for failure in value["check_failures"]:
+        _fields(failure, "name state source url")
+        if any(part is not None and not isinstance(part, str) for part in failure.values()):
+            raise ValueError("invalid normalized check")
+    fingerprints = value["fingerprints"]
+    if fingerprints is not None:
+        _fields(fingerprints, "votes approvals discussions policies gates")
+        if any(not isinstance(part, str) or not part for part in fingerprints.values()):
+            raise ValueError("invalid normalized fingerprints")
+    if len(json.dumps(value, allow_nan=False).encode()) > 65536:
+        raise ValueError("normalized facts exceed byte bound")
+
+
 def validate(value: object, namespace: str) -> None:
     """Refuse foreign/newer state rather than silently rebuilding a projection."""
     _fields(value, "repositories registrations events next_sequence")
@@ -62,8 +104,8 @@ def validate(value: object, namespace: str) -> None:
                     _integer(pull[field])
             if not isinstance(pull["error"], str) or len(pull["error"]) > 128:
                 raise ValueError("invalid current-state error")
-            if pull["facts"] is not None and not isinstance(pull["facts"], dict):
-                raise ValueError("invalid normalized current facts")
+            if pull["facts"] is not None:
+                facts(pull["facts"])
     registrations = set()
     for row in value["registrations"]:
         _fields(row, "registration_id request_id consumer target expires_at acknowledged cancelled")
@@ -92,5 +134,14 @@ def validate(value: object, namespace: str) -> None:
             raise ValueError("invalid durable repository event")
         if row["number"] is not None:
             _integer(row["number"], 1)
+        if row["facts"] is not None:
+            if row["kind"] == "coverage":
+                _fields(row["facts"], "outcome error")
+                if row["facts"]["outcome"] not in ("complete", "partial", "unavailable") or (
+                    not isinstance(row["facts"]["error"], str)
+                ):
+                    raise ValueError("invalid inventory status event")
+            else:
+                facts(row["facts"])
     if len(json.dumps(value, allow_nan=False).encode()) > MAX_CACHE_BYTES:
         raise ValueError("repository cache byte capacity exceeded")

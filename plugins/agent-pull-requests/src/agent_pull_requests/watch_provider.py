@@ -134,6 +134,7 @@ def fetch_snapshot(
     repo: str, number: int, command: str, *, prefix: list[str] | None = None,
     runner: Callable[[list[str]], subprocess.CompletedProcess] | None = None,
     credential_command: list[str] | None = None,
+    config_file: str | None = None,
 ) -> PRSnapshot:
     """Perform exactly one native configured read; never start another waiter."""
     if prefix is None:
@@ -161,8 +162,14 @@ def fetch_snapshot(
             raise ValueError("credential command argv exceeds its budget")
         credential_arguments = ["--credential-command", serialized]
     try:
+        configuration = []
+        if config_file is not None:
+            if not isinstance(config_file, str) or not Path(config_file).is_absolute():
+                raise ValueError("native snapshot requires an absolute selected configuration")
+            configuration = ["--config", config_file]
         result = (runner or _run_native)(
-            [*launch, "pr-watch", "snapshot", repo, str(number), "--json", *credential_arguments],
+            [*launch, "pr-watch", "snapshot", repo, str(number), "--json",
+             *credential_arguments, *configuration],
         )
         if result.returncode or len(result.stdout.encode("utf-8")) > _MAX_SNAPSHOT_BYTES:
             raise ValueError("native snapshot command failed or exceeded its budget")
