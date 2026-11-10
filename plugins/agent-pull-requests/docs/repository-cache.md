@@ -152,6 +152,15 @@ under the same cycle custody and concurrency bound; qualified waiting work
 precedes configured-only work. Reentry retains the last native facts but marks
 them `selection_reentry_unconfirmed` until a bounded read refreshes them.
 Selection entry does not publish an old terminal summary as new current evidence.
+Passive qualification is now separate from provider inventory: once bounds are
+confirmed, already-admitted configured waits are read before inventory pages.
+Their bounded normalized evidence is retained across inventory and projected
+for every known cached PR, including a departed terminal summary absent from
+the current inventory plan. No duplicate acquisition is charged to that wait.
+The transient prepared bound is the existing at-most-1,024 wait targets times
+64 KiB normalized facts, plus at most 32 configured-only results; raw results
+remain limited to the four-reader phases. These phases are sequential under one
+observer cycle and writer, not additional pollers.
 
 Initial membership and unknown-to-known evidence use baseline events. Later
 members use entry events; semantic facts produce change or confirmed terminal

@@ -34,8 +34,8 @@ def _invoke(argv, *, timeout, checkpoint, qualified=False):
     return result
 
 
-def inventory(binding, *, checkpoint):
-    """Qualify the executing peer and perform one selected bounded inventory."""
+def qualify(binding, *, checkpoint):
+    """Confirm executing read bounds without provider or credential acquisition."""
     checkpoint()
     identity = binding.repository_identity
     if identity is None or binding.inventory_config is None:
@@ -61,6 +61,14 @@ def inventory(binding, *, checkpoint):
     ):
         raise RepositoryNativeUnsupported("selected native repository observation unsupported")
     checkpoint()
+
+
+def inventory(binding, *, checkpoint, _qualified=False):
+    """Perform selected bounded inventory after its current-cycle qualification."""
+    if not _qualified:
+        qualify(binding, checkpoint=checkpoint)
+    identity = binding.repository_identity
+    prefix = list(binding.prefix or (binding.command,))
     result = _invoke([
         *prefix, "pr-watch", "inventory", identity.repo,
         "--config", binding.inventory_config,

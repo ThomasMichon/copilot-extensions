@@ -15,7 +15,8 @@ from .watch_replay_store import ReplayStore
 from .repository_contract import RepositoryIdentity
 from pathlib import Path
 from .repository_native import (
-    RepositoryNativeUnavailable, RepositoryNativeUnsupported, inventory as fetch_inventory,
+    RepositoryNativeUnsupported, inventory as fetch_inventory,
+    qualify as qualify_native,
 )
 from .repository_projection import RepositoryProjection, normalized, validate_identity
 
@@ -102,76 +103,117 @@ class ReplayObserver:
 
     def _observe(
         self, *, expires_at: int, checkpoint: Callable[[], None] | None,
-        _legacy_only: bool = False,
     ) -> dict:
         authority = {"expires_at": expires_at, "checkpoint": checkpoint}
         observed_at = int(self.store.clock())
-        legacy = None
-        if self.repositories is not None and not _legacy_only:
-            # New repository acquisition must not consume existing legacy wait deadlines.
-            legacy = self._observe(
-                expires_at=expires_at, checkpoint=checkpoint, _legacy_only=True,
-            )
-            if legacy["status"] != "observed":
-                return legacy
         result = self.store.sweep_timeouts(**authority)
         if result["status"] == "uncertain":
             return result
+        waiting = self.store.observation_targets(**authority)
+        if self.repositories is None:
+            return self._consume(waiting, **authority)
         inventories = {}
-        repository_targets = {}
-        snapshots = {}
-        projected = False
         qualified = set()
         configured = {
             (binding.account, binding.repo) for binding in self.bindings.values()
             if binding.repository_identity is not None
         }
-        if self.repositories is not None and not _legacy_only:
-            for binding in self.bindings.values():
-                if binding.repository_identity is None:
-                    continue
-                self.store.check_current(expires_at, checkpoint)
-                try:
-                    scan = fetch_inventory(
-                        binding, checkpoint=lambda: self.store.check_current(expires_at, checkpoint),
-                    )
-                    qualified.add((binding.account, binding.repo))
-                except RepositoryNativeUnsupported:
-                    raise
-                except RepositoryNativeUnavailable as error:
-                    if error.qualified:
-                        qualified.add((binding.account, binding.repo))
-                    scan = {"outcome": "unavailable", "numbers": [], "pages": 0,
-                            "error": "inventory_unavailable" if error.qualified else "qualification_unavailable"}
-                except ValueError:
-                    scan = {"outcome": "unavailable", "numbers": [], "pages": 0,
-                            "error": "inventory_unavailable"}
-                inventories[binding.repository_identity.key] = scan
-            repository_targets = self.repositories.plans(inventories, **authority)
-            repository_targets = {
-                key: target for key, target in repository_targets.items() if key[:2] in qualified
-            }
-        waiting = {}
-        for target in self.store.observation_targets(**authority):
-            scope = (target.account, target.repo)
-            if _legacy_only and scope in configured or (
-                self.repositories is not None and not _legacy_only and scope not in configured
-            ):
+        totals = {"observed": 0, "unavailable": 0, "unbound": 0}
+        legacy = [target for target in waiting if (target.account, target.repo) not in configured]
+        result = self._consume(legacy, **authority)
+        if result["status"] != "observed":
+            return result
+        for name in totals:
+            totals[name] += result[name]
+
+        def check():
+            self.store.check_current(expires_at, checkpoint)
+
+        for binding in self.bindings.values():
+            if binding.repository_identity is None:
                 continue
-            if scope not in configured or scope in qualified:
-                waiting[(target.account, target.repo, target.number)] = target
-        selected_targets = {}
-        if self.repositories is not None and not _legacy_only:
-            keys = sorted(key for key in repository_targets if key not in waiting)
-            if keys:
-                start = self._repository_cursor % len(keys)
-                selected = (keys[start:] + keys[:start])[:_MAX_REPOSITORY_READS]
-                selected_targets = {key: repository_targets[key] for key in selected}
-                self._repository_cursor = (start + len(selected)) % len(keys)
-        combined = {**waiting, **selected_targets}
-        targets = iter(combined.values())
+            try:
+                qualify_native(binding, checkpoint=check)
+                qualified.add((binding.account, binding.repo))
+            except RepositoryNativeUnsupported:
+                raise
+            except ValueError:
+                check()
+                inventories[binding.account] = {
+                    "outcome": "unavailable", "numbers": [], "pages": 0,
+                    "error": "qualification_unavailable",
+                }
+        prepared = {}
+
+        def capture(target, snapshot):
+            key = (target.account, target.repo, target.number)
+            try:
+                prepared[key] = normalized(
+                    snapshot, self.repositories.identities[key[0]], target.number,
+                ) if snapshot is not None else None
+            except (ValueError, TypeError):
+                prepared[key] = None
+
+        current = [target for target in waiting if (target.account, target.repo) in qualified]
+        result = self._consume(current, on_read=capture, **authority)
+        if result["status"] != "observed":
+            return result
+        for name in totals:
+            totals[name] += result[name]
+        for binding in self.bindings.values():
+            if (binding.account, binding.repo) not in qualified:
+                continue
+            try:
+                inventories[binding.account] = fetch_inventory(
+                    binding, checkpoint=check, _qualified=True,
+                )
+            except RepositoryNativeUnsupported:
+                raise
+            except ValueError:
+                check()
+                inventories[binding.account] = {
+                    "outcome": "unavailable", "numbers": [], "pages": 0,
+                    "error": "inventory_unavailable",
+                }
+        totals["unavailable"] += sum(
+            scan["outcome"] == "unavailable" for scan in inventories.values()
+        )
+        repository_targets = self.repositories.plans(inventories, **authority)
+        seen = set(prepared)
+
+        def publish():
+            self.repositories.apply_facts(
+                inventories, prepared, observed_at=observed_at, **authority,
+            )
+            prepared.clear()
+
+        while len(prepared) > _MAX_REPOSITORY_READS:
+            batch = {key: prepared.pop(key) for key in list(prepared)[:_MAX_REPOSITORY_READS]}
+            self.repositories.apply_facts(
+                inventories, batch, observed_at=observed_at, **authority,
+            )
+        publish()
+        keys = sorted(key for key in repository_targets if key not in seen and key[:2] in qualified)
+        if keys:
+            start = self._repository_cursor % len(keys)
+            selected = (keys[start:] + keys[:start])[:_MAX_REPOSITORY_READS]
+            self._repository_cursor = (start + len(selected)) % len(keys)
+            targets = [repository_targets[key] for key in selected]
+            result = self._consume(targets, cache_keys=set(selected), on_read=capture, **authority)
+            if result["status"] != "observed":
+                return result
+            for name in totals:
+                totals[name] += result[name]
+            publish()
+        return {"status": "observed", **totals}
+
+    def _consume(
+        self, targets, *, expires_at, checkpoint, cache_keys=frozenset(), on_read=None,
+    ):
+        authority = {"expires_at": expires_at, "checkpoint": checkpoint}
+        targets = iter(targets)
         observed = unbound = 0
-        unavailable = sum(scan["outcome"] == "unavailable" for scan in inventories.values())
+        unavailable = 0
         pending = {}
         exhausted = False
         stopped = threading.Event()
@@ -194,7 +236,7 @@ class ReplayObserver:
                     if binding is None:
                         unbound += 1
                         continue
-                    if (target.account, target.repo, target.number) not in selected_targets:
+                    if (target.account, target.repo, target.number) not in cache_keys:
                         target = self.store.waiting_target(target, **authority)
                     if target is not None:
                         future = readers.submit(
@@ -208,13 +250,12 @@ class ReplayObserver:
                     target = pending.pop(future)
                     self.store.check_current(expires_at, checkpoint)
                     snapshot = future.result()
-                    key = (target.account, target.repo, target.number)
                     if snapshot is None:
                         unavailable += 1
                     else:
                         try:
                             result = self.store.observe(target, snapshot, **authority) if (
-                                target.registration_ids
+                                target.registration_ids or target.retention_epoch is not None
                             ) else {"status": "observed"}
                         except ReplayEventTooLarge:
                             unavailable += 1
@@ -222,19 +263,8 @@ class ReplayObserver:
                             if result["status"] == "uncertain":
                                 return result
                             observed += 1
-                    if key in repository_targets:
-                        try:
-                            snapshots[key] = normalized(
-                                snapshot, self.repositories.identities[key[0]], target.number,
-                            ) if snapshot is not None else None
-                        except (ValueError, TypeError):
-                            snapshots[key] = None
-                        if len(snapshots) == _MAX_REPOSITORY_READS:
-                            self.repositories.apply_facts(
-                                inventories, snapshots, observed_at=observed_at, **authority,
-                            )
-                            snapshots.clear()
-                            projected = True
+                    if on_read is not None:
+                        on_read(target, snapshot)
                     result = self.store.sweep_timeouts(**authority)
                     if result["status"] == "uncertain":
                         return result
@@ -242,14 +272,9 @@ class ReplayObserver:
             stopped.set()
             readers.shutdown(wait=True, cancel_futures=True)
         self.store.check_current(expires_at, checkpoint)
-        if self.repositories is not None and not _legacy_only and (snapshots or not projected):
-            self.repositories.apply_facts(
-                inventories, snapshots, observed_at=observed_at, **authority,
-            )
         return {
-            "status": "observed", "observed": observed + (legacy["observed"] if legacy else 0),
-            "unavailable": unavailable + (legacy["unavailable"] if legacy else 0),
-            "unbound": unbound + (legacy["unbound"] if legacy else 0),
+            "status": "observed", "observed": observed,
+            "unavailable": unavailable, "unbound": unbound,
         }
 
     def _read(

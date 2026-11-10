@@ -26,16 +26,23 @@ def snapshot(identity, number=7, **changes):
 
 
 def selected(tmp_path):
+    qualifier = tmp_path / "qualifier.py"
     identities = [
         RepositoryIdentity("test", provider, endpoint, "reader", "owner/repo")
         for provider, endpoint in (("github", "https://github.com"), ("gitea", "https://forge.example"))
     ]
     bindings = tuple(NativeObservationBinding(
-        identity.key, identity.repo, sys.executable, (sys.executable,),
+        identity.key, identity.repo, sys.executable, (sys.executable, str(qualifier)),
         (sys.executable,), identity, str(tmp_path / f"{identity.provider}.yaml"),
     ) for identity in identities)
     store = ReplayStore(tmp_path, "test", repository_cache=True)
     store.provision()
+    qualifier.write_text(
+        'import json,sys\nassert sys.argv[1:]==["pr-watch","inventory","--contract","--json"]\n'
+        'print(json.dumps({"protocol":"agent-worktrees.pr-inventory/v1",'
+        '"providers":["github","gitea"],"credential":"observe/per-request","effects":"none",'
+        '"snapshot_request_budget":64,"snapshot_capture_bytes":1048584}))\n'
+    )
     return store, identities, bindings
 
 
@@ -505,3 +512,66 @@ def test_reentry_outside_rotation_preserves_last_terminal_facts_as_explicitly_un
     owner.cycle(**authority(store))
     result = owner.repositories.query(identity.key, number=33, **authority(store))["pulls"][0]
     assert result["facts"]["pr_state"] == "open" and not result["error"]
+
+
+def test_qualified_configured_wait_is_read_before_slow_inventory(tmp_path, monkeypatch):
+    store, identities, bindings = selected(tmp_path)
+    identity = identities[0]
+    now = [100.0]
+    store.clock = lambda: now[0]
+    scope = ConsumerScope("configured", identity.key, identity.repo)
+    store.execute(scope, "register", {
+        "request_id": "short-configured", "issued_at": 100, "deadline_at": 105,
+        "number": 7, "until": ("merged",),
+    }, **authority(store))
+    order = []
+    def inventory(*_args, **_kwargs):
+        order.append("inventory")
+        now[0] += 10
+        return {"outcome": "complete", "numbers": [], "pages": 1, "error": ""}
+    def fetch(*_args, **_kwargs):
+        order.append("snapshot")
+        return snapshot(identity, pr_state="closed", merged=True)
+    monkeypatch.setattr(observation, "fetch_inventory", inventory)
+    monkeypatch.setattr(observation, "fetch_snapshot", fetch)
+    owner = ReplayObserver(store, bindings=(bindings[0],))
+    owner.cycle(expires_at=160)
+    event = store.execute(scope, "pending", {}, **authority(store))["events"][0]
+    assert not event["timed_out"] and event["transitions"] == ["merged"]
+    assert order == ["snapshot", "inventory"]
+
+
+def test_reopening_evidence_from_wait_updates_known_departed_summary_even_if_inventory_omits_it(
+    tmp_path, monkeypatch,
+):
+    store, identities, bindings = selected(tmp_path)
+    identity = identities[0]
+    projection = RepositoryProjection(store, identities[:1])
+    projection.apply(
+        {identity.key: {"outcome": "complete", "numbers": [33], "pages": 2, "error": ""}},
+        {(identity.key, identity.repo, 33): snapshot(identity, 33)}, **authority(store),
+    )
+    projection.apply(
+        {identity.key: {"outcome": "complete", "numbers": [], "pages": 1, "error": ""}},
+        {(identity.key, identity.repo, 33): snapshot(identity, 33, pr_state="closed")},
+        **authority(store),
+    )
+    scope = ConsumerScope("reopened", identity.key, identity.repo)
+    store.execute(scope, "register", {
+        "request_id": "reopened", "issued_at": store.clock(), "number": 33, "until": ("merged",),
+    }, **authority(store))
+    monkeypatch.setattr(observation, "fetch_inventory", lambda *_a, **_kw: {
+        "outcome": "complete", "numbers": [], "pages": 1, "error": "",
+    })
+    reads = []
+    def fetch(*_args, **_kwargs):
+        reads.append(33)
+        return snapshot(identity, 33, head_sha="reopened")
+    monkeypatch.setattr(observation, "fetch_snapshot", fetch)
+    owner = ReplayObserver(store, bindings=(bindings[0],))
+    owner.cycle(**authority(store))
+    result = owner.repositories.query(identity.key, number=33, **authority(store))["pulls"][0]
+    assert result["facts"]["pr_state"] == "open" and result["facts"]["head_sha"] == "reopened"
+    assert not result["member"] and reads == [33]
+    assert any(event["number"] == 33 and event["kind"] == "change"
+               for event in document(store)["events"])
