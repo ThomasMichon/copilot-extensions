@@ -256,6 +256,9 @@ named tracked objective before the whole effort is Done.
     ordinary reconciliation against the newly versioned payloads. Coordinator
     retains review, release and installed acceptance; source guards alone do
     not complete the measured sweep.
+    - [x] **Source correction merged:** #11709 landed at
+      `4176aaea9a1d3dde5f3e6f924cc5542e7fce9483` after current-head approval
+      and required CI. Promotion and installed reconciliation remain open.
 - [x] **Worktrees incoming-monitor source correction:** #11673 merged the
   #11524 correction at `2e575be1a26c789f1b5b1912df626165fb9c7158`
   after current-head approval, required CI and Windows/Linux native acceptance.
@@ -529,6 +532,10 @@ migration already works.
   from native identity of the incoming writer. The remaining implementation
   must preserve uncertain recovery records and conflicting-work protection,
   rather than merely suppressing the first outgoing-observation exception.
+
+### 2026-11-09 - Nested-library consumer correction merged
+
+- [Source milestone, validation scope and remaining delivery gates](journal/2026/11.09%20nested-library%20consumer%20correction.md).
 
 ### 2026-11-08 - Termination-free installer source merged
 
