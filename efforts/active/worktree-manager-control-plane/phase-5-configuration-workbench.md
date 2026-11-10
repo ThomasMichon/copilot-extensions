@@ -55,6 +55,9 @@ retains that shared shell/lifecycle and its release/installed acceptance.
 The [Wave 0 source inventory and minimal consumer design](phase-5-effective-configuration-contract.md)
 separates those existing capabilities from the missing effective-state and
 post-input preview contract; do not rebuild the shell from this older checklist.
+The [bounded local knowledge-registration proposal](phase-5-local-knowledge-registration.md)
+defines a separate owner operation before the existing bind-only action, under
+#1419 Track 3. It does not claim creation, authentication, pairing or receiving.
 
 ## Plan
 
