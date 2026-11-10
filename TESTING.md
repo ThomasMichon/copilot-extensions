@@ -2991,6 +2991,10 @@ case's clock before this distinct consumer even starts; this case is not a
 300-second Worktrees construction-performance check. The existing 300-second
 admission case and 300+180 installed execution-owner case remain unchanged,
 as do the native startup and cleanup limits.
+The public application cases allocate a short, fixture-owned sandbox below
+the candidate checkout rather than nesting installed version slots beneath
+pytest's test-name directory. The real console entrypoint must still remain
+below MAX_PATH; no launcher alias or path assertion is substituted.
 
 Select `-k public_copilot` separately with those same prerequisites and bounds
 for the installed public TTY caller. Its real console entrypoint inherits an

@@ -159,8 +159,8 @@ def test_fresh_application_owns_native_broker_fresh_and_resume(tmp_path, monkeyp
     os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
     reason="Explicitly select the installed public Windows Worktrees embodiment lane",
 )
-def test_public_embody(tmp_path, monkeypatch):
-    _qualify_native_application(tmp_path, monkeypatch, broker="embody")
+def test_public_embody(monkeypatch):
+    _qualify_public_application(monkeypatch, "embody")
 
 
 @pytest.mark.timeout(900)
@@ -168,8 +168,15 @@ def test_public_embody(tmp_path, monkeypatch):
     os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
     reason="Explicitly select the installed public Windows Worktrees TTY lane",
 )
-def test_public_copilot(tmp_path, monkeypatch):
-    _qualify_native_application(tmp_path, monkeypatch, broker="copilot")
+def test_public_copilot(monkeypatch):
+    _qualify_public_application(monkeypatch, "copilot")
+
+
+def _qualify_public_application(monkeypatch, caller):
+    from plugin_test_containment import TestSandbox
+
+    with TestSandbox(prefix="p-", dir=ROOT) as directory:
+        _qualify_native_application(Path(directory), monkeypatch, broker=caller)
 
 
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
