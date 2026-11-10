@@ -96,6 +96,9 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
         if defect == "command-failed":
             raise RuntimeError("actual command refused")
         if argv[0] == copilot:
+            if argv[1:4] == ["plugin", "marketplace", "add"]:
+                assert argv[-1] == artifact
+                return ""
             name = argv[-1].split("@")[0]
             shutil.copytree(
                 artifact / "plugins" / name,
@@ -132,9 +135,12 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
             _SUITE["install_payload_closure"](artifact, _COMMIT, **arguments)
         if defect == "reduced-settings":
             assert calls == []
+        if defect == "command-failed":
+            assert calls == [[copilot, "plugin", "marketplace", "add", artifact]]
     else:
         result = _SUITE["install_payload_closure"](artifact, _COMMIT, **arguments)
-        assert [argv[1:] for argv in calls[:-1]] == [
+        assert calls[0] == [copilot, "plugin", "marketplace", "add", artifact]
+        assert [argv[1:] for argv in calls[1:-1]] == [
             ["plugin", "install", name + "@example-marketplace"]
             for name in sorted(profile["inventory"])
         ]

@@ -76,6 +76,10 @@ def install_payload_closure(
     executable_hash = hashlib.sha256(copilot.read_bytes()).hexdigest()
     marketplace = next(iter(profile["settings"]["extraKnownMarketplaces"]))
     names = sorted(profile["inventory"])
+    run(
+        [copilot, "plugin", "marketplace", "add", artifact],
+        environment, project, diagnostics, "suite-marketplace-register", timeout=120,
+    )
     for name in names:
         run(
             [copilot, "plugin", "install", name + "@" + marketplace],

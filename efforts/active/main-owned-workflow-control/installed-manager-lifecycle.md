@@ -920,3 +920,18 @@ run; source controls are not native evidence. Complete runtime construction,
 actual Machines/required-readiness discovery and New after an authentic
 admitted-baseline ordinary update remain open, as do mandatory frozen-candidate
 enforcement, this extension's separate Main adoption and the parent campaign.
+
+Run 42903264094 at `848fc8f7c710c95cad41e029c684464157ae96c2`
+failed its real payload acquisition after the native engine constructor and
+canonical whole-tree materialization. The actual CLI's first `plugin install`
+refused because marketplace `copilot-extensions` was not registered.
+The test ran for 289.98 seconds; no deadline expired and no runtime/Machines or
+payload-closure success is claimed. The subsequent core step did not run.
+This is not a Bridge communication failure: its payload name was only the first
+sorted acquisition target.
+
+The companion now invokes the documented `plugin marketplace add` for that
+exact local frozen artifact through the same actual CLI and bounded private
+HOME executor before installation. Source controls require this command and
+stop immediately on registration failure; no ledger or acquisition result is
+fabricated. A new exact-head native run remains required.

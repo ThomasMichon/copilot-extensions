@@ -842,7 +842,9 @@ Before the unchanged core case, a separate preflight constructs the installed
 engine, builds the canonical commit-bound whole-tree artifact, and acquires
 every declared payload with the actual pinned CLI. Installed engine discovery
 and complete payload-byte comparison must succeed in the private HOME, with
-the required-readiness profile enabled. Its separate
+the required-readiness profile enabled. The CLI first registers that exact local
+artifact with `plugin marketplace add`; repository settings alone are not the
+plugin command's marketplace registration. Its separate
 `installed-manager-suite-payloads` receipt explicitly reports runtime
 installation as unobserved: payload delivery is not runtime construction,
 actual Machines readiness, an authentic update or lifecycle acceptance.
