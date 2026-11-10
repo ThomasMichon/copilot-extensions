@@ -549,11 +549,17 @@ def main() -> int:
             elif args.phase == "admit" and not args.receipt_uncertain and all(value is None for value in (
                 args.pid, args.process_start_time, args.exit_code,
             )):
-                admit(
-                    args.record, correlation, args.operation_id,
-                    admission_only=args.admission_only, preserve_seed_id=args.preserve_seed_id,
-                    native_resume_session=args.native_resume_session,
-                )
+                try:
+                    admit(
+                        args.record, correlation, args.operation_id,
+                        admission_only=args.admission_only, preserve_seed_id=args.preserve_seed_id,
+                        native_resume_session=args.native_resume_session,
+                    )
+                except ValueError as exc:
+                    # The Windows responder relays this bounded line to the session host.
+                    from agent_remote_driver.session_host.startup_admission import refusal_reason
+                    print(f"Startup admission refused: {refusal_reason(exc)}", file=sys.stderr)
+                    raise
             elif args.phase == "spawn-failed" and not args.receipt_uncertain and all(value is None for value in (
                 args.pid, args.process_start_time, args.exit_code,
             )):
