@@ -17,6 +17,12 @@
   "actions": [
     {"key": "details", "label": "Inspect effective state / sources / owner boundaries", "kind": "card", "title_from": "card.title", "body_from": "card.body"},
     {
+      "key": "register-local-knowledge", "label": "Register an existing local knowledge checkout", "kind": "form",
+      "when": {"knowledge_registration_available": "true"}, "fields_from": "knowledge_registration_fields", "body_from": "card.body", "confirm": true,
+      "preview": ["agent-worktrees", "repos", "configuration", "knowledge-register-preview", "--context-project", "{context_project}", "--repository", "{field.name}", "--checkout-path", "{field.path}", "--default-branch", "{field.branch}", "--account={field.account}"],
+      "run": ["agent-worktrees", "repos", "configuration", "knowledge-register-apply", "--context-project", "{context_project}", "--repository", "{field.name}", "--checkout-path", "{field.path}", "--default-branch", "{field.branch}", "--account={field.account}", "--preview-token", "{configuration_preview}"]
+    },
+    {
       "key": "bind-preferred-knowledge", "label": "Bind the accepted knowledge default", "kind": "form",
       "when": {"preferred_knowledge_bindable": "true"}, "fields_from": "binding_fields", "body_from": "card.body", "confirm": true,
       "preview": ["agent-worktrees", "repos", "configuration", "knowledge-preview", "--context-project", "{context_project}", "--harness-id", "{harness_repository_id}", "--knowledge-id", "{knowledge_repository_id}", "--accepted-default"],
