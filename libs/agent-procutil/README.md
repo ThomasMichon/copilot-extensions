@@ -944,6 +944,9 @@ uses the existing private-session guardian, PTY and caller-lifetime pipe.
 The original native command stays gated until its actual PID/pidfd is retained
 and the optional synchronous admission callback succeeds. `pid` is the native
 child, not the guardian. Redirected streams remain inherited.
+An overlapping terminal-backed start in the same process refuses before taking
+another mode snapshot; ownership remains held through restoration and close.
+Readiness and output drainage accept valid descriptors above the `select()` range.
 
 `wait()` returns the native exit status only after whole-session settlement and
 terminal restoration. `terminate()` closes the original lifetime channel and

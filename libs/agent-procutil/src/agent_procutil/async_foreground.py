@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
-import select
 import signal
 import subprocess
 import sys
@@ -45,21 +44,23 @@ def require_foreground_custody() -> None:
 async def _ready_io(readers, writers=(), *, timeout=None):
     loop = asyncio.get_running_loop()
     ready = loop.create_future()
+    readable, writable = set(), set()
 
-    def wake():
+    def wake(descriptor, observed):
+        observed.add(descriptor)
         if not ready.done():
             ready.set_result(None)
 
     try:
         for descriptor in readers:
-            loop.add_reader(descriptor, wake)
+            loop.add_reader(descriptor, wake, descriptor, readable)
         for descriptor in writers:
-            loop.add_writer(descriptor, wake)
+            loop.add_writer(descriptor, wake, descriptor, writable)
         try:
             await asyncio.wait_for(ready, timeout)
         except asyncio.TimeoutError:
             pass
-        return select.select(readers, writers, [], 0)[:2]
+        return list(readable), list(writable)
     finally:
         for descriptor in readers:
             loop.remove_reader(descriptor)
@@ -130,8 +131,9 @@ class AsyncForegroundProcess:
             self._descriptors.extend((lifetime, self._writer))
             _lifetime_writers.add(self._writer)
         self._events, reply = _private_pair(os.pipe())
+        self._descriptors.extend((self._events, reply))
         gate, self._control = _private_pair(os.pipe())
-        self._descriptors.extend((self._events, reply, gate, self._control))
+        self._descriptors.extend((gate, self._control))
         inherited = (lifetime, reply, gate, *([slave] if slave >= 0 else []))
         streams = [
             slave if value == "tty" else subprocess.DEVNULL if value == "absent" else None
@@ -268,9 +270,10 @@ class AsyncForegroundProcess:
                         self.returncode = code
                     elif frame == f"settled {self._guardian.pid}".encode("ascii"):
                         self._receipt = True
-                    elif frame == b"stopped" and not self._requested:
-                        self._terminal.suspend()
-                        os.write(self._control, b"c")
+                    elif frame == b"stopped":
+                        if not self._requested:
+                            self._terminal.suspend()
+                            os.write(self._control, b"c")
                     elif self._starting and (
                         frame in (b"ready", b"running") or frame.startswith(b"native ")
                     ):

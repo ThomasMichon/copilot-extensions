@@ -318,7 +318,8 @@ asyncio.run(run())
         os.close(master)
 
 
-def test_pty_input_resize_redirected_output_and_terminal_restore(tmp_path):
+@pytest.mark.parametrize("high_descriptors", [False, True])
+def test_pty_input_resize_redirected_output_and_terminal_restore(tmp_path, high_descriptors):
     import fcntl
     import select
     import struct
@@ -337,11 +338,20 @@ print(json.dumps({'text':text,'rows':rows,'cols':cols}),flush=True)
 import asyncio,fcntl,json,os,sys,termios
 from pathlib import Path
 from agent_procutil.async_foreground import AsyncForegroundProcess
+from agent_procutil import _interactive_terminal as terminal
 os.setsid()
 fcntl.ioctl(0,termios.TIOCSCTTY,0)
 before=termios.tcgetattr(0)
+if os.environ.get('FOREGROUND_FIXTURE_HIGH_FDS')=='1':
+    def high(fd):
+        moved=fcntl.fcntl(fd,fcntl.F_DUPFD_CLOEXEC,2048)
+        os.close(fd)
+        return moved
+    terminal._above_stdio=high
 async def run():
     owner=await AsyncForegroundProcess.start(sys.argv[2:])
+    if os.environ.get('FOREGROUND_FIXTURE_HIGH_FDS')=='1':
+        assert owner._events>=2048 and owner._terminal.fd>=2048
     code=await owner.wait()
     Path(sys.argv[1]).write_text(json.dumps({
         'code':code,'attributes':termios.tcgetattr(0)==before,
@@ -353,7 +363,9 @@ asyncio.run(run())
     process = subprocess.Popen(
         [sys.executable, "-c", caller, str(result),
          sys.executable, "-c", native, str(native_ready)],
-        stdin=slave, stdout=subprocess.PIPE, stderr=slave, env=_environment(),
+        stdin=slave, stdout=subprocess.PIPE, stderr=slave, env={
+            **_environment(), "FOREGROUND_FIXTURE_HIGH_FDS": "1" if high_descriptors else "0",
+        },
     )
     os.close(slave)
     try:
@@ -373,3 +385,79 @@ asyncio.run(run())
         process.wait(timeout=5)
         process.stdout.close()
         os.close(master)
+
+
+def test_overlapping_native_terminal_start_refuses_and_restores_original_modes(tmp_path):
+    result = tmp_path / "overlap.json"
+    caller = """
+import asyncio,fcntl,json,os,sys,termios
+from pathlib import Path
+from agent_procutil.async_foreground import AsyncForegroundProcess
+os.setsid()
+fcntl.ioctl(0,termios.TIOCSCTTY,0)
+before=termios.tcgetattr(0)
+async def run():
+    first=await AsyncForegroundProcess.start([sys.executable,'-c','import time;time.sleep(60)'])
+    second=None
+    refused=False
+    try:
+        try:
+            second=await AsyncForegroundProcess.start(
+                [sys.executable,'-c','import time;time.sleep(60)'])
+        except RuntimeError as error:
+            refused='already has an interactive owner' in str(error)
+    finally:
+        if second is not None:
+            await second.terminate()
+        await first.terminate()
+    Path(sys.argv[1]).write_text(json.dumps({
+        'refused':refused,'restored':termios.tcgetattr(0)==before}))
+asyncio.run(run())
+"""
+    master, slave = os.openpty()
+    process = subprocess.Popen(
+        [sys.executable, "-c", caller, str(result)],
+        stdin=slave, stdout=slave, stderr=slave, env=_environment(),
+    )
+    os.close(slave)
+    try:
+        process.wait(timeout=10)
+        assert process.returncode == 0
+        assert _read(result) == {"refused": True, "restored": True}
+    finally:
+        if process.poll() is None:
+            process.kill()
+        process.wait(timeout=5)
+        os.close(master)
+
+
+def test_queued_native_stop_frame_does_not_turn_retirement_into_cleanup_failure(tmp_path):
+    async def exercise():
+        owner = await api.AsyncForegroundProcess.start([
+            sys.executable, "-c",
+            "import os,signal,time;os.kill(os.getpid(),signal.SIGSTOP);time.sleep(60)",
+        ])
+        stopped, release = asyncio.Event(), asyncio.Event()
+        original = owner._frame
+
+        async def gated():
+            frame = await original()
+            if frame == b"stopped":
+                stopped.set()
+                await release.wait()
+            return frame
+
+        owner._frame = gated
+        try:
+            await asyncio.wait_for(stopped.wait(), 2)
+            retiring = asyncio.create_task(owner.terminate())
+            await asyncio.sleep(0)
+            assert owner._requested
+            release.set()
+            await asyncio.wait_for(retiring, 5)
+            assert await owner.wait() == -signal.SIGKILL and owner.retirement_started
+        finally:
+            release.set()
+            await owner.terminate()
+
+    asyncio.run(exercise())
