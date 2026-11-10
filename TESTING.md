@@ -707,6 +707,9 @@ Git worktree creation, native process incarnation, conversation history and
 private mux attachment participate. The case checks parallel Open, preserved
 work after detaching the first view, normal Copilot exit and a fresh Manager's
 Resume, plus the existing unusable-installed-entry negative control.
+Completed turns require durable conversation history and the reply in the
+terminal stream or the actual bound private pane's rendered capture. Removing
+escape sequences from a redraw stream is not itself a rendered-screen witness.
 The stateless harness has a real private knowledge repository, registered and
 bound before New; the installed coordination-readiness command must resolve it.
 Before constructing runtimes, the case requires an empty, confirmed native

@@ -111,6 +111,8 @@ def _capture_failure(root, record_property):
                 "lifecycle-launch.jsonl",
                 "lifecycle-processes.jsonl",
                 "lifecycle-conversation.json",
+                "lifecycle-pane-*.stdout.txt",
+                "lifecycle-pane-*.stderr.txt",
             ):
                 for path in (root / "diagnostics").glob(pattern):
                     text = (
@@ -494,14 +496,32 @@ class _Witness:
             }
             if len(matches) > 1:
                 raise RuntimeError("One Manager operation produced multiple conversations")
-            if not matches or f"LIFECYCLE_REPLY_{number}" not in installed._visible(
-                console.output
-            ):
+            if not matches:
                 return None
             self.history = matches[0]
+            if not self.turn_observation["reply_in_terminal"]:
+                rendered = self._reply_in_pane(number)
+                self.turn_observation["reply_in_pane"] = rendered
+                if not rendered:
+                    return None
             return self.one_native()
 
         return self.wait(finished, f"Native conversation did not finish {prompt}", timeout=60)
+
+    def _reply_in_pane(self, number):
+        record = self.records(f"records-rendering-{number}")
+        rendered = installed._run(
+            [
+                self.root / "mux" / "psmux.exe", "capture-pane", "-p",
+                "-t", "wt-" + record["id"], "-S", "-60",
+            ],
+            self.env,
+            self.root,
+            self.root / "diagnostics",
+            f"lifecycle-pane-{number}",
+            timeout=5,
+        )
+        return f"LIFECYCLE_REPLY_{number}" in rendered
 
     def records(self, label):
         code = (
@@ -852,6 +872,7 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
         history.write_text("".join(json.dumps(event) + "\n" for event in events), encoding="utf-8")
     witness = _Witness(tmp_path, {"COPILOT_HOME": str(home)}, None, None, None, None)
     witness._diagnose_bootstrap = lambda: None
+    witness._reply_in_pane = lambda _number: False
 
     def wait(check, *_args, **_kwargs):
         assert check() is None
@@ -871,6 +892,42 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
         assert row["prompt_seen"] is True
         assert row["turn_ends"] == (1 if phase == "rendering-only" else 0)
         assert row["reply_seen"] is (phase == "rendering-only")
+
+
+@pytest.mark.parametrize("reply", ["LIFECYCLE_REPLY_1", "unfinished"])
+def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(tmp_path, monkeypatch, reply):
+    from types import SimpleNamespace
+
+    home = tmp_path / "copilot-home"
+    history = home / "session-state" / "fixture-session" / "events.jsonl"
+    history.parent.mkdir(parents=True)
+    history.write_text("".join(json.dumps(event) + "\n" for event in (
+        {"type": "user.message", "data": {"content": PROMPTS[0]}},
+        {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+        {"type": "assistant.turn_end", "data": {}},
+    )), encoding="utf-8")
+    witness = _Witness(tmp_path, {"COPILOT_HOME": str(home)}, None, None, None, None)
+    witness.wait = lambda check, *_args, **_kwargs: check()
+    witness.one_native = lambda: ("native-pid", "native-birth")
+    calls = []
+
+    def records(_label):
+        assert witness.history == history
+        return {"id": "fixture-worktree"}
+
+    def capture(command, env, cwd, diagnostics, label, timeout):
+        calls.append(command)
+        assert env is witness.env and cwd == tmp_path and timeout == 5
+        return reply
+
+    witness.records = records
+    monkeypatch.setattr(installed, "_run", capture)
+    result = witness.turn(PROMPTS[0], 1, SimpleNamespace(output=b"cursor redraw"))
+    assert result == (("native-pid", "native-birth") if reply == "LIFECYCLE_REPLY_1" else None)
+    assert calls == [[
+        tmp_path / "mux" / "psmux.exe", "capture-pane", "-p",
+        "-t", "wt-fixture-worktree", "-S", "-60",
+    ]]
 
 
 def test_lifecycle_diagnostic_write_cannot_mask_unsettled_custody(tmp_path):

@@ -253,3 +253,21 @@ terminal check or extending its timeout.
 All five focused diagnostic controls passed, including absent, unfinished
 and completed-but-unmatched history. The same native case will retain these
 observations on its next exact-source attempt; its pass criteria are unchanged.
+
+### 2026-11-10 - Measured a terminal-stream false negative
+
+Run 42775388223 at `26a4adf7615409d8936af5cadfee1b700262c5d7`
+retained one actual history with 11 events: the exact prompt and reply were
+present and one assistant turn had ended. The raw-stream terminal predicate
+alone was false. A PSMux redraw stream is not a rendered screen: stripping
+escape sequences does not apply cursor edits or recover text reused by a
+later frame.
+
+The witness now falls back to the real private mux's bounded `capture-pane`
+view, only after completed history matches. It resolves and verifies that
+history's actual worktree/head/session binding before targeting the pane.
+Rendered reply, native process identity, normal exit and same-conversation
+Resume/Open assertions remain required. This is not a callback, terminal
+assertion removal or a timeout extension. Missing enabled payload warnings
+remain a separate unresolved fixture-closure observation, not an accepted
+degraded installation.
