@@ -719,3 +719,29 @@ larger sessions file (152 unrelated cases deselected), alongside the complete
 four affected Worktrees files. Both missing and relative tracked paths have
 focused refusal controls. No installed run was dispatched for the intermediate
 raw-registry-only commit; the combined candidate must qualify as one unit.
+
+### 2026-11-10 - Preserve backfilled registries against stale full-record writers
+
+Reviews 5845986009 and 5846264600 surface High comment 4527926377: registry
+initialization did not advance `lifecycle_revision`, so the canonical stale-write
+merge could later accept an older `sessions=None` snapshot and erase a discovered
+Resume target. The finding still applied to `4ebc8fade813d7e410462a3ace80b74a8add32c0`.
+Its installed run 42864326611 was cancelled after that blocking feedback was
+identified; qualification was cancelled and the evidence-retention step failed.
+No native qualification is credited to that run.
+
+Three regressions reproduced the failures: both strict and best-effort backfill
+lost the discovered target after a real stale save with an unrelated title
+change, and strict reconciliation acknowledged a concurrent lifecycle revision
+change. Both refresh paths now use the canonical revision helper when initializing
+the registry, including relation-revision updates for discovered sessions. Strict
+reconciliation also includes the lifecycle revision in its observation fence.
+Liveness-only refreshes do not create another lifecycle revision.
+
+All 237 selected controls pass in 63.98 seconds: complete producer/runtime/client/
+projection files, backfill-scoped sessions tests and strict native-observation
+reclaim tests (224 unrelated cases deselected). These include real YAML and
+stale-writer merge behavior, retained Resume identity, unchanged unrelated edits,
+idempotent later liveness refresh and concurrent-revision refusal. Fresh
+exact-source installed qualification, actual review and required CI remain
+mandatory; all parent acceptance gates remain open.

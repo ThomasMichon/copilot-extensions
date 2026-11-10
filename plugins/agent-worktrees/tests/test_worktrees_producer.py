@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from agent_worktrees import __main__ as core
-from agent_worktrees import git_ops, mux_link, reclaim, sessions, tracking
+from agent_worktrees import git_ops, list_cli, mux_link, reclaim, sessions, tracking
 from agent_worktrees import worktrees_producer as producer
 from agent_worktrees.record_io import read_record_mapping
 from agent_worktrees.worktrees_runtime import CONTRACT_VERSION, WorktreesRuntime
@@ -110,6 +110,7 @@ def test_slow_fact_collection_counts_against_the_published_roster_age(tmp_path, 
     ("malformed-registry", False), ("malformed-entry", False), ("malformed-id", False),
     ("partial-registry", False), ("numeric-id", False),
     ("malformed-during-observation", False),
+    ("lifecycle-changed", False),
 ])
 def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     tmp_path, monkeypatch, failure, managed,
@@ -201,9 +202,16 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
     bound_reads = []
 
     def bound(**kwargs):
+        nonlocal initial_bytes
+
         bound_reads.append(kwargs)
         if failure == "malformed-during-observation":
             corrupt_sessions(malformed["malformed-registry"])
+        elif failure == "lifecycle-changed":
+            changed = tracking.load_record(paths[0])
+            tracking._next_lifecycle_revision(changed)
+            tracking.save_record(changed, paths[0])
+            initial_bytes = paths[0].read_bytes()
         if failure == "bound":
             raise OSError("bound observation failed")
         if failure == "cleanup":
@@ -311,7 +319,7 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
             if failure == "unreadable-record":
                 assert denied_reads
                 assert paths[0].read_bytes() == initial_bytes
-            if failure in {"unreadable-workspace", "contended", "unpersisted"}:
+            if failure in {"unreadable-workspace", "contended", "unpersisted", "lifecycle-changed"}:
                 assert paths[0].read_bytes() == initial_bytes
             if failure in malformed or failure == "malformed-during-observation":
                 assert paths[0].read_bytes() == initial_bytes
@@ -366,6 +374,54 @@ def test_requested_point_refresh_reconciles_bound_hint_before_acknowledgement(
             contender.join(3)
             assert not contender.is_alive() and not contention_errors
         owner.shutdown()
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_legacy_backfill_ledger_survives_an_unrelated_stale_writer(tmp_path, monkeypatch, strict):
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    monkeypatch.setattr(producer.cfg, "project_name", lambda: "project")
+    config_path = producer.cfg.project_dir("project") / "config.yaml"
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    config_path.write_text(json.dumps({"repos": {"project": {"anchor": str(checkout)}}}))
+    path = producer.cfg.tracking_dir("project") / "one.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    record = tracking.WorktreeRecord(
+        worktree_id="one", branch="worktree/one", worktree_path=str(checkout),
+        repo="project", machine="host", platform="windows", title="Original",
+        started_at="", last_resumed_at="", resume_count=0, status="active",
+        completed_at=None, sessions=None, creation_nonce="fixture-incarnation",
+    )
+    tracking.save_record(record, path)
+    stale = tracking.load_record(path)
+    original_revision = stale.lifecycle_revision
+    state = tmp_path / "session-state"
+    entry = state / "discovered"
+    entry.mkdir(parents=True)
+    (entry / "workspace.yaml").write_text(json.dumps({"cwd": str(checkout)}), encoding="utf-8")
+    (entry / "events.jsonl").write_text("{}\n", encoding="utf-8")
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: state)
+    monkeypatch.setattr(reclaim, "live_bridge_worktrees", lambda **_: set())
+    monkeypatch.setattr(reclaim, "resolve_bound_copilots", lambda **_: [])
+    monkeypatch.setattr(sessions, "mux_status_many", lambda _: {
+        "one": sessions.MuxInfo(exists=False, clients=0),
+    })
+    monkeypatch.setattr(tracking, "stamp_bound_live", lambda *a, **kw: None)
+    monkeypatch.setattr(tracking, "stamp_mux_live", lambda *a, **kw: None)
+
+    list_cli._refresh_list_record(tracking.load_record(path), strict=strict)
+    indexed = tracking.load_record(path)
+    assert [entry.session_id for entry in indexed.sessions] == ["discovered"]
+    stale.title = "Unrelated edit"
+    tracking.save_record(stale, path)
+    preserved = tracking.load_record(path)
+    assert preserved.title == "Unrelated edit"
+    assert [entry.session_id for entry in preserved.sessions or []] == ["discovered"]
+    assert preserved.resolved_head_session == "discovered"
+    assert preserved.lifecycle_revision == indexed.lifecycle_revision > original_revision
+    assert preserved.sessions[0].relation_revision == preserved.lifecycle_revision
+    list_cli._refresh_list_record(preserved, strict=strict)
+    assert tracking.load_record(path).lifecycle_revision == preserved.lifecycle_revision
 
 
 @pytest.mark.parametrize(("failure", "managed_state"), [

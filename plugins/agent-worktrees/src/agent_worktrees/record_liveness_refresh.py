@@ -30,7 +30,8 @@ def _read(path):
 
 
 def _fence(record):
-    fields = (*_INCARNATION, *_HINTS, "sessions", "execution_leg", "execution_leg_raw",
+    fields = (*_INCARNATION, *_HINTS, "sessions", "lifecycle_revision",
+              "execution_leg", "execution_leg_raw",
               "session_backend", "session_backend_raw")
     return (
         tuple(copy.deepcopy(getattr(record, name, None)) for name in fields),
@@ -66,7 +67,12 @@ def refresh_record(record):
         current = _read(path)
         if _fence(current) != expected:
             raise ObservationUnavailable("Tracking changed during strict refresh")
+        initializing_registry = current.sessions is None
         current.sessions = observed.sessions
+        if initializing_registry:
+            tracking._next_lifecycle_revision(
+                current, *(entry.session_id for entry in current.sessions),
+            )
         current.bound_live, current.mux_live = bound_live, bool(mux.exists)
         current.bound_live_at = current.mux_live_at = tracking._now_iso()
         tracking.save_record(current, path)
