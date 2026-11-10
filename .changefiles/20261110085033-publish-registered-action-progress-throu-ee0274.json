@@ -1,0 +1,9 @@
+{
+  "comment": "Publish registered action progress through the owning modal Inbox with run isolation and terminal reader errors.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

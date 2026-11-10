@@ -62,7 +62,9 @@ class PickerScreenMaintenanceActionsMixin:
         ``_key_progress`` confirm gate. The screen mutates engine state directly
         (``self.progress`` / ``self.executor`` / ``self.debug``) and needs no
         callback."""
-        self.app.push_screen(ProgressScreen(self))
+        screen = ProgressScreen(self)
+        self.app.push_screen(screen)
+        return screen
     def _start_stop(self, recs):
         """Stop the Mux/Copilot wrapper of one or more worktrees (the 'Stop'
         action -- solo from the row sub-menu, or in aggregate from the bulk
