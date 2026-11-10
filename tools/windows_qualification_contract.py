@@ -16,6 +16,10 @@ NATIVE_PACKETS = {
         "agent-worktrees", "test_native_seed_application", "test_public_embody",
         "native-worktrees-public-caller",
     ),
+    "native-worktrees-copilot": (
+        "agent-worktrees", "test_native_seed_application", "test_public_copilot",
+        "native-worktrees-public-tty",
+    ),
     "native-driver-auth-wait": (
         "agent-remote-driver", "test_native_headed_auth_wait",
         "test_opt_in_receiver_auth_wait_and_same_session_resume", "native-driver-auth-wait",

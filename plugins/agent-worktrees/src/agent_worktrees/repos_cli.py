@@ -61,6 +61,8 @@ def _repos_usage() -> None:
     print("                                      Read-only selected GitHub account and API observations")
     print("  registration inspect --anchor PATH --default-name NAME")
     print("                                      Read-only unique project/exposure inspection (versioned JSON)")
+    print("  registration preflight --repository NAME")
+    print("                                      Read-only registration/provider/account/server-policy observations")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
     print("  account default [<login>|--unset]   Preferred GitHub identity; exact repo overrides win")

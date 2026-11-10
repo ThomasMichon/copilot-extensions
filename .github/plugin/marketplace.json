@@ -6,13 +6,13 @@
   },
   "metadata": {
     "description": "Copilot CLI plugins for worktree isolation, service lifecycle, inter-agent communication, GitHub Codespaces management, local container fleets, MCP bridging, session logging, context-window handoff, effort planning, budget posture, coordinator-first delegation, publication safety, WSL environment setup, and CLI customization",
-    "version": "1.25.87-dev1"
+    "version": "1.25.88-dev1"
   },
   "plugins": [
     {
       "name": "agent-worktrees",
       "description": "Worktree isolation system for concurrent Copilot CLI sessions - lifecycle management, finalization, cleanup, service discovery, and deployment patterns for monorepos",
-      "version": "1.25.87-dev1",
+      "version": "1.25.88-dev1",
       "source": "plugins/agent-worktrees"
     },
     {
@@ -128,7 +128,7 @@
     {
       "name": "harness-knowledge",
       "description": "Binds a stateless Copilot CLI control harness to its private knowledge repo, harness-first: after cloning the harness, ask for (or create) the knowledge repo, register both, and write the machine-local knowledge_repo pointer so agent-worktrees can resolve state and paired worktrees natively. Ships the binding-knowledge setup skill.",
-      "version": "0.1.8-dev1",
+      "version": "0.1.9-dev1",
       "source": "plugins/harness-knowledge"
     },
     {
