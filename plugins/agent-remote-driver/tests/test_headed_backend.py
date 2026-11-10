@@ -371,6 +371,36 @@ async def test_native_observation_fault_only_closes_its_bound_sdk_stream(tmp_pat
         await receiver.close()
 
 
+@pytest.mark.parametrize("writable", [True, False])
+def test_fixture_coordinator_diagnostic_preserves_publication_without_sensitive_values(
+    tmp_path, monkeypatch, writable,
+):
+    from agent_remote_driver.headed import launcher
+    from native.test_native_headed_auth_wait import _diagnostic_publisher
+
+    published = []
+    monkeypatch.setattr(launcher, "_write_host_state", lambda path, state: published.append((path, state)))
+    error_file = tmp_path / "error.json" if writable else tmp_path / "missing" / "error.json"
+    publish = _diagnostic_publisher(error_file)
+    state = {"state": "auth_held", "nonce": "must-not-be-recorded"}
+    publish(tmp_path / "state.json", state)
+    assert not error_file.exists()
+    try:
+        raise ValueError("private-error-message-must-not-be-recorded")
+    except ValueError:
+        publish(tmp_path / "state.json", state)
+    assert len(published) == 2 and all(value is state for _, value in published)
+    if writable:
+        raw = error_file.read_text(encoding="utf-8")
+        diagnostic = json.loads(raw)
+        assert diagnostic["exception"] == "ValueError" and diagnostic["frames"]
+        assert all("/" not in frame["file"] and "\\" not in frame["file"]
+                   for frame in diagnostic["frames"])
+        assert "must-not-be-recorded" not in raw and str(tmp_path) not in raw
+    else:
+        assert not error_file.exists()
+
+
 @pytest.mark.asyncio
 async def test_cli_backend_shares_ws_tcp_control_and_only_exact_owner_can_stop():
     owner = Owner()

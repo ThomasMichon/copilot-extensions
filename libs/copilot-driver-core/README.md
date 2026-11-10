@@ -224,6 +224,9 @@ positional launch input is refused, no request is buffered/replayed, and the
 old endpoint binding cannot act on the new incarnation. Previous Host/client
 connections close; callers must select the new private declaration, not
 replay an uncertain send. Actual native history restoration remains unqualified.
+Bare positional input before `--` and ambiguous attached short-seed forms
+also refuse before endpoint or native creation; option values keep their
+declared boundaries.
 Missing/invalid observation, native input, closed/uncontrolled state,
 pending/sending/outstanding work, connection loss or cleanup uncertainty
 cannot be cleared by a lease. These remain held or terminally unavailable.

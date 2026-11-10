@@ -19,6 +19,11 @@ from agent_procutil._interpreter import physical_executable
 PYTHON = physical_executable(getattr(sys, "_base_executable", sys.executable))
 
 
+@pytest.fixture(autouse=True)
+def fixture_interpreter_arguments(monkeypatch):
+    monkeypatch.setattr(launcher, "VALUE_OPTIONS", launcher.VALUE_OPTIONS | {"-c"})
+
+
 def configuration(**changes):
     return {
         "source_owner": "fixture-owner", "source_revision": "source-revision-1",
@@ -216,6 +221,28 @@ def test_seedless_resume_preserves_option_values_but_not_launch_input():
     ]
     with pytest.raises(ValueError, match="positional"):
         launcher._seedless_resume([*argv, "--", "never replay"], "durable-session")
+    for extra in (["bare launch input"], ["-iattached-seed"]):
+        with pytest.raises(ValueError, match="positional"):
+            launcher._seedless_resume([*argv, *extra], "durable-session")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("extra", [["bare launch input"], ["-iattached-seed"]])
+async def test_unreplayable_input_refuses_before_receiving_endpoint(tmp_path, monkeypatch, extra):
+    from agent_remote_driver.headed import auth_child
+
+    monkeypatch.setattr(auth_child, "require_auth_custody", lambda: None)
+
+    async def forbidden_server(_receiver):
+        raise AssertionError("Invalid launch input must refuse before endpoint creation")
+
+    monkeypatch.setattr(AuthWaitReceiver, "serve", forbidden_server)
+    with pytest.raises(ValueError, match="positional"):
+        await launcher.run_headed(
+            ["native", "--session-id", "durable-session", *extra],
+            session_id="durable-session", attempt_directory=tmp_path / "attempt",
+            state_file=tmp_path / "state.json", cwd=str(tmp_path), auth_wait=configuration(),
+        )
 
 
 _NATIVE = r"""

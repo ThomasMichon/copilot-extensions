@@ -131,6 +131,35 @@ def native_provider():
         assert not thread.is_alive()
 
 
+def _diagnostic_publisher(error_file):
+    import sys
+    from agent_remote_driver.headed import launcher
+
+    publish = launcher._write_host_state
+
+    def write(path, state):
+        kind, error, frame = sys.exc_info()
+        if state.get("state") == "auth_held" and kind is not None:
+            frames = []
+            while frame is not None and len(frames) < 20:
+                frames.append({
+                    "file": Path(frame.tb_frame.f_code.co_filename).name[:80],
+                    "function": frame.tb_frame.f_code.co_name[:80], "line": frame.tb_lineno,
+                })
+                frame = frame.tb_next
+            diagnostic = {"exception": kind.__name__[:80], "frames": frames}
+            for name in ("errno", "winerror"):
+                value = getattr(error, name, None)
+                diagnostic[name] = value if type(value) is int else None
+            try:
+                error_file.write_text(json.dumps(diagnostic), encoding="utf-8")
+            except OSError:
+                pass
+        publish(path, state)
+
+    return write
+
+
 def _observation_loss_backend(fault_file, receipt_file):
     from agent_remote_driver.headed.backend import HeadedBackend
 
@@ -238,6 +267,13 @@ def _qualify_native_receiver(
     }), encoding="utf-8")
     driver = tmp_path / "receiver.py"
     fault_file, receipt_file = tmp_path / "lose-sdk.json", tmp_path / "lost-sdk.json"
+    error_file = tmp_path / "coordinator-error.json"
+    diagnostic_hook = (
+        inspect.getsource(_diagnostic_publisher)
+        + "\nimport agent_remote_driver.headed.launcher as launcher\n"
+        + "launcher._write_host_state=_diagnostic_publisher("
+        + f"Path({str(error_file)!r}))\n"
+    )
     fault_hook = ""
     if observation_loss:
         fault_hook = (
@@ -250,6 +286,7 @@ def _qualify_native_receiver(
         "import asyncio,json,sys,time\n"
         "from pathlib import Path\n"
         "from agent_remote_driver.headed.launcher import run_headed\n"
+        + diagnostic_hook
         + fault_hook
         + "value=json.loads(Path(sys.argv[1]).read_text(encoding='utf-8'))\n"
         "value['auth_wait']={'source_owner':'native-fixture',"
@@ -287,6 +324,8 @@ def _qualify_native_receiver(
             key: observed.get("auth_wait", {}).get(key)
             for key in ("phase", "hold", "lease_revision", "native_qualification")
         })
+        if error_file.exists():
+            diagnostic += "\n" + error_file.read_text(encoding="utf-8")[:4096]
         if mux is not None:
             diagnostic += "\n" + mux.query("capture-pane", "-p", "-t", mux.target).stdout[-8192:]
         raise AssertionError(label + "\n" + diagnostic)
@@ -300,7 +339,7 @@ def _qualify_native_receiver(
     async def flow():
         first = await until(
             lambda: value if (value := state())["state"] == "running" else None,
-            "The actual SDK extension did not bind the opted-in receiver",
+            "The opted-in receiver did not reach running after native startup",
         )
         assert first["session_id"] == session_id and first["mode"] == "headed"
         assert first["host_process_start_time"] == process_start_time(first["pid"])
@@ -458,7 +497,15 @@ def _qualify_native_receiver(
             assert launched.returncode == 0, launched.stderr
             incarnation = launched.stdout.strip()
             assert re.fullmatch(r"\$[0-9]+:[0-9]+\|%[0-9]+", incarnation), incarnation
-            asyncio.run(flow())
+            try:
+                asyncio.run(flow())
+            except Exception as error:
+                if error_file.exists():
+                    raise AssertionError(
+                        "Fixture coordinator diagnostic:\n"
+                        + error_file.read_text(encoding="utf-8")[:4096]
+                    ) from error
+                raise
         finally:
             present = mux.query("has-session", "-t", mux.target)
             assert present.returncode in (0, 1), present.stderr

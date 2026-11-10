@@ -217,6 +217,8 @@ def _seedless_resume(argv: list[str], session_id: str) -> list[str]:
             if not separator:
                 index += 1
         else:
+            if not name.startswith("-") or name.startswith("-i") and not name.startswith("--"):
+                raise ValueError("Auth recovery cannot replay positional launch input")
             result.append(argument)
             if not separator and (name in VALUE_OPTIONS or name == "-C"):
                 index += 1
