@@ -210,7 +210,12 @@ writer and native consumer, not inferred from a valid reference or this report.
 `relay --request <request-id> --followup <followup-id>` sequences a status
 inquiry or adjustment for an existing assignment; it never creates another
 worker or performs an effect. Persist the complete follow-up and, for an
-adjustment, the full revised charter before using the report:
+adjustment, the full revised charter before using the report. When native
+Dispatch evidence identifies an owner but the assignment's `nativeWorktree` is
+still null, the report holds with `persist-native-worktree-before-relay`.
+Persist that exact observed worktree and re-read the report before reconciling
+the charter or preparing a relay effect; conflicting owners and unresolved
+effects remain separate holds:
 
 1. Reconcile a changed native standing charter through its existing owner,
    retaining the worktree and original assignment generation. Re-read native

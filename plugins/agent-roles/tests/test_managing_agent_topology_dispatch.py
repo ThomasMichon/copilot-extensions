@@ -196,6 +196,12 @@ def test_adjustment_reconciles_then_relays_to_same_head_and_requires_reacceptanc
     assignment["followups"].append(followup)
     request = assignment["requestId"]
     result = report(document).relay(request, "adjust-a")
+    assert result["phase"] == "held"
+    assert result["holds"] == ["persist-native-worktree-before-relay"]
+    assert result["nextStep"] is None
+    assignment["nativeWorktree"] = result["retainedWorktree"]
+    document["revision"] += 1
+    result = report(document).relay(request, "adjust-a")
     assert result["phase"] == "reconcile"
     assert result["retainedWorktree"] == observation["owner"]
     assert result["nextStep"]["expectedRevision"] == 3
@@ -208,7 +214,7 @@ def test_adjustment_reconciles_then_relays_to_same_head_and_requires_reacceptanc
     assert result["phase"] == "persist-relay"
     assert result["nextStep"]["expectedHead"] == observation["head"]
     assert result["nextStep"]["expectedHeadRevision"] == 7
-    assignment.update(nativeWorktree=observation["owner"], state="active")
+    assignment["state"] = "active"
     effect = {"id": "relay-a", "kind": "relay", "state": "prepared", "charterRevision": 2,
               "target": observation["owner"], "nativeRef": None,
               "nativeRequest": {"mode": "bridge-native", "envelopeRef": "synthetic:adjust-envelope"}}
@@ -309,6 +315,12 @@ def test_status_can_reach_retained_owner_while_acceptance_lags(document: dict[st
     })
     topology = report(document)
     result = topology.relay(assignment["requestId"], "status-a")
+    assert result["phase"] == "held"
+    assert result["holds"] == ["persist-native-worktree-before-relay"]
+    assignment["nativeWorktree"] = result["retainedWorktree"]
+    document["revision"] += 1
+    topology = report(document)
+    result = topology.relay(assignment["requestId"], "status-a")
     assert result["phase"] == "persist-relay"
     assert result["nextStep"]["target"] == document["observations"]["owners"][0]["owner"]
     assert topology.overview()["coverage"][0]["qualifiedCount"] == 0
@@ -316,6 +328,56 @@ def test_status_can_reach_retained_owner_while_acceptance_lags(document: dict[st
     held = report(document).relay(assignment["requestId"], "status-a")
     assert held["phase"] == "held"
     assert "native-accepted-head-conflict" in held["holds"]
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+def test_unbound_native_relay_persists_a_valid_owner_and_effect(
+    document: dict[str, Any], tmp_path: Path,
+) -> None:
+    assignment = document["assignments"][0]
+    followup = {"id": "followup-a", "kind": "status", "content": "Report the current scope.",
+                "charterRevision": 1, "effectId": None}
+    assignment["followups"].append(followup)
+    path = tmp_path / "topology.json"
+
+    def relay() -> dict[str, Any]:
+        path.write_text(json.dumps(document), encoding="utf-8")
+        before = path.read_bytes()
+        result = subprocess.run(
+            [sys.executable, str(SKILL / "scripts" / "topology.py"), "relay", str(path),
+             "--request", assignment["requestId"], "--followup", followup["id"], "--at", AT],
+            capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stderr == ""
+        assert path.read_bytes() == before
+        output: dict[str, Any] = json.loads(result.stdout)
+        return output
+
+    held = relay()
+    assert held["phase"] == "held"
+    assert held["holds"] == ["persist-native-worktree-before-relay"]
+    assert held["nextStep"] is None
+    assignment["nativeWorktree"] = held["retainedWorktree"]
+    document["revision"] += 1
+    planned = relay()
+    assert planned["phase"] == "persist-relay"
+    proposal = planned["nextStep"]
+    assignment["effects"].append({
+        "id": "relay-a", "kind": "relay", "state": "prepared",
+        "charterRevision": proposal["charterRevision"], "target": proposal["target"], "nativeRef": None,
+        "nativeRequest": {"mode": "bridge-native", "envelopeRef": "synthetic:followup-envelope"},
+    })
+    followup["effectId"] = "relay-a"
+    document["revision"] += 1
+    ready = relay()
+    assert ready["phase"] == "relay"
+    assert ready["nextStep"]["effect"] == assignment["effects"][0]
+    assert ready["nextStep"]["target"] == assignment["nativeWorktree"]
+    assert ready["nextStep"]["expectedHead"] == document["observations"]["owners"][0]["head"]
+    assert ready["nextStep"]["expectedHeadRevision"] == 7
 
 
 @pytest.mark.portfolio_tier("T1")

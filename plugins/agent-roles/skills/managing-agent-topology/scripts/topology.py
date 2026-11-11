@@ -600,6 +600,8 @@ class Topology:
                 hold(*self.discovery_holds())
             if result["holds"]:
                 return result
+            if assignment["nativeWorktree"] != target["owner"]:
+                return hold("persist-native-worktree-before-relay")
             if effect is not None and effect["state"] in {"admitted", "consumed"}:
                 if not adjustment:
                     return step("await-owner-response", deliveryIsNotAnswer=True)
