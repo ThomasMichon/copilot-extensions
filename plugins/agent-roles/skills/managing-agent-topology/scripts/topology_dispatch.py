@@ -153,7 +153,6 @@ DESIRED_PROPOSED = (
      "proposed-effective-revision-differs-from-desired"),
 )
 PROPOSED_ADOPTED = (
-    ("materializationRef", "materializationRef", "adopted-differs-from-proposed"),
     ("sourceRevision", "sourceRevision", "adopted-differs-from-proposed"),
     ("expectedMaterializationRevision", "materializationRevision", "adopted-differs-from-proposed"),
 )

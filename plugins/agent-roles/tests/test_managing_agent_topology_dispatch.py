@@ -537,6 +537,17 @@ def test_intent_keeps_desired_proposed_and_adopted_records_separate(document: di
 
 
 @pytest.mark.portfolio_tier("T1")
+def test_locator_only_change_preserves_revision_alignment(document: dict[str, Any]) -> None:
+    charter = document["observations"]["dispatch"][0]["task"]["standing_charter"]
+    charter["declaration"]["materialization_ref"] = "synthetic:relocated-materialization"
+    lane = intent_lane(document)
+    assert lane["proposed"]["materializationRef"] != lane["adopted"]["materializationRef"]
+    assert lane["state"] == "aligned" and lane["reasons"] == []
+    assert (lane["proposedMatchesDesired"], lane["adoptedMatchesProposed"], lane["adoptedMatchesDesired"]) == (
+        True, True, True)
+
+
+@pytest.mark.portfolio_tier("T1")
 @pytest.mark.parametrize("effective,reasons", [
     (False, ["proposed-source-revision-differs-from-desired"]),
     (True, ["proposed-source-revision-differs-from-desired", "proposed-effective-revision-differs-from-desired"]),
