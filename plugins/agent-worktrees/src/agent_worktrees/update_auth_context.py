@@ -169,7 +169,7 @@ def run_acquisition(
                 for item in report.results
             )
             if mode() == "on" and not anonymous:
-                cwd = Path(kwargs.get("cwd") or context or Path.cwd())
+                cwd = Path(context or kwargs.get("cwd") or Path.cwd())
                 definition = sources.settings(cwd).marketplaces.get(marketplace)
                 if isinstance(definition, dict):
                     from plugin_resolve.plugin_auth import plugin_management_environment

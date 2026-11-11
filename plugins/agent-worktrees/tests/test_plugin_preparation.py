@@ -519,14 +519,15 @@ def test_consistent_portable_identity_preserves_native_source_equivalence(tool_p
     assert preparation.observe(repo, home=home, include_tool_profile=True)["payloadsReady"]
 
 
-def test_deleted_prepared_payload_is_needed_without_trusting_its_old_receipt(tool_profile):
+@pytest.mark.parametrize("version", [None, "1.0.0"])
+def test_deleted_prepared_payload_is_needed_without_trusting_its_old_receipt(tool_profile, version):
     home, repo, _, path = tool_profile
     row, = preparation.observe(repo, home=home, include_tool_profile=True)["entries"]
     native_home = Path(row["payloadContext"]["copilotHome"])
     write(native_home / ".installation-complete.json", {
         "source": "sample@first",
         "catalog": {"name": "first", "owner": {"name": "Fixture"}},
-        "entry": {"name": "sample", "version": "1.0.0"},
+        "entry": {"name": "sample", **({"version": version} if version else {})},
     })
     write(native_home / "settings.json", json.loads(path.read_text()))
     result = preparation.observe(repo, home=home, include_tool_profile=True)
@@ -602,6 +603,47 @@ def test_profile_git_prelaunch_failure_confirms_no_native_writer(tool_profile, m
             revalidate=lambda: preparation.observe(repo, home=home, include_tool_profile=True),
         )
     assert not activation_preservation_pending(native_home)
+
+
+def test_prepared_auth_context(selected, monkeypatch):
+    from agent_procutil import owned_process
+    import plugin_resolve.plugin_auth as auth
+
+    home, repo, _ = selected
+    monkeypatch.setattr(preparation.Path, "home", lambda: home)
+    definition = {"source": {"source": "github", "repo": "example/first"}}
+    write(home / ".copilot" / "settings.json", {"extraKnownMarketplaces": {"first": definition}})
+    lookups, launches = [], []
+
+    def token(url, environment, cwd, *, timeout):
+        lookups.append(cwd)
+        return "synthetic-checkout-value" if cwd == repo else "synthetic-global-value"
+
+    def run(argv, **kwargs):
+        env = kwargs["env"]
+        launches.append(Path(kwargs["cwd"]))
+        assert Path(kwargs["cwd"]) != repo
+        assert env["GH_TOKEN"] == env["COPILOT_GITHUB_TOKEN"] == "synthetic-checkout-value"
+        write(Path(env["COPILOT_HOME"]) / "installed-plugins" / "first" / "sample" / "plugin.json", {
+            "name": "sample", "version": "1.0.0",
+        })
+        write(Path(env["COPILOT_CACHE_HOME"]) / "marketplaces" / "fixture" / "marketplace.json", {
+            "name": "first", "owner": {"name": "Fixture"},
+            "plugins": [{"name": "sample", "source": "./sample"}],
+        })
+        kwargs["on_settled"]()
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(auth, "_git_token", token)
+    monkeypatch.setattr(update_acquisition._auth, "mode", lambda: "on")
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+    monkeypatch.setattr(update_acquisition, "_run_update", run)
+    assert update_acquisition.acquire_prepared(
+        "sample@first", definition, sys.executable, cwd=repo,
+        staging=home / "p", revalidate=lambda: None,
+    ) == "OK (prepared)"
+    assert len(launches) == 1 and len(lookups) == 2 and all(path == repo for path in lookups)
 
 
 @pytest.mark.parametrize("prepared", [False, True])

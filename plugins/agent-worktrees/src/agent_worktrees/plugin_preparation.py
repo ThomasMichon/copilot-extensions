@@ -138,7 +138,6 @@ def _prepared_root(native_home: Path, source: str, definition: dict) -> Path | N
     if _settings_document(settings_path).get("extraKnownMarketplaces", {}).get(marketplace) != definition:
         raise PreparationError("Prepared payload does not match its complete declared source.")
     if not root.exists():
-        catalog_metadata(source, {}, catalog, entry)
         return None
     manifest = plugin_manifest(root)
     if manifest.get("name") != name:

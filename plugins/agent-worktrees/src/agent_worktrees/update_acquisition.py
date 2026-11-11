@@ -86,6 +86,7 @@ def _run_install(
     argv: list[str], identity: str, *, cwd: Path | None, timeout: float,
     env: Mapping[str, str] | None = None, custody: ActivationCustody | None = None,
     runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    auth_context: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Preserve activation using the caller's bounded executor.
 
@@ -120,7 +121,8 @@ def _run_install(
             )
             result = _auth.run_acquisition(
                 runner or _run_update, argv,
-                context=cwd, marketplace=identity.rpartition("@")[2],
+                context=auth_context if auth_context is not None else cwd,
+                marketplace=identity.rpartition("@")[2],
                 cwd=cwd, timeout=remaining, **environment, **settlement,
             )
         except _QuiescentPayloadTimeout:
@@ -263,6 +265,7 @@ def acquire_prepared(
     from . import activation_preservation, installer_run
 
     started = monotonic()
+    auth_context = cwd
 
     def run(argv, *, env, cwd, timeout, **_kwargs):
         remaining = min(timeout, _TOTAL_BUDGET_S - (monotonic() - started))
@@ -275,7 +278,7 @@ def acquire_prepared(
         with activation_preservation.activation_custody(home=Path(env["COPILOT_HOME"])) as custody:
             return _run_install(
                 argv, source, cwd=cwd, timeout=remaining, env=env,
-                custody=custody, runner=checked,
+                custody=custody, runner=checked, auth_context=auth_context,
             )
 
     prepare_payload(

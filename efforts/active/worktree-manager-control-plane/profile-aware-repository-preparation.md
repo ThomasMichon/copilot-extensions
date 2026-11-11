@@ -191,3 +191,14 @@ plugin or successful repository setup.
   acquisition controls include deletion/reinstallation without premature
   receipt readiness. Strict Linux/Windows type targets, lint, install contracts
   and vendored parity passed. New exact-head CI and review remain required.
+- 2026-11-11: The next review found two further medium defects in the candidate:
+  an original catalog entry may omit the version supplied by a now-deleted
+  payload, and a repeated credential lookup used the neutral execution cwd
+  instead of the selected checkout. Missing-root observation now returns
+  needed after receipt identity and complete source checks without requiring
+  deleted manifest metadata. Acquisition retains checkout-scoped authentication
+  context independently of its neutral execution directory. The combined
+  native/preparation and existing authentication packet passed 96 controls,
+  including versionless receipt recovery and differing checkout/global
+  credential selection. The published-head CI and review gates still apply;
+  no caller migration, full repository setup or host rollout is claimed.
