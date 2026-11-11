@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 import stat
+import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
@@ -194,16 +195,19 @@ def preparation_profile(root: Path) -> tuple[dict, dict[str, dict]]:
         "profilePath": profile,
     }
     if profile is not None:
-        top = git_ops.git(
-            "rev-parse", "--show-toplevel", cwd=root, isolated_repository=True,
-            input_data=b"", timeout=15, kill_tree=True,
-        )
+        try:
+            top = git_ops.git(
+                "rev-parse", "--show-toplevel", cwd=root, isolated_repository=True,
+                input_data=b"", timeout=15, kill_tree=True,
+            )
+            revision = git_ops.git(
+                "rev-parse", "--verify", "HEAD^{commit}", cwd=root, isolated_repository=True,
+                input_data=b"", timeout=15, kill_tree=True,
+            )
+        except (git_ops.GitError, subprocess.TimeoutExpired) as error:
+            raise _error(f"cannot inspect checkout tool profile Git identity ({type(error).__name__})") from error
         if _identity(Path(os.fsdecode(top.stdout).removesuffix("\n").removesuffix("\r"))) != _identity(root):
             raise _error("tool profile preparation requires the checkout root")
-        revision = git_ops.git(
-            "rev-parse", "--verify", "HEAD^{commit}", cwd=root, isolated_repository=True,
-            input_data=b"", timeout=15, kill_tree=True,
-        )
         binding["revision"] = os.fsdecode(revision.stdout).strip()
         binding["profile"] = desired
     return binding, desired

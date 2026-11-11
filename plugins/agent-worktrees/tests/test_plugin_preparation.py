@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
 import subprocess
@@ -342,7 +343,9 @@ def test_absent_profile_keeps_active_census(selected):
     assert all(row["selection"] == "active" for row in result["entries"])
 
 
-@pytest.mark.parametrize("change", ["false-choice", "marketplace", "escape", "invalid", "duplicate"])
+@pytest.mark.parametrize("change", [
+    "false-choice", "marketplace", "escape", "invalid", "duplicate", "invalid-sha", "escaping-remote-path",
+])
 def test_invalid_profile_refuses_without_acquisition(tool_profile, monkeypatch, change):
     home, repo, settings, path = tool_profile
     if change == "false-choice":
@@ -357,6 +360,12 @@ def test_invalid_profile_refuses_without_acquisition(tool_profile, monkeypatch, 
         )
     elif change == "invalid":
         write(path, {"unsupported": True})
+    elif change in {"invalid-sha", "escaping-remote-path"}:
+        data = json.loads(path.read_text())
+        data["extraKnownMarketplaces"]["first"]["source"].update(
+            {"sha": False} if change == "invalid-sha" else {"path": "../outside"},
+        )
+        write(path, data)
     else:
         path.write_text('{"enabledPlugins":{"sample@first":true,"sample@first":false}}', encoding="utf-8")
     monkeypatch.setattr(update_acquisition, "acquire_prepared", lambda *a, **k: pytest.fail("invalid inputs ran"))
@@ -423,22 +432,24 @@ def test_prepared_payload_requires_actual_source_and_complete_receipt(tool_profi
         preparation.observe(repo, home=home, include_tool_profile=True)
 
 
-def test_prepared_payload_cannot_replace_the_declared_source(tool_profile):
+@pytest.mark.parametrize("change", ["repo", "sha", "path", "manifest"])
+def test_prepared_payload_cannot_replace_the_declared_source(tool_profile, change):
     home, repo, _, _ = tool_profile
     row, = preparation.observe(repo, home=home, include_tool_profile=True)["entries"]
     native_home = Path(row["payloadContext"]["copilotHome"])
     write(native_home / "installed-plugins" / "first" / "sample" / "plugin.json", {
-        "name": "sample", "version": "1.0.0",
+        "name": "different" if change == "manifest" else "sample", "version": "1.0.0",
     })
     write(native_home / ".installation-complete.json", {
         "source": "sample@first",
         "catalog": {"name": "first", "owner": {"name": "Fixture"}},
         "entry": {"name": "sample", "version": "1.0.0"},
     })
-    write(native_home / "settings.json", {
-        "extraKnownMarketplaces": {"first": {"source": {"source": "github", "repo": "other/source"}}},
-    })
-    with pytest.raises(ValueError, match="does not match"):
+    descriptor = {"source": "github", "repo": "example/first"}
+    if change != "manifest":
+        descriptor[change] = {"repo": "other/source", "sha": "a" * 40, "path": "other-catalog"}[change]
+    write(native_home / "settings.json", {"extraKnownMarketplaces": {"first": {"source": descriptor}}})
+    with pytest.raises(ValueError, match="does not match|different plugin"):
         preparation.observe(repo, home=home, include_tool_profile=True)
 
 
@@ -452,3 +463,94 @@ def test_plan_binds_non_json_yaml_configuration_without_serializing_it(tool_prof
     config.write_text(config.read_text() + "# revised\n", encoding="utf-8")
     after = preparation.observe(repo, home=home, include_tool_profile=True)
     assert before["selectionDigest"] != after["selectionDigest"]
+
+
+@pytest.mark.parametrize("selector", ["sha", "path"])
+def test_active_payload_cannot_hide_a_conflicting_profile_acquisition_selector(tool_profile, monkeypatch, selector):
+    home, repo, settings, path = tool_profile
+    data = json.loads(path.read_text())
+    write(settings, data)
+    install(home, "sample", "first")
+    data["extraKnownMarketplaces"]["first"]["source"][selector] = "a" * 40 if selector == "sha" else "catalog"
+    write(path, data)
+    monkeypatch.setattr(update_acquisition, "acquire_missing", lambda *a, **k: pytest.fail("conflict acquired"))
+    monkeypatch.setattr(update_acquisition, "acquire_prepared", lambda *a, **k: pytest.fail("conflict acquired"))
+    with pytest.raises(ValueError, match="conflicts with a declared marketplace"):
+        preparation.observe(repo, home=home, include_tool_profile=True)
+
+
+def test_equivalent_github_source_spelling_retains_active_payload(tool_profile):
+    home, repo, settings, path = tool_profile
+    data = json.loads(path.read_text())
+    data["extraKnownMarketplaces"]["first"]["source"]["repo"] = "https://github.com/EXAMPLE/FIRST.git"
+    write(settings, data)
+    install(home, "sample", "first")
+    result = preparation.observe(repo, home=home, include_tool_profile=True)
+    assert result["payloadsReady"]
+    assert Path(result["entries"][0]["payloadRoot"]) == home / ".copilot" / "installed-plugins" / "first" / "sample"
+
+
+@pytest.mark.parametrize("kind", ["git", "url"])
+def test_native_remote_source_kinds_use_the_isolated_acquisition_owner(tool_profile, kind):
+    home, repo, _, path = tool_profile
+    data = json.loads(path.read_text())
+    data["extraKnownMarketplaces"]["first"]["source"] = {
+        "source": kind, "url": "https://example.invalid/market.git",
+    }
+    write(path, data)
+    row, = preparation.observe(repo, home=home, include_tool_profile=True)["entries"]
+    assert row["state"] == "needed"
+    assert "prepared-payloads" in Path(row["payloadContext"]["copilotHome"]).parts
+    assert not list(home.iterdir())
+
+
+def fail_profile_git(monkeypatch, timeout):
+    def fail(*args, **kwargs):
+        if timeout:
+            raise subprocess.TimeoutExpired(["git", "rev-parse"], 15)
+        raise preparation.profile.git_ops.GitError(["git", "rev-parse"], 128, "fixture probe failure")
+
+    monkeypatch.setattr(preparation.profile.git_ops, "git", fail)
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_profile_git_probe_failures_return_structured_refusal(tool_profile, monkeypatch, capsys, timeout):
+    home, repo, _, _ = tool_profile
+    monkeypatch.setattr(preparation.Path, "home", lambda: home)
+    fail_profile_git(monkeypatch, timeout)
+    code = preparation.command(argparse.Namespace(
+        repo=repo, apply=False, expected_plan_digest=None, include_tool_profile=True,
+    ))
+    result = json.loads(capsys.readouterr().out)
+    assert code == 1 and not result["payloadsReady"]
+    assert "cannot inspect checkout tool profile Git identity" in result["refusal"]
+
+
+@pytest.mark.parametrize("timeout", [False, True])
+def test_profile_git_prelaunch_failure_confirms_no_native_writer(tool_profile, monkeypatch, timeout):
+    from agent_procutil import owned_process
+    import plugin_resolve.preparation as native
+    from agent_worktrees import installer_run
+
+    home, repo, _, _ = tool_profile
+    plan = preparation.observe(repo, home=home, include_tool_profile=True)
+    native_home = Path(plan["entries"][0]["payloadContext"]["copilotHome"])
+    fail_profile_git(monkeypatch, timeout)
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+    monkeypatch.setattr(update_acquisition, "_run_update", lambda *a, **k: pytest.fail("native writer launched"))
+
+    def drive(source, definition, *, staging, repo, copilot_command, environment, runner, check_cancelled):
+        return runner(
+            [sys.executable, "-c", "pass"], cwd=repo, timeout=5,
+            env={**environment, "COPILOT_HOME": str(native_home)},
+        )
+
+    monkeypatch.setattr(native, "prepare_payload", drive)
+    with pytest.raises(installer_run.InstallerLaunchError, match="selection changed"):
+        update_acquisition.acquire_prepared(
+            "sample@first", {"source": {"source": "github", "repo": "example/first"}},
+            sys.executable, cwd=repo, staging=home / "prepared",
+            revalidate=lambda: preparation.observe(repo, home=home, include_tool_profile=True),
+        )
+    assert not activation_preservation_pending(native_home)

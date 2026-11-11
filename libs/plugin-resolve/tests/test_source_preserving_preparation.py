@@ -4,8 +4,9 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 import pytest
 
@@ -59,9 +60,9 @@ def test_acquisition_only_uses_owned_runner_without_registering(tmp_path: Path, 
     environment = {**os.environ, "STRUCTURED_GIT_LOG": str(tmp_path / "acquisition.json")}
     staging = tmp_path / "copilot-venue-plugins"
     command = (sys.executable, str(Path(__file__).parent / "fixtures" / "structured_git_installer.py"))
-    calls = []
+    calls: list[tuple[list[str], dict[str, Any]]] = []
 
-    def run(argv, **kwargs):
+    def run(argv: list[str], **kwargs: Any) -> subprocess.CompletedProcess[str]:
         calls.append((argv, kwargs))
         return subprocess.run(argv, **kwargs)
 
@@ -85,16 +86,16 @@ def test_acquisition_only_uses_owned_runner_without_registering(tmp_path: Path, 
     ) == payload
 
 
-def test_owned_acquisition_failure_retains_the_exact_native_workspace(tmp_path: Path, monkeypatch) -> None:
-    import plugin_resolve.preparation as preparation
-
+def test_owned_acquisition_failure_retains_the_exact_native_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
     target = tmp_path / "target"
     init_checkout(target)
     workspace = tmp_path / "native"
     workspace.mkdir()
-    monkeypatch.setattr(preparation.tempfile, "mkdtemp", lambda *args, **kwargs: str(workspace))
+    monkeypatch.setattr(tempfile, "mkdtemp", lambda *args, **kwargs: str(workspace))
 
-    def unsettled(*args, **kwargs):
+    def unsettled(*args: Any, **kwargs: Any) -> NoReturn:
         (Path(kwargs["cwd"]) / "retained.txt").write_text("unsettled fixture")
         raise RuntimeError("native cleanup not verified")
 

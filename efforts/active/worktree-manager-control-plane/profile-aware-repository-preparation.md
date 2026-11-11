@@ -166,3 +166,15 @@ plugin or successful repository setup.
   profile/preservation regressions also passed. Review, required CI and release
   remain gates. Complete repository setup, caller skew/rollback controls and
   broader setup ownership remain open; no installed-host update was performed.
+- 2026-11-11: Provider PR #12007 exposed three concrete completeness gaps:
+  portable identity normalization omits acquisition selectors, catalog
+  normalization does not validate the payload's manifest name, and raw Git
+  failures cannot participate in positively witnessed no-launch recovery.
+  The candidate now compares complete source options, checks the manifest and
+  private native source definition, and converts Git errors/timeouts through the
+  existing profile/refusal owner. Remote aliases use the native marketplace
+  classifier. The corrected frozen packet passed 51 controls, including actual
+  default-source acquisition/catalog consumption. Six shared-library strict
+  typing errors from the first CI run were corrected; both 25-file platform
+  targets and the two focused acquisition/retention regressions passed locally.
+  The corrected source still requires a new published-head CI/review result.

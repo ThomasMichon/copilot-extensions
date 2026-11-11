@@ -7,7 +7,7 @@ from dataclasses import replace
 import hashlib
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import sys
 
 from dropin_registry import ScanAuthority
@@ -15,9 +15,9 @@ from plugin_activation import (
     activation_custody, activation_preservation_pending,
     current_declarations, declared_payload_roots, validate_identity,
 )
-from plugin_resolve import RepoPluginSettings, split_source
+from plugin_resolve import MarketplaceSourceKind, RepoPluginSettings, marketplace_source_kind, split_source
 from plugin_resolve.payload import catalog_metadata, plugin_manifest
-from plugin_resolve.registration import _installation_home, strict_json
+from plugin_resolve.registration import _installation_home, _settings_document, strict_json
 
 from . import (
     _installation_context as context, copilot_plugin_profile as profile,
@@ -36,6 +36,22 @@ def _digest(value: object) -> str:
     return hashlib.sha256(json.dumps(
         value, sort_keys=True, separators=(",", ":"), allow_nan=False,
     ).encode("utf-8")).hexdigest()
+
+
+def _source_options(descriptor: dict, base: Path, kind: str) -> dict:
+    for key in ("sha", "path"):
+        if key in descriptor and (not isinstance(descriptor[key], str) or not descriptor[key].strip()):
+            raise PreparationError("Marketplace acquisition selectors must be non-empty strings.")
+    if kind != "directory" and "path" in descriptor:
+        windows, posix = PureWindowsPath(descriptor["path"]), PurePosixPath(descriptor["path"])
+        if windows.drive or windows.root or posix.is_absolute() or ".." in windows.parts or ".." in posix.parts:
+            raise PreparationError("Remote marketplace path must remain inside its repository.")
+    consumed = {"kind", "source", "canonical", "repo", "url", "ref"}
+    options = {key: value for key, value in descriptor.items() if key not in consumed}
+    if kind == "directory" and isinstance(options.get("path"), str):
+        path = Path(options["path"])
+        options["path"] = profile._identity(path if path.is_absolute() else base / path)
+    return options
 
 
 def _selection(project: Path, home: Path, include_tool_profile: bool):
@@ -59,22 +75,29 @@ def _selection(project: Path, home: Path, include_tool_profile: bool):
     for name, definition in desired["extraKnownMarketplaces"].items():
         descriptor = definition["source"]
         normalized = context.normalize_source(descriptor, project)
+        options = _source_options(descriptor, project, normalized.kind)
         if name in marketplaces:
-            previous = context.normalize_source(marketplaces[name]["source"], bases[name])
-            if normalized != previous:
+            previous_definition = marketplaces[name]
+            previous_descriptor = previous_definition["source"]
+            previous = context.normalize_source(previous_descriptor, bases[name])
+            if (
+                normalized != previous
+                or options != _source_options(previous_descriptor, bases[name], previous.kind)
+                or {key: value for key, value in definition.items() if key != "source"}
+                != {key: value for key, value in previous_definition.items() if key != "source"}
+            ):
                 raise PreparationError("Tool profile conflicts with a declared marketplace source.")
             context._get_declarations(name, home / ".copilot", project)
         marketplaces[name] = definition
         bases[name] = project
+    settings = RepoPluginSettings(enabled=enabled, marketplaces=marketplaces)
     isolated = frozenset(
         source for source, on in desired["enabledPlugins"].items()
         if on and not declared.settings.enabled.get(source, False)
-        and marketplaces.get(split_source(source)[1], {}).get("source", {}).get("source")
-        in {"github", "git"}
+        and marketplace_source_kind(split_source(source)[1], settings) is MarketplaceSourceKind.REMOTE
     )
     return replace(
-        declared, settings=RepoPluginSettings(enabled=enabled, marketplaces=marketplaces),
-        marketplace_bases=bases,
+        declared, settings=settings, marketplace_bases=bases,
     ), binding, isolated
 
 
@@ -84,7 +107,7 @@ def _prepared_home(home: Path, source: str, definition: dict) -> Path:
     return root
 
 
-def _prepared_root(native_home: Path, source: str) -> Path | None:
+def _prepared_root(native_home: Path, source: str, definition: dict) -> Path | None:
     name, marketplace = split_source(source)
     root = native_home / "installed-plugins" / marketplace / name
     profile._safe_path(native_home, root)
@@ -100,7 +123,14 @@ def _prepared_root(native_home: Path, source: str) -> Path | None:
         or not isinstance(entry, dict) or entry.get("name") != name
     ):
         raise PreparationError("Prepared payload receipt identifies a different source.")
-    catalog_metadata(source, plugin_manifest(root), catalog, entry)
+    manifest = plugin_manifest(root)
+    if manifest.get("name") != name:
+        raise PreparationError("Prepared payload manifest identifies a different plugin.")
+    settings_path = native_home / "settings.json"
+    profile._safe_path(native_home, settings_path)
+    if _settings_document(settings_path).get("extraKnownMarketplaces", {}).get(marketplace) != definition:
+        raise PreparationError("Prepared payload does not match its complete declared source.")
+    catalog_metadata(source, manifest, catalog, entry)
     return root
 
 
@@ -155,7 +185,7 @@ def observe(
                 else "active"
             )
             row["payloadContext"] = {"copilotHome": str(native_home.resolve())}
-        root = _prepared_root(native_home, source) if source in isolated else roots[source]
+        root = _prepared_root(native_home, source, definition) if source in isolated else roots[source]
         if root is not None:
             if normalized.kind != "directory":
                 actual = context.resolve_payload_source(

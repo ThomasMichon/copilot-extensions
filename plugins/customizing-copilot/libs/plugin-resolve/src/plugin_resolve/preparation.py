@@ -13,7 +13,7 @@ import subprocess
 import tarfile
 import tempfile
 import uuid
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, cast
 
@@ -39,7 +39,7 @@ _GIT_SELECTORS = GIT_REPOSITORY_SELECTORS
 
 
 @contextlib.contextmanager
-def _installation_workspace(*, retain_failed: bool):
+def _installation_workspace(*, retain_failed: bool) -> Iterator[str]:
     workspace = tempfile.TemporaryDirectory(prefix="copilot-venue-install-")
     directory = workspace.name
     cleanup = True
@@ -49,7 +49,7 @@ def _installation_workspace(*, retain_failed: bool):
         if retain_failed:
             cleanup = False
             # Python 3.11 has no public keep-directory option.
-            workspace._finalizer.detach()
+            cast(Any, workspace)._finalizer.detach()
             if isinstance(error, Exception):
                 raise RuntimeError(
                     f"{error}; native working directory retained: {directory}"
