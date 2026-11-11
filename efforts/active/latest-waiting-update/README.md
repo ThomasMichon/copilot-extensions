@@ -1,0 +1,128 @@
+# Latest Waiting Update
+
+## Goal
+
+Keep the running update intact and at most one waiting successor; a newer
+accepted update replaces the older waiting request rather than executing stale
+queued installer code.
+
+- **Slug:** `latest-waiting-update`
+- **Repo:** copilot-extensions
+- **Branch(es):** independent proposal and implementation PRs against `dev`
+- **Created:** 2026-11-10
+- **Status:** Draft
+- **Vision:** [single installation execution owner](../../../visions/installer/README.md#single-installation-execution-owner);
+  [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+- **Umbrella issue:** #11985
+
+## Guiding Intent
+
+Extend the existing durable update driver rather than introduce another queue,
+scheduler, withdrawal command or installer. Newness means admission order of
+authorized requests, not a guessed version ordering or permission to roll back.
+Supersession is observable history, not successful installation.
+
+## Participants
+
+| Participant | Role in this effort | Reached via |
+|-------------|---------------------|-------------|
+| Queue driver | Proposal, implementation, focused validation and publication | Managed source worktree; public issue #11985 |
+
+## Coordination
+
+- **Topology:** sequential proposal and implementation PRs.
+- **Host (owns PRs):** Queue driver.
+- **Delegates:** none.
+- **Handoff:** canonical README, issue and journal; preserve pending gates.
+- This is a bounded scheduling slice under #7758, not ownership of its whole
+  execution-foundation campaign. #10377 retains incompatible-footprint recovery;
+  recurring maintenance and its open PR retain enrollment and lifecycle work.
+
+## Context
+
+The driver currently coalesces identical pending requests. Different source,
+runner and option selections remain separate FIFO records, so an old retained
+bootstrap can execute before a newly requested update. Admission and dequeue
+already share SQLite transactions; running installation custody is separate.
+Component provisioning and borrowed subordinate execution use the same owner
+but are not interchangeable update requests.
+
+The replacement vision remains the completion contract: incoming readiness and
+all applicable current selections establish actual installation success;
+outgoing retirement is independent. This slice does not claim to resolve the
+existing interrupted/foundation-state replacement gaps.
+
+## Request
+
+> We should only allow a "queue size of one" for updates: if there is an update in progress, and another update is queued, queueing yet-another update should replace the one already in the queue. That should deal with "stale version is queued" problems
+
+## Scope Approvals
+
+The request authorizes this source behavior change. It does not authorize
+installation, queue mutation on an existing host, replay, cleanup, automatic
+maintenance enrollment or unrelated product effects.
+
+## Plan
+
+### Phase 1 - Reviewed contract
+
+- [ ] Reconcile the Installer vision and land this proposal through review.
+
+### Phase 2 - Admission and observable supersession
+
+The following implementation decomposition is agent-recommended.
+
+- [ ] Define addressed update equivalence using existing installation and
+  execution-authority identity. Replace waiting update selections atomically
+  with acceptance of the successor, including old never-started pending rows;
+  never select by age, PID or runner version.
+- [ ] Preserve the active operation, unknown/interrupted execution evidence,
+  independent installations, selected project authority and required component
+  provisioning. Automatic requests cannot replace a waiting explicit request.
+  Keep ordinary identical-request coalescing where its execution identity is
+  truly unchanged, without losing the one-waiting-successor invariant.
+- [ ] Retain the replaced request's identity and invocation plus a durable
+  non-success superseded outcome naming its successor. Existing wait/status
+  callers must terminate honestly, including across restart and version skew.
+  Prefer the existing terminal nonzero result contract over a new schema/CLI
+  when it expresses the outcome completely.
+- [ ] Update owning API/consumer documentation, release metadata and this
+  journal; pass review and required CI and confirm release publication.
+
+## Validation Plan
+
+These controls are agent-recommended and must exercise the actual owner.
+
+- [ ] Focused admission/status/wait controls: active A, waiting B, newer C;
+  only A and C execute, B observes explicit supersession and no success.
+- [ ] Burst and actual separate-process enqueue/dequeue races retain one
+  waiting update per addressed scope and one writer; committed history survives
+  a fresh reader. Rollback of failed successor acceptance preserves B.
+- [ ] Old pending bootstrap/source replacement, equivalent arrivals, explicit
+  option changes, manual/automatic precedence, independent installation/project
+  authority, required component work and unknown-execution refusals remain
+  correct. Do not equate synthetic controls with installation acceptance.
+- [ ] Exercise the real supported submission/observation consumer seam and
+  focused clean-room/native fixtures where applicable, documenting unavailable
+  tiers explicitly. No production host mutation as a test side effect.
+- [ ] Record reviewed source merge and actual promoted release separately;
+  close this bounded effort only when its source/contract gates are resolved.
+  Host rollout and installed incoming-readiness/current-selection proof remain
+  with each explicitly authorized adopter, not implicitly granted by this plan.
+
+## Proposal
+
+No runtime change is implemented by this proposal. Admission remains in the
+existing owner and transaction. No daemon, scheduler, new credential path,
+global auth change or expansion of required CI is proposed.
+
+## Journal
+
+### 2026-11-10 - Proposal
+
+- Claimed #11985 after checking existing queue and maintenance work.
+- Captured the request verbatim and checked Goal, Guiding Intent and Plan
+  against it. Authority, component preservation and validation details above
+  are explicitly agent-recommended implementation constraints.
+- Inspected current enqueue/dequeue, pending identity, terminal result,
+  participant and update-authority boundaries; implementation awaits review.

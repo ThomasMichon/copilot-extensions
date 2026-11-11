@@ -3080,10 +3080,21 @@ conversation, no extension-permission grant and birth-matched native/extension
 retirement. Select it with `COPILOT_DRIVER_HEADED_MUX_E2E=1` and an existing
 `PSMUX_TEST_BIN`; the client-task control needs only the explicitly selected
 `COPILOT_NATIVE_TEST_EXECUTABLE`. The file requires `--allow-explicit-tiers`.
+On Windows the same file drives actual synchronous/background `powershell` and `task`
+tools using captured native tool descriptors and local synthetic model replies.
+The joined observer must see one running task before its work is released.
+Shells must finish and disappear or be exactly removed after completion.
+Agents remain idle after responding: removal is refused until exact cancellation,
+after which the cancelled record is observed and removed. These controls pin the
+CLI, observer and actual shell process births and require their retirement,
+one native conversation and no extension-permission grant. Model response gates
+keep the root turn open until the observed task settles; they do not simulate
+the task registry or use private SDK task-start operations.
+
 These controls do not call the SDK's internal schedule-add API or assume a
-prompt-mode model exposes `manage_schedule`. They do not qualify agent/shell
-coverage, complete pending snapshots, ACP idle grace, another pinned runtime,
-or survival after caller cleanup Jobs.
+prompt-mode model exposes `manage_schedule`. They do not qualify other agent/shell
+modes, complete pending snapshots, ACP idle grace, another pinned runtime or
+survival after caller cleanup Jobs.
 
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied
