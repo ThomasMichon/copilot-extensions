@@ -16,6 +16,15 @@ as the stable runtime-facing path. See
 [`docs/patterns/README.md`](../../docs/patterns/README.md) §"Runtime installs are
 immutable and versioned".
 
+## Windows filesystem paths
+
+Version inventory and garbage collection accept ordinary or extended-length
+Windows paths, without requiring a machine-wide long-path setting. Filesystem
+access uses the canonical native-path helper. Process-image and launch-path
+matching normalize both forms without resolving symlinks. Current and
+last-known-good selections, explicit keeps, live processes, construction and
+retention leases, and durable references remain deletion barriers.
+
 ## Selector sharing on Windows
 
 Selector publication uses `FileRenameInfoEx` with replace and POSIX semantics.

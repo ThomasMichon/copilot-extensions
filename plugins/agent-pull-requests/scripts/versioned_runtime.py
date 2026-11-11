@@ -166,7 +166,7 @@ def current_link(root: Path, link_name: str = CURRENT_LINK) -> Path:
 
 def list_versions(root: Path) -> list[str]:
     """Installed version directory names, sorted (newest-looking last)."""
-    vroot = versions_root(root)
+    vroot = _leases._native_path(versions_root(root))
     if not vroot.is_dir():
         return []
     names = [p.name for p in vroot.iterdir() if p.is_dir()]
@@ -758,16 +758,16 @@ def _slot_of_path(path: str | None, versions_abs: str, versions: set[str]) -> st
     if not path:
         return None
     try:
-        p = os.path.normcase(os.path.abspath(path))
+        p = os.path.normcase(str(_leases._native_path(Path(os.path.abspath(path)))))
+        base = os.path.normcase(str(_leases._native_path(Path(versions_abs))))
     except (OSError, ValueError):
         return None
-    base = os.path.normcase(versions_abs)
     if not base.endswith(os.sep):
         base += os.sep
     if not p.startswith(base):
         return None
     first = p[len(base):].split(os.sep, 1)[0]
-    return first if first in versions else None
+    return next((version for version in versions if os.path.normcase(version) == first), None)
 
 
 def _recorded_live_versions(root: Path, versions: set[str]) -> set[str]:
@@ -990,6 +990,7 @@ def gc(root: Path, keep: list[str] | None = None,
     removed via :func:`_remove_slot` as the exact reparse-point entry, never
     traversing the junction target.
     """
+    root = _leases._native_path(root)
     removed: list[str] = []
     for v in _gc_candidate_versions(root):
         with _cleanup_lease(root, v) as admitted:
