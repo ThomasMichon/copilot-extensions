@@ -3164,8 +3164,16 @@ execution scope. The stalled case must time out, independently retire the
 helper and native child, and confirm whole-scope settlement without relying on
 the helper's shutdown code.
 
+The nonempty client-task control uses public typed registration and update
+requests in Session A. It observes running and idle records, rejects removal
+in both states, and retains the completed result until exact removal. It also
+creates Session B, requires an empty B task list, disconnects B and verifies
+that A's running task is unchanged. The unprompted B session need not create
+a conversation history file. No extension principal or task registry is
+fabricated to make registration succeed.
+
 These controls do not migrate Session Host from native ACP to an SDK adapter,
-qualify nonempty headless tasks/schedules or complete pending snapshots, enable
+qualify headless agents, shells, schedules or complete pending snapshots, enable
 idle expiry, attribute observer retirement, or qualify another selected
 runtime/platform. Native and SDK versions must be recorded with each result;
 package availability alone is not runtime support.
