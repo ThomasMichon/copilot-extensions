@@ -1,0 +1,9 @@
+{
+  "comment": "Support native Windows ARM64 SSH keys and preserve sealed data and legacy Fernet caches with PyCryptodome.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

@@ -14,7 +14,7 @@ from agent_vault import cache as cache_mod
 from agent_vault import cli, keepassxc, service
 from agent_vault.cache import PersistentCache, cache_enabled, get_cache
 
-cryptography = pytest.importorskip("cryptography")
+pytest.importorskip("Cryptodome")
 
 
 @pytest.fixture
@@ -433,7 +433,7 @@ def test_batch_get_refresh_returns_ordered_partial_or_total_failure(
 def test_batch_refuses_corrupt_fernet_cache_without_replacement(
     enabled_cache, monkeypatch, capsys, failure, refresh,
 ):
-    from cryptography.fernet import Fernet
+    from agent_vault.protected_crypto import Fernet
 
     from agent_vault import kek
 
@@ -648,7 +648,7 @@ def test_batch_rejects_malformed_service_values_before_cache_write(
 def test_batch_does_not_replace_cache_corrupted_during_service_read(
     enabled_cache, monkeypatch, capsys, refresh, key_only, failure,
 ):
-    from cryptography.fernet import Fernet
+    from agent_vault.protected_crypto import Fernet
 
     from agent_vault import kek
 
@@ -1292,7 +1292,7 @@ def test_cache_key_is_wrapped_at_rest(enabled_cache):
 
 def test_cache_migrates_legacy_plaintext_key(enabled_cache):
     """A pre-existing plaintext Fernet key is read, then rewrapped on next use."""
-    from cryptography.fernet import Fernet
+    from agent_vault.protected_crypto import Fernet
 
     from agent_vault import kek
 
