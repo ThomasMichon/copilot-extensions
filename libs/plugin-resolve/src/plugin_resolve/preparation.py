@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import io
 import json
@@ -35,6 +36,29 @@ from .target import bind_target
 from .plugin_auth import plugin_management_environment, redact_plugin_credentials
 
 _GIT_SELECTORS = GIT_REPOSITORY_SELECTORS
+
+
+@contextlib.contextmanager
+def _installation_workspace(*, retain_failed: bool):
+    workspace = tempfile.TemporaryDirectory(prefix="copilot-venue-install-")
+    directory = workspace.name
+    cleanup = True
+    try:
+        yield directory
+    except BaseException as error:
+        if retain_failed:
+            cleanup = False
+            # Python 3.11 has no public keep-directory option.
+            workspace._finalizer.detach()
+            if isinstance(error, Exception):
+                raise RuntimeError(
+                    f"{error}; native working directory retained: {directory}"
+                ) from error
+        raise
+    finally:
+        if cleanup:
+            workspace.cleanup()
+
 
 def _environment(environment: Mapping[str, str] | None = None) -> dict[str, str]:
     source = os.environ if environment is None else environment
@@ -137,6 +161,7 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
              copilot_command: tuple[str, ...], *, environment: Mapping[str, str] | None = None,
              execution_cwd: Path | None = None,
              check_cancelled: Callable[[], None] = lambda: None,
+             runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
              ) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     check_cancelled()
     name, marketplace = identity(source)
@@ -195,7 +220,7 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
         settings.setdefault("extraKnownMarketplaces", {})[marketplace] = definition
         check_cancelled()
         atomic_json(settings_path, settings)
-    with tempfile.TemporaryDirectory(prefix="copilot-venue-install-") as neutral:
+    with _installation_workspace(retain_failed=runner is not None) as neutral:
         if Path(neutral).resolve().is_relative_to(repo.resolve()):
             raise ValueError("Native installation commands require a neutral cwd outside the target checkout")
         cache_root = Path(neutral) / "cache"
@@ -218,7 +243,7 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
         def command(arguments: list[str], operation: str) -> None:
             check_cancelled()
             try:
-                result = subprocess.run(
+                result = (runner or subprocess.run)(
                     [*command_prefix, *arguments], cwd=neutral, env=env,
                     capture_output=True, text=True, timeout=240,
                     creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
@@ -252,6 +277,21 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
     check_cancelled()
     atomic_json(receipt, {"source": source, "catalog": metadata, "entry": entry})
     return payload, metadata, entry
+
+
+def prepare_payload(
+    source: str, definition: dict[str, Any], *, staging: Path, repo: Path,
+    copilot_command: tuple[str, ...], environment: Mapping[str, str],
+    runner: Callable[..., subprocess.CompletedProcess[str]],
+    check_cancelled: Callable[[], None],
+) -> Path:
+    """Acquire one source-qualified payload without repository registration."""
+    home = _installation_home(staging, source, definition)
+    payload, _, _ = _install(
+        source, definition, home, repo, copilot_command,
+        environment=environment, runner=runner, check_cancelled=check_cancelled,
+    )
+    return payload
 
 
 def prepare(

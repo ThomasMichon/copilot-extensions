@@ -238,6 +238,44 @@ def acquire_missing(
     return "OK (installed)"
 
 
+def acquire_prepared(
+    source: str, definition: dict, copilot: str, *, cwd: Path,
+    staging: Path, revalidate: Callable[[], None],
+) -> str:
+    """Compose the existing isolated source installer with owned execution."""
+    from plugin_resolve.preparation import prepare_payload
+    from . import activation_preservation, installer_run
+
+    started = monotonic()
+
+    def run(argv, *, env, cwd, timeout, **_kwargs):
+        remaining = min(timeout, _TOTAL_BUDGET_S - (monotonic() - started))
+        if remaining <= 0:
+            raise installer_run.InstallerLaunchError("payload acquisition budget exhausted")
+
+        def checked(*args, **kwargs):
+            try:
+                revalidate()
+            except (ValueError, OSError, RuntimeError) as error:
+                raise installer_run.InstallerLaunchError(
+                    "payload selection changed before acquisition"
+                ) from error
+            return _run_update(*args, **kwargs)
+
+        with activation_preservation.activation_custody(home=Path(env["COPILOT_HOME"])) as custody:
+            return _run_install(
+                argv, source, cwd=cwd, timeout=remaining, env=env,
+                custody=custody, runner=checked,
+            )
+
+    prepare_payload(
+        source, definition, staging=staging, repo=cwd,
+        copilot_command=(copilot,), environment=dict(os.environ),
+        runner=run, check_cancelled=revalidate,
+    )
+    return "OK (prepared)"
+
+
 def _acquire(
     name: str, marketplace: str, copilot: str, *,
     cwd: Path | None, engine: bool, started: float,

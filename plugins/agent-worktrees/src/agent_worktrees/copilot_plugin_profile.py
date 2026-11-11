@@ -6,6 +6,7 @@ then reconciled under knowledge_plugins' workspace lease and atomic writer.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -166,6 +167,46 @@ def _profile(root: Path, selected: str | None) -> tuple[str | None, dict[str, di
             definition = {**definition, "source": localized_source}
         desired["extraKnownMarketplaces"][name] = definition
     return _identity(path), desired
+
+
+def preparation_profile(root: Path) -> tuple[dict, dict[str, dict]]:
+    """Read the selected checkout, not a registered anchor's default branch."""
+    from . import config_sources, inrepo_config_source
+
+    candidates = (
+        cfg.inrepo_config_path(root), cfg.legacy_inrepo_config_path(root),
+        root / cfg.INREPO_CONFIG_FILENAME,
+    )
+    selected = None
+    config = {}
+    config_path = None
+    for path in candidates:
+        _safe_path(root, path)
+        if path.exists():
+            config = inrepo_config_source.load_config_file(path, strict=True)
+            selected = config_sources.parse_plugin_profile(config.get("copilot_plugin_profile"))
+            config_path = path
+            break
+    profile, desired = _profile(root, selected)
+    binding = {
+        "configPath": str(config_path) if config_path else None,
+        "configurationDigest": hashlib.sha256(config_path.read_bytes()).hexdigest() if config_path else None,
+        "profilePath": profile,
+    }
+    if profile is not None:
+        top = git_ops.git(
+            "rev-parse", "--show-toplevel", cwd=root, isolated_repository=True,
+            input_data=b"", timeout=15, kill_tree=True,
+        )
+        if _identity(Path(os.fsdecode(top.stdout).removesuffix("\n").removesuffix("\r"))) != _identity(root):
+            raise _error("tool profile preparation requires the checkout root")
+        revision = git_ops.git(
+            "rev-parse", "--verify", "HEAD^{commit}", cwd=root, isolated_repository=True,
+            input_data=b"", timeout=15, kill_tree=True,
+        )
+        binding["revision"] = os.fsdecode(revision.stdout).strip()
+        binding["profile"] = desired
+    return binding, desired
 
 
 def validate_marker(existing: dict, path: Path, *, project: str | None = None,

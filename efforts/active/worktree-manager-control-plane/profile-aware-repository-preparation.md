@@ -1,6 +1,6 @@
 # Profile-aware repository preparation
 
-- **Status:** Proposed; review before implementation.
+- **Status:** Active; provider candidate implemented, source qualification and publication in progress.
 - **Parent:** [Worktree Manager control plane](README.md), Phase 5.
 - **Coordination:** #11989; source participant `sluggish-gasket`.
 - **Scope:** Native dependency preparation only. #356/#8545 retain broader
@@ -95,15 +95,18 @@ plugin or successful repository setup.
 
 ## Plan
 
-- [ ] Land this proposal through the normal review and required CI gates.
+- [x] Land this proposal through the normal review and required CI gates.
 - [ ] Extend the existing profile/preparation owner and native acquisition
   composition; preserve ordinary observation and activation behavior.
 - [ ] Add the provider's explicit result semantics and actual-parser
   compatibility/refusal controls before a dependent caller migrates.
 - [ ] Update the owning operation's reference documentation and affected tests.
   Add the normal plugin changefile; do not hand-edit versions.
-- [ ] Qualify the complete first-touch setup consumer in disposable state,
-  then publish the implementation through review, CI and release.
+- [ ] Qualify native dependency preparation and catalog consumption in
+  disposable state, then publish the provider through review, CI and release.
+- [ ] Retain complete first-touch setup and upgrade/rollback controls as the
+  dependent caller's adoption gate after provider expansion; this provider
+  change alone does not migrate that caller or complete repository setup.
 - [ ] Record the source/release result and return caller adoption to its
   existing owner. Installed-host rollout remains separately authorized.
 
@@ -135,3 +138,31 @@ plugin or successful repository setup.
 - 2026-11-10: Reserved #11989 after checking existing setup coordination and
   the adjacent knowledge-acquisition PR. This proposal precedes runtime changes;
   no installation, activation, adoption or rollout has been performed.
+- 2026-11-11: Proposal #11990 merged after exact-head Copilot approval with no
+  findings and successful required CI. The source worktree synchronized to the
+  accepted plan. Next is the existing native acquisition/source-context seam
+  and its focused consumer proof, not a settings cutover or installed rollout.
+- 2026-11-11: Implemented the opt-in prospective census and explicit
+  `tool-profile-dependencies-v1` capability/result discriminator. The native
+  profile parser reads the selected checkout; configuration bytes and revision
+  bind the plan. Profile-only remote acquisition reuses the shared installer's
+  isolated homes, bounded native execution and activation preservation. It never
+  calls repository registration. Exceptional owned-runner exits retain their
+  native working directory rather than deleting potentially active write state.
+- 2026-11-11: Focused native/source controls passed for profile refusal and
+  preservation, actual strict CLI parsing, source-default acquisition and
+  read-only machine catalog consumption. A synthetic native catalog control
+  also passed through an existing repository adapter without provisioning a
+  backend. An initial control incorrectly expected a catalog binding field;
+  the machine owner's actual in-process catalog has none. That control error
+  does not justify expanding the installation-context primitive.
+  Two broad local test groups reached their unchanged 300-second limits with
+  no assertion failures reported; narrower affected-source controls passed.
+  A temporary cleanup regression involving Windows read-only Git objects was
+  caught and fixed by retaining standard-library cleanup on settled completion.
+  The final frozen provider selection passed 37 controls, including actual
+  public default-source machine-plugin acquisition and its native catalog;
+  ten shared acquisition controls and eighteen targeted existing
+  profile/preservation regressions also passed. Review, required CI and release
+  remain gates. Complete repository setup, caller skew/rollback controls and
+  broader setup ownership remain open; no installed-host update was performed.

@@ -294,3 +294,161 @@ def test_conflicting_native_marketplace_sources_refuse_before_acquisition(select
     monkeypatch.setattr(update_acquisition, "acquire_missing", lambda *a, **k: pytest.fail("conflicting source ran"))
     with pytest.raises(ValueError, match="Conflicting declarations"):
         preparation.observe(repo, home=home)
+
+
+@pytest.fixture
+def tool_profile(selected, monkeypatch):
+    home, repo, settings = selected
+    write(settings, {})
+    config = repo / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("copilot_plugin_profile: tool-plugins.json\n", encoding="utf-8")
+    path = repo / "tool-plugins.json"
+    write(path, {
+        "enabledPlugins": {"sample@first": True},
+        "extraKnownMarketplaces": {
+            "first": {"source": {"source": "github", "repo": "example/first"}},
+        },
+    })
+
+    def git(*args, **kwargs):
+        return subprocess.CompletedProcess(args, 0, str(repo) if "--show-toplevel" in args else "a" * 40, "")
+
+    monkeypatch.setattr(preparation.profile.git_ops, "git", git)
+    return home, repo, settings, path
+
+
+def test_profile_is_explicit_and_never_activates_or_registers(tool_profile):
+    home, repo, settings, path = tool_profile
+    before = {item: item.read_bytes() for item in repo.rglob("*") if item.is_file()}
+    ordinary = preparation.observe(repo, home=home)
+    assert ordinary["entries"] == [] and ordinary["payloadsReady"]
+    assert preparation.PROFILE_CAPABILITY in ordinary["capabilities"]
+    result = preparation.observe(repo, home=home, include_tool_profile=True)
+    assert result["selectionMode"] == preparation.PROFILE_CAPABILITY
+    assert not result["payloadsReady"]
+    row, = result["entries"]
+    assert row["source"] == "sample@first" and row["selection"] == "profile-dependency"
+    assert Path(row["payloadContext"]["copilotHome"]).is_relative_to(home)
+    assert before == {item: item.read_bytes() for item in repo.rglob("*") if item.is_file()}
+    assert not list(home.iterdir())
+
+
+def test_absent_profile_keeps_active_census(selected):
+    home, repo, _ = selected
+    ordinary = preparation.observe(repo, home=home)
+    result = preparation.observe(repo, home=home, include_tool_profile=True)
+    assert [row["source"] for row in ordinary["entries"]] == [row["source"] for row in result["entries"]]
+    assert all(row["selection"] == "active" for row in result["entries"])
+
+
+@pytest.mark.parametrize("change", ["false-choice", "marketplace", "escape", "invalid", "duplicate"])
+def test_invalid_profile_refuses_without_acquisition(tool_profile, monkeypatch, change):
+    home, repo, settings, path = tool_profile
+    if change == "false-choice":
+        write(settings, {"enabledPlugins": {"sample@first": False}})
+    elif change == "marketplace":
+        write(settings, {"extraKnownMarketplaces": {
+            "first": {"source": {"source": "github", "repo": "other/first"}},
+        }})
+    elif change == "escape":
+        (repo / ".agent-worktrees" / "config.yaml").write_text(
+            "copilot_plugin_profile: ../outside.json\n", encoding="utf-8",
+        )
+    elif change == "invalid":
+        write(path, {"unsupported": True})
+    else:
+        path.write_text('{"enabledPlugins":{"sample@first":true,"sample@first":false}}', encoding="utf-8")
+    monkeypatch.setattr(update_acquisition, "acquire_prepared", lambda *a, **k: pytest.fail("invalid inputs ran"))
+    with pytest.raises(ValueError):
+        preparation.observe(repo, home=home, include_tool_profile=True)
+    assert not list(home.iterdir())
+
+
+@pytest.mark.parametrize("change", ["profile", "config", "revision"])
+def test_profile_plan_binds_all_selected_checkout_inputs(tool_profile, monkeypatch, change):
+    home, repo, _, path = tool_profile
+    plan = preparation.observe(repo, home=home, include_tool_profile=True)
+    if change == "profile":
+        data = json.loads(path.read_text())
+        data["extraKnownMarketplaces"]["first"]["source"]["repo"] = "other/first"
+        write(path, data)
+    elif change == "config":
+        (repo / ".agent-worktrees" / "config.yaml").write_text(
+            "copilot_plugin_profile: tool-plugins.json\nexpose_agent: false\n", encoding="utf-8",
+        )
+    else:
+        monkeypatch.setattr(preparation.profile.git_ops, "git", lambda *a, **k: subprocess.CompletedProcess(
+            a, 0, str(repo) if "--show-toplevel" in a else "b" * 40, "",
+        ))
+    monkeypatch.setattr(update_acquisition, "acquire_prepared", lambda *a, **k: pytest.fail("stale plan ran"))
+    with pytest.raises(ValueError, match="plan changed"):
+        preparation.prepare(repo, plan["planDigest"], home=home, include_tool_profile=True)
+
+
+def test_profile_plan_cannot_be_applied_as_active_only(tool_profile, monkeypatch):
+    home, repo, _, _ = tool_profile
+    plan = preparation.observe(repo, home=home, include_tool_profile=True)
+    monkeypatch.setattr(update_acquisition, "acquire_missing", lambda *a, **k: pytest.fail("downgraded plan ran"))
+    with pytest.raises(ValueError, match="plan changed"):
+        preparation.prepare(repo, plan["planDigest"], home=home)
+
+
+def test_profile_local_payload_is_qualified_without_global_copy(tool_profile):
+    home, repo, _, path = tool_profile
+    payload = repo / ".ai" / "sample"
+    write(payload / "plugin.json", {"name": "sample", "version": "1.0.0"})
+    write(payload.parent / ".github" / "plugin" / "marketplace.json", {
+        "name": "first", "plugins": [{"name": "sample", "source": "./sample"}],
+    })
+    write(path, {
+        "enabledPlugins": {"sample@first": True},
+        "extraKnownMarketplaces": {"first": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    result = preparation.observe(repo, home=home, include_tool_profile=True)
+    assert result["payloadsReady"]
+    assert Path(result["entries"][0]["payloadRoot"]) == payload
+    assert not list(home.iterdir())
+
+
+def test_prepared_payload_requires_actual_source_and_complete_receipt(tool_profile):
+    home, repo, _, _ = tool_profile
+    row, = preparation.observe(repo, home=home, include_tool_profile=True)["entries"]
+    native_home = Path(row["payloadContext"]["copilotHome"])
+    root = native_home / "installed-plugins" / "first" / "sample"
+    write(root / "plugin.json", {"name": "sample", "version": "1.0.0"})
+    assert not preparation.observe(repo, home=home, include_tool_profile=True)["payloadsReady"]
+    write(native_home / ".installation-complete.json", {"source": "different@first"})
+    with pytest.raises(ValueError, match="different source"):
+        preparation.observe(repo, home=home, include_tool_profile=True)
+
+
+def test_prepared_payload_cannot_replace_the_declared_source(tool_profile):
+    home, repo, _, _ = tool_profile
+    row, = preparation.observe(repo, home=home, include_tool_profile=True)["entries"]
+    native_home = Path(row["payloadContext"]["copilotHome"])
+    write(native_home / "installed-plugins" / "first" / "sample" / "plugin.json", {
+        "name": "sample", "version": "1.0.0",
+    })
+    write(native_home / ".installation-complete.json", {
+        "source": "sample@first",
+        "catalog": {"name": "first", "owner": {"name": "Fixture"}},
+        "entry": {"name": "sample", "version": "1.0.0"},
+    })
+    write(native_home / "settings.json", {
+        "extraKnownMarketplaces": {"first": {"source": {"source": "github", "repo": "other/source"}}},
+    })
+    with pytest.raises(ValueError, match="does not match"):
+        preparation.observe(repo, home=home, include_tool_profile=True)
+
+
+def test_plan_binds_non_json_yaml_configuration_without_serializing_it(tool_profile):
+    home, repo, _, _ = tool_profile
+    config = repo / ".agent-worktrees" / "config.yaml"
+    config.write_text(
+        "copilot_plugin_profile: tool-plugins.json\nannotation: 2020-01-01\n", encoding="utf-8",
+    )
+    before = preparation.observe(repo, home=home, include_tool_profile=True)
+    config.write_text(config.read_text() + "# revised\n", encoding="utf-8")
+    after = preparation.observe(repo, home=home, include_tool_profile=True)
+    assert before["selectionDigest"] != after["selectionDigest"]

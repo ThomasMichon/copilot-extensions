@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from plugin_resolve.preparation import prepare
+from plugin_resolve.preparation import prepare, prepare_payload
 from plugin_resolve.reflection import build_plan
 from plugin_resolve.registration import atomic_json
 from plugin_resolve.settings import read_repo_settings
@@ -49,6 +49,65 @@ def git_origin(tmp_path: Path) -> GitOrigin:
     git(root, "commit", "--quiet", "-m", "second fixture")
     second = git(root, "rev-parse", "HEAD")
     return root, first, second
+
+
+def test_acquisition_only_uses_owned_runner_without_registering(tmp_path: Path, git_origin: GitOrigin) -> None:
+    root, _, _ = git_origin
+    target = tmp_path / "target"
+    init_checkout(target)
+    definition = {"source": {"source": "git", "url": root.as_uri(), "path": "catalog-a"}}
+    environment = {**os.environ, "STRUCTURED_GIT_LOG": str(tmp_path / "acquisition.json")}
+    staging = tmp_path / "copilot-venue-plugins"
+    command = (sys.executable, str(Path(__file__).parent / "fixtures" / "structured_git_installer.py"))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.run(argv, **kwargs)
+
+    payload = prepare_payload(
+        "helper@git-fixture", definition, staging=staging,
+        repo=target, copilot_command=command, environment=environment,
+        runner=run, check_cancelled=lambda: None,
+    )
+    assert len(calls) == 1
+    assert calls[0][0][-3:] == ["plugin", "install", "helper@git-fixture"]
+    assert Path(calls[0][1]["cwd"]) != target
+    assert Path(payload, "marker.txt").read_text() == "second"
+    assert read_repo_settings(target).enabled == {}
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
+    assert not (target / ".git" / "copilot-venue-plugins").exists()
+    assert prepare_payload(
+        "helper@git-fixture", definition, staging=staging,
+        repo=target, copilot_command=command, environment=environment,
+        runner=lambda *a, **k: pytest.fail("completed payload acquired again"),
+        check_cancelled=lambda: None,
+    ) == payload
+
+
+def test_owned_acquisition_failure_retains_the_exact_native_workspace(tmp_path: Path, monkeypatch) -> None:
+    import plugin_resolve.preparation as preparation
+
+    target = tmp_path / "target"
+    init_checkout(target)
+    workspace = tmp_path / "native"
+    workspace.mkdir()
+    monkeypatch.setattr(preparation.tempfile, "mkdtemp", lambda *args, **kwargs: str(workspace))
+
+    def unsettled(*args, **kwargs):
+        (Path(kwargs["cwd"]) / "retained.txt").write_text("unsettled fixture")
+        raise RuntimeError("native cleanup not verified")
+
+    with pytest.raises(RuntimeError, match="native cleanup not verified.*retained:"):
+        prepare_payload(
+            "helper@git-fixture", {"source": {"source": "git", "url": "https://example.invalid/source.git"}},
+            staging=tmp_path / "prepared", repo=target,
+            copilot_command=(sys.executable,), environment=dict(os.environ),
+            runner=unsettled, check_cancelled=lambda: None,
+        )
+    assert (workspace / "retained.txt").read_text() == "unsettled fixture"
+    assert not list((tmp_path / "prepared").rglob(".installation-complete.json"))
+    assert not (target / ".github" / "copilot" / "settings.local.json").exists()
 
 
 @pytest.mark.parametrize("mode", ["copy", "reference"])
