@@ -122,8 +122,9 @@ installing or starting anything. Actual actions remain exclusively in the
 module manifest; this document defines no command, module, service or installer.
 Its runtime root participates in the same complete ownership census,
 ordinary/core mode checks and duplicate-writer refusal, even without readiness
-metadata. Its content binds the reviewed plan and readiness-only declaration
-digest. It grants no mutation authority.
+metadata. Its parsed content binds the reviewed plan and readiness-only
+declaration digest independently of payload-tree hash exclusions. It grants no
+mutation authority.
 
 This is provider-first additive support, not a change to the existing command
 protocol. Consumers predating this reader retain their pre-effect

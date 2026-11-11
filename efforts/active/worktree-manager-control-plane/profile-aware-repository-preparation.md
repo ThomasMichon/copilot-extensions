@@ -196,6 +196,16 @@ exception or automatic reclassification.
 
 ## Journal
 
+- 2026-11-11: Review of #12142 found that a declaration below a hash-excluded
+  payload directory could evade full-plan invalidation. The full-mode digest
+  now binds parsed script-owner metadata independently, while retaining the
+  existing generated-command digest behavior. Normal and readiness-only
+  excluded-directory regressions join the final 34-control passing packet;
+  persistent PATH remained unchanged. One older-protocol apply exceeded its
+  original 20-second fixture parent limit. The final functional fixture uses
+  a 30-second apply bound and 60-second whole-test observer, without changing
+  production action or runner aggregate limits. This is not a pass of the
+  earlier timing bound. Updated exact-head review and CI remain required.
 - 2026-11-11: The focused ownership packet passed 32 controls, including actual
   installed-console first touch for both protocols and both selection forms.
   A distinct prior-reader process loaded the exact accepted pre-change source

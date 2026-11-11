@@ -259,12 +259,15 @@ def _binding(
             refusal = "ordinary-owner-mutation-not-admitted"
         else:
             refusal = None
+    if readiness_only:
+        content_digest = digest({"manifest": manifest, "invocation": invocation})
+    else:
+        content_digest = payload_identity(root)
+        if "installerRuntime" in manifest:
+            content_digest = digest({"payload": content_digest, "installerRuntime": invocation})
     return OwnerBinding(
         installation=installation, source=source, mode=mode, version=version,
-        content_digest=(
-            digest({"manifest": manifest, "invocation": invocation})
-            if readiness_only else payload_identity(root)
-        ),
+        content_digest=content_digest,
         mode_binding=digest(mode_data),
         no_self_provision=no_provision, payload_root_environment=payload_environment,
         environment=clean, legacy_root=legacy_root, refusal=refusal,

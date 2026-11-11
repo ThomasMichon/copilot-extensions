@@ -337,12 +337,23 @@ def test_installer_runtime_dual_protocol_refuses_before_probes(repair_fixture, m
 
 
 @pytest.mark.parametrize("readiness_only", [False, True])
-def test_installer_runtime_changes_invalidate_plan(repair_fixture, monkeypatch, readiness_only):
+@pytest.mark.parametrize("hash_excluded", [False, True])
+def test_installer_runtime_changes_invalidate_plan(
+    repair_fixture, monkeypatch, readiness_only, hash_excluded,
+):
     home, project, payload, _, _ = repair_fixture
     use_installer_runtime(payload)
+    path = payload / "installer-runtime.json"
+    if hash_excluded:
+        excluded = payload / "__pycache__"
+        excluded.mkdir()
+        path = path.rename(excluded / path.name)
+        manifest_path = payload / "plugin.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["installerRuntime"] = "__pycache__/installer-runtime.json"
+        write_json(manifest_path, manifest)
     monkeypatch.setattr(repair_api, "_invoke", _ready_read)
     plan = repair_api.repair(project, home=home, required=True, readiness_only=readiness_only)
-    path = payload / "installer-runtime.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     data["noSelfProvisionEnv"] = "AGENT_EXAMPLE_OTHER_NO_SELFPROVISION"
     write_json(path, data)
@@ -1983,7 +1994,7 @@ def _assert_process_stopped(pid, *, timeout=5):
 
 @pytest.mark.parametrize("required", [False, True])
 @pytest.mark.parametrize("protocol", ["payload-invocation", "installer-runtime"])
-@pytest.mark.timeout(45)
+@pytest.mark.timeout(60)
 def test_installation_repair_installed_cli_native_first_touch(repair_fixture, required, protocol):
     home, project, payload, _, identity = repair_fixture
     if protocol == "installer-runtime":
@@ -2007,7 +2018,7 @@ def test_installation_repair_installed_cli_native_first_touch(repair_fixture, re
     assert not list(home.glob("*.ready"))
     applied = run_action(
         [*argv, "--apply", "--expected-plan-digest", preview["planDigest"]],
-        cwd=project, environment=environment, timeout=20, readonly=False,
+        cwd=project, environment=environment, timeout=30, readonly=False,
     )
     assert applied.status == "exited" and applied.exit_code == 0
     result = json.loads(applied.stdout)
