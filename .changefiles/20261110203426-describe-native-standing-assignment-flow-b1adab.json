@@ -1,0 +1,13 @@
+{
+  "comment": "Describe native standing assignment flow and prove full-seed and generation fences",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}
