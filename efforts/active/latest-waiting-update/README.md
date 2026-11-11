@@ -183,6 +183,15 @@ expansion of required CI is introduced.
   runner directory. New controls cover two callers sharing an anchor, old
   relative records and the actual product environment. Fresh review and CI
   remain required after this correction.
+- The engine adapter must also capture its already-selected home before queue
+  normalization: an explicit project can change the process directory while
+  retaining the original invocation directory. Engine and Manager adapters now
+  persist absolute homes from their actual execution directories. The adapter
+  packet passed 117 engine/JSON cases and 121 Manager cases, including real
+  queue admission and borrowed engine re-entry with installation lookup intact.
+  The engine control covers re-entry at both the selected project and caller
+  directories. Lint and all 13 installation-contract checks passed. Fresh
+  current-head review and hosted qualification remain required.
 
 ### 2026-11-10 - Proposal
 

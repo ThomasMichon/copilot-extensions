@@ -167,6 +167,8 @@ def request_context(*, capture_engine: bool = True) -> dict[str, str]:
         key: os.environ[key] for key in _CONTEXT_KEYS
         if key in os.environ and key not in excluded
     }
+    if context.get("AGENT_HOME", "").strip():
+        context["AGENT_HOME"] = os.path.abspath(context["AGENT_HOME"].strip())
     if capture_engine and f"{__package__}.engine_client" in sys.modules:
         from .engine_client import ENGINE_ARGV_ENV, inherited_engine_command
 

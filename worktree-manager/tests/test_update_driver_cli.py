@@ -144,6 +144,25 @@ def test_request_context_never_persists_credentials(monkeypatch):
     assert context["AGENT_WORKTREES_UPDATE_CONTEXT"] == "example-context"
 
 
+def test_relative_home_is_captured_from_execution_directory_not_source_anchor(
+    tmp_path, monkeypatch,
+):
+    from worktree_manager.source_config import SOURCE_ANCHOR_ENV
+
+    caller, anchor = tmp_path / "caller", tmp_path / "anchor"
+    caller.mkdir()
+    anchor.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("AGENT_HOME", "state")
+    monkeypatch.setenv(SOURCE_ANCHOR_ENV, str(anchor))
+    context = driver.request_context()
+    assert context["AGENT_HOME"] == str(caller / "state")
+    assert driver.request_source_anchor() == str(anchor)
+    monkeypatch.chdir(anchor)
+    with driver._request_environment(context, cwd=str(anchor)):
+        assert driver.request_context()["AGENT_HOME"] == str(caller / "state")
+
+
 def test_cold_bootstrap_context_requires_no_uninstalled_manager_dependencies():
     import os
     import subprocess
