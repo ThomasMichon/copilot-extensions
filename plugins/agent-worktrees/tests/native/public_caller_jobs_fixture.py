@@ -264,6 +264,16 @@ def replace_application(python, incoming, *, shell, cwd, environment):
     assert (root / "projects.yaml").read_bytes() == projects
     selected_python = incoming / ".venv" / "Scripts" / "python.exe"
     assert selected_python.is_file()
+    checked = run([
+        selected_python, "-I", "-B", "-c",
+        "import json,sys;import agent_worktrees as app;"
+        "print(json.dumps({'generation':getattr(app,'_fixture_application_generation',None),"
+        "'prefix':sys.prefix,'module':app.__file__}))",
+    ], 15)
+    facts = json.loads(checked.stdout)
+    assert facts["generation"] == 2, facts
+    assert Path(facts["prefix"]).resolve() == (incoming / ".venv").resolve(), facts
+    assert Path(facts["module"]).resolve().is_relative_to((incoming / ".venv").resolve()), facts
     collected = run([
         selected_python, "-I", "-B", incoming / "runtime" / "versioned_runtime.py",
         "--root", root, "--json", "gc", "--protect-pids", "--min-age-days", "0",
