@@ -140,6 +140,20 @@ zero windows or focus changes. Late wake/suspend, Linux, retained-closure replac
 adoption, hourly cohort behavior and carrier receipt remain separate gates.
 This T3 packet never enters required actor-free unit CI.
 
+## Compact Session Host compatibility controls
+
+Driver's `tests/test_session_host_core.py` relocates both compact exports and
+removes their construction directories before execution. The current client
+exercises literal ACP frames, durable cursors, active legacy reattachment,
+legacy idle-detach shutdown, modern ACP detach persistence and exact child
+cleanup. A separate real-process control preserves external owner cancellation.
+Host-state controls additionally cover transient Windows reader contention,
+bounded permanent failure and non-Windows/unrelated-error refusal.
+The fixture uses the bundled canonical policy reader and explicit selected
+context, not an installed guest Worktrees runtime. These are bounded synthetic
+ACP-child controls, not native Copilot, historical-release rollback or SDK
+observer/idle qualification.
+
 ## Owner-only hosted Windows escape hatch
 
 `windows-qualification.yml` is an explicit manual lane on a disposable
