@@ -306,14 +306,16 @@ its protected controller must be promoted before submission.
 `test_public_attached_caller_job_lifetime` through that same leased native owner.
 The installed public `copilot` entrypoint and two nested caller Jobs inherit the
 fixture's existing private ConPTY. After real target attachment, the fixture
-closes the inner Job while the caller is still running, retains its actual
-nonzero termination code, closes the outer Job and proves the bounded child
+closes the inner Job while the caller is still running, retains that pre-close
+liveness and its actual termination code, closes the outer Job and proves the bounded child
 exited. The original caller pane must also close before checking the same
 broker/native births, mux incarnation and history. Live reattachment repeats
 that loss with a fresh ticket before a broker prompt proves continued use.
 Fresh and cold-resume legs preserve one conversation without seed replay.
 This is abrupt attached-caller loss, not graceful `detach-client` success or
-visible new-window evidence. Frontend replacement remains in the separate
+visible new-window evidence: Windows kill-on-close can return exit code zero,
+so the exit code alone does not distinguish those outcomes.
+Frontend replacement remains in the separate
 `embody` packet rather than being repeated. Existing 420/300/180-second phase
 bounds, 15-second renewable lease, 900-second hard maximum, 300-second
 preparation and 1200-second aggregate, native pins, Worktrees-only feed and

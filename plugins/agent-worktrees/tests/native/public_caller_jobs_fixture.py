@@ -165,10 +165,9 @@ def _tty_leaf(directory):
         else:
             process.kill()
         exit_code = process.wait(5)
-    assert exit_code != 0, "Abrupt caller Job closure must not become graceful detach"
     _publish(directory / "inner-closed.json", {
         "innerJobClosed": True, "callerExited": True, "callerExitCode": exit_code,
-        "caller": caller, "leafTty": True,
+        "caller": caller, "leafTty": True, "callerAliveBeforeClose": True,
     })
 
 
@@ -220,9 +219,9 @@ def close_public_tty_jobs(directory):
     assert started["leafTty"] is True and started["caller"] == reply["caller"], reply
     assert all(reply.get(key) is True for key in (
         "innerJobClosed", "outerJobClosed", "callerExited", "boundedControlExited",
-        "middleTty", "leafTty",
+        "middleTty", "leafTty", "callerAliveBeforeClose",
     )), reply
-    assert type(reply["callerExitCode"]) is int and reply["callerExitCode"] != 0, reply
+    assert type(reply["callerExitCode"]) is int, reply
     for key in ("caller", "control"):
         identity = reply[key]
         assert identity["birth"] and not (
