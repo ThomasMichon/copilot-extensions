@@ -172,6 +172,7 @@ No install, service, network or credentials are required.
 ```text
 python <resolved-script> validate <private-topology-json>
 python <resolved-script> overview <private-topology-json>
+python <resolved-script> intent <private-topology-json>
 python <resolved-script> placement <private-topology-json> --role <role-id> --kind standing
 python <resolved-script> route <private-topology-json> --request <request-id>
 python <resolved-script> seed <private-topology-json> --request <request-id>
@@ -180,9 +181,12 @@ python <resolved-script> inspect-materialization <private-materialization-json>
 ```
 
 The helper only reads and prints JSON. `validate` checks structure and references;
-`overview` derives coverage, holds and pending effects; `placement` ranks supported
-eligible capacity; `route` returns the retained worktree and observed current head
-or a hold; `seed` exports the complete saved assignment, role and machine context.
+`overview` derives coverage, holds and pending effects; `intent` compares each
+standing assignment's checked-in desired charter with the proposed native
+declaration and its adopted materialization, without qualifying coverage;
+`placement` ranks supported eligible capacity; `route` returns the retained
+worktree and observed current head or a hold; `seed` exports the complete saved
+assignment, role and machine context.
 There is no allocate, send, reconcile-write or launch command.
 
 `materialize` exports a nonterminal persisted assignment's complete charter, role,

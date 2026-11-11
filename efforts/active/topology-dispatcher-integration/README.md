@@ -71,15 +71,15 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ### Phase 1 - Liveness and progress evidence
 
-- [ ] Add optional dated progress evidence to owner observations and report
+- [x] Add optional dated progress evidence to owner observations and report
   liveness and progress beside every coverage entry, with explicit unknowns and
-  no effect on qualification or routing (#12009).
+  no effect on qualification or routing (#12009, #12010).
 
 ### Phase 2 - Desired versus native standing intent
 
-- [ ] Add a read-only view joining checked-in desired assignments with proposed
+- [x] Add a read-only view joining checked-in desired assignments with proposed
   and adopted Dispatch standing-charter evidence, keeping them separate and
-  adding no writable ledger or reconciliation effect.
+  adding no writable ledger or reconciliation effect (#12016).
 
 ### Phase 3 - Native assignment flow
 
@@ -127,3 +127,16 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - Phase 1 adds an optional `progress` read, derived `liveness`/`progress` per
   coverage entry and per-role `progressCounts`. The agent-roles packet passed
   201 tests; Python F/E9 lint passed. No live fleet effect was performed.
+- Phase 1 merged in #12010.
+
+### 2026-11-10 - Phase 2 desired versus native standing intent
+
+- Added a read-only `intent` command (#12016). Each standing assignment reports
+  separate `desired`, `proposed` and `adopted` records, revision-only
+  comparisons that are `null` when evidence is missing, stale, future-dated or
+  desired-terminal, a lane state with explicit reasons, and native standing
+  charters no assignment links. It copies no relationship receipt, writes
+  nothing and does not qualify coverage.
+- The agent-roles packet passed 216 tests, including a subprocess run proving
+  unchanged input bytes; Python F/E9 lint passed. No live fleet effect was
+  performed; live venue validation remains outside this source-only authority.

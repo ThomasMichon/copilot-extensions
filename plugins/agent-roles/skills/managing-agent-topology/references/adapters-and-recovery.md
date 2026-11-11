@@ -113,6 +113,30 @@ not unqualify an accepted one or authorize replacement. Use these fields to
 report material progress and the blocking owner, then observe or escalate
 through the rightful owner.
 
+## Desired, proposed and adopted intent
+
+`intent` reports one lane per standing assignment with three separate records:
+`desired` (the checked-in assignment and its current materialization's source
+and effective revisions, or `null` revisions when terminal), `proposed` (the
+saved native standing-charter declaration, lifecycle, status and freshness) and
+`adopted` (the native accepted materialization and its accepting head). It never
+copies the relationship or its receipt and writes no ledger.
+
+`proposedMatchesDesired`, `adoptedMatchesProposed` and `adoptedMatchesDesired`
+compare revisions only. Each is `null` when either side is missing, stale,
+future-dated, incomplete or desired-terminal; a `null` comparison is unknown, not
+a mismatch. `state` is `aligned`, `adoption-pending` (not adopted, or adopted
+content differs from the proposal), `proposal-pending` (the declaration differs
+from desired intent), `proposal-inactive` (the native lane is not active),
+`unknown`, `unlinked` or `desired-terminal`, with explicit reasons.
+`proposedWithoutDesired` lists native standing charters no assignment links.
+
+An adopted record is not current-head, presence or progress proof, and
+`aligned` does not qualify coverage: `overview` remains the coverage authority.
+No state grants effect authority. Resolve a pending proposal or adoption through
+the native declaration owner and its accepting head, never by editing saved
+observations, and recheck current native evidence before any effect.
+
 ## State and effect protocol
 
 Persist intent under the existing native single writer, using the adopter's
