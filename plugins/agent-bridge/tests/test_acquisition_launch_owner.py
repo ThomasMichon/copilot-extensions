@@ -37,25 +37,17 @@ def retain_synthetic_transport(owner: LocalLaunchOwner, client: AcpClient, host:
 
 def test_acquisition_launch_unselected_host_keeps_requested_reap_timeouts(tmp_path, monkeypatch):
     from agent_bridge.session_host import launcher
+    from agent_remote_driver.session_host import launcher_spawn
 
-    popen = Mock(return_value=SimpleNamespace(
-        stdout=io.BytesIO(b"expected test exit"), pid=os.getpid(),
-        poll=lambda: 1, returncode=1,
-    ))
-    original_popen = launcher.subprocess.Popen
-    monkeypatch.setattr(
-        launcher.subprocess, "Popen",
-        lambda argv, *args, **kwargs: (
-            original_popen(argv, *args, **kwargs) if "--support-json" in argv
-            else popen(argv, *args, **kwargs)
-        ),
-    )
+    process = SimpleNamespace(pid=os.getpid(), poll=lambda: 1, returncode=1)
+    spawn = Mock(return_value=(process, io.BytesIO(b"expected test exit")))
+    monkeypatch.setattr(launcher_spawn, "spawn_host", spawn)
     with pytest.raises(RuntimeError, match="exited early"):
         launcher.launch_session_host(
             [sys.executable, "-c", "pass"], state_dir=tmp_path,
             active_reap_seconds=1800.0, unexpected_reap_seconds=60.0,
         )
-    argv = popen.call_args.args[0]
+    argv = spawn.call_args.args[0]
     assert float(argv[argv.index("--active-reap-seconds") + 1]) == 1800.0
     assert float(argv[argv.index("--unexpected-reap-seconds") + 1]) == 60.0
 

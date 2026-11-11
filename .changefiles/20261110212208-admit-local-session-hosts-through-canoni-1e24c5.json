@@ -1,0 +1,13 @@
+{
+  "comment": "Admit local Session Hosts through canonical daemon creation and refuse retained outer caller cleanup Jobs before execution.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
