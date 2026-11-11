@@ -37,6 +37,8 @@ def offline_cli(tmp_path):
         pytest.skip("Select an existing native Copilot executable for the offline acceptance lane")
     assert Path(executable).is_absolute() and Path(executable).is_file()
     requests = []
+    responses = []
+    response_gate = SimpleNamespace(select=lambda _: None)
     pause_response, response_started, release_response = (threading.Event() for _ in range(3))
 
     class Provider(http.server.BaseHTTPRequestHandler):
@@ -44,7 +46,12 @@ def offline_cli(tmp_path):
             pass
 
         def do_POST(self):
-            requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(request)
+            gate = response_gate.select(request)
+            if gate is not None and not gate.wait(30):
+                self.send_error(504)
+                return
             if pause_response.is_set():
                 response_started.set()
                 if not release_response.wait(30):
@@ -58,6 +65,8 @@ def offline_cli(tmp_path):
                 "choices": [{"index": 0, "delta": {"role": "assistant", "content": "FIXTURE"},
                              "finish_reason": "stop"}],
             }
+            if responses:
+                body["choices"] = [{"index": 0, **responses.pop(0)}]
             self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
             self.wfile.flush()
 
@@ -87,6 +96,8 @@ def offline_cli(tmp_path):
         yield SimpleNamespace(
             executable=executable, env=environment, home=home, workspace=workspace,
             requests=requests, logs=tmp_path / "logs",
+            responses=responses,
+            response_gate=response_gate,
             pause_response=pause_response, response_started=response_started,
             release_response=release_response,
         )
