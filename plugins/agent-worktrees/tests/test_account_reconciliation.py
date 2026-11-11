@@ -150,6 +150,34 @@ def test_repository_slot_projects_each_missing_alias_without_replacing_explicit_
     assert "repo:zz-alias" not in state.account_projection
 
 
+def test_invalid_projection_owner_never_persists_unreadable_metadata(local):
+    registry, policy = local
+    before = registry.read_bytes()
+    with pytest.raises(ValueError):
+        run(policy, owner="x" * 65, apply=True)
+    assert registry.read_bytes() == before
+
+
+def test_large_alias_projection_refuses_before_persisting_an_unreadable_record_count(local, monkeypatch):
+    from copy import deepcopy
+
+    registry, policy = local
+    state = repos.read_registry(strict=True)
+    state.repos.update({
+        f"alias-{number}": repos.RepoEntry(
+            f"alias-{number}", remote="https://github.com/Publisher/tool",
+        ) for number in range(1023)
+    })
+    policy.write_text(json.dumps({
+        "version": 1, "accounts": {"work": "operator-work", "public": "operator-public"},
+    }), encoding="utf-8")
+    before = registry.read_bytes()
+    monkeypatch.setattr(repos, "read_registry", lambda **_kwargs: deepcopy(state))
+    with pytest.raises(ValueError, match="record limit exceeded"):
+        run(policy, apply=True)
+    assert registry.read_bytes() == before
+
+
 def test_portable_and_argument_slot_conflict_refuses_before_writing(local):
     registry, policy = local
     policy.write_text(json.dumps({

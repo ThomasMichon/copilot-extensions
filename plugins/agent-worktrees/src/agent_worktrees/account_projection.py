@@ -15,6 +15,7 @@ def snapshot(registry):
 
 def prepare(registry, owner):
     """Withdraw only this owner's unchanged projections before recomposition."""
+    owner = resource_name(owner)
     records = registry.account_projection
     if not isinstance(records, dict) or len(records) > 1024:
         raise ValueError("Invalid account projection records")
@@ -42,6 +43,9 @@ def prepare(registry, owner):
 
 
 def record(registry, owner, target, account):
+    owner, account = resource_name(owner), identity(account)
+    if target not in registry.account_projection and len(registry.account_projection) >= 1024:
+        raise ValueError("Account projection record limit exceeded")
     registry.account_projection[target] = {"owner": owner, "account": account}
 
 
