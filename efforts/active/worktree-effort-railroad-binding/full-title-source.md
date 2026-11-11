@@ -142,6 +142,22 @@ authorized by this plan; unavailable native rollout is not replaced by a fixture
 
 ## Journal
 
+### 2026-11-11 - Native YAML Unicode scalars
+
+The next review found that JSON surrogate-pair escapes are not portable YAML
+scalars: the C loader rejects non-BMP titles, while the pure-Python loader
+retains surrogate code units. Four fail-first controls reproduce cold-read
+failure after both an asserted title write and an unrelated summary save.
+
+Title serialization now uses PyYAML's double-quoted scalar emitter with
+ASCII escaping, preserving numeric strings, Unicode separators and non-BMP
+characters for both safe loaders. The JSON-only import is removed. All 343
+cases in the five affected writer, tracking, history, publication-state and
+receiver files pass, including the explicit fresh-profile CLI child.
+The unchanged required packet readmits only the changed tracking import
+dependency; no node, actor, coverage, effect or budget expansion is requested.
+The new exact-head review and required CI remain mandatory before merge.
+
 ### 2026-11-10 - Scalar type and Unicode framing controls
 
 Seven new controls reproduce two serialization defects: a long numeric

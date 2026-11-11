@@ -5,9 +5,32 @@ from __future__ import annotations
 import argparse
 
 import pytest
+import yaml
 
 from agent_worktrees import __main__ as main
 from agent_worktrees import tracking, worktree_identity
+
+
+@pytest.mark.parametrize("loader_name", ["SafeLoader", "CSafeLoader"])
+@pytest.mark.parametrize("assert_title", [False, True])
+def test_non_bmp_title_survives_cold_read_after_status_save(
+    status_env, monkeypatch, loader_name, assert_title,
+):
+    loader = getattr(yaml, loader_name, None)
+    if loader is None:
+        pytest.skip(f"{loader_name} is unavailable")
+    monkeypatch.setattr(tracking, "_FastSafeLoader", loader)
+    title = ("Full launch \U0001f680 title " * 4).strip()
+    if not assert_title:
+        record = tracking.load_record(status_env)
+        record.title = title
+        tracking.save_record(record, status_env)
+    assert main._cmd_status_write(
+        argparse.Namespace(worktree_id=None),
+        title=title if assert_title else None,
+        summary="Unrelated status save",
+    ) == 0
+    assert tracking._load_record_uncached(status_env).title == title
 
 
 @pytest.mark.parametrize("raw,expected", [

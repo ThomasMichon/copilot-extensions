@@ -5367,7 +5367,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/record_cache.py": "92027ac4c125b1f86e1e437c6f1f9f01651e8c15a02dc01d1ea72a89a1ce9f7f",
         "plugins/agent-worktrees/src/agent_worktrees/record_io.py": "62aa2abf470a394896dff1d950ae91cfba72153f92273a4c68cb74dddb36d9c2",
         "plugins/agent-worktrees/src/agent_worktrees/record_machine_identity.py": "0cb8b04964f4cfd46502a4ccad50a822d68ce82fda03f99fb3c3af3f63cb0a3a",
-        "plugins/agent-worktrees/src/agent_worktrees/tracking.py": "155c7f4b3d489c130084b723701d5d6c8230181e5c294ebe5235a40b2472da6b",
+        "plugins/agent-worktrees/src/agent_worktrees/tracking.py": "75eb3220620bbeec9e4be05e039d39de6de58b48e0e4f69ef2ea141dc6343324",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_claims.py": "2cfc23d5d386f16066d4ec42d94efdfa2f1b16a39697ed34e9a69654c6e2d8fa",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_controller_relations.py": "be79cd6eeab409e2f8ac6fed23d079dbb566325da7c799bf014b1e052b1171a8",
         "plugins/agent-worktrees/src/agent_worktrees/tracking_lifecycle.py": "8743fa89b0c5e5bbbcb22cc8fbefd82dfe1fcf4b82ac022ef3dca8df45edc6ae",
