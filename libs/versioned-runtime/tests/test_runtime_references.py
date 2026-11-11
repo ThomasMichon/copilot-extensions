@@ -143,6 +143,99 @@ def test_owned_cleanup_removes_long_descendants(tmp_path, operation, extended_ro
             shutil.rmtree(native_slot)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+@pytest.mark.parametrize("native_process_path", [False, True])
+def test_gc_inventory_and_protection_use_equivalent_windows_paths(
+    tmp_path, monkeypatch, long_root, native_process_path,
+):
+    base = str(tmp_path)
+    if base.startswith("\\\\?\\UNC\\"):
+        base = "\\\\" + base[8:]
+    elif base.startswith("\\\\?\\"):
+        base = base[4:]
+    root = Path(base) / "runtime"
+    names = {
+        role: f"{index}.0.0+repair." + "a" * 32
+        for index, role in enumerate(
+            ("current", "previous", "referenced", "kept", "constructing", "retained", "live", "spare"), 1,
+        )
+    }
+    names["live"] = names["live"][:-32] + "A" * 32
+    while (
+        len(str(root)) <= 270 if long_root
+        else len(str(root / "versions" / names["spare"])) <= 260
+    ):
+        root /= "d" * 16
+    native_root = runtime._leases._native_path(root)
+    native_root.mkdir(parents=True)
+    try:
+        for version in names.values():
+            slot = native_root / "versions" / version
+            (slot / "Scripts").mkdir(parents=True)
+            (slot / "Scripts" / "python.exe").write_bytes(b"fixture")
+            runtime.mark_complete(native_root, version)
+        (native_root / "current-version").write_text(names["current"], encoding="utf-8")
+        (native_root / "last-known-good").write_text(names["previous"], encoding="utf-8")
+        replace(native_root, [names["referenced"]])
+        references = (native_root / "runtime-references.json").read_bytes()
+        image = root / "versions" / names["live"] / "Scripts" / "python.exe"
+        if native_process_path:
+            image = runtime._leases._native_path(image)
+        monkeypatch.setattr(runtime, "_iter_all_pids", lambda: [123])
+        monkeypatch.setattr(runtime, "_pid_cmdline_argv0", lambda _pid: None)
+        monkeypatch.setattr(runtime, "_pid_image_path", lambda _pid: str(image))
+        assert set(runtime.list_versions(root)) == set(names.values())
+        assert runtime.gc(root, protect_pids=True, min_age_days=1) == []
+        with runtime.construction_lease(root, names["constructing"], timeout=1), runtime.retention_lease(
+            native_root, names["retained"], timeout=1,
+        ):
+            assert runtime.gc(root, keep=[names["kept"]], protect_pids=True, min_age_days=0) == [names["spare"]]
+        assert set(runtime.gc(root, keep=[names["kept"]], protect_pids=True, min_age_days=0)) == {
+            names["constructing"], names["retained"],
+        }
+        assert set(runtime.list_versions(root)) == {
+            names[role] for role in ("current", "previous", "referenced", "kept", "live")
+        }
+        assert (native_root / "runtime-references.json").read_bytes() == references
+        assert (native_root / "current-version").read_text(encoding="utf-8") == names["current"]
+        assert (native_root / "last-known-good").read_text(encoding="utf-8") == names["previous"]
+    finally:
+        shutil.rmtree(native_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+def test_gc_toss_preserves_completed_deep_slots(tmp_path, monkeypatch, capsys, long_root):
+    base = str(tmp_path)
+    if base.startswith("\\\\?\\UNC\\"):
+        base = "\\\\" + base[8:]
+    elif base.startswith("\\\\?\\"):
+        base = base[4:]
+    root = Path(base) / "runtime"
+    complete = "1.0.0+repair." + "a" * 32
+    incomplete = "2.0.0+repair." + "b" * 32
+    while len(str(root)) <= 270 if long_root else len(str(root / "versions" / complete)) <= 260:
+        root /= "d" * 16
+    native_root = runtime._leases._native_path(root)
+    for version in (complete, incomplete):
+        (native_root / "versions" / version).mkdir(parents=True)
+    try:
+        runtime.mark_complete(native_root, complete)
+        marker = runtime.marker_path(native_root, complete)
+        before = marker.read_bytes()
+        monkeypatch.setattr(runtime, "_iter_all_pids", lambda: [])
+        assert runtime.main([
+            "--root", str(root), "--json", "gc", "--min-age-days", "1", "--toss-incomplete",
+        ]) == 0
+        output = capsys.readouterr()
+        assert json.loads(output.out) == {"removed": [incomplete]}
+        assert marker.read_bytes() == before
+        assert not (native_root / "versions" / incomplete).exists()
+    finally:
+        shutil.rmtree(native_root)
+
+
 def test_update_is_owner_scoped_and_compare_bound(tmp_path):
     root = case(tmp_path)
     replace(root, ["old"])

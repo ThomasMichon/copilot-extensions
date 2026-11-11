@@ -1,3 +1,3 @@
 """Independent host for the existing PR watch core, not a second watcher."""
 
-__version__ = "0.1.15-dev1"
+__version__ = "0.1.16-dev1"

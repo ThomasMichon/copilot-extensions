@@ -176,6 +176,33 @@ Each capture retains its own existing aggregate clock, including managed test
 environment preparation; the workflow timeout does not enlarge it.
 Returned files are data: the client never applies the generated outputs.
 
+`submit --packet desktop-capability` selects only
+`tools/test_windows_qualification_desktop_native.py::test_hosted_desktop_capability`.
+This independently scored, optional venue prerequisite composes the existing
+SDK canary, unfiltered observer and calibration validator unchanged. It admits
+only the explicit disposable GitHub-hosted Windows owner before desktop access,
+then requires the actual normal input desktop, a correlated visible/foreground
+control, original foreground restoration and observed control retirement.
+Runner labels, an API success, empty enumeration and a non-input desktop do
+not qualify. The one visible attempt is never run on an operator desktop;
+unavailable desktop prerequisites produce an explicit unsupported capture and
+a skipped/incomplete packet, not zero observed windows or an acquisition pass.
+
+The control keeps ordinary caller containment: no daemon breakaway, native
+application lifetime exception, pinned application downloads, feed secret or
+SDK functional worker is selected. Its inner deadline is 45 seconds, with a
+40-second calibration completion bound, inside the 50-second pytest and
+60-second contained packet limits; the captured controller invocation has a
+90-second outer ceiling. Process, stream, observer and hook cleanup are
+independently required. The actual JUnit case and calibration evidence bind to
+the same request, immutable candidate, protected controller and run attempt.
+The existing artifact owner retains `packet/desktop-capability.json` and the
+finite canary evidence. The support descriptor must be reviewed and promoted
+before submission. This is not permission to dispatch it or provision an
+interactive venue. It changes no ordinary publication, CI or enrollment gate,
+and does not qualify the later two-cycle acquisition test, an installed build
+or a receiving machine.
+
 `submit --packet native-worktrees-embody` selects only the installed public
 Worktrees detached caller. The candidate must supply `test_public_embody` in
 `tests/native/test_native_seed_application.py`; controller support does not
