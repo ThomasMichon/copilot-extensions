@@ -2182,6 +2182,51 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
         )
 
 
+@pytest.mark.parametrize("custody_source", ["backend", "body"])
+def test_frozen_git_transport_preserves_later_unreaped_custody(tmp_path, custody_source):
+    import urllib.request
+
+    from manager_installed_suite_payloads import serve_git_transport
+    from plugin_test_containment import TestSandbox, UnreapedProcessError
+
+    custody = UnreapedProcessError("controlled unresolved backend custody")
+    calls = 0
+
+    def run(argv, *_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            Path(argv[-1]).write_bytes(b"Content-Type: text/plain\r\n\r\nref: refs/heads/main\n")
+            return ""
+        if calls == 2:
+            raise RuntimeError("controlled earlier transport error")
+        raise custody
+
+    sandbox = TestSandbox(prefix="mock-custody-", dir=tmp_path)
+    with pytest.raises(UnreapedProcessError) as caught:
+        with sandbox as raw:
+            root = Path(raw)
+            repository = root / "suite-transport.git"
+            repository.mkdir()
+            (repository / "HEAD").write_bytes(b"ref: refs/heads/main\n")
+            marker = root / "backend-held"
+            marker.write_bytes(b"retained")
+            with serve_git_transport(
+                {"repository": str(repository)}, environment={}, project=root,
+                diagnostics=root, deadline=time.monotonic() + 15, run=run,
+            ) as transport:
+                opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                for _ in range(2 if custody_source == "backend" else 1):
+                    with pytest.raises(OSError):
+                        opener.open(transport["url"] + "/info/refs?service=git-upload-pack", timeout=5)
+                if custody_source == "body":
+                    raise custody
+    assert caught.value is custody
+    assert sandbox.retained and marker.read_bytes() == b"retained"
+    # Backend execution was substituted; no process can hold this retained test directory.
+    shutil.rmtree(root)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Actual native Windows suite payload acquisition")
 @pytest.mark.timeout(900)
 def test_installed_suite_payload_closure_uses_the_real_cli(record_testsuite_property):

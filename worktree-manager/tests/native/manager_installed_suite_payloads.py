@@ -161,6 +161,8 @@ def serve_git_transport(
     deadline: float, run,
 ):
     """Serve actual Git object data for the caller's bounded acquisition scope."""
+    from plugin_test_containment import UnreapedProcessError
+
     repository = Path(transport["repository"])
     prefix = "/suite-transport.git"
     failures = []
@@ -271,14 +273,23 @@ def serve_git_transport(
             if response.read(1024) != (repository / "HEAD").read_bytes():
                 raise RuntimeError("The private Git transport did not serve its owned repository")
         yield {**transport, "url": url}
+    except BaseException as error:
+        failures.append(error)
+        raise
     finally:
-        if started:
-            server.shutdown()
-        server.server_close()
-        if started:
-            thread.join(5)
-        if thread.is_alive() or server.socket.fileno() != -1:
-            raise RuntimeError("The private Git transport did not stop")
+        try:
+            if started:
+                server.shutdown()
+            server.server_close()
+            if started:
+                thread.join(5)
+            if thread.is_alive() or server.socket.fileno() != -1:
+                raise UnreapedProcessError("The private Git transport did not stop")
+        except BaseException as error:
+            failures.append(error)
+        for error in failures:
+            if isinstance(error, UnreapedProcessError):
+                raise error
         if failures:
             raise failures[0]
 

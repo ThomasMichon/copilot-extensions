@@ -1056,3 +1056,20 @@ control includes LF script blobs with CRLF source attributes, and acquisition
 controls refuse a foreign or changed template. This is data-transport custody
 only, not ordinary platform-checkout, runtime or admitted-upgrade acceptance.
 The corrected head still requires native qualification.
+
+Run 42928717907 at `089a02c92b31e5fecc3c45df144312c2991d3977`
+passed both exact-source witnesses: actual CLI acquisition, installed-engine
+discovery and strict byte comparison of all 24 payloads took 488.537 seconds;
+the unchanged installed-core lifecycle took 348.119 seconds. The distinct
+payload receipt still reports runtime installation unobserved, so complete
+runtime/Machines readiness, authentic update and release enforcement remain
+open. The PR cleared current required CI and entered review, not merge.
+
+Copilot review 5851705493 identified an error-precedence defect: an earlier
+ordinary HTTP failure could mask a later unreaped-backend failure, allowing
+sandbox deletion despite unresolved custody. Transport exit now prioritizes
+the actual containment owner's `UnreapedProcessError` across backend, caller
+and transport-cleanup failures. Focused controls cover an ordinary request
+failure followed by backend or caller custody failure and verify that the
+real sandbox retains its files. The reviewed correction needs new exact-head
+native qualification and a passing subsequent review.
