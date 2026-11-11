@@ -305,5 +305,7 @@ def catalog(project: str, *, workspace: str = "") -> dict:
         and registry.repos[project].repo_class == "worktree"
         and binding_names_supported(project, project) and eligible(inspection)
     ):
-        rows.insert(0, action_row(project))
+        from .repos_knowledge_acquisition import action_row as acquisition_row
+
+        rows[0:0] = [acquisition_row(project), action_row(project)]
     return {"entries": rows, "summary": summary}
