@@ -251,6 +251,8 @@ def _legacy_controller_engine(tmp_path, stdout, *, stderr="", returncode=1):
     script = tmp_path / "legacy engine.py"
     script.write_text(
         "import sys\n"
+        "sys.stdout.reconfigure(encoding='utf-8', errors='replace')\n"
+        "sys.stderr.reconfigure(encoding='utf-8', errors='replace')\n"
         "assert sys.argv[-2:] == ['get', 'update-controller']\n"
         f"sys.stdout.write({stdout!r})\n"
         f"sys.stderr.write({stderr!r})\n"
@@ -260,9 +262,12 @@ def _legacy_controller_engine(tmp_path, stdout, *, stderr="", returncode=1):
     ec.set_engine_command([sys.executable, str(script)])
 
 
-def test_legacy_controller_probe_preserves_utf8_controller_path(tmp_path):
+def test_legacy_controller_probe_preserves_utf8_controller_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
     selected = "tools/\u66f4\u65b0.py"
-    _legacy_controller_engine(tmp_path, selected + "\n", returncode=0)
+    _legacy_controller_engine(
+        tmp_path, selected + "\n", stderr=f"Selected {selected}\n", returncode=0,
+    )
     assert ec.get_value("example", "update-controller") == selected
 
 
