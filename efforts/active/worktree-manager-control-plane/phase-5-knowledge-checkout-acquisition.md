@@ -214,7 +214,8 @@ alter screen-lock policy or ask a person to hold their desktop open.
 
 ### Delivery and validation
 
-- [ ] Review this amendment before changing the test or controller selection.
+- [x] Review this amendment before changing the test or controller selection;
+  source design merged in #12061.
 - [ ] Qualify the existing execution owner's desktop capability with a bounded
   positive control, under separately applicable execution authority. Record
   source revision, actual session/desktop suitability and the result; neither
