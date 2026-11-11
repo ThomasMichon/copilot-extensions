@@ -1,0 +1,9 @@
+{
+  "comment": "Add same-owner follow-up relay guidance and separate temporary work from standing coverage",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

@@ -83,8 +83,8 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ### Phase 3 - Native assignment flow
 
-- [ ] Prove reserve, persist, start and accept through native owners, including
-  the full charter seed and stale-generation rejection.
+- [x] Prove reserve, persist, start and accept through native owners, including
+  the full charter seed and stale-generation rejection (#12026, #12030).
 
 ### Phase 4 - Same-owner routing and temporary work
 
@@ -217,3 +217,78 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - Isolated source evidence only; no live fleet effect, installation or
   deployment occurred. Corrected publication, fresh review and required CI
   remain the next gates before merge.
+
+### 2026-11-11 - Phase 3 merged
+
+- Phase 3 merged in #12030, closing #12026 after the native assignment,
+  ownership-conflict and bookkeeping-revision corrections. Later phases and
+  the overall validation gate remain open.
+
+### 2026-11-11 - Phase 4 same-owner relay and temporary work
+
+- Added the read-only `relay` report (#12050), separating complete follow-up
+  persistence, native charter reconciliation, immutable envelope/effect
+  persistence, exact-head delivery and response/acceptance settlement.
+  Delivery does not imply acceptance; settlement requires positive current
+  evidence and respects owner/effect holds. Source-only relay bookkeeping
+  reconciliation preserves the original owner, generation and envelope.
+- Temporary work is reported separately from standing minimum coverage.
+  Dispatcher/worker self-ownership is rejected; completion does not bypass
+  native retirement or obligation settlement.
+- Both focused topology files passed 218 tests, including stale, missing and
+  contradictory evidence, immutable-envelope fences, unresolved effects and
+  unchanged subprocess input bytes. The native Dispatch assignment file passed
+  4 tests; its new relay regression invokes the real helper and native
+  reconciliation/acceptance while preserving the original owner, generation,
+  session, relationship and envelope bytes. Acceptance uses the complete
+  retained workspace, including its creation nonce and path.
+- Python F/E9 lint, all enforced type-check projects, documentation consistency,
+  install-contract and version-consistency checks passed. After the final
+  workspace correction, both focused test packets and the agent-roles strict
+  Linux/Windows type-check project passed again.
+- All evidence is isolated and synthetic. No live fleet effect, installation,
+  deployment or external-venue validation occurred under this source-only
+  authority. Fresh temporary fixtures exercise the helper without prior
+  enrollment; this change adds no installer or provisioning path. Publication,
+  independent review and merge gates remain outstanding; Phase 4 and the parent
+  objective are not complete.
+
+### 2026-11-11 - Phase 4 review corrections
+
+- Settled, accepted assignments retain standing coverage, routing and accepted
+  flow after proven bookkeeping-only source revision drift. Effective charter
+  differences, missing acceptance, unresolved effects and ownership conflicts
+  remain held; the intent report still exposes exact source-declaration drift.
+- Delivered adjustments can propose reacceptance at a monotonically newer
+  observed head revision of the same retained session. Prepared delivery,
+  another session, regressed or missing revisions, and head drift after
+  current-revision acceptance remain held.
+- Both focused topology files passed 222 tests. All 5 native Dispatch
+  assignment tests passed, including unchanged and advanced same-session head
+  revisions and restored coverage, routing and accepted flow after settlement.
+  The regressions preserve native owner, generation, session, relationship and
+  immutable envelope bytes.
+- Python F/E9 lint, all enforced type-check projects, explicit agent-roles
+  Linux/Windows strict checks, documentation consistency and whitespace checks
+  passed. The existing install-contract and version-consistency evidence is
+  unchanged. These remain isolated synthetic checks; no live external venue,
+  enrollment, installation or deployment was exercised. Updated publication,
+  fresh independent review and required CI remain gates before merge.
+
+### 2026-11-11 - Phase 4 aligned-source performance correction
+
+- Skip historical bookkeeping-digest searches when the current source digest
+  already matches the materialized declaration. A real source mismatch still
+  requires the existing bounded proof; acceptance and ownership guards are
+  unchanged.
+- The new regression reproduced 256 unnecessary historical hashes for one
+  aligned assignment before the fix. Both aligned and drift cases now pass:
+  the former performs no historical hashes, while the latter proves the prior
+  revision normally.
+- All 158 tests in the affected topology-dispatch file passed, along with
+  Python F/E9 lint, strict agent-roles checks for Linux and Windows, and
+  whitespace checks. Earlier integration evidence remains applicable; this
+  correction adds no native operation or provisioning path.
+- Validation remains isolated and synthetic, with no live enrollment,
+  installation, deployment or external-venue effects. Publication, fresh
+  independent review and required CI still gate merge.

@@ -14,7 +14,7 @@ import pytest
 SKILL = Path(__file__).resolve().parents[1] / "skills" / "managing-agent-topology"
 sys.path.insert(0, str(SKILL / "scripts"))
 from topology import BOOKKEEPING_REVISION_WINDOW, Topology  # noqa: E402
-from topology_contract import ContractError, read_json, timestamp, validate  # noqa: E402
+from topology_contract import ContractError, content_revision, read_json, timestamp, validate  # noqa: E402
 
 AT = "2026-01-01T00:01:00Z"
 pytestmark = [
@@ -98,6 +98,7 @@ def set_value(document: dict[str, Any], path: str, value: Any) -> None:
     ("placement", ["--role", "reviewer"]), ("route", ["--request", "request-review-a"]),
     ("seed", ["--request", "request-review-a"]),
     ("flow", ["--request", "request-review-a"]),
+    ("relay", ["--request", "request-review-a", "--followup", "question-a"]),
     ("materialize", ["--request", "request-review-a"]), ("inspect-materialization", []),
 ])
 def test_null_dispatcher_cli_is_read_only(
@@ -119,7 +120,7 @@ def test_null_dispatcher_cli_is_read_only(
     assert result.stderr == ""
     assert path.read_bytes() == before
     output = json.loads(result.stdout)
-    if command in {"placement", "route", "seed", "overview", "flow"}:
+    if command in {"placement", "route", "seed", "overview", "flow", "relay"}:
         assert "dispatcher-not-appointed" in output["holds"]
     if command == "overview":
         assert output["coverage"][0]["qualifiedCount"] == 1
@@ -155,6 +156,240 @@ def test_only_joined_native_acceptance_counts_and_routes(
     assert route["target"]["headRevision"] == 7
     assert route["advisoryOnly"] and route["nativeHeadRecheckRequired"]
     assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("bookkeeping_drift", [False, True])
+def test_overview_searches_historical_digests_only_for_source_drift(
+    document: dict[str, Any], monkeypatch: pytest.MonkeyPatch, bookkeeping_drift: bool,
+) -> None:
+    document["revision"] = BOOKKEEPING_REVISION_WINDOW + 1
+    document["observations"]["dispatch"] = [bind_snapshot(document)]
+    if bookkeeping_drift:
+        document["revision"] += 1
+    historical_revisions: list[int] = []
+
+    def observed_revision(value: dict[str, Any]) -> str:
+        source = value.get("source")
+        if source is not None and source["topologyRevision"] < document["revision"]:
+            historical_revisions.append(source["topologyRevision"])
+        return content_revision(value)
+
+    monkeypatch.setattr("topology.content_revision", observed_revision)
+    overview = report(document).overview()
+    assert overview["coverage"][0]["qualifiedCount"] == 1
+    assert overview["holds"] == []
+    assert historical_revisions == ([document["revision"] - 1] if bookkeeping_drift else [])
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("advance_head", [False, True])
+def test_adjustment_reconciles_then_relays_to_same_head_and_requires_reacceptance(
+    document: dict[str, Any], advance_head: bool,
+) -> None:
+    assignment = document["assignments"][0]
+    observation = document["observations"]["owners"][0]
+    task = document["observations"]["dispatch"][0]["task"]
+    assignment["charter"].update(revision=2, objective="Review the revised synthetic scope.")
+    followup = {"id": "adjust-a", "kind": "adjustment", "content": "Accept the revised charter.",
+                "charterRevision": 2, "effectId": None}
+    assignment["followups"].append(followup)
+    request = assignment["requestId"]
+    result = report(document).relay(request, "adjust-a")
+    assert result["phase"] == "held"
+    assert result["holds"] == ["persist-native-worktree-before-relay"]
+    assert result["nextStep"] is None
+    assignment["nativeWorktree"] = result["retainedWorktree"]
+    document["revision"] += 1
+    result = report(document).relay(request, "adjust-a")
+    assert result["phase"] == "reconcile"
+    assert result["retainedWorktree"] == observation["owner"]
+    assert result["nextStep"]["expectedRevision"] == 3
+    materialized = result["nextStep"]["materialization"]
+    declaration = task["standing_charter"]["declaration"]
+    declaration.update(source_revision=materialized["sourceRevision"],
+                       expected_materialization_revision=materialized["materializationRevision"])
+    task["standing_revision"] = 4
+    result = report(document).relay(request, "adjust-a")
+    assert result["phase"] == "persist-relay"
+    assert result["nextStep"]["expectedHead"] == observation["head"]
+    assert result["nextStep"]["expectedHeadRevision"] == 7
+    assignment["state"] = "active"
+    effect = {"id": "relay-a", "kind": "relay", "state": "prepared", "charterRevision": 2,
+              "target": observation["owner"], "nativeRef": None,
+              "nativeRequest": {"mode": "bridge-native", "envelopeRef": "synthetic:adjust-envelope"}}
+    assignment["effects"].append(effect)
+    followup["effectId"] = effect["id"]
+    document["revision"] += 1
+    result = report(document).relay(request, "adjust-a")
+    assert result["phase"] == "relay"
+    assert result["nextStep"]["operation"] == "send-exact-head"
+    assert result["nextStep"]["replayAllowed"] is False
+    assert result["nextStep"]["effect"] == effect
+    assert result["nextStep"]["expectedHead"] == observation["head"]
+    assert result["nextStep"]["expectedHeadRevision"] == 7
+    if advance_head:
+        observation["headRevision"] += 1
+        held = report(document).relay(request, "adjust-a")
+        assert held["phase"] == "held"
+        assert "native-accepted-head-conflict" in held["holds"]
+    effect.update(state="admitted", nativeRef="synthetic:relay-admission")
+    result = report(document).relay(request, "adjust-a")
+    assert result["phase"] == "await-acceptance"
+    assert result["nextStep"]["operation"] == "accept-standing-charter"
+    assert result["nextStep"]["expectedRevision"] == 4
+    assert result["nextStep"]["sameHeadReacceptance"] is True
+    assert result["nextStep"]["ownerSessionId"] == observation["head"]
+    assert result["nextStep"]["expectedHeadRevision"] == observation["headRevision"]
+    relationship = document["observations"]["dispatch"][0]["relationship"]
+    assert result["nextStep"]["workspace"] == relationship["request"]["workspace"]
+    accepted = task["standing_charter"]["accepted_materialization"]
+    accepted.update(source_revision=declaration["source_revision"],
+                    materialization_revision=declaration["expected_materialization_revision"],
+                    expected_revision=4)
+    accepted["head"]["revision"] = observation["headRevision"]
+    task["standing_revision"] = 5
+    result = report(document).relay(request, "adjust-a")
+    assert result["phase"] == "settle-relay"
+    assert result["nextStep"]["acceptance"] == accepted
+    assert report(document).overview()["coverage"][0]["qualifiedCount"] == 0
+    effect.update(state="accepted", nativeRef="synthetic:relay-acceptance")
+    document["revision"] += 1
+    topology = report(document)
+    assert topology.relay(request, "adjust-a")["phase"] == "settled"
+    assert topology.overview()["coverage"][0]["qualifiedCount"] == 1
+    assert topology.route(request)["target"]["headRevision"] == observation["headRevision"]
+    assert topology.flow(request)["phase"] == "accepted"
+    assert topology.intent()["lanes"][0]["state"] == "proposal-pending"
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("change,reason", [
+    ("missing-acceptance", "native-materialization-not-accepted"),
+    ("successor", "native-accepted-head-conflict"),
+    ("revision-regressed", "native-accepted-head-conflict"),
+    ("revision-missing", "native-accepted-head-conflict"),
+    ("already-accepted-revision-advanced", "native-accepted-head-conflict"),
+])
+def test_relay_bookkeeping_drift_does_not_hide_unqualified_acceptance(
+    document: dict[str, Any], change: str, reason: str,
+) -> None:
+    assignment = document["assignments"][0]
+    observation = document["observations"]["owners"][0]
+    task = document["observations"]["dispatch"][0]["task"]
+    assignment["nativeWorktree"] = observation["owner"]
+    assignment["followups"].append({
+        "id": "adjust-a", "kind": "adjustment", "content": "Confirm the saved charter.",
+        "charterRevision": 1, "effectId": "relay-a",
+    })
+    assignment["effects"].append({
+        "id": "relay-a", "kind": "relay", "state": "consumed", "charterRevision": 1,
+        "target": observation["owner"], "nativeRef": "synthetic:consumption",
+        "nativeRequest": {"mode": "bridge-native", "envelopeRef": "synthetic:adjust-envelope"},
+    })
+    document["revision"] += 1
+    if change == "missing-acceptance":
+        task["standing_charter"]["accepted_materialization"] = None
+    elif change == "successor":
+        observation["head"] = "unaccepted-successor"
+    else:
+        observation["headRevision"] = {
+            "revision-regressed": 6, "revision-missing": None, "already-accepted-revision-advanced": 8,
+        }[change]
+    result = report(document).relay(assignment["requestId"], "adjust-a")
+    assert result["phase"] == "held"
+    assert result["nextStep"] is None
+    assert reason in result["holds"]
+    assert report(document).overview()["coverage"][0]["qualifiedCount"] == 0
+    assert report(document).route(assignment["requestId"])["target"] is None
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_status_can_reach_retained_owner_while_acceptance_lags(document: dict[str, Any]) -> None:
+    assignment = document["assignments"][0]
+    task = document["observations"]["dispatch"][0]["task"]
+    task["standing_charter"]["accepted_materialization"]["source_revision"] = "synthetic:prior-revision"
+    assignment["followups"].append({
+        "id": "status-a", "kind": "status", "content": "Report your accepted charter revision.",
+        "charterRevision": 1, "effectId": None,
+    })
+    topology = report(document)
+    result = topology.relay(assignment["requestId"], "status-a")
+    assert result["phase"] == "held"
+    assert result["holds"] == ["persist-native-worktree-before-relay"]
+    assignment["nativeWorktree"] = result["retainedWorktree"]
+    document["revision"] += 1
+    topology = report(document)
+    result = topology.relay(assignment["requestId"], "status-a")
+    assert result["phase"] == "persist-relay"
+    assert result["nextStep"]["target"] == document["observations"]["owners"][0]["owner"]
+    assert topology.overview()["coverage"][0]["qualifiedCount"] == 0
+    document["observations"]["owners"][0]["head"] = "unaccepted-successor"
+    held = report(document).relay(assignment["requestId"], "status-a")
+    assert held["phase"] == "held"
+    assert "native-accepted-head-conflict" in held["holds"]
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+def test_unbound_native_relay_persists_a_valid_owner_and_effect(
+    document: dict[str, Any], tmp_path: Path,
+) -> None:
+    assignment = document["assignments"][0]
+    followup = {"id": "followup-a", "kind": "status", "content": "Report the current scope.",
+                "charterRevision": 1, "effectId": None}
+    assignment["followups"].append(followup)
+    path = tmp_path / "topology.json"
+
+    def relay() -> dict[str, Any]:
+        path.write_text(json.dumps(document), encoding="utf-8")
+        before = path.read_bytes()
+        result = subprocess.run(
+            [sys.executable, str(SKILL / "scripts" / "topology.py"), "relay", str(path),
+             "--request", assignment["requestId"], "--followup", followup["id"], "--at", AT],
+            capture_output=True, text=True, timeout=15,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert result.stderr == ""
+        assert path.read_bytes() == before
+        output: dict[str, Any] = json.loads(result.stdout)
+        return output
+
+    held = relay()
+    assert held["phase"] == "held"
+    assert held["holds"] == ["persist-native-worktree-before-relay"]
+    assert held["nextStep"] is None
+    assignment["nativeWorktree"] = held["retainedWorktree"]
+    document["revision"] += 1
+    planned = relay()
+    assert planned["phase"] == "persist-relay"
+    proposal = planned["nextStep"]
+    assignment["effects"].append({
+        "id": "relay-a", "kind": "relay", "state": "prepared",
+        "charterRevision": proposal["charterRevision"], "target": proposal["target"], "nativeRef": None,
+        "nativeRequest": {"mode": "bridge-native", "envelopeRef": "synthetic:followup-envelope"},
+    })
+    followup["effectId"] = "relay-a"
+    document["revision"] += 1
+    ready = relay()
+    assert ready["phase"] == "relay"
+    assert ready["nextStep"]["effect"] == assignment["effects"][0]
+    assert ready["nextStep"]["target"] == assignment["nativeWorktree"]
+    assert ready["nextStep"]["expectedHead"] == document["observations"]["owners"][0]["head"]
+    assert ready["nextStep"]["expectedHeadRevision"] == 7
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_dispatcher_cannot_own_native_assignment(document: dict[str, Any]) -> None:
+    document["dispatcher"]["owner"] = document["observations"]["owners"][0]["owner"]
+    document["observations"]["dispatcher"]["owner"] = document["dispatcher"]["owner"]
+    document["observations"]["dispatch"] = [bind_snapshot(document)]
+    topology = report(document)
+    reason = "dispatcher-cannot-own-worker-assignment"
+    assert topology.overview()["coverage"][0]["qualifiedCount"] == 0
+    assert reason in topology.route("request-review-a")["holds"]
+    assert reason in topology.flow("request-review-a")["holds"]
 
 
 @pytest.mark.portfolio_tier("T1")
@@ -921,7 +1156,11 @@ def test_flow_bookkeeping_reconciliation_does_not_weaken_retained_effect_holds(
         assignment["effects"][0]["assignmentGeneration"] += 1
     result = report(document).flow("request-review-a")
     assert result["phase"] == "held" and result["nextStep"] is None
-    assert "retained-owner-revision-reconciliation-required" in result["holds"]
+    reason = (
+        "native-materialization-not-accepted" if change == "started"
+        else "retained-owner-revision-reconciliation-required"
+    )
+    assert reason in result["holds"]
 
 
 @pytest.mark.portfolio_tier("T1")
