@@ -119,6 +119,20 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ## Journal
 
+### 2026-11-11 - Preserve saved task-owner obligations
+
+- Admission now examines all saved task-owner obligations before ranking,
+  including work absent from the topology assignment map. A retained started,
+  claimed or submitted task, waiting/held dormant work, stale evidence or a
+  terminal row retaining its owner blocks competing resumption independently
+  of priority and input order. Eligible dormant alternatives still compete for
+  at most one same-owner recommendation.
+- The affected topology packet passed 332 tests and Python F/E9 lint passed.
+  The selected native Worktrees completion/succession packet passed 21 tests:
+  open PRs, unrelated live claims, incomplete efforts, two-way succession links,
+  uncertain conclusions and exact relationship replay remain native gates.
+  These isolated checks do not authorize any live completion or takeover.
+
 ### 2026-11-11 - Native admission custody consistency
 
 - Dormant native admission requires a bound relationship receipt, matching task

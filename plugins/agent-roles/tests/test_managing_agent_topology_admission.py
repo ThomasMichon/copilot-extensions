@@ -350,6 +350,29 @@ def test_both_request_and_native_task_identity_must_agree(
     assert "retained-assignment-identity-conflict" in result["held"][0]["reasons"]
 
 
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("changes", [
+    {"status": "started"}, {"status": "claimed"}, {"status": "submitted"},
+    {"status": "suspended", "readiness": "waiting"},
+    {"status": "suspended", "holdReason": "synthetic:unresolved"},
+    {"status": "completed"},
+])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_saved_owner_obligations_block_resume_regardless_of_priority_or_order(
+    document: dict[str, Any], evidence: dict[str, Any], changes: dict[str, Any], reverse: bool,
+) -> None:
+    candidate = dormant(document, priority=100)
+    retained = task(
+        "unmapped-obligation", owner=copy.deepcopy(candidate["owner"]),
+        ownerSessionId=candidate["ownerSessionId"], priority=0, **changes,
+    )
+    evidence["tasks"] = [candidate, retained] if not reverse else [retained, candidate]
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    candidate_result = next(item for item in result["held"] if item["task"] == candidate["id"])
+    assert "retained-owner-has-unresolved-work" in candidate_result["reasons"]
+
+
 @pytest.mark.effect("process")
 @pytest.mark.portfolio_tier("T2")
 def test_real_cli_and_fresh_empty_work_are_read_only(

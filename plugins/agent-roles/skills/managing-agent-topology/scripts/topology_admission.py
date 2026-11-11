@@ -52,6 +52,11 @@ def admission(topology: Topology, evidence: Any) -> dict[str, Any]:
     }
     operator_owners = {owner_key(task["owner"]) for task in evidence["tasks"]
                        if task["operatorTask"] and task["owner"] is not None}
+    occupied_owners = {
+        owner_key(task["owner"]) for task in evidence["tasks"] if task["owner"] is not None
+        and (task["status"] != "suspended" or task["readiness"] != "ready"
+             or task["holdReason"] is not None or not topology.fresh(task))
+    }
     proposed_owners: set[tuple[str, str, str]] = set()
     for task in sorted(evidence["tasks"], key=lambda item: (-item["priority"], item["id"])):
         reasons = list(holds)
@@ -71,6 +76,8 @@ def admission(topology: Topology, evidence: Any) -> dict[str, Any]:
         if owner is not None and owner_key(owner) in proposed_owners:
             reasons.append("retained-owner-already-proposed")
         dormant = task["status"] == "suspended"
+        if dormant and owner is not None and owner_key(owner) in occupied_owners:
+            reasons.append("retained-owner-has-unresolved-work")
         snapshot = topology.dispatch.get(task["id"])
         if snapshot is not None:
             native = snapshot["task"]

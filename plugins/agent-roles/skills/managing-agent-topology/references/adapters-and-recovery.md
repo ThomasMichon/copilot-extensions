@@ -455,6 +455,12 @@ Both request and task IDs must agree with the retained assignment (legacy
 assignments may omit the native task link). Relationship-only owners still
 retain their workspace. A terminal assignment does not release a matching
 request, task or owner until native retirement is settled.
+All saved tasks contribute retained-owner obligations, even without a separate
+topology assignment. Another started/claimed/submitted task, a held or waiting
+dormant task, stale evidence or a terminal row still retaining an owner blocks
+resumption on that workspace regardless of priority or input order. Several
+otherwise eligible dormant tasks may compete for one recommendation; proposing
+one does not release the others.
 
 The report uses one homogeneous slot per proposal, **including dormant
 resumption**, conservatively requiring extra activation headroom even if the
