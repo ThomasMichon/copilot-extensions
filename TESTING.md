@@ -1304,6 +1304,8 @@ admitted/consumed send and same-conversation rejoin, with a duplicate-loadout
 refusal. It executes the copied compact headed core and its launch-bound
 extension in real processes, with a synthetic native parent/SDK worker and
 independently checked Host/native/extension identities and child settlement.
+Its carrier-timeout control also settles the constructor-owned process tree,
+listener and streams before propagating failure.
 `tests/test_receiving_mux.py` additionally runs the copied core declaration
 after removing its construction archive, rejects incompatible core support
 before prerequisite/registration/mux effects, and preserves unknown/reuse
