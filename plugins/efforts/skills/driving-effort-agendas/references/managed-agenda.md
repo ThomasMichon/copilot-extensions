@@ -303,6 +303,11 @@ supplies `--publisher-python <absolute-owned-provider-interpreter>` and
 `--publisher-project <project>` together, never mixed with `--publish-arg`.
 The source adapter checks the declared provider contract, health and v2 parser
 before publishing the identical committed observation; no mutation is replayed.
+Both isolated Python hops explicitly select UTF-8 for stdin/stdout, independently
+of the host locale or environment encoding overrides. Isolation remains enabled;
+the protocol reader still rejects non-UTF-8 replies rather than guessing a locale
+or replacing characters. A pending delivery is retried with `publish`, not by
+reapplying its already accepted agenda mutation.
 See [the new-mode guide](context-qualified-commands.md#delivery-and-validation-boundary).
 
 After commit, stdin carries one compact JSON observation followed by newline:
