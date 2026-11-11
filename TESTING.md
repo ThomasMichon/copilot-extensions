@@ -164,6 +164,15 @@ timeout/abort recovery room to finish while also bounding the older client.
 This is actual prior frontend source compatibility,
 not an old installed Host, historical binary rollback or native SDK evidence.
 
+The reverse control loads the exact dev150 Host source and its protocol in the
+same isolated namespace. The current frontend exchanges literal ACP frames,
+reattaches to the same real Python child with a durable cursor, and exercises
+both explicit termination and the historical idle-detach shutdown. The test
+owner awaits its listener, frontend handlers and exact child independently of
+the historical Host's limited close. This qualifies prior Host source
+compatibility only, not modern lifetime/authentication capabilities, an old
+installed binary, native Copilot or SDK observer/idle behavior.
+
 ## Owner-only hosted Windows escape hatch
 
 `windows-qualification.yml` is an explicit manual lane on a disposable
