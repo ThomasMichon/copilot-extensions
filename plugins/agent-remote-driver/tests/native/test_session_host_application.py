@@ -18,7 +18,7 @@ import pytest
 from websockets.asyncio.client import connect
 
 from agent_remote_driver.session_host.client import SessionHostClient
-from agent_remote_driver.session_host.osutil import kill_pid, pid_alive
+from agent_remote_driver.session_host.osutil import kill_pid, pid_alive, process_start_time
 
 ROOT = Path(__file__).resolve().parents[4]
 SOURCE = ROOT / "plugins" / "agent-remote-driver"
@@ -46,7 +46,9 @@ def _frontdoor(slot, *arguments, command="agent-remote-driver"):
 
 
 @pytest.mark.asyncio
-async def test_fresh_application_installs_reuses_and_runs_without_caller_sources(tmp_path, monkeypatch):
+async def test_fresh_application_installs_reuses_and_runs_without_caller_sources(
+    tmp_path, monkeypatch, record_testsuite_property,
+):
     sys.path.insert(0, str(ROOT / "tools"))
     import build_python_artifacts as builder
     import materialize_main as materializer
@@ -61,7 +63,8 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
     assert uv is not None
     interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert interpreter is not None
-    deadline = time.monotonic() + 300
+    started = time.monotonic()
+    deadline = started + 300
     inputs, installation = tmp_path / "source-inputs", tmp_path / "installation"
     source, artifacts = inputs / "plugins" / "agent-remote-driver", inputs / "wheels"
     source.mkdir(parents=True)
@@ -102,6 +105,7 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
         prepare_profile=True, component="agent-remote-driver",
     )
     assert prepared["install_ready"] is True
+    timings = {"package_prepare_seconds": time.monotonic() - started}
     application = Path(prepared["snapshot"]) / "applications" / "agent-remote-driver"
     declaration = json.loads((application / "application.json").read_text())
     construction = declaration["construction"]
@@ -118,28 +122,53 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
                UV_CACHE_DIR=str(tmp_path / "cache"), UV_PYTHON_DOWNLOADS="never",
                UV_PYTHON=interpreter, PYTHONDONTWRITEBYTECODE="1")
     install = _frontdoor(slot, command="install")
+    install_started = time.monotonic()
     stage = _run([*install, "--stage"], cwd=caller, env=env, deadline=deadline)
     assert json.loads(stage.stdout)["state"] == "staged"
     assert not (installation / "current-version").exists()
     result = _run(install, cwd=caller, env=env, deadline=deadline)
     assert json.loads(result.stdout)["state"] == "installed"
     assert (installation / "current-version").read_text().strip() == slot.name
+    timings["staged_first_install_seconds"] = time.monotonic() - install_started
     completion = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
     shutil.rmtree(inputs)
-    repeat = _run(install, cwd=caller, env=env, deadline=deadline)
-    assert json.loads(repeat.stdout)["state"] == "installed"
-    assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
     support = _run(_frontdoor(slot, "--support-json"), cwd=caller, env=env, deadline=deadline)
     assert json.loads(support.stdout)["contract"] == "agent-remote-driver.session-host"
     assert "acp.v1" in json.loads(support.stdout)["transports"]
 
-    state = tmp_path / "host-state.json"
+    previous_identity = None
+    for mode in ("cold", "warm"):
+        if mode == "warm":
+            repeat_started = time.monotonic()
+            repeat = _run(install, cwd=caller, env=env, deadline=deadline)
+            assert json.loads(repeat.stdout)["state"] == "installed"
+            assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
+            timings["retained_install_seconds"] = time.monotonic() - repeat_started
+        directory = tmp_path / mode
+        directory.mkdir()
+        observed = await _exercise_installed_host(
+            slot, caller, env, interpreter, directory, deadline,
+        )
+        timings[mode + "_launch_to_ready_seconds"] = observed["launch_to_ready_seconds"]
+        if mode == "cold":
+            timings["cold_delivery_to_ready_seconds"] = observed["ready_at"] - started
+        assert observed["child_identity"] != previous_identity
+        previous_identity = observed["child_identity"]
+        assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
+    report = json.dumps(timings, sort_keys=True)
+    record_testsuite_property("driver_application_readiness", report)
+    print("Driver application readiness: " + report, flush=True)
+
+
+async def _exercise_installed_host(slot, caller, env, interpreter, directory, deadline):
+    state = directory / "host-state.json"
     child = (
         "import json,sys\n"
         "for line in sys.stdin:\n"
         " r=json.loads(line)\n"
         " print(json.dumps({'jsonrpc':'2.0','id':r['id'],'result':r.get('params')}),flush=True)\n"
     )
+    launch_started = time.monotonic()
     process = subprocess.Popen(
         _frontdoor(slot, "--cwd", str(caller), "--state-file", str(state), "--ws-port", "0",
                    "--", interpreter, "-I", "-S", "-u", "-c", child),
@@ -153,7 +182,11 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
         facts = json.loads(state.read_text())
         child_pid = facts["child_pid"]
         client = await SessionHostClient.connect(port=facts["port"])
-        await client.attach(nonce=facts["nonce"].encode())
+        hello = await client.attach(nonce=facts["nonce"].encode())
+        ready_at = time.monotonic()
+        assert hello.child_pid == child_pid
+        child_identity = (child_pid, process_start_time(child_pid))
+        assert child_identity[1] is not None
         literal = 'first line\n"quoted" & literal $value'
         await client.write((json.dumps({
             "jsonrpc": "2.0", "id": 1, "method": "session/prompt", "params": {"text": literal},
@@ -198,3 +231,7 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
             await asyncio.to_thread(process.wait, timeout=5)
         process.communicate(timeout=5)
         assert child_pid is None or not pid_alive(child_pid)
+    return {
+        "ready_at": ready_at, "launch_to_ready_seconds": ready_at - launch_started,
+        "child_identity": child_identity,
+    }
