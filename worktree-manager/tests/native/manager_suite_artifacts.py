@@ -219,6 +219,10 @@ def _configuration(case: Path, declared: dict[str, Any]) -> None:
     index_repo.write_text(f"indexers:\n  - machine: {machine}\n", encoding="utf-8")
     if "agent-vault" in declared:
         _write(project / ".agent-vault.json", {"enabled": True})
+    if "agent-codespaces" in declared:
+        codespaces = home / ".agent-codespaces"
+        codespaces.mkdir()
+        _write(codespaces / "config.yaml", {"windows_scheduled_task": "enabled"})
     _write(project / "services.yaml", {"plugins": [
         {"name": name, "deploy_machines": [machine]}
         for name, row in declared.items() if row["scope"] == "machine-gated"

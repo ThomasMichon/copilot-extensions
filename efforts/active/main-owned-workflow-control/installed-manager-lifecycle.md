@@ -1165,3 +1165,32 @@ packet passes 42 tests with two platform-inapplicable skips; the seven focused
 root/committed-code/diagnostic cases and changed-source lint pass. Native
 construction on this correction remains unverified, and the fresh case on
 `cd0848ac` is still failed, with successful settlement, not superseded acceptance.
+
+Run 42949961145 at `9edfc0b14b0da25b588e940e1bf376f50c840810` passed
+materialization but failed fresh bootstrap: the low-level Worktrees constructor
+correctly required live native update-driver custody. Failure rendering itself
+then failed because captured strings were passed to a file-based diagnostic
+reader. The adapter now passes retained output paths and enters the canonical
+native driver for both private engine roots. Its 38 contained runtime controls
+pass; that is source evidence, not native runtime acceptance.
+
+Run 42952406260 at `ab0ad1ec417e694767a5677739a97ff8ca9ac6d7` advanced through
+driver-owned bootstrap construction and then failed frozen marketplace
+registration. Retained bootstrap logs show that the full native `install`
+action had already registered the public marketplace and acquired a plugin.
+That acquisition is not frozen-suite evidence. The adapter now requests the
+canonical lean `provision` action, which constructs the selected source runtime
+without launcher/plugin acquisition. The actual CLI still owns subsequent
+complete frozen payload acquisition, and no existing registration is erased or
+silently treated as the requested source.
+
+The normal/repair failures on `cd0848ac` and `9edfc0b` are distinct. Their
+Codespaces on-demand owner started successfully, but their required scheduled
+task was absent. The native update log explicitly reported the default
+preserve policy and no task creation; preparation and settlement reported no
+cleanup errors. The disposable replacement fixture now explicitly declares
+installation-local `windows_scheduled_task: enabled` before installation,
+preserving its strict native task ownership assertion and production defaults.
+Two focused configuration controls pass through the actual Codespaces policy
+and native/dependency-free Index role readers. Native registration, runtime
+closure, actual Machines readiness and all later acceptance remain open.

@@ -130,8 +130,8 @@ def test_fresh_engine_construction_enters_the_native_driver_for_each_private_roo
         assert argv[4] == payload / "scripts" / "runtime_install_driver.py"
         assert argv[argv.index("--root") + 1] == root
         assert argv[argv.index("--payload") + 1] == payload
-        assert argv[argv.index("--action") + 1] == "install"
-        assert "--runtime-only" in argv and "--bootstrap-python" in argv
+        assert argv[argv.index("--action") + 1] == "provision"
+        assert "--runtime-only" not in argv and "--bootstrap-python" in argv
         assert env is environment
         assert cwd == diagnostics == tmp_path and label == "engine"
 

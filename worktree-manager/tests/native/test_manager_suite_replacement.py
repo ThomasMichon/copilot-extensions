@@ -291,6 +291,25 @@ def test_stdio_frontdoor_qualifies_its_actual_version_without_a_resolver_trace(
     assert calls == ["--version"]
 
 
+def test_fixture_declares_the_native_codespaces_scheduling_it_requires(tmp_path: Path) -> None:
+    import runpy
+
+    (tmp_path / "project").mkdir()
+    payload = tmp_path / "published" / "plugins" / "agent-codespaces"
+    payload.mkdir(parents=True)
+    (payload / "plugin.json").write_text('{"name":"agent-codespaces","version":"1.0"}')
+    fixture._env(tmp_path)
+    fixture._configuration(tmp_path, {
+        "agent-codespaces": {"scope": "universal", "version": "1.0"},
+    })
+    reader = runpy.run_path(str(
+        fixture.REPO / "plugins" / "agent-codespaces" / "src" / "agent_codespaces"
+        / "scheduling.py"
+    ))["windows_scheduled_task"]
+    assert reader(tmp_path / "h" / ".agent-codespaces") == "enabled"
+    assert reader(tmp_path / "unconfigured-installation") == "preserve"
+
+
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Index role readers")
 def test_fixture_configures_host_for_native_and_dependency_free_index_readers(tmp_path: Path) -> None:
     from agent_procutil import no_window_kwargs

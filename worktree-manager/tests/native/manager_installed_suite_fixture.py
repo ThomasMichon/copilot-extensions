@@ -54,7 +54,7 @@ def _install_engine(payload, root, environment, project, diagnostics, label, run
     run([
         base, "-I", "-S", "-B", payload / "scripts" / "runtime_install_driver.py",
         "--payload", payload, "--root", root, "--shell", shutil.which("pwsh"),
-        "--action", "install", "--runtime-only", "--bootstrap-python", base,
+        "--action", "provision", "--bootstrap-python", base,
     ], environment, project, diagnostics, label)
 
 
