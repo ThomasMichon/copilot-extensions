@@ -75,7 +75,7 @@ jobs:
           -k "${{ matrix.select }}"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
       - name: Qualify literal batches on the same fallback worker
-        if: matrix.residual != ''
+        if: ${{ !cancelled() && matrix.residual != '' }}
         env:
           AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
           PYTHONUTF8: "0"

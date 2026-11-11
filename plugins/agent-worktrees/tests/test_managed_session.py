@@ -60,23 +60,6 @@ function Write-NativeWriteFixtureCpuPhase([string]$Name) {
             [Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name +
         ' cpu_ticks=' + $cpu.ToString([Globalization.CultureInfo]::InvariantCulture))
 }
-function Write-NativeWriteFixtureAssemblyState([string]$Name) {
-    $utility = 0
-    $web = 0
-    foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
-        $assemblyName = $assembly.GetName().Name
-        if ($assemblyName -ceq 'Microsoft.PowerShell.Commands.Utility') { $utility = 1 }
-        if ($assemblyName -ceq 'System.Web.Extensions') { $web = 1 }
-    }
-    $process = [Diagnostics.Process]::GetCurrentProcess()
-    try { $cpu = $process.TotalProcessorTime.Ticks }
-    finally { $process.Dispose() }
-    [Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' +
-        [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString(
-            [Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name +
-        ' cpu_ticks=' + $cpu.ToString([Globalization.CultureInfo]::InvariantCulture) +
-        ' utility=' + $utility.ToString() + ' web=' + $web.ToString())
-}
 """
 # Prior reader retained to exercise additive-declaration compatibility.
 NATIVE_READ_V1 = r"""
@@ -183,7 +166,8 @@ def native_write_fixture_stderr(stderr):
                 not match[3]
                 or match[4] and match[2] in {b"json-web-load", b"json-resolver-type"}
                 or not match[4] and match[2] in {
-                    b"json-resolver-create", b"json-serializer-create", b"json-deserialize", b"json-deserialized",
+                    b"json-web-load", b"json-resolver-type", b"json-resolver-create",
+                    b"json-serializer-create", b"json-deserialize", b"json-deserialized",
                 }
             )
         ):
@@ -221,10 +205,10 @@ def instrument_prepared_admission(source):
     ):
         assert statement in source
         writer = (
-            "Write-NativeWriteFixtureAssemblyState"
-            if boundary in {"json-web-load", "json-resolver-type"} else
             "Write-NativeWriteFixtureCpuPhase"
-            if boundary in {"json-resolver-create", "json-serializer-create", "json-deserialize"} else
+            if boundary in {
+                "json-web-load", "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize",
+            } else
             "Write-NativeWriteFixturePhase"
         )
         source = source.replace(statement, f"{writer} '{boundary}'\n" + statement, 1)
@@ -508,6 +492,7 @@ def test_native_write_fixture_stderr_preserves_errors(newline):
     phase = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
     before = b"NATIVE_WRITE_FIXTURE_PHASE 124 json-web-load cpu_ticks=250000 utility=1 web=0" + newline
     after = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-resolver-type cpu_ticks=500000 utility=1 web=1" + newline
+    minimal = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-web-load cpu_ticks=500000" + newline
     deserialize = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-deserialize cpu_ticks=625000" + newline
     decoded = b"NATIVE_WRITE_FIXTURE_PHASE 127 json-deserialized cpu_ticks=750000" + newline
     errors = (
@@ -519,12 +504,13 @@ def test_native_write_fixture_stderr_preserves_errors(newline):
         + b"NATIVE_WRITE_FIXTURE_PHASE 129 json-web-load cpu_ticks=1 utility=1 web=2" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 130 json-web-load cpu_ticks=" + b"1" * 21 + b" utility=1 web=0" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 131 json-deserialize cpu_ticks=1 utility=1 web=0" + newline
-        + b"NATIVE_WRITE_FIXTURE_PHASE 132 json-web-load cpu_ticks=1" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 132 command-entry cpu_ticks=1" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
     )
-    assert native_write_fixture_stderr(phase + before + after + deserialize + decoded + errors) == (
+    assert native_write_fixture_stderr(phase + before + after + minimal + deserialize + decoded + errors) == (
         "123 command-entry\n124 json-web-load cpu_ticks=250000 utility=1 web=0\n"
         "126 json-resolver-type cpu_ticks=500000 utility=1 web=1\n"
+        "126 json-web-load cpu_ticks=500000\n"
         "126 json-deserialize cpu_ticks=625000\n127 json-deserialized cpu_ticks=750000", errors,
     )
 
@@ -539,7 +525,7 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
         pytest.skip(f"{shell} is unavailable")
     command = (
         NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LOAD_WRITER
-        + "Write-NativeWriteFixtureAssemblyState 'json-web-load'; "
+        + "Write-NativeWriteFixtureCpuPhase 'json-web-load'; "
         + "Write-NativeWriteFixtureCpuPhase 'json-deserialize'; "
         + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
     )
@@ -550,7 +536,7 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
         )
     progress, errors = native_write_fixture_stderr(captured.value.stderr)
     assert re.fullmatch(
-        r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+ utility=[01] web=[01]\n"
+        r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+\n"
         r"[0-9]+ json-deserialize cpu_ticks=[0-9]+", progress,
     ), progress
     assert errors == b"real fixture error\r\n"
@@ -2258,7 +2244,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         _, prior_read.stderr = native_write_fixture_stderr(prior_read.stderr)
         assert prior_read.returncode == 0 and not prior_read.stderr and prior_read.stdout == b""
         assert not observed.exists()
-    if case == "patch-protected-input":
+    if case in {"patch-protected-input", "personal-state"}:
         with capsys.disabled():
             print(json.dumps({
                 "shell": shell, "case": case, "start_ms": started_ms,

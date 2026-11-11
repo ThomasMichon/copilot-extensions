@@ -395,6 +395,8 @@ The fallback worker runs the literal-batch residual sequentially in a separate
 runner invocation on the same VM. Both invocations retain the 300-second group
 bound inside the unchanged ten-minute job; no cases or workers are added by
 the split.
+The residual runs after a primary-step failure unless the job is cancelled;
+either runner's failure still fails the job and the full qualification.
 The controls use actual membership and guard-map publication for legacy and
 installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
@@ -437,17 +439,19 @@ decoding, so a similarly shaped content reader cannot stand in for that stage.
 They never retry the child, extend its ten-second bound or classify the
 unobserved stalled phase as a known flake.
 On PS5.1, the copied admission helper records process CPU ticks (100 ns units)
-and whether Utility/Web assemblies are already loaded immediately before and
-after the original `System.Web.Extensions` load. Enumeration uses only the
-current AppDomain; it does not load an assembly or warm another child.
-CPU-only checkpoints bracket resolver/serializer construction and JSON
-deserialization in the copied helper, including a distinct decoded marker.
+immediately before and after the original `System.Web.Extensions` load, without
+enumerating loaded assemblies. CPU-only checkpoints bracket resolver/serializer
+construction and JSON deserialization in the copied helper, including a distinct
+decoded marker.
 These distinguish observed process CPU from elapsed first-touch time without
 changing the production decoder, prewarming it or extending a deadline.
-The `patch-protected-input` control retains those successful-call phases too.
+The `patch-protected-input` and `personal-state` controls retain those
+successful-call phases too.
 Snapshots include their observer work and cannot establish why an earlier
 unobserved load stalled. Malformed or out-of-bound snapshot markers remain
 real stderr; native timeout controls preserve valid snapshots alongside errors.
+The parser still recognizes historical assembly-state snapshots so retained
+failure records remain readable; new timed children do not collect them.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
