@@ -246,6 +246,22 @@ packet. Controller support does not supply or qualify the candidate fixture.
 Neither packet qualifies new-window/no-mux modes or survival after all caller
 cleanup Jobs close; a detached `embody` result cannot qualify the TTY caller.
 
+`submit --packet native-worktrees-manager-no-mux` selects only
+`test_manager_no_mux_decision` in `tests/native/test_manager_application_launch.py`.
+It constructs and installs a fresh Manager wheel application, then passes a
+saved local resume decision through the real Manager decision dispatcher and
+engine process boundary, rather than calling its PowerShell launcher directly.
+The installed Manager supplies that launcher. Fresh and resumed native Copilot
+legs retain one history, seed non-replay, correlated Manager/engine terminal
+receipts, independent assertion-completion proof, and exact process/pane cleanup;
+neither leg may create a Manager mux
+session. The existing private ConPTY supplies terminal transport, not a visible
+new-window claim. This fixed Worktrees packet uses the same feed, native pins
+and sanitizer, with the original 300-second Manager case, 420-second plugin
+aggregate and 180-second native bounds. It does not exercise interactive Picker
+keystrokes, new-window presentation or caller-Job independence. Its protected
+controller support must be reviewed and promoted before submission.
+
 `submit --packet native-worktrees-caller-jobs` separately selects
 `test_public_caller_job_lifetime` in the same source fixture. Only this
 selection uses the existing hosted native application owner, with renewable
@@ -490,6 +506,18 @@ bound inside the unchanged ten-minute job; no cases or workers are added by
 the split.
 The residual runs after a primary-step failure unless the job is cancelled;
 either runner's failure still fails the job and the full qualification.
+The same fallback worker then runs the disjoint bare-argument packet; the
+existing job, child/item/group limits and worker count are unchanged. Its
+registered single/mixed-batch controls cover PS5.1/PS7 and legacy/cell admission,
+ordered original/candidate/original/protected observations, one declaration
+load/shared source pass and a real later protected denial. The focused
+`tests/test_native_shell_arguments.py` controls compare every generated boolean
+regex with its actual original Python owner on both native engines, including
+invariant-case behavior, original write/PR indicators and full-match boundaries.
+They exercise original heads/keys/carriers, member precedence and uncertainty,
+128/129 calls, invalid/absent optional facts and the actual preceding shared
+reader with new data. No JSON decoder, original policy owner or budget changes
+are implied by these finite source controls.
 The controls use actual membership and guard-map publication for legacy and
 installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.

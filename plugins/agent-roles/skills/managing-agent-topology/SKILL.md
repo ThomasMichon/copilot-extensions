@@ -53,6 +53,7 @@ An `authorityRef`, receipt, accepted charter or valid JSON does not grant effect
 When using native Dispatch standing charters, link assignments by `nativeTask`
 and derive attachment, acceptance and lifecycle from native reads. Do not maintain
 a second writable acceptance or worktree-ownership map in this document.
+The dispatcher's own worktree cannot also own a worker assignment.
 
 ## Discover before assigning
 
@@ -118,6 +119,8 @@ Use the owner's supported exact-head/idempotent send contract; if the head chang
 during admission, reconcile rather than sending to both. Receipt-only recovery
 uses the saved original envelope, never a new current-head lookup or reconstructed
 prompt. Respect holds and pending effects.
+The read-only `relay` report sequences these persistence, exact-head delivery and
+acceptance boundaries; see [follow-up relay and temporary work](references/adapters-and-recovery.md#follow-up-relay-and-temporary-work).
 
 Any semantic change to the role meaning, scope, expected work, restrictions or
 acceptance increments the assignment charter revision. Keep the prior revision
@@ -148,6 +151,8 @@ blindly or move to another machine.
 Recompute semantic coverage without replacing an uncertain owner. Count each
 native owner at most once in a role/scope lane. Stale, unreachable, wrong-scope,
 unaccepted or unresolved-effect assignments remain visible but unqualified.
+Temporary assignments are reported separately and never satisfy a standing
+role's minimum coverage, even when their work is accepted.
 With Dispatch observations, report desired, reserved, accepted, held, unknown,
 retiring and retired lanes separately. Owner-retaining lanes are not vacancies,
 and only a joined, current accepted lane contributes qualified coverage.
@@ -176,6 +181,7 @@ python <resolved-script> intent <private-topology-json>
 python <resolved-script> flow <private-topology-json> --request <request-id>
 python <resolved-script> placement <private-topology-json> --role <role-id> --kind standing
 python <resolved-script> route <private-topology-json> --request <request-id>
+python <resolved-script> relay <private-topology-json> --request <request-id> --followup <followup-id>
 python <resolved-script> seed <private-topology-json> --request <request-id>
 python <resolved-script> materialize <private-topology-json> --request <request-id>
 python <resolved-script> inspect-materialization <private-materialization-json>
@@ -189,6 +195,12 @@ declaration and its adopted materialization, without qualifying coverage;
 worktree and observed current head or a hold; `seed` exports the complete saved
 assignment, role and machine context.
 There is no allocate, send, reconcile-write or launch command.
+
+`relay` reports the next advisory step for a saved follow-up: reconcile a changed
+native charter when needed, persist the immutable request envelope and relay
+effect, send to the retained worktree's exact head, then await the response or
+joined current-revision acceptance before settlement. It never reads an envelope,
+sends a message or treats delivery as acceptance.
 
 `flow` reports the next advisory step for a standing request: persist its complete
 assignment and materialization, allocate through Worktrees, reserve through

@@ -590,8 +590,17 @@ can compose the same proof over each shell member's own arguments, alongside
 `view`/`rg`/`glob`. Shared declaration and source verification runs once per event,
 including the original batch and relevance owners. Any uncertain or protected
 member retains whole raw fallback; top-level fields cannot rescue it.
-Older readers retain their original shell-batch path. Shell arguments and
-JSON argument strings do not gain that proof.
+Older readers retain their original shell-batch path. The optional version-1
+argument facts extend the same proof to one or more original-safe unquoted ASCII
+arguments, using the original relevance grammar and every original write/PR
+invocation veto. The renderer extracts those expressions without importing their
+owners and refuses unsupported syntax/flags. Predicates are compiled once per
+event and reused across members, with one declaration load and shared source
+pass. Missing/invalid argument facts preserve an independent exact-literal proof;
+any batch needing an unproved argument member falls back whole. Prior readers
+ignore those facts and retain argument fallback; new readers with old data do
+likewise. JSON strings, Unicode, unsupported whitespace, quoted or arbitrary
+shell syntax and write/PR-looking arguments do not gain this proof.
 The same exact literal can come from a raw string, or from `tool_input` only
 when `toolArgs` is absent. A present null, empty or invalid primary value never
 falls through to the fallback carrier. Raw text is compared unchanged, not
@@ -604,7 +613,9 @@ This does not qualify installed or composed hook latency.
 After guard or proof-dependency source changes, regenerate the shipped contract
 with `python tools/render-hook-read-policy.py`. Registered-consumer fixtures use
 the actual packaged declaration; literal comparator legs explicitly omit only
-its optional proof and record that contract identity. Stale source digests are
+its optional proof and record that contract identity. Argument comparator legs
+omit only the optional argument facts, retaining the existing literal proof.
+Stale source digests are
 never repaired in fixtures to manufacture qualification.
 
 New producers remain compatible with old readers, which ignore the additive

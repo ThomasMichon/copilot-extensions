@@ -217,7 +217,8 @@ def test_native_write_contract_matches_actual_target_and_map_readers():
     ("toolArgs", False), ("toolArgs", True),
     ("tool_input", False), ("tool_input", True),
 ])
-def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monkeypatch, argument_key, raw):
+@pytest.mark.parametrize("suffix", ["", " .\\read.txt -Tail 1"])
+def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monkeypatch, argument_key, raw, suffix):
     import hashlib
     import importlib.util
     from test_managed_session import fixture_linked_worktree, fixture_project
@@ -242,6 +243,7 @@ def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monk
     env = {"AGENT_HOME": str(tmp_path)}
     protected_command = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
     for command in relevance.SHELL_READ_HEADS:
+        command += suffix
         keys = policy["nativeShellReadCommandKeys"]
         for index, key in enumerate(keys[:1] if raw else keys):
             arguments = {earlier: None for earlier in keys[:index]}
@@ -332,6 +334,32 @@ def test_native_shell_renderer_rejects_invalid_or_oversized_declarations(tmp_pat
     (tmp_path / "hook_pre_relevance.py").write_text("SHELL_READ_HEADS = " + declaration + "\n", encoding="utf-8")
     with pytest.raises(ValueError):
         renderer.render(tmp_path)
+
+
+@pytest.mark.parametrize("expression", [
+    're.compile("read", re.MULTILINE)',
+    're.compile("read", re.IGNORECASE | re.ASCII)',
+    're.compile("read", flags=re.IGNORECASE)',
+    're.compile(fetch_pattern(), re.IGNORECASE)',
+    're.compile("(?=read)", re.IGNORECASE)',
+    're.compile("[(?P<literal>]", re.IGNORECASE)',
+    're.compile(r"(read)\\1", re.IGNORECASE)',
+    're.compile(r"\\Aread\\Z", re.IGNORECASE)',
+    're.compile("read{1,2}", re.IGNORECASE)',
+    're.compile("read++", re.IGNORECASE)',
+    're.compile("[a-z-[b]]", re.IGNORECASE)',
+    're.compile("read$", re.IGNORECASE)',
+])
+def test_native_argument_renderer_refuses_unqualified_regex_semantics(expression):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "native_argument_renderer", _PLUGIN.parents[1] / "tools" / "render-hook-read-policy.py",
+    )
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    with pytest.raises(ValueError):
+        renderer.boolean_pattern("_PATTERN = " + expression, "_PATTERN", ("Get-Content",))
 
 
 @pytest.mark.parametrize("declaration", [
