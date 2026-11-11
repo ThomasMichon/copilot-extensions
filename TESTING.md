@@ -958,8 +958,15 @@ records, without command lines, inside the existing evidence size budget.
 An early consumer exit also retains up to 16 birth-bound descendant exit codes
 before Job cleanup, distinguishing already-exited processes from live ones.
 Manager module and console entrypoints enable Python fatal-fault reporting on
-their existing stderr descriptor, so a native interpreter fault can retain its
-thread stacks in the same terminal capture. This does not identify externally
+their existing stderr descriptor. The native witness supplies an existing
+absolute `WORKTREE_MANAGER_FAULT_DIR` inside its own diagnostics directory;
+each Manager process exclusively creates `manager-<pid>.fault.log` there.
+Keeping the fault descriptor open independently of the terminal preserves
+fault headers and thread stacks that ConPTY screen rendering can otherwise
+interleave or overwrite. Normal terminal output and input stay unchanged.
+An existing handler is preserved; unavailable, relative or colliding diagnostic
+paths retain the stderr fallback without creating directories or overwriting
+files. No file sink is selected by default. This does not identify externally
 terminated processes or turn a crash into successful qualification.
 The installed-process, keyboard, native-terminal-offer and cleanup assertions
 remain unchanged; the bounded wait is not a larger readiness deadline.
