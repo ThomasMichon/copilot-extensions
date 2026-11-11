@@ -190,7 +190,8 @@ def _aesgcm(kek: bytes):
     except ImportError as exc:  # pragma: no cover - env-dependent
         raise KekError(
             "the 'pycryptodomex' package is required for seal/unseal -- select "
-            "the agent-vault 'kek' or 'ssh' dependency profile"
+            "the agent-vault 'ssh' installer profile; package-based installations "
+            "can use the 'kek' extra"
         ) from exc
     return AesGcm(kek)
 
