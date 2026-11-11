@@ -262,6 +262,50 @@ release: retain the assignment until effects settle, obligations are resolved
 and native retirement is confirmed. Never retire or replace a standing owner
 to make room without the original owner's authority.
 
+## Vacancy and drift reconciliation
+
+`reconcile <private-topology-json>` reports semantic coverage, eligible placement
+and retained-assignment `dispositions` per role. Every disposition preserves
+the assignment/request/creation identities, native task and worktree evidence,
+expected role/scope/charter revision, proposed/adopted records and pending effects.
+Every disposition sets `replacementAllowed: false`.
+
+| Disposition | Advisory next action |
+|-------------|----------------------|
+| Off-role or wrong-scope owner | Coordinate an in-place reassignment with the current owner and any assigned monitor; preserve its work and obligations, obtain required agreement and accept the complete revised charter through the native owner |
+| Stale, dormant, unreachable, unaccepted or otherwise uncertain owner | Reconcile with that retained owner; neither liveness nor a numerical shortfall authorizes replacement |
+| Unsettled effect | Recover or reconcile the original operation and envelope through its native owner, without replay or a new identity |
+| Saved unowned proposal | Continue the original assignment using its existing `flow` report and holds, not a duplicate assignment |
+| Completed or incompletely released assignment | Reconcile retirement through the native lifecycle owner; completion is not release |
+
+Unmapped owners and native tasks appear as in-place `adoptions` proposals and
+hold new placement. These proposals neither adopt custody nor authorize a
+monitor message. Use existing reader/monitor evidence and the original steering
+grant; do not expand monitoring or add a watcher to obtain the report.
+
+A released assignment stops holding its lane only after its effects are settled
+and no saved owner observation still identifies it or its retained worktree.
+For a Dispatch-linked assignment, require fresh native evidence of a retired
+standing task, null task owner/session and a closed or absent original
+relationship. Missing or contradictory retirement evidence remains a hold, even
+when the saved assignment says `released`. Never erase observations or change
+their timestamps to manufacture a vacancy.
+
+A lane proposes `persist-new-standing-assignment` only for a remaining shortfall
+with no custody/discovery holds, no unresolved standing assignments and at least
+one eligible placement candidate. The conservative same-lane hold avoids
+replacing retained owners when several owners are desired. `newAssignmentCount`
+is uncovered demand, not available slots, reserved capacity or launch authority.
+Persist each complete charter and stable identity, then serialize admission
+through the native resource owner and recompute after each outcome. Temporary
+assignments never satisfy standing demand.
+
+The report writes nothing and invokes no adapter. `effectAuthorityGranted` is
+false and `nativeRecheckRequired` is true: recheck current ownership, pending
+effects, acceptance, resources and actual authority before any effect. Resolve
+drift with the rightful owner rather than editing copied evidence or moving the
+assignment to another machine.
+
 ## State and effect protocol
 
 Persist intent under the existing native single writer, using the adopter's
