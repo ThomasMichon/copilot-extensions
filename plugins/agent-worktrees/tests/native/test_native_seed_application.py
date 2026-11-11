@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+from types import ModuleType, SimpleNamespace
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
@@ -476,6 +477,41 @@ def test_manager_native_phase_propagates_owned_failures_without_inline_retry(tmp
             environment=environment, picker_decision=True,
         )
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("valid_observations", [False, True])
+def test_manager_decision_proof_distinguishes_native_exit_from_assertion(tmp_path, monkeypatch, valid_observations):
+    from test_headed_worktrees_copilot import _manager_decision_source
+
+    script, marker = tmp_path / "launch-session.ps1", tmp_path / "decision.json"
+    script.touch()
+    phases = ["confirmed", "resolution-requested", "resolved", "launch-requested"]
+    if valid_observations:
+        phases.append("launcher-returned")
+    detail = {
+        "events": [{"phase": phase, "details": {"exit_code": 1}} for phase in phases],
+        "input": {"options": {"no_mux": True}},
+    }
+    manager = ModuleType("worktree_manager")
+    manager.__main__ = SimpleNamespace(_run_production_picker=lambda *args, **kwargs: 1)
+    manager.engine_client = SimpleNamespace(set_engine_command=lambda command: None)
+    attempts = ModuleType("worktree_manager.launch_attempts")
+    attempts.LaunchAttempts = lambda: SimpleNamespace(
+        record_intent=lambda *args, **kwargs: None, detail=lambda *args, **kwargs: detail,
+    )
+    relocated = ModuleType("worktree_manager.relocated_launch")
+    relocated._relocated_launch_script = lambda: script
+    for module in (manager, attempts, relocated):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(sys, "argv", ["fixture", "engine", "worktree", "attempt", str(script), str(marker)])
+    code = compile(_manager_decision_source(), "manager-decision-fixture", "exec")
+    with pytest.raises(SystemExit if valid_observations else AssertionError) as error:
+        exec(code, {"__name__": "__main__"})
+    # Both subprocess outcomes are 1; only completed assertions produce proof.
+    assert (error.value.code if valid_observations else 1) == 1
+    assert marker.exists() is valid_observations
+    if valid_observations:
+        assert json.loads(marker.read_text(encoding="utf-8")) == {"attempt": "attempt", "exit_code": 1}
 
 
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_jobs=False):

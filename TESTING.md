@@ -253,7 +253,8 @@ saved local resume decision through the real Manager decision dispatcher and
 engine process boundary, rather than calling its PowerShell launcher directly.
 The installed Manager supplies that launcher. Fresh and resumed native Copilot
 legs retain one history, seed non-replay, correlated Manager/engine terminal
-receipts, and exact process/pane cleanup; neither leg may create a Manager mux
+receipts, independent assertion-completion proof, and exact process/pane cleanup;
+neither leg may create a Manager mux
 session. The existing private ConPTY supplies terminal transport, not a visible
 new-window claim. This fixed Worktrees packet uses the same feed, native pins
 and sanitizer, with the original 300-second Manager case, 420-second plugin
