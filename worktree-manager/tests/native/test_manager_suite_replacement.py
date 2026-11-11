@@ -35,6 +35,18 @@ def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: p
         require_venue()
 
 
+@pytest.mark.parametrize("nested", [False, True])
+def test_selected_runtime_python_uses_its_native_installed_layout(tmp_path, nested):
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "current-version").write_text("1.0")
+    slot = root / "versions" / "1.0"
+    python = (slot / ".venv" if nested else slot) / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    assert fixture._python(root) == python
+
+
 @pytest.mark.parametrize("mutation", ("none", "same-stat-content", "added", "removed"))
 def test_retention_diagnostics_preserve_strict_byte_and_identity_comparison(
     tmp_path: Path, mutation: str,

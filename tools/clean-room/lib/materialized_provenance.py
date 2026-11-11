@@ -153,8 +153,12 @@ def build(dest: Path, *, source_root: Path) -> list[str]:
         log = json.loads(result.stdout)
         if not isinstance(log, list) or any(not isinstance(line, str) for line in log):
             raise ValueError("committed materializer returned an invalid log")
-    if any(line.startswith("SKIP") for line in log):
-        raise ValueError("candidate materialization refused an unresolved source")
+    refused = [line for line in log if line.startswith("SKIP")]
+    if refused:
+        detail = "\n".join(line[:400] for line in refused[:8])
+        raise ValueError(
+            f"candidate materialization refused an unresolved source ({len(refused)}):\n{detail}"
+        )
     receipt = {"schema": SCHEMA, "version": 1, "source_commit": head,
                "paths": content_manifest(dest)}
     (dest / RECEIPT).write_text(json.dumps(receipt, indent=2) + "\n", encoding="utf-8")

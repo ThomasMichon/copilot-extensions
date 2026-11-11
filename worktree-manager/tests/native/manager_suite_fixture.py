@@ -119,7 +119,9 @@ def _commit(case: Path, root: Path) -> str:
 
 def _python(root: Path) -> Path:
     generation = (root / "current-version").read_text(encoding="utf-8").strip()
-    return root / "versions" / generation / "Scripts" / "python.exe"
+    slot = root / "versions" / generation
+    nested = slot / ".venv" / "Scripts" / "python.exe"
+    return nested if nested.is_file() else slot / "Scripts" / "python.exe"
 
 
 def _probe(case: Path, kind: str) -> dict[str, Any]:

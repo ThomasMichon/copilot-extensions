@@ -1130,3 +1130,21 @@ it is not accepted evidence. Native fresh construction and actual Machines
 readiness have not yet run. The authentic admitted-baseline update, mandatory
 frozen-candidate enforcement and separate Main adoption remain open, with no
 operator rollout or shared-host repair authorized.
+
+Run 42946413939 exercised draft #12013 at exact source
+`e24b119f1f483843538243b0c28f0baab4a9d516`. All three cases failed preparation,
+and each retained successful finally-owned settlement. Fresh stopped at the
+canonical materializer's unresolved-source refusal, before payload acquisition
+or runtime construction. The original error omitted its actual refusal reasons.
+A local exact-source diagnostic hit the unchanged 120-second materialization
+limit and supplied no replacement acceptance evidence.
+
+Normal and repair reached installed-origin observation but failed to spawn a
+selected interpreter. Their common resolver assumed only venv-as-slot layout;
+it now also recognizes the canonical nested `.venv` layout, without changing
+selected generations or installing a substitute. The canonical materialization
+error now retains up to eight bounded refusal reasons and still emits no
+receipt on failure. Two controls for each correction passed, with changed-source
+lint and staged diff checks. The unresolved fresh source must be diagnosed
+from the next retained reason; no runtime, readiness or lifecycle result is
+credited from this failed run, and no deadline or provenance rule is waived.

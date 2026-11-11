@@ -199,6 +199,29 @@ def test_builder_does_not_inherit_repository_selection(source, tmp_path, monkeyp
     assert PROVENANCE.verify(dest, head) == head
 
 
+@pytest.mark.parametrize("oversized", [False, True])
+def test_builder_retains_bounded_unresolved_source_reasons_without_receipt(
+    source, tmp_path, oversized,
+):
+    root, _head = source
+    log = ["SKIP plugins/example: canonical source missing"]
+    if oversized:
+        log += ["SKIP " + "x" * 2000] * 20
+    (root / "tools/materialize_main.py").write_text(
+        "def build(dest, **kwargs):\n    dest.mkdir()\n    return " + repr(log) + "\n",
+    )
+    _git(root, "add", ".")
+    _git(root, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "commit", "--quiet", "-m", "unresolved committed materializer")
+    dest = tmp_path / "candidate"
+    with pytest.raises(ValueError, match="unresolved source") as caught:
+        PROVENANCE.build(dest, source_root=root)
+    assert "plugins/example: canonical source missing" in str(caught.value)
+    assert f"({len(log)})" in str(caught.value)
+    assert len(str(caught.value)) < 3400
+    assert not (dest / PROVENANCE.RECEIPT).exists()
+
+
 @pytest.mark.parametrize("module", ["materialize_main.py", "uv_editable_ref.py"])
 def test_builder_uses_committed_materializer_code_not_working_tree(source, tmp_path, module, monkeypatch):
     root, head = source
