@@ -10205,6 +10205,12 @@ still a change, never an exemption or a reason to reseal the frozen manifest.
 The runtime-resolution source guard distinguishes canonical selected-slot
 layout comparisons from direct nested-venv launches and root-link comparisons;
 only the former are readiness observations rather than launch paths.
+Index's payload-stability packet executes the actual session scope writer and
+native shell entries twice against a cold copied payload, including its
+configuration-reader dependencies. It sets Python environment cache controls
+deliberately ignored by `-E`; explicit `-B` must still preserve every payload
+file. Role/construction fixtures use real Git roots and complete reader inputs,
+not invalid explicit repository overrides or successful configuration callbacks.
 
 The bootstrap RedirectionGuard controls create links as an unprivileged user:
 Windows deliberately [trusts administrator-created links](https://www.microsoft.com/en-us/msrc/blog/2025/06/redirectionguard-mitigating-unsafe-junction-traversal-in-windows).

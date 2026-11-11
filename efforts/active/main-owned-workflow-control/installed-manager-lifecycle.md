@@ -1803,3 +1803,44 @@ updates TESTING.md; no runtime, profile, source-admission or budget policy chang
 The still-running exact `e530` native matrix retains its own outcome, not the
 next source head's result. Current-head CI, complete fresh immutability and
 settlement, authentic upgrade, frozen enforcement and Main adoption remain open.
+
+### November 11 - Identify and stop scope-guidance payload bytecode
+
+Required CI 43060269249 passes at
+`2caee135fd988dc890a70fc274e2d70773e05c36`, including the corrected strict
+runtime-resolution guard. Exact-source run 43060369382 passes normal/repair.
+Fresh again passes preparation, actual actions/continuity, all six daemon
+cleanup outcomes and zero-error census/session close, then refuses post-lifecycle
+Index payload immutability. Settlement succeeds.
+
+The new bounded difference report identifies twelve added paths and no removed
+or changed original file: eight `.pyc` files and four cache directories beneath
+Index's configuration-reader scripts, vendored configuration helpers and source
+package. The active session scope writer invokes `emit_scope_binding.py` with
+`-E` but without `-B`; that script imports `resolve_effective_config` and the
+identified module chain. Its retained PowerShell/Bash wrappers have the same
+omission. Environment cache/no-bytecode flags are ignored by `-E`.
+
+Three actual cold-copy controls reproduce those eight cache files before the
+fix through the real session-writer function, PowerShell 7 and Windows
+PowerShell. The callers now explicitly add `-B`, preserving `-E`, UTF-8, cwd,
+guidance output, budgets and normal runtime-owned caching. No payload file is
+excluded, deleted or resealed. Current paginated #11121/#10757 file checks show
+no overlapping caller or payload-stability-test hunks. The existing Index patch
+changefile is clarified to include the scope-reader case, not duplicated.
+
+The broader packet also exposes three older role/construction fixtures whose
+explicit repository override is only a directory. The actual reader correctly
+reports `repository-override-unavailable`. Fixtures now initialize real Git
+roots and supply the complete copied configuration-reader inputs; production
+refusal of invalid overrides is unchanged. The actual role and construction
+assertions remain, rather than being replaced with success callbacks.
+
+All thirty configuration-scope/guidance/catalog/payload-stability cases pass,
+with nine platform skips uncredited. Each new helper case repeats against the
+same cold payload and proves every file unchanged. Changed-source lint,
+strict runtime-resolution, the 13-plugin install contract and whitespace pass.
+Documentation-impact review updates Index's read-only scope contract and
+TESTING.md. The next unchanged exact-head hosted matrix must still prove the
+final immutable comparison and complete result; authentic update, mandatory
+frozen enforcement and separate Main adoption remain open.

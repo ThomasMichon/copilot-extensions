@@ -10,6 +10,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -32,6 +33,24 @@ def _run(arguments, *, cwd, env, input=None):
     )
 
 
+def _configuration_bundle(payload):
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    for name in ("resolve-activation-role.py", "resolve_effective_config.py"):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
+    ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
+    shutil.copytree(PLUGIN / "scripts" / "configuration-layers", scripts / "configuration-layers", ignore=ignore)
+    shutil.copytree(PLUGIN / "src", payload / "src", ignore=ignore)
+
+
+def _repository(tmp_path, env):
+    repository = tmp_path / "repository"
+    repository.mkdir()
+    result = _run(["git", "init", "-q", str(repository)], cwd=tmp_path, env=env)
+    assert result.returncode == 0, result.stderr
+    return repository
+
+
 def test_cold_runtime_helper_cli_does_not_write_into_its_payload(tmp_path):
     scripts = tmp_path / "payload" / "scripts"
     construction_bundle(scripts)
@@ -47,6 +66,51 @@ def test_cold_runtime_helper_cli_does_not_write_into_its_payload(tmp_path):
         assert _files(scripts) == before
 
 
+@pytest.mark.parametrize("entrypoint", ("session-writer", "pwsh", "powershell.exe", "bash"))
+def test_cold_scope_binding_preserves_the_complete_payload(tmp_path, monkeypatch, entrypoint):
+    from test_write_session_guidance import writer
+
+    if entrypoint == "bash" and (os.name == "nt" or not shutil.which("bash")):
+        pytest.skip("Native POSIX scope-binding entry required")
+    shell = shutil.which(entrypoint) if entrypoint != "session-writer" else None
+    if entrypoint != "session-writer" and not shell:
+        pytest.skip("Native scope-binding shell unavailable")
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for name in (
+        "emit_scope_binding.py", "emit-scope-binding.ps1", "emit-scope-binding.sh",
+    ):
+        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
+    _configuration_bundle(payload)
+    env = environment(tmp_path)
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env["PATH"]
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    env["PYTHONPYCACHEPREFIX"] = str(tmp_path / "owned-cache")
+    repository = _repository(tmp_path, env)
+    config = repository / ".agent-index" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text(
+        "indexers:\n  - machine: fixture\ncorpus:\n  sources:\n"
+        "    - name: git:fixture\n      repo: fixture/repository\n",
+        encoding="utf-8",
+    )
+    before = _files(payload)
+    for _ in range(2):
+        if entrypoint == "session-writer":
+            monkeypatch.setattr(writer, "os", SimpleNamespace(environ=env, path=os.path))
+            context = writer._scope_binding_context(payload, {"cwd": str(repository)})
+        else:
+            argv = [shell, str(scripts / "emit-scope-binding.sh")] if entrypoint == "bash" else [
+                shell, "-NoProfile", "-File", str(scripts / "emit-scope-binding.ps1"),
+            ]
+            result = _run(argv, cwd=repository, env=env)
+            assert result.returncode == 0, result.stdout + result.stderr
+            context = json.loads(result.stdout)["additionalContext"]
+        assert "agent-index:" in context
+        assert _files(payload) == before
+
+
 def test_cold_bash_role_probe_preserves_payload_for_real_completion(tmp_path):
     if os.name == "nt":
         git = shutil.which("git")
@@ -59,10 +123,9 @@ def test_cold_bash_role_probe_preserves_payload_for_real_completion(tmp_path):
             pytest.skip("Bash is unavailable")
     scripts = tmp_path / "payload" / "scripts"
     construction_bundle(scripts)
-    for name in ("resolve-activation-role.py", "resolve_effective_config.py"):
-        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
-    repository = tmp_path / "repository"
-    repository.mkdir()
+    _configuration_bundle(scripts.parent)
+    env = environment(tmp_path)
+    repository = _repository(tmp_path, env)
     binary = tmp_path / "bin"
     binary.mkdir()
     wrapper = binary / "python3"
@@ -71,7 +134,6 @@ def test_cold_bash_role_probe_preserves_payload_for_real_completion(tmp_path):
         encoding="utf-8",
     )
     wrapper.chmod(0o755)
-    env = environment(tmp_path)
     env["PATH"] = str(binary) + os.pathsep + env["PATH"]
     env["AGENT_INDEX_REPO"] = repository.as_posix()
     env["AGENT_INDEX_MACHINE"] = "fixture-machine"
@@ -113,10 +175,9 @@ def test_cold_installer_hash_survives_real_construction_and_role_resolution(tmp_
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     construction_bundle(scripts)
-    for name in ("resolve-activation-role.py", "resolve_effective_config.py"):
-        shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
-    repository = tmp_path / "repository"
-    repository.mkdir()
+    _configuration_bundle(payload)
+    env = environment(tmp_path)
+    repository = _repository(tmp_path, env)
     root = tmp_path / "runtime"
     script = scripts / "consumer.ps1"
     script.write_text(
@@ -148,7 +209,7 @@ def test_cold_installer_hash_survives_real_construction_and_role_resolution(tmp_
         encoding="utf-8",
     )
     before = _files(scripts)
-    result = _run([shell, "-NoProfile", "-File", str(script)], cwd=tmp_path, env=environment(tmp_path))
+    result = _run([shell, "-NoProfile", "-File", str(script)], cwd=tmp_path, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert _files(scripts) == before
     assert (root / "versions" / "1.0.0" / ".install-complete.json").is_file()
