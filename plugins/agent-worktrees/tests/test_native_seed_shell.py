@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import venv
 
 import pytest
 
@@ -179,6 +180,73 @@ def test_native_absent_end_handler_preserves_actual_exit_quietly(tmp_path):
     assert result.returncode == 0, result.stderr
     assert [event[1] for event in events] == ["prepare", "spawned", "returned"]
     assert not result.stderr
+
+
+@pytest.mark.parametrize("supported", [True, False], ids=["current-provider", "unsupported-current"])
+def test_terminal_callback_survives_outgoing_provider_removal(tmp_path, supported):
+    root = tmp_path / "runtime"
+    outgoing, incoming = (root / "versions" / name for name in ("1.0", "2.0"))
+    observed, gate = tmp_path / "phases.jsonl", tmp_path / "spawn-provider"
+    child = (
+        "import pathlib,time\n"
+        "from agent_remote_driver.session_host.osutil import pid_alive\n"
+        f"gate=pathlib.Path({str(gate)!r})\n"
+        "while not gate.is_file(): time.sleep(0.01)\n"
+        "provider=int(gate.read_text())\n"
+        "while pid_alive(provider): time.sleep(0.01)\n"
+        f"pathlib.Path({str(root / 'current-version')!r}).write_text('2.0')\n"
+        f"pathlib.Path({str(outgoing / '.runtime-bootstrap' / 'runtime_launcher.py')!r}).unlink()\n"
+        "raise SystemExit(7)\n"
+    )
+    prepared = {
+        "version": 1, "argv": [sys.executable, "-I", "-B", "-c", child], "environment": None,
+        "attempt_id": "a" * 32, "resolution_id": "b" * 32,
+        "operation_id": "c" * 32, "parent_id": None,
+    }
+    for slot in (outgoing, incoming):
+        venv.EnvBuilder(with_pip=False).create(slot / ".venv")
+        (slot / "application.json").write_text("{}", encoding="utf-8")
+        (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+        bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+        bootstrap.parent.mkdir()
+        bootstrap.write_text(
+            "import json,os,sys\nfrom pathlib import Path\n"
+            "if '--describe-contract' in sys.argv:\n"
+            "    print(json.dumps({'contract':'agent-worktrees.native-seed','version':1,"
+            "'backend_preparation_modes':[],'backend_process_receipts':[]}));raise SystemExit(0)\n"
+            "args=sys.argv[1:];phase=args[args.index('--phase')+1]\n"
+            "assert args[args.index('--contract-version')+1]=='1'\n"
+            f"with Path({str(observed)!r}).open('a',encoding='utf-8') as stream:\n"
+            "    stream.write(json.dumps({'phase':phase,'python':sys.executable,'args':args})+'\\n')\n"
+            + (
+                "if phase=='returned': raise SystemExit(3)\n"
+                if slot == incoming and not supported else ""
+            )
+            + f"if phase=='spawned':\n"
+            f"    gate=Path({str(gate)!r});pending=gate.with_suffix('.pending')\n"
+            "    pending.write_text(str(os.getpid()));pending.replace(gate)\n"
+            f"print(json.dumps({prepared!r} if phase=='prepare' else {{'recorded':True}}))\n",
+            encoding="utf-8",
+        )
+    (root / "current-version").write_text(outgoing.name, encoding="utf-8")
+    copied = tmp_path / SCRIPT.name
+    shutil.copyfile(SCRIPT, copied)
+    result = run_caller_owned([
+        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-Command",
+        f". {_literal(copied)}; "
+        f"$code=Invoke-AwNativeSeedBackend -Root {_literal(root)} "
+        f"-Record {_literal(tmp_path / 'record.yaml')} -Command @('copilot'); exit $code",
+    ], cwd=tmp_path, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 7, result.stdout + result.stderr
+    assert not (outgoing / ".runtime-bootstrap" / "runtime_launcher.py").exists()
+    events = [json.loads(line) for line in observed.read_text(encoding="utf-8").splitlines()]
+    assert [event["phase"] for event in events] == ["prepare", "spawned", "returned"]
+    assert all(Path(event["python"]).is_relative_to(outgoing) for event in events[:2])
+    assert Path(events[-1]["python"]).is_relative_to(incoming)
+    arguments = events[-1]["args"]
+    assert arguments[arguments.index("--exit-code") + 1] == "7"
+    assert arguments[arguments.index("--operation-id") + 1] == prepared["operation_id"]
+    assert "--receipt-uncertain" not in arguments
 
 
 @pytest.mark.parametrize("setup, fault", [

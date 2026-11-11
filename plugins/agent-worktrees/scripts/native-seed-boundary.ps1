@@ -510,7 +510,8 @@ function Invoke-AwNativeSeedBackend {
         $code = $process.ExitCode
         $returnedArgs = @('--phase', 'returned', '--exit-code', [string]$code) + $callbackArgs
         if ($receiptUncertain) { $returnedArgs += '--receipt-uncertain' }
-        $null = Invoke-AwNativeSeedPhase $Root $returnedArgs -Runtime $runtime
+        # Terminal observation uses the current provider after runtime replacement.
+        $null = Invoke-AwNativeSeedPhase $Root $returnedArgs
         if ($code -eq 0 -and $receiptUncertain) { return 3 }
         return $code
     } finally {
