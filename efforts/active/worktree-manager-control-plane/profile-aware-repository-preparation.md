@@ -213,3 +213,13 @@ plugin or successful repository setup.
   cases. Two standalone acquisition/reinstall controls, both strict platform
   targets, vendored parity and install contracts also passed. Exact-head
   publication, CI and accepted review remain gates.
+- 2026-11-11: A review summary raised Windows execution bounds and local-profile
+  discovery without an enumerated finding. Direct inspection confirmed that
+  the Windows installer's ordinary deadline is inactivity-based. Preparation
+  now also supplies that owner's existing absolute native deadline, preventing
+  continuous output from extending the shared acquisition budget. The frozen
+  packet passed 101 controls, including an actual sustained-output Windows
+  child that times out and settles its Job/activation transaction. A real CLI
+  control also proves canonical repository-local directory-profile discovery
+  without activation; no local-profile behavior change was needed. New
+  exact-head CI and review remain required.

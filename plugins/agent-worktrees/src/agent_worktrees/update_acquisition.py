@@ -213,6 +213,8 @@ def _run_revalidated(
     kwargs["timeout"] = min(deadline - now, _TOTAL_BUDGET_S - (now - started) - reserve)
     if kwargs["timeout"] <= 0:
         raise installer_run.InstallerLaunchError("payload acquisition budget exhausted")
+    if _WINDOWS:
+        kwargs["native_write_deadline"] = now + kwargs["timeout"]
     return _run_update(*args, **kwargs)
 
 

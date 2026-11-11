@@ -7,21 +7,91 @@ from pathlib import Path
 import shutil
 import subprocess
 import re
+import sys
 import sysconfig
 import threading
+import time
 from urllib.parse import urlsplit
 
 import pytest
 from agent_procutil import no_window_kwargs
 from agent_procutil.owned_process import run_caller_owned
-from plugin_activation import read_json_object
+from plugin_activation import activation_preservation_pending, read_json_object
 
-from agent_worktrees import plugin_preparation as preparation
+from agent_worktrees import plugin_preparation as preparation, update_acquisition
 import test_plugin_preparation as fixtures
 
 pytestmark = [pytest.mark.real_installer_processes, pytest.mark.timeout(60)]
 selected = fixtures.selected
 write = fixtures.write
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows hard deadline and Job settlement")
+@pytest.mark.timeout(30)
+def test_prepared_windows_absolute_deadline(selected, monkeypatch):
+    import plugin_resolve.preparation as native
+
+    home, repo, _ = selected
+    monkeypatch.setattr(update_acquisition._auth, "mode", lambda: "off")
+
+    def drive(source, definition, *, staging, repo, copilot_command, environment, runner,
+              check_cancelled, authentication):
+        return runner(
+            [sys.executable, "-u", "-c",
+             "import time\nwhile True:\n print('fixture progress',flush=True)\n time.sleep(.05)"],
+            cwd=repo, timeout=3, env={**environment, "COPILOT_HOME": str(home / ".copilot")},
+        )
+
+    monkeypatch.setattr(native, "prepare_payload", drive)
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        update_acquisition.acquire_prepared(
+            "sample@first", {"source": {"source": "github", "repo": "example/first"}},
+            sys.executable, cwd=repo, staging=home / "p", revalidate=lambda: None,
+        )
+    assert time.monotonic() - started < 10
+    assert not activation_preservation_pending(home / ".copilot")
+
+
+def test_real_cli_repository_local_profile(selected):
+    home, repo, settings = selected
+    write(settings, {})
+    config = repo / ".copilot-extensions" / "agent-worktrees" / "config.yaml"
+    config.parent.mkdir(parents=True)
+    config.write_text("copilot_plugin_profile: local-profile.json\n", encoding="utf-8")
+    payload = repo / ".ai" / "sample"
+    write(payload / "plugin.json", {"name": "sample", "version": "1.0.0"})
+    write(payload.parent / ".github" / "plugin" / "marketplace.json", {
+        "name": "local", "plugins": [{"name": "sample", "source": "./sample"}],
+    })
+    write(repo / "local-profile.json", {
+        "enabledPlugins": {"sample@local": True},
+        "extraKnownMarketplaces": {"local": {"source": {"source": "directory", "path": "./.ai"}}},
+    })
+    for args in (
+        ["init", "-q", "--initial-branch=main"], ["add", "."],
+        ["-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+         "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture"],
+    ):
+        result = run_caller_owned(
+            ["git", "-C", str(repo), *args], cwd=repo, env=dict(os.environ),
+            timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+        )
+        assert result.returncode == 0, result.stderr
+    entry = Path(sysconfig.get_path("scripts")) / ("agent-worktrees.exe" if os.name == "nt" else "agent-worktrees")
+    result = run_caller_owned(
+        [str(entry), "prepare-plugin-payloads", "--repo", str(repo), "--include-tool-profile"],
+        cwd=repo, env=dict(os.environ), timeout=30,
+        max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert result.returncode == 0, result.stderr
+    observed = json.loads(result.stdout)
+    row, = observed["entries"]
+    assert observed["payloadsReady"] and observed["selectionMode"] == preparation.PROFILE_CAPABILITY
+    assert row["source"] == "sample@local" and Path(row["payloadRoot"]) == payload
+    assert preparation.observe(repo, home=home)["entries"] == []
+    assert json.loads(settings.read_text()) == {}
+    assert not (home / ".copilot").exists()
 
 
 @pytest.mark.timeout(240)
