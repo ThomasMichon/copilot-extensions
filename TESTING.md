@@ -3180,7 +3180,9 @@ command and session. A responding agent remains idle until exact cancellation
 and removal. The public pending-work wait returns before the final empty list;
 an optional native background-agent completion follow-up is checked explicitly,
 not counted as a duplicate input. History must contain one root tool execution
-and only the expected root and nested user inputs.
+with successful tool completion and only the expected root and nested user inputs.
+Synchronous results must contain the expected shell output or agent reply;
+shell completion also requires a marker written after the real work finishes.
 
 The future-schedule control explicitly enables the real `manage_schedule` tool
 and creates a two-hour recurring prompt through that offered tool. After the

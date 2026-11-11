@@ -165,7 +165,8 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, mode, timeo
             "$deadline = [DateTime]::UtcNow.AddSeconds(15); "
             f"while (-not (Test-Path -LiteralPath '{offline_cli.workspace / 'release-shell'}')) {{ "
             "if ([DateTime]::UtcNow -gt $deadline) { throw 'Pending shell was not observed' }; "
-            "Start-Sleep -Milliseconds 50 }; Write-Output 'ISOLATED_SHELL_SETTLED'"
+            "Start-Sleep -Milliseconds 50 }; Write-Output 'ISOLATED_SHELL_SETTLED'; "
+            f"[System.IO.File]::WriteAllText('{offline_cli.workspace / 'shell-completed'}', 'ISOLATED_SHELL_SETTLED')"
         )
         offline_cli.env["DRIVER_FIXTURE_SHELL_COMMAND"] = command
         tool_arguments = {
@@ -303,6 +304,9 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, mode, timeo
         if kind == "shell":
             assert all(task["command"] == command for task in active)
             assert observed["permissions"] == ["fixture-shell"]
+            assert (offline_cli.workspace / "shell-completed").read_text(
+                encoding="utf-8",
+            ) == "ISOLATED_SHELL_SETTLED"
         else:
             assert observed["permissions"] == []
             assert not pending["refusedRemove"]["removed"]
@@ -323,6 +327,10 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, mode, timeo
         tool_result, = {json.dumps(message, sort_keys=True) for message in tool_results}
         tool_result = json.loads(tool_result)
         assert tool_result["content"] and "Permission denied" not in str(tool_result["content"])
+        if mode.endswith("-sync"):
+            assert ("ISOLATED_SHELL_SETTLED" if kind == "shell" else "FIXTURE") in str(
+                tool_result["content"],
+            ), tool_result
     else:
         assert pending is None and observed["permissions"] == []
     control = observed["clientTaskControl"]
@@ -357,6 +365,11 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, mode, timeo
             event for event in events if event["type"] == "tool.execution_start"
             and event["data"].get("toolCallId") == "fixture-pending-tool"
         ]) == 1
+        completion, = [
+            event["data"] for event in events if event["type"] == "tool.execution_complete"
+            and event["data"].get("toolCallId") == "fixture-pending-tool"
+        ]
+        assert completion["success"] is True, completion
     inputs = [
         event["data"]["content"] for event in events if event["type"] == "user.message"
     ]
