@@ -444,8 +444,12 @@ def test_observer_modes_share_the_actual_pending_installation_recipe(
         )
     requests = core.status(root=queue)
     assert len(requests) == (1 if shared else 4)
+    assert [request.id for request in requests if request.state == "pending"] == [requests[-1].id]
     for request in requests:
-        assert request.state == "pending" and request.runner.cwd == str(tmp_path)
+        assert request.runner.cwd == str(tmp_path)
+        if request != requests[-1]:
+            assert request.exit_code == 125 and request.started_at is None
+            assert "superseded by update request" in request.error
         assert request.spec.argv == (
             "--project", "sample", "--engine-acquisition-timeout", "600.0",
         )
