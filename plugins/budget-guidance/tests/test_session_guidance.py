@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -272,22 +273,40 @@ def test_projection_and_hook_declarations_are_output_free_and_owner_scoped():
     assert "as authoritative for this session" in pointer
 
 
-@pytest.mark.parametrize("platform", ["python", "posix", "powershell"])
+@pytest.mark.parametrize("platform", ["python", "posix", "powershell", "powershell.exe"])
 def test_real_payload_writer_and_wrappers_do_not_provision_or_emit_context(tmp_path, platform):
-    shell = shutil.which("bash" if platform == "posix" else "pwsh")
+    shell = shutil.which({
+        "posix": "bash", "powershell": "pwsh", "powershell.exe": "powershell.exe",
+    }.get(platform, "pwsh"))
     if platform != "python" and (not shell or (platform == "posix" and os.name == "nt")):
         pytest.skip(f"{platform} interpreter unavailable")
     env = {**os.environ, "HOME": str(tmp_path), "USERPROFILE": str(tmp_path)}
-    env["COPILOT_PLUGIN_ROOT"] = str(PLUGIN)
+    root = tmp_path / "payload"
+    for name in ("scripts", "src"):
+        shutil.copytree(
+            PLUGIN / name, root / name, ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+        )
+    shutil.copy2(PLUGIN / "plugin.json", root / "plugin.json")
+    env["COPILOT_PLUGIN_ROOT"] = str(root)
     env["BUDGET_GUIDANCE_CONFIG"] = str(tmp_path / "not-configured.json")
     env["PYTHONPATH"] = "invalid-ambient-startup-path"
-    script = PLUGIN / "scripts"
+    script = root / "scripts"
     argv = (
         [sys.executable, "-I", "-S", str(script / "write_session_guidance.py")]
         if platform == "python" else
         [shell, str(script / "write-session-guidance.sh")] if platform == "posix" else
         [shell, "-NoProfile", "-File", str(script / "write-session-guidance.ps1")]
     )
+
+    def entries():
+        return {
+            str(path.relative_to(root)): (
+                hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
+            )
+            for path in root.rglob("*")
+        }
+
+    before = entries()
     for source in ("startup", "resume"):
         result = subprocess.run(
             argv, input=json.dumps(_payload(tmp_path, source=source)),
@@ -298,6 +317,7 @@ def test_real_payload_writer_and_wrappers_do_not_provision_or_emit_context(tmp_p
         assert result.stdout == "{}"
         written = tmp_path / ".copilot/session-state/test-session/instructions/budget-guidance/session-guidance.instructions.md"
         assert _data(written)["error"] == "configuration not found"
+        assert entries() == before
     assert not (tmp_path / ".budget-guidance").exists()
 
 

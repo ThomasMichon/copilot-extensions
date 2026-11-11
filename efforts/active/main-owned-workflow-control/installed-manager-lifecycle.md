@@ -2016,3 +2016,39 @@ Publication uses the managed history-rewrite flow and exact recorded old-head
 lease, never manual force, a stash or a gate bypass. New current-head CI and
 exact-source native acceptance remain required before draft readiness; the
 earlier CIM scan and preparation masking gaps remain unwaived.
+
+### November 11 - Separate Actions failures from the budget cue mutation
+
+The frozen pre-rebase run 43093690653 at
+`4bdf4a06e9138599c46ac4a02917eeaa63869a04` finishes with all three jobs red.
+Normal and repair complete their qualification commands successfully, then
+artifact creation fails after five retries with an HTML response where the
+Actions client requires JSON. Fresh separately fails its post-actions retained
+payload comparison: `budget-guidance: the frozen installed payload changed`.
+The original source callsite is after `_actions` and native cleanup, not before
+the lifecycle. The outer observer also exits one. Preparation/settlement return
+zero and exercise one, with errors empty.
+
+All three artifact-upload steps fail and the artifact API lists no retained
+artifacts. The original complete path-difference, trace, cleanup and result
+files therefore remain unavailable; no exact hosted bytecode list, clean census
+or full native acceptance is inferred. This run cannot qualify the rebased
+candidate regardless. Current-head 43095516456 at `99e9ef18b9` separately reports
+an internal Actions startup error with no jobs. Its one accepted platform-start
+retry again produces no jobs; no further automatic start request is planned.
+The exact external blocker is recorded in #12013 comment 6806733466.
+
+Independent local reproduction uses the budget plugin's existing actual writer
+and wrappers with copied cold source, without a fake policy or provider. Python,
+PowerShell 7 and Windows PowerShell each add seven source bytecode files and
+one cache directory while returning the correct unavailable-config cue and
+empty output envelope. This proves a local mutation, not the contents of the
+lost hosted report. One standalone-only setting now disables bytecode before
+those imports. Imported callers, pure posture, reader/refresh restrictions,
+five-second writer deadline and no-provisioning behavior remain unchanged.
+
+All 47 guidance controls pass afterward, with four platform skips uncredited.
+The expanded existing control compares every file and directory after both
+startup and resume. Documentation-impact review updates the budget plugin's
+read-only cue contract and TESTING.md. No census rule, payload integrity,
+artifact-publication requirement or parent completion gate is relaxed.

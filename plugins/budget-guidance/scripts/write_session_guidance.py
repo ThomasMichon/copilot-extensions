@@ -6,6 +6,7 @@ import signal
 import sys
 
 if __name__ == "__main__":
+    sys.dont_write_bytecode = True
     if os.name != "nt":
         if not all(hasattr(signal, name) for name in ("SIGALRM", "ITIMER_REAL", "setitimer")):
             sys.stderr.write("budget-guidance: session cue deadline is unsupported\n")

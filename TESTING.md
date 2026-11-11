@@ -10642,6 +10642,14 @@ repository. They require available policy guidance and compare every payload
 entry without mocking the producer. Missing-repository no-op behavior is not a
 substitute for that control, and POSIX skips on Windows remain uncredited.
 
+Budget-guidance's existing real payload-writer control also copies cold scripts
+and source, invokes standalone Python or native PowerShell 5/7/POSIX wrappers,
+and compares every payload file and directory after both startup and resume.
+It preserves the unavailable-config cue, empty output envelope, no-provisioning
+assertion and original deadline controls. This does not refresh or authorize any
+external quota reader, and local success does not replace native artifact and
+census evidence.
+
 Dependency fixtures must also preserve source attribution. Stage matching
 publisher/project metadata and the declared local library graph at the real
 helper location; use the existing release materializers before stamping a
