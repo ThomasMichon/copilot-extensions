@@ -211,6 +211,15 @@ def test_public_embody(monkeypatch):
 
 @pytest.mark.timeout(900)
 @pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("WORKTREES_NATIVE_CALLER_JOBS") != "1",
+    reason="Explicitly select the leased native caller-Job lifetime owner",
+)
+def test_public_caller_job_lifetime(monkeypatch):
+    _qualify_public_application(monkeypatch, "embody", caller_jobs=True)
+
+
+@pytest.mark.timeout(900)
+@pytest.mark.skipif(
     os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
     reason="Explicitly select the installed public Windows Worktrees TTY lane",
 )
@@ -218,12 +227,15 @@ def test_public_copilot(monkeypatch):
     _qualify_public_application(monkeypatch, "copilot")
 
 
-def _qualify_public_application(monkeypatch, caller):
+def _qualify_public_application(monkeypatch, caller, *, caller_jobs=False):
     from plugin_test_containment import TestSandbox
 
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
     with TestSandbox(prefix="p-", dir=sandbox) as directory:
-        _qualify_native_application(Path(directory), monkeypatch, broker=caller)
+        _qualify_native_application(
+            Path(directory), monkeypatch, broker=caller,
+            **({"caller_jobs": True} if caller_jobs else {}),
+        )
 
 
 def test_public_application_workspace_is_outside_source_only_repository(tmp_path, monkeypatch):
@@ -254,7 +266,60 @@ def test_public_application_workspace_is_outside_source_only_repository(tmp_path
     assert all(not root.exists() for root, _ in observed)
 
 
-def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
+def test_withdrawn_fixture_application_is_restored_after_broker_failure(tmp_path, monkeypatch):
+    from public_caller_jobs_fixture import application_unavailable
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(tmp_path))
+    application = tmp_path / "application"
+    python = application / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (application / "application.json").write_text("ordinary fixture", encoding="utf-8")
+    moved = application.with_name("application-temporarily-unavailable")
+    with pytest.raises(RuntimeError, match="broker failed"):
+        with application_unavailable(python):
+            assert not application.exists() and moved.is_dir()
+            raise RuntimeError("broker failed")
+    assert python.is_file() and not moved.exists()
+    assert (application / "application.json").read_text() == "ordinary fixture"
+    moved.mkdir()
+    with pytest.raises(AssertionError):
+        with application_unavailable(python):
+            pytest.fail("A retained alias must not be overwritten")
+    assert python.is_file() and moved.is_dir()
+
+
+def test_application_withdrawal_refuses_an_unowned_slot(tmp_path, monkeypatch):
+    from public_caller_jobs_fixture import application_unavailable
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(sandbox))
+    application = tmp_path / "foreign"
+    python = application / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (application / "application.json").write_text("foreign", encoding="utf-8")
+    with pytest.raises(AssertionError):
+        with application_unavailable(python):
+            pytest.fail("An unrelated application must not move")
+    assert python.is_file()
+
+
+def test_lifetime_selection_cannot_disable_an_existing_contained_owner(tmp_path, monkeypatch):
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    with pytest.raises(AssertionError):
+        _qualify_native_application(tmp_path, monkeypatch, broker="embody", caller_jobs=True)
+    assert list(tmp_path.iterdir()) == []
+
+
+def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_jobs=False):
+    if caller_jobs:
+        from agent_procutil import contained_test_mode
+        from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+
+        assert broker == "embody" and not contained_test_mode()
+        assert os.environ.get(TEST_CONTEXT_ENV), "The native runner must own the daemon lease"
     started = time.monotonic()
     construction_budget = 420 if broker in {"embody", "copilot"} else 300
     deadline = started + construction_budget
@@ -341,6 +406,9 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
         UV_CACHE_DIR=str(tmp_path / "cache"), UV_PYTHON_DOWNLOADS="never",
         UV_PYTHON=interpreter, PYTHONDONTWRITEBYTECODE="1",
     )
+    if caller_jobs:
+        environment.pop("COPILOT_EXTENSIONS_TEST_CONTAINED")
+        environment[TEST_CONTEXT_ENV] = os.environ[TEST_CONTEXT_ENV]
     assert environment.get("PYTEST_CURRENT_TEST")
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
         if os.name == "nt" else [slot / "install"]
@@ -402,6 +470,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
         _qualify_manager_application(
             manager, monkeypatch, broker, worktrees_python=python,
             worktrees_root=root, worktrees_environment=environment,
+            caller_jobs=caller_jobs,
         )
     elif broker:
         assert time.monotonic() < deadline, "Application construction exceeded 300 seconds"

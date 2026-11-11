@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import time
 
@@ -23,6 +25,31 @@ _NATIVE_COPILOT = (
 )
 
 
+def _run_lifetime_native(command, *, directory, cwd, environment):
+    from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
+
+    stdout, stderr = directory / "native.stdout.log", directory / "native.stderr.log"
+    with stdout.open("wb") as out, stderr.open("wb") as err:
+        process, job = spawn_sync_in_kill_on_close_job(
+            command, cwd=cwd, env=environment, require_job=True, allow_breakaway=True,
+            stdin=subprocess.DEVNULL, stdout=out, stderr=err, **no_window_kwargs(),
+        )
+    try:
+        assert job is not None
+        code = process.wait(180)
+    finally:
+        try:
+            if process.poll() is None:
+                process.kill()
+                process.wait(5)
+        finally:
+            if job is not None:
+                job.close()
+    return subprocess.CompletedProcess(
+        command, code, stdout.read_text(encoding="utf-8"), stderr.read_text(encoding="utf-8"),
+    )
+
+
 @pytest.mark.parametrize(
     "control", ["manager-no-mux", "manager-mux"] if _NATIVE_COPILOT else ["manager-no-mux"],
 )
@@ -33,7 +60,7 @@ def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(tmp_pa
 
 def _qualify_manager_application(
     tmp_path, monkeypatch, control, *, worktrees_python=None,
-    worktrees_root=None, worktrees_environment=None,
+    worktrees_root=None, worktrees_environment=None, caller_jobs=False,
 ):
     paired = worktrees_python is not None
     assert not paired or (control in {"embody", "copilot"} and worktrees_environment is not None)
@@ -123,11 +150,12 @@ def _qualify_manager_application(
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
         if os.name == "nt" else [slot / "install"]
     cleanup = []
+    lifecycle_owner = nullcontext({}) if caller_jobs else daemon_test_lifecycle(
+        owner="manager-application-launch-fixture", registry_root=tmp_path / "daemon-instances",
+        deadline=deadline + (180 if paired else 0), cleanup_results=cleanup,
+    )
     try:
-        with daemon_test_lifecycle(
-            owner="manager-application-launch-fixture", registry_root=tmp_path / "daemon-instances",
-            deadline=deadline + (180 if paired else 0), cleanup_results=cleanup,
-        ) as lifecycle:
+        with lifecycle_owner as lifecycle:
             environment.update(lifecycle)
             installed = _run(install, cwd=caller, env=environment, deadline=deadline)
             assert json.loads(installed.stdout.splitlines()[-1])["state"] == "installed"
@@ -159,22 +187,32 @@ def _qualify_manager_application(
                 assert time.monotonic() < deadline, "Manager construction exceeded 300 seconds"
                 native = tmp_path / "n"
                 native.mkdir()
-                qualified = run_caller_owned(
-                    [sys.executable, "-I", "-B", "-X", "utf8", "-c",
-                     "import os,sys;from pathlib import Path;"
-                     "sys.path[:0]=sys.argv[1:3];"
-                     "from test_headed_worktrees_copilot import _qualify_native_worktrees;"
-                     "_qualify_native_worktrees(Path(sys.argv[3]),sys.argv[7],"
-                     "worktrees_python=Path(sys.argv[4]),worktrees_root=Path(sys.argv[5]),"
-                     "worktrees_environment=dict(os.environ),"
-                     "manager_environment={'WORKTREE_MANAGER_ROOT':sys.argv[6]})",
-                     str(Path(__file__).parent), str(ROOT / "tools"), str(native),
-                     str(worktrees_python), str(worktrees_root), str(root), control],
-                    cwd=caller, env={
-                        **worktrees_environment, **lifecycle,
-                        "COPILOT_EXTENSIONS_TEST_SANDBOX": os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"],
-                    }, timeout=180, max_stdout_bytes=65536, max_stderr_bytes=65536,
-                )
+                command = [
+                    sys.executable, "-I", "-B", "-X", "utf8", "-c",
+                    "import os,sys;from pathlib import Path;"
+                    "sys.path[:0]=sys.argv[1:3];"
+                    "from test_headed_worktrees_copilot import _qualify_native_worktrees;"
+                    "_qualify_native_worktrees(Path(sys.argv[3]),sys.argv[7],"
+                    "worktrees_python=Path(sys.argv[4]),worktrees_root=Path(sys.argv[5]),"
+                    "worktrees_environment=dict(os.environ),caller_jobs=sys.argv[8]=='1',"
+                    "manager_environment={'WORKTREE_MANAGER_ROOT':sys.argv[6]})",
+                    str(Path(__file__).parent), str(ROOT / "tools"), str(native),
+                    str(worktrees_python), str(worktrees_root), str(root), control,
+                    "1" if caller_jobs else "0",
+                ]
+                native_environment = {
+                    **worktrees_environment, **lifecycle,
+                    "COPILOT_EXTENSIONS_TEST_SANDBOX": os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"],
+                }
+                if caller_jobs:
+                    qualified = _run_lifetime_native(
+                        command, directory=native, cwd=caller, environment=native_environment,
+                    )
+                else:
+                    qualified = run_caller_owned(
+                        command, cwd=caller, env=native_environment, timeout=180,
+                        max_stdout_bytes=65536, max_stderr_bytes=65536,
+                    )
                 print(qualified.stdout, flush=True)
                 assert qualified.returncode == 0, qualified.stdout + qualified.stderr
             elif _NATIVE_COPILOT:
@@ -193,4 +231,4 @@ def _qualify_manager_application(
             assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
     finally:
         assert all(result.status == "settled" for result in cleanup), cleanup
-    assert cleanup, "Manager installation did not start its owned resident"
+    assert caller_jobs or cleanup, "Manager installation did not start its owned resident"

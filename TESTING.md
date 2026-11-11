@@ -180,6 +180,23 @@ packet. Controller support does not supply or qualify the candidate fixture.
 Neither packet qualifies new-window/no-mux modes or survival after all caller
 cleanup Jobs close; a detached `embody` result cannot qualify the TTY caller.
 
+`submit --packet native-worktrees-caller-jobs` separately selects
+`test_public_caller_job_lifetime` in the same source fixture. Only this
+selection uses the existing hosted native application owner, with renewable
+15-second daemon leases and a 900-second hard maximum. Ordinary plugin tests
+keep their restrictive containment. Canonical test-environment preparation has
+300 seconds, followed by the unchanged 900-second functional/cleanup and
+1200-second aggregate limits; application/Manager/native bounds remain
+420/300/180 seconds. Both nested Jobs around each installed public `embody`
+invocation close before native broker/history checks, and an ordinary bounded
+child must die with them. Fresh/resume/reuse and seed non-replay still apply.
+The same native conversation must also serve its broker while only its
+disposable Worktrees application slot is temporarily unavailable; the slot is
+restored even on failure. This does not qualify an updater, another caller or
+launch mode, a restrictive external outer Job, or desktop behavior. The fixed
+packet shares the Worktrees-only feed and pinned prerequisite policy above;
+its protected controller must be promoted before submission.
+
 `submit --packet native-driver-auth-wait` selects only the Driver receiver's
 `test_opt_in_receiver_auth_wait_and_same_session_resume` in
 `tests/native/test_native_headed_auth_wait.py`. The candidate must supply that
