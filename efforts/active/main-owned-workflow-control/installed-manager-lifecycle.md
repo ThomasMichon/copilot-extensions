@@ -2133,3 +2133,47 @@ Publication and current-head CI remain separate gates. The next step is the
 narrow hosted quiet/churn profile, not an unchanged whole-suite retry.
 Admitted-baseline upgrade, complete fresh acceptance, frozen enforcement and
 separate Main adoption remain open under the parent.
+
+### November 11 - Measure the narrow hosted profiles and reconcile Dev
+
+Owner-only Windows Tools request `a11dc0049fd84a4ba3e865d7cffd4d81`, run
+43117520605 attempt 1, qualifies the exact `7fe797a01f2a6d0112a45cca61799ac7a32dc392`
+source on the existing protected controller
+`24c2a03a8e7d405e0b8890e61e69bedc03f0cfac`. The manifest independently binds
+that source and both successful cases; the controller commit is not a runtime
+Main pin or adoption result.
+
+The retained JUnit summaries show 47 successful scans per six-second case.
+Quiet observes one owned process, with query-pipeline total/max 964/90 ms
+and session creation 104 ms. Churn observes 34 owned process incarnations,
+with query-pipeline total/max 1010/72 ms and session creation 101 ms.
+Both record zero scan errors, cooperative stop, an armed window, no
+truncation and closed CIM sessions. The contained helper independently reaps
+its children. This disproves neither a rare provider failure nor a
+construction-pressure effect; it does not repair or waive the original
+full-suite census failure.
+
+The legitimate diagnostic push also restores current PR-head metadata, but
+Dev has moved and the PR is conflicting. A backup preserves `7fe797` before
+rebasing onto `f864f03fc0219a90e7756b371f8f5c950d50f2d5`. All 33 owned
+commits remain. The sole conflict is MCP's generated uninstall-profile
+producer hashes: the canonical refresh preserves upstream's newer source
+binding and the contributed script binding, with revision 36 and contract
+semantics unchanged. Range-diff confirms no other owned patch changes.
+The frozen hosted result remains evidence for `7fe797`, not the rebased tip.
+
+All 33 focused MCP bootstrap, readiness and provider-selection controls pass
+after reconciliation (160.16 seconds including environment preparation and
+cleanup). All contributed Python files pass F/E9 lint; strict runtime
+resolution, all 13 install contracts, documentation consistency and whitespace
+also pass. The original 13 census controls have an unchanged range-diff patch.
+The profile helper parses, but only real hosted execution can qualify the new
+burst case. Existing Manager patch changefiles cover this PR's fixture work;
+no version, runtime CLI or service contract changes.
+
+The next diagnostic selects only a new six-second eight-child CPU/churn burst
+through that same opt-in profile and existing owner. It changes the measured
+load dimension without an unchanged full-suite retry, host runtime effects,
+new fixture family, query/record-cap change or new workflow. Required
+current-head CI, strict complete fresh acceptance, admitted-baseline upgrade,
+frozen enforcement and separate Main adoption remain open.

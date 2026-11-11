@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, sys.argv[1])
 from agent_procutil import no_window_kwargs
 home, ready, stop = map(Path, sys.argv[2:5])
-churn = sys.argv[5] == 'churn'
+mode = sys.argv[5]
 children = []
 deadline = time.monotonic() + 15
 try:
@@ -41,15 +41,20 @@ try:
     end = time.monotonic() + 6
     count = 0
     while time.monotonic() < end:
-        if churn:
-            child = subprocess.Popen(
-                [sys.executable, '-I', '-S', '-B', '-c', 'import time;time.sleep(.15)',
-                 str(home / '.agent-census' / 'ephemeral')], **no_window_kwargs(),
-            )
-            children.append(child)
-            child.wait(timeout=2)
-            children.pop()
-            count += 1
+        if mode != 'quiet':
+            program = (
+                'import time;end=time.monotonic()+.15\n'
+                'while time.monotonic()<end: sum(range(10000))'
+            ) if mode == 'burst' else 'import time;time.sleep(.15)'
+            for _ in range(8 if mode == 'burst' else 1):
+                children.append(subprocess.Popen(
+                    [sys.executable, '-I', '-S', '-B', '-c', program,
+                     str(home / '.agent-census' / 'ephemeral')], **no_window_kwargs(),
+                ))
+                count += 1
+            for child in children[1:]:
+                child.wait(timeout=2)
+            del children[1:]
         else:
             time.sleep(.05)
     print(count)
@@ -62,7 +67,7 @@ finally:
 """
 
 
-@pytest.mark.parametrize("mode", ("quiet", "churn"))
+@pytest.mark.parametrize("mode", ("quiet", "churn", "burst"))
 def test_real_manager_census_profile(tmp_path, record_property, monkeypatch, mode):
     monkeypatch.syspath_prepend(str(ROOT / "libs" / "agent-procutil" / "src"))
     from agent_procutil.owned_process import run_caller_owned
@@ -102,7 +107,10 @@ def test_real_manager_census_profile(tmp_path, record_property, monkeypatch, mod
 
     trace = json.loads(report.read_text("utf-8"))
     summary = {key: value for key, value in trace.items() if key != "records"}
-    summary.update(mode=mode, observed_records=len(trace["records"]))
+    summary.update(
+        mode=mode, observed_records=len(trace["records"]),
+        load_children=int(load_result.stdout.strip()) if load_result.returncode == 0 else None,
+    )
     record_property("census_profile", json.dumps(summary, sort_keys=True))
     assert load_result.returncode == 0, "caller-owned load failed"
     assert result.returncode == 0 and trace["scan_errors"] == 0, summary
@@ -111,6 +119,6 @@ def test_real_manager_census_profile(tmp_path, record_property, monkeypatch, mod
     assert trace["timing"]["scan_successes"] >= 2, summary
     assert not trace["truncated"] and trace["records"], summary
     assert {row["component"] for row in trace["records"]} == {"agent-census"}
-    if mode == "churn":
+    if mode != "quiet":
         assert int(load_result.stdout.strip()) >= 5
         assert len(trace["records"]) >= 3, summary
