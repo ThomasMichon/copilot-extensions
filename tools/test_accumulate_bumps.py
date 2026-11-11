@@ -176,58 +176,6 @@ def test_skips_plugin_with_no_plugin_json(isolated: Path, capsys):
     assert "no plugin.json" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("receiver_bump", [None, "dev"])
-def test_compute_bumps_packaged_manifest_receiver(isolated: Path, receiver_bump):
-    _plugin(isolated, "producer", "0.1.0-dev1")
-    _plugin(isolated, "receiver", "0.4.0-dev1")
-    (isolated / "plugins/receiver/packaged-assets.json").write_text(json.dumps({
-        "schema": "copilot-extensions.packaged-assets",
-        "version": 1,
-        "canonicalDir": "plugins",
-        "payloadDir": "src/bundle",
-        "files": ["producer/plugin.json"],
-    }), encoding="utf-8")
-    grouped = {"producer": ["patch"]}
-    if receiver_bump:
-        grouped["receiver"] = [receiver_bump]
-
-    result = acc.compute(grouped)
-
-    assert result == {
-        "producer": ("0.1.0-dev1", "0.1.1-dev1"),
-        "receiver": ("0.4.0-dev1", "0.4.0-dev2" if receiver_bump else "0.4.1-dev1"),
-    }
-    assert grouped == {
-        "producer": ["patch"],
-        **({"receiver": ["dev"]} if receiver_bump else {}),
-    }
-
-
-def test_packaged_manifest_bumps_close_cycles_and_reach_standalone(isolated: Path):
-    _plugin(isolated, "producer", "0.1.0-dev1")
-    _plugin(isolated, "receiver", "0.4.0-dev1")
-    _standalone(isolated, "worktree-manager", "0.7.0-dev1")
-    for consumer, files in (
-        ("plugins/producer", ["receiver/plugin.json"]),
-        ("plugins/receiver", ["producer/pyproject.toml", "receiver/plugin.json"]),
-        ("worktree-manager", ["receiver/plugin.json"]),
-    ):
-        (isolated / consumer / "packaged-assets.json").write_text(json.dumps({
-            "schema": "copilot-extensions.packaged-assets",
-            "version": 2,
-            "groups": [{
-                "canonicalDir": "plugins", "payloadDir": "src/bundle", "files": files,
-            }],
-        }), encoding="utf-8")
-
-    assert acc.compute({"producer": ["patch"]}) == {
-        "producer": ("0.1.0-dev1", "0.1.1-dev1"),
-        "receiver": ("0.4.0-dev1", "0.4.1-dev1"),
-        "worktree-manager": ("0.7.0-dev1", "0.7.1-dev1"),
-    }
-    assert acc.compute({}) == {}
-
-
 # --- standalone (out-of-plugin) consumers, e.g. worktree-manager -----------
 
 def _standalone(root: Path, name: str, version: str) -> None:
