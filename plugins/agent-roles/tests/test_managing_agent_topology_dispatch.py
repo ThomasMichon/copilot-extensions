@@ -825,6 +825,38 @@ def test_flow_persists_full_seed_before_launch_and_fences_acceptance(document: d
 
 
 @pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("launch_state", ["unprepared", "prepared", "consumed"])
+@pytest.mark.parametrize("owner_assignment", ["missing", "matching", "conflicting"])
+def test_flow_checks_owner_assignment_before_preparing_or_launching(
+    document: dict[str, Any], launch_state: str, owner_assignment: str,
+) -> None:
+    launch_flow(document, "consumed" if launch_state == "consumed" else "prepared")
+    assignment = document["assignments"][0]
+    if launch_state == "unprepared":
+        assignment["effects"] = []
+    if owner_assignment == "conflicting":
+        other = copy.deepcopy(assignment)
+        other.update(
+            id="other-assignment", requestId="other-request", creationKey="other-key", nativeTask=None, effects=[],
+        )
+        document["assignments"].append(other)
+    document["observations"]["owners"][0]["assignmentId"] = {
+        "missing": None, "matching": assignment["id"], "conflicting": "other-assignment",
+    }[owner_assignment]
+    before = copy.deepcopy(document)
+    result = report(document).flow("request-review-a")
+    if owner_assignment == "conflicting":
+        assert result["phase"] == "held" and result["nextStep"] is None
+        assert "assignment-not-accepted-by-owner" in result["holds"]
+    else:
+        assert result["phase"] == {
+            "unprepared": "persist-launch", "prepared": "launch", "consumed": "accept",
+        }[launch_state]
+        assert result["holds"] == []
+    assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
 def test_flow_recovers_unknown_launch_with_original_envelope_not_new_head(document: dict[str, Any]) -> None:
     effect = launch_flow(document, "unknown")
     document["observations"]["owners"][0].update(head="new-head", headRevision=8)

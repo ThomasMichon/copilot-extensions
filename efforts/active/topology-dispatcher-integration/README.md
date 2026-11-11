@@ -180,6 +180,17 @@ synthetic fixtures. Live adoption is a separate explicit decision.
   workspace-creation file passed 53 tests with three existing skips, including
   all three saved-seed cases. Python F/E9 lint passed. No live fleet effects,
   installation or deployment occurred; review and merge remain pending.
-- Final publication gates passed: Python lint, all 41 enforced type-check
-  projects for Linux and Windows, and the install-contract check across all
-  13 runtime plugins.
+- Final publication gates passed: Python lint, all enforced type-check
+  projects for Linux and Windows, and the install-contract check.
+
+### 2026-11-11 - Phase 3 ownership-conflict correction
+
+- Moved the retained owner's assignment-conflict check ahead of launch
+  preparation. The flow now holds incompatible ownership before recommending
+  launch persistence, workspace start or acceptance.
+- The affected roles file passed 130 tests, including the nine-case
+  ownership-conflict regression matrix. Python F/E9 lint, documentation
+  consistency and all enforced Linux/Windows type-check projects passed.
+- This correction uses isolated synthetic evidence only. No live fleet effect,
+  installation or deployment occurred; corrected publication, fresh review and
+  required CI remain the next gates before merge.

@@ -114,6 +114,8 @@ def flow(
     if any(effect["kind"] != "launch" for effect in pending):
         return hold("effect-outcome-unsettled-no-replay")
     observation = observe(native["owner"])
+    if observation is not None and observation["assignmentId"] not in (None, assignment["id"]):
+        return hold("assignment-not-accepted-by-owner")
     if observation is not None and (
         observation["role"] not in (None, assignment["role"])
         or (seed is not None and observation["scope"] not in (None, seed["role"]["scope"]))
@@ -156,8 +158,6 @@ def flow(
     if (observation is None or observation["state"] not in LIVE_STATES
             or not observation["head"] or not observation.get("headRevision")):
         return hold("current-native-head-unqualified")
-    if observation["assignmentId"] not in (None, assignment["id"]):
-        return hold("assignment-not-accepted-by-owner")
     if task["owner_session_id"] not in (None, observation["head"]):
         return hold("native-reserved-head-conflict")
     return step("accept", "agent-dispatch", "accept-standing-charter",
