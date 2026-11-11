@@ -102,6 +102,56 @@ def _manager_decision_source():
     )
 
 
+def _manager_mux_decision_source():
+    return (
+        "import json,sys\n"
+        "from pathlib import Path\n"
+        "from worktree_manager import __main__ as cli,engine_client,terminal_launch\n"
+        "from worktree_manager.launch_attempts import LaunchAttempts\n"
+        "from worktree_manager.relocated_launch import _relocated_launch_script\n"
+        "engine,worktree,attempt,script,marker=sys.argv[1:]\n"
+        "assert _relocated_launch_script().samefile(script)\n"
+        "request,offer=terminal_launch.validate()\n"
+        "engine_client.set_engine_command([engine,'-m','agent_worktrees'])\n"
+        "LaunchAttempts().record_intent(attempt,action='resume',"
+        "project='native-copilot',surface='native-mux-decision',"
+        "is_local=True,worktree_id=worktree,options={})\n"
+        "code=cli._run_production_picker('native-copilot',initial_decision={"
+        "'action':'resume','project':'native-copilot','is_local':True,"
+        "'worktree_id':worktree,'attempt_id':attempt,'options':{}})\n"
+        "assert code==0,code\n"
+        "detail=LaunchAttempts().detail(attempt,include_input=True)\n"
+        "assert [event['phase'] for event in detail['events']]==["
+        "'confirmed','resolution-requested','resolved','launch-requested'],detail\n"
+        "assert detail['input']['options']=={},detail\n"
+        "prepared=json.loads((request.parent/'result.json').read_text(encoding='utf-8'))\n"
+        "assert prepared['nonce']==offer['nonce']\n"
+        "assert Path(prepared['script']).samefile(script)\n"
+        "assert prepared['arguments']==['--project','native-copilot','--worktree-id',"
+        "worktree,'--require-launch-attempt','--launch-attempt-id',attempt],prepared\n"
+        "assert Path(prepared['completion'][0]).samefile(sys.executable)\n"
+        "assert prepared['completion'][-3:]==['-m','worktree_manager.terminal_launch',attempt]\n"
+        "Path(marker).write_text(json.dumps({'attempt':attempt,'exit_code':code,"
+        "'request':str(request)}),encoding='utf-8')\n"
+        "sys.exit(code)\n"
+    )
+
+
+def _manager_mux_terminal_source(python, script, arguments):
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    return (
+        "$ErrorActionPreference='Stop'\n"
+        f". {quote(script.parent / 'terminal-launch.ps1')}\n"
+        f"Invoke-WorktreeTerminalLaunch -Executable {quote(python)} "
+        f"-Arguments @({','.join(quote(value) for value in arguments)}) "
+        "-QueryArguments @('-I','-B','-X','utf8','-m','worktree_manager','--version') "
+        "-Package worktree_manager\n"
+        "exit $LASTEXITCODE\n"
+    )
+
+
 @pytest.mark.parametrize("control", ["broker", "native-input", "manager-no-mux", "manager-mux"])
 def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tmp_path, control):
     _qualify_native_worktrees(tmp_path, control)
@@ -220,7 +270,7 @@ def _qualify_native_worktrees(
     installed = worktrees_python is not None
     public_caller = control in {"embody", "copilot"}
     public_tty = control == "copilot"
-    assert not manager_picker or (control == "manager-no-mux" and manager_python is not None)
+    assert not manager_picker or (control.startswith("manager-") and manager_python is not None)
     if installed:
         assert control in {"broker", "embody", "copilot"} and worktrees_root is not None
         assert Path(worktrees_python).is_file()
@@ -309,6 +359,9 @@ def _qualify_native_worktrees(
         UV_PROJECT_ENVIRONMENT=str(tmp_path / "manager-environment"),
     )
     environment.update(manager_environment or {})
+    if manager_picker and control == "manager-mux":
+        for key in ("CE_TERMINAL_LAUNCH", "WORKTREE_NO_MUX"):
+            environment.pop(key, None)
     if caller_jobs:
         environment.pop("COPILOT_EXTENSIONS_TEST_CONTAINED")
     mux_directory, namespace_file = _prepare_private_mux_adapter(
@@ -538,12 +591,21 @@ def _qualify_native_worktrees(
                     decision_script = tmp_path / (leg + "-manager-decision.py")
                     decision_proof = tmp_path / (leg + "-manager-decision.json")
                     decision_script.write_text(
-                        _manager_decision_source(), encoding="utf-8",
+                        _manager_mux_decision_source() if control == "manager-mux"
+                        else _manager_decision_source(), encoding="utf-8",
                     )
                     manager_command = [
                         str(manager_python), "-I", "-B", "-X", "utf8", str(decision_script),
                         sys.executable, worktree_id, plan["attempt"], str(manager_script), str(decision_proof),
                     ]
+                    if control == "manager-mux":
+                        terminal_script = tmp_path / (leg + "-manager-terminal.ps1")
+                        terminal_script.write_text(
+                            _manager_mux_terminal_source(
+                                manager_python, manager_script, manager_command[1:],
+                            ), encoding="utf-8",
+                        )
+                        manager_command = [shell, "-NoProfile", "-File", str(terminal_script)]
                 invocation = (
                     "    import subprocess\n"
                     "    # headless-guard: allow the real Manager consumer to inherit the fixture's private ConPTY\n"
@@ -782,7 +844,6 @@ def _qualify_native_worktrees(
                   flush=True)
             assert state["session_id"] == native and state["restoration"] == "unqualified"
             assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
-
             def attached_tty():
                 assert not result_file.exists(), caller_diagnostics()
                 observed = query("display-message", "-p", "-t", target, "#{session_attached}")
@@ -821,6 +882,26 @@ def _qualify_native_worktrees(
                     f"{leg}: original Manager caller pane did not close",
                 )
                 assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
+                if manager_picker:
+                    prepared = json.loads(decision_proof.read_text(encoding="utf-8"))
+                    assert prepared["attempt"] == plan["attempt"] and prepared["exit_code"] == 0
+                    assert not Path(prepared["request"]).parent.exists()
+                    completion = run_caller_owned(
+                        [str(manager_python), "-I", "-B", "-X", "utf8", "-c",
+                         "import json,sys;from worktree_manager.launch_attempts import LaunchAttempts;"
+                         "print(json.dumps(LaunchAttempts().detail(sys.argv[1],include_input=True)))",
+                         plan["attempt"]],
+                        env=environment, cwd=checkout, timeout=10,
+                        max_stdout_bytes=65536, max_stderr_bytes=4096,
+                    )
+                    assert completion.returncode == 0, completion.stdout + completion.stderr
+                    detail = json.loads(completion.stdout)
+                    assert [event["phase"] for event in detail["events"]] == [
+                        "confirmed", "resolution-requested", "resolved",
+                        "launch-requested", "launcher-returned",
+                    ], detail
+                    assert detail["events"][-1]["details"]["exit_code"] == 0
+                    assert detail["input"]["options"] == {}
                 if public_caller:
                     reply = json.loads(public_result.read_text(encoding="utf-8"))
                     assert reply["ok"] and reply["created"]
@@ -1048,9 +1129,9 @@ def _qualify_native_worktrees(
                 0 if control == "manager-mux" or public_caller else exit_code
             )
             if manager_picker:
-                assert json.loads(decision_proof.read_text(encoding="utf-8")) == {
-                    "attempt": plan["attempt"], "exit_code": exit_code,
-                }
+                proof = json.loads(decision_proof.read_text(encoding="utf-8"))
+                assert proof["attempt"] == plan["attempt"]
+                assert proof["exit_code"] == (0 if control == "manager-mux" else exit_code)
             pane_output = []
 
             def pane_closed():
@@ -1086,7 +1167,7 @@ def _qualify_native_worktrees(
             home / "session-state" / native / "events.jsonl",
         ]
         assert not (home / "permissions-config.json").exists()
-        if manager_picker:
+        if manager_picker and control == "manager-no-mux":
             commands = tmp_path / "mux-commands.txt"
             assert not commands.exists() or "new-session" not in commands.read_text(encoding="utf-8").splitlines()
         if control == "manager-mux" or public_caller:

@@ -28,6 +28,10 @@ NATIVE_PACKETS = {
         "agent-worktrees", "test_manager_application_launch", "test_manager_no_mux_decision",
         "native-worktrees-manager-no-mux",
     ),
+    "native-worktrees-manager-mux": (
+        "agent-worktrees", "test_manager_application_launch", "test_manager_mux_decision",
+        "native-worktrees-manager-mux",
+    ),
     "native-driver-auth-wait": (
         "agent-remote-driver", "test_native_headed_auth_wait",
         "test_opt_in_receiver_auth_wait_and_same_session_resume", "native-driver-auth-wait",
