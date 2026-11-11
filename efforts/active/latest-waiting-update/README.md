@@ -172,6 +172,17 @@ expansion of required CI is introduced.
   native acceptance remains required before merge. The actor-free source
   admission reader independently verified every declared binding, and the
   extracted queue module is 994 lines.
+- Hosted run42937626010 qualified the corrected actual bootstrap selection:
+  Windows 83 passed/three platform skips and Linux 84 passed/two platform skips,
+  including the new latest-wins/caller-loss cases and original independent
+  project/coalescing controls. This does not turn the local deadline failures
+  into passes.
+- A further review identified relative `AGENT_HOME` scoping against the source
+  anchor rather than the actual execution directory. Update admission now
+  captures the absolute execution home; old records compare using their retained
+  runner directory. New controls cover two callers sharing an anchor, old
+  relative records and the actual product environment. Fresh review and CI
+  remain required after this correction.
 
 ### 2026-11-10 - Proposal
 

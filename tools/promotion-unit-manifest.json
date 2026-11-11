@@ -4815,7 +4815,7 @@
         "worktree-manager/src/worktree_manager/update_driver_cli.py": "f61e20c25adc1e1ed49c1f5b8c91a6394f72341707a33a9d88c24940ea45eff4",
         "worktree-manager/src/worktree_manager/project_update_controller.py": "4b32701c0947366a98a881508326bb52c062a4c513ae61eb73f34d93e491660c",
         "worktree-manager/src/worktree_manager/engine_acquisition_budget.py": "8184f8974fb1cacb06cdbaeb75bbe4a8995c813a5356e164f362e08da513085d",
-        "libs/update-driver/src/update_driver/core.py": "5b8a19f9c43ea07249d66ba800cdc426c24110dd7d930ef7e5b5d59f58692753",
+        "libs/update-driver/src/update_driver/core.py": "46424b564550917b87859a5d64cae750df37e5eb5e0a963c654423a50131c05b",
         "libs/update-driver/src/update_driver/authority.py": "5e1604f05fd7233be00a5b15241d54f4fec504e8260d11fca6df8da31bcf7b13",
         "libs/update-driver/src/update_driver/_invocation.py": "6349eb9a949313b239461fe5f3fd053afc354983dca8f3b653441cb08ba98f28",
         "worktree-manager/src/worktree_manager/__init__.py": "1b1fc236627940a7b00bf58b1443547b3acb51441de40e3e5225e8dd10a10785",

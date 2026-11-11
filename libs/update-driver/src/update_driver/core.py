@@ -22,6 +22,7 @@ from typing import Callable, Mapping, Sequence, TextIO
 from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import _invocation, authority, boot, foundation_state
 from ._directory import create_queue_directory
+from .pending_updates import capture_home as _capture_home
 from .pending_updates import supersede_waiting as _supersede_waiting
 
 SCHEMA = 4
@@ -446,6 +447,7 @@ def enqueue(
     """Commit acceptance; only trusted adapters with pinned targets may share active work."""
     root = _root(root)
     spec, runner = _spec(spec), _runner(runner)
+    spec = _spec(_capture_home(spec, runner))
     override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
     if override and not spec.killswitch_path:
         path = Path(override).expanduser()
@@ -481,7 +483,7 @@ def enqueue(
                 ).fetchone()
             if row is None:
                 identifier = uuid.uuid4().hex
-                _supersede_waiting(db, root, spec, identifier)
+                _supersede_waiting(db, root, spec, runner, identifier)
                 db.execute(
                     "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,?,?)",
                     (identifier, identity, spec_json, runner_json, "pending", time.time()),
@@ -489,7 +491,7 @@ def enqueue(
                 row = db.execute("SELECT * FROM requests WHERE id=?", (identifier,)).fetchone()
             elif row["state"] == "pending":
                 # Coalescing an existing selection also collapses legacy backlog.
-                _supersede_waiting(db, root, spec, row["id"])
+                _supersede_waiting(db, root, spec, runner, row["id"])
             request = _request(row, root)
             db.commit()
             return request

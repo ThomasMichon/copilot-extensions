@@ -155,6 +155,49 @@ def test_bootstrap_retains_independent_project_requests(area):
     assert all(row.state == "pending" for row in status(root=area / "state"))
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_relative_installation_homes_use_execution_directory_not_shared_source_anchor(
+    area, monkeypatch, legacy,
+):
+    from update_driver import core
+
+    anchor, left, right = (area / name for name in ("source-anchor", "left", "right"))
+    for directory in (anchor, left, right):
+        directory.mkdir()
+    spec = RequestSpec(
+        "manager", cwd=str(anchor), context=(("AGENT_HOME", "state"),), repair=True,
+    )
+    left_runner = TrustedRunner((sys.executable, "-c", "pass"), str(left))
+    right_runner = replace(left_runner, cwd=str(right))
+    with monkeypatch.context() as old_client:
+        if legacy:
+            old_client.setattr(core, "_capture_home", lambda spec, runner: spec)
+        first = submit(area, "", spec=spec, runner=left_runner)
+    other = submit(area, "", spec=spec, runner=right_runner)
+    assert status(first.id, root=area / "state").state == "pending"
+    assert dict(other.spec.context)["AGENT_HOME"] == str(right / "state")
+    newer = submit(area, "", spec=replace(spec, source="new"), runner=left_runner)
+    assert dict(newer.spec.context)["AGENT_HOME"] == str(left / "state")
+    assert status(first.id, root=area / "state").exit_code == 125
+    assert status(other.id, root=area / "state").state == "pending"
+
+
+def test_captured_home_is_the_actual_product_environment(area):
+    anchor, caller = area / "source-anchor", area / "caller"
+    anchor.mkdir()
+    caller.mkdir()
+    request = submit(area, "", spec=RequestSpec(
+        "manager", cwd=str(anchor), context=(("AGENT_HOME", "state"),),
+    ), runner=TrustedRunner(
+        (sys.executable, "-c", "import os; print(os.path.abspath(os.environ['AGENT_HOME']))"),
+        str(caller), context_keys=("AGENT_HOME",),
+    ))
+    assert drain(root=area / "state") == 0
+    result = wait(request.id, root=area / "state", timeout=0)
+    assert result.exit_code == 0
+    assert result.log_path.read_text().strip() == str(caller / "state")
+
+
 @pytest.mark.parametrize("backend", ["owning-plugin-provision", "plugin-native-install", "manager-bootstrap"])
 def test_update_never_discards_required_component_work(area, backend):
     component = submit(area, "", spec=RequestSpec(backend))

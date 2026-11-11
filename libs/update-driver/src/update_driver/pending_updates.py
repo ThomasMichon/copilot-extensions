@@ -5,14 +5,35 @@ from __future__ import annotations
 import os
 import sqlite3
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .core import RequestSpec
+    from .core import RequestSpec, TrustedRunner
 
 
-def _update_scope(spec: RequestSpec) -> tuple[str, ...] | None:
+def _execution_home(value: str, cwd: str) -> str:
+    from .core import InvalidRequestError
+
+    selected = os.path.normpath(os.path.join(cwd, value))
+    if not os.path.isabs(selected):
+        raise InvalidRequestError("installation home requires an absolute execution directory")
+    return selected
+
+
+def capture_home(spec: RequestSpec, runner: TrustedRunner) -> RequestSpec:
+    if spec.backend not in {"manager", "engine", "engine-launch-update"}:
+        return spec
+    context = dict(spec.context)
+    home = context.get("AGENT_HOME", "").strip()
+    if not home:
+        return spec
+    context["AGENT_HOME"] = _execution_home(home, runner.cwd)
+    return replace(spec, context=tuple(context.items()))
+
+
+def _update_scope(spec: RequestSpec, runner: TrustedRunner) -> tuple[str, ...] | None:
     from .core import InvalidRequestError
 
     if spec.backend not in {"manager", "engine", "engine-launch-update"}:
@@ -40,7 +61,9 @@ def _update_scope(spec: RequestSpec) -> tuple[str, ...] | None:
             cell = str(receipt.parent.parent.parent)
         else:
             cell = str(receipt)
-    home = path(context.get("AGENT_HOME", "").strip() or str(Path.home()))
+    home = os.path.normcase(_execution_home(
+        context.get("AGENT_HOME", "").strip() or str(Path.home()), runner.cwd,
+    ))
     manager = path(context.get("WORKTREE_MANAGER_ROOT") or str(Path.home() / ".worktree-manager"))
     project = spec.project
     if spec.backend == "manager" and project and Path(project).is_absolute() and path(project) == manager:
@@ -53,10 +76,12 @@ def _update_scope(spec: RequestSpec) -> tuple[str, ...] | None:
     return home, cell, manager, spec.authority, project
 
 
-def supersede_waiting(db: sqlite3.Connection, root: Path, spec: RequestSpec, successor: str) -> None:
+def supersede_waiting(
+    db: sqlite3.Connection, root: Path, spec: RequestSpec, runner: TrustedRunner, successor: str,
+) -> None:
     from .core import StateError, _request
 
-    scope = _update_scope(spec)
+    scope = _update_scope(spec, runner)
     if scope is None:
         return
     waiting = [
@@ -65,7 +90,10 @@ def supersede_waiting(db: sqlite3.Connection, root: Path, spec: RequestSpec, suc
             AND finished_at IS NULL AND boot_id IS NULL AND id<>?""", (successor,),
         )
     ]
-    peers = [request for request in waiting if _update_scope(request.spec) == scope]
+    peers = [
+        request for request in waiting
+        if _update_scope(request.spec, request.runner) == scope
+    ]
     if "--auto" in spec.argv and any("--auto" not in request.spec.argv for request in peers):
         raise StateError("explicit update already waiting; automatic request not admitted")
     db.executemany(

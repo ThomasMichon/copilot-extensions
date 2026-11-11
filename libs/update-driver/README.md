@@ -101,6 +101,10 @@ creation, not an implicit permission migration or a read-only status side effect
   equivalence; driver capability and Python import keys cannot be projected.
   Adapters must retain the original invocation directory as the runner cwd
   when their front door changes directory during project resolution.
+  Update admission captures a nonempty `AGENT_HOME` as an absolute value
+  against the retained runner cwd, not the source anchor in `RequestSpec.cwd`.
+  Older records with a relative home use that same execution directory for
+  scope comparison, preserving independent caller installations.
 - `runtime_command(module, args=()) -> (argv, env)` uses `direct_python` and
   the current runtime's `.runtime-bootstrap/runtime_launcher.py` with
   `-I -S -B -X utf8` when present. It never resolves a newer selected slot.
