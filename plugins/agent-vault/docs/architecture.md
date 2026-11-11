@@ -163,16 +163,18 @@ in `config.py`; the service retains its compatibility alias.
 
 ## Persistent cache and KEK storage
 
-The persistent cache (`src/agent_vault/cache.py`) is off unless `AGENT_VAULT_CACHE` is truthy or `AGENT_VAULT_CACHE_DIR` is set. When enabled and `cryptography` is installed, `agent-vault get` checks the encrypted file cache before contacting the daemon, unless `--refresh` is used. `--cache-only` never contacts the service. Cache commands are `cache-populate`, `cache-status`, `cache-clear`, and `cache-verify` (which exits `2` when required entries are missing).
+The persistent cache (`src/agent_vault/cache.py`) is off unless `AGENT_VAULT_CACHE` is truthy or `AGENT_VAULT_CACHE_DIR` is set. When enabled and its encryption backend is available, `agent-vault get` checks the encrypted file cache before contacting the daemon, unless `--refresh` is used. `--cache-only` never contacts the service. Cache commands are `cache-populate`, `cache-status`, `cache-clear`, and `cache-verify` (which exits `2` when required entries are missing).
 
 The cache file lives under the configured cache dir, defaulting to a `cache` directory beside the global config. Its Fernet key is wrapped with `src/agent_vault/kek.py`: DPAPI per-user on Windows, `0600` raw wrapping on POSIX. This is a convenience layer for locked unattended reads, not a substitute for host security and disk encryption.
 
-On Windows without `cryptography`, new caches use native user-bound DPAPI
+On Windows without `pycryptodomex`, new caches use native user-bound DPAPI
 directly (`cache_dpapi.py`), including on ARM64; no Fernet key file or vault
 unlock is needed to read a populated cache. The `AVC1D` format tag distinguishes
 these local caches from legacy Fernet files. Existing DPAPI caches keep their
-format when cryptography becomes available. Existing Fernet caches still need
-cryptography: an unavailable legacy decoder, wrong user, or invalid DPAPI cache
+format when PyCryptodome becomes available. Existing Fernet caches use its
+AES-CBC and PKCS7 primitives with the original HMAC-SHA256 wire protocol in
+`protected_crypto.py`; no key or data conversion is needed. An unavailable
+legacy decoder, wrong user, or invalid DPAPI cache
 must not cause replacement with an empty store. The cache is machine-local;
 only the authoritative vault database and its shared credential travel
 between machines.
@@ -226,7 +228,11 @@ while legacy global-cache selection and contents are unchanged.
 See [shared owner-key setup](../README.md#shared-owner-key-setup) for exact
 flags, synchronization constraints and result shapes.
 
-`seal`/`unseal` use named 32-byte KEKs stored beside the config (`AGENT_VAULT_KEK_DIR` overrides). They require `cryptography` for AES-256-GCM. KEKs are independent of KeePass master passwords, so these commands work while the vault is locked.
+`seal`/`unseal` use named 32-byte KEKs stored beside the config
+(`AGENT_VAULT_KEK_DIR` overrides). They use PyCryptodome's AES-256-GCM with the
+unchanged `AVK1 || nonce || ciphertext || tag` layout and KEK-name associated
+data. Existing wrapped keys remain unchanged. KEKs are independent of KeePass
+master passwords, so these commands work while the vault is locked.
 
 ## Lifecycle tier (declared, per `service-lifecycle-supervision`)
 

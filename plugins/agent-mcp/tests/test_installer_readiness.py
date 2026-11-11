@@ -41,7 +41,7 @@ def test_readiness_without_repository_preserves_request_context_requirement(
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(config, "_machine_overlay", lambda *_: {"timeout": 15})
     monkeypatch.setattr(config, "BRIDGES_DIR", tmp_path)
-    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda: [])
+    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda **_: [])
     calls = []
 
     def missing_context(root):
@@ -107,7 +107,7 @@ def test_payload_command_does_not_create_bridge_configuration(
 ):
     bridges = tmp_path / "bridges"
     monkeypatch.setattr(config, "BRIDGES_DIR", bridges)
-    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda: [])
+    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda **_: [])
 
     assert cli.main(["installer-readiness"]) == 0
     assert not bridges.exists()

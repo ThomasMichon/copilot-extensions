@@ -6,6 +6,8 @@ import base64
 import builtins
 import json
 import os
+import shutil
+import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
@@ -89,21 +91,22 @@ def test_record_mismatch_or_noncanonical_data_refused(record, mutation):
 
 
 def test_public_metadata_never_generates_another_private_key(monkeypatch, record):
-    serialization, private_type, public_type = ssh_key._crypto()
+    backend = ssh_key._crypto()
     public = ssh_key._read_record(record)["public_key"]
     monkeypatch.setattr(
         ssh_key, "_crypto",
-        lambda: (serialization, SimpleNamespace(generate=Mock(side_effect=AssertionError)), public_type),
+        lambda: SimpleNamespace(
+            import_key=backend.import_key, generate=Mock(side_effect=AssertionError),
+        ),
     )
     assert ssh_key.public_metadata(public)["public_key"] == public
-    assert private_type is not None
 
 
 def test_missing_crypto_has_explicit_remedy(monkeypatch):
     original = builtins.__import__
 
     def without_crypto(name, *args, **kwargs):
-        if name.startswith("cryptography"):
+        if name.startswith("Cryptodome"):
             raise ImportError("fixture only")
         return original(name, *args, **kwargs)
 
@@ -111,6 +114,120 @@ def test_missing_crypto_has_explicit_remedy(monkeypatch):
     with pytest.raises(IdentityKeyError) as error:
         ssh_key._crypto()
     assert error.value.code == "crypto_unavailable"
+
+
+def test_record_roundtrip_without_cryptography(monkeypatch):
+    original = builtins.__import__
+
+    def without_cryptography(name, *args, **kwargs):
+        if name.startswith("cryptography"):
+            raise ImportError("fixture only")
+        return original(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", without_cryptography)
+    value = ssh_key._generate_record()
+    assert ssh_key.decode_record(value)["public_key"] == ssh_key._read_record(value)["public_key"]
+
+
+@pytest.mark.parametrize("damage", ["outer-public", "pair-public", "seed", "check", "padding", "kdf"])
+def test_damaged_openssh_fields_are_not_silently_adopted(record, damage):
+    data = ssh_key.decode_record(record)
+    blob = bytearray(base64.b64decode("".join(data["private_key"].splitlines()[1:-1])))
+    public_wire = base64.b64decode(data["public_key"].split(" ")[1])
+    outer = blob.index(public_wire)
+    raw_public = public_wire[-32:]
+    private_public = blob.rindex(raw_public)
+    if damage == "outer-public":
+        blob[outer + len(public_wire) - 1] ^= 1
+    elif damage == "pair-public":
+        blob[private_public] ^= 1
+    elif damage == "seed":
+        blob[private_public - 32] ^= 1
+    elif damage == "check":
+        blob[outer + len(public_wire) + 4] ^= 1
+    elif damage == "kdf":
+        blob[blob.index(b"none") + 8] ^= 1
+    else:
+        blob[-1] ^= 1
+    encoded = base64.b64encode(blob).decode("ascii")
+    data["private_key"] = (
+        "-----BEGIN OPENSSH PRIVATE KEY-----\n" + encoded
+        + "\n-----END OPENSSH PRIVATE KEY-----\n"
+    )
+    damaged = base64.b64encode(
+        json.dumps(data, sort_keys=True, separators=(",", ":")).encode("ascii"),
+    ).decode("ascii")
+    with pytest.raises(IdentityKeyError) as error:
+        ssh_key.decode_record(damaged)
+    assert error.value.code == "malformed_key"
+
+
+def test_existing_cryptography_records_and_new_records_interoperate():
+    serialization = pytest.importorskip("cryptography.hazmat.primitives.serialization")
+    ed25519 = pytest.importorskip("cryptography.hazmat.primitives.asymmetric.ed25519")
+    private = ed25519.Ed25519PrivateKey.generate()
+    data = {
+        "schema": "agent-vault.ssh-key", "version": 1,
+        "private_key": private.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH,
+            serialization.NoEncryption(),
+        ).decode("ascii"),
+        "public_key": private.public_key().public_bytes(
+            serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH,
+        ).decode("ascii"),
+    }
+    value = base64.b64encode(
+        json.dumps(data, sort_keys=True, separators=(",", ":")).encode("ascii"),
+    ).decode("ascii")
+    assert ssh_key.decode_record(value) == data
+    new = ssh_key.decode_record(ssh_key._generate_record())
+    parsed = serialization.load_ssh_private_key(new["private_key"].encode("ascii"), None)
+    assert parsed.public_key().public_bytes(
+        serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH,
+    ).decode("ascii") == new["public_key"]
+
+
+def test_openssh_reads_new_key_and_existing_key_is_reused(tmp_path):
+    executable = shutil.which("ssh-keygen")
+    if not executable:
+        pytest.skip("OpenSSH is unavailable")
+    directory = tmp_path / "keys"
+    if os.name == "nt":
+        from agent_vault.ssh_key_files import WindowsSecurity
+
+        security = WindowsSecurity()
+        security.create(directory, directory=True)
+    else:
+        directory.mkdir(mode=0o700)
+    path = directory / "id_ed25519"
+    data = ssh_key.decode_record(ssh_key._generate_record())
+    descriptor = (
+        security.create(path, directory=False) if os.name == "nt"
+        else os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    )
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(data["private_key"].encode("ascii"))
+    options = {
+        "capture_output": True, "text": True, "timeout": 10,
+        "creationflags": getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    }
+    result = subprocess.run([executable, "-y", "-f", str(path)], **options)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == data["public_key"]
+    path.unlink()
+    result = subprocess.run(
+        [executable, "-q", "-t", "ed25519", "-N", "", "-C", "", "-f", str(path)], **options,
+    )
+    assert result.returncode == 0, result.stderr
+    existing = {
+        "schema": "agent-vault.ssh-key", "version": 1,
+        "private_key": path.read_text(encoding="ascii"),
+        "public_key": path.with_suffix(".pub").read_text(encoding="ascii").strip(),
+    }
+    value = base64.b64encode(
+        json.dumps(existing, sort_keys=True, separators=(",", ":")).encode("ascii"),
+    ).decode("ascii")
+    assert ssh_key.decode_record(value) == existing
 
 
 @pytest.mark.parametrize("value,code", [(None, "entry_missing"), ("invalid", "malformed_key")])

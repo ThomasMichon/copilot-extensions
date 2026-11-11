@@ -10,9 +10,25 @@ selected existing KeePass database. It returns **only public metadata**:
 Use the owning payload's session-catalog command. Select the native installer's
 [`ssh` dependency profile](../README.md#dependency-profiles), which installs
 the optional `agent-vault[ssh]` extra in a separate immutable runtime. It supplies
-cryptographic generation and pair validation;
-missing support produces `crypto_unavailable`, not a replacement key or
+PyCryptodome (`pycryptodomex`, isolated `Cryptodome` namespace) for Ed25519
+generation and pair validation, including native Windows ARM64 wheels.
+The schema-v1 record and unencrypted OpenSSH private-key format are unchanged;
+existing keys are imported and validated without conversion or rotation.
+Missing support produces `crypto_unavailable`, not a replacement key or
 fallback implementation. Other Vault commands do not require the extra.
+
+The focused `tests/test_ssh_key.py` and `tests/test_protected_crypto.py` controls
+cover OpenSSH interoperability, independent Fernet/AES-GCM vectors, malformed
+records, wrong keys and tampering. Cross-backend controls additionally use
+`cryptography` where that test dependency has a supported wheel.
+The opt-in native `tests/native/test_runtime_profile.py` packet uses disposable
+installed runtimes and protected fixtures, not a production database or service.
+Select the complete `TestNativeProfileSequence` class: its ordered stages share
+one installation and retain base-to-SSH, repeat, upgrade and byte-preservation
+assertions under the runner's file-group limit. The separate
+`test_native_profile_failed_dependency_preserves_installed_consumer` case
+verifies refusal and continued use of the incumbent. These are functional
+contracts, not installation-performance or live-enrollment acceptance.
 
 ```text
 <agent-vault catalog argv[0]> ssh-key prepare --entry SSH/node-a --json

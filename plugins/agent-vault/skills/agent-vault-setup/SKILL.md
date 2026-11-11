@@ -172,7 +172,7 @@ Common findings:
 | `KeePass database path is not configured` | Set `KPDB`, add a named vault, or create `.agent-vault.json`; inspect with the payload-local `which`. |
 | `keepassxc-cli` missing | Install KeePassXC or add `keepassxc-cli` to PATH. |
 | Locked read fails fast | Run the payload-local `unlock`, `unlock --terminal`, or retry `get` with `--prompt`. |
-| Cache commands are disabled | Set `AGENT_VAULT_CACHE=1` or `AGENT_VAULT_CACHE_DIR`; install `cryptography` into the runtime venv. |
+| Cache commands are disabled | Set `AGENT_VAULT_CACHE=1` or `AGENT_VAULT_CACHE_DIR`; select the `ssh` profile for Fernet support through `pycryptodomex`. New Windows caches also support native DPAPI. Preserve unreadable existing caches. |
 
 ## First-run database config
 
