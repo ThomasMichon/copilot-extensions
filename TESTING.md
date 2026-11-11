@@ -5500,6 +5500,12 @@ regressions in the same packet. Native closed-wheel tests exercise long retained
 paths and installed-origin parity; acquisition controls expose only the refused
 origin, never its path or query. These controls do not enable a default consumer
 or approve a production feed.
+`worktree-manager/tests/test_manager_engine_adapter.py` also checks the actual
+local-source origin projection for ordinary and extended Windows drive/UNC
+paths. It supplies synthetic project metadata but uses the real file-URI
+construction, keeping filesystem namespace prefixes out of recorded origins
+without weakening exact installed-origin comparison. This portable control is
+not a native installation or long-path acceptance result.
 Built wheels must preserve the retained source's dependencies, extras and
 Python requirement. Native regressions alter actual wheel metadata, refuse
 nonordinary inputs before opening, bound compressed filename tags before

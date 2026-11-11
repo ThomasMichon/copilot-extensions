@@ -1,5 +1,5 @@
 {
-  "comment": "Propagate the shared update-driver first-queue-publication read-only authority correction to every vendored consumer",
+  "comment": "Propagate the shared update-driver first-queue-publication read-only authority correction and normalize retained local-package file URLs on Windows without relaxing exact origin verification",
   "changes": [
     {
       "plugin": "agent-bridge",

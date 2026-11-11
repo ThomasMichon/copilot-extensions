@@ -11,7 +11,7 @@ import sys
 import time
 import tomllib
 from contextlib import contextmanager
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from types import SimpleNamespace
 
 import pytest
@@ -42,6 +42,26 @@ def _capture(adapter, monkeypatch):
         yield SimpleNamespace(slot=root / "versions" / version, reused=False)
     monkeypatch.setattr(adapter.engine, "numbered_candidate", candidate)
     return calls
+
+
+@pytest.mark.parametrize("path,uri", [
+    (r"\\?\C:\held inputs\package", "file:///C:/held%20inputs/package"),
+    (r"\\?\UNC\server\share\package", "file://server/share/package"),
+    (r"C:\held inputs\package", "file:///C:/held%20inputs/package"),
+], ids=["extended-drive", "extended-unc", "ordinary-drive"])
+def test_local_source_origin_uses_regular_windows_file_uri(tmp_path, path, uri):
+    engine = si._runtime_installer().engine
+    manifest = tmp_path / "pyproject.toml"
+    manifest.write_text('[project]\nname="example-app"\n', encoding="utf-8")
+
+    class SourcePath(PureWindowsPath):
+        def read_text(self, *, encoding):
+            assert self.name == "pyproject.toml"
+            return manifest.read_text(encoding=encoding)
+
+    package = SourcePath(path)
+    inputs = engine.FrozenInputs(package, (package,), "source-content")
+    assert engine._input_origins(inputs) == {"example-app": uri}
 
 
 def test_adapter_delegates_construction_health_and_retention_without_selecting(tmp_path, monkeypatch):
