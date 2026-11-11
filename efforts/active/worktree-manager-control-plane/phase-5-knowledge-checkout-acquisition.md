@@ -1,6 +1,6 @@
 # Phase 5 - Remote knowledge checkout acquisition
 
-- **Status:** Proposed owner contract; no new executable interface is shipped.
+- **Status:** Source implementation and contained Windows validation; publication gates pending.
 - **Parent:** [Configuration workbench](phase-5-configuration-workbench.md).
 - **Coordination:** #1419 Track 3; bounded consumer slice `shiny-actuator`.
   The shared #356/#8545 acquisition owner retains its implementation boundary.
@@ -34,12 +34,12 @@ standalone discovery, a register-URL replacement, or a transfer of those
 campaigns. Existing #7611 forced-registration and #11926 remote-free identity
 work remain independent.
 
-## Proposed native consumer
+## Native consumer
 
-Add optional `repos configuration knowledge-acquire-preview` and
+The optional `repos configuration knowledge-acquire-preview` and
 `knowledge-acquire-apply` operations, with an explicit context project,
-credential-free HTTPS repository URL and absolute destination path.
-They remain proposed until their implementation and compatibility checks land.
+credential-free HTTPS repository URL and absolute destination path, use the
+shared acquisition-only mode. Registration and binding remain separate actions.
 
 The selected native catalog supplies a dedicated optional row and action marker
 only for an eligible, canonically registered worktree-class stateless harness
@@ -130,22 +130,22 @@ omit it; newer manifests must not emit the new syntax without it. Older
 manifests retain their current registration/binding behavior. Missing or
 incompatible acquisition support blocks only this optional action.
 
-- [ ] Review this owner contract before adding executable caller syntax.
-- [ ] Extend the shared acquisition owner without changing ordinary setup,
+- [x] Review this owner contract before adding executable caller syntax.
+- [x] Extend the shared acquisition owner without changing ordinary setup,
   attended credential handling, immutable-commit or registration behavior.
-- [ ] Implement native read-only preview, fresh confirmed apply and the
+- [x] Implement native read-only preview, fresh confirmed apply and the
   conditional existing Manager form/result/refresh path.
-- [ ] Prove the actual production Manager flow through preview, default Cancel,
+- [x] Prove the actual production Manager flow through preview, default Cancel,
   confirm, native acquisition, receipt and refresh, then the existing
   separately confirmed registration/binding boundary. No setup code may run.
-- [ ] Exercise a disposable real HTTPS Git consumer with a synthetic configured
+- [x] Exercise a disposable real HTTPS Git consumer with a synthetic configured
   credential owner, no-credential/public behavior, explicit-account refusal,
   native timeout/descendant cleanup and preserved partial targets.
-- [ ] Cover existing/indirect/nested/registered destinations, malformed sources,
+- [x] Cover existing/indirect/nested/registered destinations, malformed sources,
   URL rewrites, concurrent target creation and registry/account/binding drift.
   Compare complete fixture source/configuration trees and preserve every
   unrelated value; only the explicitly acquired new checkout may appear.
-- [ ] Cover older executing provider/manifest/Manager and supported rollback;
+- [x] Cover older executing provider/manifest/Manager and supported rollback;
   verify ordinary setup and local registration/binding keep their promises.
 - [ ] Run required source checks, review and CI. Record contained Windows/POSIX,
   native first-touch, installed UI, real provider and receiving evidence
@@ -156,4 +156,70 @@ KO/KOV outcome. Hosted private creation/protection, actual first-restarted-model
 and decline, provider-policy adoption/rejected-push recovery, general retrofit,
 overlays, aligned state writes/cleanup and full receiving remain open under
 their existing owners. No installation, authentication, deployment or live
-repository operation follows from this proposal.
+repository operation follows from this source contract.
+
+## Journal
+
+### 2026-11-10 - Acquisition-only source and native consumer
+
+The owner contract cleared review in #11971 before executable syntax was added.
+The source extension keeps ordinary setup's default registration and attended
+credential behavior. Its explicit acquisition-only mode reserves an absent
+destination, uses the same account/clone/source owners and leaves registration
+and setup untouched. Configuration shares the local-registration owner's
+unbound-harness eligibility and input revisions, rather than inventing another
+binding rule. Its single caller-owned worker bounds Git and credential
+descendants within the existing finite action deadline.
+
+The acquisition packet passed 31 controls with one desktop-observation skip;
+five additional focused negative controls passed after adding real indirect
+parents, registered names, URL parameters, malformed binding and late source
+changes. The latest real HTTPS configured-helper/public/denied packet passed
+with observable setup entrypoints which did not execute. Existing setup's 54
+controls and four default/pinned/unavailable/blob HTTPS cases passed across
+bounded selections. Completed local-registration controls remained passing;
+two native FIFO cases were skipped on Windows.
+
+The actual production Manager packet passed five cases, including remote
+HTTPS acquisition, default Cancel, receipt/refresh, separately confirmed
+registration, separately confirmed binding and real New admission. The remote
+flow took 66.32 seconds end to end; the five-case packet took 173.16 seconds
+(299.39 including preparation and cleanup). This is a finite functional
+sequence, not an installed-UI latency or tail-performance qualification.
+The prior-provider process fixture and both shipped-manifest contract guards
+also passed: a current Manager consumes a real legacy catalog process without
+emitting unsupported acquisition syntax, while prior manifest actions remain
+available. Empty-token native controls cover hosts without provider previews.
+
+Two combined native selections exceeded their unchanged 300-second group
+limit. Named completed independent cases were retained, and unfinished setup
+and HTTPS cases ran in separate bounded invocations. No larger timeout or
+monolithic pass was substituted. Windows window/focus observation was skipped
+because no foreground desktop window was observable. POSIX, installed
+interactive UI, live provider authentication and receiving-machine/relay
+validation remain unqualified; no runtime installation or productive
+registration/binding was performed.
+
+### 2026-11-10 - Nonsecret preview and native failure ownership
+
+The registry's nonempty account strings are not necessarily safe display
+identities. Selection validates the resolved value through the existing
+nonsecret-login owner before hashing or rendering a proposal; malformed or
+secret-shaped values refuse without echoing their content.
+
+Native cleanup failure is not a serializable PID observation. A process, Job,
+retained stream/descriptor and retry operation belong to the original
+`OwnedCleanupError`; reducing it to JSON discards the exact objects required
+for safe settlement, especially when failure occurred before a process existed.
+Worker, invocation and failure-reporting boundaries therefore propagate that
+owner intact. In-process callers retain and settle it before another attempt.
+No replacement cleanup owner, daemon or command replay is introduced.
+
+A missing or malformed native completion frame can instead raise
+`RuntimeError`. Preview returns a sanitized refusal; apply returns an
+incomplete result with preserved-target guidance and unknown cleanup, not
+a traceback or a claim that the interrupted mutation failed.
+The focused native packet passed 12 controls, including process and Job-only
+ownership through Configuration reporting, retained resources/retry/callback,
+nested cleanup propagation, lost preview/apply completion, real secret-shaped
+account refusal, HTTPS access and timeout descendant cleanup.
