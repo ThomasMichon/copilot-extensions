@@ -10149,7 +10149,8 @@ proof that a particular process wrote a changed file.
 For fresh selected-suite installation, the trace starts only after preparation
 has recorded readiness; constructor processes cannot consume the lifecycle
 record allowance. Scan failures retain at most eight exception types and
-HRESULTs, never exception messages or argument values, and still fail the lane.
+HRESULTs and numeric CIM native/status codes, never exception messages or
+argument values, and still fail the lane.
 The assembled Manager update retains a finite stderr allowance of 4 MiB per
 declared component plus Manager, rather than applying one component's 4 MiB
 capture to the entire suite. Other fixture calls and stdout keep their existing
@@ -10159,6 +10160,8 @@ Cold preparation has an 1800-second owned-process deadline; exercise has 900 sec
 The fresh lifecycle witness separately waits up to 120 seconds for the actual
 initial or resumed user event, covering the two existing 60-second New
 required-readiness passes before the unchanged 60-second completed-turn check.
+Resume's actual prompt attachment shares that same 120-second launch allowance;
+waiting for its user event does not reset the clock after attachment.
 Both waits remain clipped to the exercise deadline. The installed-core witness
 keeps its existing timing; this phase split neither changes production
 readiness deadlines nor permits incomplete conversation or pane evidence.

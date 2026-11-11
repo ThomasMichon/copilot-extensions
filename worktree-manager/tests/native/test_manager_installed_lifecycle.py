@@ -743,10 +743,14 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
         launch_elapsed = None
         launch_timeout = getattr(self, "launch_timeout", None)
         if launch_timeout is not None and number in (1, 4):
-            started = time.monotonic()
+            started = (
+                getattr(self, "resume_launch_started", time.monotonic())
+                if number == 4 else time.monotonic()
+            )
             self.wait(
                 lambda: self._turn_started(prompt, number),
-                f"Native launch/readiness did not record {prompt}", timeout=launch_timeout,
+                f"Native launch/readiness did not record {prompt}",
+                timeout=max(0, launch_timeout - (time.monotonic() - started)),
             )
             launch_elapsed = time.monotonic() - started
 
@@ -878,13 +882,23 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
             lambda: self._action_location(console, verb) is not None,
             f"Real Manager discovery did not offer {verb}",
         )
+        launch_timeout = getattr(self, "launch_timeout", None) if verb == "Resume" else None
+        if launch_timeout is not None:
+            self.resume_launch_started = time.monotonic()
         console.send(b"\r")
 
         def attached():
             screen = self.rendered(console)
             return "Start of Prompt Indicator" in screen and "Interactive" in screen
 
-        self.wait(attached, f"Real Manager {verb} did not attach the native CLI prompt")
+        label = f"Real Manager {verb} did not attach the native CLI prompt"
+        if launch_timeout is None:
+            self.wait(attached, label)
+        else:
+            self.wait(
+                attached, label,
+                timeout=max(0, launch_timeout - (time.monotonic() - self.resume_launch_started)),
+            )
 
     def _action_location(self, console, label):
         self.rendered(console)
@@ -2064,6 +2078,58 @@ def test_lifecycle_selection_waits_for_the_current_cli_prompt(tmp_path, attached
         with pytest.raises(TimeoutError, match="did not attach the native CLI prompt"):
             witness.select(console, {"id": "fixture-c123"}, "Open")
     assert len(checks) == 3
+
+
+@pytest.mark.parametrize(
+    "launch_timeout,event_after,expected_clock,completed",
+    [(None, 65, 30, False), (120, 65, 75, True), (120, 130, 120, False)],
+)
+def test_fullsuite_resume_shares_launch_budget_with_prompt_attachment(
+    tmp_path, monkeypatch, launch_timeout, event_after, expected_clock, completed,
+):
+    from types import SimpleNamespace
+
+    home = tmp_path / "copilot-home"
+    history = home / "session-state" / "fixture-session" / "events.jsonl"
+    history.parent.mkdir(parents=True)
+    history.write_text("", encoding="utf-8")
+    clock = [0]
+    witness = _Witness(
+        tmp_path, {"COPILOT_HOME": str(home)}, None, None, None,
+        SimpleNamespace(execution_deadline=200), launch_timeout=launch_timeout,
+    )
+    witness.history = history
+    witness._capture_processes = witness._capture_liveness = lambda: None
+    witness._refresh_before_resume = lambda *_: None
+    witness._action_location = lambda *_: (1, 1)
+    witness.one_native = lambda: (101, 1001)
+    witness.rendered = lambda _: "Start of Prompt Indicator Interactive" if clock[0] >= 45 else "Loading"
+    console = SimpleNamespace(output=b"c123 LIFECYCLE_REPLY_4", send=lambda _: None)
+
+    def sleep(_seconds):
+        clock[0] += 5
+        if clock[0] >= event_after:
+            events = [{"type": "user.message", "data": {"content": PROMPTS[3]}}]
+            if clock[0] >= event_after + 10:
+                events.extend([
+                    {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_4"}},
+                    *[{"type": "assistant.turn_end", "data": {}} for _ in range(4)],
+                ])
+            history.write_text("".join(json.dumps(row) + "\n" for row in events), encoding="utf-8")
+
+    monkeypatch.setitem(
+        _Witness.turn.__globals__, "time",
+        SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep),
+    )
+    if completed:
+        witness.select(console, {"id": "fixture-c123"}, "Resume")
+        assert witness.turn(PROMPTS[3], 4, console) == (101, 1001)
+        assert witness.turn_observation["launch_readiness_seconds"] == event_after
+    else:
+        with pytest.raises(TimeoutError, match="did not attach|did not record"):
+            witness.select(console, {"id": "fixture-c123"}, "Resume")
+            witness.turn(PROMPTS[3], 4, console)
+    assert clock[0] == expected_clock
 
 
 @pytest.mark.parametrize("case", ["stopped", "wrong-highlight", "still-unknown"])

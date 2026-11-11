@@ -251,15 +251,17 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
-def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(tmp_path: Path) -> None:
+@pytest.mark.parametrize("cim", (False, True))
+def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(tmp_path: Path, cim: bool) -> None:
     from agent_procutil import no_window_kwargs
     from manager_suite_artifacts import _runtime_process_trace_script
 
     ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
     (tmp_path / "process-trace-window").write_text("baseline")
     private = "private query argument must not enter diagnostics"
+    error = f"[Microsoft.Management.Infrastructure.CimException]::new('{private}')" if cim else f"'{private}'"
     prefix = (
-        f"function Get-CimInstance {{throw '{private}'}};"
+        f"function Get-CimInstance {{throw {error}}};"
         "function Start-Sleep {param($Milliseconds);"
         f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
     )
@@ -275,6 +277,11 @@ def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(tmp_path
     assert trace["scan_errors"] == 1 and trace["stop_observed"]
     (failure,) = trace["scan_failures"]
     assert failure["type"] and isinstance(failure["hresult"], int)
+    if cim:
+        assert failure["type"] == "Microsoft.Management.Infrastructure.CimException"
+        assert isinstance(failure["native_error_code"], int) and isinstance(failure["status_code"], int)
+    else:
+        assert failure["native_error_code"] is None and failure["status_code"] is None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process inventory")

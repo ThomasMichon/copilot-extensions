@@ -1567,3 +1567,44 @@ no public invocation, readiness policy or deadline changes. The next exact-head
 hosted matrix must still prove complete fresh UI actions and settlement.
 Authentic upgrade, mandatory frozen enforcement and separate Main adoption
 remain open, as does the older cooperatively reported normal bootstrap cause.
+
+### November 11 - Resume attachment shares the fresh launch allowance
+
+Required CI passes at `30da5278ca50c5ed46169f00aff137fff1607e9e`.
+Exact-source run 43024963735 passes normal. Fresh again passes preparation
+and now completes actual Create, active Open, detach and three provider-backed
+turns. It fails before the final resumed turn: the separate prompt-attachment
+wait still uses the core 30-second default. The retained final rendered frame
+contains both required prompt markers. Fresh settlement succeeds; the four
+actions are not accepted as a complete result.
+
+Fresh Resume attachment and its subsequent actual-user-event wait now share
+one 120-second launch allowance from action activation. The user-event wait
+uses only the remaining time, never a new 120 seconds. Core attachment remains
+30 seconds; completed-turn and outer exercise deadlines remain unchanged.
+Virtual-clock controls prove core refusal, fresh completion and exhaustion
+of the shared allowance before a late user event.
+
+The process observer still reports four CIM exceptions and a truncated
+512-identity trace after arming at the correct phase. Exception type and
+HRESULT alone do not identify their cause. Diagnostics now additionally retain
+numeric CIM native/status codes, with nulls for non-CIM failures. All scan errors
+still fail; query timeout, cadence, cap and argument/message omission remain
+unchanged. Both real CIM-exception and ordinary-exception controls prove
+sanitized reports and nonzero exit.
+
+Repair fails initial Manager bootstrap before its repair mutation. Newly
+retained private-driver output ends with the original error,
+`Proof object is not owned by this principal`, after successful wheel
+installation and payload inventory. The outer unclosed-participant error masks
+that physical publication-proof refusal. Exact offending path/principal and
+root cause are still unproven. Settlement succeeds with no errors or remaining
+tasks. This distinct evidence was reported cooperatively on #11121 at its
+still-open head `c3770520b3cbde2fc86e23251b393b8832b51c55`; no competing
+constructor/publication change is made here.
+
+All 21 phase/selection/pane/trace controls and changed-source lint pass.
+Documentation-impact review records the single shared Resume launch allowance
+and numeric diagnostics in TESTING.md. The next unchanged hosted matrix remains
+required for complete fresh actions, strict scan observation and settlement.
+No authentic upgrade, frozen enforcement, Main activation or rollout is claimed.
