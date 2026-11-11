@@ -225,6 +225,24 @@ def prepare(directory):
         (case / "process-trace-window").write_text("fresh", encoding="utf-8")
 
 
+def _verify_retained_payloads(case, rows):
+    from manager_suite_diagnostics import _snapshot_difference
+
+    for name, row in rows.items():
+        actual = payloads._PROVENANCE["content_manifest"](Path(row["path"]))
+        expected = payloads._PROVENANCE["content_manifest"](case / "suite-artifact" / "plugins" / name)
+        if actual != expected:
+            failure = ValueError(f"{name}: the frozen installed payload changed")
+            try:
+                suite._write(
+                    case / "diagnostics" / f"suite-lifecycle-payload-difference-{name}.json",
+                    _snapshot_difference(expected, actual),
+                )
+            except OSError as write_error:
+                failure.add_note(f"Payload difference diagnostic write: {write_error}")
+            raise failure
+
+
 def _verify_prepared(case, setup, run):
     if setup.get("ready") is not True:
         raise ValueError("Fresh suite preparation did not finish")
@@ -254,11 +272,7 @@ def _verify_prepared(case, setup, run):
     )
     if manager_origin != setup["manager_origin"]:
         raise ValueError("The installed Manager changed after preparation")
-    for name, row in closure["payloads"].items():
-        if payloads._PROVENANCE["content_manifest"](Path(row["path"])) != (
-            payloads._PROVENANCE["content_manifest"](artifact / "plugins" / name)
-        ):
-            raise ValueError(f"{name}: the frozen installed payload changed")
+    _verify_retained_payloads(case, closure["payloads"])
     for name, row in setup["runtime_closure"]["runtimes"].items():
         root = Path(row["root"])
         if (root / "current-version").read_text().strip() != row["generation"]:

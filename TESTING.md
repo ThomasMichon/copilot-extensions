@@ -10199,6 +10199,12 @@ Fresh lifecycle teardown also retains a bounded daemon-instance outcome
 projection with total unsettled and omitted counts. A held reservation outside
 the sample still fails, and a diagnostic-write error cannot mask the original
 unsettled-custody refusal.
+The retained-payload check after lifecycle execution uses the same bounded
+path/hash difference projection as construction diagnostics. Added bytecode is
+still a change, never an exemption or a reason to reseal the frozen manifest.
+The runtime-resolution source guard distinguishes canonical selected-slot
+layout comparisons from direct nested-venv launches and root-link comparisons;
+only the former are readiness observations rather than launch paths.
 
 The bootstrap RedirectionGuard controls create links as an unprivileged user:
 Windows deliberately [trusts administrator-created links](https://www.microsoft.com/en-us/msrc/blog/2025/06/redirectionguard-mitigating-unsafe-junction-traversal-in-windows).

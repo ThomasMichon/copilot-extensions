@@ -58,6 +58,40 @@ def test_fresh_cleanup_diagnostic_write_cannot_mask_held_custody(tmp_path, monke
     assert any("controlled diagnostic write failure" in note for note in caught.value.__notes__)
 
 
+@pytest.mark.parametrize("write_fails", (False, True))
+def test_fresh_retained_payload_change_never_reseals_or_loses_its_refusal(
+    tmp_path, monkeypatch, fresh_fixture, write_fails,
+):
+    frozen = tmp_path / "suite-artifact" / "plugins" / "agent-index"
+    installed = tmp_path / "installed"
+    for root in (frozen, installed):
+        root.mkdir(parents=True)
+        (root / "module.py").write_text("unchanged", encoding="utf-8")
+    (tmp_path / "diagnostics").mkdir()
+    rows = {"agent-index": {"path": str(installed)}}
+    verify = fresh_fixture["_verify_retained_payloads"]
+    verify(tmp_path, rows)
+    cache = installed / "__pycache__"
+    cache.mkdir()
+    private = b"private fixture content"
+    (cache / "module.pyc").write_bytes(private)
+    if write_fails:
+        def failed_write(*_):
+            raise OSError("controlled diagnostic write failure")
+        monkeypatch.setattr(fresh_fixture["suite"], "_write", failed_write)
+    with pytest.raises(ValueError, match="agent-index: the frozen installed payload changed") as caught:
+        verify(tmp_path, rows)
+    if write_fails:
+        assert any("controlled diagnostic write failure" in note for note in caught.value.__notes__)
+    else:
+        raw = (tmp_path / "diagnostics" / "suite-lifecycle-payload-difference-agent-index.json").read_bytes()
+        assert private not in raw
+        report = json.loads(raw)
+        assert report["counts"] == {"added": 2, "removed": 0, "changed": 0}
+        assert "__pycache__/module.pyc" in report["added"]
+    assert not (frozen / "__pycache__").exists()
+
+
 def test_fresh_suite_refuses_shared_host_before_creating_a_case(tmp_path, monkeypatch, fresh_fixture):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):

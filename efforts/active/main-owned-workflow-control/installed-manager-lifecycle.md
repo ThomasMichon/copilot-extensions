@@ -1770,3 +1770,36 @@ rewrite preview confirms the exact old published-head lease; it is not itself
 publication. Actual managed rewrite, current-head CI and a new exact-source
 hosted matrix remain required before review/merge acceptance. No old green
 check or native result is reused across the rebase.
+
+### November 11 - Cleanup and census pass; post-lifecycle immutability refuses
+
+The retained frozen-source run 43053171740 at
+`bf22bb3f5e6cbfadd9ff4f83cbf32c80130b3b69` passes normal and repair.
+Fresh preparation, all actual actions/continuity checks and all six daemon
+cleanup outcomes complete successfully. Its census has zero errors and closes
+the owned CIM session; the 512-record truncation remains explicitly recorded.
+Fresh still fails: the next post-lifecycle frozen-payload comparison finds an
+Index change. Independent settlement passes. No complete result or immutable
+payload acceptance is inferred from the successful earlier phases.
+
+Current required CI 43056366851 at
+`e530d48508ed38053b81641537c31e37ab8680cb` passes eligible units, then its
+runtime-resolution source guard flags the new nested paths in the healthy-slot
+comparisons as venv-link launches. The code already consumes the canonical
+marker resolver and compares its result with physical paths beneath the exact
+selected generation. The guard now recognizes only those two established
+Bash/PowerShell comparison shapes. It still flags direct nested-venv launch
+assignment, root-link comparison and a forbidden path on a mixed line.
+No per-line allow marker or general launch exemption is introduced.
+
+Nineteen guard controls and the actual repository-wide strict scan pass.
+The post-lifecycle payload verifier now reuses the bounded path/hash difference
+projection so the next refusal identifies the added/removed/changed paths.
+Bytecode remains included; no path is exempted and no manifest is resealed.
+Two focused cases retain the exact added-cache refusal and preserve it even
+when the diagnostic write fails. The combined 14 Manager payload/cleanup/trace
+controls, changed-source lint and whitespace pass. Documentation-impact review
+updates TESTING.md; no runtime, profile, source-admission or budget policy changes.
+The still-running exact `e530` native matrix retains its own outcome, not the
+next source head's result. Current-head CI, complete fresh immutability and
+settlement, authentic upgrade, frozen enforcement and Main adoption remain open.
