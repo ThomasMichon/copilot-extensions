@@ -147,6 +147,11 @@ def _unpack(payload: bytes, root: Path) -> None:
                 stream.write(archive.read(entry))
 
 
+def _require_headed_args(request: dict) -> None:
+    if "--no-experimental" in request["copilot_args"]:
+        raise ValueError("Fresh portable headed execution requires experimental extensions")
+
+
 def _policy(request: dict, support: Path) -> None:
     sys.path.insert(0, str(support))
     try:
@@ -356,6 +361,7 @@ def receive(request: dict, payload: bytes) -> dict:
         if record.get("request_digest") != digest or record.get("phase") != "ready":
             return {**record, "ok": False, "pending": True}
         _policy(request, support)
+        _require_headed_args(request)
         _require_core(support)
         _prepare_mux(request, support)
         _policy(request, support)
@@ -393,6 +399,7 @@ def child(attempt: Path) -> None:
     if Path.cwd().resolve() != Path(request["cwd"]):
         raise ValueError("Mux child execution directory differs from its retained launch")
     _policy(request, support)
+    _require_headed_args(request)
     bridge = support / "plugins" / "agent-bridge"
     driver = support / "plugins" / "agent-remote-driver"
     env = os.environ.copy()

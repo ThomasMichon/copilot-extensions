@@ -73,6 +73,38 @@ def test_creation_and_reuse_observe_the_same_native_incarnation(tmp_path, native
     assert json.loads((Path(request["state_root"]) / request["attempt"] / "receipt.json").read_text())["phase"] == "created"
 
 
+def test_experimental_opt_out_refuses_before_fresh_launch_effects(tmp_path, native, monkeypatch):
+    payload = _payload()
+    request = {
+        **_request(tmp_path, payload), "ensure_mux": True,
+        "copilot_args": ["--no-experimental"],
+    }
+    for name in ("_require_core", "_prepare_mux", "_registration"):
+        monkeypatch.setattr(receiving_mux, name, lambda *args: pytest.fail("fresh launch effect"))
+    with pytest.raises(ValueError, match="requires experimental extensions"):
+        receiving_mux.receive(request, payload)
+    attempt = Path(request["state_root"]) / request["attempt"]
+    monkeypatch.chdir(request["cwd"])
+    with pytest.raises(ValueError, match="requires experimental extensions"):
+        receiving_mux.child(attempt)
+    assert native == []
+
+
+def test_legacy_experimental_opt_out_does_not_reject_retained_reuse(tmp_path, native):
+    payload = _payload()
+    request = _request(tmp_path, payload)
+    receiving_mux.receive(request, payload)
+    request["copilot_args"] = ["--no-experimental"]
+    receipt = Path(request["state_root"]) / request["attempt"] / "receipt.json"
+    retained = json.loads(receipt.read_text())
+    retained["request_digest"] = hashlib.sha256(
+        json.dumps(request, sort_keys=True, separators=(",", ":")).encode(),
+    ).hexdigest()
+    receipt.write_text(json.dumps(retained), encoding="utf-8")
+    assert receiving_mux.receive(request, payload)["reused"] is True
+    assert [call[0][3] for call in native] == ["new-session", "display-message"]
+
+
 def test_registration_is_private_to_the_original_attempt_and_never_on_argv(tmp_path, native, monkeypatch):
     payload = _payload()
     request = {
@@ -398,13 +430,16 @@ def test_packaged_core_is_selected_after_copy_without_a_guest_suite(tmp_path, mo
     from agent_remote_driver.session_host import bundle
 
     original = bundle.build_session_host_bundle
-    construction = tmp_path / "construction"
-    monkeypatch.setattr(bundle, "build_session_host_bundle", lambda: original(construction))
+    construction = []
+
+    def build(directory):
+        construction.append(Path(directory))
+        return original(directory)
+
+    monkeypatch.setattr(bundle, "build_session_host_bundle", build)
     payload, _ = build_mux_support()
     support = tmp_path / "receiving"
     support.mkdir()
     receiving_mux._unpack(payload, support)
-    for path in construction.iterdir():
-        path.unlink()
-    construction.rmdir()
+    assert len(construction) == 1 and not construction[0].exists()
     receiving_mux._require_core(support)

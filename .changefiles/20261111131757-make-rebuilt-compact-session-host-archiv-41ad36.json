@@ -1,0 +1,21 @@
+{
+  "comment": "Preserve exact compact Session Host bytes when rebuilding launch support",
+  "changes": [
+    {
+      "plugin": "libs/copilot-driver-core",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
