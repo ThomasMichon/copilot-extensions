@@ -91,6 +91,48 @@ runnable installer and probe without copying their behavior into the consumer.
 one, while the first payload command requires the canonical command-manifest
 shape and rejects mixed legacy `command` fields with `commands[]`.
 
+### Script-only runtime ownership
+
+Native `agent-machines installation-repair` also needs an attributable runtime
+root and a read-only provisioning-inhibition protocol. A generated-command
+producer keeps declaring these in `payload-invocation.json`. A script-only
+producer instead adds `"installerRuntime": "installer-runtime.json"` to
+`plugin.json` and publishes this strict object:
+
+```json
+{
+  "schema": "copilot-extensions.installer-runtime",
+  "version": 1,
+  "runtimeRoot": ".example-runtime",
+  "noSelfProvisionEnv": "EXAMPLE_NO_SELFPROVISION"
+}
+```
+
+Version 1 accepts exactly those four fields. The reference is a nonempty
+payload-relative path with `/` separators, no empty, `.` or `..` components,
+backslashes, drive syntax or linked/reparse ancestors. The runtime root is one
+dedicated HOME child matching `\.[a-z0-9][a-z0-9-]{0,127}`; existing roots and
+ancestors must be ordinary directories. The environment name matches
+`[A-Z][A-Z0-9_]{0,127}`. A missing referenced file, invalid schema/version,
+unknown field or simultaneous `payload-invocation.json` refuses admission.
+
+The declared variable is set to `1` for the read-only probe and removed for
+the explicitly admitted installer. The producer's probe must honor it without
+installing or starting anything. Actual actions remain exclusively in the
+module manifest; this document defines no command, module, service or installer.
+Its runtime root participates in the same complete ownership census,
+ordinary/core mode checks and duplicate-writer refusal, even without readiness
+metadata. Its parsed content binds the reviewed plan and readiness-only
+declaration digest independently of payload-tree hash exclusions. It grants no
+mutation authority.
+
+This is provider-first additive support, not a change to the existing command
+protocol. Consumers predating this reader retain their pre-effect
+`owner-readonly-protocol-not-declared` refusal for script-only owners. Do not
+silently omit those owners, invent a generated launcher or retry a weaker
+required-module selection. Neither protocol being present is still unsupported.
+Required modules on undeclared platforms remain unsupported and unsatisfied.
+
 ### Module semantics
 
 Each module declares:
