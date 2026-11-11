@@ -173,6 +173,7 @@ No install, service, network or credentials are required.
 python <resolved-script> validate <private-topology-json>
 python <resolved-script> overview <private-topology-json>
 python <resolved-script> intent <private-topology-json>
+python <resolved-script> flow <private-topology-json> --request <request-id>
 python <resolved-script> placement <private-topology-json> --role <role-id> --kind standing
 python <resolved-script> route <private-topology-json> --request <request-id>
 python <resolved-script> seed <private-topology-json> --request <request-id>
@@ -188,6 +189,16 @@ declaration and its adopted materialization, without qualifying coverage;
 worktree and observed current head or a hold; `seed` exports the complete saved
 assignment, role and machine context.
 There is no allocate, send, reconcile-write or launch command.
+
+`flow` reports the next advisory step for a standing request: persist its complete
+assignment and materialization, allocate through Worktrees, reserve through
+Dispatch, persist the full launch seed and envelope, start the retained worktree
+through Bridge, then accept through Dispatch. It returns the owning adapter and
+revision/generation/head fences, or an explicit hold. Unknown effects require
+receipt recovery with the original identity, never replay. See the
+[native assignment flow](references/adapters-and-recovery.md#native-assignment-flow)
+for persistence and acceptance boundaries. The helper performs none of these
+steps and cannot verify that a referenced envelope was saved.
 
 `materialize` exports a nonterminal persisted assignment's complete charter, role,
 machine constraints and dispatcher context in a versioned envelope. Save that
