@@ -221,7 +221,10 @@ def test_windowless_job_root_propagates_result_and_bounded_owned_cleanup(
     assert options["max_stderr_bytes"] == 64 * 1024
 
 
-@pytest.mark.parametrize("outcome", ["absent", "inconclusive", "functional-failure", "cleanup-failure"])
+@pytest.mark.parametrize("outcome", [
+    "absent", "inconclusive", "confirmed-focus", "confirmed-window",
+    "functional-failure", "cleanup-failure",
+])
 def test_optional_desktop_does_not_gate_absence_or_mask_functional_and_cleanup_failures(
     tmp_path, monkeypatch, outcome,
 ):
@@ -249,7 +252,10 @@ def test_optional_desktop_does_not_gate_absence_or_mask_functional_and_cleanup_f
             raise AssertionError("native functional failure")
         return {
             "passed": False, "samples": 1, "maximum_gap": .02, "hook_count": 2,
-            "violations": [{"kind": "foreground"}], "sealed": True, "hooks_closed": True,
+            "violations": [
+                {"kind": "sampled-foreground", "identity": (11, 22, 33)}
+                if outcome == "confirmed-focus" else {"kind": "foreground"}
+            ], "sealed": True, "hooks_closed": True,
         }
 
     observer = SimpleNamespace(
@@ -258,10 +264,16 @@ def test_optional_desktop_does_not_gate_absence_or_mask_functional_and_cleanup_f
             is_alive=lambda: outcome == "cleanup-failure",
         ),
     )
-    monkeypatch.setattr(health_task_desktop, "make_api", lambda: SimpleNamespace(require_desktop=admission))
+    monkeypatch.setattr(health_task_desktop, "make_api", lambda: SimpleNamespace(
+        require_desktop=admission, owned_identities=lambda: {(11, 33)},
+        confirmed_task_windows=[{"kind": "task-visible-window"}] if outcome == "confirmed-window" else [],
+    ))
     monkeypatch.setattr(sdk_desktop_observer, "DesktopObserver", lambda *args: observer)
     monkeypatch.setattr(module, "_exercise_cycles", exercise)
-    expected = AssertionError if outcome.endswith("failure") else pytest.skip.Exception
+    expected = (
+        AssertionError if outcome.endswith("failure") or outcome.startswith("confirmed-")
+        else pytest.skip.Exception
+    )
     with pytest.raises(expected):
         module.test_two_calendar_cycles_without_windows_or_focus_changes(
             tmp_path, monkeypatch, lambda name, value: properties.append(json.loads(value)),

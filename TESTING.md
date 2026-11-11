@@ -132,7 +132,9 @@ The JUnit suite property `desktop_observation` records the result. No operator
 unlock, focus, quiet-window commitment or physical console is required.
 Absent/inconclusive visual coverage does not block publication, CI or enrollment.
 Functional assertions and exact cleanup remain mandatory; confirmed regressions
-are not waived.
+are not waived. Task-attributed visible windows or sampled focus violations fail
+even when capture coverage is incomplete. Ownership uses the fixture's native
+PID/birth receipts, not an unrelated process's reused PID or desktop activity.
 Selecting only `test_health_windows_scheduler.py` runs the unattended controls; it never claims
 zero windows or focus changes. Late wake/suspend, Linux, retained-closure replacement, installed
 adoption, hourly cohort behavior and carrier receipt remain separate gates.

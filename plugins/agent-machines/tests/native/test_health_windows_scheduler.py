@@ -108,8 +108,15 @@ def _payload(tmp_path, *, delay_seconds=0):
         "import ctypes, json, os\nfrom ctypes import wintypes\n"
         "kernel = ctypes.WinDLL('kernel32', use_last_error=True)\n"
         "kernel.GetConsoleWindow.restype = wintypes.HWND\n"
+        "kernel.GetCurrentProcess.restype = wintypes.HANDLE\n"
+        "kernel.GetProcessTimes.argtypes = [wintypes.HANDLE] + [ctypes.POINTER(wintypes.FILETIME)] * 4\n"
+        "kernel.GetProcessTimes.restype = wintypes.BOOL\n"
+        "times = [wintypes.FILETIME() for _ in range(4)]\n"
+        "if not kernel.GetProcessTimes(kernel.GetCurrentProcess(), *(ctypes.byref(t) for t in times)):\n"
+        "    raise ctypes.WinError(ctypes.get_last_error())\n"
+        "birth = (times[0].dwHighDateTime << 32) | times[0].dwLowDateTime\n"
         f"with open({str(tmp_path / 'console.jsonl')!r}, 'a', encoding='utf-8') as stream:\n"
-        "    stream.write(json.dumps({'pid': os.getpid(), "
+        "    stream.write(json.dumps({'pid': os.getpid(), 'birth': birth, "
         "'console_window': int(kernel.GetConsoleWindow() or 0)}) + '\\n')\n",
         encoding="utf-8",
     )
@@ -201,6 +208,8 @@ def _exercise_cycles(tmp_path, observation, *, observed_session=None):
 
         raise ObservationBlocked("optional desktop/controller session mismatch")
     payload = _payload(tmp_path)
+    if observed_session is not None:
+        observation.api.prepare_task_observation(tmp_path)
     store = tmp_path / "store"
     store.mkdir()
     unrelated = tmp_path / "unrelated-data"
@@ -264,6 +273,7 @@ def _exercise_cycles(tmp_path, observation, *, observed_session=None):
                     ]
                     assert len(consoles) == 2 * count
                     assert all(row["console_window"] == 0 for row in consoles)
+                    assert all(row["birth"] > 0 for row in consoles)
                 assert samples[0]["last_run"] != samples[1]["last_run"]
                 assert _control("read", name)["instances"] == []
         if observer is not None:
@@ -397,9 +407,11 @@ def test_native_failed_slot_preserves_policy_existing_data_and_reports_failure(t
     assert identity["interactive"]
     with listener(response(QUALIFYING_BODY), count=2) as (port, requests):
         store = _store(tmp_path, port)
-        slot = store / f"{(time.time_ns() // 1_000_000 // health_slots.HOUR_MS) % health_slots.SLOTS:03d}.json"
-        slot.mkdir()
-        (slot / "sentinel").write_bytes(b"not replaceable")
+        hour = time.time_ns() // 1_000_000 // health_slots.HOUR_MS
+        blocked = [store / f"{(hour + offset) % health_slots.SLOTS:03d}.json" for offset in (0, 1)]
+        for slot in blocked:
+            slot.mkdir()
+            (slot / "sentinel").write_bytes(b"not replaceable")
         before = (store / "policy.json").read_bytes()
         definition = _definition(payload, store, identity["sid"], enabled=True, calendar=False)
         with _task(tmp_path, definition) as (name, _registered):
@@ -412,5 +424,5 @@ def test_native_failed_slot_preserves_policy_existing_data_and_reports_failure(t
             assert completed["last_result"] == 2
         assert len(requests) == 0
     assert (store / "policy.json").read_bytes() == before
-    assert (slot / "sentinel").read_bytes() == b"not replaceable"
+    assert all((slot / "sentinel").read_bytes() == b"not replaceable" for slot in blocked)
     assert not list(store.glob("*.tmp.*"))

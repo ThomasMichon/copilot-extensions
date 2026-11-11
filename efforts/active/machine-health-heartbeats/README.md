@@ -1406,3 +1406,13 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   cycles, along with results, overlap, both deadline owners and exact cleanup.
   Pure composition/admission passed 27 cases; two guidance-projection controls
   and the skill, install, headless-source and documentation guards also passed.
+- Subsequent focused corrections distinguish unavailable/inconclusive capture
+  from confirmed task-owned violations: native PID/birth identity checks and
+  sampled focus identities can prove a violation even with incomplete coverage,
+  and that result fails. Unrelated or reused-PID activity is not attributed to
+  the task. The storage-failure fixture now blocks both adjacent hourly slots
+  across its launch window rather than depending on the controller's hour.
+- The post-correction packet passed 25 selected cases with one optional desktop
+  skip; three unchanged overlap/deadline cases were deliberately deselected
+  after their earlier full pass. The 27-case pure packet additionally proves
+  positive violation classification, reused-PID refusal and closed process pins.

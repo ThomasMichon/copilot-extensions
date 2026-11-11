@@ -96,6 +96,26 @@ def test_optional_desktop_admission_accepts_active_console_and_rdp_without_chang
                 {**facts, **changed}, station_name="RDP-Tcp#1",
                 connection_state=state, inherited_job=contained,
             )
+    classify = modules["task_desktop"].task_owned_visual_violations
+    incomplete = {
+        "passed": False, "violations": [{"kind": "sampled-foreground", "identity": [11, 22, 33]}],
+    }
+    assert classify(incomplete, {(11, 33)}, [])
+    assert not classify(incomplete, {(11, 34)}, [])
+    assert not classify(incomplete, {(12, 33)}, [])
+    assert classify({"passed": False}, set(), [{"kind": "task-visible-window"}])
+    pin = SimpleNamespace(pid=11, birth=33, gone=lambda: False)
+    closed = []
+    pin.close = lambda: closed.append(True)
+    api = SimpleNamespace(
+        pin=lambda pid: pin, user=SimpleNamespace(IsWindowVisible=lambda hwnd: True),
+        window_identity=lambda hwnd: (11, 22),
+    )
+    observe = modules["task_desktop"].confirm_visible_task_window
+    assert observe(api, {99: (11, 22)}, {(11, 33)})["kind"] == "task-visible-window"
+    assert closed == [True]
+    assert observe(api, {99: (11, 22)}, {(11, 34)}) is None
+    assert closed == [True, True]
 
 
 def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners):

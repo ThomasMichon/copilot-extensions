@@ -24,10 +24,53 @@ def require_observable_session(facts, *, station_name, connection_state, inherit
     return facts
 
 
+def task_owned_visual_violations(packet, identities, visible_confirmations):
+    confirmed = list(visible_confirmations)
+    for event in packet.get("violations", []):
+        identity = event.get("identity")
+        if (
+            event.get("kind") == "sampled-foreground"
+            and isinstance(identity, (list, tuple)) and len(identity) == 3
+            and (identity[0], identity[2]) in identities
+        ):
+            confirmed.append(event)
+    return confirmed
+
+
+def confirm_visible_task_window(api, windows, identities, *, unavailable_error=RuntimeError):
+    pids = {pid for pid, _birth in identities}
+    for hwnd, owner in windows.items():
+        if owner[0] not in pids:
+            continue
+        try:
+            pin = api.pin(owner[0])
+        except unavailable_error:
+            continue
+        try:
+            if (
+                (pin.pid, pin.birth) in identities and not pin.gone()
+                and api.user.IsWindowVisible(hwnd) and api.window_identity(hwnd) == owner
+                and not pin.gone()
+            ):
+                return {"kind": "task-visible-window", "pid": pin.pid, "birth": pin.birth}
+        except unavailable_error:
+            pass
+        finally:
+            try:
+                pin.close()
+            except unavailable_error:
+                api.attribution_cleanup_error = True
+                raise
+    return None
+
+
 def make_api():
     import ctypes as ct
     from ctypes import wintypes as wt
     import os
+    import json
+    from pathlib import Path
+    import time
 
     from sdk_desktop_observer import ObservationBlocked
     from sdk_desktop_win32 import WinAPI
@@ -43,6 +86,53 @@ def make_api():
                 ),
                 "WTSFreeMemory": ([ct.c_void_p], None),
             })
+            self.receipt_paths = ()
+            self.task_processes = set()
+            self.confirmed_task_windows = []
+            self.attribution_cleanup_error = False
+            self.receipt_check = 0.0
+
+        def prepare_task_observation(self, root):
+            self.receipt_paths = tuple(Path(root) / name for name in ("console.jsonl", "resolver.jsonl"))
+
+        def refresh_receipts(self, *, force=False):
+            now = time.monotonic()
+            if not force and now - self.receipt_check < .1:
+                return
+            self.receipt_check = now
+            for path in self.receipt_paths:
+                try:
+                    if path.stat().st_size > 16384:
+                        continue
+                    content = path.read_text(encoding="utf-8-sig")
+                except OSError:
+                    continue
+                for line in content.splitlines():
+                    try:
+                        row = json.loads(line)
+                    except ValueError:
+                        continue
+                    if (
+                        isinstance(row, dict) and type(row.get("pid")) is int and row["pid"] > 0
+                        and type(row.get("birth")) is int and row["birth"] > 0
+                    ):
+                        self.task_processes.add((row["pid"], row["birth"]))
+
+        def owned_identities(self):
+            self.refresh_receipts(force=True)
+            return frozenset(self.task_processes)
+
+        def raw_windows(self):
+            rows = super().raw_windows()
+            self.refresh_receipts()
+            if self.confirmed_task_windows:
+                return rows
+            confirmed = confirm_visible_task_window(
+                self, rows, self.task_processes, unavailable_error=ObservationBlocked,
+            )
+            if confirmed:
+                self.confirmed_task_windows.append(confirmed)
+            return rows
 
         def session_info(self, session, kind):
             buffer, size = ct.c_void_p(), wt.DWORD()

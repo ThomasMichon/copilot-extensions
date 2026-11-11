@@ -14,10 +14,10 @@ def test_two_calendar_cycles_without_windows_or_focus_changes(
 ):
     monkeypatch.syspath_prepend(str(REPO / "libs/agent-procutil/tests"))
     from sdk_desktop_observer import DesktopObserver, ObservationBlocked
-    from health_task_desktop import make_api
+    from health_task_desktop import make_api, task_owned_visual_violations
 
     summary = {"status": "unobserved", "reason": "not-admitted"}
-    observer = None
+    observer = api = None
     try:
         try:
             api = make_api()
@@ -31,17 +31,23 @@ def test_two_calendar_cycles_without_windows_or_focus_changes(
         except ObservationBlocked as error:
             summary["reason"] = str(error)
             pytest.skip(f"optional desktop observation unqualified: {error}")
+        confirmed = task_owned_visual_violations(
+            packet, api.owned_identities(), api.confirmed_task_windows,
+        )
         summary = {
-            "status": "observed" if packet["passed"] else "unqualified",
+            "status": "failed" if confirmed else "observed" if packet["passed"] else "unqualified",
             "session_kind": facts["session_kind"], "samples": packet["samples"],
             "maximum_gap": packet["maximum_gap"], "hook_count": packet["hook_count"],
             "violations": len(packet["violations"]), "sealed": packet["sealed"],
             "hooks_closed": packet["hooks_closed"],
+            "confirmed_task_violations": len(confirmed),
         }
+        assert not confirmed, "confirmed task-owned window/focus violation"
         if not packet["passed"]:
             pytest.skip("optional desktop observation unqualified; see recorded coverage/events")
     finally:
         record_testsuite_property("desktop_observation", json.dumps(summary, sort_keys=True))
+        assert not getattr(api, "attribution_cleanup_error", False), "owned process pins did not settle"
         if observer is not None and observer.thread.ident is not None:
             assert not observer.thread.is_alive(), "owned observer did not quiesce"
             assert observer.hooks_closed and not observer.cleanup_error, "owned hooks did not settle"
