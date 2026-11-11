@@ -147,6 +147,7 @@ def test_actual_readiness_command_uses_isolated_selection(providers):
     result = subprocess.run(
         [sys.executable, "-m", "agent_mcp", "installer-readiness"],
         cwd=home.parent, env=dict(os.environ), capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
     assert result.returncode == 0, result.stderr
