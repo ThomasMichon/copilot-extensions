@@ -108,10 +108,15 @@ def _select_registered_catalogs(
     )
     if expected is None:
         return matches
-    selected = [
-        match for match in matches
-        if normalize_remote(_cached_origin_url(match[0]) or "") == expected
-    ]
+    if kind == "github":
+        # GitHub owner and repository names are case-insensitive.
+        expected = expected.casefold()
+
+    def _origin(root: Path) -> str | None:
+        origin = normalize_remote(_cached_origin_url(root) or "")
+        return origin.casefold() if kind == "github" and origin else origin
+
+    selected = [match for match in matches if _origin(match[0]) == expected]
     if kind == "github" and len(selected) > 1:
         slug = location.strip("/").replace("/", "-").casefold()
         native = [match for match in selected if match[0].name.casefold() == slug]

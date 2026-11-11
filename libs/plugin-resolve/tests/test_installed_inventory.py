@@ -80,3 +80,17 @@ def test_stale_catalog_predating_the_plugin_does_not_block_selection(
     native = _catalog(cache, "example-owner-fixture-market", origin)
     item = installed_item(SOURCE, home, cache)
     assert item["inventory"]["catalog_root"] == str(native.resolve())
+
+
+def test_github_registration_identity_matches_case_insensitively(
+    inventory: tuple[Path, Path],
+) -> None:
+    home, cache = inventory
+    _write(home / "settings.json", {"extraKnownMarketplaces": {"fixture-market": {
+        "source": {"source": "github", "repo": "Example-Owner/Fixture-Market"},
+    }}})
+    origin = "https://github.com/example-owner/fixture-market.git"
+    _catalog(cache, "example-owner--fixture-market", origin)
+    native = _catalog(cache, "Example-Owner-Fixture-Market", origin)
+    item = installed_item(SOURCE, home, cache)
+    assert item["inventory"]["catalog_root"] == str(native.resolve())

@@ -1,5 +1,5 @@
 {
-  "comment": "Select the registered marketplace catalog when a stale same-origin cache duplicates it, and return a typed local_launch_preparation_failed refusal (logged at ERROR) instead of a bare HTTP 500; clarify the keyed-creation --target-dir refusal",
+  "comment": "Select the registered marketplace catalog when a stale same-origin cache duplicates it, and return a typed local_launch_preparation_failed refusal (logged at ERROR) instead of a bare HTTP 500",
   "changes": [
     {
       "plugin": "agent-bridge",
