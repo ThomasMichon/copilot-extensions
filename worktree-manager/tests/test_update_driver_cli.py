@@ -1790,28 +1790,28 @@ def test_actual_queued_automatic_update_sanitizes_a_foreground_drivers_environme
     monkeypatch.delenv("UPDATE_DRIVER_TEST_ENGINE_HANDOFF", raising=False)
     monkeypatch.delenv("CE_UPDATE_UNATTENDED", raising=False)
     fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
-    for arguments in ([], ["--automatic-trigger", "manager"]):
+    root = short_home / ".copilot-extensions/update-driver"
+    for index, arguments in enumerate(([], ["--automatic-trigger", "manager"])):
         accepted = run_owned(
             [sys.executable, str(fixture), "submit-only", *arguments],
             timeout=_NATIVE_QUEUE_TIMEOUT,
         )
         assert accepted.returncode == 0, accepted.stderr
-    root = short_home / ".copilot-extensions/update-driver"
-    requests = update_driver.status(root=root)
-    assert len(requests) == 2
-    for key in ("GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"):
-        monkeypatch.setenv(key, "foreground-driver-session-token")
-    monkeypatch.setenv("GIT_SSH_COMMAND", "unwanted-foreground-transport")
-    monkeypatch.setenv("GIT_DIR", str(tmp_path / "unwanted-repository"))
-    monkeypatch.setenv("GIT_CONFIG_COUNT", "0")
-    monkeypatch.setenv("SSH_ASKPASS", "unwanted-foreground-helper")
-    monkeypatch.setenv("SSH_ASKPASS_REQUIRE", "force")
-    monkeypatch.setenv("CE_UPDATE_UNATTENDED", "1")
-    completed = run_owned(
-        [sys.executable, "-m", "update_driver", "worker"],
-        timeout=2 * _NATIVE_QUEUE_TIMEOUT,
-    )
-    assert completed.returncode == 0, completed.stderr
+        assert len(update_driver.status(root=root)) == index + 1
+        with monkeypatch.context() as foreground_environment:
+            for key in ("GH_TOKEN", "GITHUB_TOKEN", "AGENT_WORKTREES_AHP_AUTH_TOKEN"):
+                foreground_environment.setenv(key, "foreground-driver-session-token")
+            foreground_environment.setenv("GIT_SSH_COMMAND", "unwanted-foreground-transport")
+            foreground_environment.setenv("GIT_DIR", str(tmp_path / "unwanted-repository"))
+            foreground_environment.setenv("GIT_CONFIG_COUNT", "0")
+            foreground_environment.setenv("SSH_ASKPASS", "unwanted-foreground-helper")
+            foreground_environment.setenv("SSH_ASKPASS_REQUIRE", "force")
+            foreground_environment.setenv("CE_UPDATE_UNATTENDED", "1")
+            completed = run_owned(
+                [sys.executable, "-m", "update_driver", "worker"],
+                timeout=_NATIVE_QUEUE_TIMEOUT,
+            )
+        assert completed.returncode == 0, completed.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]
     foreground, automatic = [record for record in records if record["phase"] == "start"]
     assert foreground["session_credentials_present"] and foreground["git_override_present"]

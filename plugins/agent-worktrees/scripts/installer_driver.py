@@ -319,13 +319,14 @@ def _settle(wait):
             continue
 
 
-def admit_broker_removal(args) -> None:
+def admit_broker_removal(args, *, controller_custody=None) -> None:
     from installer_engine_uninstall import cleanup
 
     profile = args.payload / "scripts" / "uninstall-profile.json"
     cleanup(
         args.payload, args.plugin, args.root, str(args.shell),
         profile=profile if profile.is_file() else None, check_consumers=True,
+        **({"controller_custody": controller_custody} if args.plugin == "agent-vault" else {}),
     )
 
 
@@ -366,7 +367,7 @@ def execute(args) -> int:
                 raise ValueError("Broker removal requires the owning uninstall action")
             from update_driver.windows_broker import remove
 
-            admit_broker_removal(args)
+            admit_broker_removal(args, controller_custody=owner)
             owner.assert_owned()
             remove(args.root)
             return 0
