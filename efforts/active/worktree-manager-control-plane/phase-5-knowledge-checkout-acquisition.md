@@ -1,6 +1,7 @@
 # Phase 5 - Remote knowledge checkout acquisition
 
-- **Status:** Source implementation and contained Windows validation; publication gates pending.
+- **Status:** Acquisition source merged in #11976; unattended desktop qualification
+  design below precedes implementation. Installed and receiving acceptance remain open.
 - **Parent:** [Configuration workbench](phase-5-configuration-workbench.md).
 - **Coordination:** #1419 Track 3; bounded consumer slice `shiny-actuator`.
   The shared #356/#8545 acquisition owner retains its implementation boundary.
@@ -157,6 +158,91 @@ and decline, provider-policy adoption/rejected-push recovery, general retrofit,
 overlays, aligned state writes/cleanup and full receiving remain open under
 their existing owners. No installation, authentication, deployment or live
 repository operation follows from this source contract.
+
+## Unattended native Windows qualification follow-up
+
+This agent-recommended source plan addresses the follow-up recorded under
+#1419 without changing acquisition, credential or first-task admission semantics.
+It closes part of the existing knowledge-selection intent and follows
+[the test portfolio](../../../TESTING.md#select-the-evidence-first) and
+[version-skew-safe contracts](../../../docs/patterns/service-contract-evolution.md):
+reuse the current test/execution owners, and review any new independently
+deployed controller packet before a caller selects it.
+
+The current
+[`test_native_acquisition_from_windowless_parent_has_no_windows_or_focus_changes`](../../../plugins/agent-worktrees/tests/test_repos_knowledge_acquisition.py)
+uses a real `pythonw.exe` parent, console Python/Git descendants, two loopback
+HTTPS acquisitions, the existing Win32 observer and a kill-on-close Job.
+It correctly skips without an observable foreground window. That is not an
+unattended qualification lane: a person keeping their own desktop available
+must not be a prerequisite for repeatable source validation.
+
+### Execution boundary
+
+Keep ordinary acquisition/credential/timeout controls runnable through the
+existing contained runner without a desktop. Keep native visibility and focus
+as an independently scored packet; a headless functional pass does not replace
+it. Do not remove the foreground requirement, substitute process creation flags,
+accept an empty observation, or report a skipped case as native acceptance.
+
+First qualify an already-authorized disposable Windows execution venue through
+its existing owner. The
+[owner-only hosted Windows lane](../../../TESTING.md#owner-only-hosted-windows-escape-hatch)
+is an existing submission boundary, not a promise of an interactive desktop.
+Its protected controller, source selection, eligibility, budgets, containment
+and artifact handling remain authoritative. Do not add a competing workflow,
+runner service, scheduler or resource allocator.
+
+Before the acquisition case can qualify, prove the actual Windows session,
+window station and input desktop are usable, and that the observer can detect
+an intentionally visible, foreground fixture owned by that packet. Retire that
+positive control before measuring acquisition. The control must run only on
+the dedicated test desktop, never on a shared operator desktop. Require valid
+observation throughout both acquisition cycles; desktop/session loss is an
+unqualified result, not a successful absence of windows.
+
+A non-input private desktop, service session or successful Win32 API call is
+not sufficient evidence. Microsoft documents
+[interactive versus service window stations](https://learn.microsoft.com/en-us/windows/win32/winstation/window-station-and-desktop-creation);
+its [pipeline UI guidance](https://learn.microsoft.com/en-us/azure/devops/pipelines/test/ui-testing-considerations)
+also distinguishes visible desktop testing from headless browser testing.
+Those are constraints, not proof about a particular GitHub-hosted run.
+If the existing venue cannot pass the control, retain an explicit unsupported
+venue outcome and prepare a separately approved dedicated interactive venue
+through its owner. Do not unlock/switch the current session, enable autologon,
+alter screen-lock policy or ask a person to hold their desktop open.
+
+### Delivery and validation
+
+- [ ] Review this amendment before changing the test or controller selection.
+- [ ] Qualify the existing execution owner's desktop capability with a bounded
+  positive control, under separately applicable execution authority. Record
+  source revision, actual session/desktop suitability and the result; neither
+  a runner label nor a source-plan approval supplies that authority.
+- [ ] Adapt the acquisition packet to that qualified venue without changing
+  the two real HTTPS acquisitions, windowless parent, real console descendants
+  or current observation assertions. Reuse the current observer and containment;
+  coordinate any shared-helper change with its owner rather than copy it.
+- [ ] Prove the positive control detects both visibility and foreground
+  ownership, then prove neither occurs for acquisition descendants. Missing
+  controls, zero collected cases, skips, observer failure and mid-run desktop
+  loss cannot qualify. Keep unrelated desktop activity distinct from a fixture
+  regression, without turning a lost observation into success.
+- [ ] Preserve the existing finite case/packet and cleanup budgets. On success,
+  failure, cancellation or observer loss, settle the exact Job and descendants,
+  HTTPS server and observer; retain unconfirmed cleanup custody as failure.
+  Add no durable daemon or privileged cleanup fallback.
+- [ ] Publish the reproducible source flow and its separately scored functional,
+  native desktop, cleanup and installed/receiving outcomes through the existing
+  result owner. Do not capture an operator desktop, real credentials or private
+  repository content in public logs or artifacts.
+
+This amendment changes no runtime, test, workflow or controller behavior.
+No execution venue has yet been qualified by this follow-up. It grants no
+installation, workflow dispatch, runner enrollment, resource creation,
+authentication, session manipulation or rollout. Existing first-run, provider,
+shared observer, controller and physical-resource owners retain their scope.
+Required review/CI and the complete #1419/#8545 receiving gates remain independent.
 
 ## Journal
 
