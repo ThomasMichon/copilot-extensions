@@ -191,6 +191,14 @@ requires the real TCP HELLO to identify the owned Python ACP child; both launche
 also complete literal TCP/WebSocket exchanges and exact cleanup.
 The `driver_application_readiness` JUnit suite property records measurements,
 not performance-budget acceptance or native Copilot input readiness.
+The separate live-replacement variant constructs a second, byte-distinct
+application generation through those same owners. While the original Host and
+child are live, it stages the incoming slot without changing current selection,
+activates it, checks both old PID/birth identities and exchanges another literal
+request through the original broker. It then qualifies a fresh launch from the
+incoming slot and preserves both completion markers. Its timings use the
+separate `driver_application_live_replacement` JUnit property. This is bounded
+synthetic ACP package-replacement evidence, not headed CLI or SDK lifetime proof.
 The existing 300-second construction boundary and ordinary runner containment
 remain; the governed feed is an explicit prerequisite. Select only this file with
 `--allow-explicit-tiers --test-timeout 300`. This private first-touch application
