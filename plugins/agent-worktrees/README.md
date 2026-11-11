@@ -960,6 +960,8 @@ standalone-behavior changes.
 | Skill | Description |
 |-------|-------------|
 | [worktree](skills/worktree/SKILL.md) | Worktree lifecycle -- creation, finalization, cleanup, safety rules |
+| [finalizing-worktrees](skills/finalizing-worktrees/SKILL.md) | Focused closeout entrypoint; completion/disposition versus physical removal |
+| [cleaning-worktrees](skills/cleaning-worktrees/SKILL.md) | Explicit cleanup-pass entrypoint; retained children, history and owner-qualified removal |
 | [git-collaboration](skills/git-collaboration/SKILL.md) | Pull-forward and shared feature-branch git primitives |
 | [service-lifecycle](skills/service-lifecycle/SKILL.md) | Service installer patterns -- deploy, update, status |
 | [copilot-extensions-setup](skills/copilot-extensions-setup/SKILL.md) | Bootstrap agent-worktrees and optional sibling plugins |

@@ -15,6 +15,12 @@ description: >
 
 # Using Scratch Space
 
+First distinguish disposable working files from execution history, durable
+knowledge, user deliverables and reusable caches using the
+[artifact lifecycle guide](../../docs/artifact-lifecycle.md).
+This compatibility entrypoint owns scratch mechanics only; a durable report or
+agenda must not be assigned to scratch merely because this skill was invoked.
+
 A file written directly at a filesystem/drive root (`C:\`, `D:\`, `/`, `~`)
 with no enclosing structure gives nobody -- a human glancing at the root, or a
 later agent session -- any way to tell whether it is still needed or has long
