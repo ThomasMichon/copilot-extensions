@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify public SDK native tool tasks and future-schedule inventory",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}
