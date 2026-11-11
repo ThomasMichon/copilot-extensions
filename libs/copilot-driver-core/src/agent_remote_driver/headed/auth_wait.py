@@ -9,6 +9,8 @@ import secrets
 import time
 import uuid
 
+from .recovery import RecoveryDescriptor, crash_candidate
+
 CONTRACT = "copilot-driver.headed-auth-wait"
 VERSION = 1
 MAX_BUDGET_SECONDS = 3600
@@ -113,6 +115,11 @@ class AuthWaitReceiver:
             "history": "same-session-id-requested", "native_qualification": "unqualified",
             "replay": "never",
         }
+
+    def crash_candidate(
+        self, descriptor: RecoveryDescriptor, *, unknown_effects: tuple[str, ...] = (),
+    ) -> dict:
+        return crash_candidate(descriptor, self.status(), unknown_effects=unknown_effects)
 
     def declaration(self) -> dict:
         if self._server is None:

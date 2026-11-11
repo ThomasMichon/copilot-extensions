@@ -267,6 +267,37 @@ pending/sending/outstanding work, connection loss or cleanup uncertainty
 cannot be cleared by a lease. These remain held or terminally unavailable.
 Ordinary lost-controller recovery remains unsupported.
 
+### Effect-free crash-recovery bookkeeping
+
+The additive Python `headed.recovery` interface exports diagnostic crash
+candidates and records original-owner recovery transitions. It does not add
+a CLI/wire operation, canonical journal, observer, native recovery provider or
+automatic recovery. `AuthWaitReceiver.crash_candidate(descriptor, ...)` reads
+existing status without changing authorization, holds, incarnation or grants.
+Missing observation remains unknown; silence or a candidate never authorizes
+retirement. Nonces and credentials are not exported.
+
+An immutable `RecoveryDescriptor` binds the original owner/worktree, descriptor
+and source revisions, conversation, environment, boot, scope, incarnation and
+lease revision. The original owner supplies a `RecoveryStore` with durable
+atomic compare-and-swap, one record per exact descriptor and unique operation
+IDs across descriptors. No production store adapter or lifecycle effect
+callback is provided. A store's evidence references are assertions requiring
+owner admission, not independently verified settlement or authorization.
+
+`record_recovery_step` requires an exact store revision and records
+`retire_intent`, `settled`, `resume_intent`, then `observation_restored`.
+Resume intent records a newer authority revision; restored observation names
+a different native incarnation of the same conversation. Duplicate identical
+steps return the retained record, including after an acknowledgement is lost;
+conflicting IDs, bindings, evidence or revisions refuse without retrying.
+Old EOF/control holds and unknown-effect references remain sticky even after
+observation is recorded as restored. No step proves idle or completed work,
+clears the legacy receiver's refusal, resends a prompt, or executes an effect.
+All status remains native-recovery-unqualified and reconciliation-required.
+Actual provider settlement, current admission and native seedless history
+restoration need separate qualification before any owner wires recovery.
+
 See the [ACP WS boundary](../../plugins/agent-remote-driver/docs/session-host-websocket.md).
 The compact dependency-free receiving archive supports TCP only. Tests stay
 with the application and Bridge consumers; the canonical receiving-policy
