@@ -108,6 +108,129 @@ def run_public_caller_jobs(command, *, python, cwd, environment, directory):
     return subprocess.CompletedProcess(command, **reply)
 
 
+def _require_native_tty_owner(directory, environment):
+    from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+
+    assert not pu.contained_test_mode()
+    assert os.name == "nt" and environment.get(TEST_CONTEXT_ENV)
+    assert environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
+    sandbox = Path(environment["COPILOT_EXTENSIONS_TEST_SANDBOX"]).resolve()
+    assert directory.resolve().is_relative_to(sandbox)
+    return sandbox
+
+
+def prepare_public_tty_jobs(command, *, python, cwd, environment, directory):
+    """Prepare a unique caller ticket; its foreground process inherits the real ConPTY."""
+    directory = Path(directory)
+    sandbox = _require_native_tty_owner(directory, environment)
+    assert Path(python).resolve().is_relative_to(sandbox)
+    assert Path(command[0]).resolve().is_relative_to(sandbox)
+    assert Path(cwd).resolve().is_relative_to(sandbox)
+    directory.mkdir()
+    _publish(directory / "request.json", {"command": list(map(str, command)), "cwd": str(cwd)})
+    return [str(python), "-I", "-B", __file__, "tty-middle", str(directory)]
+
+
+def _tty_leaf(directory):
+    _require_native_tty_owner(directory, os.environ)
+    assert sys.stdin.isatty() and sys.stdout.isatty()
+    request = json.loads((directory / "request.json").read_text(encoding="utf-8"))
+    control = subprocess.Popen(
+        [sys.executable, "-I", "-B", "-c", "import time;time.sleep(180)"],
+        stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **pu.no_window_kwargs(),
+    )
+    identity = {"pid": control.pid, "birth": process_start_time(control.pid)}
+    assert identity["birth"]
+    _publish(directory / "control.json", identity)
+    # headless-guard: allow the installed public caller to inherit this private ConPTY
+    process, inner = pu.spawn_sync_in_kill_on_close_job(
+        request["command"], cwd=request["cwd"], env=dict(os.environ),
+        require_job=True, allow_breakaway=True,
+    )
+    try:
+        assert inner is not None
+        caller = {"pid": process.pid, "birth": process_start_time(process.pid)}
+        assert caller["birth"]
+        _publish(directory / "started.json", {"caller": caller, "leafTty": True})
+        deadline = time.monotonic() + 180
+        while not (directory / "close.json").exists():
+            assert process.poll() is None, "Public TTY caller returned before Job closure"
+            assert time.monotonic() < deadline, "Public TTY caller close request timed out"
+            time.sleep(.025)
+        assert process.poll() is None, "Public TTY caller exited before Job closure"
+    finally:
+        if inner is not None:
+            inner.close()
+        else:
+            process.kill()
+        exit_code = process.wait(5)
+    assert exit_code != 0, "Abrupt caller Job closure must not become graceful detach"
+    _publish(directory / "inner-closed.json", {
+        "innerJobClosed": True, "callerExited": True, "callerExitCode": exit_code,
+        "caller": caller, "leafTty": True,
+    })
+
+
+def _tty_middle(directory):
+    _require_native_tty_owner(directory, os.environ)
+    assert sys.stdin.isatty() and sys.stdout.isatty()
+    # headless-guard: allow the nested caller fixture to inherit this private ConPTY
+    process, outer = pu.spawn_sync_in_kill_on_close_job(
+        [sys.executable, "-I", "-B", __file__, "tty-leaf", str(directory)],
+        cwd=directory, env=dict(os.environ), require_job=True, allow_breakaway=True,
+    )
+    try:
+        assert outer is not None
+        assert process.wait(180) == 0, "Public TTY caller leaf failed"
+    finally:
+        if outer is not None:
+            outer.close()
+        else:
+            process.kill()
+        process.wait(5)
+    control = json.loads((directory / "control.json").read_text(encoding="utf-8"))
+    deadline = time.monotonic() + 5
+    while (
+        pid_alive(control["pid"]) and process_start_time(control["pid"]) == control["birth"]
+        and time.monotonic() < deadline
+    ):
+        time.sleep(.025)
+    assert not (
+        pid_alive(control["pid"]) and process_start_time(control["pid"]) == control["birth"]
+    ), control
+    reply = json.loads((directory / "inner-closed.json").read_text(encoding="utf-8"))
+    _publish(directory / "jobs-closed.json", {
+        **reply, "outerJobClosed": True, "boundedControlExited": True, "middleTty": True,
+        "control": control,
+    })
+
+
+def close_public_tty_jobs(directory):
+    """Request abrupt loss of this ticket's attached caller, then retain actual cleanup."""
+    _require_native_tty_owner(directory, os.environ)
+    _publish(directory / "close.json", {"close": True})
+    deadline = time.monotonic() + 15
+    proof = directory / "jobs-closed.json"
+    while not proof.exists():
+        assert time.monotonic() < deadline, "Public TTY caller Jobs did not settle"
+        time.sleep(.025)
+    reply = json.loads(proof.read_text(encoding="utf-8"))
+    started = json.loads((directory / "started.json").read_text(encoding="utf-8"))
+    assert started["leafTty"] is True and started["caller"] == reply["caller"], reply
+    assert all(reply.get(key) is True for key in (
+        "innerJobClosed", "outerJobClosed", "callerExited", "boundedControlExited",
+        "middleTty", "leafTty",
+    )), reply
+    assert type(reply["callerExitCode"]) is int and reply["callerExitCode"] != 0, reply
+    for key in ("caller", "control"):
+        identity = reply[key]
+        assert identity["birth"] and not (
+            pid_alive(identity["pid"]) and process_start_time(identity["pid"]) == identity["birth"]
+        ), identity
+    return reply
+
+
 def replace_application(python, incoming, *, shell, cwd, environment):
     """Use regular installation and canonical GC, never overwrite a built venv."""
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"]).resolve()
@@ -172,4 +295,6 @@ def application_unavailable(python):
 
 if __name__ == "__main__":
     operation, selected = sys.argv[1:]
-    {"middle": _middle, "leaf": _leaf}[operation](Path(selected))
+    {"middle": _middle, "leaf": _leaf, "tty-middle": _tty_middle, "tty-leaf": _tty_leaf}[
+        operation
+    ](Path(selected))

@@ -302,6 +302,24 @@ launch mode, a restrictive external outer Job, or desktop behavior. The fixed
 packet shares the Worktrees-only feed and pinned prerequisite policy above;
 its protected controller must be promoted before submission.
 
+`submit --packet native-worktrees-copilot-caller-jobs` selects only
+`test_public_attached_caller_job_lifetime` through that same leased native owner.
+The installed public `copilot` entrypoint and two nested caller Jobs inherit the
+fixture's existing private ConPTY. After real target attachment, the fixture
+closes the inner Job while the caller is still running, retains its actual
+nonzero termination code, closes the outer Job and proves the bounded child
+exited. The original caller pane must also close before checking the same
+broker/native births, mux incarnation and history. Live reattachment repeats
+that loss with a fresh ticket before a broker prompt proves continued use.
+Fresh and cold-resume legs preserve one conversation without seed replay.
+This is abrupt attached-caller loss, not graceful `detach-client` success or
+visible new-window evidence. Frontend replacement remains in the separate
+`embody` packet rather than being repeated. Existing 420/300/180-second phase
+bounds, 15-second renewable lease, 900-second hard maximum, 300-second
+preparation and 1200-second aggregate, native pins, Worktrees-only feed and
+sanitization are unchanged. Actual protected controller support is required
+before staging or submission.
+
 `submit --packet native-driver-auth-wait` selects only the Driver receiver's
 `test_opt_in_receiver_auth_wait_and_same_session_resume` in
 `tests/native/test_native_headed_auth_wait.py`. The candidate must supply that
