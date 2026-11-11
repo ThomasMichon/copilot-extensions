@@ -102,9 +102,9 @@ def _prepare_application(
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("replace_live", [False, True])
+@pytest.mark.parametrize("selection", ["unchanged", "replacement", "rollback"])
 async def test_fresh_application_installs_reuses_and_runs_without_caller_sources(
-    tmp_path, monkeypatch, record_testsuite_property, replace_live,
+    tmp_path, monkeypatch, record_testsuite_property, selection,
 ):
     sys.path.insert(0, str(ROOT / "tools"))
     import local_install_profile as profiles
@@ -136,6 +136,7 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
         key: value for key, value in os.environ.items()
         if not key.startswith("UV_") and key not in {"VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME"}
     }
+    env.pop(declaration["root_environment"], None)
     env.update(HOME=str(home), USERPROFILE=str(home),
                UV_CACHE_DIR=str(tmp_path / "cache"), UV_PYTHON_DOWNLOADS="never",
                UV_PYTHON=interpreter, PYTHONDONTWRITEBYTECODE="1")
@@ -152,6 +153,7 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
     completions = {slot: completion}
     selected_slot = slot
     replacement_slot = None
+    replace_live = selection != "unchanged"
     if replace_live:
         replacement_started = time.monotonic()
         replacement_inputs = tmp_path / "replacement-inputs"
@@ -166,9 +168,34 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
         shutil.rmtree(replacement_inputs)
         timings["replacement_prepare_seconds"] = time.monotonic() - replacement_started
     shutil.rmtree(inputs)
-    support = _run(_frontdoor(slot, "--support-json"), cwd=caller, env=env, deadline=deadline)
-    assert json.loads(support.stdout)["contract"] == "agent-remote-driver.session-host"
-    assert "acp.v1" in json.loads(support.stdout)["transports"]
+    global_bin = home / ".local" / "bin"
+    launchers = {path: path.read_bytes() for path in global_bin.iterdir()}
+    assert launchers
+
+    def assert_current(expected_generation):
+        for marker in ("current-version", "last-known-good"):
+            assert (installation / marker).read_text().strip() == selected_slot.name
+        for generation, marker in completions.items():
+            assert (generation / engine.runtime.COMPLETE_MARKER).read_bytes() == marker
+        for path, content in launchers.items():
+            assert path.read_bytes() == content
+        support = _run(
+            _frontdoor(global_bin, "--support-json"), cwd=caller, env=env, deadline=deadline,
+        )
+        assert json.loads(support.stdout)["contract"] == "agent-remote-driver.session-host"
+        assert "acp.v1" in json.loads(support.stdout)["transports"]
+        selected_python = engine.runtime.resolve_python(installation)
+        assert selected_python == engine.runtime.slot_python(installation, selected_slot.name)
+        assert selected_python is not None
+        _run([
+            selected_python, "-I", "-c",
+            "import json,sys;from pathlib import Path;import agent_remote_driver_app as app;"
+            "assert getattr(app,'_fixture_generation',None) == json.loads(sys.argv[2]);"
+            "assert Path(app.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve())",
+            selected_slot, json.dumps(expected_generation),
+        ], cwd=caller, env=env, deadline=deadline)
+
+    assert_current(None)
 
     def replace_while_live():
         nonlocal selected_slot, install
@@ -185,22 +212,24 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
         assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
         completions[replacement_slot] = (replacement_slot / engine.runtime.COMPLETE_MARKER).read_bytes()
         selected_slot, install = replacement_slot, incoming_install
-        support = _run(_frontdoor(selected_slot, "--support-json"), cwd=caller, env=env, deadline=deadline)
-        assert json.loads(support.stdout)["contract"] == "agent-remote-driver.session-host"
-        selected_python = engine.runtime.resolve_python(installation)
-        assert selected_python == engine.runtime.slot_python(installation, selected_slot.name)
-        assert selected_python is not None
-        _run([
-            selected_python, "-I", "-c",
-            "import sys;from pathlib import Path;import agent_remote_driver_app as app;"
-            "assert app._fixture_generation == 2;"
-            "assert Path(app.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve())",
-            selected_slot,
-        ], cwd=caller, env=env, deadline=deadline)
+        assert_current(2)
         timings["live_replacement_seconds"] = time.monotonic() - replacement_started
 
+    def rollback_while_live():
+        nonlocal selected_slot, install
+        assert selected_slot == replacement_slot
+        assert_current(2)
+        rollback_started = time.monotonic()
+        install = _frontdoor(slot, command="install")
+        result = _run(install, cwd=caller, env=env, deadline=deadline)
+        assert json.loads(result.stdout)["state"] == "installed"
+        selected_slot = slot
+        assert_current(None)
+        timings["live_rollback_seconds"] = time.monotonic() - rollback_started
+
     previous_identity = None
-    for mode in ("cold", "warm"):
+    modes = ("cold", "warm", "restored") if selection == "rollback" else ("cold", "warm")
+    for mode in modes:
         if mode == "warm":
             repeat_started = time.monotonic()
             repeat = _run(install, cwd=caller, env=env, deadline=deadline)
@@ -209,9 +238,13 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
             timings["retained_install_seconds"] = time.monotonic() - repeat_started
         directory = tmp_path / mode
         directory.mkdir()
+        on_live = None
+        if replace_live and mode == "cold":
+            on_live = replace_while_live
+        elif selection == "rollback" and mode == "warm":
+            on_live = rollback_while_live
         observed = await _exercise_installed_host(
-            selected_slot, caller, env, interpreter, directory, deadline,
-            on_live=replace_while_live if replace_live and mode == "cold" else None,
+            global_bin, caller, env, interpreter, directory, deadline, on_live=on_live,
         )
         timings[mode + "_launch_to_ready_seconds"] = observed["launch_to_ready_seconds"]
         if mode == "cold":
@@ -222,13 +255,13 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
             assert (generation / engine.runtime.COMPLETE_MARKER).read_bytes() == marker
         assert (installation / "current-version").read_text().strip() == selected_slot.name
     report = json.dumps(timings, sort_keys=True)
-    record_testsuite_property(
-        "driver_application_live_replacement" if replace_live else "driver_application_readiness", report,
-    )
-    print(
-        ("Driver application live replacement: " if replace_live else "Driver application readiness: ")
-        + report, flush=True,
-    )
+    property_name = {
+        "unchanged": "driver_application_readiness",
+        "replacement": "driver_application_live_replacement",
+        "rollback": "driver_application_live_rollback",
+    }[selection]
+    record_testsuite_property(property_name, report)
+    print(property_name + ": " + report, flush=True)
 
 
 async def _exercise_installed_host(
@@ -275,12 +308,12 @@ async def _exercise_installed_host(
             assert process_start_time(facts["pid"]) == host_identity
             assert (child_pid, process_start_time(child_pid)) == child_identity
             await client.write((json.dumps({
-                "jsonrpc": "2.0", "id": "after-replacement", "method": "session/prompt",
+                "jsonrpc": "2.0", "id": "after-selection", "method": "session/prompt",
                 "params": {"text": literal},
             }) + "\n").encode())
             cursor, frame = await asyncio.wait_for(anext(client.frames()), 5)
             assert json.loads(frame) == {
-                "jsonrpc": "2.0", "id": "after-replacement", "result": {"text": literal},
+                "jsonrpc": "2.0", "id": "after-selection", "result": {"text": literal},
             }
             await client.ack(cursor)
         await client.close()
