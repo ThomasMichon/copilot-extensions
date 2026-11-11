@@ -3822,7 +3822,7 @@ class TestSetDisposition:
         assert "title_asserted: true" in p.read_text()
         assert load_record(p).title_asserted is True
 
-    def test_set_disposition_caps_long_title(self, tmp_path: Path, monkeypatch):
+    def test_set_disposition_retains_long_title_for_display_consumers(self, tmp_path: Path, monkeypatch):
         from agent_worktrees.tracking import TITLE_MAX
         rec = self._rec()
         p = tmp_path / "wt.yaml"
@@ -3831,10 +3831,20 @@ class TestSetDisposition:
         long_title = "Session a900: harness improvements (nudge, history, clobber fix)"
         set_disposition(rec, title=long_title)
         stored = load_record(p).title
-        assert len(stored) <= TITLE_MAX
-        assert stored.endswith("\u2026")            # truncated with an ellipsis
-        assert stored.startswith("Session a900")     # keeps the leading text
+        assert stored == long_title
+        assert len(cap_title(stored)) <= TITLE_MAX
         assert load_record(p).title_asserted is True
+
+    def test_rejected_title_does_not_partially_change_disposition(self, tmp_path):
+        rec = self._rec(summary="unchanged", follow_up=False)
+        before = dict(rec.__dict__)
+        with pytest.raises(ValueError, match="512"):
+            set_disposition(
+                rec, title="x" * 513, summary="must not change", follow_up=True,
+                tracking_path=tmp_path,
+            )
+        assert rec.__dict__ == before
+        assert not list(tmp_path.iterdir())
 
     def test_set_paused_is_purely_informational(self, tmp_path: Path, monkeypatch):
         """`paused` never reopens a finalized owner (unlike `follow_up=True`)

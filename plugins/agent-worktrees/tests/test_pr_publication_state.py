@@ -151,6 +151,8 @@ def test_legacy_first_push_failure_is_retryable_or_explicitly_ambiguous(pr_repo,
 
 
 def test_title_only_rewrite_uses_selected_ledger(pr_repo, monkeypatch, tmp_path):
+    from agent_worktrees import disposition_history
+
     config, wid, wt, remote = pr_repo
     selected = cfg.tracking_dir()
     ambient = tmp_path / "ambient"
@@ -160,11 +162,14 @@ def test_title_only_rewrite_uses_selected_ledger(pr_repo, monkeypatch, tmp_path)
     tracking.save_record(shadow, shadow_path)
     monkeypatch.setattr(cfg, "tracking_dir", lambda name=None: selected if name == config.repo_name else ambient)
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
+    title = "Selected full title retains every identifying word outside the compact projection"
     args = cli.build_parser().parse_args([
-        "push-changes", wid, "--config", "selected.yaml", "--rewrite-pr", "--title-only", "--title", "Selected",
+        "push-changes", wid, "--config", "selected.yaml", "--rewrite-pr", "--title-only", "--title", title,
     ])
     assert finalize_cli.cmd_push_changes(args) == 0
-    assert tracking.load_record(selected / f"{wid}.yaml").title == "Selected"
+    assert tracking.load_record(selected / f"{wid}.yaml").title == title
+    assert disposition_history.read(wid, tracking_path=selected)[-1]["title"] == title
+    assert not disposition_history.read(wid, tracking_path=ambient)
     assert tracking.load_record(shadow_path).title == "Ambient"
 
 

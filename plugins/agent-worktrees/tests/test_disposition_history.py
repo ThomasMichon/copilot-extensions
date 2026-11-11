@@ -50,6 +50,27 @@ def test_append_and_read_roundtrip(_tracking_dir):
     assert len(p.read_text("utf-8").splitlines()) == 2
 
 
+@pytest.mark.parametrize("separator", ["\u0085", "\u2028", "\u2029"], ids=["next-line", "line", "paragraph"])
+def test_unicode_separators_survive_new_and_legacy_history(_tracking_dir, separator):
+    title = "x" * 40 + separator + "retained suffix"
+    for summary in ("first", "second"):
+        dh.append(
+            "wt-unicode", at="time", summary=summary, title=title,
+            follow_up=False, changed=["title"],
+        )
+    path = dh.history_path("wt-unicode")
+    assert [entry["title"] for entry in dh.read("wt-unicode")] == [title, title]
+    assert len(path.read_text("utf-8").splitlines()) == 2
+    path.write_text(json.dumps({
+        "at": "old", "summary": "legacy", "title": title, "follow_up": False,
+    }, ensure_ascii=False) + "\n", encoding="utf-8")
+    dh.append(
+        "wt-unicode", at="new", summary="new", title=title,
+        follow_up=False, changed=["title"],
+    )
+    assert [entry["title"] for entry in dh.read("wt-unicode")] == [title, title]
+
+
 def test_read_accepts_an_explicit_tracking_path_over_the_ambient_project(
     tmp_path, monkeypatch
 ):
