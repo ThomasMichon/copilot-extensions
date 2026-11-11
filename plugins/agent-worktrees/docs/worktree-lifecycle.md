@@ -527,7 +527,8 @@ normalization is a separate, unchanged contract.
 The status mutation's running receiver advertises
 `status_disposition_write` version 3 for the explicit
 `retain_full_title: true` request semantic. A qualified title caller requires
-that support; non-title writes retain their version-2 baseline. Requests
+that support; non-title writes also require version 3 because they reserialize
+the existing title. Requests
 without the selector retain the legacy 30-character projection, including
 empty-title clearing, so old callers are not claimed to provide full retention.
 The existing per-verb discovery selects the running generation, not a package

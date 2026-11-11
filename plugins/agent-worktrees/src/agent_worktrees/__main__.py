@@ -2556,7 +2556,7 @@ def _cmd_status_write(
             },
             read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
-            min_version=3 if title is not None else 2,
+            min_version=3,  # Every disposition write reserializes the current title.
         )
     except tracking_write.ResidentRecoveryHeld as e: return tracking_write.refuse_recovery(e, json_output=getattr(args, "json", False))
     except tracking_write.AmbiguousWriteOutcome as e:

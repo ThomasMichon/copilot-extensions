@@ -112,6 +112,47 @@ def test_full_title_caller_selects_the_qualified_receiver(status_env, monkeypatc
     assert seen == [(True, 3)]
 
 
+@pytest.mark.parametrize("title", ["1234567890" * 6, "x" * 40 + "\u2028suffix"])
+@pytest.mark.parametrize("field", ["summary", "activity"])
+def test_non_title_write_avoids_prior_serializer_after_full_title(
+    status_env, monkeypatch, title, field,
+):
+    import re
+    from agent_worktrees import locks, tracking_write
+
+    requests = []
+
+    def prior_receiver(kind, payload):
+        requests.append(payload)
+        result = tracking_write.compute(kind, payload)
+        value = tracking.load_record(status_env).title or "null"
+        if value != "null" and any(char in value for char in ":{}[]#&*!|>',\""):
+            value = "'" + value.replace("'", "''") + "'"
+        raw = status_env.read_text(encoding="utf-8")
+        status_env.write_text(
+            re.sub(r"(?m)^title:.*$", lambda _: f"title: {value}", raw),
+            encoding="utf-8",
+        )
+        return result
+
+    server = tracking_write.start_server(prior_receiver)
+    server.start()
+    try:
+        fields = tracking_write.rendezvous_fields(server)
+        fields["tracking_write_verb_versions"]["status_disposition_write"] = 2
+        monkeypatch.setattr(locks, "read_lock", lambda *_: fields)
+        monkeypatch.setattr(main, "_status_monitor_enabled", lambda: False, raising=False)
+        args = argparse.Namespace(worktree_id=None)
+        assert main._cmd_status_write(args, summary=None, title=title) == 0
+        assert tracking._load_record_uncached(status_env).title == title
+        assert main._cmd_status_write(args, **{"summary": None, field: "Next work"}) == 0
+        assert tracking._load_record_uncached(status_env).title == title
+        assert getattr(tracking.load_record(status_env), field) == "Next work"
+        assert requests == []
+    finally:
+        server.close()
+
+
 @pytest.mark.parametrize("existing", [False, True])
 @pytest.mark.parametrize("title_only", [False, True])
 def test_legacy_title_entry_retains_full_current_and_new_history(
@@ -431,13 +472,8 @@ def test_unpaused_prints_an_explicit_confirmation(status_env, capsys):
     assert record.paused is False
 
 
-def test_every_status_write_requires_verb_v2_even_without_paused(status_env, monkeypatch):
-    """Every status write must avoid a resident v1 full-record writer, not
-    only ones touching `paused`: a v1 daemon's old full-record writer
-    silently drops `paused`/`paused_revision` (fields it predates), so a
-    plain summary/title/follow-up write reaching that daemon during
-    rolling skew would erase an already-persisted pause set moments
-    earlier by a (correctly v2-gated) `--paused` write."""
+def test_every_status_write_requires_verb_v3_even_without_title(status_env, monkeypatch):
+    """Every full-record write must retain existing title and pause fields."""
     from agent_worktrees import tracking_write
 
     args = argparse.Namespace(worktree_id=None)
@@ -453,7 +489,7 @@ def test_every_status_write_requires_verb_v2_even_without_paused(status_env, mon
     assert main._cmd_status_write(args, summary="plain write", paused=None) == 0
     assert main._cmd_status_write(args, summary=None, paused=True) == 0
 
-    assert captured_versions == [2, 2]
+    assert captured_versions == [3, 3]
 
 
 def test_status_history_disambiguates_pausing_from_unpausing(status_env, capsys):

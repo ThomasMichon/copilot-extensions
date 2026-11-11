@@ -25,8 +25,8 @@ status requests explicitly select the existing 30-character projection.
 The ordinary title-only paths use that same full assertion/history helper.
 The publication-only `normalize_title` contract remains separate.
 
-The status mutation retains `status_disposition_write` version 2 as its
-legacy baseline and advertises version 3 for qualified full-title requests.
+The status mutation retains the legacy request form and advertises
+`status_disposition_write` version 3 for YAML-safe full-title retention.
 Its running receiver owns the actual semantics: a new caller cannot assume
 an older daemon stopped truncating because the new payload is installed.
 The existing per-verb advertisement/minimum-version selection already
@@ -80,7 +80,9 @@ advertisement before qualified callers request it. A new caller selects the
 running receiver's advertised verb support, not package-version equality.
 An older supported request retains its legacy short-title semantics; absence
 of a new full-retention selector cannot silently change its contract.
-Non-title operations retain their existing supported baseline.
+New callers require version 3 even for non-title operations, since every
+disposition save reserializes the existing title. A version-2 daemon's old
+serializer could otherwise corrupt a safely saved numeric or Unicode title.
 
 A qualified full-retention caller must not send to a version-2 receiver that
 would silently cap the value. Reuse the existing pre-send capability selection
@@ -141,6 +143,24 @@ No native pane/session, real provider or productive title/binding operation is
 authorized by this plan; unavailable native rollout is not replaced by a fixture.
 
 ## Journal
+
+### 2026-11-11 - Whole-record compatibility on non-title saves
+
+A further review identified that new summary/activity-only callers could
+still send to a version-2 receiver after safely storing a full title locally.
+That receiver's prior serializer rewrites the unchanged title as an unsafe
+plain scalar. Four sequential fail-first cases reproduce numeric type loss
+and Unicode-separator parse failure through a real TCP peer with that prior
+serializer. An initial missing required fixture argument was corrected before
+counting those failures.
+
+All new disposition callers now require version 3, including non-title
+updates. Old request forms remain supported by the new receiver, and older
+callers remain outside the new retention guarantee. The complete five-file
+packet passes 347 cases with explicit tiers, including fresh-profile CLI,
+old/new transport, rollback and ambiguous-outcome controls. This corrects the
+earlier non-title version-2 baseline; it does not add a new actor or replay
+an admitted write.
 
 ### 2026-11-11 - Native YAML Unicode scalars
 
