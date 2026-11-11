@@ -90,19 +90,27 @@ def test_suite_profile_refuses_nonfixture_git_transport(tmp_path, defect):
                                    "changed-nested-receipt", "missing-payload-file",
                                    "extra-payload-file",
                                    "changed-artifact", "changed-cli", "reduced-settings", "command-failed",
-                                   "changed-transport", "foreign-transport"])
+                                   "changed-transport", "foreign-transport", "changed-template",
+                                   "foreign-template"])
 def test_suite_acquisition_requires_real_command_closure_and_private_selected_bytes(
     tmp_path, monkeypatch, defect,
 ):
     artifact = _artifact(tmp_path)
     config = {"project": "example", "stateless": True, "require_application_readiness": True}
     repository = tmp_path / "suite-transport.git"
+    template = tmp_path / "suite-checkout-template"
+    (template / "info").mkdir(parents=True)
+    (template / "info" / "attributes").write_bytes(b"* -text\n")
     transport = {
         "repository": str(repository), "url": "http://127.0.0.1:12345/suite-transport.git",
-        "commit": "b" * 40, "tree": "c" * 40,
+        "commit": "b" * 40, "tree": "c" * 40, "checkout_template": str(template),
     }
     if defect == "foreign-transport":
         transport["repository"] = str(tmp_path.parent / "foreign.git")
+    elif defect == "foreign-template":
+        transport["checkout_template"] = str(tmp_path.parent / "foreign-template")
+    elif defect == "changed-template":
+        (template / "info" / "attributes").write_bytes(b"* text\n")
     profile = _SUITE["selected_profile"](artifact, _COMMIT, config, transport=transport)
     project = tmp_path / "project"
     settings = project / ".github" / "copilot" / "settings.json"
@@ -124,6 +132,7 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
                 else transport["commit"]
             ) + "\n" + transport["tree"]
         if argv[0] == copilot:
+            assert environment["GIT_TEMPLATE_DIR"] == str(template)
             if defect == "command-failed":
                 raise RuntimeError("actual command refused")
             if argv[1:4] == ["plugin", "marketplace", "add"]:
@@ -195,7 +204,7 @@ def test_suite_acquisition_requires_real_command_closure_and_private_selected_by
             assert [argv for argv in calls if argv[0] == copilot] == [
                 [copilot, "plugin", "marketplace", "add", transport["url"]],
             ]
-        if defect == "foreign-transport":
+        if defect in {"foreign-transport", "foreign-template", "changed-template"}:
             assert calls == []
     else:
         result = _SUITE["install_payload_closure"](artifact, _COMMIT, **arguments)

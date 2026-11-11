@@ -1037,3 +1037,22 @@ relative paths with bounded metadata and hashes, both in the owned diagnostics
 and in the failure. File contents are not reported. Focused controls retain
 strict rejection of changed, missing and extra files, including nested receipts;
 no exclusions, content normalization or acceptance rule changed.
+
+Run 42926168518 at `82a26c0386c3dc968a2a4147a2ebc460d7be79af`
+failed after 480.755 seconds and retained the exact discrepancy: all 3,630
+`agent-bridge` entries were present, with no extras; only the bytes of
+`bin/agent-bridge.cmd`, `bin/agent-bridge.ps1` and
+`scripts/emit-command-catalog.ps1` differed. For each file, the expected hash
+equals the committed LF blob and the actual hash exactly equals that blob's
+CRLF checkout projection. The source `.gitattributes` explicitly declares
+CRLF for `.cmd` and `.ps1`. This identifies ordinary Git checkout conversion,
+not missing payloads or a Bridge communication failure.
+
+The fixture now supplies a private Git template whose `info/attributes` disables
+text conversion when the actual CLI clones its data transport. The complete
+frozen artifact and strict comparison remain unchanged; no bytes are normalized
+after acquisition and no path is excluded. The small actual shallow-clone
+control includes LF script blobs with CRLF source attributes, and acquisition
+controls refuse a foreign or changed template. This is data-transport custody
+only, not ordinary platform-checkout, runtime or admitted-upgrade acceptance.
+The corrected head still requires native qualification.

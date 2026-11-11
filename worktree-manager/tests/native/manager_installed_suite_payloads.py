@@ -91,6 +91,11 @@ def prepare_git_transport(
     repository = project.parent / "suite-transport.git"
     if repository.exists() or repository.is_symlink():
         raise ValueError("Frozen Git transport requires a fresh fixture-owned repository")
+    template = project.parent / "suite-checkout-template"
+    template.mkdir()
+    (template / "info").mkdir()
+    # This Git repository transports frozen bytes, not platform checkout projections.
+    (template / "info" / "attributes").write_bytes(b"* -text\n")
     date = run(
         ["git", "show", "-s", "--format=%ct", candidate_commit],
         environment, REPO, diagnostics, "suite-source-date", timeout=30,
@@ -146,7 +151,7 @@ def prepare_git_transport(
     _PROVENANCE["verify"](artifact, candidate_commit)
     return {
         "repository": str(repository),
-        "commit": commit, "tree": tree,
+        "commit": commit, "tree": tree, "checkout_template": str(template),
     }
 
 
@@ -321,6 +326,14 @@ def install_payload_closure(
     require_venue()
     if not Path(transport["repository"]).resolve().is_relative_to(project.parent.resolve()):
         raise ValueError("The frozen Git transport must belong to this private fixture")
+    template = Path(transport["checkout_template"])
+    if (
+        template != project.parent / "suite-checkout-template"
+        or template.is_symlink()
+        or not template.resolve().is_relative_to(project.parent.resolve())
+        or (template / "info" / "attributes").read_bytes() != b"* -text\n"
+    ):
+        raise ValueError("The frozen Git checkout template must preserve the fixture bytes")
     profile = selected_profile(
         artifact, candidate_commit, repository_config, transport=transport,
     )
@@ -337,7 +350,10 @@ def install_payload_closure(
     if settings != profile["settings"]:
         raise ValueError("The representative harness does not enable the complete frozen suite")
     executable_hash = hashlib.sha256(copilot.read_bytes()).hexdigest()
-    environment = {**environment, "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost"}
+    environment = {
+        **environment, "NO_PROXY": "127.0.0.1,localhost", "no_proxy": "127.0.0.1,localhost",
+        "GIT_TEMPLATE_DIR": str(template),
+    }
     marketplace = next(iter(profile["settings"]["extraKnownMarketplaces"]))
     names = sorted(profile["inventory"])
 
