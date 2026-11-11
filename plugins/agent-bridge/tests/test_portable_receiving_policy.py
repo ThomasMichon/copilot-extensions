@@ -95,11 +95,17 @@ def test_isolated_preflight_uses_selected_canonical_policy(
         assert "allowed" not in answer
 
 
+@pytest.mark.parametrize("legacy", [False, True])
 def test_policy_change_after_preflight_refuses_the_actual_bundle(
-    repo: Path, tmp_path: Path,
+    repo: Path, tmp_path: Path, legacy: bool,
 ) -> None:
+    from agent_remote_driver.session_host import bundle as core_bundle
+
     assert _read(repo, dict(os.environ)).returncode == 0
-    archive, _hash = bundle.build_session_host_bundle(tmp_path / "bundles")
+    archive, _hash = (
+        bundle.build_session_host_bundle(tmp_path / "bundles") if legacy
+        else core_bundle.build_session_host_bundle(tmp_path / "bundles")
+    )
     _policy(repo, "expose_agent: false\n", overlay=True)
     marker = tmp_path / "child-started"
     result = subprocess.run(
@@ -938,15 +944,24 @@ async def test_real_remote_host_preparation_preserves_retained_checkout(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("legacy", [False, True])
 async def test_shipped_receiver_launches_observes_sends_and_reattaches_without_guest_suite(
-    repo: Path, tmp_path: Path,
+    repo: Path, tmp_path: Path, legacy: bool,
 ) -> None:
-    archive, _hash = bundle.build_session_host_bundle(tmp_path / "bundles")
+    from agent_remote_driver.session_host import bundle as core_bundle
+
+    archive, _hash = (
+        bundle.build_session_host_bundle(tmp_path / "bundles") if legacy
+        else core_bundle.build_session_host_bundle(tmp_path / "bundles")
+    )
     state = tmp_path / "authority" / "host.json"
     transcript = tmp_path / "peer.jsonl"
     process = await asyncio.create_subprocess_exec(
         sys.executable, "-I", "-S", str(archive),
         "--cwd", str(repo), "--state-file", str(state), "--session-id", "portable-fixture",
+        "--mode", "headless", "--backend", "native-acp",
+        "--lifetime-policy", "legacy" if legacy else "acp",
+        "--unexpected-reap-seconds", "0.05",
         "--repository-policy-context", portable_policy.selected_context(),
         "--", sys.executable, str(Path(__file__).with_name("mock_acp_peer.py")),
         "--acp", "--stdio", "--no-auto-update",
@@ -968,6 +983,7 @@ async def test_shipped_receiver_launches_observes_sends_and_reattaches_without_g
                 await asyncio.sleep(0.02)
         await asyncio.wait_for(wait_ready(), 15)
         authority = json.loads(state.read_text())
+        assert authority["lifetime_policy"] == ("legacy" if legacy else "acp")
         client = await SessionHostClient.connect(port=authority["port"])
         hello = await client.attach(0, nonce=b"fixture-nonce")
         frames = client.frames()
@@ -1007,6 +1023,15 @@ async def test_shipped_receiver_launches_observes_sends_and_reattaches_without_g
         ]
         assert len(boots) == len(prompts) == 1
         assert boots[0]["session_id"] == prompts[0]["params"]["sessionId"] == conversation
+        if not legacy:
+            await client.send_status(True)
+            await client.detach(True)
+            await client.close()
+            await asyncio.sleep(0.2)
+            assert process.returncode is None
+            client = await SessionHostClient.connect(port=authority["port"])
+            retained = await client.attach(cursor, nonce=b"fixture-nonce")
+            assert retained.child_pid == hello.child_pid
     finally:
         if client is not None:
             with contextlib.suppress(ConnectionError, OSError):

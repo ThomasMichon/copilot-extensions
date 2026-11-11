@@ -142,6 +142,13 @@ This T3 packet never enters required actor-free unit CI.
 
 ## Compact Session Host compatibility controls
 
+Bridge's `tests/test_codespace_spawner.py` executes the fresh remote path's
+relocated current-core support declaration and rejects incompatible declarations
+before provisioning or launch. `tests/test_portable_receiving_policy.py`
+exercises both exports with an actual isolated Host and synthetic ACP child;
+the modern case retains the same child after an idle/reapable detach.
+These controls do not qualify a live remote transport or native Copilot.
+
 Driver's `tests/test_session_host_core.py` relocates both compact exports and
 removes their construction directories before execution. The current client
 exercises literal ACP frames, durable cursors, active legacy reattachment,
