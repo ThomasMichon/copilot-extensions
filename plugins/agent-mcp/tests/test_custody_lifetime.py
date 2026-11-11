@@ -242,16 +242,24 @@ def test_real_owner_pin_observes_exit_without_signalling_the_owner():
     os.name != "nt" and not sys.platform.startswith("linux"),
     reason="explicit session owner currently supports Windows and Linux",
 )
-def test_dedicated_conduit_exits_cleanly_with_stdin_writer_still_open():
+@pytest.mark.parametrize("command", ["bridge", "forward"])
+def test_dedicated_conduit_exits_cleanly_with_stdin_writer_still_open(
+    monkeypatch: pytest.MonkeyPatch, command: str,
+) -> None:
+    for key in ("AGENT_MCP_NO_MULTIPLEX", "AGENT_MCP_NO_SERVE", "AGENT_MCP_NO_ENSURE_SERVE"):
+        monkeypatch.delenv(key, raising=False)
     code = """
 import socket, sys
 from unittest.mock import patch
 from agent_mcp import custody_launch
+from agent_mcp.__main__ import main
 connection = socket.create_connection(('127.0.0.1', int(sys.argv[1])))
 with patch.object(custody_launch.incoming, 'ensure_current', return_value=object()), \\
      patch.object(custody_launch, 'attach', return_value=connection):
-    custody_launch.run_adopted(
-        'fixed', 'bridge', owner_pid=int(sys.argv[2]), owner_birth=sys.argv[3])
+    raise SystemExit(main([
+        sys.argv[4], 'bridge', '--session-owner-pid', sys.argv[2],
+        '--session-owner-birth', sys.argv[3],
+    ]))
 """
     with subprocess.Popen(
         [sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"],
@@ -263,7 +271,7 @@ with patch.object(custody_launch.incoming, 'ensure_current', return_value=object
         listener.settimeout(5)
         with subprocess.Popen(
             [sys.executable, "-c", code, str(listener.getsockname()[1]),
-             str(owner.pid), birth_identity(owner.pid)],
+             str(owner.pid), birth_identity(owner.pid), command],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             **no_window_kwargs(),
         ) as conduit:
