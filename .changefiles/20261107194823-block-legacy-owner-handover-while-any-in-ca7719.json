@@ -1,0 +1,9 @@
+{
+  "comment": "Block legacy owner handover while any inventoried user unit has a pending or unverifiable systemd job",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

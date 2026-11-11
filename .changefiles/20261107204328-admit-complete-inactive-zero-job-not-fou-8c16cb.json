@@ -1,0 +1,9 @@
+{
+  "comment": "Admit complete inactive zero-job not-found user-unit responses even when systemctl exits nonzero; retain refusal for incomplete or inconsistent inventory.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

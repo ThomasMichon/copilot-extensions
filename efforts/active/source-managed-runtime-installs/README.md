@@ -562,6 +562,15 @@ adopter/platform combination.
   setup seam and installation driver. Keep source health/sync/install bounded,
   use the selected installed Manager after updates, and preserve the declared
   native headless lifetime and current-user Windows Autorun boundary.
+- [ ] Qualify retained automatic-owner identity across project-controller queueing
+  and callbacks (#11456), including disable/reselection after admission, unchanged
+  owners, manual routes and supported participant/engine skew. The Manager-owned
+  request correction is source-only until review and native qualification pass;
+  previously queued engine requests cannot recover already-lost trigger identity.
+
+The bounded Manager-first repository command entry merged in #10270, composing
+the existing setup caller and engine. Its [source qualification](<journal/2026/11.03 manager-register.md>)
+does not close the enrollment, native worker, actual adopter or release gates above.
 
 ### Phase 4a.1 - Manager automatic-update controls
 
@@ -713,6 +722,24 @@ independent configuration choice rather than forcing the Manager and suite
 onto one branch.
 
 ## Journal
+
+### 2026-11-07 - Retained automatic-owner queue correction
+
+The #11456 source correction keeps scheduled project updates in the existing
+Manager request, preserves selected authority/root/trigger and rechecks before
+engine handoff and Manager callbacks. It sends no new flags, context keys or
+queue fields to an independently selected runtime. Thirty real private-queue
+controls cover later disable/reselection, unchanged owners, callback disable
+and trigger relabeling; manual project routing remains unchanged. The focused
+Manager packet passes 252 tests with one platform skip.
+
+That packet also exposed a first-publication race: read-only authority inspection
+could see the newly created SQLite file before its schema transaction committed.
+Inspection now treats only a pristine, unguarded zero-version database as not
+configured, using one read snapshot without writes. Guarded, foreign-table and
+unsupported-version state still refuse. The shared core/authority packet passes
+169 tests with two platform skips. These are isolated source results, not native
+startup, installed deployment, old queued-request repair or parent completion.
 
 ### 2026-10-30 - Proposed combined-trigger admission case
 

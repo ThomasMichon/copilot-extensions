@@ -5512,6 +5512,12 @@ regressions in the same packet. Native closed-wheel tests exercise long retained
 paths and installed-origin parity; acquisition controls expose only the refused
 origin, never its path or query. These controls do not enable a default consumer
 or approve a production feed.
+`worktree-manager/tests/test_manager_engine_adapter.py` also checks the actual
+local-source origin projection for ordinary and extended Windows drive/UNC
+paths. It supplies synthetic project metadata but uses the real file-URI
+construction, keeping filesystem namespace prefixes out of recorded origins
+without weakening exact installed-origin comparison. This portable control is
+not a native installation or long-path acceptance result.
 Built wheels must preserve the retained source's dependencies, extras and
 Python requirement. Native regressions alter actual wheel metadata, refuse
 nonordinary inputs before opening, bound compressed filename tags before
@@ -6570,6 +6576,17 @@ checks retain their own invocation directory.
 The retained lifecycle deadline and guardian-pair units substitute their native
 Windows path-owner/file-open boundaries, retaining actual cleanup/deadline and
 byte-reader logic. Native ownership and file-sharing custody are not unit evidence.
+
+Manager's separate `test_update_driver_cli.py` packet retains automatic-owner
+identity through a real private SQLite queue and authenticated borrowed custody.
+It pauses after admission, disables or changes the owner, and requires no engine
+dispatch or Manager installation; unchanged-owner controls exercise the callback
+without recursive transaction locking. Later callback disable and trigger
+relabeling refuse before Manager installation. Product bodies remain synthetic,
+so these controls do not qualify installed engine/controller execution or native
+startup. Update-driver's `test_authority.py` holds the first schema publication
+open while a read-only authority inspection observes the pristine database.
+Guarded/incomplete, foreign-table and unsupported-version controls still refuse.
 
 `tools/promotion_unit_tests/test_komodo_repair_authorization.py` exercises the
 repair phase controller with synthetic verified-identity records and the real
@@ -7739,6 +7756,16 @@ producer isolation on Linux. The incomplete-association control reaches the
 actual original admission CLI and its caller-watch helper, then verifies the
 one-time prepared-view upgrade. It remains under the same item/child bounds;
 missing native prerequisites are failures in the selected hosted lane.
+The selected-owner post-tool routing controls hold only the copied sender's
+elapsed clock at zero, isolating real entry/owner/IPC assertions from optional
+budget-exhaustion drops. Both real shells, sockets, bounded waits and all receiver
+and invalidation assertions remain selected. Phase diagnostics use that controlled
+clock; they are not production latency evidence. The separate uninstrumented
+cold-process controls retain the actual production clock, 100 ms shared budget
+and mandatory notification assertions, without warmup or replay.
+The controlled-clock sender cases charge allocation, async connection setup,
+stream acquisition and async write setup to that same budget before either
+wait; exhaustion never starts an additional wait or retries a notification.
 
 The `plugin-activation` target runs the shared activation transaction suite.
 Its `tests/test_preservation_processes.py` packet interrupts real transaction

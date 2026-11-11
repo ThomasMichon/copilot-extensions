@@ -261,7 +261,8 @@ the shell-safe advisory baseline, not a blocking compatibility call.
 The sender allocates an explicitly IPv4 client for its IPv4-only loopback
 endpoint, avoiding the modern runtime's default dual-mode socket selection.
 Client allocation remains inside the send clock. Both connection and write
-waits subtract the elapsed time; allocation cannot receive a separate wait
+waits subtract the elapsed time, including their asynchronous task and stream
+setup before waiting; allocation cannot receive a separate wait
 allowance. The 100-ms ceiling gives cold framework initialization headroom
 without making the hook wait for a response or adding a retry.
 The sender first checks the runtime's IPv4 support. That capability query can

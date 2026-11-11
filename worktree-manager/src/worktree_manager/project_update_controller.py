@@ -46,7 +46,7 @@ def legacy_controller_error(project: str | None, proc) -> engine_client.EngineEr
 
 def handoff(
     arguments: list[str], *, observer: list[str] | None = None, authority=None,
-    delegated: bool = False,
+    delegated: bool = False, defer_automatic: bool = False,
 ) -> int | None:
     managed = authority is not None and authority.configured and authority.mode == "project"
     if authority is not None and authority.configured and authority.mode == "standalone":
@@ -82,7 +82,39 @@ def handoff(
         if managed:
             raise ValueError("selected project update controller is unavailable")
         return None
-    return engine_client.run_engine_passthrough(
-        project, ["update", *forwarded, *(observer or [])],
-        **({"headless": True} if observer and "--detach" in observer else {}),
-    )
+    run = None
+    if any(
+        value == "--automatic-trigger" or value.startswith("--automatic-trigger=")
+        for value in forwarded
+    ):
+        from .automatic_updates_cli import guarded_update
+        from .update_events import UpdateRun
+
+        normalized: list[str] = []
+        trigger = "manual"
+        automatic_trigger = None
+
+        def admit(arguments: list[str], admitted_trigger: str, admitted_origin: str | None) -> int:
+            nonlocal trigger, automatic_trigger
+            normalized.extend(arguments)
+            trigger, automatic_trigger = admitted_trigger, admitted_origin
+            return 0
+
+        # Release admission custody before the engine can call Manager back.
+        admitted = guarded_update(forwarded, admit)
+        if admitted:
+            return admitted
+        if defer_automatic:
+            return None
+        forwarded = normalized
+        run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
+    try:
+        code = engine_client.run_engine_passthrough(
+            project, ["update", *forwarded, *(observer or [])],
+            **({"headless": True} if observer and "--detach" in observer else {}),
+        )
+        return run.finish(code) if run is not None else code
+    except BaseException as error:
+        if run is not None:
+            run.abort(error)
+        raise

@@ -44,7 +44,10 @@ def extract_project(rest: list[str]) -> tuple[str | None, list[str]]:
     return project, out
 
 
-def execute_update(rest: list[str], steps: Callable[..., int]) -> int:
+def execute_update(
+    rest: list[str], steps: Callable[..., int], *, trigger: str = "manual",
+    automatic_trigger: str | None = None,
+) -> int:
     """Admit a Manager update and preserve its targeted or suite transaction."""
     from .maintenance_policy import admit_update
 
@@ -53,7 +56,7 @@ def execute_update(rest: list[str], steps: Callable[..., int]) -> int:
     if any(arg == "--target" or arg.startswith("--target=") for arg in rest):
         from .installation_updates import run_targeted_update
 
-        return run_targeted_update(rest)
+        return run_targeted_update(rest, trigger=trigger, automatic_trigger=automatic_trigger)
     from .runtime_source import SourceAcquisitionError
     from .runtime_source_update import repair_selection
     from .update_bootstrap import prepare_update
@@ -70,7 +73,7 @@ def execute_update(rest: list[str], steps: Callable[..., int]) -> int:
             prepared = prepare_update(rest, **source_arguments)
             if prepared.exit_code:
                 return prepared.exit_code
-            run = UpdateRun()
+            run = UpdateRun(trigger=trigger, automatic_trigger=automatic_trigger)
             rc = steps(
                 prepared.arguments, run, fresh_manager=prepared.fresh_manager,
                 environment=prepared.environment, **source_arguments,

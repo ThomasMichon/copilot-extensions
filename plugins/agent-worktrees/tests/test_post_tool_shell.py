@@ -545,6 +545,135 @@ def prepared_read_event(tmp_path, monkeypatch, monkeypatch_config, request):
         runtime.shutdown()
 
 
+def _instrument_prepared_sender(source, *, routing_clock=False):
+    start = source.index("function Send-PostToolReadDemand")
+    end = source.index("function Get-PostToolRuntimeRoot", start)
+    sender = source[start:end]
+    if routing_clock:
+        # Isolate routing from host latency; cold-process controls retain the real clock.
+        clock = "$clock = [Diagnostics.Stopwatch]::StartNew()"
+        assert sender.count(clock) == 1
+        sender = sender.replace(clock, "$clock = [pscustomobject]@{ ElapsedMilliseconds = 0 }")
+    allocation = "$client = [Net.Sockets.TcpClient]::new([Net.Sockets.AddressFamily]::InterNetwork)"
+    connect = "$connect = $client.ConnectAsync([Net.IPAddress]::Loopback, $port)"
+    connect_wait = "if ($remaining -le 0 -or -not $connect.Wait($remaining)) { return }"
+    write = "$write = $client.GetStream().WriteAsync($bytes, 0, $bytes.Length)"
+    for original, replacement in (
+        ("$client = $null", "$script:senderDiagnostic = @{ phase = 'entered' }; $client = $null"),
+        (
+            allocation,
+            "$script:senderDiagnostic.phase = 'allocating'\n" + allocation + "\n"
+            "$script:senderDiagnostic.phase = 'allocated'\n"
+            "$script:senderDiagnostic.allocation_ms = $clock.ElapsedMilliseconds",
+        ),
+        (
+            connect,
+            "$script:senderDiagnostic.phase = 'connecting'\n" + connect,
+        ),
+        (
+            connect_wait,
+            connect_wait + "\n"
+            "$script:senderDiagnostic.phase = 'connected'\n"
+            "$script:senderDiagnostic.connected_ms = $clock.ElapsedMilliseconds",
+        ),
+        (
+            write,
+            "$script:senderDiagnostic.phase = 'writing'\n" + write,
+        ),
+        (
+            "$null = $write.Wait($remaining)",
+            "$script:senderDiagnostic.write_complete = "
+            "$write.Wait($remaining)\n"
+            "$script:senderDiagnostic.phase = 'write-returned'",
+        ),
+        (
+            "} catch {} finally {",
+            "} catch {\n"
+            " $script:senderDiagnostic.error_type = $_.Exception.GetType().FullName\n"
+            " $script:senderDiagnostic.error_hresult = $_.Exception.HResult\n"
+            "} finally {\n"
+            " if ($null -ne $clock) { $script:senderDiagnostic.elapsed_ms = $clock.ElapsedMilliseconds }",
+        ),
+    ):
+        assert sender.count(original) == 1, original
+        sender = sender.replace(original, replacement)
+    return source[:start] + sender + source[end:]
+
+
+def _trace_prepared_sender(fixture):
+    path = fixture["payload_root"] / "scripts" / "hook-facts.ps1"
+    path.write_text(
+        _instrument_prepared_sender(path.read_text(encoding="utf-8"), routing_clock=True),
+        encoding="utf-8",
+    )
+    harness = fixture["harness"]
+    source = harness.read_text(encoding="utf-8")
+    terminal = "InvariantCulture)); exit 0"
+    assert source.count(terminal) == 1
+    harness.write_text(source.replace(terminal, (
+        "InvariantCulture));\n"
+        "[Console]::Error.WriteLine('sender_diagnostics=' + "
+        "(ConvertTo-Json -Compress -InputObject $script:senderDiagnostic)); exit 0"
+    )), encoding="utf-8")
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.effect("network")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_post_tool_routing_clock_preserves_real_owner_delivery(tmp_path, shell):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees.hook_ipc import HookIpcServer
+
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    notices = []
+    received = threading.Event()
+
+    class Server(HookIpcServer):
+        def _on_read_demand(self, request):
+            super()._on_read_demand(request)
+            notices.append(request)
+            received.set()
+
+    server = Server(
+        lambda *args: pytest.fail("read demand must not request synchronous policy"),
+        read_demand_admitted=lambda: True,
+    )
+    server.start()
+    try:
+        discovery = server.rendezvous()
+        source = _instrument_prepared_sender(
+            (PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8"),
+            routing_clock=True,
+        )
+        managed = str(PLUGIN / "scripts" / "managed-session.ps1").replace("'", "''")
+        script = tmp_path / "routing-clock.ps1"
+        script.write_text(
+            f". '{managed}'\n" + source + "\nSend-PostToolReadDemand -Discovery @{\n"
+            "hook_capabilities = @('read-hook-demand-v1'); hook_transport = 'tcp'\n"
+            + "\n".join(
+                f"{key} = '{discovery[key]}'"
+                for key in ("hook_generation", "hook_endpoint", "hook_token")
+            )
+            + "\n}\nConvertTo-Json -Compress -InputObject $script:senderDiagnostic\n",
+            encoding="utf-8",
+        )
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
+            text=True, capture_output=True, timeout=10, **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr
+        assert received.wait(2), result.stdout
+        assert len(notices) == 1 and notices[0]["kind"] == "readHookDemand"
+        assert server.has_recent_hook_demand()
+        assert json.loads(result.stdout)["write_complete"] is True
+    finally:
+        server.close()
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
@@ -593,7 +722,8 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             + harness,
             encoding="utf-8",
         )
-    invalidated, notices, synchronous = [], [], []
+    _trace_prepared_sender(fixture)
+    invalidated, notices, synchronous, connections = [], [], [], []
     received, release = threading.Event(), threading.Event()
     policy = main._ResidentHookPolicy(main._load_hook_client_module())
     target = str(fixture["home"] / "changed")
@@ -603,6 +733,10 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
     )
 
     class Server(HookIpcServer):
+        def _on_request_accepted(self):
+            super()._on_request_accepted()
+            connections.append(time.monotonic())
+
         def _on_read_demand(self, request):
             super()._on_read_demand(request)
             notices.append(request)
@@ -737,7 +871,10 @@ def test_registered_prepared_cell_post_tool_uses_selected_original_owners(
             received.wait(2)
             assert not server.has_recent_hook_demand()
         else:
-            assert received.wait(2), "selected original IPC owner received no notification"
+            assert received.wait(2), (
+                "selected original IPC owner received no notification",
+                {"sender": result.stderr, "accepted_connections": len(connections)},
+            )
             assert len(notices) == 1
             expected_kind = {
                 "native": "nativeToolMutation", "batch": "nativeToolBatchMutation",
@@ -970,10 +1107,15 @@ ConvertTo-Json -Compress -InputObject @{ old = $old; prepared = $prepared }
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.effect("filesystem")
-@pytest.mark.skipif(os.name != "nt", reason="Native Windows sender deadline arithmetic")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
-@pytest.mark.parametrize("allocation_ms", [60, 110])
-def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, shell, allocation_ms):
+@pytest.mark.parametrize(
+    "allocation_ms,connect_setup_ms,stream_setup_ms,write_setup_ms",
+    [(60, 0, 0, 0), (110, 0, 0, 0), (60, 10, 5, 5),
+     (60, 40, 0, 0), (60, 0, 25, 0), (60, 0, 0, 25)],
+)
+def test_post_tool_send_debits_allocation_and_connect_from_one_budget(
+    tmp_path, shell, allocation_ms, connect_setup_ms, stream_setup_ms, write_setup_ms,
+):
     from agent_procutil import no_window_kwargs
 
     executable = shutil.which(shell)
@@ -981,7 +1123,7 @@ def test_post_tool_send_debits_allocation_and_connect_from_one_budget(tmp_path, 
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
             pytest.fail(f"Required native membership shell {shell} is unavailable")
         pytest.skip(f"{shell} is unavailable")
-    source = (PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8")
+    source = _instrument_prepared_sender((PLUGIN / "scripts" / "hook-facts.ps1").read_text(encoding="utf-8"))
     start = source.index("function Send-PostToolReadDemand")
     end = source.index("function Get-PostToolRuntimeRoot", start)
     sender = source[start:end]
@@ -1007,7 +1149,7 @@ $script:connectTask = [pscustomobject]@{}
 $script:connectTask | Add-Member ScriptMethod Wait {
     param($remaining)
     $script:connectWaits.Add($remaining)
-    $script:clock.ElapsedMilliseconds = 75
+    $script:clock.ElapsedMilliseconds += 15
     return $true
 }
 $script:writeTask = [pscustomobject]@{}
@@ -1019,15 +1161,20 @@ $script:writeTask | Add-Member ScriptMethod Wait {
 $script:stream = [pscustomobject]@{}
 $script:stream | Add-Member ScriptMethod WriteAsync {
     param($bytes, $offset, $count)
+    $script:clock.ElapsedMilliseconds += [int]$env:WRITE_SETUP_MS
     $script:wire = [Text.Encoding]::UTF8.GetString($bytes, $offset, $count)
     return $script:writeTask
 }
 $script:client = [pscustomobject]@{}
 $script:client | Add-Member ScriptMethod ConnectAsync {
     param($address, $port)
+    $script:clock.ElapsedMilliseconds += [int]$env:CONNECT_SETUP_MS
     return $script:connectTask
 }
-$script:client | Add-Member ScriptMethod GetStream { return $script:stream }
+$script:client | Add-Member ScriptMethod GetStream {
+    $script:clock.ElapsedMilliseconds += [int]$env:STREAM_SETUP_MS
+    return $script:stream
+}
 $script:client | Add-Member ScriptMethod Dispose { $script:disposed++ }
 Send-PostToolReadDemand -Discovery @{
     hook_capabilities = @('read-hook-demand-v1'); hook_transport = 'tcp'
@@ -1036,24 +1183,40 @@ Send-PostToolReadDemand -Discovery @{
 }
 ConvertTo-Json -Compress -InputObject @{
     connect = @($script:connectWaits); write = @($script:writeWaits)
-    wire = $script:wire; disposed = $script:disposed
+    wire = $script:wire; disposed = $script:disposed; diagnostic = $script:senderDiagnostic
 }
 """, encoding="utf-8")
     result = subprocess.run(
         [executable, "-NoProfile", "-NonInteractive", "-File", str(script)],
         text=True, capture_output=True, timeout=10,
-        env={**os.environ, "ALLOCATION_MS": str(allocation_ms)}, **no_window_kwargs(),
+        env={
+            **os.environ, "ALLOCATION_MS": str(allocation_ms),
+            "CONNECT_SETUP_MS": str(connect_setup_ms), "STREAM_SETUP_MS": str(stream_setup_ms),
+            "WRITE_SETUP_MS": str(write_setup_ms),
+        }, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
     value = json.loads(result.stdout)
     assert value["disposed"] == 1
-    if allocation_ms == 60:
-        assert value["connect"] == [40]
-        assert value["write"] == [25]
+    connect_started = allocation_ms < 100
+    connect_ready_ms = allocation_ms + connect_setup_ms
+    connect_waited = connect_started and connect_ready_ms < 100
+    connected_ms = connect_ready_ms + (15 if connect_waited else 0)
+    write_started = connect_waited and connected_ms < 100
+    write_ready_ms = connected_ms + (stream_setup_ms + write_setup_ms if write_started else 0)
+    write_waited = write_started and write_ready_ms < 100
+    assert value["connect"] == ([100 - connect_ready_ms] if connect_waited else [])
+    assert value["write"] == ([100 - write_ready_ms] if write_waited else [])
+    if write_started:
         assert json.loads(value["wire"])["kind"] == "readHookDemand"
     else:
-        assert value["connect"] == value["write"] == []
         assert value["wire"] is None
+    assert value["diagnostic"]["allocation_ms"] == allocation_ms
+    assert value["diagnostic"]["elapsed_ms"] == write_ready_ms
+    if connect_waited:
+        assert value["diagnostic"]["connected_ms"] == connected_ms
+    if write_waited:
+        assert value["diagnostic"]["write_complete"] is True
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -2688,6 +2851,19 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
             "}\n"
             "Invoke-PostToolHook -Raw '{\"toolName\":\"view\"}'\n"
             "Invoke-PostToolHook -Raw '{\"toolName\":\"empty\"}'\n"
+            "$nativeReader = ${function:ConvertFrom-PostToolJson}\n"
+            "function ConvertFrom-PostToolJson {\n"
+            "  param([string]$Text)\n"
+            "  $value = & $nativeReader $Text\n"
+            "  if ($value -is [pscustomobject]) {\n"
+            "    $dictionary = [Collections.Generic.Dictionary[string,object]]::new()\n"
+            "    foreach ($p in $value.PSObject.Properties) { $dictionary.Add($p.Name, $p.Value) }\n"
+            "    return ,$dictionary\n"
+            "  }\n"
+            "  return ,$value\n"
+            "}\n"
+            "Invoke-PostToolHook -Raw '{\"toolName\":\"dictionary\"}'\n"
+            "${function:ConvertFrom-PostToolJson} = $nativeReader\n"
             "$deny = Invoke-ResidentPostTool -Endpoint "
             "(Get-Content (Join-Path $env:USERPROFILE '.agent-worktrees/status-monitor.lock') "
             "-Raw | ConvertFrom-Json | ForEach-Object {"
@@ -2716,6 +2892,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+        env["AGENT_WORKTREES_NUDGE"] = "off"
         result = subprocess.run(
             [shell, "-NoProfile", "-NonInteractive", "-File", str(harness)],
             capture_output=True, text=True, encoding="utf-8", env=env, timeout=15,
@@ -2726,13 +2903,18 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
         assert result.stdout == (
             '{"additionalContext":"resident"}'
             '{"additionalContext":"resident"}'
+            '{"additionalContext":"resident"}'
             'local-fallbackcell-client'
         )
+        metadata = {"environment": {
+            key: env[key] for key in (
+                "AGENT_WORKTREES_NUDGE", "AGENT_WORKTREES_AGENDA_NUDGE",
+                "AGENT_WORKTREES_NUDGE_CALLS", "AGENT_WORKTREES_NUDGE_MINUTES",
+            ) if key in env
+        }}
         assert seen == [
-            ("postToolUse", {"toolName": "view"}),
-            ("postToolUse", {"toolName": "view"}),
-            ("postToolUse", {"toolName": "empty"}),
-            ("postToolUse", {"toolName": "deny"}),
+            ("postToolUse", {"toolName": name, "_agentWorktrees": metadata})
+            for name in ("view", "view", "empty", "dictionary", "deny")
         ]
         bin_dir = root / "bin"
         bin_dir.mkdir()
@@ -2760,7 +2942,7 @@ def test_real_powershell_roundtrip_and_validation_without_cli_children(tmp_path,
         assert manifest_result.returncode == 0, manifest_result.stderr
         assert manifest_result.stderr == ""
         assert json.loads(manifest_result.stdout) == {"additionalContext": payload["text"]}
-        assert seen[-1] == ("postToolUse", payload)
+        assert seen[-1] == ("postToolUse", {**payload, "_agentWorktrees": metadata})
         (bin_dir / SCRIPT.name).unlink()
         (bin_dir / "hook_client.py").write_text(
             "import json,sys\n"
@@ -2818,6 +3000,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admi
         '{"small":1e-100,"big":1.234567890123456789e30,'
         '"long":0.12345678901234567890123456789}',
         json.dumps({"nested": {"__type": "ordinary-data", "value": values}}),
+        '{"_agentWorktrees":{"environment":{"AGENT_WORKTREES_NUDGE":"on"}}}',
     ]
     seen = []
 
@@ -2838,6 +3021,7 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admi
         env = os.environ.copy()
         env["USERPROFILE"] = str(tmp_path)
         env.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+        env["AGENT_WORKTREES_NUDGE"] = "off"
         reference_harness = tmp_path / "legacy-json.ps1"
         expected_requests = []
         for payload in raw_payloads:
@@ -2875,6 +3059,14 @@ def test_real_shell_json_values_and_legacy_metadata_compatibility(tmp_path, admi
             assert legacy.stderr == ""
             expected = [json.loads(line) for line in legacy.stdout.splitlines()]
             assert len(expected) == 2
+            metadata = {"environment": {
+                key: env[key] for key in (
+                    "AGENT_WORKTREES_NUDGE", "AGENT_WORKTREES_AGENDA_NUDGE",
+                    "AGENT_WORKTREES_NUDGE_CALLS", "AGENT_WORKTREES_NUDGE_MINUTES",
+                ) if key in env
+            }}
+            for value in expected:
+                value.setdefault("_agentWorktrees", metadata)
             assert json.loads(result.stdout) == expected[1], payload
             expected_requests.append(("postToolUse", expected[0]))
         assert seen == expected_requests

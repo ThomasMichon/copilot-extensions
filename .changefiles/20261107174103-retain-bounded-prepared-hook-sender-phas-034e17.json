@@ -1,0 +1,9 @@
+{
+  "comment": "Retain bounded prepared-hook sender phase diagnostics without weakening native selected-owner notification assertions",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

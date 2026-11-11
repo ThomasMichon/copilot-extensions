@@ -27,11 +27,13 @@ dependencies = [
     "agent-installer-readiness",
     "agent-installation-context",
     "agent-process-telemetry",
+    "agent-zdd",
 ]
 
 [tool.uv.sources]
 agent-configuration-layers = { path = "../../libs/configuration-layers", editable = true }
 agent-process-telemetry = { path = "../../libs/process-telemetry", editable = true }
+agent-zdd = { path = "../../libs/zdd", editable = true }
 agent-remote-login-shell = { path = "../../libs/remote-login-shell", editable = true }
 agent-installer-readiness = { path = "../../libs/installer-readiness", editable = true }
 # Flat-module metadata must remain retained, not an unsupported live editable.

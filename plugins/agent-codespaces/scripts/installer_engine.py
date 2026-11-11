@@ -479,7 +479,7 @@ def _input_origins(inputs: FrozenInputs, slot: Path | None = None) -> dict[str, 
         }
     return {
         tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))["project"]["name"]:
-        root.as_uri() for root in _installed_packages(inputs)
+        _file_uri(root) for root in _installed_packages(inputs)
     }
 
 

@@ -59,6 +59,58 @@ def test_absent_authority_keeps_standalone_behavior_without_creating_state(area)
         _submit(area, authority="project", project="example")
 
 
+def test_authority_read_during_first_queue_publication_is_read_only(area, monkeypatch):
+    from update_driver import core
+
+    root = area / "state"
+    publishing, release = threading.Event(), threading.Event()
+    errors = []
+    validate = core._validate_db
+
+    def pause_publication(db):
+        validate(db)
+        if db.in_transaction and threading.current_thread() is writer:
+            publishing.set()
+            assert release.wait(5)
+
+    def submit():
+        try:
+            _submit(area)
+        except BaseException as error:
+            errors.append(error)
+
+    monkeypatch.setattr(core, "_validate_db", pause_publication)
+    writer = threading.Thread(target=submit)
+    writer.start()
+    try:
+        assert publishing.wait(5)
+        before = (root / "queue.sqlite3").read_bytes()
+        assert current_authority(root=root).configured is False
+        assert (root / "queue.sqlite3").read_bytes() == before
+    finally:
+        release.set()
+        writer.join(10)
+    assert not writer.is_alive() and not errors
+    assert current_authority(root=root).configured is False
+
+
+@pytest.mark.parametrize("state", ["guard", "table", "version"])
+def test_pristine_authority_read_never_accepts_incomplete_or_foreign_state(area, state):
+    from update_driver.authority import ensure_guard
+
+    root = area / "state"
+    root.mkdir()
+    with sqlite3.connect(root / "queue.sqlite3") as db:
+        if state == "guard":
+            ensure_guard(root)
+        elif state == "table":
+            db.execute("CREATE TABLE unrelated (id INTEGER)")
+        else:
+            db.execute("PRAGMA user_version=99")
+    with pytest.raises(StateError):
+        current_authority(root=root)
+
+
 def test_switch_waits_for_active_writer_and_enforces_both_modes(area):
     root = area / "state"
     request = _submit(area)

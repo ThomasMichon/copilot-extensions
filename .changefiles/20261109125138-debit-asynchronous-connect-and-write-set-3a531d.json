@@ -1,0 +1,9 @@
+{
+  "comment": "Debit asynchronous sender setup before waiting and separate selected-owner routing controls from real-clock budget qualification",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

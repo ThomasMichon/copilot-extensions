@@ -309,7 +309,7 @@ def _assert_database_identity(path: Path, expected: os.stat_result) -> None:
 @contextmanager
 def _database(
     root: Path, *, create: bool = False, writable: bool = False,
-    expected_identity: os.stat_result | None = None,
+    expected_identity: os.stat_result | None = None, allow_pristine: bool = False,
 ):
     db = None
     try:
@@ -349,7 +349,17 @@ def _database(
             _validate_db(db)
             db.commit()
         else:
-            _validate_db(db)
+            if allow_pristine:
+                # Keep the header and schema in one read-only snapshot while a
+                # first writer may still be publishing its initialization.
+                db.execute("BEGIN")
+            pristine = (
+                allow_pristine
+                and db.execute("PRAGMA user_version").fetchone()[0] == 0
+                and not db.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+            )
+            if not pristine:
+                _validate_db(db)
         if expected_identity is not None:
             _assert_database_identity(path, expected_identity)
         yield db

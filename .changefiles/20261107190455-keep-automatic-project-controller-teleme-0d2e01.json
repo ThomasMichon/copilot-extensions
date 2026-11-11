@@ -1,0 +1,9 @@
+{
+  "comment": "Keep automatic project-controller telemetry scheduled and correlated across Manager callbacks, and require post-activation focus restoration evidence",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}
