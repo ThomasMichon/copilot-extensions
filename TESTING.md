@@ -3392,7 +3392,10 @@ The independent Core Host Windows cleanup-Job lane is
 `plugins/agent-remote-driver/tests/native/host_caller_jobs_fixture.py qualify <fresh-private-output-directory>`,
 using an interpreter with the core and process library installed. Run it outside
 the contained test supervisor; the fixture refuses containment rather than
-disabling it. Its renewable instance lease bounds both cases to 180 seconds.
+disabling it. Each instance has a renewable 15-second lease and a 150-second
+hard maximum, inside the 180-second fixture lifecycle/cleanup deadline.
+The complete broker exchange has one ten-second allowance, with separately
+bounded termination/close; unrelated frames cannot renew that allowance.
 It closes two nested permissive caller Jobs before exercising the real copied
 Host through its broker, and requires a bounded control to die with its caller.
 A permissive inner/restrictive outer control must refuse before Host entry,

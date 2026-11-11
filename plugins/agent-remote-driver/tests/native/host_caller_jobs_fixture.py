@@ -17,7 +17,7 @@ import traceback
 
 import agent_procutil as pu
 from agent_procutil._interpreter import physical_executable
-from agent_procutil.daemon_instances import daemon_test_lifecycle
+from agent_procutil.daemon_instances import DaemonLeasePolicy, daemon_test_lifecycle
 from agent_remote_driver.session_host.client import SessionHostClient
 from agent_remote_driver.session_host.launcher import launch_session_host
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
@@ -101,38 +101,49 @@ def _middle(directory):
 
 
 async def _probe(result):
-    client = await SessionHostClient.connect(port=result["port"])
-    try:
+    client, attached = None, False
+
+    async def exchange():
+        nonlocal client, attached
+        client = await SessionHostClient.connect(port=result["port"])
         hello = await client.attach(nonce=result["nonce"].encode())
+        attached = True
         assert hello.child_pid == result["child"]["pid"]
         payload = {"literal": "after all caller Jobs\n'quoted' & $value"}
         await client.write((json.dumps({
             "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": payload,
         }) + "\n").encode())
         while True:
-            cursor, frame = await asyncio.wait_for(anext(client.frames()), 10)
+            cursor, frame = await anext(client.frames())
             reply = json.loads(frame)
             await client.ack(cursor)
             if reply.get("id") == 1:
                 assert reply["result"] == {"method": "initialize", "literal": payload}
                 return
+
+    try:
+        await asyncio.wait_for(exchange(), 10)
     finally:
         try:
-            await client.terminate()
+            if attached:
+                await asyncio.wait_for(client.terminate(), 3)
         finally:
-            await client.close()
+            if client is not None:
+                await asyncio.wait_for(client.close(), 3)
 
 
 def qualify(directory):
     """Prove all-caller-Job survival and pre-execution strict-outer refusal."""
     assert sys.platform == "win32", "This native lane requires Windows"
     assert not pu.contained_test_mode(), "Use a production-lifetime lane, not a contained runner"
+    directory = directory.resolve()
     directory.mkdir()
     cleanup, summary = [], []
     try:
         with daemon_test_lifecycle(
             owner="core-host-caller-job-fixture",
             registry_root=directory / "instances", cleanup_results=cleanup,
+            lease=DaemonLeasePolicy(ttl_seconds=15, max_lifetime_seconds=150),
             deadline=time.monotonic() + 180,
         ) as lifecycle:
             for case, permissive in (("permissive", True), ("strict-outer", False)):
