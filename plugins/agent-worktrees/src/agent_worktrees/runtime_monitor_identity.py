@@ -13,6 +13,9 @@ from zdd import diagnostics, routing
 from . import locks, status_monitor_cutover as cutover
 
 
+READ_ONLY_OBSERVATION_CAPABILITY = "worktrees-monitor-observation/read-only-v1"
+
+
 class AsyncRetirementUnsupported(ValueError):
     def __init__(self, message: str, identity: tuple[int, str, str | None]):
         super().__init__(message)
@@ -50,9 +53,10 @@ def candidate_serving(root: Path, slot: Path) -> bool:
     if before is None or before != endpoint.process_start_time:
         return False
     generation = slot_generation(slot)
-    health = cutover.ControlClient(
-        endpoint.base_url, token=cutover.load_or_create_control_token(root),
-    ).health()
+    token = cutover.read_control_token(root)
+    if token is None:
+        return False
+    health = cutover.ControlClient(endpoint.base_url, token=token).health()
     prefix = health.get("runtime_prefix")
     return (
         health.get("status") == "ready"
@@ -110,13 +114,16 @@ def routed_identity(
         require_async_retirement and endpoint.process_start_time != before
     ):
         raise ValueError("Routed monitor process identity is unconfirmed")
-    client_options = {} if runtime_home is None else {"token": cutover.load_or_create_control_token(runtime_home)}
-    try:
-        health = cutover.ControlClient(endpoint.base_url, **client_options).health()
-    except (OSError, ValueError, ConnectionError):
-        if not require_async_retirement:
-            raise
-        health = {}
+    token = cutover.read_control_token(directory.parent)
+    if token is None and not require_async_retirement:
+        raise ValueError("Serving monitor control token is unavailable")
+    health = {}
+    if token is not None:
+        try:
+            health = cutover.ControlClient(endpoint.base_url, token=token).health()
+        except (OSError, ValueError, ConnectionError):
+            if not require_async_retirement:
+                raise
     if (
         (health and health.get("pid") != pid)
         or (not require_async_retirement and health.get("status") not in {"ready", "draining", "unavailable"})
