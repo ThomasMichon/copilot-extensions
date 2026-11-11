@@ -41,11 +41,21 @@ def _run_owner(deadline):
             (diagnostics / f"{label}.{suffix}.txt").write_text(text, encoding="utf-8")
         if result.returncode:
             raise RuntimeError(installed._command_failure(
-                label, result.returncode, result.stdout, result.stderr,
+                label, result.returncode,
+                diagnostics / f"{label}.stdout.txt", diagnostics / f"{label}.stderr.txt",
             ))
         return result.stdout.strip()
 
     return run
+
+
+def _install_engine(payload, root, environment, project, diagnostics, label, run):
+    base = Path(getattr(sys, "_base_executable", sys.executable))
+    run([
+        base, "-I", "-S", "-B", payload / "scripts" / "runtime_install_driver.py",
+        "--payload", payload, "--root", root, "--shell", shutil.which("pwsh"),
+        "--action", "install", "--runtime-only", "--bootstrap-python", base,
+    ], environment, project, diagnostics, label)
 
 
 def _environment(case, setup):
@@ -133,14 +143,10 @@ def prepare(directory):
     bootstrap_payload = artifact / "plugins" / "agent-worktrees"
     # Discovery alone needs an engine; this separate root is never suite evidence.
     bootstrap = case / "bootstrap-engine"
-    run([
-        base, "-I", "-B", bootstrap_payload / "scripts" / "runtime_install.py",
-        "--root", bootstrap, "--plugin", bootstrap_payload, "--payload", bootstrap_payload,
-        "--uv", shutil.which("uv"), "--base-python", base,
-        "--frontend", json.dumps({
-            "shell": "ps1", "executable": shutil.which("pwsh"), "scope": "resolvers",
-        }), "--result", case / "bootstrap-install.json",
-    ], env, project, case / "diagnostics", "suite-bootstrap-engine")
+    _install_engine(
+        bootstrap_payload, bootstrap, env, project, case / "diagnostics",
+        "suite-bootstrap-engine", run,
+    )
     transport = payloads.prepare_git_transport(
         artifact, candidate, environment=env, project=project, diagnostics=case / "diagnostics",
         deadline=budget.execution_deadline, run=run,
@@ -175,15 +181,10 @@ def prepare(directory):
             diagnostics=case / "diagnostics", transport=transport, run=run,
         )
         engine_payload = Path(closure["payloads"]["agent-worktrees"]["path"])
-        run([
-            base, "-I", "-B", engine_payload / "scripts" / "runtime_install.py",
-            "--root", case / "h" / ".agent-worktrees",
-            "--plugin", engine_payload, "--payload", engine_payload,
-            "--uv", shutil.which("uv"), "--base-python", base,
-            "--frontend", json.dumps({
-                "shell": "ps1", "executable": shutil.which("pwsh"), "scope": "resolvers",
-            }), "--result", case / "engine-install.json",
-        ], env, project, case / "diagnostics", "suite-installed-engine")
+        _install_engine(
+            engine_payload, case / "h" / ".agent-worktrees", env, project,
+            case / "diagnostics", "suite-installed-engine", run,
+        )
         manager_payload = artifact / "worktree-manager"
         run([
             base, "-I", "-S", "-B", manager_payload / "scripts" / "runtime_install.py",

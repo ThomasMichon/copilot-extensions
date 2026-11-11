@@ -92,6 +92,50 @@ def test_fresh_command_owner_has_a_finite_vm_lifetime_boundary(
     assert len(observed) == 1
 
 
+def test_fresh_command_failure_retains_the_original_constructor_diagnostic(
+    tmp_path, monkeypatch, fresh_fixture,
+):
+    from types import SimpleNamespace
+    from agent_procutil import _caller_owned
+
+    monkeypatch.setattr(_caller_owned, "run", lambda *args, **kwargs: SimpleNamespace(
+        returncode=7, stdout="constructor started\n",
+        stderr="RuntimeError: installation requires live driver custody\n",
+    ))
+    with pytest.raises(RuntimeError, match="requires live driver custody") as failure:
+        fresh_fixture["_run_owner"](time.monotonic() + 10)(
+            ["native-constructor"], {}, tmp_path, tmp_path, "construction",
+        )
+    assert "construction exited 7" in str(failure.value)
+    assert "constructor started" in str(failure.value)
+    assert (tmp_path / "construction.stderr.txt").read_text().endswith("driver custody\n")
+
+
+def test_fresh_engine_construction_enters_the_native_driver_for_each_private_root(
+    tmp_path, monkeypatch, fresh_fixture,
+):
+    calls = []
+    monkeypatch.setattr(fresh_fixture["shutil"], "which", lambda name: str(tmp_path / "pwsh.exe"))
+    payload = tmp_path / "payload"
+    environment = {"USERPROFILE": str(tmp_path / "home")}
+    for root in (tmp_path / "bootstrap-engine", tmp_path / "home" / ".agent-worktrees"):
+        fresh_fixture["_install_engine"](
+            payload, root, environment, tmp_path, tmp_path, "engine",
+            lambda *args: calls.append(args),
+        )
+    assert len(calls) == 2
+    for arguments, root in zip(calls, (tmp_path / "bootstrap-engine",
+                                       tmp_path / "home" / ".agent-worktrees")):
+        argv, env, cwd, diagnostics, label = arguments
+        assert argv[4] == payload / "scripts" / "runtime_install_driver.py"
+        assert argv[argv.index("--root") + 1] == root
+        assert argv[argv.index("--payload") + 1] == payload
+        assert argv[argv.index("--action") + 1] == "install"
+        assert "--runtime-only" in argv and "--bootstrap-python" in argv
+        assert env is environment
+        assert cwd == diagnostics == tmp_path and label == "engine"
+
+
 @pytest.mark.parametrize(
     "defect", [None, "identity", "missing-runtime", "manager", "cli", "mux",
                "missing-action", "same-native", "missing-native"],
