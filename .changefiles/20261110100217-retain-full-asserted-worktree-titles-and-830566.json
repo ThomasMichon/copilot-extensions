@@ -1,0 +1,9 @@
+{
+  "comment": "Retain full asserted worktree titles and new history with qualified writer semantics and display-only truncation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

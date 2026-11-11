@@ -138,10 +138,12 @@ def append(
         lines: list[str] = []
         if path.exists():
             try:
-                lines = path.read_text("utf-8").splitlines()
+                lines = path.read_text("utf-8").split("\n")
+                if lines[-1] == "":
+                    lines.pop()
             except OSError:
                 lines = []
-        lines.append(json.dumps(entry, ensure_ascii=False))
+        lines.append(json.dumps(entry, ensure_ascii=True))
         if len(lines) > MAX_ENTRIES:
             lines = lines[-MAX_ENTRIES:]
         # Atomic-ish replace so a concurrent reader never sees a torn file.
@@ -164,7 +166,7 @@ def read(
     try:
         if not path.exists():
             return []
-        for line in path.read_text("utf-8").splitlines():
+        for line in path.read_text("utf-8").split("\n"):
             line = line.strip()
             if not line:
                 continue

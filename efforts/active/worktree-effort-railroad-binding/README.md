@@ -36,8 +36,9 @@ plan the way a long or context-pressured session tends to today.
   source-worktree owner; broader participant responsibility does not transfer.
 - The full-title participant owns only its finite source PRs. All original
   participants, phases, native hosting, claims and holds retain their scopes.
-  The parent remains Draft while the finite plan is reviewed; review of this
-  slice is not administrative intake or completion of the whole #3581 body.
+  The parent remains Draft for the broader program. The finite lane executes
+  only its reviewed plan; that review is not administrative intake or
+  completion of the whole #3581 body.
 
 ## Context
 
@@ -211,7 +212,7 @@ The [bounded execution proposal](full-title-source.md) retains the full
 canonical-or-compatible-companion alternative and recommends a specific
 source design for review. Original Phases 1-4 remain unchanged and open.
 
-- [ ] Review the finite full-title source plan before functional edits.
+- [x] Review the finite full-title source plan before functional edits (#11952).
 - [ ] Retain full new assertions/current storage/history with an explicit sane
   bound, actual ordinary JSON/consumer fidelity and compatible short displays.
 - [ ] Preserve current/prior writer semantics through actual runtime contract
@@ -274,6 +275,17 @@ _Pending — this effort's plan itself will be submitted for review per the
 repo's `pr-self-merge` profile before Phase 1 implementation begins._
 
 ## Journal
+
+### 2026-11-10 - Finite full-title source implementation candidate
+
+The bounded plan merged in #11952 before functional edits. The ordinary
+writer retains full bounded assertions/current and new-history values,
+with an explicit version-3 request semantic and unchanged legacy baseline.
+The [source controls](full-title-source.md#journal) record six fail-first
+cases, 107 passing Worktrees consumers including real fresh-profile CLI and
+mixed-version transport, plus 12 unmodified Picker projection controls.
+Original binding/slice/native/journal work, parent completion and installed
+rollout remain open; source review/CI/merge and finite acceptance are pending.
 
 ### 2026-11-10 - Finite full-title source plan
 
