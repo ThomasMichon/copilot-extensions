@@ -18,7 +18,7 @@ from pathlib import Path
 
 from windows_qualification_contract import (
     DESKTOP_CASE, DESKTOP_PACKET, MCP_LIFETIME_CASE, MCP_LIFETIME_PACKET,
-    NATIVE_PACKETS, NATIVE_VERSIONS, VERSION,
+    NATIVE_LIFETIME_PACKETS, NATIVE_PACKETS, NATIVE_VERSIONS, VERSION,
     admit, canonical, request,
     validate_files, validate_result,
 )
@@ -384,10 +384,12 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             result["native_prerequisites"] = phase(
                 "native-prerequisites", prepare_native,
             )
-            if selected["name"] == "native-worktrees-caller-jobs":
+            if selected["name"] in NATIVE_LIFETIME_PACKETS:
                 from windows_qualification_lifetime import worktrees_lifetime
 
-                phase(native[3], lambda: worktrees_lifetime(root, output, prepare=owned))
+                phase(native[3], lambda: worktrees_lifetime(
+                    root, output, prepare=owned, packet=selected["name"],
+                ))
             else:
                 phase(native[3], lambda: owned(native_command(root, output, selected["name"]), 1800))
         elif selected["name"] == MCP_LIFETIME_PACKET:

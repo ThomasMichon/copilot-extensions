@@ -24,6 +24,10 @@ NATIVE_PACKETS = {
         "agent-worktrees", "test_native_seed_application", "test_public_caller_job_lifetime",
         "native-worktrees-caller-jobs",
     ),
+    "native-worktrees-copilot-caller-jobs": (
+        "agent-worktrees", "test_native_seed_application", "test_public_copilot_caller_job_lifetime",
+        "native-worktrees-copilot-caller-jobs",
+    ),
     "native-worktrees-manager-no-mux": (
         "agent-worktrees", "test_manager_application_launch", "test_manager_no_mux_decision",
         "native-worktrees-manager-no-mux",
@@ -59,6 +63,7 @@ NATIVE_PACKETS = {
         "native-driver-startup-cold-resume",
     ),
 }
+NATIVE_LIFETIME_PACKETS = ("native-worktrees-caller-jobs", "native-worktrees-copilot-caller-jobs")
 MCP_LIFETIME_PACKET = "mcp-caller-lifetime"
 MCP_LIFETIME_CASE = "test_native_caller_jobs_and_session_owner_lifetime"
 DESKTOP_PACKET = "desktop-capability"

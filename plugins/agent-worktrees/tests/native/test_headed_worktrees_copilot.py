@@ -279,12 +279,14 @@ def _qualify_native_worktrees(
     if caller_jobs:
         from agent_procutil import contained_test_mode
         from public_caller_jobs_fixture import (
-            application_unavailable, replace_application, run_public_caller_jobs,
+            application_unavailable, close_public_tty_jobs, prepare_public_tty_jobs,
+            replace_application, run_public_caller_jobs,
         )
 
-        assert control == "embody" and installed and not contained_test_mode()
+        assert public_caller and installed and not contained_test_mode()
         assert worktrees_environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
-    assert replacement_slot is None or caller_jobs
+    assert replacement_slot is None or (caller_jobs and control == "embody")
+    tty_ticket = None
     owner_python = str(worktrees_python) if installed else physical_executable(
         getattr(sys, "_base_executable", sys.executable),
     )
@@ -648,6 +650,14 @@ def _qualify_native_worktrees(
                 )
                 if public_tty:
                     def tty_invocation(command):
+                        nonlocal tty_ticket
+                        assert tty_ticket is None
+                        if caller_jobs:
+                            tty_ticket = tmp_path / (leg + "-tty-jobs-" + uuid4().hex)
+                            command = prepare_public_tty_jobs(
+                                command, python=worktrees_python, cwd=checkout,
+                                environment=environment, directory=tty_ticket,
+                            )
                         return (
                             "    assert sys.stdin.isatty() and sys.stdout.isatty()\n"
                             "    for key in ('TMUX','TMUX_PANE','PSMUX_PANE','PSMUX_SESSION',"
@@ -721,7 +731,7 @@ def _qualify_native_worktrees(
             assert query("has-session", "-t", outer_target).returncode == 1
             if control == "manager-mux" or public_caller:
                 assert query("has-session", "-t", target).returncode == 1
-            if caller_jobs:
+            if caller_jobs and not public_tty:
                 launched = run_public_caller_jobs(
                     public_command, python=worktrees_python, cwd=checkout,
                     environment=environment, directory=tmp_path / (leg + "-caller-jobs"),
@@ -850,6 +860,9 @@ def _qualify_native_worktrees(
                 return observed.returncode == 0 and observed.stdout.strip() == "1"
 
             def detach_tty():
+                nonlocal tty_ticket
+                if caller_jobs and tty_ticket is None:
+                    return
                 _until(attached_tty, f"{leg}: public copilot did not attach its real TTY",
                        diagnostic=caller_diagnostics)
                 observed = query(
@@ -857,15 +870,28 @@ def _qualify_native_worktrees(
                     "#{session_id}:#{session_created}|#{pane_id}",
                 )
                 assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
-                assert query("detach-client", "-s", target).returncode == 0
-                _until(result_file.exists, f"{leg}: public TTY caller did not return after detach",
+                if caller_jobs:
+                    proof = close_public_tty_jobs(tty_ticket)
+                    print(f"Native {control} {leg}: both caller Jobs closed; "
+                          f"actual attached caller exit {proof['callerExitCode']}", flush=True)
+                    tty_ticket = None
+                else:
+                    assert query("detach-client", "-s", target).returncode == 0
+                _until(result_file.exists, f"{leg}: public TTY caller cleanup did not return",
                        diagnostic=caller_diagnostics)
                 assert result_file.read_text(encoding="utf-8") == "0", caller_diagnostics()
                 _until(
                     lambda: query("has-session", "-t", outer_target).returncode == 1,
-                    f"{leg}: detached TTY caller's original pane did not close",
+                    f"{leg}: stopped TTY caller's original pane did not close",
                 )
                 assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
+                assert state["child_process_start_time"] == process_start_time(state["child_pid"])
+                assert state["host_process_start_time"] == process_start_time(state["host_pid"])
+                observed = query(
+                    "display-message", "-p", "-t", target,
+                    "#{session_id}:#{session_created}|#{pane_id}",
+                )
+                assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
 
             if public_tty:
                 _until(attached_tty, f"{leg}: public copilot did not retain its attached client",
@@ -1007,6 +1033,12 @@ def _qualify_native_worktrees(
                     _until(attached_tty, f"{leg}: live reuse did not attach its real TTY",
                            diagnostic=caller_diagnostics)
                     assert set(record.parent.glob("launch-attempts/*")) == launched_attempts
+                    if caller_jobs:
+                        detach_tty()
+                        assert [
+                            event["data"]["content"] for event in messages()
+                            if event["type"] == "user.message"
+                        ] == (prompts[:1] if leg == "fresh" else prompts[:-1])
                 else:
                     _until(
                         result_file.exists, f"{leg}: Manager reuse caller did not return",
@@ -1177,19 +1209,23 @@ def _qualify_native_worktrees(
                 assert "set-option" in commands and "source-file" in commands
     finally:
         try:
-            if state is not None and pid_alive(state["pid"]):
-                asyncio.run(broker(state, stop=True))
-            for owned_target in dict.fromkeys((outer_target, target)):
-                present = query("has-session", "-t", owned_target)
-                assert present.returncode in (0, 1), present.stderr
-                if present.returncode == 0:
-                    observed = query(
-                        "display-message", "-p", "-t", owned_target,
-                        "#{session_id}:#{session_created}|#{pane_id}",
-                    )
-                    assert observed.returncode == 0 and observed.stdout.strip() == identities.get(owned_target)
-                    assert query("kill-session", "-t", owned_target).returncode == 0
+            if tty_ticket is not None:
+                close_public_tty_jobs(tty_ticket)
         finally:
-            provider.shutdown()
-            provider.server_close()
-            thread.join(timeout=5)
+            try:
+                if state is not None and pid_alive(state["pid"]):
+                    asyncio.run(broker(state, stop=True))
+                for owned_target in dict.fromkeys((outer_target, target)):
+                    present = query("has-session", "-t", owned_target)
+                    assert present.returncode in (0, 1), present.stderr
+                    if present.returncode == 0:
+                        observed = query(
+                            "display-message", "-p", "-t", owned_target,
+                            "#{session_id}:#{session_created}|#{pane_id}",
+                        )
+                        assert observed.returncode == 0 and observed.stdout.strip() == identities.get(owned_target)
+                        assert query("kill-session", "-t", owned_target).returncode == 0
+            finally:
+                provider.shutdown()
+                provider.server_close()
+                thread.join(timeout=5)

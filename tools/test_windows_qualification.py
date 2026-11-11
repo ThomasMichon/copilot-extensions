@@ -179,6 +179,7 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
     ("desktop-capability", False),
     ("native-worktrees-embody", True), ("native-worktrees-copilot", True),
     ("native-worktrees-caller-jobs", True),
+    ("native-worktrees-copilot-caller-jobs", True),
     ("native-worktrees-manager-no-mux", True),
     ("native-worktrees-manager-mux", True),
     ("native-driver-auth-wait", True), ("native-driver-inflight", True),
@@ -716,12 +717,14 @@ def test_native_execution_gates_consumer_and_sanitizes_uploaded_files(
 
     monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
     monkeypatch.setattr(worker, "native_prerequisites", prepare)
-    if packet == "native-worktrees-caller-jobs":
+    if packet in contract.NATIVE_LIFETIME_PACKETS:
         import windows_qualification_lifetime
 
         monkeypatch.setattr(
             windows_qualification_lifetime, "worktrees_lifetime",
-            lambda root, output, *, prepare: prepare(worker.native_command(root, output, packet), 1200),
+            lambda root, output, *, prepare, packet: prepare(
+                worker.native_command(root, output, packet), 1200,
+            ),
         )
     value = request()
     value["selection"] = {"kind": "packet", "name": packet}
@@ -815,6 +818,7 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
 @pytest.mark.parametrize("unsupported", [
     "version", "selector", "packet", "inflight", "observation-loss",
     "startup-seed", "startup-no-seed", "startup-cold-resume", "copilot", "caller-jobs",
+    "copilot-caller-jobs",
     "manager-no-mux", "manager-mux",
     "workflow", "unprotected", "desktop",
 ])
@@ -831,6 +835,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "startup-cold-resume": "native-driver-startup-cold-resume",
         "copilot": "native-worktrees-copilot",
         "caller-jobs": "native-worktrees-caller-jobs",
+        "copilot-caller-jobs": "native-worktrees-copilot-caller-jobs",
         "manager-no-mux": "native-worktrees-manager-no-mux",
         "manager-mux": "native-worktrees-manager-mux",
         "desktop": contract.DESKTOP_PACKET,
@@ -843,7 +848,8 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
         "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
     ] if packet in {
-        "native-worktrees-copilot", "native-worktrees-caller-jobs", "native-worktrees-manager-no-mux",
+        "native-worktrees-copilot", "native-worktrees-caller-jobs",
+        "native-worktrees-copilot-caller-jobs", "native-worktrees-manager-no-mux",
         "native-worktrees-manager-mux",
     } else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
@@ -1230,6 +1236,7 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                     "${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || "
                     "needs.admit.outputs.packet == 'native-worktrees-copilot' || "
                     "needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || "
+                    "needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || "
                     "needs.admit.outputs.packet == 'native-worktrees-manager-no-mux' || "
                     "needs.admit.outputs.packet == 'native-worktrees-manager-mux') && "
                     "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
