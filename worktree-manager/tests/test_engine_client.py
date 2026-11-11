@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -244,6 +245,85 @@ def test_error_envelope_is_surfaced(monkeypatch):
     with pytest.raises(ec.EngineError) as ei:
         ec.list_worktrees("dotfiles", classify=False)
     assert "no such project" in str(ei.value)
+
+
+def _legacy_controller_engine(tmp_path, stdout, *, stderr="", returncode=1):
+    script = tmp_path / "legacy engine.py"
+    script.write_text(
+        "import sys\n"
+        "assert sys.argv[-2:] == ['get', 'update-controller']\n"
+        f"sys.stdout.write({stdout!r})\n"
+        f"sys.stderr.write({stderr!r})\n"
+        f"raise SystemExit({returncode})\n",
+        encoding="utf-8",
+    )
+    ec.set_engine_command([sys.executable, str(script)])
+
+
+def test_legacy_controller_probe_preserves_utf8_controller_path(tmp_path):
+    selected = "tools/\u66f4\u65b0.py"
+    _legacy_controller_engine(tmp_path, selected + "\n", returncode=0)
+    assert ec.get_value("example", "update-controller") == selected
+
+
+@pytest.mark.parametrize(("stdout", "stderr"), [
+    ("  \u2717 Unknown key: 'update-controller'. Use 'get keys' to list available keys.\n", ""),
+    ("\x1b[0;31m\u2717\x1b[0m Unknown key: 'update-controller'. Use 'get keys' to list available keys.\n", ""),
+    ("", "Unknown key: 'update-controller'"),
+    (json.dumps({"error": "Unknown key: 'update-controller'"}), ""),
+])
+def test_legacy_controller_probe_never_assumes_no_project_controller(tmp_path, monkeypatch, stdout, stderr):
+    from worktree_manager import project_update_controller
+
+    project = tmp_path / "project"
+    (project / ".agent-worktrees").mkdir(parents=True)
+    (project / ".agent-worktrees" / "config.yaml").write_text(
+        "update_controller:\n  windows: tools/update.py\n  linux: tools/update.py\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(ec, "run_engine_passthrough", lambda *_args, **_kwargs: pytest.fail("unexpected update"))
+    _legacy_controller_engine(tmp_path, stdout, stderr=stderr)
+    with pytest.raises(ec.EngineFeatureUnavailable, match="cannot determine.*project update controller"):
+        project_update_controller.handoff(["--project", "example"])
+
+    authority = SimpleNamespace(configured=True, mode="project", project="example")
+    with pytest.raises(ValueError, match="selected project update controller is unavailable"):
+        project_update_controller.handoff(["--project", "example"], authority=authority)
+
+
+def test_legacy_controller_probe_without_a_project_can_fall_back(tmp_path):
+    from worktree_manager import project_update_controller
+
+    _legacy_controller_engine(
+        tmp_path,
+        "  \u2717 Cannot load config: No active project could be resolved. agent-worktrees discovers "
+        "its context from the current directory (like git); run from inside a managed repo or "
+        "worktree, or pass --project <name>.\n",
+    )
+    assert project_update_controller.handoff([]) is None
+    with pytest.raises(ec.EngineError, match="no output"):
+        project_update_controller.handoff(["--project", "example"])
+
+
+@pytest.mark.parametrize(("returncode", "extra", "stderr", "expected"), [
+    (1, "unrelated output\n", "", "no output"),
+    (1, "", "permission denied", "permission denied"),
+    (2, "", "", "no output"),
+])
+def test_legacy_controller_probe_does_not_hide_other_failures(
+    tmp_path, returncode, extra, stderr, expected,
+):
+    from worktree_manager import project_update_controller
+
+    _legacy_controller_engine(
+        tmp_path,
+        "  \u2717 Unknown key: 'update-controller'. Use 'get keys' to list available keys.\n" + extra,
+        stderr=stderr, returncode=returncode,
+    )
+    with pytest.raises(ec.EngineError, match=expected) as failure:
+        project_update_controller.handoff(["--project", "example"])
+    assert "unrelated output" not in str(failure.value)
 
 
 def test_invalid_json_raises(monkeypatch):

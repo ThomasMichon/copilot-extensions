@@ -2321,6 +2321,15 @@ existing installer publication and per-slot leases remain in force underneath.
 Manager and engine retain their process boundary, including the engine's
 `--no-manager` re-entry, which does not bypass execution ownership.
 
+Project-controller discovery requires a capable selected engine. A legacy
+`Unknown key: 'update-controller'` response is not proof that the repository
+has no controller, even when durable authority has not been configured.
+Manager refuses that uncertainty with an engine setup/recovery diagnostic
+instead of choosing standalone execution. A confirmed no-project response is
+neutral only when the caller did not explicitly select a project. Fixed legacy
+diagnostics are recognized across UTF-8 stdout, stderr and JSON error responses;
+arbitrary stdout is not exposed as an error message.
+
 ```text
 worktree-manager update --wait
 worktree-manager update --detach --json

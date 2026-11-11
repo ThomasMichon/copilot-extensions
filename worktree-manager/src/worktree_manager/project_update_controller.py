@@ -36,7 +36,7 @@ def handoff(
         if managed:
             raise ValueError("selected project update controller is unavailable") from error
         detail = str(error)
-        if error.install_hint or "Unknown key: 'update-controller'" in detail:
+        if error.install_hint:
             return None
         if project is None and (
             "No active project could be resolved" in detail
