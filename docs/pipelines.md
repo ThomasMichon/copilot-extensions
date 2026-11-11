@@ -1996,6 +1996,19 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > filename also creates a new release identity. Complete Git history is required
 > to verify freshness, including identities integrated after a PR forked.
 
+**Packaged version manifests propagate bumps.** A release bump can change a
+`plugin.json` or `pyproject.toml` copied into another consumer through
+`packaged-assets.json` or `launch-wrapper-assets.json`, even when that
+manifest's version was unchanged on Dev. Version allocation adds one patch
+bump for each such receiver before materialization, transitively through
+declared copies. Explicit receiver bumps are retained rather than applied
+twice; self-references and cycles do not repeat a bump. Without a new bump
+intent, merely carrying a consumed changefile into another promotion does
+not trigger this propagation. This keeps changed bundled release metadata
+from silently reusing the receiver's immutable runtime version. Receiver
+metadata and asset declarations retain the existing contained,
+non-indirect version-path guard before allocation.
+
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes
 `copilot plugin update` report "already at latest" even when new code is

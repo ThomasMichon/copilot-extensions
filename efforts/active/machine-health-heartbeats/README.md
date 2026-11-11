@@ -84,6 +84,31 @@ The [unattended validation follow-up](inception-transcript.md#unattended-desktop
 removes mandatory operator-attended desktop observation, not the automated
 functional, launch-mechanism, result or cleanup checks.
 
+### Current delivery lane
+
+The current host owner continues beyond source qualification to an installed,
+reversible Windows hourly job and real inbound SSH/Bridge verification.
+Complete these observable outcomes in dependency order:
+
+1. Retain the job's complete installed execution closure independently of the
+   source checkout and replaceable marketplace payload. Prove supported
+   runtime selection, replacement and rollback through the existing owner.
+2. Converge the explicitly adopted local policy and native registration through
+   Agent Machines, preserving unrelated tasks/data and providing exact
+   disable/remove/readback behavior. Qualification is not an enrollment API;
+   the currently rendered disabled definitions cannot be installed ad hoc.
+3. Qualify first install, repeat convergence, failed replacement/rollback and
+   native periodic execution, then deploy only within the separately authorized
+   host scope. Verify actual local hourly results and real peer inbound access.
+
+The [enrollment amendment](local-collection.md#installed-windows-job-enrollment)
+defines the next review-before-code slice. Keep release availability, installed
+adoption, active execution and peer verification distinct. A missing additional
+CODEOWNER vote does not hold a Maintainer-authorized merge after the configured
+review and required CI pass; unresolved feedback, failed/missing CI and task
+holds still do. This lane neither completes the broader preference/carrier
+campaign nor authorizes another host or synchronized storage.
+
 ## Scope Approvals
 
 The operator authorizes source planning, review and implementation. The adopter
@@ -201,6 +226,9 @@ enrollment authority/holds remain unchanged.
 - [x] Prepare inert Windows/Linux job definitions and qualify collection
   support from the exact selected runtime before forwarding new operations;
   keep scheduler registration and native execution unqualified.
+- [x] Qualify isolated Windows scheduler execution, results, launch mechanism,
+  overlap, deadlines, Unicode paths and exact cleanup; merge the reviewed source.
+  Keep installed-runtime retention/replacement and production enrollment separate.
 - [ ] Qualify the selected carrier's delayed delivery, weekly slot reuse,
   conflicts, offline catch-up and reader-side outage reporting.
 - [ ] Obtain activation authority for the selected cohort, prove actual hourly
@@ -1425,3 +1453,23 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   including a real scheduler action under a non-ASCII payload/store path;
   five unchanged native cases were deselected. The 27-case pure packet passed
   all pinned focus kinds and the earlier ownership/admission controls.
+
+### 2026-11-11 - Windows scheduler qualification merged
+- #11974 merged as `93dfbd7c15d19a3c60da5fe5c61d2a3718e52e7c` after
+  current-head Copilot approval, green required checks and all three resolved
+  review threads. The authorized Maintainer CODEOWNER-review exception was
+  used per operator direction and documented on the PR. No CI, change request,
+  unresolved thread or deployment hold was bypassed.
+- Reconciled the four local commits only after their combined stable patch
+  matched the squash merge exactly. Pull-forward preserved independent
+  upstream testing documentation and manifest changes. The umbrella issue
+  remains open and this effort remains Active.
+- The isolated Windows fixture gate is complete; optional visual observation
+  remains a recorded diagnostic rather than an attendance requirement.
+  This does not qualify Linux, an installed runtime closure, replacement/
+  rollback, production registration, actual hourly execution or carrier receipt.
+- Next qualify retained installed-runtime closure and reversible replacement
+  through the existing lifecycle owner before current-host job enrollment.
+  Source merge, release availability, installed adoption and live connectivity
+  remain separate evidence. No production task, service or carrier was changed
+  by this merge.
