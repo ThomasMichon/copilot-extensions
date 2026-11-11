@@ -9,11 +9,11 @@ import pytest
 
 from agent_vault import kek
 
-# AES-256-GCM seal/unseal needs the optional 'cryptography' dep; the DPAPI/KEK-store
+# AES-256-GCM seal/unseal needs the optional PyCryptodome dep; the DPAPI/KEK-store
 # tests below do not. Skip only the crypto-dependent cases when it is absent (CI runs
 # a minimal env), matching the persistent-cache tests.
-_HAS_CRYPTO = importlib.util.find_spec("cryptography") is not None
-_needs_crypto = pytest.mark.skipif(not _HAS_CRYPTO, reason="cryptography not installed")
+_HAS_CRYPTO = importlib.util.find_spec("Cryptodome") is not None
+_needs_crypto = pytest.mark.skipif(not _HAS_CRYPTO, reason="pycryptodomex not installed")
 
 
 @pytest.fixture(autouse=True)

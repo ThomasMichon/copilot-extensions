@@ -21,7 +21,7 @@ class DpapiCacheCipher:
     def decrypt(self, ciphertext: bytes) -> bytes:
         if not ciphertext.startswith(MAGIC):
             raise CacheProtectionError(
-                "legacy cache requires cryptography before migration; cache was not replaced"
+                "legacy cache requires its Fernet backend; cache was not replaced"
             )
         try:
             return kek._dpapi(False, ciphertext[len(MAGIC):])

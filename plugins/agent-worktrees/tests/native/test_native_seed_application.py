@@ -11,7 +11,6 @@ import subprocess
 import sys
 import time
 from types import ModuleType, SimpleNamespace
-from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
@@ -368,8 +367,11 @@ def test_application_withdrawal_refuses_an_unowned_slot(tmp_path, monkeypatch):
     assert python.is_file()
 
 
-@pytest.mark.parametrize("failure", [None, "install", "selection", "retained"])
-def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, monkeypatch, failure):
+@pytest.mark.parametrize("failure,generation", [
+    (None, 2), (None, 1), ("install", 2), ("selection", 2),
+    ("generation", 2), ("prefix", 2), ("module", 2), ("retained", 2),
+])
+def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, monkeypatch, failure, generation):
     import public_caller_jobs_fixture as fixture
 
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(tmp_path))
@@ -406,6 +408,18 @@ def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, mon
             installed_python.parent.mkdir(parents=True)
             installed_python.touch()
             return subprocess.CompletedProcess(command, 0, 'setup callback\n{"state":"installed"}', "")
+        if len(calls) == 2:
+            assert command[:4] == [
+                str(incoming / ".venv" / "Scripts" / "python.exe"), "-I", "-B", "-c",
+            ]
+            return subprocess.CompletedProcess(command, 0, json.dumps({
+                "generation": 3 if failure == "generation" else generation,
+                "prefix": str((outgoing if failure == "prefix" else incoming) / ".venv"),
+                "module": str(
+                    (outgoing if failure == "module" else incoming)
+                    / ".venv" / "Lib" / "site-packages" / "agent_worktrees" / "__init__.py"
+                ),
+            }), "")
         assert command == [
             str(incoming / ".venv" / "Scripts" / "python.exe"), "-I", "-B",
             str(incoming / "runtime" / "versioned_runtime.py"),
@@ -417,19 +431,24 @@ def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, mon
         return subprocess.CompletedProcess(command, 0, json.dumps({"removed": [outgoing.name]}), "")
 
     monkeypatch.setattr(fixture.subprocess, "run", run)
-    arguments = dict(shell="selected-pwsh", cwd=tmp_path, environment={"FIXTURE": "selected"})
+    arguments = dict(
+        shell="selected-pwsh", cwd=tmp_path, environment={"FIXTURE": "selected"},
+        expected_generation=generation,
+    )
     if failure:
         with pytest.raises(AssertionError):
             fixture.replace_application(python, incoming, **arguments)
         assert outgoing.is_dir()
-        assert len(calls) == (2 if failure == "retained" else 1)
+        assert len(calls) == (
+            3 if failure == "retained" else 2 if failure in {"generation", "prefix", "module"} else 1
+        )
         if failure == "retained":
             assert (root / "current-version").read_text() == incoming.name
             assert (incoming / "install-success.json").is_file()
     else:
         selected = fixture.replace_application(python, incoming, **arguments)
         assert selected == incoming / ".venv" / "Scripts" / "python.exe"
-        assert not outgoing.exists() and len(calls) == 2
+        assert not outgoing.exists() and len(calls) == 3
 
 
 def test_generation_replacement_refuses_unowned_or_prebuilt_input(tmp_path, monkeypatch):
@@ -448,7 +467,58 @@ def test_generation_replacement_refuses_unowned_or_prebuilt_input(tmp_path, monk
     (incoming / ".venv").mkdir()
     for selected in (incoming, tmp_path / "foreign"):
         with pytest.raises(AssertionError):
-            replace_application(python, selected, shell="must-not-run", cwd=sandbox, environment={})
+            replace_application(
+                python, selected, shell="must-not-run", cwd=sandbox, environment={}, expected_generation=2,
+            )
+
+
+@pytest.mark.parametrize("damage", [None, "foreign", "prebuilt", "occupied"])
+def test_application_restoration_uses_only_owned_unbuilt_artifact(tmp_path, monkeypatch, damage):
+    import public_caller_jobs_fixture as fixture
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(sandbox))
+    outgoing = sandbox / "runtime" / "versions" / "2.0"
+    python = outgoing / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    artifact = (tmp_path if damage == "foreign" else sandbox) / "prepared-application"
+    artifact.mkdir()
+    (artifact / "application.json").write_text(json.dumps({
+        "construction": {"runtime_version": "1.0"},
+    }), encoding="utf-8")
+    (artifact / "wheel.whl").write_bytes(b"fixture wheel")
+    incoming = outgoing.with_name("1.0")
+    if damage == "prebuilt":
+        (artifact / ".venv").mkdir()
+    elif damage == "occupied":
+        incoming.mkdir()
+    calls = []
+
+    def replace(selected_python, selected_slot, **options):
+        calls.append(selected_slot)
+        assert selected_python == python and selected_slot == incoming
+        assert options == {
+            "shell": "selected-pwsh", "cwd": sandbox,
+            "environment": {"FIXTURE": "selected"}, "expected_generation": 1,
+        }
+        assert not (selected_slot / ".venv").exists()
+        assert (selected_slot / "wheel.whl").read_bytes() == b"fixture wheel"
+        assert (selected_slot / "application.json").read_bytes() == (artifact / "application.json").read_bytes()
+        return "selected original interpreter"
+
+    monkeypatch.setattr(fixture, "replace_application", replace)
+    options = dict(shell="selected-pwsh", cwd=sandbox, environment={"FIXTURE": "selected"})
+    if damage:
+        with pytest.raises(AssertionError):
+            fixture.restore_application(python, artifact, **options)
+        assert not calls
+        assert incoming.exists() is (damage == "occupied")
+    else:
+        assert fixture.restore_application(python, artifact, **options) == "selected original interpreter"
+        assert calls == [incoming]
+    assert python.is_file() and (artifact / "wheel.whl").is_file()
 
 
 @pytest.mark.parametrize("caller", ["embody", "copilot"])
@@ -683,37 +753,21 @@ def test_manager_mux_decision_retains_proof_only_after_correlated_preparation(tm
         }
 
 
-def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_jobs=False):
-    if caller_jobs:
-        from agent_procutil import contained_test_mode
-        from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
-
-        assert broker in {"embody", "copilot"} and not contained_test_mode()
-        assert os.environ.get(TEST_CONTEXT_ENV), "The native runner must own the daemon lease"
+def _prepare_native_application(inputs, profile, *, monkeypatch, uv, interpreter, deadline, generation):
     started = time.monotonic()
-    construction_budget = 420 if broker in {"embody", "copilot"} else 300
-    deadline = started + construction_budget
-    print("Application construction starting", flush=True)
-    sys.path.insert(0, str(ROOT / "tools"))
     import build_python_artifacts as builder
     import materialize_main as materializer
     import local_install_profile as profiles
-    from governed_feed_trust import _governed_feed_configured
 
-    print("Application build/profile owners imported", flush=True)
-    if not _governed_feed_configured():
-        pytest.skip("native application construction requires the configured governed feed")
-    assert os.environ.get("PYTEST_CURRENT_TEST")
-    uv = shutil.which("uv")
-    shell = shutil.which("pwsh") or shutil.which("powershell.exe") if os.name == "nt" else None
-    assert uv and (os.name != "nt" or shell)
-    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
-    assert interpreter is not None
-    inputs = tmp_path / "source-inputs"
     source, artifacts = inputs / "plugins" / "agent-worktrees", inputs / "wheels"
     source.mkdir(parents=True)
     artifacts.mkdir()
     _copy_application_inputs(SOURCE, source)
+    entry = source / "src" / "agent_worktrees" / "__init__.py"
+    entry.write_text(
+        entry.read_text(encoding="utf-8") + f"\n_fixture_application_generation = {generation}\n",
+        encoding="utf-8",
+    )
     materializer.materialize_uv_editable_ref_into(
         source_consumer_dir=SOURCE, dest_consumer_dir=source, canonical_root=ROOT,
     )
@@ -748,12 +802,43 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
         }},
     }), encoding="utf-8")
     prepared = profiles.prepare_registry_lock(
-        inputs, tmp_path / "profile", uv=uv, deadline=deadline,
+        inputs, profile, uv=uv, deadline=deadline,
         prepare_profile=True, component="agent-worktrees",
     )
     print(f"Application profile prepared: {time.monotonic() - started:.2f}s", flush=True)
     assert prepared["install_ready"] is True
-    application = Path(prepared["snapshot"]) / "applications" / "agent-worktrees"
+    return Path(prepared["snapshot"]) / "applications" / "agent-worktrees"
+
+
+def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_jobs=False):
+    if caller_jobs:
+        from agent_procutil import contained_test_mode
+        from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+
+        assert broker in {"embody", "copilot"} and not contained_test_mode()
+        assert os.environ.get(TEST_CONTEXT_ENV), "The native runner must own the daemon lease"
+    started = time.monotonic()
+    construction_budget = 420 if broker in {"embody", "copilot"} else 300
+    deadline = started + construction_budget
+    print("Application construction starting", flush=True)
+    sys.path.insert(0, str(ROOT / "tools"))
+    import local_install_profile as profiles
+    from governed_feed_trust import _governed_feed_configured
+
+    if not _governed_feed_configured():
+        pytest.skip("native application construction requires the configured governed feed")
+    assert os.environ.get("PYTEST_CURRENT_TEST")
+    uv = shutil.which("uv")
+    shell = shutil.which("pwsh") or shutil.which("powershell.exe") if os.name == "nt" else None
+    assert uv and (os.name != "nt" or shell)
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
+    engine = profiles.source_inputs.engine
+    inputs = tmp_path / "source-inputs"
+    application = _prepare_native_application(
+        inputs, tmp_path / "profile", monkeypatch=monkeypatch, uv=uv,
+        interpreter=interpreter, deadline=deadline, generation=1,
+    )
     declaration = json.loads((application / "application.json").read_text())
     home, caller = tmp_path / "home", tmp_path / "caller"
     home.mkdir()
@@ -765,10 +850,19 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
     shutil.copytree(application, slot)
     replacement = None
     if caller_jobs and broker == "embody":
-        assert not (application / ".venv").exists()
-        assert not (application / engine.runtime.COMPLETE_MARKER).exists()
-        replacement = slot.with_name(slot.name + ".repair." + uuid4().hex)
-        shutil.copytree(application, replacement)
+        replacement_inputs = tmp_path / "replacement-inputs"
+        incoming = _prepare_native_application(
+            replacement_inputs, tmp_path / "replacement-profile", monkeypatch=monkeypatch,
+            uv=uv, interpreter=interpreter, deadline=deadline, generation=2,
+        )
+        incoming_construction = json.loads((incoming / "application.json").read_text())["construction"]
+        replacement = root / "versions" / incoming_construction["runtime_version"]
+        assert replacement != slot
+        assert not (incoming / ".venv").exists()
+        assert not (incoming / engine.runtime.COMPLETE_MARKER).exists()
+        shutil.copytree(incoming, replacement)
+        shutil.rmtree(replacement_inputs)
+        assert not replacement_inputs.exists()
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("UV_", "COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_RT_",
@@ -801,6 +895,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
     checked = _run([
         python, "-I", "-B", "-c",
         "import argparse,json,os,sys;from pathlib import Path;"
+        "import agent_worktrees;assert agent_worktrees._fixture_application_generation == 1;"
         "from agent_worktrees import config,launch_seed_native,status_monitor_runtime;"
         "assert not status_monitor_runtime._status_monitor_enabled();"
         "launch_seed_native.require_current_runtime(Path(sys.argv[1]));"
@@ -847,6 +942,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
             manager, monkeypatch, broker, worktrees_python=python,
             worktrees_root=root, worktrees_environment=environment,
             caller_jobs=caller_jobs, replacement_slot=replacement,
+            rollback_application=application if replacement is not None else None,
         )
     elif broker:
         assert time.monotonic() < deadline, "Application construction exceeded 300 seconds"
@@ -908,8 +1004,8 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
     if replacement is None:
         assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
     else:
-        assert not slot.exists()
-        assert (root / "current-version").read_text().strip() == replacement.name
-        assert (root / "last-known-good").read_text().strip() == replacement.name
-        assert (replacement / engine.runtime.COMPLETE_MARKER).is_file()
+        assert not replacement.exists()
+        assert (root / "current-version").read_text().strip() == slot.name
+        assert (root / "last-known-good").read_text().strip() == slot.name
+        assert (slot / engine.runtime.COMPLETE_MARKER).is_file()
         assert (root / "projects.yaml").is_file()

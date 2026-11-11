@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import threading
+from types import SimpleNamespace
 
 import agent_procutil
 from packaging.requirements import Requirement
@@ -62,15 +63,19 @@ def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):
 '''
 
 CONSUMER = r'''
-import contextlib,io,json,os,pathlib,sys
-from agent_vault import cli,ssh_key
+import contextlib,hashlib,io,json,os,pathlib,sys
+from agent_vault import cache,cli,kek,ssh_key
 import agent_vault
 root=pathlib.Path(sys.argv[1])
 assert pathlib.Path(agent_vault.__file__).is_relative_to(pathlib.Path(sys.prefix))
 database=root/"fixture.kdbx"
 database.write_bytes(b"private credential-owner fixture")
 os.environ["KPDB"]=str(database)
-record=ssh_key._generate_record()
+saved=root/"fixture-record"
+first=not saved.exists()
+record=ssh_key._generate_record() if first else saved.read_text()
+if first:
+    saved.write_text(record)
 metadata=ssh_key._read_record(record)
 def send(request,**kwargs):
     if request["action"]=="ping":
@@ -94,9 +99,21 @@ with contextlib.redirect_stdout(output):
     assert cli.main(["ssh-key","install","--entry","SSH/node-a","--directory",str(directory),
         "--expected-fingerprint",prepared["fingerprint"],"--require-running","--json"])==0
 installed=json.loads(output.getvalue())
-assert installed["status"]=="installed"
+assert installed["status"]==("installed" if first else "reused")
 assert "BEGIN OPENSSH" not in output.getvalue() and record not in output.getvalue()
 assert len(list(directory.iterdir()))==2
+os.environ["AGENT_VAULT_CACHE_DIR"]=str(root/"protected-cache")
+os.environ["AGENT_VAULT_KEK_DIR"]=str(root/"protected-keks")
+data=root/"fixture-data.json"
+if first:
+    assert cache.PersistentCache().put("SSH/node-a","password","fixture-value")
+    sealed=kek.seal("fixture",b"fixture-sealed")
+    data.write_text(json.dumps({"sealed":sealed,
+        "kek_sha256":hashlib.sha256((root/"protected-keks"/"fixture.kek").read_bytes()).hexdigest()}))
+preserved=json.loads(data.read_text())
+assert cache.PersistentCache().get("SSH/node-a",readonly=True)=="fixture-value"
+assert kek.unseal("fixture",preserved["sealed"])==b"fixture-sealed"
+assert hashlib.sha256((root/"protected-keks"/"fixture.kek").read_bytes()).hexdigest()==preserved["kek_sha256"]
 print(json.dumps({"prepare":True,"protected_install":True,"installed_runtime":True}))
 '''
 
@@ -220,9 +237,7 @@ def native_profile_inputs(tmp_path_factory, *, crypto=True):
     pool.mkdir()
     _external_wheel(tmp_path, "psutil", "psutil", pool, uv, env)
     if crypto:
-        _external_wheel(tmp_path, "cryptography", "cryptography", pool, uv, env)
-        _external_wheel(tmp_path, "cffi", "cffi", pool, uv, env)
-        _external_wheel(tmp_path, "pycparser", "pycparser", pool, uv, env)
+        _external_wheel(tmp_path, "pycryptodomex", "Cryptodome", pool, uv, env)
     for package in [payload, *(payload / "libs").iterdir()]:
         if (package / "pyproject.toml").is_file():
             _backend(package)
@@ -232,9 +247,38 @@ def native_profile_inputs(tmp_path_factory, *, crypto=True):
         yield payload, home, env, pwsh
 
 
+@pytest.fixture(scope="class")
+def native_sequence(tmp_path_factory):
+    with contextmanager(native_profile_inputs)(tmp_path_factory) as inputs:
+        sequence = SimpleNamespace(inputs=inputs, selected=None, complete=False)
+        yield sequence
+        assert sequence.complete, "select the complete native profile sequence"
+
+
+class TestNativeProfileSequence:
+    @pytest.mark.timeout(180)
+    def test_base_repeat_and_ssh_switch(self, native_sequence):
+        native_sequence.selected = _exercise_native_profile(*native_sequence.inputs)
+
+    @pytest.mark.timeout(180)
+    def test_ssh_repeat_update_and_preservation(self, native_sequence):
+        assert native_sequence.selected is not None, "profile switch must run first"
+        _exercise_native_profile_upgrade(*native_sequence.inputs, native_sequence.selected)
+        native_sequence.complete = True
+
+
 @pytest.mark.timeout(180)
-def test_native_profile_construction_reuse_update_and_installed_ssh_consumer(native_inputs):
-    _exercise_native_profile(*native_inputs)
+def test_native_profile_failed_dependency_preserves_installed_consumer(native_inputs):
+    payload, home, env, pwsh = native_inputs
+    installer = payload / "scripts" / "install.ps1"
+    env["AGENT_VAULT_INSTALL_PROFILE"] = "ssh"
+    _run(_no_service_provision_command(home, installer, pwsh), env, home)
+    root = home / ".agent-vault"
+    selected = (root / "current-version").read_text().strip()
+    python_member = "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    python = root / "versions" / selected / python_member
+    _run([python, "-I", "-B", "-c", CONSUMER, home], env, home)
+    _refuse_missing_dependency(payload, home, env, pwsh, python)
 
 
 @pytest.mark.timeout(120)
@@ -367,6 +411,12 @@ def _exercise_native_profile(payload, home, env, pwsh):
     slot = root / "versions" / selected
     evidence = slot / ".runtime-input-origins.json"
     assert json.loads(evidence.read_text())["extras"] == ["ssh"]
+    _run([slot / python_member, "-I", "-B", "-c", CONSUMER, home], env, home)
+    return root, installer, base_slot, slot, selected, python_member
+
+
+def _exercise_native_profile_upgrade(payload, home, env, pwsh, state):
+    root, installer, base_slot, slot, selected, python_member = state
     completed = {str(p.relative_to(slot)): (p.read_bytes(), p.stat().st_mtime_ns)
                  for p in slot.rglob("*") if p.is_file()}
     env.pop("AGENT_VAULT_INSTALL_PROFILE")
@@ -376,6 +426,13 @@ def _exercise_native_profile(payload, home, env, pwsh):
             for p in slot.rglob("*") if p.is_file()} == completed
     manifest = json.loads((root / "deploy-manifest.json").read_text())
     assert manifest["runtime_profile"] == "ssh" and manifest["runtime_version"] == selected
+    _run([slot / python_member, "-I", "-B", "-c", CONSUMER, home], env, home)
+    preserved = {
+        str(path.relative_to(home)): (path.read_bytes(), path.stat().st_mtime_ns)
+        for directory in ("keys", "protected-cache", "protected-keks")
+        for path in (home / directory).rglob("*")
+        if path.is_file() and not path.name.endswith(".lock")
+    }
     project = payload / "pyproject.toml"
     version = manifest["source"]["version"]
     next_version = "9.0.0"
@@ -388,10 +445,21 @@ def _exercise_native_profile(payload, home, env, pwsh):
     assert json.loads(result.stdout) == {
         "prepare": True, "protected_install": True, "installed_runtime": True,
     }
+    assert {
+        member: ((home / member).read_bytes(), (home / member).stat().st_mtime_ns)
+        for member in preserved
+    } == preserved
+
+
+def _refuse_missing_dependency(payload, home, env, pwsh, installed_python):
+    root = home / ".agent-vault"
+    installer = payload / "scripts" / "install.ps1"
     incumbent = (root / "current-version").read_bytes()
+    project = payload / "pyproject.toml"
+    version = json.loads((root / "deploy-manifest.json").read_text())["source"]["version"]
     project.write_text(
-        project.read_text().replace(f'version = "{next_version}"', 'version = "10.0.0"')
-        .replace('ssh = ["cryptography>=50.0.0"]', 'ssh = ["missing-profile-artifact==1.0"]'),
+        project.read_text().replace(f'version = "{version}"', 'version = "10.0.0"')
+        .replace('ssh = ["pycryptodomex>=3.23.0"]', 'ssh = ["missing-profile-artifact==1.0"]'),
     )
     failed = subprocess.run(
         _no_service_provision_command(home, installer, pwsh, action="update"),
@@ -401,9 +469,10 @@ def _exercise_native_profile(payload, home, env, pwsh):
     assert failed.returncode != 0 and "missing-profile-artifact" in failed.stdout + failed.stderr
     assert (root / "current-version").read_bytes() == incumbent
     _run([
-        updated_python, "-I", "-B", "-c",
+        installed_python, "-I", "-B", "-c",
         "import runpy,sys; from pathlib import Path; runtime=runpy.run_path(sys.argv[1]); "
         "assert not runtime['is_complete'](Path(sys.argv[2]), '10.0.0+ssh')",
         payload / "scripts" / "versioned_runtime.py", root,
     ], env, home)
     assert json.loads((root / "runtime-profile.json").read_text())["profile"] == "ssh"
+    _run([installed_python, "-I", "-B", "-c", CONSUMER, home], env, home)

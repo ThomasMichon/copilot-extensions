@@ -6,6 +6,8 @@ import base64
 import binascii
 import hashlib
 import json
+import secrets
+import struct
 import time
 from pathlib import Path
 
@@ -23,51 +25,113 @@ MAX_RECORD_BYTES = 16384
 
 def _crypto():
     try:
-        from cryptography.hazmat.primitives import serialization
-        from cryptography.hazmat.primitives.asymmetric.ed25519 import (
-            Ed25519PrivateKey,
-            Ed25519PublicKey,
-        )
+        from Cryptodome.PublicKey import ECC
     except ImportError as exc:
         raise IdentityKeyError("crypto_unavailable", FAILURE_HINTS["crypto_unavailable"]) from exc
-    return serialization, Ed25519PrivateKey, Ed25519PublicKey
+    return ECC
+
+
+def _public_bytes(key) -> str:
+    if key.curve != "Ed25519":
+        raise ValueError("not an Ed25519 key")
+    return key.public_key().export_key(format="OpenSSH").strip()
+
+
+def _openssh_private(key, public: str) -> str:
+    """Serialize the existing unencrypted openssh-key-v1 record, not PKCS8."""
+    def field(value: bytes) -> bytes:
+        return struct.pack(">I", len(value)) + value
+
+    wire = base64.b64decode(public.split(" ")[1], validate=True)
+    raw_public = key.public_key().export_key(format="raw")
+    check = secrets.token_bytes(4)
+    private = (
+        check + check + field(b"ssh-ed25519") + field(raw_public)
+        + field(key.seed + raw_public) + field(b"")
+    )
+    padding = 8 - len(private) % 8
+    private += bytes(range(1, padding + 1))
+    blob = (
+        b"openssh-key-v1\0" + field(b"none") + field(b"none") + field(b"")
+        + struct.pack(">I", 1) + field(wire) + field(private)
+    )
+    encoded = base64.b64encode(blob).decode("ascii")
+    lines = "\n".join(encoded[index:index + 70] for index in range(0, len(encoded), 70))
+    return "-----BEGIN OPENSSH PRIVATE KEY-----\n" + lines + "\n-----END OPENSSH PRIVATE KEY-----\n"
+
+
+def _validate_private_encoding(value: str, public: str) -> None:
+    # Validate redundant public fields and reject encrypted/KDF input before
+    # invoking the library importer. It must not ignore damaged record framing.
+    lines = value.splitlines()
+    if (
+        len(lines) < 3 or lines[0] != "-----BEGIN OPENSSH PRIVATE KEY-----"
+        or lines[-1] != "-----END OPENSSH PRIVATE KEY-----"
+    ):
+        raise ValueError
+    blob = base64.b64decode("".join(lines[1:-1]), validate=True)
+    if not blob.startswith(b"openssh-key-v1\0"):
+        raise ValueError
+
+    def field(data: bytes) -> tuple[bytes, bytes]:
+        if len(data) < 4:
+            raise ValueError
+        size = struct.unpack(">I", data[:4])[0]
+        if size > len(data) - 4:
+            raise ValueError
+        return data[4:4 + size], data[4 + size:]
+
+    cipher, rest = field(blob[15:])
+    kdf, rest = field(rest)
+    options, rest = field(rest)
+    if cipher != b"none" or kdf != b"none" or options or rest[:4] != b"\0\0\0\1":
+        raise ValueError
+    wire, rest = field(rest[4:])
+    private, rest = field(rest)
+    if rest or wire != base64.b64decode(public.split(" ")[1], validate=True):
+        raise ValueError
+    if len(private) < 8 or len(private) % 8 or private[:4] != private[4:8]:
+        raise ValueError
+    key_type, rest = field(private[8:])
+    public_raw, rest = field(rest)
+    pair, rest = field(rest)
+    _, padding = field(rest)
+    if (
+        key_type != b"ssh-ed25519" or len(public_raw) != 32
+        or wire != struct.pack(">I", 11) + b"ssh-ed25519" + struct.pack(">I", 32) + public_raw
+        or len(pair) != 64 or pair[32:] != public_raw
+        or len(padding) > 8 or padding != bytes(range(1, len(padding) + 1))
+    ):
+        raise ValueError
 
 
 def public_metadata(public_key: str) -> dict:
-    serialization, _, public_type = _crypto()
-    from cryptography.exceptions import UnsupportedAlgorithm
+    backend = _crypto()
 
     try:
         if not isinstance(public_key, str) or len(public_key) > 256:
             raise ValueError
-        public = serialization.load_ssh_public_key(public_key.encode("ascii"))
-        if not isinstance(public, public_type):
+        if not public_key.startswith("ssh-ed25519 "):
             raise ValueError
-        canonical = public.public_bytes(
-            serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH,
-        ).decode("ascii")
+        public = backend.import_key(public_key.encode("ascii"))
+        canonical = _public_bytes(public)
         if canonical != public_key:
             raise ValueError
         wire = base64.b64decode(public_key.split(" ")[1], validate=True)
-    except (ValueError, TypeError, UnicodeError, binascii.Error, UnsupportedAlgorithm) as exc:
+    except (ValueError, TypeError, IndexError, UnicodeError, binascii.Error) as exc:
         raise IdentityKeyError("malformed_key", FAILURE_HINTS["malformed_key"]) from exc
     digest = base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii").rstrip("=")
     return {"public_key": canonical, "fingerprint": "SHA256:" + digest}
 
 
 def _generate_record() -> str:
-    serialization, private_type, _ = _crypto()
-    private = private_type.generate()
+    private = _crypto().generate(curve="Ed25519")
+    public = _public_bytes(private)
     record = {
         "schema": "agent-vault.ssh-key",
         "version": 1,
-        "private_key": private.private_bytes(
-            serialization.Encoding.PEM, serialization.PrivateFormat.OpenSSH,
-            serialization.NoEncryption(),
-        ).decode("ascii"),
-        "public_key": private.public_key().public_bytes(
-            serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH,
-        ).decode("ascii"),
+        "private_key": _openssh_private(private, public),
+        "public_key": public,
     }
     return base64.b64encode(
         json.dumps(record, sort_keys=True, separators=(",", ":")).encode("ascii")
@@ -75,8 +139,7 @@ def _generate_record() -> str:
 
 
 def decode_record(value: str) -> dict:
-    serialization, private_type, _ = _crypto()
-    from cryptography.exceptions import UnsupportedAlgorithm
+    backend = _crypto()
 
     try:
         if not isinstance(value, str) or not value or len(value) > MAX_RECORD_BYTES:
@@ -95,21 +158,18 @@ def decode_record(value: str) -> dict:
         canonical = json.dumps(record, sort_keys=True, separators=(",", ":")).encode("ascii")
         if canonical != decoded or base64.b64encode(decoded).decode("ascii") != value:
             raise ValueError
-        private = serialization.load_ssh_private_key(
-            record["private_key"].encode("ascii"), password=None,
-        )
-        if not isinstance(private, private_type):
+        public_metadata(record["public_key"])
+        _validate_private_encoding(record["private_key"], record["public_key"])
+        private = backend.import_key(record["private_key"].encode("ascii"))
+        if not private.has_private():
             raise ValueError
-        derived = private.public_key().public_bytes(
-            serialization.Encoding.OpenSSH, serialization.PublicFormat.OpenSSH,
-        ).decode("ascii")
+        derived = _public_bytes(private)
         if derived != record["public_key"]:
             raise ValueError
-        public_metadata(derived)
         return record
     except (
         ValueError, TypeError, KeyError, UnicodeError, binascii.Error,
-        RecursionError, UnsupportedAlgorithm,
+        RecursionError, IndexError,
     ) as exc:
         raise IdentityKeyError("malformed_key", FAILURE_HINTS["malformed_key"]) from exc
 

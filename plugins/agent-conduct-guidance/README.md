@@ -42,6 +42,12 @@ unrelated enabled plugins and conduct modules unchanged.
 
 ## What it does (and how to use it)
 
+The on-demand [managing-artifacts](skills/managing-artifacts/SKILL.md) entrypoint
+uses the [artifact lifecycle guide](docs/artifact-lifecycle.md) to classify
+scratch, execution history, durable knowledge, user deliverables and reusable
+caches. It separates custody/disposition from physical deletion and records
+unsupported runtime integration explicitly; it adds no storage runtime or hook.
+
 The on-demand [recovering-operational-locks](skills/recovering-operational-locks/SKILL.md)
 procedure also authorizes bounded operational-state hand-edits and stale-guard
 bypasses during an already-authorized repair. It preserves owner evidence,

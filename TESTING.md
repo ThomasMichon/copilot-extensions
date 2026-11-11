@@ -361,13 +361,19 @@ invocation close before native broker/history checks, and an ordinary bounded
 child must die with them. Fresh/resume/reuse and seed non-replay still apply.
 The same native conversation must also serve its broker while only its
 disposable Worktrees frontend is replaced. During the fresh leg, regular
-application installation constructs a fresh same-source repair generation
-from the emitted application, publishes both current and last-known-good
-selections, and acknowledges startup. Canonical GC with live-process and
-retention protection must retire the outgoing slot before the installed global
+application installation constructs a second byte-distinct generation through
+the canonical wheel/profile owners, publishes both current and last-known-good
+selections, and acknowledges startup. Both construction-input directories are
+removed before native execution. The selected interpreter must load the incoming
+generation's fixture marker from that slot's installed package. Canonical GC
+with live-process and retention protection must retire the outgoing slot before the installed global
 launcher reuses the same native conversation without seed replay. A protected
-outgoing slot fails this proof rather than being force-deleted. The resume leg
-uses the incoming generation and temporarily withdraws/restores that slot during
+outgoing slot fails this proof rather than being force-deleted. The fixture then
+reconstructs the collected original slot from its retained unbuilt application
+artifact through that same installer, verifies generation 1 and both selectors,
+and collects the replacement. The global command must again reuse the original
+live conversation without seed replay, and another broker request must succeed.
+The resume leg uses the restored generation and temporarily withdraws/restores that slot during
 its broker prompt. No completed virtualenv is copied. Its fixture directory stays under the outer native
 owner until leased residents settle; existing packets retain immediate inner
 sandbox cleanup. This tests the selected application installer/generation

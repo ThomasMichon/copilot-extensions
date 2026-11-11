@@ -6,6 +6,7 @@ from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import time
@@ -230,7 +231,7 @@ def close_public_tty_jobs(directory):
     return reply
 
 
-def replace_application(python, incoming, *, shell, cwd, environment):
+def replace_application(python, incoming, *, shell, cwd, environment, expected_generation):
     """Use regular installation and canonical GC, never overwrite a built venv."""
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"]).resolve()
     outgoing = Path(python).resolve().parent.parent.parent
@@ -264,6 +265,16 @@ def replace_application(python, incoming, *, shell, cwd, environment):
     assert (root / "projects.yaml").read_bytes() == projects
     selected_python = incoming / ".venv" / "Scripts" / "python.exe"
     assert selected_python.is_file()
+    checked = run([
+        selected_python, "-I", "-B", "-c",
+        "import json,sys;import agent_worktrees as app;"
+        "print(json.dumps({'generation':getattr(app,'_fixture_application_generation',None),"
+        "'prefix':sys.prefix,'module':app.__file__}))",
+    ], 15)
+    facts = json.loads(checked.stdout)
+    assert facts["generation"] == expected_generation, facts
+    assert Path(facts["prefix"]).resolve() == (incoming / ".venv").resolve(), facts
+    assert Path(facts["module"]).resolve().is_relative_to((incoming / ".venv").resolve()), facts
     collected = run([
         selected_python, "-I", "-B", incoming / "runtime" / "versioned_runtime.py",
         "--root", root, "--json", "gc", "--protect-pids", "--min-age-days", "0",
@@ -271,6 +282,23 @@ def replace_application(python, incoming, *, shell, cwd, environment):
     assert json.loads(collected.stdout) == {"removed": [outgoing.name]}, collected.stdout
     assert not outgoing.exists() and incoming.is_dir()
     return selected_python
+
+
+def restore_application(python, application, *, shell, cwd, environment):
+    """Reconstruct the collected original slot from its unbuilt canonical artifact."""
+    sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"]).resolve()
+    outgoing = Path(python).resolve().parent.parent.parent
+    application = Path(application).resolve()
+    assert outgoing.is_relative_to(sandbox) and application.is_relative_to(sandbox)
+    assert outgoing.parent.name == "versions" and not (application / ".venv").exists()
+    version = json.loads((application / "application.json").read_text())["construction"]["runtime_version"]
+    incoming = outgoing.parent / version
+    assert incoming.parent == outgoing.parent and incoming.name == version
+    assert incoming != outgoing and not incoming.exists()
+    shutil.copytree(application, incoming)
+    return replace_application(
+        python, incoming, shell=shell, cwd=cwd, environment=environment, expected_generation=1,
+    )
 
 
 @contextmanager

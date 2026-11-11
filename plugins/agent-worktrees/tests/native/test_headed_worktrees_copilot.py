@@ -258,7 +258,7 @@ def _qualify_native_worktrees(
     tmp_path, control, *, manager_script=None, manager_environment=None,
     manager_python=None, verify_reuse=True, worktrees_python=None,
     worktrees_root=None, worktrees_environment=None, caller_jobs=False, replacement_slot=None,
-    manager_picker=False,
+    manager_picker=False, rollback_application=None,
 ):
     from plugin_test_command_safety import private_mux_args
 
@@ -280,12 +280,13 @@ def _qualify_native_worktrees(
         from agent_procutil import contained_test_mode
         from public_caller_jobs_fixture import (
             application_unavailable, close_public_tty_jobs, prepare_public_tty_jobs,
-            replace_application, run_public_caller_jobs,
+            replace_application, restore_application, run_public_caller_jobs,
         )
 
         assert public_caller and installed and not contained_test_mode()
         assert worktrees_environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
     assert replacement_slot is None or (caller_jobs and control == "embody")
+    assert rollback_application is None or replacement_slot is not None
     tty_ticket = None
     owner_python = str(worktrees_python) if installed else physical_executable(
         getattr(sys, "_base_executable", sys.executable),
@@ -374,6 +375,8 @@ def _qualify_native_worktrees(
     prompts = ['Worktrees original\nsingle \' double " & $literal', "fresh broker", "resumed broker"]
     if control == "native-input":
         prompts.insert(2, "ISOLATED native keyboard input")
+    if rollback_application is not None:
+        prompts.insert(2, "rollback broker")
     outer_target = "headed-fixture-" + uuid4().hex
     target = manager_target if control == "manager-mux" or public_caller else outer_target
 
@@ -1072,7 +1075,7 @@ def _qualify_native_worktrees(
                 outgoing = Path(worktrees_python).parent.parent.parent
                 worktrees_python = replace_application(
                     worktrees_python, replacement_slot, shell=shell, cwd=checkout,
-                    environment=worktrees_environment,
+                    environment=worktrees_environment, expected_generation=2,
                 )
                 prefix[0] = owner_python = str(worktrees_python)
                 assert state["child_process_start_time"] == process_start_time(state["child_pid"])
@@ -1095,6 +1098,31 @@ def _qualify_native_worktrees(
                 asyncio.run(retained_prompt())
                 print("Native embody fresh: incoming generation selected; outgoing collected; "
                       "public launcher reused retained conversation", flush=True)
+                if rollback_application is not None:
+                    worktrees_python = restore_application(
+                        worktrees_python, rollback_application, shell=shell, cwd=checkout,
+                        environment=worktrees_environment,
+                    )
+                    prefix[0] = owner_python = str(worktrees_python)
+                    assert state["child_process_start_time"] == process_start_time(state["child_pid"])
+                    assert state["host_process_start_time"] == process_start_time(state["host_pid"])
+                    restored = run_public_caller_jobs(
+                        [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+                         str(public_launcher), "--project", "native-copilot", "embody",
+                         "--worktree-id", worktree_id, "--recovery",
+                         "--seed", "MUST NOT REPLAY AFTER ROLLBACK"],
+                        python=worktrees_python, cwd=checkout, environment=environment,
+                        directory=tmp_path / "rollback-reuse-jobs",
+                    )
+                    assert restored.returncode == 0, restored.stdout + restored.stderr
+                    reply = json.loads(restored.stdout)
+                    assert reply["ok"] and not reply["created"] and not reply["seeded"]
+                    assert reply["launch_action"] == "reuse" and reply["session"] == target
+                    assert set(record.parent.glob("launch-attempts/*")) == launched_attempts
+                    assert outgoing.is_dir() and not replacement_slot.exists()
+                    asyncio.run(asyncio.wait_for(broker(state, prompt=prompts[2]), 30))
+                    print("Native embody fresh: original generation restored; replacement collected; "
+                          "public launcher reused retained conversation", flush=True)
             elif caller_jobs:
                 with application_unavailable(worktrees_python):
                     assert state["child_process_start_time"] == process_start_time(state["child_pid"])
@@ -1104,7 +1132,7 @@ def _qualify_native_worktrees(
                       flush=True)
             else:
                 asyncio.run(retained_prompt())
-            expected = prompts[:2] if leg == "fresh" else prompts
+            expected = prompts[:3 if rollback_application is not None else 2] if leg == "fresh" else prompts
             if control == "native-input" and leg == "fresh":
                 assert query("send-keys", "-t", target, "-l", "--", prompts[2]).returncode == 0
                 assert query("send-keys", "-t", target, "Enter").returncode == 0

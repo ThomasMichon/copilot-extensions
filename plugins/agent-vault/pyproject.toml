@@ -7,7 +7,7 @@ exclude-newer = "7 days"
 
 [project]
 name = "agent-vault"
-version = "0.1.266-dev1"
+version = "0.1.267-dev1"
 description = "Local KeePassXC-backed secret store for Copilot CLI agents."
 readme = "README.md"
 license = "MIT"
@@ -53,13 +53,17 @@ agent-single-instance-lease = { path = "libs/single-instance-lease" }
 [project.optional-dependencies]
 # The persistent on-disk credential cache (opt-in) encrypts entries with Fernet,
 # and the seal/unseal envelope-KEK multi-machine system encrypts with AES-256-GCM -- both need
-# `cryptography`. Install with `pip install agent-vault[cache]` / `[kek]` (or
-# provide cryptography another way); without it the cache degrades to a safe no-op
-# and seal/unseal raise a clear error.
-cache = ["cryptography>=50.0.0"]
-kek = ["cryptography>=50.0.0"]
-ssh = ["cryptography>=50.0.0"]
-dev = ["pytest", "cryptography>=50.0.0"]
+# PyCryptodome in its isolated namespace, including native Windows ARM64.
+# Without it POSIX caches are inert, new Windows caches use DPAPI, and
+# seal/unseal raise a clear error. Existing formats and keys remain unchanged.
+cache = ["pycryptodomex>=3.23.0"]
+kek = ["pycryptodomex>=3.23.0"]
+ssh = ["pycryptodomex>=3.23.0"]
+dev = [
+    "pytest",
+    "pycryptodomex>=3.23.0",
+    "cryptography>=50.0.0; sys_platform != 'win32' or platform_machine != 'ARM64'",
+]
 
 [project.scripts]
 agent-vault = "agent_vault.__main__:main"
