@@ -97,6 +97,7 @@ def set_value(document: dict[str, Any], path: str, value: Any) -> None:
     ("validate", []), ("overview", []), ("intent", []),
     ("placement", ["--role", "reviewer"]), ("route", ["--request", "request-review-a"]),
     ("seed", ["--request", "request-review-a"]),
+    ("flow", ["--request", "request-review-a"]),
     ("materialize", ["--request", "request-review-a"]), ("inspect-materialization", []),
 ])
 def test_null_dispatcher_cli_is_read_only(
@@ -118,7 +119,7 @@ def test_null_dispatcher_cli_is_read_only(
     assert result.stderr == ""
     assert path.read_bytes() == before
     output = json.loads(result.stdout)
-    if command in {"placement", "route", "seed", "overview"}:
+    if command in {"placement", "route", "seed", "overview", "flow"}:
         assert "dispatcher-not-appointed" in output["holds"]
     if command == "overview":
         assert output["coverage"][0]["qualifiedCount"] == 1
@@ -667,3 +668,183 @@ def test_intent_covers_only_standing_assignments() -> None:
     assert [lane["desired"]["assignment"] for lane in result["lanes"]] == ["review-a"]
     assert result["lanes"][0]["state"] == "unlinked"
     assert result["lanes"][0]["reasons"] == ["not-linked-to-native-task"]
+
+
+def queued_flow(document: dict[str, Any]) -> dict[str, Any]:
+    snapshot = document["observations"]["dispatch"][0]
+    snapshot["task"].update(status="queued", owner=None, owner_session_id=None)
+    snapshot["task"]["standing_charter"]["accepted_materialization"] = None
+    snapshot["relationship"] = None
+    document["observations"]["owners"] = []
+    assignment: dict[str, Any] = document["assignments"][0]
+    return assignment
+
+
+def launch_flow(document: dict[str, Any], state: str = "prepared") -> dict[str, Any]:
+    snapshot = document["observations"]["dispatch"][0]
+    snapshot["task"]["status"] = "claimed"
+    snapshot["task"]["standing_charter"]["accepted_materialization"] = None
+    assignment = document["assignments"][0]
+    assignment["nativeWorktree"] = copy.deepcopy(snapshot["relationship"]["request"]["workspace"])
+    effect = {
+        "id": "launch-flow", "kind": "launch", "state": state,
+        "charterRevision": assignment["charter"]["revision"], "assignmentGeneration": 1,
+        "target": copy.deepcopy(assignment["nativeWorktree"]),
+        "nativeRef": "synthetic:launch-receipt" if state in {"admitted", "consumed", "accepted"} else None,
+        "nativeRequest": {"mode": "bridge-existing-worktree-create", "envelopeRef": "synthetic:original-envelope"},
+    }
+    assignment["effects"] = [effect]
+    return effect
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_flow_persists_assignment_and_declaration_before_allocation(document: dict[str, Any]) -> None:
+    queued_flow(document)
+    assert report(document).flow("unrelated")["nextStep"]["operation"] == "persist-complete-assignment"
+    document["assignments"][0]["nativeTask"] = None
+    document["observations"]["dispatch"] = []
+    before = copy.deepcopy(document)
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "reconcile"
+    step = result["nextStep"]
+    assert step["operation"] == "declare-standing-charter"
+    assert step["persistMaterializationRequired"] is True
+    assert step["materialization"] == report(document).materialize("request-review-a")
+    assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_flow_uses_one_keyed_allocation_then_reserves_returned_workspace(document: dict[str, Any]) -> None:
+    assignment = queued_flow(document)
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "persist-allocation"
+    assignment["effects"] = [{
+        "id": "allocate-flow", "kind": "allocate", "state": "prepared", "charterRevision": 1,
+        "target": None, "nativeRequest": None, "nativeRef": None,
+    }]
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "allocate"
+    assert result["nextStep"]["creationKey"] == assignment["creationKey"]
+    assert result["nextStep"]["effect"] == assignment["effects"][0]
+    owner = {"machine": "beta", "project": "example-control", "worktree": "returned"}
+    assignment["nativeWorktree"] = owner
+    assignment["effects"][0].update(state="confirmed", target=owner, nativeRef="synthetic:allocated")
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "reserve" and result["holds"] == []
+    assert result["nextStep"] == {
+        "owner": "agent-dispatch", "operation": "reserve-standing-charter",
+        "nativeTask": assignment["nativeTask"], "expectedRevision": 3,
+        "workspace": owner, "exactWorkspaceEvidenceRequired": True,
+    }
+    assert result["effectAuthorityGranted"] is False
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("own_pending", [False, True])
+def test_flow_does_not_ignore_another_assignments_pending_allocation(
+    document: dict[str, Any], own_pending: bool,
+) -> None:
+    assignment = queued_flow(document)
+    pending = {
+        "id": "foreign-allocate", "kind": "allocate", "state": "unknown", "charterRevision": 1,
+        "target": None, "nativeRequest": None, "nativeRef": None,
+    }
+    other = copy.deepcopy(assignment)
+    other.update(id="other", requestId="other-request", creationKey="other-key", nativeTask=None, effects=[pending])
+    document["assignments"].append(other)
+    if own_pending:
+        assignment["effects"] = [{**pending, "id": "own-allocate", "state": "prepared"}]
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "held" and result["nextStep"] is None
+    assert "allocation-outcome-unsettled" in result["holds"]
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_flow_persists_full_seed_before_launch_and_fences_acceptance(document: dict[str, Any]) -> None:
+    launch_flow(document)
+    assignment = document["assignments"][0]
+    assignment["effects"] = []
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "persist-launch"
+    step = result["nextStep"]
+    assert step["seed"] == report(document).seed("request-review-a")
+    assert step["seed"]["assignment"]["charter"] == assignment["charter"]
+    assert (step["assignmentGeneration"], step["charterRevision"]) == (1, 1)
+    effect = launch_flow(document)
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "launch"
+    assert result["nextStep"]["effect"]["nativeRequest"] == effect["nativeRequest"]
+    assert result["nextStep"]["expectedGeneration"] == 1
+    effect.update(state="consumed", nativeRef="synthetic:consumption")
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "accept"
+    assert result["nextStep"] == {
+        "owner": "agent-dispatch", "operation": "accept-standing-charter",
+        "nativeTask": assignment["nativeTask"], "expectedRevision": 3, "expectedGeneration": 1,
+        "workspace": assignment["nativeWorktree"], "ownerSessionId": "synthetic-head-a", "expectedHeadRevision": 7,
+    }
+    document["observations"]["dispatch"] = [bind_snapshot(document)]
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "settle-launch"
+    assert result["nextStep"]["acceptance"]["assignment_generation"] == 1
+    effect["state"] = "accepted"
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "accepted" and result["nextStep"] is None
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_flow_recovers_unknown_launch_with_original_envelope_not_new_head(document: dict[str, Any]) -> None:
+    effect = launch_flow(document, "unknown")
+    document["observations"]["owners"][0].update(head="new-head", headRevision=8)
+    before = copy.deepcopy(document)
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "recover-launch"
+    assert result["nextStep"] == {
+        "owner": "agent-bridge", "operation": "recover-effect-receipt", "effect": effect, "replayAllowed": False,
+    }
+    assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("path,value,reason", [
+    ("assignments.0.effects.0.assignmentGeneration", 2, "launch-assignment-generation-conflict"),
+    ("observations.dispatch.0.relationship.request.generation", 2, "native-reservation-generation-conflict"),
+    ("observations.dispatch.0.relationship.state", "pending", "native-relationship-not-bound"),
+    ("observations.owners.0.headRevision", None, "current-native-head-unqualified"),
+    ("observations.owners.0.head", "successor", "native-reserved-head-conflict"),
+    ("observations.owners.0.scope", "other/repo", "role-or-scope-mismatch"),
+    ("observations.dispatch.0.observedAt", "2025-12-31T23:00:00Z", "native-task-evidence-stale-or-future"),
+    ("observations.dispatch", [], "native-task-evidence-missing"),
+    ("observations.dispatcher.custody", "unknown", "dispatcher-custody-not-exclusive"),
+])
+def test_flow_refuses_stale_or_conflicting_fences(
+    document: dict[str, Any], path: str, value: Any, reason: str,
+) -> None:
+    launch_flow(document, "consumed")
+    set_value(document, path, value)
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "held" and result["nextStep"] is None
+    assert reason in result["holds"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("field,value", [("role", "scratch"), ("scope", "other/repo")])
+def test_flow_never_reports_wrong_role_or_scope_as_accepted(
+    document: dict[str, Any], field: str, value: str,
+) -> None:
+    document["assignments"][0]["nativeWorktree"] = document["observations"]["owners"][0]["owner"]
+    document["observations"]["owners"][0][field] = value
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "held" and result["nextStep"] is None
+    assert "role-or-scope-mismatch" in result["holds"]
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_flow_requires_new_launch_envelope_for_new_charter(document: dict[str, Any]) -> None:
+    launch_flow(document)
+    document["assignments"][0]["charter"]["revision"] = 2
+    snapshot = document["observations"]["dispatch"][0]
+    snapshot["task"]["standing_charter"]["declaration"] = bind_snapshot(document)["task"]["standing_charter"][
+        "declaration"]
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "held" and "launch-charter-revision-conflict" in result["holds"]

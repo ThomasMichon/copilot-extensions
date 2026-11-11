@@ -140,3 +140,27 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - The agent-roles packet passed 216 tests, including a subprocess run proving
   unchanged input bytes; Python F/E9 lint passed. No live fleet effect was
   performed; live venue validation remains outside this source-only authority.
+
+### 2026-11-11 - Phase 3 native assignment flow
+
+- Implemented the read-only `flow` command (#12026): persist complete assignment
+  and materialization, allocate through Worktrees, reserve through Dispatch,
+  preserve the complete launch seed and original envelope, start the retained
+  workspace through Bridge, then accept through Dispatch. The report names
+  owning adapters and revision, generation and head fences without performing
+  effects. Unknown effects require original-identity receipt recovery, never
+  replay; stale generations and incompatible evidence hold the flow.
+- Unit/behavior evidence: the agent-roles packet passed 236 tests and the
+  Dispatch standing-admission/charter packet passed 174 tests. After correcting
+  a test-helper annotation, the affected roles file passed 116 tests and the
+  native assignment integration file passed both tests. Python F/E9 lint and
+  all enforced type-check projects passed, with the corrected agent-roles
+  project checked for both Linux and Windows.
+- Simple E2E and fresh-state evidence: isolated native Dispatch admission and
+  the launch subprocess consumer preserve the complete seed, reject a stale
+  assignment generation and qualify coverage only after native acceptance.
+  Synthetic topology fixtures also cover absent optional evidence and
+  unchanged input bytes. Install-contract and documentation checks passed.
+- No live external venue, fleet activation or installation was exercised:
+  those require separate adoption and effect authority. Publication, review
+  and merge remain pending; later phases and the parent objective stay open.

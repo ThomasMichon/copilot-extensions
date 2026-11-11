@@ -137,6 +137,54 @@ No state grants effect authority. Resolve a pending proposal or adoption through
 the native declaration owner and its accepting head, never by editing saved
 observations, and recheck current native evidence before any effect.
 
+## Native assignment flow
+
+`flow <private-topology-json> --request <request-id>` reads the saved standing
+assignment and native observations to recommend one next step. Its `phase`,
+`holds` and `nextStep` distinguish preparation, native admission and acceptance.
+`nextStep` names the owner and operation; it is not an executable command or
+authorization. Obtain current commands and recheck custody, authority, resource
+admission and the returned fences through that native owner before acting.
+
+The sequence preserves these boundaries:
+
+1. Persist the complete assignment before allocation. Export and durably save
+   its materialization before declaring or reconciling the native standing task.
+   A missing assignment reports `persist-assignment`; a missing native link
+   reports the declaration step, not permission to create a worker.
+2. Persist an allocation effect and stable creation key before keyed Worktrees
+   allocation. Save the returned workspace, then reserve the standing charter
+   through Dispatch with `expectedRevision` and exact workspace evidence.
+3. After the native relationship is bound, persist the launch effect and the
+   full `seed` in the native request envelope. Retain `assignmentGeneration`
+   from the reservation and the expected `charterRevision`; a role label or
+   regenerated prompt does not substitute for the saved seed.
+4. Start only the retained workspace through Bridge. The proposal carries
+   `expectedRevision` and `expectedGeneration`; the saved effect must match the
+   current reservation generation and charter revision before this step.
+5. Once delivery is admitted or consumed and a fresh current head is observed,
+   accept through Dispatch using its revision, generation, original workspace,
+   `ownerSessionId` and `expectedHeadRevision` fences. Launch success is not
+   acceptance. A joined native accepted materialization permits `settle-launch`
+   to record that acceptance for the matching effect; `accepted` then has no
+   further step.
+
+`assignmentGeneration` is an optional nonnegative integer (or `null`) on saved
+effects for backward-compatible document reads, but this flow requires a
+nonnegative integer on a launch effect. It identifies the original native
+reservation, not the document or charter revision. Replacing a reservation
+invalidates the old launch generation;
+never rewrite that old effect to make it current. Succession retains the
+original assignment generation in accepted evidence rather than relaunching.
+
+A single unknown effect proposes receipt recovery with `replayAllowed: false`
+and the original effect record. Multiple unknown effects, unsettled conflicting
+operations, stale native evidence, incompatible revisions or ambiguous owners
+hold the flow. Reconcile through the existing owner instead of allocating a
+replacement or regenerating a launch. The helper reads neither envelope content
+nor receipt authority: durable full-seed preservation must be established by the
+writer and native consumer, not inferred from a valid reference or this report.
+
 ## State and effect protocol
 
 Persist intent under the existing native single writer, using the adopter's
