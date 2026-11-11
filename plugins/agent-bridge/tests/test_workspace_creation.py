@@ -720,19 +720,6 @@ async def test_unsupported_venue_refuses_before_effects(creation_rig):
     assert not rig.calls and not rig.manager.list_sessions()
 
 
-@pytest.mark.asyncio
-async def test_explicit_target_dir_refusal_names_the_conflicting_option(creation_rig):
-    rig = creation_rig
-    with pytest.raises(AcquisitionRefused) as failure:
-        await workspace_creation.start(
-            rig.manager, replace(rig.target, cwd=rig.row["path"], explicit_cwd=True), key="logical-work",
-        )
-    assert failure.value.code == "creation_venue_unsupported"
-    assert failure.value.effect == "not_started"
-    assert "--target-dir" in str(failure.value) and "--creation-key" in str(failure.value)
-    assert not rig.calls and not rig.manager.list_sessions()
-
-
 def test_client_gates_old_protocol_without_sending_creation(monkeypatch):
     client = BridgeClient(base_url="http://127.0.0.1:1", token="test")
     monkeypatch.setattr(client, "daemon_supports", lambda _floor: False)

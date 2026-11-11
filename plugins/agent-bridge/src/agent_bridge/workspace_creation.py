@@ -170,16 +170,8 @@ async def start(
         return await start_provider(manager, target, key=key, prompt=prompt, **options)
     if not isinstance(key, str) or not key.strip() or len(key) > 1024:
         raise AcquisitionRefused("creation_key_invalid", "creation key must be non-empty and at most 1024 characters")
-    if target.explicit_cwd:
-        raise AcquisitionRefused(
-            "creation_venue_unsupported",
-            "keyed creation allocates its own worktree and cannot use an explicit "
-            "target directory; omit --target-dir when passing --creation-key, or "
-            "omit --creation-key to start in an existing worktree",
-            effect="not_started",
-        )
     if (
-        target.type != "local" or not target.project
+        target.type != "local" or not target.project or target.explicit_cwd
         or target.codespace or target.container or target.spawn_command
     ):
         raise AcquisitionRefused(

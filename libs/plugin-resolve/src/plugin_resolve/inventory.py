@@ -152,6 +152,7 @@ def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
             if root.is_absolute() and root.exists():
                 declared_catalog = root.resolve(strict=True)
     matches = []
+    named: list[tuple[Path, dict[str, Any]]] = []
     catalogs = cache / "marketplaces"
     candidates = (
         [declared_catalog] if declared_catalog is not None
@@ -177,6 +178,10 @@ def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
             if candidate == declared_catalog:
                 raise ValueError(f"Installed marketplace catalog identity differs: {source}")
             continue
+        named.append((candidate, document))
+    # Choose among same-named clones before validating entries, so a stale
+    # clone that predates the requested plugin cannot fail the lookup.
+    for candidate, document in _select_registered_catalogs(source, registration, named):
         owner = document.get("owner")
         if not isinstance(owner, dict) or not isinstance(owner.get("name"), str) or not owner["name"].strip():
             raise ValueError(f"Installed marketplace owner metadata is missing: {source}")
@@ -187,7 +192,6 @@ def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
         if len(entries) != 1:
             raise ValueError(f"Installed marketplace catalog does not uniquely declare: {source}")
         matches.append((candidate, *publication_metadata(candidate, source)))
-    matches = _select_registered_catalogs(source, registration, matches)
     if len(matches) > 1:
         raise ValueError(
             f"Installed marketplace catalog is ambiguous: {source} "

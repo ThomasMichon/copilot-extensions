@@ -20,11 +20,11 @@ def _write(path: Path, data: Any) -> None:
     path.write_text(data if isinstance(data, str) else json.dumps(data), encoding="utf-8")
 
 
-def _catalog(cache: Path, directory: str, origin: str) -> Path:
+def _catalog(cache: Path, directory: str, origin: str, *, declares_helper: bool = True) -> Path:
     root = cache / "marketplaces" / directory
     _write(root / ".claude-plugin" / "marketplace.json", {
         "name": "fixture-market", "owner": {"name": "Example"},
-        "plugins": [{"name": "helper", "source": "helper"}],
+        "plugins": [{"name": "helper", "source": "helper"}] if declares_helper else [],
     })
     _write(root / "helper" / "plugin.json", {"name": "helper", "version": "1.0.0"})
     _write(root / ".git" / "config", f'[core]\n\tbare = false\n[remote "origin"]\n\turl = {origin}\n')
@@ -69,3 +69,14 @@ def test_unattributable_same_named_catalogs_still_refuse(inventory: tuple[Path, 
     _catalog(cache, "copy-two", origin)
     with pytest.raises(ValueError, match=r"catalog is ambiguous: .*copy-one, copy-two"):
         installed_item(SOURCE, home, cache)
+
+
+def test_stale_catalog_predating_the_plugin_does_not_block_selection(
+    inventory: tuple[Path, Path],
+) -> None:
+    home, cache = inventory
+    origin = "https://github.com/example-owner/fixture-market.git"
+    _catalog(cache, "example-owner--fixture-market", origin, declares_helper=False)
+    native = _catalog(cache, "example-owner-fixture-market", origin)
+    item = installed_item(SOURCE, home, cache)
+    assert item["inventory"]["catalog_root"] == str(native.resolve())
