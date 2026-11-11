@@ -199,6 +199,16 @@ request through the original broker. It then qualifies a fresh launch from the
 incoming slot and preserves both completion markers. Its timings use the
 separate `driver_application_live_replacement` JUnit property. This is bounded
 synthetic ACP package-replacement evidence, not headed CLI or SDK lifetime proof.
+The rollback variant reinstalls the original completed slot while a Host from
+the replacement is serving. It checks both current/last-good selectors, unchanged
+global launchers and completion markers, the selected interpreter's actual
+generation bytes, and the same live Host/child identities with another literal
+broker request. Each actual Host writes a fixture-only PID, generation, prefix
+and module-path observation, checked against its broker identity and expected
+slot before changing selection. A third launch exercises the restored selection.
+All variants launch through the installed global command; rollback timings use the separate
+`driver_application_live_rollback` property. This is current-source generation
+rollback, not a historical installed-binary or native Copilot compatibility claim.
 The existing 300-second construction boundary and ordinary runner containment
 remain; the governed feed is an explicit prerequisite. Select only this file with
 `--allow-explicit-tiers --test-timeout 300`. This private first-touch application
