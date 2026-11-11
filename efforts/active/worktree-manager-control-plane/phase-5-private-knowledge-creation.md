@@ -236,3 +236,58 @@ not a full typing pass. Required exact-head CI and review remain independent.
 No launch primitive changes, native desktop qualification, cold installation,
 installed-runtime observation, live provider effect or rollout is included.
 The native creation/protection owner and its real consumer sequence stay open.
+
+### 2026-11-10 - Standalone native creation and protection owner
+
+The standalone source owner implements separate create, read-only inspect and
+protect-default operations, with selected-runtime inventory capability
+`knowledge_repository_creation: 1`. It does not expose a Configuration catalog
+action or consumer yet. Named configured account selection, personal-private
+identity, initial provider README/branch, complete no-bypass safeguard reads,
+one-attempt creation and independently confirmed protection use the existing
+credential and finite caller-owned process boundaries.
+
+All 94 selected controls pass, including the actual native CLI, worker and
+synthetic credential/provider subprocess, separately confirmed protection
+repair after denial, timeout/descendant cleanup, cancellation, stale receipt
+serialization and affected legacy parser/set/reset/registration/binding
+contracts. Native source, configuration and credential sentinels remain
+unchanged apart from the operation's own receipt/lock evidence. These fixtures
+simulate remote effects in private local state, not GitHub enforcement.
+
+An earlier broad selection exceeded its unchanged 300-second group budget;
+it is not a full-suite pass. The final affected-contract selection preserves
+those deadlines. Worktrees remains pending for typing admission: its optional
+whole-project probe stops on duplicate setup modules, not a typing pass.
+Exact-head required CI and code review remain independent publication gates.
+Live creation/protection, installed/receiving evidence and the optional real
+Configuration consumer remain open; no launch primitive or rollout changes.
+
+The recovery controls additionally cover runtime update/rollback, interrupted
+repair from a prior successful receipt and failed read-only observations.
+Six controls fail on the original implementation; all 44 native-owner cases
+then pass with the corrections. Durable receipt lookup now uses stable
+installation/project/repository identity while previews retain runtime
+freshness. Repair remains incomplete until safeguards are reverified, and
+inspection failures preserve original creation evidence plus any available
+current metadata. These fix concrete recovery failures, not just review shape.
+
+The final identity controls compare inspection with the confirmed original
+repository ID/default branch and normalize repository slugs without folding
+branch names. The complete provider, credential and native-owner selection
+passes 91 cases, including case-equivalent protection repair and paginated
+policy reads. Original creation and current observations remain distinct when
+the provider identity or default branch drifts.
+
+The policy packet additionally accepts either pagination query order while
+retaining exact source/branch, unique parameter, page-size and next-page
+validation. All 33 provider cases pass, including reordered links and rejection
+of duplicate or unrelated query parameters; the native/credential baseline
+above remains unchanged.
+
+Receipt recovery retains canonical project/composition and original provider
+identity checks after knowledge binding. Only new creation, acquisition and
+registration require the harness to remain unbound. The selected lifecycle
+and legacy-admission packet passes 66 cases, including inspection and
+separately confirmed protection completion against an existing binding without
+changing its registry/configuration bytes.
