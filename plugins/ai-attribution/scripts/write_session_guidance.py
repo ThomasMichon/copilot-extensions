@@ -20,6 +20,9 @@ import time
 from pathlib import Path
 from typing import Mapping
 
+if __name__ == "__main__":
+    sys.dont_write_bytecode = True
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from attribution_profile import Profile, ProfileError, guidance as profile_guidance, load_profile
 

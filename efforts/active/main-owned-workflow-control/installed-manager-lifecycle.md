@@ -1947,3 +1947,44 @@ fresh preparation failure remains unresolved pending its original request
 evidence. Documentation-impact review updates TESTING.md. A changed diagnostic
 candidate may gather that evidence in the existing hosted lane, but no unchanged
 retry, accepted flake, cache waiver or parent completion is claimed.
+
+### November 11 - Preserve attribution payload and complete failure diagnostics
+
+Required CI 43087596699 passes at
+`fc4115e08af6410964b25decdd89f5274555f2c3`. Exact-source native run
+43087608190 passes normal/repair. Fresh passes preparation and completes the
+four actual lifecycle actions and same-conversation history, then refuses
+AI-attribution payload immutability. Settlement returns zero with no errors or
+remaining tasks; all six daemon instances settle. No preparation request fails,
+so no original error is recovered for the prior #11121 masking boundary. That
+cause remains unproven, not fixed or waived by this later preparation pass.
+
+The actual difference is captured first: one profile-helper bytecode file and
+its cache directory are added, with no original entry changed or removed and
+no truncation. The standalone guidance writer imports `attribution_profile`
+before any bytecode control. Real Python/PowerShell 7/Windows PowerShell
+entrypoints reproduce the addition with valid current policy output. The first
+test fixture had only a directory and correctly received unavailable policy;
+it now initializes a real Git repository rather than changing the producer's
+admission. The source correction disables bytecode only for standalone writer
+execution, before the import. Policy/cache/profile behavior and imported callers'
+cache policy remain unchanged.
+
+The after packet passes 91 writer/profile controls, with eleven platform skips
+uncredited. Each new positive repeats the real caller and compares the complete
+payload. The final observer also now preserves bounded differences for every
+changed payload before raising the unchanged first refusal. A two-owner real
+manifest regression fails before the change because the second report is lost;
+all 72 fresh-runtime controls pass afterward. No cache is excluded, deleted or
+resealed and no changed owner is certified.
+
+This run also has one actual CIM scan failure: native error/status code one,
+elapsed 1349ms, at 32 records. The session is created and closed, but this is
+not clean native-census evidence. Existing one-second queries, cadence, caps and
+fatal-error rules remain unchanged; the next exact-head proof must satisfy them
+too. This is not a Bridge communication failure.
+
+Documentation-impact review updates AI-attribution's standalone-read contract
+and TESTING.md's complete failure-report and cold-writer flows. Full fresh
+acceptance, authentic baseline update, frozen enforcement and Main adoption
+remain open.

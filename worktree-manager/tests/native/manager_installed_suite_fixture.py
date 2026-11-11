@@ -229,11 +229,16 @@ def prepare(directory):
 def _verify_retained_payloads(case, rows):
     from manager_suite_diagnostics import _snapshot_difference
 
+    failure = None
     for name, row in rows.items():
         actual = payloads._PROVENANCE["content_manifest"](Path(row["path"]))
         expected = payloads._PROVENANCE["content_manifest"](case / "suite-artifact" / "plugins" / name)
         if actual != expected:
-            failure = ValueError(f"{name}: the frozen installed payload changed")
+            detail = f"{name}: the frozen installed payload changed"
+            if failure is None:
+                failure = ValueError(detail)
+            else:
+                failure.add_note(detail)
             try:
                 suite._write(
                     case / "diagnostics" / f"suite-lifecycle-payload-difference-{name}.json",
@@ -241,7 +246,8 @@ def _verify_retained_payloads(case, rows):
                 )
             except OSError as write_error:
                 failure.add_note(f"Payload difference diagnostic write: {write_error}")
-            raise failure
+    if failure is not None:
+        raise failure
 
 
 def _verify_prepared(case, setup, run):

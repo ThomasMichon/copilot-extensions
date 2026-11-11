@@ -92,6 +92,27 @@ def test_fresh_retained_payload_change_never_reseals_or_loses_its_refusal(
     assert not (frozen / "__pycache__").exists()
 
 
+def test_fresh_payload_refusal_retains_differences_for_every_changed_owner(tmp_path, fresh_fixture):
+    (tmp_path / "diagnostics").mkdir()
+    rows = {}
+    for name in ("agent-index", "ai-attribution"):
+        frozen = tmp_path / "suite-artifact" / "plugins" / name
+        installed = tmp_path / "installed" / name
+        for root in (frozen, installed):
+            root.mkdir(parents=True)
+            (root / "module.py").write_text("unchanged", encoding="utf-8")
+        (installed / "module.pyc").write_bytes(b"added bytecode")
+        rows[name] = {"path": str(installed)}
+    with pytest.raises(ValueError, match="agent-index: the frozen installed payload changed"):
+        fresh_fixture["_verify_retained_payloads"](tmp_path, rows)
+    for name in rows:
+        report = json.loads(
+            (tmp_path / "diagnostics" / f"suite-lifecycle-payload-difference-{name}.json").read_text(),
+        )
+        assert report["counts"] == {"added": 1, "removed": 0, "changed": 0}
+        assert "module.pyc" in report["added"]
+
+
 def test_fresh_suite_refuses_shared_host_before_creating_a_case(tmp_path, monkeypatch, fresh_fixture):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):

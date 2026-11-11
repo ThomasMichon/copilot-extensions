@@ -10113,6 +10113,10 @@ admitted, execution-bound read-only actions, without applying repair or relaxing
 the original readiness refusal.
 Delivered payloads retain exact full-manifest identity after runtime construction;
 failed comparisons retain bounded path/hash differences without cache exemptions.
+Post-lifecycle comparison retains one bounded report for every changed payload
+before raising the original first refusal, including secondary diagnostic-write
+errors as notes. It does not stop at the first changed owner or certify any
+changed payload.
 Index configuration, role and catalog helpers explicitly disable bytecode writes;
 the runtime's existing owned-cache policy is unchanged.
 
@@ -10631,6 +10635,12 @@ no-provisioning assertion. A separate actual import control preserves the
 resident runtime's cache policy. This is a cold hook/no-op regression, not
 qualification of the admitted Manager lifecycle or a substitute for its hosted
 immutable-payload comparison.
+
+AI-attribution's writer controls similarly copy a cold payload and invoke the
+actual standalone Python and native shell entrypoints twice against a real Git
+repository. They require available policy guidance and compare every payload
+entry without mocking the producer. Missing-repository no-op behavior is not a
+substitute for that control, and POSIX skips on Windows remain uncredited.
 
 Dependency fixtures must also preserve source attribution. Stage matching
 publisher/project metadata and the declared local library graph at the real

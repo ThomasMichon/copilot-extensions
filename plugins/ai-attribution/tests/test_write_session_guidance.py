@@ -38,6 +38,65 @@ def _target(home: Path) -> Path:
     )
 
 
+@pytest.mark.parametrize("entrypoint", ["python", "pwsh", "powershell.exe", "bash"])
+def test_cold_writer_preserves_complete_payload(tmp_path, entrypoint):
+    from agent_procutil.owned_process import run_caller_owned
+
+    if entrypoint == "bash" and os.name == "nt":
+        pytest.skip("Native POSIX guidance wrapper required")
+    shell = shutil.which(entrypoint) if entrypoint != "python" else None
+    if entrypoint != "python" and not shell:
+        pytest.skip("Native guidance shell unavailable")
+    root = tmp_path / "payload"
+    shutil.copytree(
+        _PLUGIN / "scripts", root / "scripts",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copy2(_PLUGIN / "plugin.json", root / "plugin.json")
+    home = tmp_path / "home"
+    home.mkdir()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    env = {
+        **os.environ, "HOME": str(home), "USERPROFILE": str(home),
+        "APPDATA": str(home / "AppData"), "XDG_CONFIG_HOME": str(home / ".config"),
+        "COPILOT_PLUGIN_ROOT": str(root),
+        "PATH": str(Path(sys._base_executable).parent) + os.pathsep + os.environ["PATH"],
+    }
+    for key in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "COPILOT_CUSTOM_INSTRUCTIONS_DIRS"):
+        env.pop(key, None)
+    initialized = run_caller_owned(
+        ["git", "init", "-q", str(repo)], cwd=tmp_path, env=env, timeout=10,
+        max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    if entrypoint == "python":
+        argv = [sys.executable, "-I", str(root / "scripts" / "write_session_guidance.py")]
+    elif entrypoint == "bash":
+        argv = [shell, str(root / "scripts" / "write-session-guidance.sh")]
+    else:
+        argv = [shell, "-NoProfile", "-File", str(root / "scripts" / "write-session-guidance.ps1")]
+
+    def entries():
+        return {
+            str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
+            for path in root.rglob("*")
+        }
+
+    before = entries()
+    for _ in range(2):
+        result = run_caller_owned(
+            argv, cwd=repo, env=env, timeout=30,
+            input_text=json.dumps({"sessionId": "session-1", "cwd": str(repo)}),
+            max_stdout_bytes=8192, max_stderr_bytes=8192,
+        )
+        assert result.returncode == 0 and json.loads(result.stdout) == {}, result.stderr
+        guidance = _target(home).read_text(encoding="utf-8")
+        assert "attribution" in guidance.lower()
+        assert "No current AI attribution guidance was available" not in guidance
+        assert entries() == before
+
+
 def test_writes_current_policy(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         writer,
