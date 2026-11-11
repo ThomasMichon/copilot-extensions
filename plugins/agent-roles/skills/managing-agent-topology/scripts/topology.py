@@ -324,6 +324,8 @@ class Topology:
                 task["standing_charter"]["lifecycle"] != "retired"
                 or task["owner"] is not None or task["owner_session_id"] is not None
                 or relationship is None or relationship["state"] not in {"closed", "absent"}
+                or relationship["request"]["task_id"] != assignment["nativeTask"]
+                or relationship["request"]["workspace"] != assignment["nativeWorktree"]
             ):
                 return False
             owners.append(relationship["request"]["workspace"])

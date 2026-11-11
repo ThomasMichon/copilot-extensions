@@ -203,9 +203,12 @@ def test_reconcile_unmapped_native_task_requires_adoption(document: dict[str, An
 
 
 @pytest.mark.portfolio_tier("T1")
-@pytest.mark.parametrize("blocker", [None, "retaining", "missing", "stale", "owner"])
+@pytest.mark.parametrize("relationship_state", ["closed", "absent"])
+@pytest.mark.parametrize("blocker", [
+    None, "retaining", "missing", "stale", "owner", "task", "machine", "project", "worktree",
+])
 def test_reconcile_released_native_task_requires_fresh_retired_detachment(
-    document: dict[str, Any], blocker: str | None,
+    document: dict[str, Any], blocker: str | None, relationship_state: str,
 ) -> None:
     assignment = document["assignments"][0]
     observation = document["observations"]["owners"][0]
@@ -218,7 +221,7 @@ def test_reconcile_released_native_task_requires_fresh_retired_detachment(
     snapshot = document["observations"]["dispatch"][0]
     snapshot["task"].update(status="completed", owner=None, owner_session_id=None)
     snapshot["task"]["standing_charter"]["lifecycle"] = "retired"
-    snapshot["relationship"]["state"] = "closed"
+    snapshot["relationship"]["state"] = relationship_state
     document["observations"]["owners"] = []
     if blocker == "retaining":
         snapshot["relationship"]["state"] = "bound"
@@ -228,10 +231,17 @@ def test_reconcile_released_native_task_requires_fresh_retired_detachment(
         snapshot["observedAt"] = "2025-12-31T23:00:00Z"
     elif blocker == "owner":
         document["observations"]["owners"] = [observation]
+    elif blocker == "task":
+        snapshot["relationship"]["request"]["task_id"] = "synthetic-other-task"
+    elif blocker in {"machine", "project", "worktree"}:
+        snapshot["relationship"]["request"]["workspace"][blocker] = "synthetic-other"
+    before = copy.deepcopy(document)
     lane = report(document).reconcile()["lanes"][0]
+    assert document == before
     assert lane["newAssignmentCount"] == int(blocker is None)
     if blocker is not None:
         assert lane["dispositions"][0]["action"] == "reconcile-retirement-with-native-owner"
+        assert lane["dispositions"][0]["replacementAllowed"] is False
 
 
 @pytest.mark.portfolio_tier("T1")

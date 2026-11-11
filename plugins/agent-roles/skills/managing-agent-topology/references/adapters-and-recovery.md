@@ -287,9 +287,10 @@ A released assignment stops holding its lane only after its effects are settled
 and no saved owner observation still identifies it or its retained worktree.
 For a Dispatch-linked assignment, require fresh native evidence of a retired
 standing task, null task owner/session and a closed or absent original
-relationship. Missing or contradictory retirement evidence remains a hold, even
-when the saved assignment says `released`. Never erase observations or change
-their timestamps to manufacture a vacancy.
+relationship whose task ID and complete workspace match the saved assignment's
+native task and retained worktree. Missing or contradictory retirement evidence
+remains a hold, even when the saved assignment says `released`. Never erase
+observations or change their timestamps to manufacture a vacancy.
 
 A lane proposes `persist-new-standing-assignment` only for a remaining shortfall
 with no custody/discovery holds, no unresolved standing assignments and at least
