@@ -295,8 +295,9 @@ def test_selected_core_rejects_malformed_or_unsupported_contract_before_host_spa
     monkeypatch.setattr(launcher.subprocess, "run", lambda *args, **kwargs: SimpleNamespace(
         returncode=0, stdout=json.dumps(declaration),
     ))
+    from agent_remote_driver.session_host import launcher_spawn
     spawn = Mock(side_effect=AssertionError("unsupported Host must not start"))
-    monkeypatch.setattr(launcher, "spawn_instance", spawn)
+    monkeypatch.setattr(launcher_spawn, "spawn_host", spawn)
     with pytest.raises(RuntimeError, match="does not support"):
         launcher.launch_session_host(
             ["fixture-child-must-not-start"], state_dir=tmp_path, session_id="fixture-session",

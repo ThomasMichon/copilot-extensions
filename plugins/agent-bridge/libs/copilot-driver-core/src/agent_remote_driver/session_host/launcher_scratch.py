@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import subprocess
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -36,19 +35,6 @@ def launch_state(
         ):
             remove_scratch(fallback)
         raise
-
-
-def tracked_creation(phase: dict[str, bool]):
-    """Observe refusal at Popen itself, not at a potentially post-spawn wrapper."""
-    def create_host(*args, **kwargs):
-        phase["spawn_attempted"] = True
-        try:
-            return subprocess.Popen(*args, **kwargs)
-        except (OSError, ValueError):
-            phase["creation_refused"] = True
-            raise
-
-    return create_host
 
 
 def observe_exit(phase: dict[str, bool], process) -> None:
