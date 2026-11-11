@@ -189,7 +189,7 @@ def _installed_callback(tmp_path, monkeypatch, layout):
     monkeypatch.setenv("AGENT_MCP_HOME", str(bridges.parent))
     monkeypatch.setenv("AGENT_MCP_INSTALL_DIR", str(root))
     monkeypatch.setattr(config, "BRIDGES_DIR", bridges)
-    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda: [])
+    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda **_: [])
     for name in ("AGENT_MCP_NO_SERVE", "AGENT_MCP_NO_CUTOVER"):
         monkeypatch.delenv(name, raising=False)
     return module, root, slot, generation, bridges

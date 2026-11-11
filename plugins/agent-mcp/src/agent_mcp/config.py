@@ -22,7 +22,7 @@ import re
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import yaml
 
@@ -452,7 +452,9 @@ def normalize_bridge_name(
     return stem.casefold() if case_insensitive else stem
 
 
-def discover_plugin_bridge_candidates() -> list[tuple[str, Path]]:
+def discover_plugin_bridge_candidates(
+    *, include: Callable[[Path], bool] | None = None,
+) -> list[tuple[str, Path]]:
     """Return every normalized plugin-shipped bridge candidate.
 
     Unlike :func:`discover_plugin_bridges`, this lossless inventory preserves
@@ -468,6 +470,8 @@ def discover_plugin_bridge_candidates() -> list[tuple[str, Path]]:
             for sub in ("agents", "mcp"):
                 for ext in (".yaml", ".yml", ".json"):
                     for path in sorted(root.glob(f"*/{sub}/*{ext}")):
+                        if include is not None and not include(path):
+                            continue
                         resolved = path.resolve()
                         if resolved in seen:
                             continue
@@ -480,6 +484,8 @@ def discover_plugin_bridge_candidates() -> list[tuple[str, Path]]:
         for sub in ("agents", "mcp"):
             for ext in (".yaml", ".yml", ".json"):
                 for path in sorted(root.glob(f"*/*/{sub}/*{ext}")):
+                    if include is not None and not include(path):
+                        continue
                     resolved = path.resolve()
                     if resolved in seen:
                         continue

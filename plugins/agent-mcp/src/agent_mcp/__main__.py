@@ -193,22 +193,9 @@ def _cmd_status(_args: argparse.Namespace) -> int:
 
 
 def _cmd_installer_readiness(_args: argparse.Namespace) -> int:
-    from .config import (
-        BRIDGES_DIR,
-        discover_plugin_bridge_candidates,
-        normalize_bridge_name,
-    )
-    from .installer_readiness import emit, evaluate
+    from .installer_readiness import configured_readiness, emit
 
-    candidates = []
-    if BRIDGES_DIR.is_dir():
-        for path in sorted(BRIDGES_DIR.iterdir()):
-            suffix = path.suffix.lower()
-            if suffix not in (".yaml", ".yml", ".json"):
-                continue
-            candidates.append((normalize_bridge_name(path.name), path))
-    candidates.extend(discover_plugin_bridge_candidates())
-    return emit(evaluate(candidates))
+    return emit(configured_readiness())
 
 
 # ---------------------------------------------------------------------------
