@@ -108,6 +108,8 @@ def resolve_completed_python(
     try:
         current = current_version(root) or ""
     except OSError:
+        if os.name == "nt":
+            raise
         current = ""
     selected = candidate(current)
     if selected is not None:
