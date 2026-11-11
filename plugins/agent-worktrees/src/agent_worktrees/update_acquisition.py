@@ -192,6 +192,28 @@ def acquire(
         return status
 
 
+def _run_revalidated(
+    *args, revalidate: Callable[[], None], started: float, **kwargs,
+) -> subprocess.CompletedProcess[str]:
+    from . import activation_preservation, installer_run
+
+    deadline = monotonic() + kwargs["timeout"]
+    try:
+        revalidate()
+    except (ValueError, OSError, RuntimeError) as error:
+        raise installer_run.InstallerLaunchError(
+            "payload selection changed before acquisition"
+        ) from error
+    now = monotonic()
+    reserve = activation_preservation.SETTLEMENT_RETRY_RESERVE_S + (
+        installer_run._REAP_GRACE_S if _WINDOWS else _POSIX_CLEANUP_S
+    )
+    kwargs["timeout"] = min(deadline - now, _TOTAL_BUDGET_S - (now - started) - reserve)
+    if kwargs["timeout"] <= 0:
+        raise installer_run.InstallerLaunchError("payload acquisition budget exhausted")
+    return _run_update(*args, **kwargs)
+
+
 def acquire_missing(
     name: str, marketplace: str, copilot: str, *, cwd: Path,
     revalidate: Callable[[], None], copilot_home: Path,
@@ -203,13 +225,7 @@ def acquire_missing(
     started = monotonic()
 
     def checked_runner(*args, **kwargs):
-        try:
-            revalidate()
-        except (ValueError, OSError) as error:
-            raise installer_run.InstallerLaunchError(
-                "payload selection changed before acquisition"
-            ) from error
-        return _run_update(*args, **kwargs)
+        return _run_revalidated(*args, revalidate=revalidate, started=started, **kwargs)
 
     try:
         with activation_preservation.activation_custody(home=copilot_home) as custody:
@@ -254,13 +270,7 @@ def acquire_prepared(
             raise installer_run.InstallerLaunchError("payload acquisition budget exhausted")
 
         def checked(*args, **kwargs):
-            try:
-                revalidate()
-            except (ValueError, OSError, RuntimeError) as error:
-                raise installer_run.InstallerLaunchError(
-                    "payload selection changed before acquisition"
-                ) from error
-            return _run_update(*args, **kwargs)
+            return _run_revalidated(*args, revalidate=revalidate, started=started, **kwargs)
 
         with activation_preservation.activation_custody(home=Path(env["COPILOT_HOME"])) as custody:
             return _run_install(

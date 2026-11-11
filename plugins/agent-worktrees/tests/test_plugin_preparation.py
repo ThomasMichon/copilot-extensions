@@ -490,6 +490,54 @@ def test_equivalent_github_source_spelling_retains_active_payload(tool_profile):
     assert Path(result["entries"][0]["payloadRoot"]) == home / ".copilot" / "installed-plugins" / "first" / "sample"
 
 
+@pytest.mark.parametrize("layer", ["active", "profile"])
+@pytest.mark.parametrize("override", [
+    {"repo": "other/second", "canonical": "github:example/first"},
+    {"source": "git", "kind": "github", "url": "https://example.invalid/second.git"},
+])
+def test_portable_identity_cannot_hide_a_different_native_source(tool_profile, layer, override):
+    home, repo, settings, path = tool_profile
+    data = json.loads(path.read_text())
+    write(settings, data)
+    target = settings if layer == "active" else path
+    data["extraKnownMarketplaces"]["first"]["source"].update(override)
+    write(target, data)
+    with pytest.raises(ValueError, match="contradicts its native acquisition"):
+        preparation.observe(repo, home=home, include_tool_profile=True)
+    assert not list(home.iterdir())
+
+
+def test_consistent_portable_identity_preserves_native_source_equivalence(tool_profile):
+    home, repo, settings, path = tool_profile
+    data = json.loads(path.read_text())
+    write(settings, data)
+    data["extraKnownMarketplaces"]["first"]["source"].update(
+        kind="github", canonical="github:EXAMPLE/FIRST",
+    )
+    write(path, data)
+    install(home, "sample", "first")
+    assert preparation.observe(repo, home=home, include_tool_profile=True)["payloadsReady"]
+
+
+def test_deleted_prepared_payload_is_needed_without_trusting_its_old_receipt(tool_profile):
+    home, repo, _, path = tool_profile
+    row, = preparation.observe(repo, home=home, include_tool_profile=True)["entries"]
+    native_home = Path(row["payloadContext"]["copilotHome"])
+    write(native_home / ".installation-complete.json", {
+        "source": "sample@first",
+        "catalog": {"name": "first", "owner": {"name": "Fixture"}},
+        "entry": {"name": "sample", "version": "1.0.0"},
+    })
+    write(native_home / "settings.json", json.loads(path.read_text()))
+    result = preparation.observe(repo, home=home, include_tool_profile=True)
+    assert not result["payloadsReady"]
+    assert result["entries"][0]["state"] == "needed"
+    root = native_home / "installed-plugins" / "first" / "sample"
+    root.mkdir(parents=True)
+    with pytest.raises(ValueError, match="manifest is missing"):
+        preparation.observe(repo, home=home, include_tool_profile=True)
+
+
 @pytest.mark.parametrize("kind", ["git", "url"])
 def test_native_remote_source_kinds_use_the_isolated_acquisition_owner(tool_profile, kind):
     home, repo, _, path = tool_profile
@@ -553,4 +601,57 @@ def test_profile_git_prelaunch_failure_confirms_no_native_writer(tool_profile, m
             sys.executable, cwd=repo, staging=home / "prepared",
             revalidate=lambda: preparation.observe(repo, home=home, include_tool_profile=True),
         )
+    assert not activation_preservation_pending(native_home)
+
+
+@pytest.mark.parametrize("prepared", [False, True])
+@pytest.mark.parametrize("elapsed", [2, 241])
+def test_final_revalidation_consumes_the_native_launch_budget(selected, monkeypatch, prepared, elapsed):
+    from agent_procutil import owned_process
+    import plugin_resolve.preparation as native
+    from agent_worktrees import installer_run
+
+    home, repo, _ = selected
+    native_home = home / ".copilot"
+    clock = [0.0]
+    timeouts = []
+    monkeypatch.setattr(update_acquisition, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
+    monkeypatch.setattr(update_acquisition._auth, "mode", lambda: "off")
+    monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
+
+    def revalidate():
+        clock[0] += elapsed
+
+    def run(argv, **kwargs):
+        timeouts.append(kwargs["timeout"])
+        kwargs["on_settled"]()
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    def drive(source, definition, *, staging, repo, copilot_command, environment, runner, check_cancelled):
+        return runner(
+            [sys.executable, "-c", "pass"], cwd=repo, timeout=5,
+            env={**environment, "COPILOT_HOME": str(native_home)},
+        )
+
+    monkeypatch.setattr(update_acquisition, "_run_update", run)
+    monkeypatch.setattr(native, "prepare_payload", drive)
+    if prepared:
+        def acquire():
+            return update_acquisition.acquire_prepared(
+                "sample@first", {"source": {"source": "github", "repo": "example/first"}},
+                sys.executable, cwd=repo, staging=home / "prepared", revalidate=revalidate,
+            )
+        if elapsed > 240:
+            with pytest.raises(installer_run.InstallerLaunchError, match="budget exhausted"):
+                acquire()
+        else:
+            assert acquire().startswith("OK")
+    else:
+        result = update_acquisition.acquire_missing(
+            "sample", "first", sys.executable, cwd=repo, revalidate=revalidate,
+            copilot_home=native_home,
+        )
+        assert result.startswith("OK") is (elapsed < 240)
+    assert timeouts == ([3 if prepared else 118] if elapsed == 2 else [])
     assert not activation_preservation_pending(native_home)

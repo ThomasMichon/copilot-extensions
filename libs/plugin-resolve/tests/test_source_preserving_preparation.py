@@ -52,7 +52,10 @@ def git_origin(tmp_path: Path) -> GitOrigin:
     return root, first, second
 
 
-def test_acquisition_only_uses_owned_runner_without_registering(tmp_path: Path, git_origin: GitOrigin) -> None:
+@pytest.mark.parametrize("recover", [False, True])
+def test_acquisition_only_uses_owned_runner_without_registering(
+    tmp_path: Path, git_origin: GitOrigin, recover: bool,
+) -> None:
     root, _, _ = git_origin
     target = tmp_path / "target"
     init_checkout(target)
@@ -78,6 +81,26 @@ def test_acquisition_only_uses_owned_runner_without_registering(tmp_path: Path, 
     assert read_repo_settings(target).enabled == {}
     assert not (target / ".github" / "copilot" / "settings.local.json").exists()
     assert not (target / ".git" / "copilot-venue-plugins").exists()
+    if recover:
+        receipt = Path(calls[0][1]["env"]["COPILOT_HOME"]) / ".installation-complete.json"
+        assert receipt.is_file()
+        (payload / "plugin.json").unlink()
+        (payload / "marker.txt").unlink()
+        payload.rmdir()
+        checks: list[bool] = []
+
+        def check_cancelled() -> None:
+            if payload.exists():
+                checks.append(True)
+                assert not receipt.exists()
+
+        assert prepare_payload(
+            "helper@git-fixture", definition, staging=staging,
+            repo=target, copilot_command=command, environment=environment,
+            runner=run, check_cancelled=check_cancelled,
+        ) == payload
+        assert checks and len(calls) == 2
+        assert receipt.is_file()
     assert prepare_payload(
         "helper@git-fixture", definition, staging=staging,
         repo=target, copilot_command=command, environment=environment,

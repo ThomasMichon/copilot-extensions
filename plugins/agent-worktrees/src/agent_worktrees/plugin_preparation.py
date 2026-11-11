@@ -38,6 +38,16 @@ def _digest(value: object) -> str:
     ).encode("utf-8")).hexdigest()
 
 
+def _native_source(descriptor: dict, base: Path):
+    normalized = context.normalize_source(descriptor, base)
+    native = context.normalize_source({
+        key: value for key, value in descriptor.items() if key not in {"kind", "canonical"}
+    }, base)
+    if normalized != native:
+        raise PreparationError("Marketplace identity contradicts its native acquisition source.")
+    return native
+
+
 def _source_options(descriptor: dict, base: Path, kind: str) -> dict:
     for key in ("sha", "path"):
         if key in descriptor and (not isinstance(descriptor[key], str) or not descriptor[key].strip()):
@@ -74,12 +84,12 @@ def _selection(project: Path, home: Path, include_tool_profile: bool):
         enabled[source] = on
     for name, definition in desired["extraKnownMarketplaces"].items():
         descriptor = definition["source"]
-        normalized = context.normalize_source(descriptor, project)
+        normalized = _native_source(descriptor, project)
         options = _source_options(descriptor, project, normalized.kind)
         if name in marketplaces:
             previous_definition = marketplaces[name]
             previous_descriptor = previous_definition["source"]
-            previous = context.normalize_source(previous_descriptor, bases[name])
+            previous = _native_source(previous_descriptor, bases[name])
             if (
                 normalized != previous
                 or options != _source_options(previous_descriptor, bases[name], previous.kind)
@@ -123,13 +133,16 @@ def _prepared_root(native_home: Path, source: str, definition: dict) -> Path | N
         or not isinstance(entry, dict) or entry.get("name") != name
     ):
         raise PreparationError("Prepared payload receipt identifies a different source.")
-    manifest = plugin_manifest(root)
-    if manifest.get("name") != name:
-        raise PreparationError("Prepared payload manifest identifies a different plugin.")
     settings_path = native_home / "settings.json"
     profile._safe_path(native_home, settings_path)
     if _settings_document(settings_path).get("extraKnownMarketplaces", {}).get(marketplace) != definition:
         raise PreparationError("Prepared payload does not match its complete declared source.")
+    if not root.exists():
+        catalog_metadata(source, {}, catalog, entry)
+        return None
+    manifest = plugin_manifest(root)
+    if manifest.get("name") != name:
+        raise PreparationError("Prepared payload manifest identifies a different plugin.")
     catalog_metadata(source, manifest, catalog, entry)
     return root
 
@@ -166,7 +179,7 @@ def observe(
         descriptor = definition.get("source") if isinstance(definition, dict) else None
         if not isinstance(descriptor, dict):
             raise PreparationError("Every enabled plugin requires a declared marketplace source.")
-        normalized = context.normalize_source(
+        normalized = (_native_source if include_tool_profile else context.normalize_source)(
             descriptor, declared.marketplace_bases[marketplace],
         )
         native_home = (

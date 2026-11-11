@@ -178,3 +178,16 @@ plugin or successful repository setup.
   typing errors from the first CI run were corrected; both 25-file platform
   targets and the two focused acquisition/retention regressions passed locally.
   The corrected source still requires a new published-head CI/review result.
+- 2026-11-11: The next review identified contradictory portable/native source
+  identities, deleted payloads blocked by stale completion receipts, and final
+  revalidation time omitted from the launch budget. The candidate now rejects
+  identity overrides that disagree with native acquisition, observes absent
+  payloads as needed while retaining malformed/foreign-state refusals, and
+  invalidates the owned stale receipt before reinstalling. The existing
+  checkout lock serializes acquisition-only cache writers. Both missing-payload
+  paths recheck the caller and total deadlines after final revalidation, with
+  cleanup/settlement reserves and positively witnessed no-launch refusal.
+  The frozen preparation/native packet passed 61 controls; two real shared
+  acquisition controls include deletion/reinstallation without premature
+  receipt readiness. Strict Linux/Windows type targets, lint, install contracts
+  and vendored parity passed. New exact-head CI and review remain required.

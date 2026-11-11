@@ -216,6 +216,9 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
     location = origin.get("repo") if origin.get("source") == "github" else origin.get("url")
     if not isinstance(location, str) or not location:
         raise ValueError(f"Unsupported remote marketplace installation source: {marketplace}")
+    if previous:
+        check_cancelled()
+        receipt.unlink()
     if registered is None:
         settings.setdefault("extraKnownMarketplaces", {})[marketplace] = definition
         check_cancelled()
@@ -287,10 +290,11 @@ def prepare_payload(
 ) -> Path:
     """Acquire one source-qualified payload without repository registration."""
     home = _installation_home(staging, source, definition)
-    payload, _, _ = _install(
-        source, definition, home, repo, copilot_command,
-        environment=environment, runner=runner, check_cancelled=check_cancelled,
-    )
+    with checkout_lock(home):
+        payload, _, _ = _install(
+            source, definition, home, repo, copilot_command,
+            environment=environment, runner=runner, check_cancelled=check_cancelled,
+        )
     return payload
 
 
