@@ -30,7 +30,9 @@ async def main():
     )
     identity = Path(identity_path)
     temporary = identity.with_suffix(".pending")
-    temporary.write_text(json.dumps({"pid": process.pid}), encoding="utf-8")
+    temporary.write_text(json.dumps({
+        "pid": process.pid, "helperPid": os.getpid(),
+    }), encoding="utf-8")
     temporary.replace(identity)
     errors = []
     stderr_reader = threading.Thread(target=lambda: errors.append(process.stderr.read()), daemon=True)

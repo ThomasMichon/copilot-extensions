@@ -145,6 +145,10 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli):
         while time.monotonic() < deadline and process.poll() is None:
             try:
                 native = json.loads(identity.read_text(encoding="utf-8"))
+                if native["helperPid"] != process.pid:
+                    birth = process_start_time(native["helperPid"])
+                    assert birth and pid_alive(native["helperPid"])
+                    identities.append((native["helperPid"], birth))
                 birth = process_start_time(native["pid"])
                 assert birth and pid_alive(native["pid"])
                 identities.append((native["pid"], birth))
@@ -169,7 +173,9 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli):
         )
     assert process.returncode == 0, stdout + stderr + _logs(offline_cli.logs)
     observed = json.loads(output.read_text(encoding="utf-8"))
-    assert len(identities) == 2 and identities[0][0] != identities[1][0]
+    assert len({pid for pid, _ in identities}) == len(identities)
+    assert native["helperPid"] != native["pid"]
+    assert {native["helperPid"], native["pid"]}.issubset({pid for pid, _ in identities})
     assert observed["beforeTasks"]["tasks"] == observed["afterTasks"]["tasks"] == []
     assert observed["beforeSchedules"]["entries"] == observed["afterSchedules"]["entries"] == []
     assert observed["responseType"] == "assistant.message"
