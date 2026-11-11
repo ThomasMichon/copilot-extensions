@@ -1,9 +1,11 @@
 """Explicit native SDK provider lane using a prebuilt, locked application."""
 
 from concurrent.futures import ThreadPoolExecutor
+import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import threading
 import time
 
@@ -19,13 +21,32 @@ pytestmark = pytest.mark.portfolio_tier("T3")
 @pytest.mark.parametrize("mode", [
     "plain", "permission", "schedule", "cancel", "shell-pending", "agent-pending",
 ])
-def test_native_sdk_provider_through_real_broker(tmp_path, offline_cli, mode):
+def test_native_sdk_provider_through_real_broker(tmp_path, offline_cli, mode, record_testsuite_property):
     interpreter = os.environ.get("COPILOT_NATIVE_TEST_DRIVER_SDK_PYTHON")
     if not interpreter:
         pytest.skip("Select an already-built optional SDK application interpreter")
     assert Path(interpreter).is_absolute() and Path(interpreter).is_file()
     if mode in {"permission", "shell-pending"} and os.name != "nt":
         pytest.skip("Native PowerShell permission fixture requires Windows")
+
+    def executable_digest():
+        digest = hashlib.sha256()
+        with Path(offline_cli.executable).open("rb") as stream:
+            while block := stream.read(1024 * 1024):
+                digest.update(block)
+        return digest.hexdigest()
+
+    selected_digest = executable_digest()
+    version_settled = threading.Event()
+    selected = run_caller_owned(
+        [offline_cli.executable, "--version"], cwd=offline_cli.workspace,
+        env=offline_cli.env, timeout=20, max_stdout_bytes=128_000, max_stderr_bytes=128_000,
+        on_settled=version_settled.set,
+    )
+    assert version_settled.is_set() and selected.returncode == 0, selected.stdout + selected.stderr
+    selected_version = re.search(r"GitHub Copilot CLI (\S+)", selected.stdout)
+    assert selected_version, selected.stdout + selected.stderr
+    cli_version = selected_version.group(1).removesuffix(".")
     if mode in {"permission", "schedule", "shell-pending", "agent-pending"}:
         command = "Write-Output 'SDK_PERMISSION_FIXTURE'"
         if mode == "shell-pending":
@@ -122,6 +143,17 @@ def test_native_sdk_provider_through_real_broker(tmp_path, offline_cli, mode):
             ), identities
     assert result.returncode == 0, result.stdout + result.stderr + _logs(offline_cli.logs)
     observed = json.loads((tmp_path / "result.json").read_text(encoding="utf-8"))
+    assert len(observed["runtimeStatuses"]) == len(observed["facts"])
+    assert all(status["version"] and status["protocolVersion"] >= 1 for status in observed["runtimeStatuses"])
+    assert observed["sdkVersion"]
+    record_testsuite_property(f"native_sdk_versions.{mode}", json.dumps({
+        "cli": cli_version, "servers": observed["runtimeStatuses"],
+        "sdk": observed["sdkVersion"], "executableSha256": selected_digest,
+    }))
+    assert all(
+        status["version"] == cli_version for status in observed["runtimeStatuses"]
+    ), observed["runtimeStatuses"]
+    assert executable_digest() == selected_digest, "Selected executable changed during the native scenario"
     assert len(identities) == (3 if mode in {"plain", "shell-pending"} else 2)
     assert observed["permissions"] == (["shell"] if mode in {"permission", "shell-pending"} else [])
     for facts in observed["facts"]:
