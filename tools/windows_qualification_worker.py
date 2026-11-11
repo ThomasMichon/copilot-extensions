@@ -17,13 +17,43 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 from windows_qualification_contract import (
-    MCP_LIFETIME_CASE, MCP_LIFETIME_PACKET, NATIVE_PACKETS, NATIVE_VERSIONS, VERSION,
+    DESKTOP_CASE, DESKTOP_PACKET, MCP_LIFETIME_CASE, MCP_LIFETIME_PACKET,
+    NATIVE_PACKETS, NATIVE_VERSIONS, VERSION,
     admit, canonical, request,
     validate_files, validate_result,
 )
 from windows_qualification_transport import Transport
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def desktop_tests(root: Path, output: Path, request_id: str) -> int:
+    """Keep the one visible control inside ordinary caller containment."""
+    from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
+    from windows_qualification_desktop import require_hosted_owner
+
+    admission = {**os.environ, "WINDOWS_QUALIFICATION_DESKTOP": "1"}
+    require_hosted_owner(admission, system=platform.system(), contained=False)
+    (output / "junit").mkdir(parents=True, exist_ok=True)
+    with TestSandbox(prefix="desktop-capability-", dir=Path(admission["RUNNER_TEMP"])) as directory:
+        sandbox = Path(directory)
+        env = isolated_environment(admission, sandbox, allow_explicit_tiers=True)
+        env.update({
+            "PYTHONPATH": str(root / "tools"),
+            "WINDOWS_QUALIFICATION_DESKTOP_REQUEST": request_id,
+            "WINDOWS_QUALIFICATION_DESKTOP_OUTPUT": str(output / "packet"),
+        })
+        return run_contained(
+            [
+                sys.executable, "-m", "pytest", "-q",
+                str(root / "tools/test_windows_qualification_desktop_native.py"),
+                "-k", DESKTOP_CASE, "-p", "pytest_portfolio_guard",
+                "--basetemp=" + str(sandbox / "pytest"),
+                "-o", "cache_dir=" + str(sandbox / "pytest-cache"),
+                "--junitxml=" + str(output / "junit/desktop.xml"), "--timeout=50",
+            ],
+            cwd=root, env=env, sandbox=sandbox, limits=Limits(wall_seconds=60),
+        )
 
 
 def mcp_lifetime(root: Path, output: Path) -> int:
@@ -328,6 +358,16 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                 sys.executable, str(Path(__file__)), "tools",
                 "--candidate", str(root), "--output", str(output),
             ], 720, allow_empty=True))
+        elif selected["name"] == DESKTOP_PACKET:
+            phase(DESKTOP_PACKET, lambda: owned([
+                sys.executable, str(Path(__file__)), "desktop",
+                "--candidate", str(root), "--output", str(output),
+            ], 90, allow_empty=True))
+            evidence = output / "packet/desktop-capability.json"
+            if evidence.is_file():
+                if evidence.is_symlink() or evidence.stat().st_size > 16 * 1024 * 1024:
+                    raise ValueError("desktop capability evidence exceeds its regular-file bound")
+                result["desktop"] = json.loads(evidence.read_text("utf-8"))
         elif native:
             def prepare_native():
                 preparation = os.environ.get("WINDOWS_QUALIFICATION_NATIVE_PREPARATION", "success")
@@ -377,7 +417,10 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                         "agent-mcp" if selected.get("name") == MCP_LIFETIME_PACKET else "agent-bridge"
                     )
                 )
-                python = venv_root(root) / target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+                python = (
+                    Path(sys.executable) if selected.get("name") == DESKTOP_PACKET else
+                    venv_root(root) / target / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+                )
                 metadata = owned([
                     str(python), "-c",
                     "import json,platform,sys; print(json.dumps({"
@@ -395,12 +438,12 @@ def execute(root: Path, value: dict, output: Path) -> dict:
         result["outcome"] = (
             "qualified" if (
                 selected["kind"] == "packet" and not native
-                and selected["name"] != MCP_LIFETIME_PACKET
+                and selected["name"] not in {MCP_LIFETIME_PACKET, DESKTOP_PACKET}
             ) or (
                 result["tests"] and all(case["outcome"] == "passed" for case in result["tests"])
             ) else "incomplete"
         )
-        if native or selected.get("name") == MCP_LIFETIME_PACKET:
+        if native or selected.get("name") in {MCP_LIFETIME_PACKET, DESKTOP_PACKET}:
             validate_result(
                 result, value, run_id=result["run_id"], control_sha=result["control_sha"],
                 run_attempt=result["run_attempt"],
@@ -428,7 +471,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
 def main() -> int:
     """Admit before candidate checkout, or run one already-admitted request."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("operation", choices=("admit", "execute", "tools", "sanitize"))
+    parser.add_argument("operation", choices=("admit", "execute", "tools", "desktop", "sanitize"))
     parser.add_argument("--candidate", type=Path)
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
@@ -451,6 +494,10 @@ def main() -> int:
         if value["selection"]["kind"] != "tools":
             raise ValueError("tool worker requires a tools request")
         return tool_tests(candidate, value["selection"], args.output.resolve())
+    if args.operation == "desktop":
+        if value["selection"] != {"kind": "packet", "name": DESKTOP_PACKET}:
+            raise ValueError("desktop worker requires its explicit named packet")
+        return desktop_tests(args.candidate.resolve(), args.output.resolve(), value["request_id"])
     if args.operation == "sanitize":
         if value["selection"].get("name") not in NATIVE_PACKETS:
             raise ValueError("native sanitization requires its named packet")

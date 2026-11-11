@@ -164,6 +164,7 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
 
 @pytest.mark.parametrize("packet,native", [
     (None, False), ("bridge-http52", False), ("mcp-caller-lifetime", False),
+    ("desktop-capability", False),
     ("native-worktrees-embody", True), ("native-worktrees-copilot", True),
     ("native-worktrees-caller-jobs", True),
     ("native-driver-auth-wait", True), ("native-driver-inflight", True),
@@ -507,6 +508,124 @@ def test_mcp_lifetime_execution_uses_owned_native_lane_without_cli_or_desktop_pr
     assert len(calls) == (1 if native_exit else 2)
 
 
+@pytest.mark.parametrize("outcome", ["passed", "skipped", "empty", "missing-evidence", "foreign"])
+def test_desktop_packet_requires_exact_case_and_independent_calibration(
+    tmp_path, monkeypatch, outcome,
+):
+    from test_windows_qualification_desktop import evidence
+
+    root, output = tmp_path / "candidate", tmp_path / "evidence"
+    root.mkdir()
+    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(worker, "Transport", lambda *_: SimpleNamespace(
+        git=lambda *_: SimpleNamespace(stdout="b" * 40),
+    ))
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        if "-c" in argv:
+            assert argv[0] == sys.executable
+            return SimpleNamespace(returncode=0, stdout='{"system":"Windows"}', stderr="")
+        assert argv[2:] == ["desktop", "--candidate", str(root), "--output", str(output)]
+        assert kwargs["timeout"] == 90
+        (output / "junit").mkdir()
+        case = (
+            '<testcase classname="tools.test_windows_qualification_desktop_native" '
+            f'name="{contract.DESKTOP_CASE}">'
+            + ('<skipped/>' if outcome == "skipped" else "") + "</testcase>"
+        )
+        (output / "junit/actual.xml").write_text(
+            "<testsuite>" + ("" if outcome == "empty" else case) + "</testsuite>",
+            encoding="utf-8",
+        )
+        if outcome != "missing-evidence":
+            (output / "packet").mkdir()
+            report = evidence()
+            if outcome == "foreign":
+                report["nonce"] = "d" * 32
+            (output / "packet/desktop-capability.json").write_text(json.dumps(report), encoding="utf-8")
+        return SimpleNamespace(returncode=0, stdout="actual desktop capture", stderr="")
+
+    monkeypatch.setitem(sys.modules, "agent_procutil.owned_process", SimpleNamespace(run_caller_owned=run))
+    monkeypatch.setattr(worker, "native_prerequisites", lambda *_a, **_k: pytest.fail("unrelated native preparation"))
+    value = request()
+    value["selection"] = {"kind": "packet", "name": contract.DESKTOP_PACKET}
+    actual = worker.execute(root, value, output)
+    assert actual["outcome"] == {
+        "passed": "qualified", "skipped": "incomplete", "empty": "incomplete",
+        "missing-evidence": "failed", "foreign": "failed",
+    }[outcome]
+    assert [row["name"] for row in actual["phases"]] == [
+        "source-and-selection", contract.DESKTOP_PACKET, "test-runtime",
+    ]
+    assert len(calls) == 2 and "native_prerequisites" not in actual
+
+
+def test_desktop_packet_preserves_normal_caller_containment_and_budgets(tmp_path, monkeypatch):
+    import plugin_test_containment as containment
+
+    root, output, sandbox = tmp_path / "candidate", tmp_path / "evidence", tmp_path / "sandbox"
+    sandbox.mkdir()
+    for key, value in {
+        "RUNNER_TEMP": str(tmp_path), "GITHUB_ACTIONS": "true",
+        "RUNNER_ENVIRONMENT": "github-hosted",
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(worker.platform, "system", lambda: "Windows")
+    monkeypatch.setattr(containment, "TestSandbox", lambda **_: nullcontext(str(sandbox)))
+    calls = []
+
+    def contained(argv, **kwargs):
+        calls.append((argv, kwargs))
+        assert kwargs["limits"] == containment.Limits(wall_seconds=60)
+        assert "native_application" not in kwargs and "qualification" not in kwargs
+        assert kwargs["env"]["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+        assert kwargs["env"]["WINDOWS_QUALIFICATION_DESKTOP"] == "1"
+        assert kwargs["env"]["WINDOWS_QUALIFICATION_DESKTOP_REQUEST"] == "a" * 32
+        assert kwargs["env"]["WINDOWS_QUALIFICATION_DESKTOP_OUTPUT"] == str(output / "packet")
+        assert kwargs["sandbox"] == sandbox and kwargs["cwd"] == root
+        assert "--timeout=50" in argv and argv[argv.index("-k") + 1] == contract.DESKTOP_CASE
+        return 0
+
+    monkeypatch.setattr(containment, "run_contained", contained)
+    assert worker.desktop_tests(root, output, "a" * 32) == 0
+    assert len(calls) == 1
+    monkeypatch.setenv("RUNNER_ENVIRONMENT", "self-hosted")
+    with pytest.raises(ValueError, match="disposable hosted owner"):
+        worker.desktop_tests(root, tmp_path / "refused", "a" * 32)
+    assert len(calls) == 1 and not (tmp_path / "refused").exists()
+
+
+@pytest.mark.parametrize("selected,message", [
+    (focused(), "desktop worker requires its explicit named packet"),
+    ({"kind": "packet", "name": contract.DESKTOP_PACKET},
+     "desktop capability requires its explicit disposable hosted owner"),
+])
+def test_actual_desktop_controller_refuses_before_output_or_native_access(tmp_path, selected, message):
+    value, payload = request(), event()
+    value["selection"] = selected
+    payload["inputs"]["request"] = contract.canonical(value)
+    event_path, output = tmp_path / "event.json", tmp_path / "not-created"
+    event_path.write_text(contract.canonical(payload), encoding="utf-8")
+    environment = {
+        **os.environ, "GITHUB_EVENT_PATH": str(event_path),
+        "GITHUB_ACTOR": "owner", "GITHUB_TRIGGERING_ACTOR": "owner",
+        "GITHUB_REF": "refs/heads/main", "GITHUB_REF_PROTECTED": "true",
+        "GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "self-hosted",
+        "RUNNER_TEMP": str(tmp_path),
+    }
+    completed = subprocess.run(
+        [sys.executable, "-B", str(Path(worker.__file__)), "desktop",
+         "--candidate", str(tmp_path), "--output", str(output)],
+        env=environment, capture_output=True, text=True, timeout=15,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert completed.returncode != 0 and message in completed.stderr
+    assert not output.exists()
+
+
 def test_mcp_lifetime_retains_containment_until_its_canonical_native_owner(tmp_path, monkeypatch):
     import _admission_protocol
     import plugin_test_cache
@@ -682,7 +801,7 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
 @pytest.mark.parametrize("unsupported", [
     "version", "selector", "packet", "inflight", "observation-loss",
     "startup-seed", "startup-no-seed", "startup-cold-resume", "copilot", "caller-jobs",
-    "workflow", "unprotected",
+    "workflow", "unprotected", "desktop",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
     tmp_path, monkeypatch, unsupported,
@@ -697,11 +816,12 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "startup-cold-resume": "native-driver-startup-cold-resume",
         "copilot": "native-worktrees-copilot",
         "caller-jobs": "native-worktrees-caller-jobs",
+        "desktop": contract.DESKTOP_PACKET,
     }.get(unsupported)
     selected = (
         {"kind": "packet", "name": packet} if packet else focused()
     )
-    files = [
+    files = list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
         "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
         "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
         "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
@@ -754,6 +874,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
 @pytest.mark.parametrize("packet", [
     "native-driver-auth-wait", "native-driver-inflight", "native-driver-observation-loss",
     "native-driver-startup-seed", "native-driver-startup-no-seed", "native-driver-startup-cold-resume",
+    contract.DESKTOP_PACKET,
 ])
 @pytest.mark.parametrize("missing", [True, False])
 def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_transport(
@@ -761,7 +882,7 @@ def test_receiver_packet_requires_its_candidate_fixture_before_provider_or_trans
 ):
     client = object.__new__(client_module.Client)
     client.root = tmp_path
-    files = [
+    files = list(contract.DESKTOP_FILES) if packet == contract.DESKTOP_PACKET else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
     ]
