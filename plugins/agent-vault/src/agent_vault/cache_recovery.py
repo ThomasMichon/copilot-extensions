@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -24,6 +25,11 @@ DIRECTORY = "preserved-cache"
 ADOPTION_SECONDS = 10.0
 MAX_CACHE_BYTES = 16 * 1024 * 1024
 FILES = ("credential-cache.enc", "credential-cache.key")
+COORDINATED = b'{"version":1}'
+_HELPER_BOOTSTRAP = (
+    "import sys;sys.path.insert(0,sys.argv.pop(1));"
+    "import runpy;runpy.run_module('agent_vault.cache_recovery',run_name='__main__',alter_sys=True)"
+)
 
 
 def _json(raw):
@@ -196,8 +202,46 @@ def _copy_originals(base: Path, compartment: Path, snapshot: str, windows) -> di
     }
 
 
-def _inspect_original(base: Path, source: str | None, snapshot: str | None) -> dict:
+def require_coordinated(base: Path, record: dict | None) -> None:
+    if record is None:
+        return
+    require_source(base, record)
+    _, compartment, _ = _paths(base, record["source"])
+    marker = compartment / "coordinated.json"
+    if not _path_exists(marker) or _read(marker, _windows()) != COORDINATED:
+        raise CacheProtectionError("legacy credential replacement coordination is pending")
+
+
+def _import_pending(store: dict, current: Path) -> None:
     from .cache import PersistentCache
+
+    cache = PersistentCache(current)
+    with cache._store_lock():
+        target = cache._read_store(readonly=True, strict=True)
+        changed = False
+        for entry, fields in store["entries"].items():
+            if not isinstance(fields, dict):
+                raise CacheProtectionError("invalid legacy credential fields")
+            for field, value in fields.items():
+                if not isinstance(value, dict) or "rotation" not in value:
+                    continue
+                _, selected = cache._fields_for_write(target, entry)
+                if field in selected and selected[field] != value:
+                    raise CacheProtectionError("legacy credential journal conflicts with current state")
+                selected[field] = value
+                changed = True
+        if changed and not cache._write_store_unlocked(target):
+            raise CacheProtectionError("legacy credential journals could not be preserved")
+
+
+def _inspect_original(
+    base: Path, source: str | None, snapshot: str | None, *, coordinate: bool = False,
+) -> dict:
+    from .cache import PersistentCache
+
+    class OriginalCache(PersistentCache):
+        def _refresh_selection(self):
+            pass  # The bounded helper reads originals, never the active selection.
 
     if source is not None and source_key(base) != source:
         raise CacheProtectionError("selected Vault changed during cache recovery")
@@ -206,18 +250,20 @@ def _inspect_original(base: Path, source: str | None, snapshot: str | None) -> d
     if source is not None:
         _, compartment, _ = _paths(base, source)
         _require(compartment, windows, directory=True)
-    cache = PersistentCache(base)
+    cache = OriginalCache(base)
     try:
-        with cache.replacement_lock(), cache._store_lock():
+        # The parent owns the stable replacement lock until publication finishes.
+        with cache._store_lock():
             try:
                 # Bound original reads before handing bytes to an optional decoder.
                 for name in FILES:
                     path = base / name
                     if _path_exists(path):
                         _bytes(path, MAX_CACHE_BYTES if name.endswith(".enc") else 65536)
-                cache._read_store(readonly=True, strict=True)
-                return {"state": "compatible"}
+                store = cache._read_store(readonly=True, strict=True)
             except (OSError, RuntimeError, ValueError, ImportError):
+                if coordinate:
+                    return {"state": "coordinated"}
                 if source is None:
                     return {"state": "unreadable"}
                 try:
@@ -225,26 +271,40 @@ def _inspect_original(base: Path, source: str | None, snapshot: str | None) -> d
                 except OSError:
                     original = {"state": "preserved-in-place", "reason": "legacy-io"}
                 return {"state": "recovering", "original": original}
-    except TimeoutError:
+            if coordinate:
+                _import_pending(store, compartment / "current")
+                return {"state": "coordinated"}
+            return {"state": "compatible"}
+    except (TimeoutError, OSError):
+        if coordinate:
+            return {"state": "waiting"}
         return {
             "state": "recovering",
             "original": {"state": "preserved-in-place", "reason": "legacy-lock-busy"},
         }
 
 
-def _inspect_bounded(base: Path, source: str | None, snapshot: str | None) -> dict:
+def _inspect_bounded(
+    base: Path, source: str | None, snapshot: str | None, *, coordinate: bool = False,
+) -> dict:
     from agent_procutil.owned_budget import OwnedExecutionBudget
     from agent_procutil.owned_process import run_caller_owned
 
     try:
         result = run_caller_owned(
-            [sys.executable, "-m", "agent_vault.cache_recovery"],
-            input_text=json.dumps({"base": str(base), "source": source, "snapshot": snapshot}),
+            [sys.executable, "-I", "-c", _HELPER_BOOTSTRAP,
+             str(Path(__file__).resolve().parent.parent)],
+            input_text=json.dumps({
+                "base": str(base), "source": source, "snapshot": snapshot,
+                "coordinate": coordinate,
+            }),
             timeout=ADOPTION_SECONDS, max_stdout_bytes=4096, max_stderr_bytes=4096,
             budget=OwnedExecutionBudget.from_timeout(ADOPTION_SECONDS + 2.0, cleanup_reserve=2.0),
         )
     except subprocess.TimeoutExpired:
         # The process owner confirms cleanup before returning this exception.
+        if coordinate:
+            return {"state": "waiting"}
         return {
             "state": "recovering",
             "original": {"state": "preserved-in-place", "reason": "legacy-read-timeout"},
@@ -255,6 +315,10 @@ def _inspect_bounded(base: Path, source: str | None, snapshot: str | None) -> di
         report = _json(result.stdout)
     except (ValueError, UnicodeError) as exc:
         raise CacheProtectionError("invalid protected cache adoption response") from exc
+    if coordinate:
+        if report not in ({"state": "coordinated"}, {"state": "waiting"}):
+            raise CacheProtectionError("invalid protected cache coordination response")
+        return report
     if report == {"state": "compatible"}:
         return report
     if source is None and report == {"state": "unreadable"}:
@@ -269,13 +333,46 @@ def _inspect_bounded(base: Path, source: str | None, snapshot: str | None) -> di
     return report
 
 
+@contextlib.contextmanager
+def _replacement_guard(base: Path):
+    from .cache import PersistentCache
+
+    with contextlib.ExitStack() as stack:
+        try:
+            stack.enter_context(PersistentCache(base).replacement_lock())
+        except OSError:
+            yield False
+        else:
+            yield True
+
+
+def _coordinate_selected(base: Path, record: dict) -> dict:
+    result = {"state": "recovering", "original": record["original"]}
+    windows = _windows()
+    _, compartment, _ = _paths(base, record["source"])
+    marker = compartment / "coordinated.json"
+    if _path_exists(marker):
+        require_coordinated(base, record)
+        return result
+    with _publication_lock(compartment, windows):
+        with _replacement_guard(base) as acquired:
+            if acquired:
+                report = _inspect_bounded(
+                    base, record["source"], uuid.uuid4().hex, coordinate=True,
+                )
+                require_source(base, record)
+                if report == {"state": "coordinated"}:
+                    _write(compartment, marker, COORDINATED, windows)
+    return result
+
+
 def prepare_cache(base: Path) -> dict:
     from .cache import PersistentCache
 
     base = base.absolute()
     current, record = selected_cache(base)
     if record is not None:
-        return {"state": "recovering", "original": record["original"]}
+        return _coordinate_selected(base, record)
     try:
         if not any(_path_exists(base / name) for name in FILES):
             return {"state": "ready"}
@@ -297,28 +394,37 @@ def prepare_cache(base: Path) -> dict:
         _, record = selected_cache(base)
         if record is not None:
             return {"state": "recovering", "original": record["original"]}
-        report = _inspect_bounded(base, source, uuid.uuid4().hex)
-        if source != source_key(base):
-            raise CacheProtectionError("selected Vault changed during cache recovery")
-        if report["state"] == "compatible":
-            return {"state": "ready"}
-        current = compartment / "current"
-        _private_directory(current, windows)
-        _current_directory(current, windows)
-        cache = PersistentCache(current)
-        if _path_exists(cache._cache_file):
-            cache._read_store(readonly=True, strict=True)
-        elif not cache._write_store({"v": 1, "entries": {}}):
-            raise CacheProtectionError("fresh protected cache could not be initialized")
-        record = {
-            "version": 1, "source": source,
-            "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            "original": report["original"],
-        }
-        require_source(base, record)
-        _write(parent, parent / "active.json", b'{"version":1}', windows)
-        _write(compartment, marker, json.dumps(record, sort_keys=True).encode(), windows)
-        return {"state": "recovering", "original": record["original"]}
+        with _replacement_guard(base) as acquired:
+            report = (
+                _inspect_bounded(base, source, uuid.uuid4().hex)
+                if acquired else {
+                    "state": "recovering",
+                    "original": {"state": "preserved-in-place", "reason": "legacy-lock-busy"},
+                }
+            )
+            if source != source_key(base):
+                raise CacheProtectionError("selected Vault changed during cache recovery")
+            if report["state"] == "compatible":
+                return {"state": "ready"}
+            current = compartment / "current"
+            _private_directory(current, windows)
+            _current_directory(current, windows)
+            cache = PersistentCache(current)
+            if _path_exists(cache._cache_file):
+                cache._read_store(readonly=True, strict=True)
+            elif not cache._write_store({"v": 1, "entries": {}}):
+                raise CacheProtectionError("fresh protected cache could not be initialized")
+            record = {
+                "version": 1, "source": source,
+                "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "original": report["original"],
+            }
+            require_source(base, record)
+            _write(parent, parent / "active.json", b'{"version":1}', windows)
+            _write(compartment, marker, json.dumps(record, sort_keys=True).encode(), windows)
+            if acquired and record["original"].get("reason") != "legacy-lock-busy":
+                _write(compartment, compartment / "coordinated.json", COORDINATED, windows)
+            return {"state": "recovering", "original": record["original"]}
 
 
 def status_command(args) -> int:
@@ -350,7 +456,9 @@ def _main() -> int:
     try:
         request = _json(sys.stdin.buffer.read(16385))
         if (
-            not isinstance(request, dict) or set(request) != {"base", "source", "snapshot"}
+            not isinstance(request, dict)
+            or set(request) != {"base", "source", "snapshot", "coordinate"}
+            or type(request["coordinate"]) is not bool
             or not isinstance(request["base"], str) or not Path(request["base"]).is_absolute()
             or not (
                 request["source"] is None and request["snapshot"] is None
@@ -361,7 +469,10 @@ def _main() -> int:
             )
         ):
             return 1
-        result = _inspect_original(Path(request["base"]), request["source"], request["snapshot"])
+        result = _inspect_original(
+            Path(request["base"]), request["source"], request["snapshot"],
+            coordinate=request["coordinate"],
+        )
         print(json.dumps(result, sort_keys=True))
         return 0
     except (OSError, RuntimeError, ValueError, ImportError):

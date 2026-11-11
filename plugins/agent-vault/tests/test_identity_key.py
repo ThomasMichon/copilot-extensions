@@ -330,6 +330,40 @@ def test_cli_reconciles_pending_and_preserves_unrelated_entries(isolated, monkey
     assert KEY not in capsys.readouterr().out
 
 
+@usable_cache
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_setup_never_clears_a_newer_journal_with_its_prelock_response(
+    isolated, monkeypatch, capsys, confirmed,
+):
+    cache = identity_cache()
+    candidate = base64.b64encode(bytes(reversed(range(32)))).decode()
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    actions = []
+
+    def send(request, **_kwargs):
+        actions.append(request["action"])
+        if request["action"] == "identity-key-setup":
+            assert cache.begin_replace("Identity/x", "password", candidate, 20)
+            return {"ok": True, "value": KEY, "generation": 10, "status": "reused"}
+        assert request["action"] == "get" and request["refresh"]
+        if not confirmed:
+            return {"ok": False, "error": "locked"}
+        return {"ok": True, "value": candidate, "generation": 30}
+
+    monkeypatch.setattr(cli, "send_command", send)
+    assert cli.main(["identity-key", "setup", "--entry", "Identity/x"]) == (0 if confirmed else 1)
+    assert actions == ["identity-key-setup", "get"]
+    if confirmed:
+        assert cache.get("Identity/x", readonly=True) == candidate
+        assert cache.pending_replace("Identity/x", "password") is None
+    else:
+        assert cache.pending_replace("Identity/x", "password")["operation"] == 20
+        assert cache.get("Identity/x", readonly=True) is None
+    output = capsys.readouterr()
+    assert KEY not in output.out + output.err
+    assert candidate not in output.out + output.err
+
+
 def test_expired_backend_operation_never_starts_subprocess(monkeypatch):
     backend = keepassxc.KeePassXCBackend()
     run = Mock()

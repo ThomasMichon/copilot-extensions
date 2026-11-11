@@ -28,6 +28,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import threading
 import time
 from pathlib import Path
 
@@ -94,6 +95,9 @@ class PersistentCache:
         self._fernet = None  # lazy
         self._available: bool | None = None
         self._recovery = None
+        self._replacement_mutex = threading.RLock()
+        self._replacement_state = threading.local()
+        self._replacement_lock_file = base / "credential-replacement.lock"
         self._select_base(base)
         self._refresh_selection()
 
@@ -104,7 +108,6 @@ class PersistentCache:
         self._cache_file = base / "credential-cache.enc"
         self._key_file = base / "credential-cache.key"
         self._lock_file = base / "credential-cache.lock"
-        self._replacement_lock_file = base / "credential-replacement.lock"
 
     def _refresh_selection(self) -> None:
         if not cache_enabled():
@@ -260,9 +263,14 @@ class PersistentCache:
             raise CacheProtectionError("Protected cache data is invalid; not replaced") from exc
 
     @contextlib.contextmanager
-    def _file_lock(self, lock_file: Path):
-        self._base_dir.mkdir(parents=True, exist_ok=True)
-        with open(lock_file, "a+b") as lock_fd:
+    def _file_lock(self, lock_file: Path, *, readonly: bool = False):
+        from .ssh_key_files import _ordinary
+
+        if not readonly:
+            self._base_dir.mkdir(parents=True, exist_ok=True)
+        if _path_exists(lock_file):
+            _ordinary(lock_file, directory=False)
+        with open(lock_file, "r+b" if readonly else "a+b") as lock_fd:
             deadline = time.monotonic() + 2.0
             locked = False
             try:
@@ -296,6 +304,9 @@ class PersistentCache:
     @contextlib.contextmanager
     def _store_lock(self):
         self._refresh_selection()
+        from .cache_recovery import require_coordinated
+
+        require_coordinated(self._root_dir, self._recovery)
         with self._file_lock(self._lock_file):
             selected = self._base_dir
             self._refresh_selection()
@@ -304,14 +315,26 @@ class PersistentCache:
             yield
 
     @contextlib.contextmanager
-    def replacement_lock(self):
+    def replacement_lock(self, *, readonly: bool = False):
         """Serialize a caller's complete credential replacement transaction."""
         if not self.enabled:
             yield
             return
         self._refresh_selection()
-        with self._file_lock(self._replacement_lock_file):
-            yield
+        if not self._replacement_mutex.acquire(timeout=2.0):
+            raise TimeoutError("protected cache is busy")
+        try:
+            if getattr(self._replacement_state, "held", False):
+                yield
+                return
+            with self._file_lock(self._replacement_lock_file, readonly=readonly):
+                self._replacement_state.held = True
+                try:
+                    yield
+                finally:
+                    self._replacement_state.held = False
+        finally:
+            self._replacement_mutex.release()
 
     def _write_store_unlocked(self, store: dict) -> bool:
         f = self._get_fernet()
@@ -430,6 +453,20 @@ class PersistentCache:
         if not self.enabled:
             return None
         self._refresh_selection()
+        from .cache_recovery import require_coordinated
+
+        with (
+            self.replacement_lock(readonly=readonly)
+            if self._recovery else contextlib.nullcontext()
+        ):
+            require_coordinated(self._root_dir, self._recovery)
+            return self._get_value(
+                entry, field, max_age_seconds, legacy_entry=legacy_entry, readonly=readonly,
+            )
+
+    def _get_value(
+        self, entry, field, max_age_seconds, *, legacy_entry, readonly,
+    ) -> str | None:
         store = (
             self._read_store(readonly=True, strict=True)
             if readonly else self._read_store()
@@ -695,7 +732,7 @@ class PersistentCache:
         try:
             record = self._recovery
             require_source(self._root_dir, record)
-            with self._store_lock():
+            with self.replacement_lock(), self._store_lock():
                 require_source(self._root_dir, record)
                 store = self._read_store(readonly=True, strict=True)
                 entries = store["entries"]

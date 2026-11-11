@@ -1399,33 +1399,36 @@ def cmd_cache_populate(args):
             else contextlib.nullcontext()
         )
         failure = None
-        with read_lock:
-            resp = send_command(
-                request, timeout=None if args.prompt else 15.0,
-                **({"strict_endpoint": True} if cache._recovery else {}),
-            )
-            present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
-            if (
-                present
-                and not args.verify
-                and cache.enabled
-                and resp.get("value") is not None
-            ):
-                cache_entry = config.normalize_entry(
-                    entry,
-                    config.resolve_context().group,
+        try:
+            with read_lock:
+                resp = send_command(
+                    request, timeout=None if args.prompt else 15.0,
+                    **({"strict_endpoint": True} if cache._recovery else {}),
                 )
-                cache.migrate_entry(entry, cache_entry, field)
-                generation = resp.get("generation")
-                update = cache.recover_missing if cache._recovery else cache.reconcile_authoritative
-                if not update(
-                    cache_entry,
-                    field,
-                    resp["value"],
-                    generation if cache._recovery or generation is None else int(generation),
+                present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
+                if (
+                    present
+                    and not args.verify
+                    and cache.enabled
+                    and resp.get("value") is not None
                 ):
-                    present = False
-                    failure = f"cache update failed: {entry} [{field}]"
+                    cache_entry = config.normalize_entry(
+                        entry,
+                        config.resolve_context().group,
+                    )
+                    cache.migrate_entry(entry, cache_entry, field)
+                    generation = resp.get("generation")
+                    update = cache.recover_missing if cache._recovery else cache.reconcile_authoritative
+                    if not update(
+                        cache_entry,
+                        field,
+                        resp["value"],
+                        generation if cache._recovery or generation is None else int(generation),
+                    ):
+                        present = False
+                        failure = f"cache update failed: {entry} [{field}]"
+        except (OSError, RuntimeError, ValueError):
+            present, failure = False, f"cache update failed: {entry} [{field}]"
         if present:
             ok += 1
         else:

@@ -199,6 +199,125 @@ def test_actual_replacement_lock_is_finite_and_retained_in_place(isolated):
     assert {name: (isolated / name).read_bytes() for name in before} == before
 
 
+def test_population_during_a_legacy_transaction_reports_a_bounded_failure(
+    isolated, monkeypatch, capsys,
+):
+    cache = PersistentCache(isolated)
+    assert cache.put("Example/rotating", "password", "previous")
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(cli, "send_command", lambda *_a, **_kw: pytest.fail("uncoordinated RPC"))
+    with cache.replacement_lock():
+        assert cache.begin_replace("Example/rotating", "password", "candidate", 2)
+        assert cli.main(["cache-populate", "--entry", "Example/rotating"]) == 1
+    output = capsys.readouterr()
+    assert "cache update failed" in output.err
+    assert "previous" not in output.out + output.err
+    assert "candidate" not in output.out + output.err
+
+
+def test_recovered_readonly_read_never_recreates_a_missing_coordination_lock(isolated):
+    corrupt(isolated)
+    cache = PersistentCache(isolated)
+    cache.prepare()
+    assert cache.recover_missing("Example/current", "password", "live", 1)
+    cache._replacement_lock_file.unlink()
+    with pytest.raises(OSError):
+        cache.get("Example/current", readonly=True)
+    assert not cache._replacement_lock_file.exists()
+
+
+def test_reentrant_replacement_guard_still_bounds_another_thread(isolated):
+    import threading
+
+    cache = PersistentCache(isolated)
+    failures = []
+
+    def blocked():
+        try:
+            with cache.replacement_lock():
+                failures.append("unexpected acquisition")
+        except TimeoutError:
+            failures.append("busy")
+
+    with cache.replacement_lock(), cache.replacement_lock():
+        worker = threading.Thread(target=blocked)
+        worker.start()
+        worker.join(timeout=5)
+        assert not worker.is_alive()
+    assert failures == ["busy"]
+
+
+@pytest.mark.parametrize("completed", [False, True])
+def test_rotation_spanning_adoption_keeps_coordination_and_pending_protection(
+    isolated, monkeypatch, completed,
+):
+    legacy = PersistentCache(isolated)
+    assert legacy.put("Example/rotating", "password", "previous", 1)
+    # Model the already-running legacy writer, which cannot observe the selection.
+    monkeypatch.setattr(legacy, "_refresh_selection", lambda: None)
+    with legacy.replacement_lock():
+        assert legacy.begin_replace("Example/rotating", "password", "candidate", 2)
+        current = PersistentCache(isolated)
+        assert current.prepare()["state"] == "recovering"
+        assert current._base_dir != isolated
+        assert current._replacement_lock_file == legacy._replacement_lock_file
+        assert not current.recover_missing("Example/rotating", "password", "previous", 1)
+        with pytest.raises((TimeoutError, CacheProtectionError)):
+            current.get("Example/rotating", readonly=True)
+        if completed:
+            assert legacy.complete_replace("Example/rotating", "password", "candidate", 2, 3)
+    current.prepare()
+    if completed:
+        assert current.recover_missing("Example/rotating", "password", "candidate", 3)
+        assert current.get("Example/rotating", readonly=True) == "candidate"
+    else:
+        assert current.pending_replace("Example/rotating", "password")["operation"] == 2
+        assert not current.recover_missing("Example/rotating", "password", "previous", 1)
+        assert current.get("Example/rotating", readonly=True) is None
+
+
+def test_real_helper_ignores_hostile_cwd_and_pythonpath(isolated, monkeypatch):
+    corrupt(isolated)
+    hostile = isolated.parent / "hostile"
+    package = hostile / "agent_vault"
+    package.mkdir(parents=True)
+    marker = isolated.parent / "injected"
+    program = f"from pathlib import Path; Path({str(marker)!r}).touch(); raise RuntimeError('injected')"
+    (package / "__init__.py").write_text(program, encoding="utf-8")
+    (hostile / "sitecustomize.py").write_text(program, encoding="utf-8")
+    monkeypatch.chdir(hostile)
+    monkeypatch.setenv("PYTHONPATH", str(hostile))
+    cache = PersistentCache(isolated)
+    assert cache.prepare()["original"]["state"] == "copied"
+    assert not marker.exists()
+    assert cache.recover_missing("Example/current", "password", "live", 1)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows deny-sharing handles")
+@pytest.mark.parametrize("name", ["credential-cache.lock", "credential-replacement.lock"])
+def test_exclusively_open_legacy_lock_does_not_veto_fresh_state(isolated, name):
+    import ctypes
+
+    before = corrupt(isolated)
+    path = isolated / name
+    path.touch(exist_ok=True)
+    windows = cache_recovery.WindowsSecurity()
+    handle = windows.kernel.CreateFileW(str(path), 0x80000000, 0, None, 3, 0x80, None)
+    assert handle != ctypes.c_void_p(-1).value
+    try:
+        cache = PersistentCache(isolated)
+        assert cache.prepare()["original"]["state"] == "preserved-in-place"
+        assert cache._base_dir != isolated
+        assert cache._cache_file.exists()
+        assert not cache.recover_missing("Example/current", "password", "unconfirmed", 1)
+    finally:
+        windows.kernel.CloseHandle(handle)
+    cache.prepare()
+    assert cache.recover_missing("Example/current", "password", "live", 2)
+    assert cache.get("Example/current", readonly=True) == "live"
+    assert {name: (isolated / name).read_bytes() for name in before} == before
+
+
 @pytest.mark.skipif(os.name != "nt", reason="actual Windows deny-sharing handle")
 def test_exclusively_open_original_is_retained_and_fresh_state_is_usable(isolated):
     import ctypes
@@ -426,6 +545,7 @@ def test_owner_setup_recovers_existing_key_without_rotation(isolated, monkeypatc
     assert cli.main(["identity-key", "setup", "--entry", "Identity/example"]) == 0
     result = json.loads(capsys.readouterr().out)
     assert result == {"version": 1, "status": "reused", "cached": True, "cache_recovery": "required"}
-    assert len(requests) == 1 and requests[0]["initialize_owner"] is False
+    assert len(requests) == 2 and requests[0]["initialize_owner"] is False
+    assert requests[1]["action"] == "get" and requests[1]["refresh"] is True
     assert PersistentCache(root).get("Identity/example", readonly=True) == key
     assert {name: (root / name).read_bytes() for name in before} == before

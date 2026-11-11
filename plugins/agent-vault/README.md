@@ -567,6 +567,16 @@ in place instead. A separately protected, schema-1 cache in that compartment
 then serves the selected Vault/database and installation. This never changes
 the authoritative Vault, SSH keys, signing keys or envelope KEKs.
 
+The helper uses isolated Python imports and the selected runtime's package
+root, never packages or startup hooks supplied by the caller's directory or
+`PYTHONPATH`. Replacement coordination stays at the original cache root across
+selection changes. If an old transaction or inaccessible lock prevents that
+coordination, the fresh empty cache may exist, but credential reads and writes
+remain pending. A later explicit population/setup retries the bounded
+assessment under the same replacement lock and carries readable pending
+journals into the current cache before permitting use. Unreadable originals
+remain preserved. An unresolved journal is never a recovered credential.
+
 Recovery uses the same live `get` request as ordinary population. Only missing
 current records are inserted: newer writes, existing values and pending
 password replacements win over a recovery response. Repeating population or
@@ -577,6 +587,8 @@ the cache cannot know that every credential has been recovered. If the Vault
 is locked, unlock it explicitly or use the existing explicit `--prompt` option.
 Owner-key setup recovers only after the owner confirms the existing key; a
 failed/locked owner request does not start cache recovery or initialize a key.
+After preparation, setup re-reads the existing owner under replacement
+coordination before reconciliation; it never repeats first-owner creation.
 
 Cache-only, batch/pinned read-only, status and verification operations never
 initiate this recovery, migrate a key or unlock/start a service. They can read

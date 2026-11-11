@@ -194,8 +194,21 @@ def command(args) -> int:
         stage = "cache_update"
         cache.prepare()
         with cache.replacement_lock():
+            # Preparation may span a password transaction. Never reconcile its
+            # newer journal with the value obtained before taking this lock.
+            confirmed = cli.send_command({
+                "action": "get", "entry": entry, "field": "password",
+                "kpdb": metadata["env"]["KPDB"], "group": "", "refresh": True,
+                "allow_prompt": args.prompt,
+            }, timeout=120.0 if args.prompt else 90.0, strict_endpoint=True)
+            if not confirmed or confirmed.get("ok") is not True:
+                raise IdentityKeyError(
+                    "cache_update_failed",
+                    "Owner entry preserved, but its current value could not be confirmed; retry setup.",
+                )
+            value = validate_key(confirmed.get("value", ""))
             update = cache.recover_missing if cache._recovery else cache.reconcile_authoritative
-            if not update(entry, "password", value, response.get("generation")):
+            if not update(entry, "password", value, confirmed.get("generation")):
                 raise IdentityKeyError("cache_update_failed", "Owner entry preserved, but protected cache update failed; repair cache and retry.")
             if cache.get(entry, "password", readonly=True) != value:
                 raise IdentityKeyError("cache_update_failed", "Protected cache verification failed; repair cache and retry.")
