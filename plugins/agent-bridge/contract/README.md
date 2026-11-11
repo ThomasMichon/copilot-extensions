@@ -161,6 +161,13 @@ consumer. Use the runner's default managed temporary namespace for this capture,
 not a long task-directory override. Pre-launch assertions retain the original
 CLI diagnostics even when no consumer exists.
 
+Two fixture-lifetime controls bring the current portfolio to 343 cases.
+Constructor and post-construction stop timeouts settle the real test-owned
+process tree, listener and streams. POSIX observation retains the unreaped
+Host until its group is retired and confirmed; Windows retains the owned Job.
+These controls do not change HTTP generation, capability floors or native
+product qualification.
+
 Commit source and the generation declaration, run the new owner's `--prepare`,
 commit and publish that checkpoint, then run `--write`, no-write verification
 and `tools/check-agent-bridge-contracts.py --base <reviewed-base>`. Prepared

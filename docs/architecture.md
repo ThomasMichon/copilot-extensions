@@ -295,6 +295,11 @@ Bridge and the Driver application consume the same canonical distribution.
 New keyed Bridge launches export its canonical Host
 into retained runtime storage, with no executing Bridge/Worktrees/Manager
 dependency. Existing receiving adapters retain their supported TCP contracts.
+Fresh portable mux receiving ships the same compact executable in its existing
+support archive and selects headed CLI support before native creation. Its
+original attempt retains the common broker and launch-bound extension, private
+socket and registration; reuse and uncertain creation never enter a direct
+Copilot fallback.
 See the [Driver application](../plugins/agent-remote-driver/README.md#independent-session-host-application)
 and [ACP WS boundary](../plugins/agent-remote-driver/docs/session-host-websocket.md).
 

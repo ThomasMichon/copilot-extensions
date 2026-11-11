@@ -66,6 +66,40 @@ def test_partial_runtime_support_never_falls_back_to_another_payload(tmp_path, m
         receiving_bundle.build_mux_support()
 
 
+def test_mux_support_never_reads_the_shared_core_cache(tmp_path, monkeypatch):
+    import tempfile
+
+    from agent_remote_driver.session_host import bundle
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    cache = tmp_path / "agent-remote-driver-bundles"
+    cache.mkdir()
+    poison = cache / bundle.bundle_filename()
+    poison.write_bytes(b"untrusted shared archive")
+    existing = set(tmp_path.iterdir())
+    payload, _ = receiving_bundle.build_mux_support()
+    with zipfile.ZipFile(io.BytesIO(payload)) as archive:
+        with zipfile.ZipFile(io.BytesIO(archive.read("driver.pyz"))) as core:
+            assert "agent_remote_driver/headed/launcher.py" in core.namelist()
+    assert poison.read_bytes() == b"untrusted shared archive"
+    assert set(tmp_path.iterdir()) == existing
+
+
+def test_mux_launch_retry_preserves_exact_payload_after_core_rebuild(monkeypatch):
+    from agent_bridge import portable_policy
+
+    monkeypatch.setattr(portable_policy, "selected_context", lambda: '{"selected":"fixture"}')
+    options = {
+        "state_root": "/home/operator/.agent-bridge/mux", "scope_id": "workspace",
+        "attempt": "11111111-1111-4111-8111-111111111111",
+        "session_id": "22222222-2222-4222-8222-222222222222",
+    }
+    monkeypatch.setattr(zipfile.time, "localtime", lambda _: (2001, 1, 1, 0, 0, 0, 0, 1, -1))
+    first = receiving_bundle.build_mux_launch("/workspace/project", **options)
+    monkeypatch.setattr(zipfile.time, "localtime", lambda _: (2026, 1, 1, 0, 0, 0, 0, 1, -1))
+    assert receiving_bundle.build_mux_launch("/workspace/project", **options) == first
+
+
 @pytest.mark.parametrize("value", ["../outside", "/absolute", "C:/outside", "a\\b", "a//b"])
 def test_receiving_assets_do_not_escape_the_declared_source(tmp_path, value):
     with pytest.raises(ValueError, match="safe relative"):
@@ -93,6 +127,10 @@ def test_provider_command_carries_selected_policy_and_exact_support(monkeypatch)
     with zipfile.ZipFile(io.BytesIO(base64.b64decode(envelope["support"]))) as archive:
         assert "repository_policy/receiving.py" in archive.namelist()
         assert "receiver.py" in archive.namelist()
+        with zipfile.ZipFile(io.BytesIO(archive.read("driver.pyz"))) as core:
+            assert "agent_remote_driver/headed/launcher.py" in core.namelist()
+            assert "agent_remote_driver/headed/extension.mjs" in core.namelist()
+            assert not any(name.startswith("agent_bridge/") for name in core.namelist())
 
 
 def test_provider_cli_advertises_support_without_touching_a_daemon(capsys, monkeypatch):

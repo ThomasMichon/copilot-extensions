@@ -36,6 +36,17 @@ for line in sys.stdin:
 """
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+def test_compact_archive_rebuild_is_byte_identical(tmp_path, monkeypatch, legacy):
+    monkeypatch.setattr(zipfile.time, "localtime", lambda _: (2001, 1, 1, 0, 0, 0, 0, 1, -1))
+    first, source = build_session_host_bundle(tmp_path / "first", legacy=legacy)
+    expected = first.read_bytes()
+    first.unlink()
+    monkeypatch.setattr(zipfile.time, "localtime", lambda _: (2026, 1, 1, 0, 0, 0, 0, 1, -1))
+    rebuilt, rebuilt_source = build_session_host_bundle(tmp_path / "first", legacy=legacy)
+    assert (rebuilt_source, rebuilt.read_bytes()) == (source, expected)
+
+
 def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
     archive, _digest = build_session_host_bundle(tmp_path / "build", legacy=legacy)
     receiver = tmp_path / "receiver"
