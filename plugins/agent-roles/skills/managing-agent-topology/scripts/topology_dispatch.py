@@ -1,4 +1,4 @@
-"""Derive advisory standing coverage from saved native Dispatch observations."""
+"""Derive advisory standing coverage and intent from saved native Dispatch observations."""
 
 from __future__ import annotations
 
@@ -145,3 +145,112 @@ def lane(
                 reasons.append("assignment-not-accepted-by-owner")
     result["status"] = "held" if reasons else "accepted"
     return result
+
+
+DESIRED_PROPOSED = (
+    ("sourceRevision", "sourceRevision", "proposed-source-revision-differs-from-desired"),
+    ("materializationRevision", "expectedMaterializationRevision",
+     "proposed-effective-revision-differs-from-desired"),
+)
+PROPOSED_ADOPTED = (
+    ("sourceRevision", "sourceRevision", "adopted-differs-from-proposed"),
+    ("expectedMaterializationRevision", "materializationRevision", "adopted-differs-from-proposed"),
+)
+DESIRED_ADOPTED = (
+    ("sourceRevision", "sourceRevision", "adopted-differs-from-desired"),
+    ("materializationRevision", "materializationRevision", "adopted-differs-from-desired"),
+)
+
+
+def proposed_record(snapshot: dict[str, Any], fresh: bool) -> dict[str, Any]:
+    """Project the native declaration; never the relationship or its receipt."""
+    task = snapshot["task"]
+    charter = task["standing_charter"]
+    declaration = charter["declaration"]
+    return {
+        "nativeTask": task["id"], "observedAt": snapshot["observedAt"],
+        "sourceRef": snapshot["sourceRef"], "fresh": fresh, "status": task["status"],
+        "lifecycle": charter["lifecycle"], "holdReason": task["hold_reason"],
+        "standingRevision": task["standing_revision"],
+        "declarationGeneration": charter["declaration_generation"],
+        "materializationRef": declaration["materialization_ref"],
+        "sourceRevision": declaration["source_revision"],
+        "expectedMaterializationRevision": declaration["expected_materialization_revision"],
+    }
+
+
+def adopted_record(snapshot: dict[str, Any]) -> dict[str, Any] | None:
+    """Project the native accepted materialization, which is not current-head proof."""
+    accepted = snapshot["task"]["standing_charter"]["accepted_materialization"]
+    if accepted is None:
+        return None
+    return {
+        "acceptedHead": accepted["head"]["session_id"],
+        "acceptedHeadRevision": accepted["head"]["revision"],
+        "generation": accepted["generation"],
+        "materializationRef": accepted["materialization_ref"],
+        "sourceRevision": accepted["source_revision"],
+        "materializationRevision": accepted["materialization_revision"],
+    }
+
+
+def differences(
+    left: dict[str, Any] | None, right: dict[str, Any] | None,
+    pairs: tuple[tuple[str, str, str], ...],
+) -> list[str] | None:
+    """Return mismatch reasons, or None when either side is not comparable."""
+    if left is None or right is None or any(left[a] is None or right[b] is None for a, b, _ in pairs):
+        return None
+    return list(dict.fromkeys(reason for a, b, reason in pairs if left[a] != right[b]))
+
+
+def intent_lane(
+    desired: dict[str, Any], snapshot: dict[str, Any] | None, fresh: bool, supplied: bool,
+) -> dict[str, Any]:
+    """Keep desired, proposed and adopted intent separate; derive no effect."""
+    proposed = None if snapshot is None else proposed_record(snapshot, fresh)
+    adopted = None if snapshot is None else adopted_record(snapshot)
+    current = proposed if fresh else None
+    comparable = current if desired["sourceRevision"] is not None else None
+    to_proposed = differences(desired, comparable, DESIRED_PROPOSED)
+    to_adopted = differences(comparable, adopted if comparable else None, PROPOSED_ADOPTED)
+    from_desired = differences(desired, adopted if comparable else None, DESIRED_ADOPTED)
+    reasons: list[str] = []
+    if desired["nativeTask"] is None:
+        reasons.append("not-linked-to-native-task")
+    elif not supplied:
+        reasons.append("dispatch-evidence-not-supplied")
+    elif snapshot is None:
+        reasons.append("proposed-evidence-missing")
+    elif not fresh:
+        reasons.append("proposed-evidence-stale-or-future")
+    if desired["sourceRevision"] is None:
+        if current is not None and current["lifecycle"] == "active":
+            reasons.append("desired-terminal-native-lane-active")
+        state = "desired-terminal"
+    elif reasons:
+        state = "unlinked" if desired["nativeTask"] is None else "unknown"
+    elif current is None or to_proposed is None:
+        reasons.append("proposed-evidence-incomplete")
+        state = "unknown"
+    else:
+        if current["lifecycle"] != "active":
+            reasons.append("native-lane-" + current["lifecycle"])
+        reasons.extend(to_proposed)
+        if adopted is None:
+            reasons.append("not-adopted")
+        else:
+            reasons.extend(to_adopted or [])
+        if current["lifecycle"] != "active":
+            state = "proposal-inactive"
+        elif to_proposed:
+            state = "proposal-pending"
+        else:
+            state = "adoption-pending" if reasons else "aligned"
+    return {
+        "desired": desired, "proposed": proposed, "adopted": adopted,
+        "proposedMatchesDesired": None if to_proposed is None else not to_proposed,
+        "adoptedMatchesProposed": None if to_adopted is None else not to_adopted,
+        "adoptedMatchesDesired": None if from_desired is None else not from_desired,
+        "state": state, "reasons": reasons,
+    }

@@ -98,6 +98,54 @@ The legacy receiving entrypoint advertises only legacy lifetime and TCP.
 An explicit ACP lifetime or WebSocket request refuses before launch rather
 than being silently reinterpreted as legacy execution.
 
+### Optional headless SDK provider
+
+The ordinary application's explicit `sdk` dependency extra adds the public
+Python SDK provider. It requires an already-selected Python 3.11+ interpreter;
+the base core and native-ACP default retain Python 3.10 support. Construct the
+extra through the existing wheel-first application/profile owner. No interpreter
+or SDK is downloaded at launch. The currently qualified dependency is SDK
+1.0.27; the extra does not silently select a newer, unqualified SDK.
+
+```powershell
+agent-remote-driver --backend sdk --cwd <execution-workspace> --state-file <private-state-file> -- copilot --headless
+```
+
+Select the actual optional application's entrypoint, not the compact export or
+the base-interpreter local launch helper. `--support-json` reports
+`headless_backends`; only an eligible executing application includes `sdk`.
+The compact receiver remains native-ACP-only and refuses SDK selection before
+child creation. Headed mode, legacy lifetime, native argv seeds/resume and native
+idle-timeout flags cannot be combined with this provider.
+
+The same Session Host owns sequencing, acknowledgements and frontend reconnect.
+The adapter connects the public SDK to its exact owned native process, then
+binds one conversation through ACP `session/new` or `session/load`. The launch
+workspace and native MCP configuration are retained; nonempty ACP `mcpServers`
+overrides are unsupported. Text prompts, streamed assistant/tool updates,
+explicit cancellation and text-history restoration are supported. Restoration
+with message attachments refuses instead of silently omitting those inputs.
+Unknown native acceptance or observation loss disables further effects without
+replay, fallback or another conversation. Existing callers are not migrated.
+
+Native permission requests use ACP `session/request_permission`; only the
+matching controller's explicit `allow-once` selection approves one request.
+Managed-approval requirements remain pending rather than being bypassed.
+`initialize._meta.userInput` is `unavailable`: this adapter does not invent an
+ACP mapping for SDK user-input prompts. Such unsupported native interactions
+can require explicit owner intervention; there is no approve-all default.
+
+`initialize._meta.activity` advertises the additive read-only
+`copilot-driver/activity` method, requiring the bound `sessionId`. Its result
+separates `foreground: {known, state}`, `tasks: {known, items}` and
+`schedules: {known, items}`. Items retain the public SDK's native fields,
+including retained terminal tasks. Events invalidate cached inventory;
+callbacks coalesce bounded work and racing/failed reads remain unknown.
+A known read is not an atomic native idle boundary or proof of complete
+observation. `automaticIdleRetirement` remains `unavailable`, including when
+both lists are empty. Explicit transport close is not an observer-drain or
+whole-session-settlement receipt, and does not qualify headed auth recovery.
+
 ## SDK extension
 
 > A user-global Copilot CLI SDK extension that gives any `copilot` session

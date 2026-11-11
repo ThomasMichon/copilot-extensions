@@ -1,6 +1,6 @@
 # Profile-aware repository preparation
 
-- **Status:** Proposed; review before implementation.
+- **Status:** Active; provider candidate implemented, source qualification and publication in progress.
 - **Parent:** [Worktree Manager control plane](README.md), Phase 5.
 - **Coordination:** #11989; source participant `sluggish-gasket`.
 - **Scope:** Native dependency preparation only. #356/#8545 retain broader
@@ -95,15 +95,18 @@ plugin or successful repository setup.
 
 ## Plan
 
-- [ ] Land this proposal through the normal review and required CI gates.
+- [x] Land this proposal through the normal review and required CI gates.
 - [ ] Extend the existing profile/preparation owner and native acquisition
   composition; preserve ordinary observation and activation behavior.
 - [ ] Add the provider's explicit result semantics and actual-parser
   compatibility/refusal controls before a dependent caller migrates.
 - [ ] Update the owning operation's reference documentation and affected tests.
   Add the normal plugin changefile; do not hand-edit versions.
-- [ ] Qualify the complete first-touch setup consumer in disposable state,
-  then publish the implementation through review, CI and release.
+- [ ] Qualify native dependency preparation and catalog consumption in
+  disposable state, then publish the provider through review, CI and release.
+- [ ] Retain complete first-touch setup and upgrade/rollback controls as the
+  dependent caller's adoption gate after provider expansion; this provider
+  change alone does not migrate that caller or complete repository setup.
 - [ ] Record the source/release result and return caller adoption to its
   existing owner. Installed-host rollout remains separately authorized.
 
@@ -135,3 +138,88 @@ plugin or successful repository setup.
 - 2026-11-10: Reserved #11989 after checking existing setup coordination and
   the adjacent knowledge-acquisition PR. This proposal precedes runtime changes;
   no installation, activation, adoption or rollout has been performed.
+- 2026-11-11: Proposal #11990 merged after exact-head Copilot approval with no
+  findings and successful required CI. The source worktree synchronized to the
+  accepted plan. Next is the existing native acquisition/source-context seam
+  and its focused consumer proof, not a settings cutover or installed rollout.
+- 2026-11-11: Implemented the opt-in prospective census and explicit
+  `tool-profile-dependencies-v1` capability/result discriminator. The native
+  profile parser reads the selected checkout; configuration bytes and revision
+  bind the plan. Profile-only remote acquisition reuses the shared installer's
+  isolated homes, bounded native execution and activation preservation. It never
+  calls repository registration. Exceptional owned-runner exits retain their
+  native working directory rather than deleting potentially active write state.
+- 2026-11-11: Focused native/source controls passed for profile refusal and
+  preservation, actual strict CLI parsing, source-default acquisition and
+  read-only machine catalog consumption. A synthetic native catalog control
+  also passed through an existing repository adapter without provisioning a
+  backend. An initial control incorrectly expected a catalog binding field;
+  the machine owner's actual in-process catalog has none. That control error
+  does not justify expanding the installation-context primitive.
+  Two broad local test groups reached their unchanged 300-second limits with
+  no assertion failures reported; narrower affected-source controls passed.
+  A temporary cleanup regression involving Windows read-only Git objects was
+  caught and fixed by retaining standard-library cleanup on settled completion.
+  The final frozen provider selection passed 37 controls, including actual
+  public default-source machine-plugin acquisition and its native catalog;
+  ten shared acquisition controls and eighteen targeted existing
+  profile/preservation regressions also passed. Review, required CI and release
+  remain gates. Complete repository setup, caller skew/rollback controls and
+  broader setup ownership remain open; no installed-host update was performed.
+- 2026-11-11: Provider PR #12007 exposed three concrete completeness gaps:
+  portable identity normalization omits acquisition selectors, catalog
+  normalization does not validate the payload's manifest name, and raw Git
+  failures cannot participate in positively witnessed no-launch recovery.
+  The candidate now compares complete source options, checks the manifest and
+  private native source definition, and converts Git errors/timeouts through the
+  existing profile/refusal owner. Remote aliases use the native marketplace
+  classifier. The corrected frozen packet passed 51 controls, including actual
+  default-source acquisition/catalog consumption. Six shared-library strict
+  typing errors from the first CI run were corrected; both 25-file platform
+  targets and the two focused acquisition/retention regressions passed locally.
+  The corrected source still requires a new published-head CI/review result.
+- 2026-11-11: The next review identified contradictory portable/native source
+  identities, deleted payloads blocked by stale completion receipts, and final
+  revalidation time omitted from the launch budget. The candidate now rejects
+  identity overrides that disagree with native acquisition, observes absent
+  payloads as needed while retaining malformed/foreign-state refusals, and
+  invalidates the owned stale receipt before reinstalling. The existing
+  checkout lock serializes acquisition-only cache writers. Both missing-payload
+  paths recheck the caller and total deadlines after final revalidation, with
+  cleanup/settlement reserves and positively witnessed no-launch refusal.
+  The frozen preparation/native packet passed 61 controls; two real shared
+  acquisition controls include deletion/reinstallation without premature
+  receipt readiness. Strict Linux/Windows type targets, lint, install contracts
+  and vendored parity passed. New exact-head CI and review remain required.
+- 2026-11-11: The next review found two further medium defects in the candidate:
+  an original catalog entry may omit the version supplied by a now-deleted
+  payload, and a repeated credential lookup used the neutral execution cwd
+  instead of the selected checkout. Missing-root observation now returns
+  needed after receipt identity and complete source checks without requiring
+  deleted manifest metadata. Acquisition retains checkout-scoped authentication
+  context independently of its neutral execution directory. The combined
+  native/preparation and existing authentication packet passed 96 controls,
+  including versionless receipt recovery and differing checkout/global
+  credential selection. The published-head CI and review gates still apply;
+  no caller migration, full repository setup or host rollout is claimed.
+- 2026-11-11: Review identified an authentication-policy gap before native
+  execution: shared acquisition prepared credentials before Worktrees could
+  enforce off/report-only or an existing anonymous-source decision. The
+  acquisition-only entry now accepts the caller's authentication callback
+  before lookup; standalone behavior remains the default. Worktrees reuses
+  its existing mode/anonymous policy for both preparation and execution.
+  The frozen native/preparation/authentication packet passed 99 controls,
+  requiring zero lookup and no token injection in all three non-authenticated
+  cases. Two standalone acquisition/reinstall controls, both strict platform
+  targets, vendored parity and install contracts also passed. Exact-head
+  publication, CI and accepted review remain gates.
+- 2026-11-11: A review summary raised Windows execution bounds and local-profile
+  discovery without an enumerated finding. Direct inspection confirmed that
+  the Windows installer's ordinary deadline is inactivity-based. Preparation
+  now also supplies that owner's existing absolute native deadline, preventing
+  continuous output from extending the shared acquisition budget. The frozen
+  packet passed 101 controls, including an actual sustained-output Windows
+  child that times out and settles its Job/activation transaction. A real CLI
+  control also proves canonical repository-local directory-profile discovery
+  without activation; no local-profile behavior change was needed. New
+  exact-head CI and review remain required.

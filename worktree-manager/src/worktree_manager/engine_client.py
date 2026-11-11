@@ -52,11 +52,8 @@ ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 _DEFAULT_TIMEOUT = 120
 _REMOTE_ADMISSION_TIMEOUT = 300
 class EngineError(RuntimeError):
-    """The agent-worktrees engine is absent, failed, or returned no valid JSON.
-
-    ``install_hint`` is True when the engine binstub could not be found at all --
-    the caller should point the user at ``worktree-manager setup`` (which drives
-    the core install) rather than treat it as a hard error.
+    """The engine is absent, failed, or returned invalid JSON.
+    ``install_hint`` requests ``worktree-manager setup`` for a missing engine.
     """
 
     def __init__(self, message: str, *, install_hint: bool = False) -> None:
@@ -230,7 +227,7 @@ def _run(
             proc = runner(cmd, timeout)
         else:
             kwargs = {
-                "capture_output": True, "text": True, "timeout": timeout,
+                "capture_output": True, "text": True, "encoding": "utf-8", "timeout": timeout,
                 "check": False, "env": _engine_environment(environment),
                 "stdin": subprocess.DEVNULL,
                 **({"cwd": cwd} if cwd else {}),
@@ -257,6 +254,11 @@ def _run(
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
+    if args == ["get", "update-controller"]:
+        from .project_update_controller import legacy_controller_error
+        legacy_error = legacy_controller_error(project, proc)
+        if legacy_error is not None:
+            raise legacy_error
     if preserve_failure_detail and allow_nonzero:
         return json_with_failure_detail(proc.stdout, proc.stderr, failed=proc.returncode != 0)
     if proc.returncode != 0 and allow_nonzero:
@@ -401,7 +403,7 @@ def run_project_passthrough(
         raise EngineError(f"could not run project binstub {project}: {e}") from e
 
 
-def get_value(project: str, key: str, *, timeout: int = _DEFAULT_TIMEOUT) -> str:
+def get_value(project: str | None, key: str, *, timeout: int = _DEFAULT_TIMEOUT) -> str:
     """Read a pinned scalar value from ``agent-worktrees get <key>``."""
     return _run(project, ["get", key], timeout=timeout).strip()
 

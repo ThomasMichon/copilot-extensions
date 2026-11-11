@@ -242,20 +242,24 @@ def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monk
     env = {"AGENT_HOME": str(tmp_path)}
     protected_command = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
     for command in relevance.SHELL_READ_HEADS:
-        arguments = {
-            "command": command, "description": "Fixture read", "cmd": protected_command,
-        }
-        event = {
-            "toolName": "powershell", "cwd": str(workspace),
-            argument_key: command if raw else arguments,
-        }
-        if argument_key == "toolArgs":
-            event["tool_input"] = {"command": protected_command}
-        assert relevance.is_irrelevant(event, False, client._load_sibling)
-        for name in policy["guards"]:
-            guard = client._load_sibling(name)
-            kwargs = {"anchors": [{"name": "example", "path": str(anchor)}]} if name == "anchor_write_guard.py" else {}
-            assert guard.decide(event, env=env, home=tmp_path, **kwargs) is None
+        keys = policy["nativeShellReadCommandKeys"]
+        for index, key in enumerate(keys[:1] if raw else keys):
+            arguments = {earlier: None for earlier in keys[:index]}
+            arguments.update({key: command, "description": "Fixture read"})
+            if index + 1 < len(keys):
+                arguments[keys[index + 1]] = protected_command
+            event = {
+                "toolName": "powershell", "cwd": str(workspace),
+                argument_key: command if raw else arguments,
+            }
+            if argument_key == "toolArgs":
+                event["tool_input"] = {"command": protected_command}
+            assert relevance.is_irrelevant(event, False, client._load_sibling)
+            for name in policy["guards"]:
+                guard = client._load_sibling(name)
+                assert tuple(keys) == guard.CMD_ARG_KEYS
+                kwargs = {"anchors": [{"name": "example", "path": str(anchor)}]} if name == "anchor_write_guard.py" else {}
+                assert guard.decide(event, env=env, home=tmp_path, **kwargs) is None
     guard = client._load_sibling("statelessness_guard.py")
     protected = {
         **event, argument_key: protected_command if raw else {"command": protected_command},
@@ -282,5 +286,33 @@ def test_native_shell_renderer_rejects_invalid_or_oversized_declarations(tmp_pat
     for name in (*renderer.GUARDS, *renderer.WRITE_DEPENDENCIES):
         (tmp_path / name).write_bytes((_SCRIPTS / name).read_bytes())
     (tmp_path / "hook_pre_relevance.py").write_text("SHELL_READ_HEADS = " + declaration + "\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        renderer.render(tmp_path)
+
+
+@pytest.mark.parametrize("declaration", [
+    None, "()", "('',)", "['command']", "('command', 'command')", "('command', False)",
+    "tuple(['command'])", "('different',)", "('command',)\nCMD_ARG_KEYS = ('command',)",
+    "reordered",
+    repr(tuple(f"key-{index}" for index in range(129))),
+])
+def test_native_shell_renderer_rejects_invalid_original_key_selection(tmp_path, declaration):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "native_selection_renderer", _PLUGIN.parents[1] / "tools" / "render-hook-read-policy.py",
+    )
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    for name in (*renderer.GUARDS, *renderer.WRITE_DEPENDENCIES, "hook_pre_relevance.py"):
+        (tmp_path / name).write_bytes((_SCRIPTS / name).read_bytes())
+    guard = tmp_path / renderer.GUARDS[-1]
+    if declaration == "reordered":
+        keys = renderer.literal_strings(guard.read_text("utf-8"), "CMD_ARG_KEYS")
+        declaration = repr(keys[1:] + keys[:1])
+    changed = "" if declaration is None else "CMD_ARG_KEYS = " + declaration
+    source, count = re.subn(r"(?m)^CMD_ARG_KEYS = .*$", lambda _: changed, guard.read_text("utf-8"))
+    assert count == 1
+    guard.write_text(source, encoding="utf-8")
     with pytest.raises(ValueError):
         renderer.render(tmp_path)

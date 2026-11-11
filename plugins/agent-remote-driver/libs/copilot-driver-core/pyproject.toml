@@ -17,6 +17,11 @@ dependencies = [
     "websockets>=15,<16",
 ]
 
+[project.optional-dependencies]
+sdk = [
+    "github-copilot-sdk>=1.0.27,<1.0.28; python_version >= '3.11'",
+]
+
 [tool.uv]
 exclude-newer = "7 days"
 

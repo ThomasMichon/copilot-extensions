@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "agent-remote-driver"
-version = "0.1.27-dev1"
+version = "0.1.28-dev1"
 description = "Independent Copilot execution core and reattachable Session Host"
 readme = "README.md"
 license = "MIT"
@@ -17,6 +17,9 @@ dependencies = [
 agent-remote-driver = "agent_remote_driver_app:main"
 
 [project.optional-dependencies]
+sdk = [
+    "agent-copilot-driver-core[sdk]",
+]
 dev = [
     "pytest>=9.1.1",
     "pytest-asyncio>=0.24",

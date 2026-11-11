@@ -16,7 +16,10 @@ from topology_contract import (
     ContractError, TERMINAL_EFFECTS, content_revision, owner_key, read_json,
     timestamp, validate, validate_materialization,
 )
-from topology_dispatch import LIVE_STATES, RETAINING_STATES, lane, linked, native_owner
+from topology_dispatch import (
+    LIVE_STATES, RETAINING_STATES, adopted_record, intent_lane, lane, linked, native_owner,
+    proposed_record,
+)
 
 
 class Topology:
@@ -274,6 +277,37 @@ class Topology:
             "advisoryOnly": True, "shortfallIsLaunchAuthority": False,
         }
 
+    def intent(self) -> dict[str, Any]:
+        """Compare desired standing intent with proposed and adopted native records."""
+        supplied = "dispatch" in self.observations
+        lanes = []
+        for assignment in self.assignments:
+            if assignment["kind"] != "standing":
+                continue
+            terminal = assignment["state"] in {"completed", "released"}
+            materialized = None if terminal else self.materialize(assignment["requestId"])
+            desired = {
+                "assignment": assignment["id"],
+                **{name: assignment[name] for name in ("requestId", "role", "machine", "state", "nativeTask")},
+                "charterRevision": assignment["charter"]["revision"],
+                "sourceRevision": materialized["sourceRevision"] if materialized else None,
+                "materializationRevision": materialized["materializationRevision"] if materialized else None,
+            }
+            snapshot = self.dispatch.get(assignment["nativeTask"]) if supplied else None
+            lanes.append(intent_lane(desired, snapshot, self.fresh(snapshot), supplied))
+        unmatched = [{
+            "proposed": proposed_record(snapshot, self.fresh(snapshot)),
+            "adopted": adopted_record(snapshot),
+            "reasons": ["proposed-without-desired-intent"],
+        } for snapshot in self.unmapped_tasks()]
+        return {
+            "topology": self.document["id"], "revision": self.document["revision"],
+            "evaluatedAt": self.at.isoformat(), "dispatchEvidenceSupplied": supplied,
+            "lanes": lanes, "stateCounts": dict(Counter(item["state"] for item in lanes)),
+            "proposedWithoutDesired": unmatched,
+            "advisoryOnly": True, "effectAuthorityGranted": False, "qualifiesCoverage": False,
+        }
+
     def assignment(self, request_id: str) -> dict[str, Any] | None:
         return next((item for item in self.assignments if item["requestId"] == request_id), None)
 
@@ -363,7 +397,8 @@ class Topology:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=[
-        "validate", "overview", "placement", "route", "seed", "materialize", "inspect-materialization",
+        "validate", "overview", "intent", "placement", "route", "seed", "materialize",
+        "inspect-materialization",
     ])
     parser.add_argument("document", type=Path)
     parser.add_argument("--at", help="ISO timestamp with timezone; default: current UTC time")
@@ -383,6 +418,8 @@ def main(argv: list[str] | None = None) -> int:
             result = {"valid": True, "version": document["version"], "revision": document["revision"]}
         elif args.command == "overview":
             result = topology.overview()
+        elif args.command == "intent":
+            result = topology.intent()
         elif args.command == "placement":
             if not args.role:
                 raise ContractError("placement requires --role")
