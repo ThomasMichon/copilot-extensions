@@ -88,9 +88,9 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ### Phase 4 - Same-owner routing and temporary work
 
-- [ ] Route status and adjustments to the retained owner; allocate unrelated
+- [x] Route status and adjustments to the retained owner; allocate unrelated
   requests separately with bounded temporary-agent lifecycle, and prevent the
-  dispatcher from taking over a worker role.
+  dispatcher from taking over a worker role (#12050, #12067).
 
 ### Phase 5 - Vacancy and drift reconciliation
 
@@ -292,3 +292,43 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - Validation remains isolated and synthetic, with no live enrollment,
   installation, deployment or external-venue effects. Publication, fresh
   independent review and required CI still gate merge.
+
+### 2026-11-11 - Phase 4 merged
+
+- Phase 4 merged in #12067 after independent review and required CI. The final
+  correction requires persisting the exact observed native worktree before
+  relay preparation; incompatible ownership remains held.
+- The final focused topology packet passed 225 tests, including the real CLI
+  unbound/persist/relay sequence and unchanged input bytes. All five native
+  Dispatch assignment cases passed, preserving the original seed, worktree,
+  relationship and exact-head acceptance fences. Python F/E9 lint and strict
+  Linux/Windows type checks passed.
+- All evidence remains isolated and synthetic. No live external venue,
+  enrollment, installation or deployment occurred. Later phases and the parent
+  objective remain open.
+
+### 2026-11-11 - Phase 5 vacancy and drift report
+
+- Added read-only `reconcile` reporting for #12079. It combines qualified
+  coverage with eligible placement, retaining unqualified assignment identities,
+  original pending effects and owner evidence. Off-role drift proposes
+  coordinated in-place reassignment; uncertain owners never become replacement
+  slots. Unmapped owners/tasks propose in-place reconciliation.
+- Completed assignments remain held until release and retirement evidence
+  settle. Dispatch-linked release additionally requires a fresh retired task,
+  null native ownership and a closed or absent original relationship.
+  Only unobstructed uncovered demand proposes new standing assignments, with
+  complete charters, stable identities and serialized native admission.
+- Both focused topology files passed 255 tests. Behavioral cases include stale,
+  dormant, off-role and unknown owners, original-effect identity, original
+  assignment continuation, aliases, custody/discovery/capacity holds and native
+  retirement. A real CLI subprocess proves unchanged input bytes; fresh
+  synthetic legacy/native fixtures exercise optional-evidence boundaries.
+  Python F/E9 lint passed.
+- The skill, recovery reference and plugin entry point document the new report
+  and its advisory-only limits. No installer, runtime service or provisioning
+  path changed. Live external-venue validation, enrollment, installation and
+  deployment remain outside this source-only authority. Strict agent-roles
+  type checks for Linux and Windows, documentation consistency, version
+  consistency and whitespace checks passed. Publication, independent review
+  and required CI still gate merge; Phase 5 is not complete.

@@ -310,6 +310,116 @@ class Topology:
             "advisoryOnly": True, "shortfallIsLaunchAuthority": False,
         }
 
+    def retirement_settled(self, assignment: dict[str, Any]) -> bool:
+        if assignment["state"] != "released" or self.pending(assignment):
+            return False
+        owners = [assignment["nativeWorktree"]]
+        if linked(assignment, self.observations):
+            snapshot = self.dispatch.get(assignment["nativeTask"])
+            if not self.fresh(snapshot) or snapshot is None:
+                return False
+            task = snapshot["task"]
+            relationship = snapshot["relationship"]
+            if (
+                task["standing_charter"]["lifecycle"] != "retired"
+                or task["owner"] is not None or task["owner_session_id"] is not None
+                or relationship is None or relationship["state"] not in {"closed", "absent"}
+                or relationship["request"]["task_id"] != assignment["nativeTask"]
+                or relationship["request"]["workspace"] != assignment["nativeWorktree"]
+            ):
+                return False
+            owners.append(relationship["request"]["workspace"])
+        keys = {owner_key(owner) for owner in owners if owner is not None}
+        return not any(
+            item["assignmentId"] == assignment["id"] or owner_key(item["owner"]) in keys
+            for item in self.observations["owners"]
+        )
+
+    def reconcile(self) -> dict[str, Any]:
+        """Propose in-place reconciliation or uncovered demand, never replacement."""
+        holds = self.custody_holds() + self.discovery_holds()
+        lanes = []
+        for role in self.roles.values():
+            coverage = self.coverage(role)
+            unresolved = {item["assignment"]: item for item in coverage["unqualified"]}
+            dispositions = []
+            for assignment in self.assignments:
+                if assignment["kind"] != "standing" or assignment["role"] != role["id"]:
+                    continue
+                terminal = assignment["state"] in {"completed", "released"}
+                if terminal:
+                    if self.retirement_settled(assignment):
+                        continue
+                    evidence: dict[str, Any] = {"reasons": ["terminal-assignment-retirement-unsettled"]}
+                elif assignment["id"] in unresolved:
+                    evidence = unresolved[assignment["id"]]
+                else:
+                    continue
+                snapshot = self.dispatch.get(assignment["nativeTask"]) if linked(
+                    assignment, self.observations,
+                ) else None
+                owner = native_owner(snapshot) or assignment["nativeWorktree"]
+                observation = self.owners.get(owner_key(owner)) if owner else None
+                pending = self.pending(assignment)
+                action = "reconcile-with-retained-owner"
+                original_flow = None
+                if terminal:
+                    action = "reconcile-retirement-with-native-owner"
+                elif pending:
+                    action = "reconcile-original-effects-no-replay"
+                elif "role-or-scope-mismatch" in evidence["reasons"]:
+                    action = "coordinate-in-place-reassignment"
+                elif owner is None and (
+                    evidence.get("nativeStatus") == "desired"
+                    or (not linked(assignment, self.observations) and assignment["state"] == "proposed")
+                ):
+                    action = "continue-original-assignment"
+                    original_flow = self.flow(assignment["requestId"])
+                dispositions.append({
+                    **evidence, "assignment": assignment["id"], "requestId": assignment["requestId"],
+                    "creationKey": assignment["creationKey"], "nativeTask": assignment["nativeTask"],
+                    "retainedWorktree": owner,
+                    "nativeTaskOwner": snapshot["task"]["owner"] if snapshot else None,
+                    "expected": {
+                        "role": role["id"], "scope": role["scope"],
+                        "charterRevision": assignment["charter"]["revision"],
+                    },
+                    "observedOwner": observation,
+                    "proposed": proposed_record(snapshot, self.fresh(snapshot)) if snapshot else None,
+                    "adopted": adopted_record(snapshot) if snapshot else None,
+                    "pendingEffects": pending, "action": action, "originalFlow": original_flow,
+                    "replacementAllowed": False,
+                })
+            lane_holds = list(holds)
+            if dispositions:
+                lane_holds.append("existing-assignments-require-reconciliation")
+            placement = self.placement(role["id"], "standing") if coverage["shortfall"] else None
+            if placement is not None and not placement["candidates"]:
+                lane_holds.append("no-eligible-capacity")
+            proposal = None
+            if coverage["shortfall"] and not lane_holds:
+                assert placement is not None
+                proposal = {
+                    "action": "persist-new-standing-assignment",
+                    "count": coverage["shortfall"], "candidates": placement["candidates"],
+                    "completeCharterRequired": True, "stableIdentityRequired": True,
+                    "serializedNativeAdmissionRequired": True,
+                }
+            lanes.append({
+                **coverage, "holds": lane_holds, "dispositions": dispositions, "placement": placement,
+                "newAssignmentCount": proposal["count"] if proposal else 0, "proposal": proposal,
+            })
+        return {
+            "topology": self.document["id"], "revision": self.document["revision"],
+            "evaluatedAt": self.at.isoformat(), "holds": holds, "lanes": lanes,
+            "adoptions": [
+                {"action": "reconcile-owner-in-place", "observation": item} for item in self.unmapped_owners()
+            ] + [
+                {"action": "reconcile-native-task-in-place", "snapshot": item} for item in self.unmapped_tasks()
+            ],
+            "advisoryOnly": True, "effectAuthorityGranted": False, "nativeRecheckRequired": True,
+        }
+
     def temporary(self) -> list[dict[str, Any]]:
         """Report temporary work beside, never inside, standing coverage."""
         lanes = []
@@ -691,7 +801,7 @@ class Topology:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=[
-        "validate", "overview", "intent", "placement", "flow", "route", "relay", "seed", "materialize",
+        "validate", "overview", "reconcile", "intent", "placement", "flow", "route", "relay", "seed", "materialize",
         "inspect-materialization",
     ])
     parser.add_argument("document", type=Path)
@@ -713,6 +823,8 @@ def main(argv: list[str] | None = None) -> int:
             result = {"valid": True, "version": document["version"], "revision": document["revision"]}
         elif args.command == "overview":
             result = topology.overview()
+        elif args.command == "reconcile":
+            result = topology.reconcile()
         elif args.command == "intent":
             result = topology.intent()
         elif args.command == "flow":

@@ -158,6 +158,10 @@ retiring and retired lanes separately. Owner-retaining lanes are not vacancies,
 and only a joined, current accepted lane contributes qualified coverage.
 The [recovery reference](references/adapters-and-recovery.md) explains adoption,
 collisions, interrupted allocation, succession and retirement.
+Use the read-only `reconcile` report to distinguish uncovered demand from
+retained assignments needing owner coordination. An off-role, stale, dormant or
+uncertain owner is not a replacement slot; preserve its original assignment and
+effects while coordinating any accepted in-place reassignment.
 
 Completion is the worker's actual acceptance gate and native lifecycle outcome,
 not an idle session. Temporary workers finish and release through their native
@@ -177,6 +181,7 @@ No install, service, network or credentials are required.
 ```text
 python <resolved-script> validate <private-topology-json>
 python <resolved-script> overview <private-topology-json>
+python <resolved-script> reconcile <private-topology-json>
 python <resolved-script> intent <private-topology-json>
 python <resolved-script> flow <private-topology-json> --request <request-id>
 python <resolved-script> placement <private-topology-json> --role <role-id> --kind standing
@@ -195,6 +200,14 @@ declaration and its adopted materialization, without qualifying coverage;
 worktree and observed current head or a hold; `seed` exports the complete saved
 assignment, role and machine context.
 There is no allocate, send, reconcile-write or launch command.
+
+`reconcile` combines coverage and eligible placement into advisory lane
+dispositions. It retains unresolved assignments and original effect identities,
+proposes in-place adoption of unmapped owners, and reports new standing demand
+only when no custody, discovery, retained-assignment or capacity hold blocks it.
+Proposal counts describe demand, not reservations or simultaneous launch capacity.
+Complete charters, stable identities and serialized native admission remain
+required; see [vacancy and drift reconciliation](references/adapters-and-recovery.md#vacancy-and-drift-reconciliation).
 
 `relay` reports the next advisory step for a saved follow-up: reconcile a changed
 native charter when needed, persist the immutable request envelope and relay

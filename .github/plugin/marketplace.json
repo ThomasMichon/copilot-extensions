@@ -152,7 +152,7 @@
     {
       "name": "agent-roles",
       "description": "Sustained agent role charters over existing owners: a fleet monitor (task master) for progress audits and separately authorized corrective steers, and a pull-request reviewer role with independent lanes. Guidance-only, with no task queue, scheduler, daemon or required companion plugin.",
-      "version": "0.2.4-dev1",
+      "version": "0.2.5-dev1",
       "source": "plugins/agent-roles"
     }
   ]
