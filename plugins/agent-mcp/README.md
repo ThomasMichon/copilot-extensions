@@ -504,8 +504,11 @@ Incoming publication and `installer-readiness` exclude cached providers whose
 `<plugin>@<marketplace>` is explicitly false in effective `enabledPlugins`.
 User `settings.json`/`settings.local.json` are followed by the nearest workspace's
 Claude settings and Copilot settings, with local overrides last within each
-convention. Missing entries remain candidates; malformed or unreadable selection
-fails readiness. Explicit `AGENT_MCP_MARKETPLACE_ROOT` ownership retains its
+convention. Staged installers use their selected
+`COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT`; otherwise workspace discovery starts
+at CWD. Settings accept string-safe `//` comments. Missing entries remain
+candidates; malformed or unreadable selection fails readiness.
+Explicit `AGENT_MCP_MARKETPLACE_ROOT` ownership retains its
 existing scoped inventory. Active/unknown-provider collisions, user bridge
 collisions and invalid selected content still fail. This does not delete cached
 payloads, change raw `status` inventory or alter explicit-path/named lookup for

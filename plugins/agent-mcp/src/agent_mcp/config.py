@@ -460,38 +460,9 @@ def discover_plugin_bridge_candidates(
     Unlike :func:`discover_plugin_bridges`, this lossless inventory preserves
     duplicate names so diagnostics and readiness checks can reject ambiguity.
     """
-    candidates: list[tuple[str, Path]] = []
-    seen: set[Path] = set()
-    marketplace_roots = _marketplace_roots()
-    if marketplace_roots:
-        for root in marketplace_roots:
-            if not root.is_dir():
-                continue
-            for sub in ("agents", "mcp"):
-                for ext in (".yaml", ".yml", ".json"):
-                    for path in sorted(root.glob(f"*/{sub}/*{ext}")):
-                        if include is not None and not include(path):
-                            continue
-                        resolved = path.resolve()
-                        if resolved in seen:
-                            continue
-                        seen.add(resolved)
-                        candidates.append((normalize_bridge_name(path.name), path))
-        return candidates
-    for root in _plugin_roots():
-        if not root.is_dir():
-            continue
-        for sub in ("agents", "mcp"):
-            for ext in (".yaml", ".yml", ".json"):
-                for path in sorted(root.glob(f"*/*/{sub}/*{ext}")):
-                    if include is not None and not include(path):
-                        continue
-                    resolved = path.resolve()
-                    if resolved in seen:
-                        continue
-                    seen.add(resolved)
-                    candidates.append((normalize_bridge_name(path.name), path))
-    return candidates
+    from .provider_selection import discover_candidates
+
+    return discover_candidates(include=include)
 
 
 def discover_plugin_bridges() -> dict[str, Path]:

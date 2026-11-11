@@ -31,6 +31,7 @@ def providers(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENT_MCP_PLUGIN_ROOTS", str(plugins))
     monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path / "state"))
     monkeypatch.delenv("AGENT_MCP_MARKETPLACE_ROOT", raising=False)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", raising=False)
     monkeypatch.setattr(config, "BRIDGES_DIR", tmp_path / "state" / "bridges")
     monkeypatch.chdir(tmp_path)
     return home, current, disabled
@@ -75,6 +76,44 @@ def test_project_and_local_precedence_can_reenable_provider(providers):
         '{"enabledPlugins":{"example@retained":true}}', encoding="utf-8",
     )
     assert cutover._configured_readiness()["state"] == "failed"
+
+
+def test_native_settings_comments_preserve_urls_and_quoted_slashes(providers):
+    home, _current, _disabled = providers
+    (home / "settings.json").write_text(
+        '// settings header\n{\n'
+        '"url":"https://example.invalid/a//b", // selected endpoint\n'
+        '"text":"escaped \\"//\\" is not a comment",\n'
+        '"enabledPlugins":{"example@retained":false} // retain files\n}\n',
+        encoding="utf-8-sig",
+    )
+
+    assert cutover._configured_readiness()["state"] == "ready"
+
+
+def test_staged_neutral_cwd_honors_selected_project_reenable(providers, monkeypatch):
+    home, _current, disabled = providers
+    project = home.parent / "project"
+    settings = project / ".github" / "copilot"
+    settings.mkdir(parents=True)
+    selected = settings / "settings.json"
+    selected.write_text(
+        '{"enabledPlugins":{"example@retained":true}}', encoding="utf-8",
+    )
+    neutral = home.parent / "neutral"
+    neutral.mkdir()
+    monkeypatch.chdir(neutral)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", str(project))
+
+    assert "ambiguous" in cutover._configured_readiness()["detail"]
+    selected.write_text(
+        '{"enabledPlugins":{"example@retained":true,"example@current":false}}',
+        encoding="utf-8",
+    )
+    disabled.write_text("server:\n  type: http\n", encoding="utf-8")
+    assert "invalid" in cutover._configured_readiness()["detail"]
+    selected.write_text("{", encoding="utf-8")
+    assert "Invalid plugin selection" in cutover._configured_readiness()["detail"]
 
 
 @pytest.mark.parametrize("raw", (

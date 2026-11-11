@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 
@@ -34,6 +35,11 @@ def _enabled(path: Path) -> dict[str, bool] | None:
     except (OSError, UnicodeError) as error:
         raise ConfigError(f"Cannot read plugin selection: {path}: {error}") from error
     try:
+        raw = re.sub(
+            r'"(?:[^"\\]|\\.)*"|//[^\r\n]*',
+            lambda match: match[0] if match[0].startswith('"') else "",
+            raw,
+        )
         document = json.loads(raw, object_pairs_hook=_unique_fields)
         if not isinstance(document, dict):
             raise ValueError("settings must be an object")
@@ -50,7 +56,10 @@ def effective_enablement() -> dict[str, bool]:
     enabled = {}
     for name in ("settings.json", "settings.local.json"):
         enabled.update(_enabled(home / name) or {})
-    workspace = Path.cwd()
+    project = os.environ.get("COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT")
+    workspace = Path(project).expanduser() if project else Path.cwd()
+    if not workspace.is_absolute() or not workspace.is_dir():
+        raise ConfigError("Selected installation project root must be an existing absolute directory")
     for root in (workspace, *workspace.parents):
         project = [_enabled(root.joinpath(*parts)) for parts in _PROJECT_SETTINGS]
         if any(layer is not None for layer in project):
@@ -79,3 +88,29 @@ def provider_filter() -> Callable[[Path], bool]:
         return True
 
     return selected
+
+
+def discover_candidates(
+    *, include: Callable[[Path], bool] | None = None,
+) -> list[tuple[str, Path]]:
+    from . import config
+
+    candidates = []
+    seen = set()
+    marketplace_roots = config._marketplace_roots()
+    roots = marketplace_roots or config._plugin_roots()
+    prefix = "*" if marketplace_roots else "*/*"
+    for root in roots:
+        if not root.is_dir():
+            continue
+        for sub in ("agents", "mcp"):
+            for ext in (".yaml", ".yml", ".json"):
+                for path in sorted(root.glob(f"{prefix}/{sub}/*{ext}")):
+                    if include is not None and not include(path):
+                        continue
+                    resolved = path.resolve()
+                    if resolved in seen:
+                        continue
+                    seen.add(resolved)
+                    candidates.append((config.normalize_bridge_name(path.name), path))
+    return candidates
