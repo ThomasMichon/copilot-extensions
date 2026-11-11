@@ -13,31 +13,42 @@ GUARDS = ("statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.p
 WRITE_DEPENDENCIES = ("tool_call_forms.py", "guarded_anchor_map.py")
 
 
+def literal_strings(source: str, name: str) -> tuple[str, ...]:
+    """Read one bounded literal tuple without executing its source."""
+    declarations = [
+        node.value for node in ast.parse(source).body
+        if isinstance(node, ast.Assign)
+        and any(isinstance(target, ast.Name) and target.id == name for target in node.targets)
+    ]
+    if len(declarations) != 1:
+        raise ValueError(f"Expected one {name} declaration")
+    values = ast.literal_eval(declarations[0])
+    if (
+        not isinstance(values, tuple) or not values or len(values) > 128
+        or any(not isinstance(value, str) or not value for value in values)
+        or len(set(values)) != len(values)
+    ):
+        raise ValueError(f"Expected unique literal strings for {name}")
+    return values
+
+
 def render(scripts: Path = SCRIPTS) -> str:
-    guards = {name: hashlib.sha256((scripts / name).read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest() for name in GUARDS}
+    sources = {name: (scripts / name).read_text(encoding="utf-8-sig") for name in GUARDS}
+    guards = {name: hashlib.sha256(text.encode("utf-8")).hexdigest() for name, text in sources.items()}
+    key_declarations = [literal_strings(text, "CMD_ARG_KEYS") for text in sources.values()]
+    if any(keys != key_declarations[0] for keys in key_declarations[1:]):
+        raise ValueError("Original guards disagree on command-key selection")
     dependencies = {
         name: hashlib.sha256((scripts / name).read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest()
         for name in WRITE_DEPENDENCIES
     }
     relevance = (scripts / "hook_pre_relevance.py").read_text(encoding="utf-8-sig")
-    declarations = [
-        node.value for node in ast.parse(relevance).body
-        if isinstance(node, ast.Assign)
-        and any(isinstance(target, ast.Name) and target.id == "SHELL_READ_HEADS" for target in node.targets)
-    ]
-    if len(declarations) != 1:
-        raise ValueError("Expected one canonical shell-read head declaration")
-    commands = ast.literal_eval(declarations[0])
-    if (
-        not isinstance(commands, tuple) or not commands or len(commands) > 128
-        or any(not isinstance(command, str) or not command for command in commands)
-        or len(set(commands)) != len(commands)
-    ):
-        raise ValueError("Expected unique literal shell-read heads")
+    commands = literal_strings(relevance, "SHELL_READ_HEADS")
     rendered = json.dumps({
         "schema": "agent-worktrees.native-read-policy", "version": 1, "guards": guards,
         "nativeWriteDependencies": dependencies,
         "nativeShellReadCommands": list(commands),
+        "nativeShellReadCommandKeys": list(key_declarations[0]),
         "nativeShellReadDependencies": {
             "hook_pre_relevance.py": hashlib.sha256(relevance.encode("utf-8")).hexdigest(),
         },

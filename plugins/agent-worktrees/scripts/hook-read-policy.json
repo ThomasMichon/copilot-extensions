@@ -21,6 +21,14 @@
     "ls",
     "cat"
   ],
+  "nativeShellReadCommandKeys": [
+    "command",
+    "cmd",
+    "script",
+    "commandLine",
+    "commandline",
+    "input"
+  ],
   "nativeShellReadDependencies": {
     "hook_pre_relevance.py": "5b6109ab45b8d81afe26b98bfd2bcfa1df45163724b93a8833c2d63b5ebebcae"
   }

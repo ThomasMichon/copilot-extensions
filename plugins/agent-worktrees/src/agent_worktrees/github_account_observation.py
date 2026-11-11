@@ -47,7 +47,7 @@ class SelectedGitHubAccount:
 
     def capture(
         self, stage, arguments, *, binary=False, limit=256 * 1024,
-        allow_graphql_errors=False,
+        allow_graphql_errors=False, input_text=None,
     ):
         """Bound each child by the same deadline and live caller checkpoint."""
         self.checkpoint()
@@ -59,6 +59,7 @@ class SelectedGitHubAccount:
                 [self.executable, *arguments], timeout=timeout, budget=self.budget,
                 env=dict(self._environment), binary=binary,
                 max_stdout_bytes=limit, max_stderr_bytes=64 * 1024,
+                **({"input_text": input_text} if input_text is not None else {}),
             )
         except OwnedCleanupError:
             raise

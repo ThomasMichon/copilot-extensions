@@ -103,8 +103,8 @@ def _checkout(path: str, branch: str, budget: OwnedExecutionBudget) -> dict:
     }
 
 
-def context_selection(project: str) -> tuple[dict, repos.ReposRegistry]:
-    """Resolve the shared unbound-harness eligibility and input revisions."""
+def context_selection(project: str, *, require_unbound: bool = True) -> tuple[dict, repos.ReposRegistry]:
+    """Resolve canonical context; new setup operations require it unbound."""
     from .repos_configuration_catalog import inspect_project
     from .repos_knowledge_configuration import binding_names_supported
 
@@ -117,8 +117,10 @@ def context_selection(project: str) -> tuple[dict, repos.ReposRegistry]:
     if registry.repos[project].repo_class != "worktree":
         raise ConfigurationError("context-not-worktree", "Knowledge registration requires a worktree-class harness.")
     inspection = inspect_project(project, "")
-    if not eligible(inspection):
+    if require_unbound and not eligible(inspection):
         raise ConfigurationError("knowledge-registration-unavailable", "Registration requires an unbound stateless harness.")
+    if not require_unbound and inspection.findings:
+        raise ConfigurationError("knowledge-recovery-unavailable", "Native harness composition requires owner inspection.")
     config = cfg.load_project_config(project, include_control_plane_related_pr=False)
     policy = cfg._load_inrepo_config(config.default_repo.anchor, strict=True)
     return {

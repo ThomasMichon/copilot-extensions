@@ -35,6 +35,7 @@ _DRIVER_MODULES = (
     "session_host/osutil.py",
     "session_host/preference_spawn.py",
     "session_host/launcher.py",
+    "session_host/host_state.py",
     "session_host/startup_admission.py",
     "session_host/legacy_launcher.py",
     "session_host/receiver_policy.py",

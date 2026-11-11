@@ -35,7 +35,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -52,6 +51,7 @@ from .. import winjob
 from ..session_preferences import execution_receipt
 from . import protocol as proto
 from .host import SessionHost
+from .host_state import write_host_state as _write_host_state
 from .osutil import child_preexec, process_start_time
 from .startup_admission import CONTEXT_ENV as _STARTUP_ENV, StartupAdmissionClient, StartupAdmissionServer
 
@@ -615,6 +615,7 @@ async def run_host(
     before_exec: Callable[[], None] | None = None,
     lifetime_policy: str = "acp",
     ws_port: int | None = None,
+    backend: str = "native-acp",
 ) -> None:
     """Spawn the child, serve the reattachable endpoint, run until closed.
 
@@ -629,7 +630,17 @@ async def run_host(
     """
     if lifetime_policy not in {"acp", "legacy"}:
         raise ValueError("Unsupported Session Host lifetime policy")
+    if backend not in {"native-acp", "sdk"} or backend == "sdk" and lifetime_policy != "acp":
+        raise ValueError("Unsupported Session Host backend or lifetime policy")
     _require_receiving_policy(cwd, policy_context)
+    sdk_token = ""
+    if backend == "sdk":
+        from .sdk_backend import connect_owner, require_sdk, validate_child_argv
+
+        require_sdk()
+        validate_child_argv(child_argv)
+        sdk_token = secrets.token_hex(32)
+        env = {**(env or {}), "COPILOT_CONNECTION_TOKEN": sdk_token}
     if ws_port is not None and (lifetime_policy != "acp" or not 0 <= ws_port <= 65535):
         raise ValueError("WebSocket requires ACP lifetime and a valid loopback port")
     # Resolve optional receiving support before creating a child. The compact
@@ -678,6 +689,19 @@ async def run_host(
     finally:
         if startup is not None:
             startup.close()
+    native_child = child
+    sdk_child = None
+    if backend == "sdk":
+        try:
+            sdk_child = await connect_owner(
+                native_child, token=sdk_token, cwd=cwd or os.getcwd(), session_id=session_id,
+            )
+            child = sdk_child
+        except BaseException:
+            if native_child.returncode is None:
+                native_child.kill()
+            await native_child.wait()
+            raise
     state_path = Path(state_file) if state_file is not None else None
     state: dict[str, Any] = {}
 
@@ -719,6 +743,7 @@ async def run_host(
             "port": bound_port,
             "protocol_version": proto.PROTOCOL_VERSION,
             "lifetime_policy": lifetime_policy,
+            "backend": backend,
             "automatic_idle_retirement": (
                 "legacy-disconnect" if lifetime_policy == "legacy" else "unavailable"
             ),
@@ -783,15 +808,19 @@ async def run_host(
                     await asyncio.gather(*tasks, return_exceptions=True)
                 finally:
                     # Reap within the loop, even if a transport failed to close.
-                    if child.returncode is None:
-                        try:
-                            child.kill()
-                        except ProcessLookupError:
-                            pass
-                        try:
-                            await child.wait()
-                        except ProcessLookupError:
-                            pass
+                    try:
+                        if sdk_child is not None:
+                            await sdk_child.close()
+                    finally:
+                        if native_child.returncode is None:
+                            try:
+                                native_child.kill()
+                            except ProcessLookupError:
+                                pass
+                            try:
+                                await native_child.wait()
+                            except ProcessLookupError:
+                                pass
 
 
 def _boot_id() -> str:
@@ -810,35 +839,6 @@ def _process_start_ticks(pid: int) -> str:
         except (OSError, IndexError):
             pass
     return ""
-
-
-def _write_host_state(
-    path: Path,
-    payload: dict,
-) -> bool:
-    """Atomically publish one mode-0600 Session Host authority record."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if os.name != "nt":
-        path.parent.chmod(0o700)
-        stat = path.parent.stat()
-        if stat.st_uid != os.geteuid() or stat.st_mode & 0o777 != 0o700:
-            raise PermissionError(
-                f"unsafe Session Host catalogue directory: {path.parent}"
-            )
-    fd, temp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        if hasattr(os, "fchmod"):
-            try:
-                os.fchmod(fd, 0o600)
-            except OSError:
-                pass
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle)
-        os.replace(temp, path)
-        return True
-    finally:
-        if os.path.exists(temp):
-            os.unlink(temp)
 
 
 def _require_receiving_policy(cwd: str | None, context: str | None) -> None:
@@ -864,6 +864,11 @@ def main(
         ("acp", "legacy", "cli") if headed_available else ("acp", "legacy")
     )
     if argv == ["--support-json"]:
+        sdk_available = False
+        if not legacy and find_spec("agent_remote_driver.session_host.sdk_backend") is not None:
+            from .sdk_backend import available
+
+            sdk_available = available()
         websocket_available = (
             not legacy
             and find_spec("agent_remote_driver.session_host.ws_transport") is not None
@@ -873,6 +878,7 @@ def main(
             "contract": "agent-remote-driver.session-host",
             "version": 1,
             "modes": ["headless"] + (["headed"] if headed_available else []),
+            "headless_backends": ["native-acp"] + (["sdk"] if sdk_available else []),
             "transports": ["tcp-frame"] + (["acp.v1"] if websocket_available else []),
             "protocol_version": proto.PROTOCOL_VERSION,
             "lifetime_policies": list(lifetime_policies),
@@ -907,6 +913,8 @@ def main(
     ap.add_argument("--repository-policy-context", default=None)
     ap.add_argument("--mode", choices=("headless", "headed") if headed_available else ("headless",),
                     default="headless")
+    ap.add_argument("--backend", choices=("native-acp",) if legacy else ("native-acp", "sdk"),
+                    default="native-acp")
     ap.add_argument("--attempt-directory", default=None)
     ap.add_argument(
         "--lifetime-policy", choices=lifetime_policies,
@@ -927,6 +935,8 @@ def main(
         "cli" if args.mode == "headed" else "legacy" if legacy else "acp"
     )
     if args.mode == "headed":
+        if args.backend != "native-acp":
+            ap.error("SDK backend selection is supported only for headless execution")
         if (
             lifetime_policy != "cli" or not args.attempt_directory
             or not args.state_file or not args.session_id
@@ -975,6 +985,7 @@ def main(
             policy_context=args.repository_policy_context,
             lifetime_policy=lifetime_policy,
             ws_port=args.ws_port,
+            **({"backend": args.backend} if args.backend != "native-acp" else {}),
         ))
     except KeyboardInterrupt:
         return 0

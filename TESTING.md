@@ -520,6 +520,20 @@ a fatal item timeout does not erase the active occurrence. This observer work
 is outside each subprocess elapsed span and remains part of fixture overhead,
 not isolated hook startup attribution.
 
+The `literal-shell-selection` cases apply original first-nonempty command-key
+selection to the same exact-literal proof. Representative first/final alternate
+keys retain complete real-worker comparisons and same-selected-key protected
+denials in both engines and legacy/cell scopes. Focused controls retain earlier
+null/nonstring/whitespace/protected values, exact key casing, dictionary-member
+metadata, JSON/batch fallback and absent or invalid optional key declarations.
+The retained command-only version-1 read consumer processes the new declaration
+without gaining alternate-key support; the current consumer keeps its
+command-only baseline when that optional field is absent. Original-guard parity
+covers every source-derived key and canonical literal in both object carriers.
+Renderer controls require all four original key declarations to agree and reject
+missing, repeated, nonliteral, invalid, duplicate or oversized data. No argument
+grammar, JSON decoder, runtime selection or time budget is changed.
+
 The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
 supplied existing Python 3.9 interpreter. Their private fixture publishes real
 project membership and the current original guard map, copies the required
@@ -3196,6 +3210,30 @@ qualify complete pending snapshots or work-arrival races, enable
 idle expiry, attribute observer retirement, or qualify another selected
 runtime/platform. Native and SDK versions must be recorded with each result;
 package availability alone is not runtime support.
+
+The separate T3 file `tests/native/test_native_sdk_backend.py` exercises the
+optional SDK provider through the real Session Host and selected wheel-built
+application. Supply `COPILOT_NATIVE_TEST_DRIVER_SDK_PYTHON` pointing to an
+already-prepared, season-locked optional application interpreter, plus the
+existing native executable selector. The tests never install packages or
+download a runtime. Only the public session's local synthetic-provider and
+instruction/tool fixture configuration is overridden; native launch/admission,
+SDK connection, ACP adaptation, permission relay and broker execute from the
+selected artifact. Private homes, caller-owned scopes and exact process births
+remain mandatory.
+
+These controls prove new/prompt, frontend reconnect, cold text-history load,
+nonempty client/agent/shell inventory, a future schedule after root idle,
+permission approval for the exact fixture command and observed cancellation.
+Shell births are published atomically and pinned before fixture work is
+released. A task registered just before a read may race its notification;
+bounded read-only refreshes may establish a stable snapshot without replaying
+the task or prompt. This is not an atomic idle-retirement proof.
+Focused unit controls additionally cover unknown admission, managed permission
+holds, event overflow, unrepresentable history and missing optional
+dependency/interpreter refusal. Compact receiving runs a real refusal subprocess.
+Python 3.10 installation, other platforms, joined-observer retirement and
+work-arrival/expiry races retain their independent qualification gates.
 
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied
