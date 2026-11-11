@@ -192,6 +192,11 @@ expansion of required CI is introduced.
   The engine control covers re-entry at both the selected project and caller
   directories. Lint and all 13 installation-contract checks passed. Fresh
   current-head review and hosted qualification remain required.
+- Refreshed the existing Manager adapter source-admission binding after its
+  home-capture change; the admission reader verified every manifest source.
+  Unit nodes, actor permissions and coverage gates are unchanged. Reconciled
+  the effort-index-only conflict with current `dev`, preserving peer entries
+  and status changes; tested adapter and queue code remained byte-identical.
 
 ### 2026-11-10 - Proposal
 
