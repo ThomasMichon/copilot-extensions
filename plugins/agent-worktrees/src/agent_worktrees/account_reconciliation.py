@@ -101,15 +101,19 @@ def knowledge_policy_path(project):
 
 def _configured_identity(registry, target):
     """Bootstrap from an existing choice, never the namespace or ambient login."""
-    if target in registry.repos:
-        target = repos.github_slug(registry.repos[target].remote)
+    entry = registry.repos.get(target)
+    if entry is not None:
+        target = repos.github_slug(entry.remote)
         if not target:
             return None
     target = _repository(target)
-    for entry in registry.repos.values():
-        if (repos.github_slug(entry.remote) or "").casefold() == target:
-            if entry.account:
-                return identity(entry.account)
+    if entry is None:
+        entry = next((
+            candidate for candidate in registry.repos.values()
+            if (repos.github_slug(candidate.remote) or "").casefold() == target
+        ), None)
+    if entry is not None and entry.account:
+        return identity(entry.account)
     owner = target.split("/", 1)[0]
     return repos.account_from_map(owner, registry=registry) or None
 
@@ -127,7 +131,9 @@ def reconcile(
         if target in requested and requested[target] != slot:
             raise ValueError("Conflicting repository slot arguments")
         requested[target] = slot
-        targets.setdefault(target, slot)
+        if target in targets and targets[target] != slot:
+            raise ValueError("Repository slot argument conflicts with portable policy")
+        targets[target] = slot
     default_slot = _slot(default_slot)
     before = projection.snapshot(registry)
     projection.prepare(registry, owner)

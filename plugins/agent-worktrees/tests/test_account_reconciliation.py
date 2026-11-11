@@ -115,6 +115,69 @@ def test_changed_local_projection_is_preserved_as_an_explicit_choice(local):
     assert "repo:upstream" not in repos.read_registry(strict=True).account_projection
 
 
+def test_alias_bootstrap_preserves_exact_name_and_first_slug_match(local):
+    _registry, policy = local
+    state = repos.read_registry(strict=True)
+    state.repos["upstream"].account = "first-account"
+    state.repos["zz-alias"] = repos.RepoEntry(
+        "zz-alias", remote=state.repos["upstream"].remote, account="alias-account",
+    )
+    repos.write_registry(state)
+    assert run(policy, identity_source="zz-alias")["default"]["account"] == "alias-account"
+    assert run(policy, identity_source="Publisher/tool")["default"]["account"] == "first-account"
+    state = repos.read_registry(strict=True)
+    state.repos["upstream"].account = ""
+    repos.write_registry(state)
+    assert run(policy, identity_source="Publisher/tool")["default"]["state"] == "missing"
+
+
+def test_portable_and_argument_slot_conflict_refuses_before_writing(local):
+    registry, policy = local
+    policy.write_text(json.dumps({
+        "version": 1, "accounts": {"work": "operator-work", "public": "operator-public"},
+        "repositories": {"Publisher/tool": "work"},
+    }), encoding="utf-8")
+    before = registry.read_bytes()
+    with pytest.raises(ValueError, match="conflicts with portable policy"):
+        run(policy, apply=True)
+    assert registry.read_bytes() == before
+
+
+def test_existing_default_map_writer_revokes_managed_ownership(local):
+    _registry, policy = local
+    value = {"version": 1, "accounts": {"work": "operator-work"}}
+    policy.write_text(json.dumps(value), encoding="utf-8")
+    run(policy, apply=True)
+    repos.set_account_map("GITHUB.COM:*", "operator-work")
+    value["accounts"]["work"] = "changed-work"
+    policy.write_text(json.dumps(value), encoding="utf-8")
+    run(policy, apply=True)
+    state = repos.read_registry(strict=True)
+    assert state.default_account == "operator-work"
+    assert "default" not in state.account_projection
+
+
+def test_remove_and_explicit_readd_cannot_inherit_projection_ownership(local, monkeypatch):
+    _registry, policy = local
+    value = {"version": 1, "accounts": {"work": "operator-work", "public": "first-public"}}
+    policy.write_text(json.dumps(value), encoding="utf-8")
+    run(policy, apply=True)
+    assert repos.remove_repo("upstream")
+    assert "repo:upstream" not in repos.read_registry(strict=True).account_projection
+    state = repos.read_registry(strict=True)
+    state.account_projection["repo:upstream"] = {"owner": "account-reconcile", "account": "first-public"}
+    repos.write_registry(state)
+    monkeypatch.setattr(repos, "_best_effort_pin_credential", lambda *_args: None)
+    repos.add_repo(
+        "upstream", str(policy.parent), remote="https://github.com/Publisher/tool",
+        account="first-public",
+    )
+    value["accounts"]["public"] = "changed-public"
+    policy.write_text(json.dumps(value), encoding="utf-8")
+    run(policy, apply=True)
+    assert repos.read_registry(strict=True).repos["upstream"].account == "first-public"
+
+
 def test_namespace_and_ambient_login_are_not_bootstrap_evidence(local, monkeypatch):
     registry, policy = local
     monkeypatch.setenv("GH_USER", "Publisher")
