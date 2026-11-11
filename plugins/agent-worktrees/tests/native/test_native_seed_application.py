@@ -231,11 +231,14 @@ def _qualify_public_application(monkeypatch, caller, *, caller_jobs=False):
     from plugin_test_containment import TestSandbox
 
     sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+    if caller_jobs:
+        # The outer owner settles residents before removing this sandbox.
+        directory = sandbox / "caller"
+        directory.mkdir()
+        _qualify_native_application(directory, monkeypatch, broker=caller, caller_jobs=True)
+        return
     with TestSandbox(prefix="p-", dir=sandbox) as directory:
-        _qualify_native_application(
-            Path(directory), monkeypatch, broker=caller,
-            **({"caller_jobs": True} if caller_jobs else {}),
-        )
+        _qualify_native_application(Path(directory), monkeypatch, broker=caller)
 
 
 def test_public_application_workspace_is_outside_source_only_repository(tmp_path, monkeypatch):
@@ -264,6 +267,31 @@ def test_public_application_workspace_is_outside_source_only_repository(tmp_path
         _qualify_public_application(monkeypatch, caller)
     assert [caller for _, caller in observed] == ["embody", "copilot"]
     assert all(not root.exists() for root, _ in observed)
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_native_fixture_directory_remains_owned_by_outer_settlement(tmp_path, monkeypatch, failed):
+    sandbox = tmp_path / "outer-sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(sandbox))
+    observed = []
+
+    def qualify(directory, _patch, *, broker, caller_jobs):
+        assert broker == "embody" and caller_jobs is True
+        assert directory.is_relative_to(sandbox)
+        observed.append(directory)
+        (directory / "resident-owned.log").write_text("held until outer settlement", encoding="utf-8")
+        if failed:
+            raise RuntimeError("native failed")
+
+    monkeypatch.setitem(_qualify_public_application.__globals__, "_qualify_native_application", qualify)
+    if failed:
+        with pytest.raises(RuntimeError, match="native failed"):
+            _qualify_public_application(monkeypatch, "embody", caller_jobs=True)
+    else:
+        _qualify_public_application(monkeypatch, "embody", caller_jobs=True)
+    assert len(observed) == 1
+    assert (observed[0] / "resident-owned.log").read_text() == "held until outer settlement"
 
 
 def test_withdrawn_fixture_application_is_restored_after_broker_failure(tmp_path, monkeypatch):

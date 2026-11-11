@@ -192,7 +192,9 @@ invocation close before native broker/history checks, and an ordinary bounded
 child must die with them. Fresh/resume/reuse and seed non-replay still apply.
 The same native conversation must also serve its broker while only its
 disposable Worktrees application slot is temporarily unavailable; the slot is
-restored even on failure. This does not qualify an updater, another caller or
+restored even on failure. Its fixture directory stays under the outer native
+owner until leased residents settle; existing packets retain immediate inner
+sandbox cleanup. This does not qualify an updater, another caller or
 launch mode, a restrictive external outer Job, or desktop behavior. The fixed
 packet shares the Worktrees-only feed and pinned prerequisite policy above;
 its protected controller must be promoted before submission.
