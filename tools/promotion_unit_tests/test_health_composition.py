@@ -58,6 +58,10 @@ def owners(monkeypatch):
             "health_report", "health_chart", "health_jobs", "cli_health",
         )
     }
+    modules["task_desktop"] = load(
+        machines.__name__ + ".task_desktop",
+        "plugins/agent-machines/tests/native/health_task_desktop.py",
+    )
     services = package(machines.__name__ + ".service_reports")
     services.collect = lambda names, hour, **fields: [
         {"instance": name, "service": name, "hour": hour, "state": "unsupported"}
@@ -70,6 +74,28 @@ def owners(monkeypatch):
     parser = argparse.ArgumentParser(allow_abbrev=False)
     modules["cli_health"].add_parser(parser.add_subparsers(required=True))
     return modules, parser
+
+
+def test_optional_desktop_admission_accepts_active_console_and_rdp_without_changing_capture(owners):
+    modules, _ = owners
+    require = modules["task_desktop"].require_observable_session
+    facts = {
+        "elevated": False, "station": "WinSta0", "station_visible": True,
+        "thread_desktop": "Default", "input_desktop": "Default",
+        "session": 2, "console_session": 1, "foreground_visible": True, "same_session": True,
+    }
+    for name in ("Console", "RDP-Tcp#1", "rdp-sxs123#0"):
+        assert require(facts, station_name=name, connection_state=0, inherited_job=True) is facts
+    for changed, state, contained in (
+        ({}, 4, True), ({"same_session": False}, 0, True),
+        ({"foreground_visible": False}, 0, True), ({"input_desktop": "Winlogon"}, 0, True),
+        ({}, 0, False),
+    ):
+        with pytest.raises(ValueError, match="optional-desktop-unavailable"):
+            require(
+                {**facts, **changed}, station_name="RDP-Tcp#1",
+                connection_state=state, inherited_job=contained,
+            )
 
 
 def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners):

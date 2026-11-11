@@ -80,11 +80,15 @@ the [request capture](inception-transcript.md#installable-service-contribution-f
 the proposed [service contribution contract](service-contributions.md) is a
 review-before-code amendment, not a new resident collector or activation grant.
 
+The [unattended validation follow-up](inception-transcript.md#unattended-desktop-validation-follow-up)
+removes mandatory operator-attended desktop observation, not the automated
+functional, launch-mechanism, result or cleanup checks.
+
 ## Scope Approvals
 
 The operator authorizes source planning, review and implementation. The adopter
 has separately selected default configuration and an initial visible Windows
-cohort. Its explicit latest boundary is **configuration-only: ask before
+cohort. That initial boundary was **configuration-only: ask before
 activating any running service**.
 
 No live service reload/restart, scheduled-job enrollment, Linux rollout,
@@ -112,6 +116,13 @@ regression requires rollback. New credentials/secrets, unavailable noninteractiv
 elevation, other machines' services or rollout, and destructive changes to
 non-test data remain excluded. Exact private direction and resource selectors
 remain in adopter records, not this public approval summary.
+
+The later validation decision permits an already active console or RDP desktop
+and makes visual observation opportunistic and non-gating. Unavailable or
+inconclusive observation records a reason; it does not require operator
+attendance or block publication, CI or an enrollment decision. No admin/CI
+bypass or fabricated visual pass is permitted. Independent deployment and
+enrollment authority/holds remain unchanged.
 
 ## Plan
 
@@ -208,7 +219,9 @@ remain in adopter records, not this public approval summary.
 - [ ] Outages: exercise the [design controls](design.md#outage-derived-controls),
   including a live process with an unresponsive SSH path and an impaired carrier.
 - [ ] Platforms: portable unit contracts plus isolated Windows/Linux native
-  one-shot, scheduling, headlessness and cleanup qualification before enrollment.
+  one-shot, scheduling, launch-mechanism and cleanup qualification before
+  enrollment; record opportunistic visual coverage separately without an
+  operator-attendance gate.
 - [x] Deployment: default configuration round-trip, custom-sink preservation,
   real readback, no running-service activation and explicit unavailable hosts.
 - [ ] Preferences: separate typed input, permitted settings only, existing
@@ -1349,3 +1362,47 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   replacement/rollback, installed adoption, live peer connectivity and actual
   hourly carrier receipt remain separate open gates. The parent stays Active;
   no running service, installed runtime, production job or carrier was changed.
+
+### 2026-11-10 - Independent inbound reachability and desktop admission
+- Returned to the independent inbound-connectivity branch while productive
+  desktop qualification remained unavailable. An enrolled peer completed
+  three fresh, host-pinned SSH commands proving the expected SID, interactive
+  session and non-admin token, followed by a real framed Bridge read and an
+  actual message/reply roundtrip.
+- These prove current reachability after earlier intermittent resets and
+  carrier startup timeouts, not their historical cause or a service repair.
+  No restart, runtime replacement, credential work, security-policy change or
+  other host's service mutation was performed.
+- Compared the selected native owners rather than the unrelated system SSH
+  service. The current target already has authenticated inbound proof,
+  stalled-Bastion recovery and timestamped history. The peer's older
+  generation lacks those observations/recovery but retains the bounded banner
+  cache. Untimestamped historical exits cannot establish causation; the
+  reporting loopback endpoint can propagate an upstream reset too.
+- Prepared an RDP-admission proposal locally, but it had not cleared review
+  or operator approval. The operator selected console-only qualification;
+  removed that unpublished proposal rather than treating it as accepted.
+  The original SDK console-only admission and unfiltered capture remain
+  unchanged. Added actual task-child/session equality without relaxing those
+  checks, and retained correct record expectations across an hour boundary.
+- A readiness cue was followed by an explicit WTS check, which showed an
+  active RDP session rather than Console. No desktop test or task registration
+  was started for that attempt. Console qualification and enrollment stay held.
+- The operator subsequently approved active RDP admission and explicitly
+  removed the forced desktop requirement. Observation is now an opportunistic,
+  non-gating diagnostic on an already observable console/RDP session; absence
+  or inconclusive coverage is recorded, never represented as a visual pass.
+  Automated periodic execution, result, deadline, launch-mechanism and exact
+  cleanup controls remain required, with no admin/CI bypass.
+- Added unattended checks of the actual GUI-subsystem entrypoint and native
+  console state in controlled Python processes. These address the launch
+  boundary without making operator attendance a hidden prerequisite. Other
+  enrollment/deployment holds remain independent.
+- The revised native/source packet passed 26 checks: 21 focused source cases
+  and five real Windows scheduler controls. The separate visual case skipped
+  with recorded `unobserved` reason `own WTS session inactive: state=4`; this
+  did not fail the packet or claim zero visual events. The native controls
+  verified the actual GUI executable and zero console allocation across both
+  cycles, along with results, overlap, both deadline owners and exact cleanup.
+  Pure composition/admission passed 27 cases; two guidance-projection controls
+  and the skill, install, headless-source and documentation guards also passed.

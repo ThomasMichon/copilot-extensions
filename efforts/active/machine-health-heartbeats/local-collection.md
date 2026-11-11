@@ -242,6 +242,13 @@ Late wake/start runs once for current health and the preceding hour; it does not
 replay every missed trigger. Disable scheduler restart/retry storms. Require
 headless launch and exact bounded child containment, definition readback and
 separate configured/enabled/running/last-result evidence on both platforms.
+Windows functional qualification must not depend on operator desktop attendance.
+Use non-interactive launch-mechanism, execution and cleanup controls. Supplement
+them opportunistically with unfiltered window/focus capture on an already active,
+observable console or RDP session, binding actual task children to that session.
+Unavailable or inconclusive observation records a reason, not a visual pass or
+a publication/CI/enrollment gate. Preserve capture/identity and exact-cleanup
+checks; do not unlock, move or elevate a session to manufacture evidence.
 On Windows, a GUI-subsystem finite root must own the complete payload child
 tree and propagate its result. A headless console host alone is insufficient:
 its native task timeout can leave the console descendant alive, and its own
@@ -270,9 +277,11 @@ storage and bounded process settlement. Keep subprocess matrices out of required
 unit CI; use the repository's existing explicit integration portfolio.
 
 Before enrollment, qualify fresh and reconcile paths on Windows and Linux:
-actual scheduler definitions, zero visible windows/focus transitions over two
-cycles on Windows, overlap, suspend/late wake, deadline enforcement, failed
+actual scheduler definitions, two automated cycles and non-interactive Windows
+launch-mechanism evidence, overlap, suspend/late wake, deadline enforcement, failed
 storage and exact fixture cleanup while preserving unrelated active work.
+Visual window/focus observation is supplemental and never requires the operator
+to maintain an active desktop for the test.
 Record cold/warm runtime, selected service count, scan bytes/work and storage
 cost for the real consumer; schema-only fixtures do not satisfy these gates.
 Installed adoption, selected-carrier delay/conflict/offline/receipt evidence and

@@ -109,7 +109,7 @@ authorized limited-interactive-user task effects on the current Windows host:
 
 ```powershell
 $env:AGENT_MACHINES_NATIVE_SCHEDULER = '1'
-python tools/run-plugin-tests.py agent-machines --test-file tests/native/test_health_windows_scheduler.py --allow-explicit-tiers --test-timeout 240
+python tools/run-plugin-tests.py agent-machines --test-file tests/native/test_health_windows_scheduler.py --test-file tests/native/test_health_windows_desktop.py --max-files-per-sub-suite 1 --allow-explicit-tiers --test-timeout 240
 ```
 
 It uses unique create-only tasks, description-marker ownership, finite
@@ -120,11 +120,21 @@ Controls cover two real one-minute calendar cycles, native overlap suppression,
 the inner execution budget, forced scheduler-root termination with retained
 descendant handles, failed storage and cleanup. The faulted outer-ceiling case
 extends only the copied helper's inner budget; production keeps 55 seconds.
+The normal cycles also inspect the actual entrypoint's GUI subsystem and
+controlled Python processes' native console state, without needing a desktop.
 
-The productive-desktop case retains the existing unfiltered window/focus
-observer and fails before registration if its desktop cannot be observed.
-`-k "not focus_changes"` selects functional evidence only, not headlessness
-qualification. Late wake/suspend, Linux, retained-closure replacement, installed
+The separate `test_health_windows_desktop.py` case retains the unfiltered window/focus
+observer as a non-gating diagnostic. It runs opportunistically on an already
+active, observable console or RDP session, including RDP-SXS, and binds actual
+task children to the observed session. Otherwise it skips with a reason; an
+inconclusive capture also records its coverage/events without becoming a pass.
+The JUnit suite property `desktop_observation` records the result. No operator
+unlock, focus, quiet-window commitment or physical console is required.
+Absent/inconclusive visual coverage does not block publication, CI or enrollment.
+Functional assertions and exact cleanup remain mandatory; confirmed regressions
+are not waived.
+Selecting only `test_health_windows_scheduler.py` runs the unattended controls; it never claims
+zero windows or focus changes. Late wake/suspend, Linux, retained-closure replacement, installed
 adoption, hourly cohort behavior and carrier receipt remain separate gates.
 This T3 packet never enters required actor-free unit CI.
 

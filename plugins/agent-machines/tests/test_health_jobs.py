@@ -219,3 +219,52 @@ def test_windowless_job_root_propagates_result_and_bounded_owned_cleanup(
     assert options["timeout"] == 55 and options["budget"].cleanup_reserve == 5
     assert options["max_stdout_bytes"] == 256 * 1024
     assert options["max_stderr_bytes"] == 64 * 1024
+
+
+@pytest.mark.parametrize("outcome", ["absent", "inconclusive", "functional-failure", "cleanup-failure"])
+def test_optional_desktop_does_not_gate_absence_or_mask_functional_and_cleanup_failures(
+    tmp_path, monkeypatch, outcome,
+):
+    native = Path(__file__).parent / "native"
+    monkeypatch.syspath_prepend(str(native))
+    monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[3] / "libs/agent-procutil/tests"))
+    import health_task_desktop
+    import sdk_desktop_observer
+
+    spec = importlib.util.spec_from_file_location(
+        "optional_health_desktop_fixture", native / "test_health_windows_desktop.py",
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    properties, calls = [], []
+
+    def admission():
+        if outcome == "absent":
+            raise sdk_desktop_observer.ObservationBlocked("own WTS session inactive: state=4")
+        return {"session": 2, "session_kind": "rdp"}
+
+    def exercise(*args, **kwargs):
+        calls.append(True)
+        if outcome == "functional-failure":
+            raise AssertionError("native functional failure")
+        return {
+            "passed": False, "samples": 1, "maximum_gap": .02, "hook_count": 2,
+            "violations": [{"kind": "foreground"}], "sealed": True, "hooks_closed": True,
+        }
+
+    observer = SimpleNamespace(
+        thread=SimpleNamespace(
+            ident=123 if outcome == "cleanup-failure" else None,
+            is_alive=lambda: outcome == "cleanup-failure",
+        ),
+    )
+    monkeypatch.setattr(health_task_desktop, "make_api", lambda: SimpleNamespace(require_desktop=admission))
+    monkeypatch.setattr(sdk_desktop_observer, "DesktopObserver", lambda *args: observer)
+    monkeypatch.setattr(module, "_exercise_cycles", exercise)
+    expected = AssertionError if outcome.endswith("failure") else pytest.skip.Exception
+    with pytest.raises(expected):
+        module.test_two_calendar_cycles_without_windows_or_focus_changes(
+            tmp_path, monkeypatch, lambda name, value: properties.append(json.loads(value)),
+        )
+    assert bool(calls) is (outcome != "absent")
+    assert properties and properties[-1]["status"] != "observed"

@@ -358,9 +358,14 @@ termination behavior are **not qualified by rendering these definitions**.
 queries of an existing task. Registration/enrollment is deliberately absent.
 Before a future owner registers anything, it must verify the actual interactive
 identity, current installation selection, policy adoption, existing-definition
-conflicts and the native first/reconcile, two-cycle headlessness, overlap,
+conflicts and the native first/reconcile, two-cycle unattended launch, overlap,
 late-wake, deadline/storage and exact-cleanup gates in the reviewed local
 collection plan. Obtain separate activation authority; preparation is not it.
+Visual window/focus observation is an opportunistic diagnostic on an already
+active console or RDP session. Record its unavailable/inconclusive reason; do
+not require operator attendance or block publication, CI or enrollment on its
+absence. Automated GUI/console-state, result and complete-tree cleanup controls
+remain independent requirements; unobserved is not a visual pass.
 Listener-only recollection replaces only `local_listener`; retained SSH,
 session and other unselected domains keep their exact evidence and source
 timestamps. The record boundary also refuses changes to those domains.

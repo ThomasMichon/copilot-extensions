@@ -8,6 +8,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import struct
 import subprocess
 import sys
 import time
@@ -103,6 +104,16 @@ def _payload(tmp_path, *, delay_seconds=0):
         "\n".join(str(Path(p).resolve()) for p in sys.path if p and Path(p).is_dir()) + "\n",
         encoding="utf-8",
     )
+    (site / "fixture_console_probe.py").write_text(
+        "import ctypes, json, os\nfrom ctypes import wintypes\n"
+        "kernel = ctypes.WinDLL('kernel32', use_last_error=True)\n"
+        "kernel.GetConsoleWindow.restype = wintypes.HWND\n"
+        f"with open({str(tmp_path / 'console.jsonl')!r}, 'a', encoding='utf-8') as stream:\n"
+        "    stream.write(json.dumps({'pid': os.getpid(), "
+        "'console_window': int(kernel.GetConsoleWindow() or 0)}) + '\\n')\n",
+        encoding="utf-8",
+    )
+    (site / "fixture-console-probe.pth").write_text("import fixture_console_probe\n", encoding="utf-8")
     payload = tmp_path / "payload"
     scripts = payload / "scripts"
     (scripts / "installation-context").mkdir(parents=True)
@@ -125,7 +136,8 @@ def _payload(tmp_path, *, delay_seconds=0):
         "param([string]$TraceMode)\n"
         "if ($TraceMode -cne 'read-only') { throw 'read-only selection required' }\n"
         "$self = [Diagnostics.Process]::GetCurrentProcess()\n"
-        "$identity = @{ pid = $PID; birth = $self.StartTime.ToUniversalTime().ToFileTimeUtc() }\n"
+        "$identity = @{ pid = $PID; birth = $self.StartTime.ToUniversalTime().ToFileTimeUtc(); "
+        "session = $self.SessionId }\n"
         f"$identity | ConvertTo-Json -Compress | Add-Content -LiteralPath {_ps(tmp_path / 'resolver.jsonl')}\n"
         f"Start-Sleep -Seconds {delay_seconds}\n"
         "$env:COPILOT_EXTENSIONS_CONTEXT = $null\n"
@@ -168,9 +180,26 @@ def _definition(payload, store, sid, *, enabled, calendar=True):
     return root
 
 
-def _exercise_cycles(tmp_path, observation):
+def _assert_gui_entry(executable):
+    with Path(executable).open("rb") as stream:
+        dos = stream.read(64)
+        assert dos[:2] == b"MZ"
+        offset = struct.unpack_from("<I", dos, 60)[0]
+        assert 0 < offset < 1024 * 1024
+        stream.seek(offset)
+        header = stream.read(94)
+    assert header[:4] == b"PE\0\0"
+    assert struct.unpack_from("<H", header, 24)[0] in (0x10B, 0x20B)
+    assert struct.unpack_from("<H", header, 24 + 68)[0] == 2
+
+
+def _exercise_cycles(tmp_path, observation, *, observed_session=None):
     identity = _control("identity")
     assert identity["interactive"]
+    if observed_session is not None and identity["session"] != observed_session:
+        from sdk_desktop_observer import ObservationBlocked
+
+        raise ObservationBlocked("optional desktop/controller session mismatch")
     payload = _payload(tmp_path)
     store = tmp_path / "store"
     store.mkdir()
@@ -194,8 +223,9 @@ def _exercise_cycles(tmp_path, observation):
             level = readback.find("t:Principals/t:Principal/t:RunLevel", NS)
             assert level is None or level.text == "LeastPrivilege"
             assert readback.find("t:Settings/t:ExecutionTimeLimit", NS).text == "PT1M"
+            _assert_gui_entry(readback.find("t:Actions/t:Exec/t:Command", NS).text)
         definition = _definition(payload, store, identity["sid"], enabled=True)
-        samples = []
+        samples, hours = [], {}
         with observation as observer:
             with _task(tmp_path, definition) as (name, registered):
                 assert registered["configured"] and registered["enabled"]
@@ -209,37 +239,46 @@ def _exercise_cycles(tmp_path, observation):
                     )
                     samples.append(state)
                     records = [p for p in store.glob("*.json") if p.name != "policy.json"]
-                    assert len(records) == 1
-                    record = json.loads(records[0].read_text(encoding="utf-8"))
+                    decoded = [json.loads(p.read_text(encoding="utf-8")) for p in records]
+                    record = max(decoded, key=lambda row: row["observed_at_ms"])
                     assert record["observation"]["domains"]["local_listener"]["state"] == "ok"
-                    assert record["revision"] == count
+                    hours[record["hour"]] = hours.get(record["hour"], 0) + 1
+                    assert {row["hour"]: row["revision"] for row in decoded} == hours
                     assert len(requests) == count
+                    identities = [
+                        json.loads(line) for line in (tmp_path / "resolver.jsonl").read_text(
+                            encoding="utf-8-sig",
+                        ).splitlines()
+                    ]
+                    assert len(identities) == count
+                    assert all(row["session"] > 0 for row in identities)
+                    if observed_session is not None and any(
+                        row["session"] != observed_session for row in identities
+                    ):
+                        from sdk_desktop_observer import ObservationBlocked
+
+                        raise ObservationBlocked("optional desktop/task session mismatch")
+                    consoles = [
+                        json.loads(line)
+                        for line in (tmp_path / "console.jsonl").read_text(encoding="utf-8").splitlines()
+                    ]
+                    assert len(consoles) == 2 * count
+                    assert all(row["console_window"] == 0 for row in consoles)
                 assert samples[0]["last_run"] != samples[1]["last_run"]
                 assert _control("read", name)["instances"] == []
         if observer is not None:
             packet = observer.packet()
             (tmp_path / "desktop-observation.json").write_text(json.dumps(packet), encoding="utf-8")
-            assert packet["passed"], packet
     assert (store / "policy.json").read_bytes() == policy_bytes
     assert (store / "collection.lock").read_bytes() == b"\0"
     assert unrelated.read_bytes() == b"fixture sentinel"
     assert not list(store.glob("*.tmp.*"))
+    return observer.packet() if observer is not None else None
 
 
 @pytest.mark.timeout(240)
 def test_scheduler_functional_two_real_calendar_cycles_and_exact_cleanup(tmp_path):
     _exercise_cycles(tmp_path, nullcontext())
-
-
-@pytest.mark.timeout(240)
-def test_two_calendar_cycles_without_windows_or_focus_changes(tmp_path, monkeypatch):
-    monkeypatch.syspath_prepend(str(REPO / "libs/agent-procutil/tests"))
-    from sdk_desktop_observer import DesktopObserver
-    from sdk_desktop_win32 import WinAPI
-
-    api = WinAPI()
-    api.require_desktop()
-    _exercise_cycles(tmp_path, DesktopObserver(api, "health-native-two-cycles"))
 
 
 def _store(tmp_path, port):

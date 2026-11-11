@@ -13,6 +13,7 @@ if ($Operation -eq 'identity') {
     @{
         sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         interactive = [Environment]::UserInteractive
+        session = [Diagnostics.Process]::GetCurrentProcess().SessionId
     } | ConvertTo-Json -Compress
     exit 0
 }

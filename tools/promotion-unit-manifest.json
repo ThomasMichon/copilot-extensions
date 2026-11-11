@@ -1,6 +1,7 @@
 {
     "profile": "copilot-extensions.promotion-units/v1",
     "nodes": [
+        "tools/promotion_unit_tests/test_health_composition.py::test_optional_desktop_admission_accepts_active_console_and_rdp_without_changing_capture",
         "tools/promotion_unit_tests/test_health_composition.py::test_native_job_preparation_preserves_the_original_path_for_owner_validation",
         "tools/promotion_unit_tests/test_health_composition.py::test_native_job_preparation_is_actor_free_and_inert_on_both_platforms",
         "tools/promotion_unit_tests/test_health_composition.py::test_native_job_preparation_refuses_unsupported_platforms_and_unsafe_definition_values",
@@ -4777,7 +4778,8 @@
         "tools/promotion_unit_tests/test_local_finalize.py::test_cleanup_requires_positive_local_branch_observation[remote]"
     ],
     "sources": {
-        "tools/promotion_unit_tests/test_health_composition.py": "69f3d26c3e3fbbb26fd6de13a6009841db22aae45cb14f56e0c677c779350682",
+        "tools/promotion_unit_tests/test_health_composition.py": "b1bfcf0ae12b9df11a5a811d1e8f910c88f990de7d20e34482e47fa21859d1cc",
+        "plugins/agent-machines/tests/native/health_task_desktop.py": "99fceb9453f0972ee0d26358ababcb83d3ac3393f310e4e40560139a86223806",
         "plugins/agent-machines/src/agent_machines/cli_health.py": "0e1a1c92440b19b384c2db49d0e094e802f55b0ea997232cb84955141f214544",
         "plugins/agent-machines/src/agent_machines/health_jobs.py": "3f763cfc0cbcc61db31fcbc0c108b2dcd2f212f5513e0347d2d59d8ff0965065",
         "plugins/agent-machines/src/agent_machines/health_chart.py": "4ff6dcdf1189ff903f55ceb0445e4853974b6b3981d9f9ee455552a8f5a4b2bf",
@@ -5467,6 +5469,7 @@
         "plugins/agent-machines/src/agent_machines/health_collect.py",
         "plugins/agent-machines/src/agent_machines/cli_health.py",
         "plugins/agent-machines/src/agent_machines/health_jobs.py",
+        "plugins/agent-machines/tests/native/health_task_desktop.py",
         "plugins/agent-machines/src/agent_machines/health_chart.py",
         "plugins/agent-machines/src/agent_machines/health_report.py",
         "plugins/agent-machines/src/agent_machines/health_slots.py",
