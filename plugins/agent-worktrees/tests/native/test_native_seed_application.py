@@ -313,6 +313,25 @@ def test_lifetime_selection_cannot_disable_an_existing_contained_owner(tmp_path,
     assert list(tmp_path.iterdir()) == []
 
 
+def test_manager_install_retains_only_the_selected_runner_lifecycle(tmp_path, monkeypatch):
+    from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+    from test_manager_application_launch import _manager_install_environment
+
+    monkeypatch.setenv(TEST_CONTEXT_ENV, "unselected ambient context")
+    arguments = tmp_path / "home", tmp_path / "manager", tmp_path, sys.executable
+    selected = {TEST_CONTEXT_ENV: "selected runner context"}
+    environment = _manager_install_environment(
+        *arguments, caller_jobs=True, worktrees_environment=selected,
+    )
+    assert environment[TEST_CONTEXT_ENV] == selected[TEST_CONTEXT_ENV]
+    assert environment["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+    assert TEST_CONTEXT_ENV not in _manager_install_environment(
+        *arguments, caller_jobs=False, worktrees_environment=selected,
+    )
+    with pytest.raises(AssertionError):
+        _manager_install_environment(*arguments, caller_jobs=True, worktrees_environment={})
+
+
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_jobs=False):
     if caller_jobs:
         from agent_procutil import contained_test_mode

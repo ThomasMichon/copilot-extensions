@@ -12,7 +12,7 @@ import sys
 import time
 
 from agent_procutil._interpreter import physical_executable
-from agent_procutil.daemon_instances import daemon_test_lifecycle
+from agent_procutil.daemon_instances import TEST_CONTEXT_ENV, daemon_test_lifecycle
 from agent_procutil.owned_process import run_caller_owned
 import pytest
 
@@ -48,6 +48,30 @@ def _run_lifetime_native(command, *, directory, cwd, environment):
     return subprocess.CompletedProcess(
         command, code, stdout.read_text(encoding="utf-8"), stderr.read_text(encoding="utf-8"),
     )
+
+
+def _manager_install_environment(home, root, tmp_path, interpreter, *, caller_jobs, worktrees_environment):
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("UV_", "COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_RT_",
+                               "AGENT_WORKTREES_", "WORKTREE_"))
+        and key not in {
+            "VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "TMUX", "TMUX_PANE", "PSMUX_PANE",
+            "COPILOT_AGENT_SESSION_ID",
+        }
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        WORKTREE_MANAGER_ROOT=str(root), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
+        AGENT_WORKTREES_STATUS_MONITOR="0",
+        UV_CACHE_DIR=str(tmp_path / "cache"), UV_PYTHON_DOWNLOADS="never",
+        UV_PYTHON=interpreter, PYTHONDONTWRITEBYTECODE="1",
+        PSMUX_DATA_DIR=str(tmp_path / "mux-data"), TMUX_TMPDIR=str(tmp_path / "mux-data"),
+    )
+    if caller_jobs:
+        assert worktrees_environment and worktrees_environment.get(TEST_CONTEXT_ENV)
+        environment[TEST_CONTEXT_ENV] = worktrees_environment[TEST_CONTEXT_ENV]
+    return environment
 
 
 @pytest.mark.parametrize(
@@ -129,22 +153,9 @@ def _qualify_manager_application(
     root = home / ".worktree-manager"
     slot = root / "versions" / declaration["construction"]["runtime_version"]
     shutil.copytree(application, slot)
-    environment = {
-        key: value for key, value in os.environ.items()
-        if not key.startswith(("UV_", "COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_RT_",
-                               "AGENT_WORKTREES_", "WORKTREE_"))
-        and key not in {
-            "VIRTUAL_ENV", "PYTHONPATH", "PYTHONHOME", "TMUX", "TMUX_PANE", "PSMUX_PANE",
-            "COPILOT_AGENT_SESSION_ID",
-        }
-    }
-    environment.update(
-        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
-        WORKTREE_MANAGER_ROOT=str(root), COPILOT_EXTENSIONS_TEST_CONTAINED="1",
-        AGENT_WORKTREES_STATUS_MONITOR="0",
-        UV_CACHE_DIR=str(tmp_path / "cache"), UV_PYTHON_DOWNLOADS="never",
-        UV_PYTHON=interpreter, PYTHONDONTWRITEBYTECODE="1",
-        PSMUX_DATA_DIR=str(tmp_path / "mux-data"), TMUX_TMPDIR=str(tmp_path / "mux-data"),
+    environment = _manager_install_environment(
+        home, root, tmp_path, interpreter,
+        caller_jobs=caller_jobs, worktrees_environment=worktrees_environment,
     )
     (tmp_path / "mux-data").mkdir()
     install = [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", slot / "install.ps1"] \
