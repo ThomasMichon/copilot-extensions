@@ -78,9 +78,23 @@ def run_prepare_job(args) -> int:
         launcher = payload / "bin" / ("agent-machines.ps1" if sys.platform == "win32" else "agent-machines")
         if not launcher.is_file():
             raise JobError("owning-launcher-unavailable")
+        windows = {}
+        if sys.platform == "win32":
+            import sysconfig
+
+            from agent_procutil import windowless_python
+
+            if not (payload / "scripts" / "health-job-entry.py").is_file():
+                raise JobError("owning-job-entry-unavailable")
+            try:
+                gui = windowless_python(sys.executable, require_windowless=True)
+            except RuntimeError as error:
+                raise JobError("windowless-runtime-unavailable") from error
+            windows = {"gui_python": gui, "runtime_site": sysconfig.get_path("purelib")}
         result = prepare(
             platform=sys.platform, payload=str(payload), store=str(store), policy_token=token,
             user_id=args.user_id, windows_root=os.environ.get("SystemRoot", "") if sys.platform == "win32" else "",
+            **windows,
         )
         print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
         return 0

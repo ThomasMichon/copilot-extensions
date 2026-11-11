@@ -161,6 +161,13 @@ specifically when reviewing a pull request, not a replacement for them.
   Instrumentation must not introduce synchronous export or per-event children.
   Missing native measurements are not a passing budget; do not require private
   execution artifacts or add effectful matrices to required unit-only CI.
+- **Unattended Windows validation.** Require the focused automated launch,
+  result, deadline and cleanup controls described in CONTRIBUTING.md.
+  Desktop/window/focus observation is opportunistic on an already active console
+  or RDP session, with recorded unavailable/inconclusive reasons. Its absence
+  does not block publication, CI or enrollment and must not turn into a demand
+  for operator attendance or a physical console. Unobserved is not a visual pass;
+  actual regressions and independent required checks still block normally.
 - **Cross-platform parity.** When a PR edits an installer/launcher `.sh` (or
   `.ps1`), flag a missing matching change to its `.ps1` (or `.sh`)
   counterpart.

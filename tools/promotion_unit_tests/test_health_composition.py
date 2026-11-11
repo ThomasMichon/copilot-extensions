@@ -58,6 +58,10 @@ def owners(monkeypatch):
             "health_report", "health_chart", "health_jobs", "cli_health",
         )
     }
+    modules["task_desktop"] = load(
+        machines.__name__ + ".task_desktop",
+        "plugins/agent-machines/tests/native/health_task_desktop.py",
+    )
     services = package(machines.__name__ + ".service_reports")
     services.collect = lambda names, hour, **fields: [
         {"instance": name, "service": name, "hour": hour, "state": "unsupported"}
@@ -72,6 +76,59 @@ def owners(monkeypatch):
     return modules, parser
 
 
+def test_optional_desktop_admission_accepts_active_console_and_rdp_without_changing_capture(owners):
+    modules, _ = owners
+    require = modules["task_desktop"].require_observable_session
+    facts = {
+        "elevated": False, "station": "WinSta0", "station_visible": True,
+        "thread_desktop": "Default", "input_desktop": "Default",
+        "session": 2, "console_session": 1, "foreground_visible": True, "same_session": True,
+    }
+    for name in ("Console", "RDP-Tcp#1", "rdp-sxs123#0"):
+        assert require(facts, station_name=name, connection_state=0, inherited_job=True) is facts
+    for changed, state, contained in (
+        ({}, 4, True), ({"same_session": False}, 0, True),
+        ({"foreground_visible": False}, 0, True), ({"input_desktop": "Winlogon"}, 0, True),
+        ({}, 0, False),
+    ):
+        with pytest.raises(ValueError, match="optional-desktop-unavailable"):
+            require(
+                {**facts, **changed}, station_name="RDP-Tcp#1",
+                connection_state=state, inherited_job=contained,
+            )
+    classify = modules["task_desktop"].task_owned_visual_violations
+    incomplete = {
+        "passed": False, "violations": [{"kind": "sampled-foreground", "identity": [11, 22, 33]}],
+    }
+    for kind in (
+        "sampled-foreground", "foreground-capture-changed",
+        "foreground-enumeration-identity-mismatch",
+    ):
+        changed = {"passed": False, "violations": [{"kind": kind, "identity": [11, 22, 33]}]}
+        assert classify(changed, {(11, 33)}, [])
+    assert classify({
+        "passed": False, "violations": [{
+            "kind": "foreground-capture-changed", "identity": [12, 22, 34],
+            "previous_identity": [11, 22, 33],
+        }],
+    }, {(11, 33)}, [])
+    assert not classify(incomplete, {(11, 34)}, [])
+    assert not classify(incomplete, {(12, 33)}, [])
+    assert classify({"passed": False}, set(), [{"kind": "task-visible-window"}])
+    pin = SimpleNamespace(pid=11, birth=33, gone=lambda: False)
+    closed = []
+    pin.close = lambda: closed.append(True)
+    api = SimpleNamespace(
+        pin=lambda pid: pin, user=SimpleNamespace(IsWindowVisible=lambda hwnd: True),
+        window_identity=lambda hwnd: (11, 22),
+    )
+    observe = modules["task_desktop"].confirm_visible_task_window
+    assert observe(api, {99: (11, 22)}, {(11, 33)})["kind"] == "task-visible-window"
+    assert closed == [True]
+    assert observe(api, {99: (11, 22)}, {(11, 34)}) is None
+    assert closed == [True, True]
+
+
 def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners):
     modules, _ = owners
     jobs = modules["health_jobs"]
@@ -79,6 +136,8 @@ def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners
     windows = jobs.prepare(
         platform="win32", payload=r"C:\Example Tools\payload", store=r"C:\Example Data\store",
         policy_token=token, user_id="S-1-5-21-111-222-333-1001", windows_root=r"C:\Windows",
+        gui_python=r"C:\Example Python\pythonw.exe",
+        runtime_site=r"C:\Example Runtime\Lib\site-packages",
     )
     root = ElementTree.fromstring(windows["artifacts"]["agent-machines-health.xml"])
     nodes = {"t": jobs.NS}
@@ -88,8 +147,11 @@ def test_native_job_preparation_is_actor_free_and_inert_on_both_platforms(owners
     assert root.find("t:Settings/t:MultipleInstancesPolicy", nodes).text == "IgnoreNew"
     assert root.find("t:Settings/t:ExecutionTimeLimit", nodes).text == "PT1M"
     arguments = root.find("t:Actions/t:Exec/t:Arguments", nodes).text
-    assert "--headless" in arguments and 'health run --store-dir "C:\\Example Data\\store"' in arguments
-    assert f"--apply --expect-policy {token}" in arguments
+    assert root.find("t:Actions/t:Exec/t:Command", nodes).text == r"C:\Example Python\pythonw.exe"
+    assert '"C:\\Example Tools\\payload\\scripts\\health-job-entry.py"' in arguments
+    assert '--store "C:\\Example Data\\store"' in arguments
+    assert f"--expect-policy {token}" in arguments
+    assert '--site "C:\\Example Runtime\\Lib\\site-packages"' in arguments
     linux = jobs.prepare(
         platform="linux", payload="/example/payload $one%", store="/example/store",
         policy_token=token,

@@ -9,6 +9,8 @@ Subcommands:
   forward <name|--config FILE>  Thin per-session forwarder: attach to a resident
                                 serve session-host and pump stdio<->socket, with a
                                 direct-bridge fallback (the #744 multiplexer child).
+  session-owner-capabilities    Inspect selected-runtime owner handoff support
+                                without starting or attaching an MCP session.
   validate <name|FILE>          Parse + schema-check a bridge config (no run).
   diagnose <name|FILE>          Staged connectivity check: config -> auth ->
                                 transport -> handshake -> catalog. Reports
@@ -773,6 +775,7 @@ class _LazyVersionAction(argparse.Action):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from .owner_capabilities import command as owner_capabilities
     from .owner_handoff import add_arguments as add_owner_arguments
 
     _h = "bridge name under ~/"
@@ -801,6 +804,11 @@ def build_parser() -> argparse.ArgumentParser:
                                             "(default: $AGENT_MCP_HOME/serve.sock)")
     add_owner_arguments(p_forward)
     p_forward.set_defaults(func=_cmd_forward)
+
+    sub.add_parser(
+        "session-owner-capabilities",
+        help="inspect selected-runtime owner handoff support without startup",
+    ).set_defaults(func=owner_capabilities)
 
     p_validate = sub.add_parser("validate", help="validate a bridge config")
     p_validate.add_argument("name", help="bridge name or path to a config file")

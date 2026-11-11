@@ -17,6 +17,7 @@ from agent_procutil._daemon_instance_identity import birth_identity
 
 @pytest.mark.parametrize("pid,birth", [
     (True, "native:1"), (0, "native:1"), (12, ""), (12, "native:\n1"),
+    (1 << (32 if os.name == "nt" else 31), "native:1"), (1 << 80, "native:1"),
 ])
 def test_invalid_owner_refused_before_native_acquisition(monkeypatch, pid, birth):
     pin = Mock()

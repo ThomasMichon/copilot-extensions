@@ -50,7 +50,7 @@
     {
       "name": "agent-mcp",
       "description": "Swiss-army MCP bridge - wrap an upstream MCP server (HTTP or stdio) as a local stdio MCP, inject host credentials, and apply a decorator stack (filter, rename, defer, code-mode, storage, transform, gate, input_gate). Dual-era: speaks modern MCP 2.x (2026-07-28) and the legacy handshake, in both directions.",
-      "version": "0.2.233-dev1",
+      "version": "0.2.234-dev1",
       "source": "plugins/agent-mcp"
     },
     {
@@ -122,7 +122,7 @@
     {
       "name": "agent-machines",
       "description": "Portable machine setup and restore for Copilot CLI. Derives setup from declared topology, enabled capabilities, and in-repo requirement packages, then converges the current machine through Copilot settings, resources, and repo-local modules. Organization policy and per-machine values remain downstream while the engine and conductor stay generic.",
-      "version": "0.3.131-dev1",
+      "version": "0.3.132-dev1",
       "source": "plugins/agent-machines"
     },
     {
@@ -146,7 +146,7 @@
     {
       "name": "agent-conduct-guidance",
       "description": "Independent ambient conduct modules and scoped task-time procedures: useful autonomy and operator pre-clearance, decision-scoped operator questions, maintenance standby, consented elevation, multi-agent authority and custody, headless process hygiene, scratch-space hygiene and secret-pattern masking avoidance. Optional assignment prompt/contract authoring and inert model configuration impose no delegation strategy.",
-      "version": "0.1.37-dev1",
+      "version": "0.1.38-dev1",
       "source": "plugins/agent-conduct-guidance"
     },
     {

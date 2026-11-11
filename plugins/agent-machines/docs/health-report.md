@@ -321,7 +321,13 @@ macOS is unsupported.
 The Windows proposal uses the explicitly named interactive account at
 LeastPrivilege, an hourly UTC repetition at 15 seconds after the boundary,
 IgnoreNew overlap handling, late-start coalescing, no restart policy, a
-60-second outer task limit and the existing headless `conhost` launch shape.
+60-second outer task limit and a GUI-subsystem Python job root. The root
+owns the normal PowerShell payload invocation through the existing finite
+process/stream Job boundary, with a 55-second aggregate budget including five
+seconds for settlement. Its bounded result preserves collection failure,
+timeout (124) and unconfirmed cleanup (125), rather than returning a console
+host's unrelated success code. Killing the native root also closes its
+kill-on-close child Job.
 Both task and trigger are disabled. The Linux proposal contains a systemd-user
 oneshot and hourly UTC persistent timer, no retries, control-group cleanup and
 55-second start/five-second stop limits, retaining the same 60-second outer
@@ -335,6 +341,12 @@ or enabled unit. Neither definition depends on the update watchdog.
 The action calls the owning payload's normal `health run --apply` entry with
 the previewed policy token. Selection and capability qualification happen again
 at invocation, and normal collection revalidates the token at each mutation.
+A Windows proposal names the preparing runtime's library directory and actual
+windowless base interpreter, avoiding a console-subsystem venv redirector.
+These are trusted local installation inputs, never synchronized preferences.
+The enclosing installation must retain that execution closure while enrolled;
+replacement/rollback must refresh and requalify it before retiring its paths.
+Missing support or paths refuse visibly; they never provision a runtime.
 A changed policy refuses; a late invocation only targets current health and the
 preceding complete service hour, never replays every missed hour.
 The enclosing scheduler budget leaves startup/settlement headroom around the
@@ -346,9 +358,14 @@ termination behavior are **not qualified by rendering these definitions**.
 queries of an existing task. Registration/enrollment is deliberately absent.
 Before a future owner registers anything, it must verify the actual interactive
 identity, current installation selection, policy adoption, existing-definition
-conflicts and the native first/reconcile, two-cycle headlessness, overlap,
+conflicts and the native first/reconcile, two-cycle unattended launch, overlap,
 late-wake, deadline/storage and exact-cleanup gates in the reviewed local
 collection plan. Obtain separate activation authority; preparation is not it.
+Visual window/focus observation is an opportunistic diagnostic on an already
+active console or RDP session. Record its unavailable/inconclusive reason; do
+not require operator attendance or block publication, CI or enrollment on its
+absence. Automated GUI/console-state, result and complete-tree cleanup controls
+remain independent requirements; unobserved is not a visual pass.
 Listener-only recollection replaces only `local_listener`; retained SSH,
 session and other unselected domains keep their exact evidence and source
 timestamps. The record boundary also refuses changes to those domains.

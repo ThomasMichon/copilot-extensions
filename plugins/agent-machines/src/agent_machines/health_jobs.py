@@ -35,7 +35,7 @@ def _systemd_directory(value: str) -> str:
 
 def prepare(
     *, platform: str, payload: str, store: str, policy_token: str,
-    user_id: str = "", windows_root: str = "",
+    user_id: str = "", windows_root: str = "", gui_python: str = "", runtime_site: str = "",
 ) -> dict:
     """Render inert definitions for explicit review, never touch a scheduler."""
     if re.fullmatch(r"[a-f0-9]{64}", policy_token) is None:
@@ -54,9 +54,15 @@ def prepare(
             or not PureWindowsPath(_text(windows_root)).is_absolute()
         ):
             raise JobError("interactive-user-and-windows-root-required")
+        if not all(
+            PureWindowsPath(_text(value)).is_absolute()
+            and ".." not in PureWindowsPath(value).parts
+            for value in (gui_python, runtime_site)
+        ):
+            raise JobError("windowless-runtime-required")
         system = PureWindowsPath(windows_root) / "System32"
         host = str(system / "WindowsPowerShell" / "v1.0" / "powershell.exe")
-        launcher = str(PureWindowsPath(payload) / "bin" / "agent-machines.ps1")
+        entry = str(PureWindowsPath(payload) / "scripts" / "health-job-entry.py")
         ET.register_namespace("", NS)
         task = ET.Element(f"{{{NS}}}Task", version="1.4")
 
@@ -84,15 +90,16 @@ def prepare(
         ):
             element(settings, key, value)
         action = element(element(task, "Actions", Context="Author"), "Exec")
-        element(action, "Command", str(system / "conhost.exe"))
+        element(action, "Command", gui_python)
         element(action, "Arguments", subprocess.list2cmdline([
-            "--headless", host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
-            "-File", launcher, *arguments,
+            "-I", "-B", "-X", "utf8", entry, "--site", runtime_site,
+            "--powershell", host, "--payload", payload, "--store", store,
+            "--expect-policy", policy_token,
         ]))
         element(action, "WorkingDirectory", payload)
         artifacts = {f"{NAME}.xml": ET.tostring(task, encoding="unicode")}
     else:
-        if user_id or windows_root:
+        if user_id or windows_root or gui_python or runtime_site:
             raise JobError("platform-job-options-mismatch")
         launcher = str(PurePosixPath(payload) / "bin" / "agent-machines")
         command = " ".join(_systemd(value) for value in ["/bin/bash", launcher, *arguments])

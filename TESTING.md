@@ -101,6 +101,45 @@ original unknown/confirmed outcomes after later active/reclosed observations
 and unchanged legacy status rejection. These remain opt-in source controls,
 not an expansion of required unit-only CI or live-provider qualification.
 
+## Local machine-health scheduler qualification
+
+The explicit Agent Machines native packet is
+`tests/native/test_health_windows_scheduler.py`. It requires separately
+authorized limited-interactive-user task effects on the current Windows host:
+
+```powershell
+$env:AGENT_MACHINES_NATIVE_SCHEDULER = '1'
+python tools/run-plugin-tests.py agent-machines --test-file tests/native/test_health_windows_scheduler.py --test-file tests/native/test_health_windows_desktop.py --max-files-per-sub-suite 1 --allow-explicit-tiers --test-timeout 240
+```
+
+It uses unique create-only tasks, description-marker ownership, finite
+three-minute trigger expiry, one-minute actions and exact stop/delete receipts.
+It never changes existing tasks, installed runtimes, services or carrier data.
+The copied payload selects a fresh fixture runtime through the normal dispatcher.
+Controls cover two real one-minute calendar cycles, native overlap suppression,
+the inner execution budget, forced scheduler-root termination with retained
+descendant handles, failed storage and cleanup. The faulted outer-ceiling case
+extends only the copied helper's inner budget; production keeps 55 seconds.
+The normal cycles also inspect the actual entrypoint's GUI subsystem and
+controlled Python processes' native console state, without needing a desktop.
+
+The separate `test_health_windows_desktop.py` case retains the unfiltered window/focus
+observer as a non-gating diagnostic. It runs opportunistically on an already
+active, observable console or RDP session, including RDP-SXS, and binds actual
+task children to the observed session. Otherwise it skips with a reason; an
+inconclusive capture also records its coverage/events without becoming a pass.
+The JUnit suite property `desktop_observation` records the result. No operator
+unlock, focus, quiet-window commitment or physical console is required.
+Absent/inconclusive visual coverage does not block publication, CI or enrollment.
+Functional assertions and exact cleanup remain mandatory; confirmed regressions
+are not waived. Task-attributed visible windows or sampled focus violations fail
+even when capture coverage is incomplete. Ownership uses the fixture's native
+PID/birth receipts, not an unrelated process's reused PID or desktop activity.
+Selecting only `test_health_windows_scheduler.py` runs the unattended controls; it never claims
+zero windows or focus changes. Late wake/suspend, Linux, retained-closure replacement, installed
+adoption, hourly cohort behavior and carrier receipt remain separate gates.
+This T3 packet never enters required actor-free unit CI.
+
 ## Owner-only hosted Windows escape hatch
 
 `windows-qualification.yml` is an explicit manual lane on a disposable
