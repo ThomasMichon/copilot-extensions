@@ -15,6 +15,21 @@ from .configuration import load_readiness_config
 MODULE_ID = "agent-mcp/runtime"
 
 
+def configured_candidates() -> list[tuple[str, Path]]:
+    from . import config
+    from .provider_selection import provider_filter
+
+    candidates = []
+    if config.BRIDGES_DIR.is_dir():
+        candidates.extend(
+            (normalize_bridge_name(path.name), path)
+            for path in sorted(config.BRIDGES_DIR.iterdir())
+            if path.suffix.lower() in {".yaml", ".yml", ".json"}
+        )
+    candidates.extend(config.discover_plugin_bridge_candidates(include=provider_filter()))
+    return candidates
+
+
 def _result(state: str, detail: str) -> dict[str, Any]:
     return {
         "schema": "copilot-extensions.module-readiness",
@@ -23,6 +38,13 @@ def _result(state: str, detail: str) -> dict[str, Any]:
         "state": state,
         "detail": detail,
     }
+
+
+def configured_readiness() -> dict[str, Any]:
+    try:
+        return evaluate(configured_candidates())
+    except ConfigError as error:
+        return _result("failed", str(error))
 
 
 def evaluate(
