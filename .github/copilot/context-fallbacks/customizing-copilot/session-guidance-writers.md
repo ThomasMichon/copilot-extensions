@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"4c22acf1450f72a10515cb991739d3391d588bef0792aba73eb60b2da2baf0f8","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/session-guidance-writers.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.70-dev1","renderedBytes":2037,"schema":"copilot-extensions.instruction-projection","sourceId":"session-guidance-writers","template":"instructions/session-guidance-writers.instructions.md","templateBytes":1234,"templateSha256":"e0c5f42329ebdb53000e1fed2b66f447f89ac0419d1847d952f566cf02aa9b0c","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"4c22acf1450f72a10515cb991739d3391d588bef0792aba73eb60b2da2baf0f8","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/customizing-copilot/session-guidance-writers.instructions.md","plugin":"customizing-copilot@copilot-extensions","pluginVersion":"0.2.71-dev1","renderedBytes":2037,"schema":"copilot-extensions.instruction-projection","sourceId":"session-guidance-writers","template":"instructions/session-guidance-writers.instructions.md","templateBytes":1234,"templateSha256":"e0c5f42329ebdb53000e1fed2b66f447f89ac0419d1847d952f566cf02aa9b0c","version":1} -->
 
 
 # Session-guidance writers are for computed facts
@@ -29,4 +29,4 @@ pointer projection and reviewed fallback, and move each part to the home
 above. Use `reviewing-customizations` for the full session-guidance
 conformance classes.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"057ab4a1175882f660942831023a3fdc2535e7f675ae96c878292b2f3ad7b228"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"382dd71411d86632358e0e5c485ee36897888e1a840a91cbf259cebd4091846d"} -->

@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import time
+from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
 from agent_procutil._interpreter import physical_executable
@@ -334,6 +335,89 @@ def test_application_withdrawal_refuses_an_unowned_slot(tmp_path, monkeypatch):
     assert python.is_file()
 
 
+@pytest.mark.parametrize("failure", [None, "install", "selection", "retained"])
+def test_generation_replacement_keeps_installer_and_cleanup_owners(tmp_path, monkeypatch, failure):
+    import public_caller_jobs_fixture as fixture
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(tmp_path))
+    root = tmp_path / "runtime"
+    outgoing, incoming = (root / "versions" / name for name in ("1.0", "2.0"))
+    python = outgoing / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    incoming.mkdir()
+    (incoming / "application.json").write_text("fixture", encoding="utf-8")
+    (root / "current-version").write_text(outgoing.name, encoding="utf-8")
+    (root / "projects.yaml").write_text("projects: {fixture: retained}\n", encoding="utf-8")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        assert kwargs["env"] == {"FIXTURE": "selected"}
+        if len(calls) == 1:
+            assert command == [
+                "selected-pwsh", "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+                str(incoming / "install.ps1"),
+            ]
+            assert not (incoming / ".venv").exists()
+            if failure == "install":
+                return subprocess.CompletedProcess(command, 1, "", "installation failed")
+            for selector in ("current-version", "last-known-good"):
+                (root / selector).write_text(
+                    outgoing.name if failure == "selection" else incoming.name, encoding="utf-8",
+                )
+            (incoming / "install-success.json").write_text(json.dumps({
+                "state": "installed", "version": incoming.name,
+            }), encoding="utf-8")
+            installed_python = incoming / ".venv" / "Scripts" / "python.exe"
+            installed_python.parent.mkdir(parents=True)
+            installed_python.touch()
+            return subprocess.CompletedProcess(command, 0, 'setup callback\n{"state":"installed"}', "")
+        assert command == [
+            str(incoming / ".venv" / "Scripts" / "python.exe"), "-I", "-B",
+            str(incoming / "runtime" / "versioned_runtime.py"),
+            "--root", str(root), "--json", "gc", "--protect-pids", "--min-age-days", "0",
+        ]
+        if failure == "retained":
+            return subprocess.CompletedProcess(command, 0, '{"removed":[]}', "")
+        shutil.rmtree(outgoing)
+        return subprocess.CompletedProcess(command, 0, json.dumps({"removed": [outgoing.name]}), "")
+
+    monkeypatch.setattr(fixture.subprocess, "run", run)
+    arguments = dict(shell="selected-pwsh", cwd=tmp_path, environment={"FIXTURE": "selected"})
+    if failure:
+        with pytest.raises(AssertionError):
+            fixture.replace_application(python, incoming, **arguments)
+        assert outgoing.is_dir()
+        assert len(calls) == (2 if failure == "retained" else 1)
+        if failure == "retained":
+            assert (root / "current-version").read_text() == incoming.name
+            assert (incoming / "install-success.json").is_file()
+    else:
+        selected = fixture.replace_application(python, incoming, **arguments)
+        assert selected == incoming / ".venv" / "Scripts" / "python.exe"
+        assert not outgoing.exists() and len(calls) == 2
+
+
+def test_generation_replacement_refuses_unowned_or_prebuilt_input(tmp_path, monkeypatch):
+    from public_caller_jobs_fixture import replace_application
+
+    sandbox = tmp_path / "sandbox"
+    sandbox.mkdir()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(sandbox))
+    outgoing = sandbox / "runtime" / "versions" / "1.0"
+    python = outgoing / ".venv" / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    incoming = outgoing.with_name("2.0")
+    incoming.mkdir()
+    (incoming / "application.json").write_text("fixture", encoding="utf-8")
+    (incoming / ".venv").mkdir()
+    for selected in (incoming, tmp_path / "foreign"):
+        with pytest.raises(AssertionError):
+            replace_application(python, selected, shell="must-not-run", cwd=sandbox, environment={})
+
+
 def test_lifetime_selection_cannot_disable_an_existing_contained_owner(tmp_path, monkeypatch):
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     with pytest.raises(AssertionError):
@@ -440,6 +524,12 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
     (root / "projects.yaml").write_text("projects: {}\n", encoding="utf-8")
     slot = root / "versions" / declaration["construction"]["runtime_version"]
     shutil.copytree(application, slot)
+    replacement = None
+    if caller_jobs:
+        assert not (application / ".venv").exists()
+        assert not (application / engine.runtime.COMPLETE_MARKER).exists()
+        replacement = slot.with_name(slot.name + ".repair." + uuid4().hex)
+        shutil.copytree(application, replacement)
     environment = {
         key: value for key, value in os.environ.items()
         if not key.startswith(("UV_", "COPILOT_PLUGIN_", "COPILOT_EXTENSIONS_", "AGENT_RT_",
@@ -517,7 +607,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
         _qualify_manager_application(
             manager, monkeypatch, broker, worktrees_python=python,
             worktrees_root=root, worktrees_environment=environment,
-            caller_jobs=caller_jobs,
+            caller_jobs=caller_jobs, replacement_slot=replacement,
         )
     elif broker:
         assert time.monotonic() < deadline, "Application construction exceeded 300 seconds"
@@ -576,4 +666,11 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
         _qualify_native_startup(
             native_root, False, command_wrapper=packaged_command, environment=environment,
         )
-    assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
+    if replacement is None:
+        assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
+    else:
+        assert not slot.exists()
+        assert (root / "current-version").read_text().strip() == replacement.name
+        assert (root / "last-known-good").read_text().strip() == replacement.name
+        assert (replacement / engine.runtime.COMPLETE_MARKER).is_file()
+        assert (root / "projects.yaml").is_file()
