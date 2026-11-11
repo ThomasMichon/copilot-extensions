@@ -236,6 +236,31 @@ After the connection and native owner pin close, successful completion exits
 the process without Python's buffered-stdio finalization: another process may
 still hold the input writer after the originating owner dies.
 
+### Selected-executable support discovery
+
+`agent-mcp session-owner-capabilities` reports the
+`agent-mcp.session-owner-handoff` version-1 capability from the executable
+actually running the query. It validates the physical installed slot and current
+selection, acquires and releases only its own native process pin, and rechecks
+selection before returning its generation, root, prefix and interpreter.
+An unmanaged runtime or unsupported platform reports `supported: false`.
+Selection or native-probe failures return a nonzero exit with `supported: false`,
+not a supported result inferred from payload or package-version equality.
+
+`invocation_allowed` reflects the same multiplex/serve-startup opt-outs as the
+explicit owner CLI path. It is not serving readiness, proof of another caller's
+identity or permission to start anything. The query never ensures a backend,
+attaches custody, loads bridge configuration or acquires credentials. The real
+invocation must still pin its supplied owner and qualify incoming serving.
+
+This is a provider expansion, not automatic launcher adoption. An older
+executable may reject the query itself; callers must retain truthful unsupported
+handling and bind any successful report to their actual selected command before
+supplying mandatory ownership arguments. Missing or stale discovery is not
+permission to replay a possibly accepted session.
+
+### Hosted originating-owner qualification
+
 The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the
 existing native test Job owner and runner-renewed daemon leases. It selects one
 functional fixture: actual custody startup, caller-Job closure with a bounded

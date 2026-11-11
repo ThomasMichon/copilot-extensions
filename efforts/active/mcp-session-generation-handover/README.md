@@ -330,10 +330,17 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
   The internal explicit-owner path and hosted packet are now qualified on
   disposable hosted Windows. Next, supply originating-owner acquisition for
   eligible ordinary callers without weakening native lifetime admission.
-  - [ ] **Explicit launcher CLI handoff:** accept the paired native owner on
+  - [x] **Explicit launcher CLI handoff:** accept the paired native owner on
     `bridge` and `forward`, preserve unproven callers' existing selection, and
-    qualify the real CLI through the hosted lifetime packet. Controlled
-    production launcher capture and automatic adoption remain separate work.
+    qualify the real CLI through the hosted lifetime packet. #12036 merged at
+    `b2bda964dc42593bc94a2cb37cde9e3520f68962`; the
+    [source-pinned CLI packet](journal/2026/11.10-explicit-owner-cli.md#qualification-and-merge-follow-up)
+    passed. Selected-runtime discovery, controlled production launcher capture
+    and automatic adoption remain separate work.
+  - [ ] **Selected-runtime discovery provider:** report owner-handoff support
+    from the actual physical selected executable without MCP startup, and
+    qualify both selected and stale-slot queries across replacement. Caller
+    discovery/capture integration and rollback adoption remain open.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
