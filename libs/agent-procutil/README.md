@@ -187,6 +187,13 @@ ancestors from other unprivileged users' writes or substitution. New
 directories use private creation; existing foreign/shared-writable paths are
 not repaired or trusted. A matching JSON record is not an access boundary.
 Windows validates ownership/DACLs and POSIX validates ownership/modes.
+Owned POSIX cache directories require private traversal, so a permissively
+created `.pyc` cannot become writable input for another user through a
+world-traversable cache tree. Windows checks inheritable access rules as well
+as rules applying to the directory itself. macOS additionally reads extended
+ACLs: deny-only ACLs are safe; extended allow entries are conservatively
+unsupported and select the no-write fallback rather than inferring safety
+from mode bits. An unresolved user home likewise selects the fallback.
 
 The namespace's bounded `owner.json` lives beside bytecode. Its installation's
 private `catalog.sqlite` indexes ownership before the provider enables cache

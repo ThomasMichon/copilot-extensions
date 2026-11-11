@@ -4,6 +4,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import stat
+import sys
 from functools import lru_cache
 from pathlib import Path
 
@@ -24,7 +25,7 @@ def mkdir(path: Path) -> None:
     _owner().mkdir_private(path, exist_ok=True)
 
 
-def _windows_check(path: Path, *, ancestor: bool) -> None:
+def _windows_check(path: Path, *, ancestor: bool, private: bool) -> None:
     import ctypes
     from ctypes import wintypes
 
@@ -65,14 +66,18 @@ def _windows_check(path: Path, *, ancestor: bool) -> None:
         info = (wintypes.DWORD * 3)()
         if not advapi.GetAclInformation(acl, info, ctypes.sizeof(info), 2):
             raise ctypes.WinError(ctypes.get_last_error())
-        writes = 0x500D0140 if ancestor else 0x500D0156
+        writes = 0xF00F01FF if private else 0x500D0140 if ancestor else 0x500D0156
         for index in range(info[0]):
             ace = ctypes.c_void_p()
             if not advapi.GetAce(acl, index, ctypes.byref(ace)):
                 raise ctypes.WinError(ctypes.get_last_error())
             header = ctypes.string_at(ace, 8)
-            kind, flags = header[0], header[1]
-            if flags & 8 or kind in (1, 2, 17):  # Inherit-only, deny, audit, integrity.
+            kind = header[0]
+            if ancestor and header[1] & 8:
+                # Existing descendants are checked separately; new cache
+                # directories use protected, non-inheriting private DACLs.
+                continue
+            if kind in (1, 2, 17):  # Deny, audit, integrity.
                 continue
             if kind != 0:
                 raise PermissionError("unsupported bytecode cache access rule")
@@ -83,7 +88,42 @@ def _windows_check(path: Path, *, ancestor: bool) -> None:
         kernel.LocalFree(descriptor)
 
 
-def check(path: Path, *, ancestor: bool = False) -> None:
+def _macos_check(path: Path) -> None:
+    import ctypes
+
+    library = ctypes.CDLL("/usr/lib/libSystem.B.dylib", use_errno=True)
+    library.acl_get_file.argtypes = [ctypes.c_char_p, ctypes.c_uint]
+    library.acl_get_file.restype = ctypes.c_void_p
+    library.acl_get_entry.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.POINTER(ctypes.c_void_p),
+    ]
+    library.acl_get_entry.restype = ctypes.c_int
+    library.acl_get_tag_type.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint)]
+    library.acl_get_tag_type.restype = ctypes.c_int
+    library.acl_free.argtypes = [ctypes.c_void_p]
+    library.acl_free.restype = ctypes.c_int
+    acl = library.acl_get_file(os.fsencode(path), 0x100)  # ACL_TYPE_EXTENDED.
+    if not acl:
+        raise PermissionError("macOS bytecode cache ACL could not be verified")
+    try:
+        entry, tag = ctypes.c_void_p(), ctypes.c_uint()
+        selector = 0
+        while True:
+            found = library.acl_get_entry(acl, selector, ctypes.byref(entry))
+            if found == 0:
+                return
+            if found < 0 or library.acl_get_tag_type(entry, ctypes.byref(tag)) != 0:
+                raise PermissionError("macOS bytecode cache ACL could not be verified")
+            # Denials cannot expand access. Other extended entries remain
+            # unsupported rather than being inferred safe from mode bits.
+            if tag.value != 0x200:
+                raise PermissionError("macOS bytecode cache has an unverified ACL grant")
+            selector = 1
+    finally:
+        library.acl_free(acl)
+
+
+def check(path: Path, *, ancestor: bool = False, private: bool = False) -> None:
     """Refuse indirection, foreign ownership and unprivileged mutation."""
     info = path.lstat()
     if (
@@ -92,13 +132,17 @@ def check(path: Path, *, ancestor: bool = False) -> None:
     ):
         raise PermissionError("bytecode cache directory is not ordinary")
     if os.name == "nt":
-        _windows_check(path, ancestor=ancestor)
+        _windows_check(path, ancestor=ancestor, private=private)
     else:
         allowed = {os.getuid(), 0} if ancestor else {os.getuid()}
         if info.st_uid not in allowed:
             raise PermissionError("bytecode cache has a foreign owner")
         if info.st_mode & 0o022 and not (ancestor and info.st_mode & stat.S_ISVTX):
             raise PermissionError("bytecode cache directory permits another user's writes")
+        if private and info.st_mode & 0o077:
+            raise PermissionError("bytecode cache traversal is not private")
+        if sys.platform == "darwin":
+            _macos_check(path)
 
 
 def check_ancestors(path: Path) -> None:

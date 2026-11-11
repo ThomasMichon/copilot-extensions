@@ -6,6 +6,7 @@ import json
 import os
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -75,6 +76,39 @@ def test_unrecorded_completion_uses_fresh_external_namespace(cache, tmp_path, ev
     assert all("unsealed-" in arguments[1] for arguments in (first, second))
     assert all(str(target) not in arguments[1] for arguments in (first, second))
     assert not (root / "cache").exists()
+
+
+def test_unsealed_policy_disables_writes_without_legacy_namespace(cache, tmp_path):
+    root = tmp_path / "owner"
+    for _ in range(20):
+        assert cache.policy_arguments(root, runtime=tmp_path / "uninstalled") == ["-B"]
+    assert not root.exists()
+
+
+def test_recorded_policy_uses_target_owner_and_cache_failure_is_no_write(cache, tmp_path, monkeypatch):
+    root = tmp_path / "owner"
+    target, _ = installed_target(root)
+    calls = []
+
+    def prepare(owner, runtime, identity, **kwargs):
+        calls.append((owner, runtime, identity))
+        return tmp_path / "external" / "bytecode"
+
+    store = SimpleNamespace(
+        normalized=lambda value: os.path.normcase(os.path.abspath(value)), prepare=prepare,
+    )
+    monkeypatch.setattr(cache, "_store", lambda: store)
+    result = cache.policy_arguments(root, runtime=target)
+    assert result == ["-X", "pycache_prefix=" + str(tmp_path / "external" / "bytecode")]
+    assert calls == [(root, target, cache._installed_identity(target))]
+    assert cache.policy_arguments(tmp_path / "different-owner", runtime=target) == ["-B"]
+    assert len(calls) == 1
+
+    def unavailable(*args, **kwargs):
+        raise RuntimeError("home unavailable")
+
+    store.prepare = unavailable
+    assert cache.policy_arguments(root, runtime=target) == ["-B"]
 
 
 @pytest.mark.parametrize("registered", [False, True])

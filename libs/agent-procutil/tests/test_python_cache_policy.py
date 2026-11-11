@@ -131,6 +131,18 @@ def test_matching_record_does_not_override_native_permission_refusal(
     assert cache.policy_arguments(root, runtime=target) == ["-B"]
 
 
+def test_unresolved_home_uses_no_write_fallback(tmp_path, local_cache, monkeypatch):
+    root = tmp_path / "installation"
+    target = _installed(root)
+
+    def unavailable():
+        raise RuntimeError("current UID has no home")
+
+    monkeypatch.setattr(store, "user_cache", unavailable)
+    assert cache.policy_arguments(root, runtime=target) == ["-B"]
+    assert not local_cache.exists()
+
+
 @pytest.mark.skipif(os.name == "nt", reason="POSIX native ownership/mode boundary")
 def test_shared_writable_base_or_ancestor_is_never_selected(tmp_path, local_cache):
     root = tmp_path / "installation"
@@ -144,6 +156,21 @@ def test_shared_writable_base_or_ancestor_is_never_selected(tmp_path, local_cach
         assert cache.policy_arguments(root, runtime=target) == ["-B"]
     finally:
         tmp_path.chmod(0o700)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX private traversal boundary")
+def test_traversable_bytecode_root_cannot_expose_writable_cached_files(tmp_path, local_cache):
+    root = tmp_path / "installation"
+    target = _installed(root)
+    selected = cache.policy_arguments(root, runtime=target)
+    assert selected[0] == "-X"
+    bytecode = Path(selected[1].split("=", 1)[1])
+    compiled = bytecode / "fixture.pyc"
+    compiled.write_bytes(b"untouched cache fixture")
+    compiled.chmod(0o666)
+    bytecode.chmod(0o755)
+    assert cache.policy_arguments(root, runtime=target) == ["-B"]
+    assert compiled.read_bytes() == b"untouched cache fixture"
 
 
 def test_conflicting_or_oversized_owner_record_is_preserved(tmp_path, local_cache):
@@ -191,13 +218,20 @@ def test_real_interpreter_reuses_external_bytecode_and_unsealed_writes_nothing(
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native DACL protection")
-def test_native_windows_shared_writable_cache_is_not_selected(tmp_path, local_cache):
+@pytest.mark.parametrize("inherit_only", [False, True])
+def test_native_windows_shared_writable_cache_is_not_selected(tmp_path, local_cache, inherit_only):
     import ctypes
     from ctypes import wintypes
 
     root = tmp_path / "installation"
     target = _installed(root)
-    permissions.mkdir(local_cache)
+    if inherit_only:
+        selected = cache.policy_arguments(root, runtime=target)
+        assert selected[0] == "-X"
+        changed = Path(selected[1].split("=", 1)[1])
+    else:
+        permissions.mkdir(local_cache)
+        changed = local_cache
     owner = permissions._owner()
     user = owner._current_sids(os.getpid())[0]
     advapi, kernel = owner._apis()
@@ -210,11 +244,28 @@ def test_native_windows_shared_writable_cache_is_not_selected(tmp_path, local_ca
     advapi.SetFileSecurityW.restype = wintypes.BOOL
     descriptor = ctypes.c_void_p()
     assert advapi.ConvertStringSecurityDescriptorToSecurityDescriptorW(
-        f"O:{user}D:P(A;;FA;;;{user})(A;;FA;;;AU)", 1, ctypes.byref(descriptor), None,
+        f"O:{user}D:P(A;;FA;;;{user})(A;{'OICIIO' if inherit_only else ''};FA;;;AU)",
+        1, ctypes.byref(descriptor), None,
     )
     try:
-        assert advapi.SetFileSecurityW(str(local_cache), 0x80000004, descriptor)
+        assert advapi.SetFileSecurityW(str(changed), 0x80000004, descriptor)
         assert cache.policy_arguments(root, runtime=target) == ["-B"]
-        assert not (local_cache / "copilot-extensions").exists()
+        if not inherit_only:
+            assert not (local_cache / "copilot-extensions").exists()
     finally:
         kernel.LocalFree(descriptor)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="macOS native named-user ACL protection")
+def test_macos_named_user_acl_does_not_override_private_mode(tmp_path, local_cache):
+    root = tmp_path / "installation"
+    target = _installed(root)
+    selected = cache.policy_arguments(root, runtime=target)
+    assert selected[0] == "-X"
+    bytecode = Path(selected[1].split("=", 1)[1])
+    subprocess.run(
+        ["/bin/chmod", "+a", "user:nobody allow write,delete_child", str(bytecode)],
+        check=True, capture_output=True, timeout=20,
+    )
+    assert bytecode.stat().st_mode & 0o077 == 0
+    assert cache.policy_arguments(root, runtime=target) == ["-B"]

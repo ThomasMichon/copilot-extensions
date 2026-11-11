@@ -82,11 +82,11 @@ def user_cache() -> Path:
     return native(base)
 
 
-def _directory(path: Path, permissions) -> None:
+def _directory(path: Path, permissions, *, private: bool = False) -> None:
     if not os.path.lexists(path):
         _directory(path.parent, permissions)
         permissions.mkdir(path)
-    permissions.check(path)
+    permissions.check(path, private=private)
 
 
 def prepare(root: Path, target: Path, identity: str, *, read_record) -> Path:
@@ -107,7 +107,7 @@ def prepare(root: Path, target: Path, identity: str, *, read_record) -> Path:
     ).hexdigest()
     for part in ("copilot-extensions", "python", "v1", installation, "installed-" + key):
         location /= part
-        _directory(location, permissions)
+        _directory(location, permissions, private=True)
     record = location / "owner.json"
     encoded = (json.dumps(owner, sort_keys=True) + "\n").encode("utf-8")
     private_owner = component("_daemon_instance_owner")
@@ -128,5 +128,5 @@ def prepare(root: Path, target: Path, identity: str, *, read_record) -> Path:
         with os.fdopen(descriptor, "wb") as stream:
             stream.write(encoded)
     bytecode = location / "bytecode"
-    _directory(bytecode, permissions)
+    _directory(bytecode, permissions, private=True)
     return bytecode

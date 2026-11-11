@@ -144,6 +144,6 @@ def policy_arguments(
         if store.normalized(target.parent.parent) != store.normalized(root):
             return ["-B"]
         prefix = store.prepare(Path(root), target, identity, read_record=_read_regular)
-    except (OSError, ValueError, ImportError):
+    except (OSError, ValueError, ImportError, RuntimeError):
         return ["-B"]
     return ["-X", "pycache_prefix=" + str(prefix)]
