@@ -292,6 +292,49 @@ async def test_sdk_identical_foreign_input_is_not_mistaken_for_the_admitted_mess
 
 
 @pytest.mark.asyncio
+async def test_sdk_queued_prompt_cannot_overtake_observed_foreign_input():
+    async with broker() as (client, backend, _host, front, _port):
+        await bind(front)
+        client.session.release.set()
+        backend.write((json.dumps({
+            "jsonrpc": "2.0", "id": 2, "method": "session/prompt", "params": {
+                "sessionId": "native-fixture",
+                "prompt": [{"type": "text", "text": "must not send"}],
+            },
+        }) + "\n").encode())
+        client.session.emit("user.message", content="foreign input", source="user")
+        reply, _, _ = await until(front, 2)
+        assert reply["error"]["code"] == -32001
+        assert client.session.inputs == [] and backend.returncode is None
+
+
+@pytest.mark.asyncio
+async def test_sdk_replayed_live_admission_does_not_revoke_a_later_prompt():
+    async with broker() as (client, backend, _host, front, _port):
+        await bind(front)
+        owned = []
+
+        async def send_once(text, **kwargs):
+            client.session.inputs.append(text)
+            event = Event("user.message", content=text, source="agent-" + kwargs["source"].agent_id)
+            owned.append(event)
+            client.session.options["on_event"](event)
+            client.session.emit("session.idle")
+
+        client.session.send_and_wait = send_once
+        await send(front, 2, "session/prompt", {
+            "sessionId": "native-fixture", "prompt": [{"type": "text", "text": "first input"}],
+        })
+        assert (await until(front, 2))[0]["result"]["stopReason"] == "end_turn"
+        client.session.options["on_event"](owned[0])
+        await send(front, 3, "session/prompt", {
+            "sessionId": "native-fixture", "prompt": [{"type": "text", "text": "second input"}],
+        })
+        assert (await until(front, 3))[0]["result"]["stopReason"] == "end_turn"
+        assert client.session.inputs == ["first input", "second input"] and backend._controlled
+
+
+@pytest.mark.asyncio
 async def test_sdk_load_replays_native_history_and_refuses_a_second_conversation():
     async with broker() as (client, _backend, _host, front, _port):
         await send(front, 1, "session/load", {
@@ -364,6 +407,30 @@ async def test_sdk_load_rejects_concurrent_prompt_until_history_is_validated(att
         else:
             assert loaded["result"] == {} and backend._bound.is_set()
         assert client.session.inputs == [] and client.resumed == ["native-fixture"]
+
+
+@pytest.mark.asyncio
+async def test_sdk_history_overlap_cannot_deduplicate_live_control_loss():
+    async with broker() as (client, backend, _host, front, _port):
+        reading, release = asyncio.Event(), asyncio.Event()
+        foreign = Event("user.message", content="overlapping input", source="user")
+
+        async def history():
+            reading.set()
+            await release.wait()
+            return [foreign]
+
+        client.session.get_events.side_effect = history
+        await send(front, 1, "session/load", {"sessionId": "native-fixture", "cwd": "fixture"})
+        await asyncio.wait_for(reading.wait(), 2)
+        client.session.options["on_event"](foreign)
+        release.set()
+        assert (await until(front, 1))[0]["error"]["code"] == -32001
+        await send(front, 2, "session/prompt", {
+            "sessionId": "native-fixture", "prompt": [{"type": "text", "text": "must not send"}],
+        })
+        assert (await until(front, 2))[0]["error"]["code"] == -32001
+        assert client.session.inputs == [] and not backend._controlled
 
 
 @pytest.mark.asyncio

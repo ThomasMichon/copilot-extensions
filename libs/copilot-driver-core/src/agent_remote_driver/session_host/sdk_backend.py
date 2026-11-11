@@ -117,6 +117,7 @@ class SdkBackend:
         self._bound = asyncio.Event()
         self._epoch = 0
         self._seen: set[str] = set()
+        self._live_seen: set[str] = set()
         self._streamed: set[str] = set()
         self._prompt: asyncio.Task | None = None
         self._cancelled = False
@@ -232,6 +233,7 @@ class SdkBackend:
                     "userInput": "unavailable",
                 },
             }
+        self._drain_events()
         if not self._controlled:
             raise AcpError(-32001, "Native SDK control is unavailable; owner reconciliation is required")
         if method in {"session/new", "session/load"}:
@@ -253,8 +255,7 @@ class SdkBackend:
                 finally:
                     started.cancel()
                     await asyncio.gather(started, return_exceptions=True)
-                if self._event_task is not None:
-                    await asyncio.shield(self._event_task)
+                self._drain_events()
                 if not self._controlled:
                     raise AcpError(-32001, "Native SDK control was lost before cancellation")
                 if self._prompt is not prompt or not self._started.is_set():
@@ -309,7 +310,11 @@ class SdkBackend:
         if not self._controlled:
             raise AcpError(-32001, "Native restoration observations are incomplete")
         self._bound.set()
+        self._drain_events()
         await self._refresh_inventory()
+        self._drain_events()
+        if not self._controlled:
+            raise AcpError(-32001, "Native restoration observations are incomplete")
         return {"sessionId": session.session_id} if method == "session/new" else {}
 
     async def _send(self, params: dict) -> dict:
@@ -327,6 +332,9 @@ class SdkBackend:
         text = "".join(part["text"] for part in parts)
         if not text:
             raise AcpError(-32602, "A nonempty prompt is required")
+        self._drain_events()
+        if not self._controlled:
+            raise AcpError(-32001, "Native SDK control was lost before prompt admission")
         self._cancelled = False
         self._aborted = False
         self._started.clear()
@@ -356,6 +364,7 @@ class SdkBackend:
         from copilot.generated.rpc import PermissionDecisionApproveOnce, PermissionDecisionReject
         from copilot.session import PermissionNoResult
 
+        self._drain_events()
         if (
             not self._bound.is_set() or self._session is None
             or invocation.get("session_id") != self._session.session_id
@@ -384,6 +393,7 @@ class SdkBackend:
         try:
             response = await reply
             outcome = response.get("result", {}).get("outcome", {})
+            self._drain_events()
             if (
                 self._controlled and not self._closed and outcome.get("outcome") == "selected"
                 and outcome.get("optionId") == "allow-once"
@@ -417,6 +427,11 @@ class SdkBackend:
 
     async def _flush_events(self) -> None:
         await self._bound.wait()
+        self._drain_events()
+
+    def _drain_events(self) -> None:
+        if not self._bound.is_set():
+            return
         try:
             refresh = False
             while self._events:
@@ -440,16 +455,28 @@ class SdkBackend:
         if not isinstance(identifier, str) or not identifier:
             self._invalidate(control=True)
             return
+        kind, data = event.get("type"), event.get("data", {})
+        if not replay and identifier not in self._live_seen:
+            if len(self._live_seen) >= 100_000:
+                self._invalidate(control=True)
+                return
+            self._live_seen.add(identifier)
+            if kind in {"session.error", "session.shutdown", "session.truncation"}:
+                self._invalidate(control=True)
+                return
+            if kind == "user.message" and not event.get("agentId") and not data.get("parentToolCallId"):
+                if self._expected_source is not None and data.get("source") == self._expected_source:
+                    self._started.set()
+                else:
+                    self._invalidate(control=True)
+                    return
         if identifier in self._seen:
             return
         if len(self._seen) >= 100_000:
             self._invalidate(control=True)
             return
         self._seen.add(identifier)
-        kind, data = event.get("type"), event.get("data", {})
         if kind in {"session.error", "session.shutdown", "session.truncation"}:
-            if not replay:
-                self._invalidate(control=True)
             return
         if event.get("agentId") or data.get("parentToolCallId"):
             return
@@ -458,11 +485,6 @@ class SdkBackend:
             self._aborted = data.get("aborted") is True
         elif kind in {"user.message", "assistant.turn_start"} and not replay:
             self._foreground = {"known": True, "state": "active"}
-        if kind == "user.message" and not replay:
-            if self._expected_source is not None and data.get("source") == self._expected_source:
-                self._started.set()
-            else:
-                self._invalidate(control=True)
         if kind == "assistant.message_delta" and not replay:
             self._streamed.add(data.get("messageId", ""))
             self._update({"sessionUpdate": "agent_message_chunk", "content": {
