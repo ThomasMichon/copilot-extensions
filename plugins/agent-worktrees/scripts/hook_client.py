@@ -750,6 +750,10 @@ def _load_file(path: Path):
         return None
 
 
+if __name__ == "__main__":
+    # Standalone hook reads cannot write into their admitted payload.
+    sys.dont_write_bytecode = True
+
 _RUNTIME = _load_sibling("hook_runtime.py")
 
 

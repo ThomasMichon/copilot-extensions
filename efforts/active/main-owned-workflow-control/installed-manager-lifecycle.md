@@ -1879,3 +1879,35 @@ Documentation-impact review updates SSH's read-only snapshot contract and
 TESTING.md. A fresh exact-head hosted matrix remains required before readiness;
 authentic baseline update, frozen enforcement and separate Main adoption are
 still open.
+
+### November 11 - Preserve cold standalone Worktrees hook payloads
+
+Required CI 43075895027 passes at
+`b46c83443eaeebb8d8a141e92f679e5895c890bb`. Exact-source native run
+43075917269 passes normal/repair. Fresh completes the actual four actions,
+same-conversation history and all six daemon settlement outcomes, then refuses
+Worktrees payload immutability. Preparation and settlement return zero with no
+errors or remaining tasks.
+
+The actual difference is captured before further changes: twelve added
+entries, ten bytecode files and two cache directories, with no removed/changed
+original entry or truncation. These belong to the standalone hook runtime,
+lifecycle/runtime context, managed-session and native-source helper imports.
+This is not a Bridge communication failure.
+
+The actual raw session-start declaration reproduces cache writes on PowerShell
+7 and Windows PowerShell, even for an ordinary unadmitted directory with no
+runtime available. Pre/post no-op controls preserve their payloads. The narrow
+correction disables bytecode writing only when `hook_client.py` executes as
+the standalone program, before its first sibling load. Importing the client
+does not change the resident runtime's cache policy; selected runtime-child
+caches and lifecycle decisions/budgets remain unchanged. Current paginated
+#11121/#10757 checks have no overlapping hook-client or new-test file.
+
+The focused after packet passes 54 tests, with four platform skips uncredited:
+actual raw-hook cold/repeat entry comparisons, an actual import-mode cache-policy
+control, existing fail-open hooks and native-source controls. The new no-op
+regression is not admitted lifecycle acceptance. Documentation-impact review
+updates Worktrees' standalone hook contract and TESTING.md. A new exact-head
+hosted matrix is still required; no cache is excluded/deleted/resealed and no
+parent baseline-update, frozen-enforcement or Main-adoption gate is closed.

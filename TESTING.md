@@ -10619,6 +10619,15 @@ actual execution, and require real completion evidence. Windows uses Git Bash,
 not WSL, for the Bash case. Run it directly with pytest; it needs neither an
 Index service nor package downloads.
 
+Worktrees' `tests/test_hook_payload_stability.py` executes the actual raw
+session-start/pre-tool/post-tool hook declarations with a cold copied payload
+and an ordinary, unadmitted directory. Native PowerShell 5/7 or POSIX Bash calls
+repeat against the same payload and compare every entry, retaining the
+no-provisioning assertion. A separate actual import control preserves the
+resident runtime's cache policy. This is a cold hook/no-op regression, not
+qualification of the admitted Manager lifecycle or a substitute for its hosted
+immutable-payload comparison.
+
 Dependency fixtures must also preserve source attribution. Stage matching
 publisher/project metadata and the declared local library graph at the real
 helper location; use the existing release materializers before stamping a

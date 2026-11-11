@@ -1051,6 +1051,12 @@ behavior; an already-loaded older extension is not retroactively changed.
 | `sessionStart` | Managed-session start | Emits worktree/account/machine context, reload guidance, runtime bootstrap hints, repo-plugin provisioning, project hooks, session registration, anchor hygiene, and provision checks |
 | `sessionEnd` | Managed-session end | Uses original source evidence to close the matching activation, not a replacement; legacy unqualified records retain their prior behavior. Ending an interval does not conclude the resumable session |
 
+The standalone hook client disables bytecode writes before loading its first
+payload helper, including when session admission returns no-op. Importing the
+client into an existing runtime preserves that runtime's cache policy. Runtime
+child cache selection, hook decisions, budgets and source qualification are
+unchanged; cold hook reads do not modify or reseal the installed payload.
+
 The existing guard family accepts legacy single-call events and native
 `toolCalls[]` batches under one composed deadline. Direct-write classification
 recognizes structured edit paths and freeform `apply_patch` add, update, delete
