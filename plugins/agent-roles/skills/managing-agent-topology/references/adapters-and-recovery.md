@@ -193,7 +193,9 @@ effective content alone is not enough. This bounded offline check is not native
 authority. Persist the materialization and use the native reconciliation owner,
 retaining the effect, envelope, creation key, reservation and generation unchanged.
 Re-read native evidence to obtain the new standing revision before proceeding.
-Already-started tasks retain their owner-reconciliation hold.
+Already-started tasks retain their owner-reconciliation hold for effective
+charter changes. Bookkeeping-only source drift uses the narrower qualification
+described below.
 
 A single unknown effect proposes receipt recovery with `replayAllowed: false`
 and the original effect record. Multiple unknown effects, unsettled conflicting
@@ -227,6 +229,11 @@ adjustment, the full revised charter before using the report:
    adjustment, positive joined acceptance of the current charter. An absent
    rejection reason is not acceptance. Validate owner evidence and conflicting
    effects before settlement, even when the expected charter is already accepted.
+   While an admitted or consumed adjustment awaits reacceptance, the same
+   owning session may reaccept at a newer observed head revision. Missing or
+   regressed revisions, a different session, a prepared send, or head drift
+   after current-revision acceptance still hold. Reacceptance uses the current
+   head fence without retargeting the saved envelope or sending again.
    Unknown outcomes require recovery with the original envelope and identity,
    never another send.
 
@@ -235,8 +242,12 @@ the charter. For a retained started lane, `relay` tolerates that native
 declaration difference without proposing another reconciliation only when it
 proves the prior source digest by varying only the bounded document revision
 and all other owner/effect fences still hold. Retain the envelope, effect and
-generation unchanged. This relay bookkeeping exception does not relax `flow`'s
-reconciliation hold for an already-started launch.
+generation unchanged. The same bounded proof lets a settled started lane qualify
+for coverage, routing and an accepted `flow` result without reconciling its
+unchanged effective charter again. Current joined acceptance, exact accepted-head
+evidence and settled effects remain required; source equivalence alone never
+qualifies an owner. `intent` still reports the exact declaration difference
+rather than treating bookkeeping equivalence as a persisted revision update.
 
 Unrelated work gets a separate `temporary` proposal with its own complete
 charter, authority limits, native owner and exit policy. The dispatcher worktree

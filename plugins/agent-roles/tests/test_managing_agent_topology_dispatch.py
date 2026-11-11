@@ -159,8 +159,9 @@ def test_only_joined_native_acceptance_counts_and_routes(
 
 
 @pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("advance_head", [False, True])
 def test_adjustment_reconciles_then_relays_to_same_head_and_requires_reacceptance(
-    document: dict[str, Any],
+    document: dict[str, Any], advance_head: bool,
 ) -> None:
     assignment = document["assignments"][0]
     observation = document["observations"]["owners"][0]
@@ -197,6 +198,11 @@ def test_adjustment_reconciles_then_relays_to_same_head_and_requires_reacceptanc
     assert result["nextStep"]["effect"] == effect
     assert result["nextStep"]["expectedHead"] == observation["head"]
     assert result["nextStep"]["expectedHeadRevision"] == 7
+    if advance_head:
+        observation["headRevision"] += 1
+        held = report(document).relay(request, "adjust-a")
+        assert held["phase"] == "held"
+        assert "native-accepted-head-conflict" in held["holds"]
     effect.update(state="admitted", nativeRef="synthetic:relay-admission")
     result = report(document).relay(request, "adjust-a")
     assert result["phase"] == "await-acceptance"
@@ -204,24 +210,36 @@ def test_adjustment_reconciles_then_relays_to_same_head_and_requires_reacceptanc
     assert result["nextStep"]["expectedRevision"] == 4
     assert result["nextStep"]["sameHeadReacceptance"] is True
     assert result["nextStep"]["ownerSessionId"] == observation["head"]
+    assert result["nextStep"]["expectedHeadRevision"] == observation["headRevision"]
     relationship = document["observations"]["dispatch"][0]["relationship"]
     assert result["nextStep"]["workspace"] == relationship["request"]["workspace"]
     accepted = task["standing_charter"]["accepted_materialization"]
     accepted.update(source_revision=declaration["source_revision"],
                     materialization_revision=declaration["expected_materialization_revision"],
                     expected_revision=4)
+    accepted["head"]["revision"] = observation["headRevision"]
     task["standing_revision"] = 5
     result = report(document).relay(request, "adjust-a")
     assert result["phase"] == "settle-relay"
     assert result["nextStep"]["acceptance"] == accepted
+    assert report(document).overview()["coverage"][0]["qualifiedCount"] == 0
     effect.update(state="accepted", nativeRef="synthetic:relay-acceptance")
-    assert report(document).relay(request, "adjust-a")["phase"] == "settled"
+    document["revision"] += 1
+    topology = report(document)
+    assert topology.relay(request, "adjust-a")["phase"] == "settled"
+    assert topology.overview()["coverage"][0]["qualifiedCount"] == 1
+    assert topology.route(request)["target"]["headRevision"] == observation["headRevision"]
+    assert topology.flow(request)["phase"] == "accepted"
+    assert topology.intent()["lanes"][0]["state"] == "proposal-pending"
 
 
 @pytest.mark.portfolio_tier("T1")
 @pytest.mark.parametrize("change,reason", [
     ("missing-acceptance", "native-materialization-not-accepted"),
     ("successor", "native-accepted-head-conflict"),
+    ("revision-regressed", "native-accepted-head-conflict"),
+    ("revision-missing", "native-accepted-head-conflict"),
+    ("already-accepted-revision-advanced", "native-accepted-head-conflict"),
 ])
 def test_relay_bookkeeping_drift_does_not_hide_unqualified_acceptance(
     document: dict[str, Any], change: str, reason: str,
@@ -242,12 +260,18 @@ def test_relay_bookkeeping_drift_does_not_hide_unqualified_acceptance(
     document["revision"] += 1
     if change == "missing-acceptance":
         task["standing_charter"]["accepted_materialization"] = None
-    else:
+    elif change == "successor":
         observation["head"] = "unaccepted-successor"
+    else:
+        observation["headRevision"] = {
+            "revision-regressed": 6, "revision-missing": None, "already-accepted-revision-advanced": 8,
+        }[change]
     result = report(document).relay(assignment["requestId"], "adjust-a")
     assert result["phase"] == "held"
     assert result["nextStep"] is None
     assert reason in result["holds"]
+    assert report(document).overview()["coverage"][0]["qualifiedCount"] == 0
+    assert report(document).route(assignment["requestId"])["target"] is None
 
 
 @pytest.mark.portfolio_tier("T1")
@@ -1046,7 +1070,11 @@ def test_flow_bookkeeping_reconciliation_does_not_weaken_retained_effect_holds(
         assignment["effects"][0]["assignmentGeneration"] += 1
     result = report(document).flow("request-review-a")
     assert result["phase"] == "held" and result["nextStep"] is None
-    assert "retained-owner-revision-reconciliation-required" in result["holds"]
+    reason = (
+        "native-materialization-not-accepted" if change == "started"
+        else "retained-owner-revision-reconciliation-required"
+    )
+    assert reason in result["holds"]
 
 
 @pytest.mark.portfolio_tier("T1")

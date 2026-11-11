@@ -56,7 +56,10 @@ def topology_flow(admission, materialization, tmp_path):
         }]
         path.write_text(json.dumps(document), encoding="utf-8")
         before = path.read_bytes()
-        arguments = ["--request", document["assignments"][0]["requestId"]] if verb in {"flow", "relay"} else []
+        arguments = (
+            ["--request", document["assignments"][0]["requestId"]]
+            if verb in {"flow", "relay", "route"} else []
+        )
         if followup is not None:
             arguments += ["--followup", followup]
         result = module.run_background_capture(
@@ -170,7 +173,10 @@ def test_saved_full_seed_reaches_exact_native_acceptance(admission, topology_flo
     assert any("--resident-only" in call for call in admission.calls)
 
 
-def test_adjustment_relay_reaccepts_through_retained_native_head(admission, topology_flow, tmp_path):
+@pytest.mark.parametrize("advance_head", [False, True])
+def test_adjustment_relay_reaccepts_through_retained_native_head(
+    admission, topology_flow, tmp_path, advance_head,
+):
     document, inspect = topology_flow
     assignment = document["assignments"][0]
     _, launch = persist_launch(document, inspect()["nextStep"], tmp_path)
@@ -210,10 +216,14 @@ def test_adjustment_relay_reaccepts_through_retained_native_head(admission, topo
     assert not result["nextStep"]["replayAllowed"] and not result["nextStep"]["retargetAllowed"]
 
     effect.update(state="admitted", nativeRef="synthetic:relay-admission")
+    if advance_head:
+        admission.head["revision"] += 1
+        document["observations"]["owners"][0]["headRevision"] = admission.head["revision"]
     result = inspect("relay", "adjust-a")
     assert result["phase"] == "await-acceptance"
     step = result["nextStep"]
     assert step["sameHeadReacceptance"] and step["ownerSessionId"] == admission.head["session_id"]
+    assert step["expectedHeadRevision"] == admission.head["revision"]
     assert step["workspace"] == relationship["request"]["workspace"]
     calls = len(admission.calls)
     reaccepted = native_accept(admission, step)
@@ -226,8 +236,16 @@ def test_adjustment_relay_reaccepts_through_retained_native_head(admission, topo
     result = inspect("relay", "adjust-a")
     assert result["phase"] == "settle-relay"
     assert result["nextStep"]["acceptance"] == reaccepted.standing_charter["accepted_materialization"]
+    assert inspect("overview")["coverage"][0]["qualifiedCount"] == 0
     effect.update(state="accepted", nativeRef="synthetic:relay-acceptance")
+    document["revision"] += 1
     assert inspect("relay", "adjust-a")["phase"] == "settled"
+    assert inspect()["phase"] == "accepted"
+    assert inspect("overview")["coverage"][0]["qualifiedCount"] == 1
+    assert inspect("route")["target"] == {
+        "owner": assignment["nativeWorktree"], "head": admission.head["session_id"],
+        "headRevision": admission.head["revision"],
+    }
     assert envelope.read_bytes() == saved
 
 

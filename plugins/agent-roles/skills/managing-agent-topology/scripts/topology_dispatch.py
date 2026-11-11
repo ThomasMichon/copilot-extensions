@@ -58,7 +58,8 @@ def flow(
     if not fresh(snapshot):
         return hold("native-task-evidence-stale-or-future")
     task = snapshot["task"]
-    native = lane(assignment, snapshot, fresh, observe, materialization)
+    native = lane(assignment, snapshot, fresh, observe, materialization,
+                  bookkeeping_only=bookkeeping_only())
     fences = {"nativeTask": task["id"], "expectedRevision": task["standing_revision"]}
     mismatch = "native-declaration-differs-from-current-materialization"
     transitional = {
@@ -210,6 +211,7 @@ def lane(
     materialization: dict[str, Any] | None,
     *,
     inspect_acceptance: bool = False,
+    bookkeeping_only: bool = False,
 ) -> dict[str, Any]:
     """Join native acceptance and current head evidence without granting effects."""
     owner = native_owner(snapshot) or assignment["nativeWorktree"]
@@ -231,7 +233,8 @@ def lane(
     declaration = charter["declaration"]
     relationship = snapshot["relationship"]
     if materialization is not None and (
-        declaration["source_revision"] != materialization["sourceRevision"]
+        (declaration["source_revision"] != materialization["sourceRevision"]
+         and not (task["status"] == "started" and bookkeeping_only))
         or declaration["expected_materialization_revision"] != materialization["materializationRevision"]
     ):
         reasons.append("native-declaration-differs-from-current-materialization")

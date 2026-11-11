@@ -106,12 +106,17 @@ class Topology:
     def native_lane(
         self, assignment: dict[str, Any], *, inspect_acceptance: bool = False,
     ) -> dict[str, Any]:
-        result = lane(
-            assignment, self.dispatch.get(assignment["nativeTask"]), self.fresh,
-            lambda owner: self.owners.get(owner_key(owner)),
+        snapshot = self.dispatch.get(assignment["nativeTask"])
+        materialization = (
             None if assignment["state"] in {"completed", "released"}
-            else self.materialize(assignment["requestId"]),
+            else self.materialize(assignment["requestId"])
+        )
+        result = lane(
+            assignment, snapshot, self.fresh,
+            lambda owner: self.owners.get(owner_key(owner)),
+            materialization,
             inspect_acceptance=inspect_acceptance,
+            bookkeeping_only=self.bookkeeping_only(materialization, snapshot),
         )
         role = self.roles[assignment["role"]]
         result["reasons"].extend(self.policy_reasons(self.machines[assignment["machine"]], role, assignment["kind"]))
@@ -475,7 +480,9 @@ class Topology:
             "holds": holds, "advisoryOnly": True, "nativeHeadRecheckRequired": True,
         }
 
-    def relay_target(self, assignment: dict[str, Any], reconcilable: bool) -> dict[str, Any]:
+    def relay_target(
+        self, assignment: dict[str, Any], reconcilable: bool, *, reaccepting: bool = False,
+    ) -> dict[str, Any]:
         """Resolve the retained owner and current head a follow-up may reach."""
         mismatch = "native-declaration-differs-from-current-materialization"
         if linked(assignment, self.observations):
@@ -485,6 +492,17 @@ class Topology:
             transitional = {"effect-outcome-unsettled", "native-materialization-revision-not-accepted"}
             if reconcilable or bookkeeping:
                 transitional.add(mismatch)
+            if reaccepting and snapshot is not None:
+                task = snapshot["task"]
+                accepted = task["standing_charter"]["accepted_materialization"]
+                if (
+                    accepted is not None
+                    and native["head"] == accepted["head"]["session_id"] == task["owner_session_id"]
+                    and native["headRevision"] is not None
+                    and native["headRevision"] > accepted["head"]["revision"]
+                    and "native-materialization-revision-not-accepted" in native["reasons"]
+                ):
+                    transitional.add("native-accepted-head-conflict")
             holds = [reason for reason in native["reasons"] if reason not in transitional]
             if snapshot is not None and snapshot["task"]["status"] != "started":
                 holds.append("relay-requires-accepted-native-owner")
@@ -569,7 +587,10 @@ class Topology:
             adjustment = followup["kind"] == "adjustment"
             if adjustment and followup["charterRevision"] != assignment["charter"]["revision"]:
                 return hold("adjustment-charter-revision-superseded")
-            target = self.relay_target(assignment, adjustment and effect is None)
+            target = self.relay_target(
+                assignment, adjustment and effect is None,
+                reaccepting=adjustment and effect is not None and effect["state"] in {"admitted", "consumed"},
+            )
             hold(*target["holds"])
             if any(item is not effect for item in self.pending(assignment)):
                 hold("effect-outcome-unsettled-no-replay")

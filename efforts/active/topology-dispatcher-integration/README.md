@@ -252,3 +252,25 @@ synthetic fixtures. Live adoption is a separate explicit decision.
   enrollment; this change adds no installer or provisioning path. Publication,
   independent review and merge gates remain outstanding; Phase 4 and the parent
   objective are not complete.
+
+### 2026-11-11 - Phase 4 review corrections
+
+- Settled, accepted assignments retain standing coverage, routing and accepted
+  flow after proven bookkeeping-only source revision drift. Effective charter
+  differences, missing acceptance, unresolved effects and ownership conflicts
+  remain held; the intent report still exposes exact source-declaration drift.
+- Delivered adjustments can propose reacceptance at a monotonically newer
+  observed head revision of the same retained session. Prepared delivery,
+  another session, regressed or missing revisions, and head drift after
+  current-revision acceptance remain held.
+- Both focused topology files passed 222 tests. All 5 native Dispatch
+  assignment tests passed, including unchanged and advanced same-session head
+  revisions and restored coverage, routing and accepted flow after settlement.
+  The regressions preserve native owner, generation, session, relationship and
+  immutable envelope bytes.
+- Python F/E9 lint, all enforced type-check projects, explicit agent-roles
+  Linux/Windows strict checks, documentation consistency and whitespace checks
+  passed. The existing install-contract and version-consistency evidence is
+  unchanged. These remain isolated synthetic checks; no live external venue,
+  enrollment, installation or deployment was exercised. Updated publication,
+  fresh independent review and required CI remain gates before merge.
