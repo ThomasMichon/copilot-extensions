@@ -122,7 +122,9 @@ def test_role_links_resolve_and_public_entrypoints_include_it() -> None:
         path = SKILL / relative
         for target in re.findall(r"\[[^\]]+\]\(([^)]+)\)", _read(relative)):
             if "://" not in target:
-                assert (path.parent / target.split("#", 1)[0]).is_file(), target
+                resolved = (path.parent / target.split("#", 1)[0]).resolve()
+                assert resolved.is_relative_to(PLUGIN), target
+                assert resolved.is_file(), target
     readme = (PLUGIN / "README.md").read_text(encoding="utf-8")
     assert "skills/maintain-agent-fleet/SKILL.md" in readme
     assert "assign a fleet maintainer role" in readme.casefold()

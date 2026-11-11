@@ -23,8 +23,8 @@ health and recovery workflow; do not build a parallel fleet controller.
    obsolete central generations? Never target session hosts, keepers,
    session-owned processes, foreground clients or protected connectivity.
 
-This follows the [authoritative replacement contract](../../../../../visions/installer/README.md#authoritative-runtime-replacement)
-and [graceful central-daemon cutover](../../../../../docs/patterns/graceful-daemon-cutover.md).
+This follows the [authoritative replacement contract](https://github.com/ThomasMichon/copilot-extensions/blob/main/visions/installer/README.md#authoritative-runtime-replacement)
+and [graceful central-daemon cutover](https://github.com/ThomasMichon/copilot-extensions/blob/main/docs/patterns/graceful-daemon-cutover.md).
 Those documents describe the target; inspect current adoption honestly.
 The role neither implements missing installer support nor authorizes bypasses.
 Report a legacy updater refusal to its owner instead of silently adopting it as
