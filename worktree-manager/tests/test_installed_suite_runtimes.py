@@ -52,7 +52,9 @@ def test_fresh_acquisition_owns_its_git_settings_before_any_constructor(
     tmp_path, monkeypatch, fresh_fixture,
 ):
     import test_resume_pane_startup
+    from plugin_test_containment import SANDBOX_ENV
 
+    monkeypatch.setenv(SANDBOX_ENV, str(tmp_path))
     environment = {
         key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
     }
