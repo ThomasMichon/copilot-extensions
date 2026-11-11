@@ -318,7 +318,8 @@ def temporary_inputs(parent):
         if not abandoned:
             temporary.name = native_retained_path(temporary.name)
             try:
-                temporary.cleanup()
+                # cleanup() can hide access errors behind exists() after detachment.
+                temporary._rmtree(temporary.name, ignore_errors=False)
             except OSError as exc:
                 if failed:
                     report_cleanup_error(exc)

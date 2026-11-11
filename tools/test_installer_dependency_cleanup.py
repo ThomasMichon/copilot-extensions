@@ -59,6 +59,40 @@ def test_explicit_temporary_input_exit_removes_contents(tmp_path):
     assert not root.exists()
 
 
+@pytest.mark.parametrize("primary_failure", [False, True])
+def test_hidden_parent_does_not_suppress_cleanup_failure(tmp_path, monkeypatch, capsys, primary_failure):
+    denied = PermissionError("retained parent cannot be searched")
+    primary = RuntimeError("primary failure")
+    attempts = []
+    exists = os.path.exists
+    remove = policy._configuration.shutil.rmtree
+    expected = RuntimeError if primary_failure else policy.RetainedInputCleanupError
+    with pytest.raises(expected) as caught:
+        with policy._temporary_inputs(tmp_path) as directory:
+            native = policy._native_retained_path(directory)
+
+            def hidden(path):
+                return False if os.fspath(path) == native else exists(path)
+
+            def refused(path, *args, **kwargs):
+                if os.fspath(path) == native:
+                    attempts.append(native)
+                    raise denied
+                return remove(path, *args, **kwargs)
+
+            monkeypatch.setattr(os.path, "exists", hidden)
+            monkeypatch.setattr(policy._configuration.shutil, "rmtree", refused)
+            if primary_failure:
+                raise primary
+    assert attempts == [native]
+    if primary_failure:
+        assert caught.value is primary
+        assert "retained-input-cleanup:" in capsys.readouterr().err
+    else:
+        assert caught.value.__cause__ is denied
+        assert capsys.readouterr().err == ""
+
+
 @pytest.fixture
 def cleanup_failure(monkeypatch, tmp_path):
     error = PermissionError("retained inputs remain locked")
@@ -71,8 +105,8 @@ def cleanup_failure(monkeypatch, tmp_path):
         def __init__(self, **kwargs):
             pass
 
-        def cleanup(self):
-            attempts.append(self.name)
+        def _rmtree(self, name, **_kwargs):
+            attempts.append(name)
             raise error
 
     monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", TemporaryInputs)
@@ -185,8 +219,8 @@ def test_normal_cleanup_preserves_success(monkeypatch, tmp_path, capsys):
         def __init__(self, **kwargs):
             pass
 
-        def cleanup(self):
-            attempts.append(self.name)
+        def _rmtree(self, name, **_kwargs):
+            attempts.append(name)
 
     monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", TemporaryInputs)
     install_transaction(monkeypatch)

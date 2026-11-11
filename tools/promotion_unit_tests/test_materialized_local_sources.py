@@ -128,6 +128,29 @@ def test_copied_installer_consumer_binds_its_declared_library_preimage(tmp_path,
                         for path in source.rglob("*") if path.is_file()}
 
 
+def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    contract = materializer.mie.ier
+    names = set((*contract.SUPPORT_FILES, *contract.STANDALONE_NATIVE_FILES))
+    owners = ("agent-containers", "agent-machines", "budget-guidance")
+    for name in names:
+        _write(source / "libs/installer-engine" / name, f"# canonical {name}\n")
+        for owner in owners:
+            for root in (source, candidate):
+                _write(root / "plugins" / owner / "scripts" / name, f"# previous {name}\n")
+    original = {path.relative_to(source): path.read_bytes()
+                for path in source.rglob("*") if path.is_file()}
+    log = materializer.mie.materialize_derived_files(candidate, canonical_root=source)
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    for owner in owners:
+        for name in contract.SUPPORT_FILES:
+            assert (candidate / "plugins" / owner / "scripts" / name).read_bytes() == (
+                source / "libs/installer-engine" / name
+            ).read_bytes()
+    assert original == {path.relative_to(source): path.read_bytes()
+                        for path in source.rglob("*") if path.is_file()}
+
+
 def test_unrelated_library_copy_does_not_read_installer_inputs(tmp_path, monkeypatch):
     source, candidate = tmp_path / "source", tmp_path / "candidate"
     library = source / "libs/unrelated"

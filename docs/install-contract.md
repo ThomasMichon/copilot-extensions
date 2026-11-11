@@ -4216,6 +4216,7 @@ not as dependency-seasoning rejection. Cleanup failure after otherwise successfu
 execution raises `RetainedInputCleanupError` and makes the CLI fail; it never
 turns an incomplete cleanup into success. Context-owned runtime construction
 uses the same exception-preserving cleanup path.
+Explicit removal does not treat an inaccessible parent as an absent directory.
 
 The deployment CLI and immutable runtime engine select non-editable retention.
 Explicit editable operands, including requirement-file entries, are refused.

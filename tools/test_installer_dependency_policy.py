@@ -1656,9 +1656,8 @@ def test_real_retained_graph_preserves_primary_failure_on_cleanup(tmp_path, monk
             self._finalizer = self.temporary._finalizer
             allocations.append(Path(self.name))
 
-        def cleanup(self):
-            self.temporary.name = self.name
-            self.temporary.cleanup()
+        def _rmtree(self, name, **kwargs):
+            self.temporary._rmtree(name, **kwargs)
             raise PermissionError("injected retained cleanup failure")
 
     def run(command, **kwargs):

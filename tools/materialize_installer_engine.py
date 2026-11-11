@@ -74,7 +74,7 @@ def derived_file_pairs(
     for consumer in ier.python_adopter_dirs(canonical_root):
         consumers.setdefault(consumer, set()).update((*ier.PYTHON_FILES, *ier.SUPPORT_FILES))
     for consumer in ier.native_adopter_dirs(canonical_root):
-        consumers.setdefault(consumer, set()).update(ier.STANDALONE_NATIVE_FILES)
+        consumers.setdefault(consumer, set()).update((*ier.STANDALONE_NATIVE_FILES, *ier.SUPPORT_FILES))
     for plugin in ier.human_output_adopters(canonical_root, ier.ADOPTERS):
         consumer = canonical_root / "plugins" / plugin
         declaration = ier.human_output_entrypoint(consumer).with_suffix(".human-output.json")
