@@ -45,27 +45,15 @@ def _frontdoor(slot, *arguments, command="agent-remote-driver"):
     return [str(slot / command), *arguments]
 
 
-@pytest.mark.asyncio
-async def test_fresh_application_installs_reuses_and_runs_without_caller_sources(
-    tmp_path, monkeypatch, record_testsuite_property,
+def _prepare_application(
+    inputs, profile, *, monkeypatch, uv, interpreter, deadline, replacement=False,
 ):
-    sys.path.insert(0, str(ROOT / "tools"))
     import build_python_artifacts as builder
     import materialize_main as materializer
     import local_install_profile as profiles
-    from governed_feed_trust import _governed_feed_configured
     install_source = profiles.source_inputs
     engine = install_source.engine
 
-    if not _governed_feed_configured():
-        pytest.skip("native profile qualification requires the configured governed feed")
-    uv = shutil.which("uv")
-    assert uv is not None
-    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
-    assert interpreter is not None
-    started = time.monotonic()
-    deadline = started + 300
-    inputs, installation = tmp_path / "source-inputs", tmp_path / "installation"
     source, artifacts = inputs / "plugins" / "agent-remote-driver", inputs / "wheels"
     source.mkdir(parents=True)
     artifacts.mkdir()
@@ -75,6 +63,11 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
             ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "*.egg-info",
         ),
     )
+    if replacement:
+        entry = source / "src" / "agent_remote_driver_app" / "__init__.py"
+        entry.write_text(
+            entry.read_text(encoding="utf-8") + "\n_fixture_generation = 2\n", encoding="utf-8",
+        )
     materializer.materialize_uv_editable_ref_into(
         source_consumer_dir=SOURCE, dest_consumer_dir=source, canonical_root=ROOT,
     )
@@ -101,12 +94,37 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
         }},
     }), encoding="utf-8")
     prepared = profiles.prepare_registry_lock(
-        inputs, tmp_path / "profile", uv=uv, deadline=deadline,
+        inputs, profile, uv=uv, deadline=deadline,
         prepare_profile=True, component="agent-remote-driver",
     )
     assert prepared["install_ready"] is True
+    return Path(prepared["snapshot"]) / "applications" / "agent-remote-driver"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("replace_live", [False, True])
+async def test_fresh_application_installs_reuses_and_runs_without_caller_sources(
+    tmp_path, monkeypatch, record_testsuite_property, replace_live,
+):
+    sys.path.insert(0, str(ROOT / "tools"))
+    import local_install_profile as profiles
+    from governed_feed_trust import _governed_feed_configured
+    engine = profiles.source_inputs.engine
+
+    if not _governed_feed_configured():
+        pytest.skip("native profile qualification requires the configured governed feed")
+    uv = shutil.which("uv")
+    assert uv is not None
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
+    started = time.monotonic()
+    deadline = started + 300
+    inputs, installation = tmp_path / "source-inputs", tmp_path / "installation"
+    application = _prepare_application(
+        inputs, tmp_path / "profile", monkeypatch=monkeypatch, uv=uv,
+        interpreter=interpreter, deadline=deadline,
+    )
     timings = {"package_prepare_seconds": time.monotonic() - started}
-    application = Path(prepared["snapshot"]) / "applications" / "agent-remote-driver"
     declaration = json.loads((application / "application.json").read_text())
     construction = declaration["construction"]
     slot = installation / "versions" / construction["runtime_version"]
@@ -131,10 +149,55 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
     assert (installation / "current-version").read_text().strip() == slot.name
     timings["staged_first_install_seconds"] = time.monotonic() - install_started
     completion = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
+    completions = {slot: completion}
+    selected_slot = slot
+    replacement_slot = None
+    if replace_live:
+        replacement_started = time.monotonic()
+        replacement_inputs = tmp_path / "replacement-inputs"
+        replacement = _prepare_application(
+            replacement_inputs, tmp_path / "replacement-profile", monkeypatch=monkeypatch,
+            uv=uv, interpreter=interpreter, deadline=deadline, replacement=True,
+        )
+        incoming = json.loads((replacement / "application.json").read_text())["construction"]
+        replacement_slot = installation / "versions" / incoming["runtime_version"]
+        assert replacement_slot != slot
+        shutil.copytree(replacement, replacement_slot)
+        shutil.rmtree(replacement_inputs)
+        timings["replacement_prepare_seconds"] = time.monotonic() - replacement_started
     shutil.rmtree(inputs)
     support = _run(_frontdoor(slot, "--support-json"), cwd=caller, env=env, deadline=deadline)
     assert json.loads(support.stdout)["contract"] == "agent-remote-driver.session-host"
     assert "acp.v1" in json.loads(support.stdout)["transports"]
+
+    def replace_while_live():
+        nonlocal selected_slot, install
+        assert replacement_slot is not None
+        assert (installation / "current-version").read_text().strip() == slot.name
+        incoming_install = _frontdoor(replacement_slot, command="install")
+        replacement_started = time.monotonic()
+        stage = _run([*incoming_install, "--stage"], cwd=caller, env=env, deadline=deadline)
+        assert json.loads(stage.stdout)["state"] == "staged"
+        assert (installation / "current-version").read_text().strip() == slot.name
+        result = _run(incoming_install, cwd=caller, env=env, deadline=deadline)
+        assert json.loads(result.stdout)["state"] == "installed"
+        assert (installation / "current-version").read_text().strip() == replacement_slot.name
+        assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
+        completions[replacement_slot] = (replacement_slot / engine.runtime.COMPLETE_MARKER).read_bytes()
+        selected_slot, install = replacement_slot, incoming_install
+        support = _run(_frontdoor(selected_slot, "--support-json"), cwd=caller, env=env, deadline=deadline)
+        assert json.loads(support.stdout)["contract"] == "agent-remote-driver.session-host"
+        selected_python = engine.runtime.resolve_python(installation)
+        assert selected_python == engine.runtime.slot_python(installation, selected_slot.name)
+        assert selected_python is not None
+        _run([
+            selected_python, "-I", "-c",
+            "import sys;from pathlib import Path;import agent_remote_driver_app as app;"
+            "assert app._fixture_generation == 2;"
+            "assert Path(app.__file__).resolve().is_relative_to(Path(sys.argv[1]).resolve())",
+            selected_slot,
+        ], cwd=caller, env=env, deadline=deadline)
+        timings["live_replacement_seconds"] = time.monotonic() - replacement_started
 
     previous_identity = None
     for mode in ("cold", "warm"):
@@ -142,25 +205,35 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
             repeat_started = time.monotonic()
             repeat = _run(install, cwd=caller, env=env, deadline=deadline)
             assert json.loads(repeat.stdout)["state"] == "installed"
-            assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
+            assert (selected_slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completions[selected_slot]
             timings["retained_install_seconds"] = time.monotonic() - repeat_started
         directory = tmp_path / mode
         directory.mkdir()
         observed = await _exercise_installed_host(
-            slot, caller, env, interpreter, directory, deadline,
+            selected_slot, caller, env, interpreter, directory, deadline,
+            on_live=replace_while_live if replace_live and mode == "cold" else None,
         )
         timings[mode + "_launch_to_ready_seconds"] = observed["launch_to_ready_seconds"]
         if mode == "cold":
             timings["cold_delivery_to_ready_seconds"] = observed["ready_at"] - started
         assert observed["child_identity"] != previous_identity
         previous_identity = observed["child_identity"]
-        assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
+        for generation, marker in completions.items():
+            assert (generation / engine.runtime.COMPLETE_MARKER).read_bytes() == marker
+        assert (installation / "current-version").read_text().strip() == selected_slot.name
     report = json.dumps(timings, sort_keys=True)
-    record_testsuite_property("driver_application_readiness", report)
-    print("Driver application readiness: " + report, flush=True)
+    record_testsuite_property(
+        "driver_application_live_replacement" if replace_live else "driver_application_readiness", report,
+    )
+    print(
+        ("Driver application live replacement: " if replace_live else "Driver application readiness: ")
+        + report, flush=True,
+    )
 
 
-async def _exercise_installed_host(slot, caller, env, interpreter, directory, deadline):
+async def _exercise_installed_host(
+    slot, caller, env, interpreter, directory, deadline, *, on_live=None,
+):
     state = directory / "host-state.json"
     child = (
         "import json,sys\n"
@@ -194,6 +267,22 @@ async def _exercise_installed_host(slot, caller, env, interpreter, directory, de
         cursor, frame = await asyncio.wait_for(anext(client.frames()), 5)
         assert json.loads(frame)["result"] == {"text": literal}
         await client.ack(cursor)
+        if on_live is not None:
+            host_identity = process_start_time(facts["pid"])
+            assert host_identity is not None
+            on_live()
+            assert process.poll() is None
+            assert process_start_time(facts["pid"]) == host_identity
+            assert (child_pid, process_start_time(child_pid)) == child_identity
+            await client.write((json.dumps({
+                "jsonrpc": "2.0", "id": "after-replacement", "method": "session/prompt",
+                "params": {"text": literal},
+            }) + "\n").encode())
+            cursor, frame = await asyncio.wait_for(anext(client.frames()), 5)
+            assert json.loads(frame) == {
+                "jsonrpc": "2.0", "id": "after-replacement", "result": {"text": literal},
+            }
+            await client.ack(cursor)
         await client.close()
         client = None
         websocket = facts["websocket"]
