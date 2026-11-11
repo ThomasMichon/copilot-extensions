@@ -548,18 +548,9 @@ def _installed_slot(*, require_selected: bool = True) -> tuple:
 
 
 def _configured_readiness() -> dict:
-    from . import config
-    from .installer_readiness import evaluate
+    from .installer_readiness import configured_readiness
 
-    candidates = []
-    if config.BRIDGES_DIR.is_dir():
-        candidates.extend(
-            (config.normalize_bridge_name(path.name), path)
-            for path in sorted(config.BRIDGES_DIR.iterdir())
-            if path.suffix.lower() in {".yaml", ".yml", ".json"}
-        )
-    candidates.extend(config.discover_plugin_bridge_candidates())
-    return evaluate(candidates)
+    return configured_readiness()
 
 
 def _intent_path(layout: tuple) -> Path:
