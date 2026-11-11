@@ -1212,3 +1212,30 @@ source digest. Its single manifest source binding is updated to the corrected
 helper; test nodes, coverage targets, packet budget and controller selection are
 unchanged. Native payload comparison, complete runtime construction and actual
 readiness remain unverified. No failed hosted case is credited as acceptance.
+
+Run 42956773294 at `ca0e62ec8840c34cce1ab7e6d7abd6e07e25b72e`
+completed normal and repair successfully. Fresh still failed strict payload
+comparison, with 72 changed files and no missing or extra paths; settlement
+succeeded. Its actual CLI inventory reported released versions rather than
+the candidate's source versions. The archive correction alone did not establish
+frozen acquisition, and no fresh runtime or readiness acceptance is claimed.
+
+A tiny actual-CLI reproduction isolates the remaining source-selection error.
+Without folder trust, nested project settings select the loopback fixture.
+With the fresh adapter's real `trustedFolders` configuration and an enclosing
+Git repository, installation instead selects that enclosing repository's
+marketplace. The contradictory source in the reproduction is an unreachable
+loopback URL, so this failure cannot silently acquire a public replacement.
+Initializing the private project as its own Git root before acquisition makes
+the same trusted CLI install the fixture version and preserve all three
+distinguishable files, including conflicting CRLF/text attributes.
+
+The adapter now initializes that root before any constructor or acquisition.
+Its existing later initialization remains idempotent. All 39 contained runtime
+controls pass, including a real-Git regression that checks the private settings
+root before construction. The extended real-Git transport control also preserves
+CRLF bytes under conflicting attributes. These are unit and lightweight
+first-touch CLI/transport checks, not complete native suite acceptance. A fresh
+hosted run must still prove all frozen payloads, complete runtime construction
+and actual Machines readiness; the authentic upgrade, frozen enforcement and
+separate Main adoption remain open.

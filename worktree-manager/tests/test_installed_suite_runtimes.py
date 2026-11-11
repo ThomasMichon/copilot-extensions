@@ -4,9 +4,11 @@ from __future__ import annotations
 from copy import deepcopy
 import hashlib
 import json
+import os
 from pathlib import Path
 import runpy
 import shutil
+import subprocess
 import time
 
 import pytest
@@ -44,6 +46,52 @@ def test_fresh_environment_keeps_real_consumers_without_inherited_identity(
         "AGENT_TEST_MODE", "AGENT_WORKTREES_STATUS_MONITOR", "AGENT_WORKTREES_NO_SELFPROVISION",
         "WORKTREE_NO_UPDATE", "COPILOT_OFFLINE", "OPENAI_API_KEY", "TMUX", "SESSION_ID",
     }
+
+
+def test_fresh_acquisition_owns_its_git_settings_before_any_constructor(
+    tmp_path, monkeypatch, fresh_fixture,
+):
+    import test_resume_pane_startup
+
+    environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+    }
+
+    def git(*args):
+        return subprocess.run(
+            ["git", *map(str, args)], check=True, capture_output=True, text=True,
+            env=environment, timeout=15, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        ).stdout.strip()
+
+    git("init", tmp_path)
+    outer_settings = tmp_path / ".github" / "copilot" / "settings.json"
+    outer_settings.parent.mkdir(parents=True)
+    outer_settings.write_text('{"extraKnownMarketplaces":{"outer-only":{}}}')
+    for key in ("COPILOT_NATIVE_TEST_EXECUTABLE", "PSMUX_TEST_BIN"):
+        executable = tmp_path / key
+        executable.write_bytes(b"not executed")
+        monkeypatch.setenv(key, str(executable))
+    monkeypatch.setattr(fresh_fixture["suite"], "REPO", tmp_path)
+    monkeypatch.setattr(fresh_fixture["suite"], "require_venue", lambda: None)
+    monkeypatch.setattr(fresh_fixture["lifecycle"], "_require_mux_venue", lambda: None)
+    monkeypatch.setattr(fresh_fixture["lifecycle"], "_identity", lambda: {"candidate_commit": "a" * 40})
+    monkeypatch.setattr(test_resume_pane_startup, "_private_psmux", lambda *args: None)
+    monkeypatch.setitem(fresh_fixture["payloads"]._PROVENANCE, "build", lambda *args, **kwargs: None)
+
+    class BeforeConstruction(Exception):
+        pass
+
+    def before_construction(payload, root, env, project, diagnostics, label, run):
+        assert Path(git("-C", project, "rev-parse", "--show-toplevel")).resolve() == project.resolve()
+        assert outer_settings.read_text() == '{"extraKnownMarketplaces":{"outer-only":{}}}'
+        assert (diagnostics / "suite-project-init.stdout.txt").is_file()
+        raise BeforeConstruction
+
+    monkeypatch.setitem(
+        fresh_fixture["prepare"].__globals__, "_install_engine", before_construction,
+    )
+    with pytest.raises(BeforeConstruction):
+        fresh_fixture["prepare"](tmp_path / "qualification")
 
 
 def test_harness_registration_preserves_the_full_profile_before_adoption(
