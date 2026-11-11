@@ -4257,6 +4257,22 @@ mux process identities. Cleanup targets only the test's own namespace and
 birth-checked processes; no default-namespace shutdown or installed update is
 performed. This is an explicit native lane, not additional required PR CI.
 
+## Retained temporary-input lifetime
+
+The admitted cases in `tools/promotion_unit_tests/test_installer_retention.py`
+exercise the actual, unmocked temporary-input owner: collection/GeneratorExit
+preservation, explicit cleanup, and hidden-parent cleanup failure with and
+without a primary exception. These cases create only disposable files and no
+processes. Existing retained-source work-bound cases retain their separate
+mocked fixture.
+
+`tools/test_installer_dependency_compile.py::test_live_temporary_inputs_survive_interpreter_shutdown`
+is the real subprocess control. The existing optional
+`installation-context-acceptance.yml` `dependency_compile=true` Linux and
+Windows jobs select it. A fresh child keeps its input context open until
+interpreter shutdown, and the parent verifies the retained bytes afterward.
+This adds no workflow, permission change or process-producing required unit.
+
 ## Optional immutable Worktrees runtime qualification
 
 The manual `installation-context-acceptance.yml` selector

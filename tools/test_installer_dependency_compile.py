@@ -18,6 +18,29 @@ import pytest
 from test_installer_dependency_policy import NOW, offline_environment, policy, settings, source_project
 
 
+def test_live_temporary_inputs_survive_interpreter_shutdown(tmp_path):
+    script = (
+        "import importlib.util, json, sys\n"
+        "from contextlib import ExitStack\n"
+        "from pathlib import Path\n"
+        "spec = importlib.util.spec_from_file_location('retained_policy', sys.argv[1])\n"
+        "policy = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(policy)\n"
+        "retained = ExitStack()\n"
+        "root = Path(retained.enter_context(policy._temporary_inputs(sys.argv[2])))\n"
+        "(root / 'held-input').write_bytes(b'retained')\n"
+        "print(json.dumps(str(root)))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, policy.__file__, str(tmp_path)],
+        capture_output=True, text=True, encoding="utf-8", check=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    root = Path(json.loads(result.stdout))
+    assert root.parent == tmp_path
+    assert (root / "held-input").read_bytes() == b"retained"
+
+
 def compile_settings(output=None, **options):
     output_value = "None," if output is None else "Some(" + json.dumps(output) + ",),"
     return settings(**options).replace("PipInstallSettings", "PipCompileSettings").replace(
