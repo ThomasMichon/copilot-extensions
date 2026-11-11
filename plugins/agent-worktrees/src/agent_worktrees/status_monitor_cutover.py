@@ -6,7 +6,6 @@ from agent_procutil.daemon_instances import DaemonInstanceSpec
 
 import json
 import os
-import secrets
 import socket
 import socketserver
 import subprocess
@@ -23,7 +22,7 @@ from single_instance_lease import AlreadyRunningError, SingleInstance
 from zdd import breadcrumb, routing
 from zdd.cutover import CutoverOrchestrator
 
-from . import locks, status_monitor_recovery_contract as guarded_recovery
+from . import locks, status_monitor_tokens, status_monitor_recovery_contract as guarded_recovery
 from .status_monitor_drain import DrainTrace
 from .status_monitor_python import direct_monitor_python
 from .status_monitor_control_frames import handle_control_request
@@ -57,29 +56,11 @@ def control_token_path(runtime_home: Path | None = None) -> Path:
 
 
 def read_control_token(runtime_home: Path | None = None) -> str | None:
-    try:
-        token = control_token_path(runtime_home).read_text(encoding="utf-8").strip()
-    except FileNotFoundError:
-        return None
-    return token or None
+    return status_monitor_tokens.read_token(control_token_path(runtime_home))
 
 
 def load_or_create_control_token(runtime_home: Path | None = None) -> str:
-    path = control_token_path(runtime_home)
-    try:
-        token = read_control_token(path.parent)
-        if token:
-            return token
-    except OSError:
-        pass
-    token = secrets.token_urlsafe(32)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(token + "\n", encoding="utf-8")
-    try:
-        path.chmod(0o600)
-    except OSError:
-        pass
-    return token
+    return status_monitor_tokens.load_or_create_token(control_token_path(runtime_home))
 
 
 class _ControlServer(socketserver.ThreadingTCPServer):
