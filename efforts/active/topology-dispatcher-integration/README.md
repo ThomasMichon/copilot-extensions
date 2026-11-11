@@ -119,6 +119,22 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ## Journal
 
+### 2026-11-11 - Qualify all retained custody before ranking
+
+- Admission now computes eligibility/custody for every saved row before
+  spending any proposal budget. Any held row protects its retained workspace,
+  including a conflicting dormant head, role, generation or assignment. This
+  removes priority/input-order dependence from owner conflict handling.
+- The affected topology packet passed 344 tests, Python F/E9 lint and strict
+  Linux/Windows type checks passed. Native allocation CLI/receiver recovery
+  passed four process cases with an explicit 120-second per-item budget,
+  retaining one child and one original parent obligation on request recovery.
+- The initial allocation qualification stopped at the ordinary 30-second
+  per-item limit in the second CLI sequence, without an assertion failure.
+  The isolated process-only run completed all four cases in 135 seconds total;
+  that is bounded functional evidence, not a pass of the original time budget.
+  No live allocation, lifecycle effect, installation or deployment occurred.
+
 ### 2026-11-11 - Preserve saved task-owner obligations
 
 - Admission now examines all saved task-owner obligations before ranking,

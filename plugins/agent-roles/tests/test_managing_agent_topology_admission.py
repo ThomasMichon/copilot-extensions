@@ -210,9 +210,9 @@ def test_operator_owner_and_multiple_dormant_tasks_are_not_repurposed(
     document["machines"][1]["capacitySlots"] = 4
     evidence["machines"][1]["reviewReserveSlots"] = 3
     result = report(document, evidence)
-    assert len(result["proposals"]) == 1
-    assert "retained-owner-already-proposed" in result["held"][0]["reasons"]
-    assert "retained-owner-has-other-assignment" in result["held"][0]["reasons"]
+    assert result["proposals"] == []
+    assert any("retained-owner-has-other-assignment" in item["reasons"] for item in result["held"])
+    assert all("retained-owner-has-unresolved-work" in item["reasons"] for item in result["held"])
 
 
 @pytest.mark.portfolio_tier("T1")
@@ -371,6 +371,24 @@ def test_saved_owner_obligations_block_resume_regardless_of_priority_or_order(
     assert result["proposals"] == []
     candidate_result = next(item for item in result["held"] if item["task"] == candidate["id"])
     assert "retained-owner-has-unresolved-work" in candidate_result["reasons"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("changes", [
+    {"ownerSessionId": "synthetic:conflicting-head"}, {"generation": 0}, {"role": "scratch"},
+])
+@pytest.mark.parametrize("first", [False, True])
+@pytest.mark.parametrize("priority", [0, 1000])
+def test_unqualified_dormant_row_blocks_its_retained_workspace_before_ranking(
+    document: dict[str, Any], evidence: dict[str, Any], changes: dict[str, Any], first: bool, priority: int,
+) -> None:
+    candidate = dormant(document, priority=10)
+    conflict = copy.deepcopy(candidate)
+    conflict.update(id="other-dormant", requestId="other-request", priority=priority, **changes)
+    evidence["tasks"] = [conflict, candidate] if first else [candidate, conflict]
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert all("retained-owner-has-unresolved-work" in item["reasons"] for item in result["held"])
 
 
 @pytest.mark.effect("process")

@@ -52,12 +52,7 @@ def admission(topology: Topology, evidence: Any) -> dict[str, Any]:
     }
     operator_owners = {owner_key(task["owner"]) for task in evidence["tasks"]
                        if task["operatorTask"] and task["owner"] is not None}
-    occupied_owners = {
-        owner_key(task["owner"]) for task in evidence["tasks"] if task["owner"] is not None
-        and (task["status"] != "suspended" or task["readiness"] != "ready"
-             or task["holdReason"] is not None or not topology.fresh(task))
-    }
-    proposed_owners: set[tuple[str, str, str]] = set()
+    entries: list[tuple[dict[str, Any], list[str], int | None]] = []
     for task in sorted(evidence["tasks"], key=lambda item: (-item["priority"], item["id"])):
         reasons = list(holds)
         if not topology.fresh(task):
@@ -73,11 +68,7 @@ def admission(topology: Topology, evidence: Any) -> dict[str, Any]:
         owner = task["owner"]
         if owner is not None and owner_key(owner) in operator_owners:
             reasons.append("operator-owner-preserved")
-        if owner is not None and owner_key(owner) in proposed_owners:
-            reasons.append("retained-owner-already-proposed")
         dormant = task["status"] == "suspended"
-        if dormant and owner is not None and owner_key(owner) in occupied_owners:
-            reasons.append("retained-owner-has-unresolved-work")
         snapshot = topology.dispatch.get(task["id"])
         if snapshot is not None:
             native = snapshot["task"]
@@ -148,6 +139,19 @@ def admission(topology: Topology, evidence: Any) -> dict[str, Any]:
                 reasons.extend(reason for reason in native_lane["reasons"] if reason != "native-task-held")
                 if assigned_snapshot is not None and assigned_snapshot["task"]["hold_reason"] is not None:
                     reasons.append("native-task-held")
+        entries.append((task, reasons, head_revision))
+    occupied_owners = {
+        owner_key(task["owner"]) for task, reasons, _ in entries
+        if task["owner"] is not None and (reasons or task["status"] != "suspended")
+    }
+    proposed_owners: set[tuple[str, str, str]] = set()
+    for task, reasons, head_revision in entries:
+        owner = task["owner"]
+        dormant = task["status"] == "suspended"
+        if dormant and owner is not None and owner_key(owner) in occupied_owners:
+            reasons.append("retained-owner-has-unresolved-work")
+        if owner is not None and owner_key(owner) in proposed_owners:
+            reasons.append("retained-owner-already-proposed")
         pool = "reviewSlotsRemaining" if task["role"] in evidence["reviewRoles"] else "generalSlotsRemaining"
         candidates = []
         excluded = []

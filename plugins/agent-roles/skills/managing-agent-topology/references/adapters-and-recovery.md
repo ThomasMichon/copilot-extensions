@@ -461,6 +461,10 @@ dormant task, stale evidence or a terminal row still retaining an owner blocks
 resumption on that workspace regardless of priority or input order. Several
 otherwise eligible dormant tasks may compete for one recommendation; proposing
 one does not release the others.
+Eligibility and custody for every retained row are evaluated before any ranking
+or budget consumption. A conflicting head, role, generation or assignment in
+one row therefore protects that workspace from every competing resume, even
+when another row matches the current head.
 
 The report uses one homogeneous slot per proposal, **including dormant
 resumption**, conservatively requiring extra activation headroom even if the
