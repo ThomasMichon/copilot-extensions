@@ -112,6 +112,10 @@ current head; unrelated work gets a separate temporary assignment. Its offline
 helper derives placement, coverage and routing from private intent and dated
 observations without writing, networking, spawning or taking custody. Numeric
 shortfalls and valid documents never grant launch or replacement authority.
+Its read-only `reconcile` report separates uncovered demand from retained owners,
+pending original effects and unsettled retirement. It proposes owner coordination
+or in-place adoption before new assignments; stale, dormant and off-role owners
+are never replacement slots.
 
 ## Dependencies & assumptions
 
