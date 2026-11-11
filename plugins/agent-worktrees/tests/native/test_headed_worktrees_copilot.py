@@ -884,6 +884,13 @@ def _qualify_native_worktrees(
                     lambda: query("has-session", "-t", outer_target).returncode == 1,
                     f"{leg}: stopped TTY caller's original pane did not close",
                 )
+                if caller_jobs:
+                    def unattached():
+                        reply = query("display-message", "-p", "-t", target, "#{session_attached}")
+                        return reply.returncode == 0 and reply.stdout.strip() == "0"
+
+                    _until(unattached, f"{leg}: killed caller still owns a target attachment",
+                           diagnostic=caller_diagnostics)
                 assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
                 assert state["child_process_start_time"] == process_start_time(state["child_pid"])
                 assert state["host_process_start_time"] == process_start_time(state["host_pid"])
