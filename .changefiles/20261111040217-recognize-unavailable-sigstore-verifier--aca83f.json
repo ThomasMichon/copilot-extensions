@@ -1,0 +1,9 @@
+{
+  "comment": "Recognize unavailable Sigstore verifier initialization within the existing bounded retry",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
