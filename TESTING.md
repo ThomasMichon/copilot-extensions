@@ -10075,6 +10075,13 @@ Fresh construction is neither an admitted baseline-to-candidate upgrade nor
 required promotion enforcement. Its result explicitly grants no source admission;
 the original synthetic replacement and installed-core witnesses remain separate.
 
+Fresh Manager observation verifies selected-slot origin/version, every installed
+candidate Python module and constructor-record hashes against the frozen artifact.
+It explicitly grants no source admission and does not manufacture an exact-source
+receipt. The admitted installed-core witness retains its existing receipt checks.
+Completed runtime-closure diagnostics are retained even if the later Manager
+observation fails; they are not a successful fresh lifecycle result.
+
 The fresh job also supplies a pinned official portable KeePassXC CLI for Vault's
 real backend readiness; it does not create or unlock a database. Failed required
 readiness retains bounded raw reports through the selected Machines owner's

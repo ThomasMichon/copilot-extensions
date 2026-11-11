@@ -1490,3 +1490,34 @@ maintenance, not a weaker witness or operator-facing protocol change; the next
 exact-head required CI still owns the full Linux unit result. The already-running
 `c0887c9d` native matrix is left running and will retain its own exact-head
 outcome rather than being cancelled or credited to a later metadata commit.
+
+Run 43006825243 at `c0887c9d3a6ced56286ed93aa95ca6686630f21d`
+passes normal and repair. Fresh completes the runtime-closure function,
+including all 13 imports/versions, actual Machines required-readiness, exact
+post-update payload and transport checks, and frozen artifact verification.
+It then fails the next Manager observer because the admitted-core helper
+requires `runtime-source.json`. Fresh intentionally has no such source-admission
+receipt. Settlement succeeds; no fresh lifecycle result is accepted. The prior
+normal bootstrap failure did not recur here, but its old underlying cause is
+still unproven and the cooperative report remains open.
+
+The fresh companion now has a separate non-admission Manager observer, using
+the existing installed-origin/version contract plus every frozen Manager Python
+module byte, selected private generation and constructor-record hashes.
+Candidate identity is bound to the verified frozen artifact; evidence explicitly
+records `source_admission: not-granted`. Foreign roots, escaped generations,
+changed modules and missing/empty constructor records fail. The existing
+admitted-core helper and its retained source-receipt checks are untouched.
+No exact-source receipt is invented in the artifact or installed snapshot.
+Runtime-closure data is retained as diagnostic evidence before the later Manager
+observation, without changing the final ready/result gate.
+
+The eight origin controls and thirteen final evidence controls pass in targeted
+packets, including wrong-candidate, false-admission and incomplete-record-hash
+refusal. This is source-level validation; the next exact-head
+hosted run still owns actual fresh Manager observation and all UI actions.
+The previously committed typing-binding correction is included in that next
+candidate, and required CI must independently pass it. Documentation-impact
+review updates the fresh-versus-admitted observation distinction in TESTING.md.
+Complete fresh acceptance, authentic upgrade, frozen enforcement and separate
+Main adoption remain open.

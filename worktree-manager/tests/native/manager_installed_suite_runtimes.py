@@ -146,6 +146,60 @@ def validate_origin(origin: dict, expected_prefix: Path, version: str) -> None:
         raise ValueError("The runtime import/version did not come from its selected installed slot")
 
 
+def observe_manager(
+    artifact, candidate_commit, *, root, environment, project, diagnostics, run,
+):
+    """Verify fresh installed bytes without manufacturing source admission."""
+    from manager_installed_suite_payloads import _PROVENANCE
+    from manager_suite_fixture import _python, require_venue
+
+    require_venue()
+    _PROVENANCE["verify"](artifact, candidate_commit)
+    home = Path(environment["USERPROFILE"])
+    if (
+        not home.is_absolute() or not home.resolve().is_relative_to(project.parent.resolve())
+        or root.resolve() != (home / ".worktree-manager").resolve()
+    ):
+        raise ValueError("Manager observation requires its private fixture installation")
+    generation = (root / "current-version").read_text(encoding="utf-8").strip()
+    if not generation or Path(generation).name != generation or generation in {".", ".."}:
+        raise ValueError("Manager observation requires one selected generation")
+    slot = root / "versions" / generation
+    if not slot.resolve().is_relative_to(root.resolve()):
+        raise ValueError("Manager observation escaped its private installation")
+    python = _python(root)
+    payload = artifact / "worktree-manager"
+    metadata = tomllib.loads((payload / "pyproject.toml").read_text(encoding="utf-8"))["project"]
+    observed = json.loads(run(
+        [python, "-I", "-B", "-c", _ORIGIN, "worktree_manager", metadata["name"]],
+        environment, project, diagnostics, "suite-manager-origin", timeout=30,
+    ))
+    validate_origin(observed, python.parent.parent, metadata["version"])
+    module = Path(observed["module"])
+    package = payload / "src" / "worktree_manager"
+    modules = list(package.rglob("*.py"))
+    if not modules or module.name != "__init__.py":
+        raise ValueError("Manager observation requires its frozen candidate package")
+    for path in modules:
+        installed = module.parent / path.relative_to(package)
+        if not installed.is_file() or installed.read_bytes() != path.read_bytes():
+            raise ValueError("Manager installed different candidate module bytes")
+    records = {}
+    for name in (".install-complete.json", ".runtime-input-origins.json"):
+        data = (slot / name).read_bytes()
+        document = json.loads(data)
+        if not isinstance(document, dict) or not document:
+            raise ValueError("Manager has no completed constructor records")
+        records[name] = hashlib.sha256(data).hexdigest()
+    _PROVENANCE["verify"](artifact, candidate_commit)
+    return {
+        "candidate_commit": candidate_commit, "source_admission": "not-granted",
+        "generation": generation, **observed, "constructor_records_present": True,
+        "constructor_records": records, "candidate_bytes_verified": True,
+        "verified_module_count": len(modules),
+    }
+
+
 def install_runtime_closure(
     artifact: Path, candidate_commit: str, *, payload_closure: dict,
     manager: Path, copilot: Path, environment: dict, project: Path,

@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import socket
 import sys
@@ -210,9 +211,10 @@ def prepare(directory):
             environment=env, project=project, diagnostics=case / "diagnostics",
             deadline=budget.execution_deadline, run=run,
         )
-        manager_origin, _manager = installed._installed(
-            case / "h" / ".worktree-manager", manager_payload,
-            "worktree-manager", env, case / "diagnostics", run=run,
+        suite._write(case / "diagnostics" / "suite-runtime-closure.json", result)
+        manager_origin = runtimes.observe_manager(
+            artifact, candidate, root=case / "h" / ".worktree-manager",
+            environment=env, project=project, diagnostics=case / "diagnostics", run=run,
         )
         setup.update({
             "transport": transport, "closure": closure, "runtime_closure": result,
@@ -245,9 +247,10 @@ def _verify_prepared(case, setup, run):
         (case / lifecycle.PROJECT / ".github" / "copilot" / "settings.json").read_text(),
     ) != closure["profile"]["settings"]:
         raise ValueError("The complete enabled profile changed after preparation")
-    manager_origin, _manager = installed._installed(
-        case / "h" / ".worktree-manager", artifact / "worktree-manager",
-        "worktree-manager", env, case / "diagnostics", run=run,
+    manager_origin = runtimes.observe_manager(
+        artifact, candidate, root=case / "h" / ".worktree-manager",
+        environment=env, project=case / lifecycle.PROJECT,
+        diagnostics=case / "diagnostics", run=run,
     )
     if manager_origin != setup["manager_origin"]:
         raise ValueError("The installed Manager changed after preparation")
@@ -356,11 +359,24 @@ def assertions(directory):
 
 
 def validate_evidence(setup, result):
+    manager_origin = result.get("manager_origin")
+    records = manager_origin.get("constructor_records") if isinstance(manager_origin, dict) else None
     if (
         result.get("schema") != RESULT_SCHEMA or result.get("identity") != setup["identity"]
         or result.get("mode") != "fresh" or result.get("profile") != "complete-installed-suite"
         or result.get("runtime_closure") != setup["runtime_closure"]
         or result.get("manager_origin") != setup["manager_origin"]
+        or not isinstance(manager_origin, dict)
+        or manager_origin.get("candidate_commit") != setup["identity"]["candidate_commit"]
+        or manager_origin.get("source_admission") != "not-granted"
+        or manager_origin.get("candidate_bytes_verified") is not True
+        or manager_origin.get("constructor_records_present") is not True
+        or type(manager_origin.get("verified_module_count")) is not int
+        or manager_origin["verified_module_count"] <= 0
+        or not isinstance(records, dict)
+        or set(records) != {".install-complete.json", ".runtime-input-origins.json"}
+        or any(not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None
+               for value in records.values())
         or result.get("copilot_sha256") != setup["closure"]["copilot_sha256"]
         or result.get("mux_sha256") != setup["mux_sha256"]
         or result["runtime_closure"].get("runtime_installation") != "observed"

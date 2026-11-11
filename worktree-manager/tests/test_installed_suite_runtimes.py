@@ -255,7 +255,9 @@ def test_fresh_engine_construction_enters_the_native_driver_for_each_private_roo
 
 
 @pytest.mark.parametrize(
-    "defect", [None, "identity", "missing-runtime", "manager", "cli", "mux",
+    "defect", [None, "identity", "missing-runtime", "manager", "manager-candidate", "manager-admission",
+               "manager-records", "manager-record-hash",
+               "cli", "mux",
                "missing-action", "same-native", "missing-native"],
 )
 def test_fresh_result_requires_complete_candidate_bound_native_evidence(
@@ -266,7 +268,13 @@ def test_fresh_result_requires_complete_candidate_bound_native_evidence(
         "identity": {"candidate_commit": "a" * 40, "run_id": 7, "run_attempt": 2},
         "runtime_closure": {"runtimes": portfolio, "runtime_installation": "observed"},
         "closure": {"profile": profile, "copilot_sha256": "b" * 64},
-        "mux_sha256": "c" * 64, "manager_origin": {"candidate_bytes_verified": True},
+        "mux_sha256": "c" * 64, "manager_origin": {
+            "candidate_commit": "a" * 40, "source_admission": "not-granted",
+            "candidate_bytes_verified": True, "constructor_records_present": True,
+            "verified_module_count": 1,
+            "constructor_records": {".install-complete.json": "a" * 64,
+                                    ".runtime-input-origins.json": "b" * 64},
+        },
     }
     result = {
         "schema": fresh_fixture["RESULT_SCHEMA"], "mode": "fresh",
@@ -285,6 +293,14 @@ def test_fresh_result_requires_complete_candidate_bound_native_evidence(
         del result["runtime_closure"]["runtimes"]["agent-machines"]
     elif defect == "manager":
         result["manager_origin"] = {}
+    elif defect == "manager-candidate":
+        result["manager_origin"]["candidate_commit"] = "d" * 40
+    elif defect == "manager-admission":
+        result["manager_origin"]["source_admission"] = "admitted"
+    elif defect == "manager-records":
+        result["manager_origin"].pop("constructor_records")
+    elif defect == "manager-record-hash":
+        result["manager_origin"]["constructor_records"][".install-complete.json"] = "invalid"
     elif defect in {"cli", "mux"}:
         result[{"cli": "copilot", "mux": "mux"}[defect] + "_sha256"] = "d" * 64
     elif defect == "missing-action":
@@ -413,6 +429,95 @@ def test_runtime_construction_refuses_the_shared_host_before_reading_or_running(
             environment={}, project=tmp_path / "project",
             diagnostics=tmp_path / "diagnostics", deadline=0, run=forbidden,
         )
+
+
+def test_fresh_manager_observation_refuses_shared_host_before_reading(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(NATIVE))
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):
+        RUNTIMES["observe_manager"](
+            tmp_path / "absent", "a" * 40, root=tmp_path / "absent",
+            environment={}, project=tmp_path / "project", diagnostics=tmp_path,
+            run=lambda *a, **k: pytest.fail("shared-host observation ran"),
+        )
+    assert not list(tmp_path.iterdir())
+
+
+@pytest.mark.parametrize(
+    "defect", [None, "foreign-root", "escaped-marker", "changed-module",
+               "missing-record", "empty-record", "wrong-candidate"],
+)
+def test_fresh_manager_observation_verifies_bytes_without_an_admission_receipt(
+    tmp_path, monkeypatch, defect,
+):
+    monkeypatch.syspath_prepend(str(NATIVE))
+    import manager_suite_fixture
+
+    monkeypatch.setattr(manager_suite_fixture, "require_venue", lambda: None)
+    controls = runpy.run_path(str(Path(__file__).with_name("test_installed_suite_payloads.py")))
+    artifact = controls["_artifact"](tmp_path)
+    payload = artifact / "worktree-manager"
+    (payload / "pyproject.toml").write_text('[project]\nname="worktree-manager"\nversion="1.0"\n')
+    package = payload / "src" / "worktree_manager"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('NAME = "frozen Manager"\n')
+    (package / "core.py").write_text("VALUE = 1\n")
+    controls["_seal"](artifact)
+    home = tmp_path / "home"
+    root = home / ".worktree-manager"
+    slot = root / "versions" / "1.0"
+    python = slot / "Scripts" / "python.exe"
+    python.parent.mkdir(parents=True)
+    python.touch()
+    (root / "current-version").write_text("1.0")
+    installed = slot / "Lib" / "site-packages" / "worktree_manager"
+    shutil.copytree(package, installed)
+    for name in (".install-complete.json", ".runtime-input-origins.json"):
+        (slot / name).write_text('{"fixture":"constructor record"}')
+    project = tmp_path / "project"
+    project.mkdir()
+    calls = []
+
+    def run(argv, environment, cwd, diagnostics, label, *, timeout):
+        assert argv[0] == python and argv[1:4] == ["-I", "-B", "-c"]
+        assert argv[-2:] == ["worktree_manager", "worktree-manager"]
+        assert cwd == project and 0 < timeout <= 30
+        calls.append(label)
+        return json.dumps({"prefix": str(slot), "module": str(installed / "__init__.py"),
+                           "version": "1.0"})
+
+    candidate = controls["_COMMIT"]
+    if defect == "foreign-root":
+        root = tmp_path / "foreign"
+    elif defect == "escaped-marker":
+        (root / "current-version").write_text("../foreign")
+    elif defect == "changed-module":
+        (installed / "core.py").write_text("VALUE = 2\n")
+    elif defect == "missing-record":
+        (slot / ".runtime-input-origins.json").unlink()
+    elif defect == "empty-record":
+        (slot / ".install-complete.json").write_text("{}")
+    elif defect == "wrong-candidate":
+        candidate = "b" * 40
+    arguments = {
+        "root": root, "environment": {"USERPROFILE": str(home)},
+        "project": project, "diagnostics": tmp_path, "run": run,
+    }
+    if defect is None:
+        result = RUNTIMES["observe_manager"](artifact, candidate, **arguments)
+        assert result["candidate_commit"] == candidate
+        assert result["candidate_bytes_verified"] is True and result["verified_module_count"] == 2
+        assert result["constructor_records_present"] is True
+        assert set(result["constructor_records"]) == {
+            ".install-complete.json", ".runtime-input-origins.json",
+        }
+        assert result["source_admission"] == "not-granted"
+        assert not (payload / "runtime-source.json").exists()
+    else:
+        with pytest.raises((ValueError, OSError)):
+            RUNTIMES["observe_manager"](artifact, candidate, **arguments)
+        if defect in {"foreign-root", "escaped-marker", "wrong-candidate"}:
+            assert not calls
 
 
 def test_readiness_failure_details_reuse_only_the_admitted_readonly_owner(
