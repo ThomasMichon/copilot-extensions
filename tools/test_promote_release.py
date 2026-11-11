@@ -763,6 +763,51 @@ def _write_changefile(repo: Path, name: str, plugin: str, bump_type: str) -> Non
     )
 
 
+def test_promote_bumps_packaged_manifest_receiver_without_repeating_bump(repo: Path):
+    for name, version in (("producer", "0.1.0-dev1"), ("receiver", "0.4.0-dev1")):
+        _write_plugin(repo, name, version)
+    _write_marketplace(repo, {
+        "demo-plugin": "0.1.0-dev1", "producer": "0.1.0-dev1", "receiver": "0.4.0-dev1",
+    })
+    (repo / "plugins/receiver/packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets",
+        "version": 1,
+        "canonicalDir": "plugins",
+        "payloadDir": "src/bundle",
+        "files": ["producer/plugin.json", "receiver/plugin.json"],
+    }), encoding="utf-8")
+    _commit(repo, "declare packaged manifest inputs")
+    _git(["branch", "-f", "dev"], repo)
+    _git(["checkout", "-q", "dev"], repo)
+    _write_changefile(repo, "20260101-producer.json", "producer", "patch")
+    _commit(repo, "bump producer only")
+
+    first = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert first["bumps"] == {
+        "producer": ("0.1.0-dev1", "0.1.1-dev1"),
+        "receiver": ("0.4.0-dev1", "0.4.1-dev1"),
+    }
+    for name in ("producer", "receiver"):
+        canonical = _git(["show", f"{first['commit']}:plugins/{name}/plugin.json"], repo)
+        packaged = _git([
+            "show", f"{first['commit']}:plugins/receiver/src/bundle/{name}/plugin.json",
+        ], repo)
+        assert packaged == canonical
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+    (repo / "README.md").write_text("unrelated change\n", encoding="utf-8")
+    _commit(repo, "unrelated change with consumed changefile still on dev")
+
+    second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert second["bumps"] == {}
+    for name in ("producer", "receiver"):
+        path = f"plugins/receiver/src/bundle/{name}/plugin.json"
+        assert _git(["show", f"{second['commit']}:{path}"], repo) == _git([
+            "show", f"{first['commit']}:{path}",
+        ], repo)
+
+
 def test_promote_does_not_reapply_a_changefile_left_behind_on_dev(repo: Path):
     """Regression: a promotion never mutates dev's own tree (by design), so
     an already-consumed changefile can keep sitting there indefinitely (the
@@ -874,15 +919,15 @@ def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path):
     iterated `plugins/*`, so a promotion round with no new changefile for
     such a consumer would regress its `pyproject.toml` back to dev's stale
     literal, or repeat an already-shipped bump (PR #4514 review)."""
-    _git(["checkout", "-q", "dev"], repo)
-    _write_standalone(repo, "worktree-manager", "0.1.0-dev1")
-    _commit(repo, "add worktree-manager")
-    _git(["checkout", "-q", "main"], repo)
-    first_add = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
-    assert first_add["promoted"] is True
-    _git(["update-ref", "refs/heads/main", first_add["commit"]], repo)
-    _git(["reset", "--hard", "main"], repo)
+    from installer_engine_ref import PYTHON_FILES, SUPPORT_FILES
 
+    _write_standalone(repo, "worktree-manager", "0.1.0-dev1")
+    canonical = repo / "libs/installer-engine"
+    canonical.mkdir(parents=True)
+    for name in (*PYTHON_FILES, *SUPPORT_FILES):
+        (canonical / name).write_text("# synthetic canonical asset\n", encoding="utf-8")
+    _commit(repo, "initial standalone release")
+    _git(["branch", "-f", "dev"], repo)
     _git(["checkout", "-q", "dev"], repo)
     _write_changefile(repo, "20260101-wtm-abc123.json", "worktree-manager", "patch")
     (repo / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
@@ -890,18 +935,13 @@ def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path):
         "x = 1\n", encoding="utf-8",
     )
     _commit(repo, "worktree-manager: change + changefile")
-    _git(["checkout", "-q", "main"], repo)
-
     first = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert first["bumps"] == {"worktree-manager": ("0.1.0-dev1", "0.1.1-dev1")}
     _git(["update-ref", "refs/heads/main", first["commit"]], repo)
-    _git(["reset", "--hard", "main"], repo)
 
     # Unrelated new content on dev; this round drives NO new bump at all.
-    _git(["checkout", "-q", "dev"], repo)
     (repo / "worktree-manager" / "README.md").write_text("y\n", encoding="utf-8")
     _commit(repo, "worktree-manager: unrelated change only")
-    _git(["checkout", "-q", "main"], repo)
 
     second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert second["promoted"] is True
@@ -1159,6 +1199,8 @@ def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Pa
     _git(["init", "-q", "-b", "main"], root)
     _git(["config", "user.name", "Test"], root)
     _git(["config", "user.email", "test@example.com"], root)
+    if os.name == "nt":
+        _git(["config", "core.longpaths", "true"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)
