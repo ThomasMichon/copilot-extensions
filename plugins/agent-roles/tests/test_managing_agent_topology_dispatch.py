@@ -507,7 +507,8 @@ def test_legacy_lanes_report_progress_without_dispatch_adapter() -> None:
     assert lane["qualified"][0]["liveness"]["state"] == "idle"
 
 def intent_lane(document: dict[str, Any]) -> dict[str, Any]:
-    return report(document).intent()["lanes"][0]
+    lane: dict[str, Any] = report(document).intent()["lanes"][0]
+    return lane
 
 
 def change_desired_intent(document: dict[str, Any], effective: bool) -> None:
@@ -628,6 +629,7 @@ def test_terminal_desired_intent_reports_active_native_lane(document: dict[str, 
     assert lane["reasons"] == ["desired-terminal-native-lane-active"]
     assert lane["desired"]["sourceRevision"] is None
     assert lane["proposedMatchesDesired"] is None
+    assert lane["adoptedMatchesProposed"] is None
     assert lane["adoptedMatchesDesired"] is None
 
 

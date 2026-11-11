@@ -212,9 +212,10 @@ def intent_lane(
     proposed = None if snapshot is None else proposed_record(snapshot, fresh)
     adopted = None if snapshot is None else adopted_record(snapshot)
     current = proposed if fresh else None
-    to_proposed = differences(desired, current, DESIRED_PROPOSED)
-    to_adopted = differences(current, adopted if current else None, PROPOSED_ADOPTED)
-    from_desired = differences(desired, adopted if current else None, DESIRED_ADOPTED)
+    comparable = current if desired["sourceRevision"] is not None else None
+    to_proposed = differences(desired, comparable, DESIRED_PROPOSED)
+    to_adopted = differences(comparable, adopted if comparable else None, PROPOSED_ADOPTED)
+    from_desired = differences(desired, adopted if comparable else None, DESIRED_ADOPTED)
     reasons: list[str] = []
     if desired["nativeTask"] is None:
         reasons.append("not-linked-to-native-task")
