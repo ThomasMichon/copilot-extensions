@@ -717,6 +717,12 @@ refuse. These Hosts do not interpret a legacy reapable boolean or detach as
 automatic retirement. They retain the child until explicit stop or child exit;
 structured pending-work-aware idle retirement remains unavailable. Retained
 legacy receiving adapters keep their prior lifetime/replacement behavior.
+Fresh remote creation also selects the current compact core, verifies its
+runtime `--support-json` declaration before helper provisioning or child
+launch, and explicitly requests headless native ACP with ACP lifetime.
+The isolated archive supplies its own policy/dependency closure; the remote
+guest does not need an installed coordination suite. Retained-host recovery
+does not replace an old host to adopt these new-creation semantics.
 The app's optional ACP WS endpoint is a separate access adapter to this Host,
 not the transport Bridge uses internally or a replacement for durable TCP ACKs.
 

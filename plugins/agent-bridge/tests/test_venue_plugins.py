@@ -1025,7 +1025,7 @@ async def test_cold_remote_spawn_authenticates_before_preparation_and_child(monk
     from pathlib import Path
     from types import SimpleNamespace
     from ssh_manager import SSHConfig
-    from agent_bridge.session_host import endpoints, spawner as module
+    from agent_bridge.session_host import endpoints, protocol, spawner as module
 
     events = []
 
@@ -1051,6 +1051,13 @@ async def test_cold_remote_spawn_authenticates_before_preparation_and_child(monk
             pass
 
     async def run(command, **kwargs):
+        if command.startswith("python3 -I -S "):
+            return 0, json.dumps({
+                "contract": "agent-remote-driver.session-host", "version": 1,
+                "protocol_version": protocol.PROTOCOL_VERSION,
+                "modes": ["headless"], "headless_backends": ["native-acp"],
+                "transports": ["tcp-frame"], "lifetime_policies": ["acp"],
+            }), ""
         return 0, "OK", ""
 
     async def provision(command, **kwargs):
@@ -1071,7 +1078,7 @@ async def test_cold_remote_spawn_authenticates_before_preparation_and_child(monk
         ssh_config=lambda: SSHConfig(host_alias="synthetic"),
         reverse_forwards=lambda: ["12001:127.0.0.1:12002"],
     )
-    monkeypatch.setattr("agent_bridge.session_host.bundle.build_session_host_bundle",
+    monkeypatch.setattr("agent_remote_driver.session_host.bundle.build_session_host_bundle",
                         lambda: (Path("bundle.pyz"), "digest"))
     monkeypatch.setattr(module, "_resolve_provision_command", lambda *a: "PROVISION")
     monkeypatch.setattr("ssh_manager.LocalForward", Forward)

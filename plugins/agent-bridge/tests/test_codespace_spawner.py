@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 from ssh_manager import SSHConfig
 
-from agent_bridge.session_host import bundle as bundle_mod
+from agent_remote_driver.session_host import bundle as bundle_mod
 from agent_bridge.session_host import endpoints as endpoints_mod
 from agent_bridge.session_host import protocol as proto
 from agent_bridge.session_host import spawner as sp
@@ -32,6 +32,16 @@ from agent_bridge.session_host.endpoints import (
     forward_from_endpoint,
     ssh_config_from_endpoint,
 )
+
+_HOST_SUPPORT = {
+    "contract": "agent-remote-driver.session-host",
+    "version": 1,
+    "protocol_version": proto.PROTOCOL_VERSION,
+    "modes": ["headless"],
+    "headless_backends": ["native-acp"],
+    "transports": ["tcp-frame"],
+    "lifetime_policies": ["acp"],
+}
 
 
 class _FakeForward:
@@ -92,8 +102,8 @@ class _FakeTransport:
 
     async def run(self, command, *, timeout=60.0):
         self.runs.append(command)
-        if command.startswith("python3 -S "):
-            return self.preflight_result or (0, "", "")
+        if command.startswith("python3 -I -S "):
+            return self.preflight_result or (0, json.dumps(_HOST_SUPPORT), "")
         if command.startswith("cat ") or command.startswith("if test -f "):
             state = dict(self._state)
             state.setdefault("session_id", self.launched_session_id or "sess1")
@@ -179,7 +189,7 @@ async def test_cold_checkout_hook_runs_after_relay_with_launch_environment(
         events.append("relay-ready")
 
     async def run(command, **kw):
-        return 0, "", ""
+        return 0, json.dumps(_HOST_SUPPORT), ""
 
     async def script(command, **kw):
         if "HELPERS" in command:
@@ -251,6 +261,8 @@ async def test_dynamic_hook_created_checkout_full_start_sequence(
     relay_ready = False
 
     async def run(command, **kwargs):
+        if command.startswith("python3 -I -S "):
+            return 0, json.dumps(_HOST_SUPPORT), ""
         if command.startswith("bash -lc "):
             script = shlex.split(command)[2]
             if script.startswith(("export ", "python3 -c ")):
@@ -573,6 +585,7 @@ def test_build_remote_launch_shape():
         reverse_forwards=["9857:127.0.0.1:61234"],
     )
     assert "setsid nohup" in cmd
+    assert "--mode headless --backend native-acp --lifetime-policy acp" in cmd
     assert "--state-file" in cmd
     assert "--cwd" in cmd
     assert "</dev/null" in cmd
@@ -624,7 +637,7 @@ async def test_codespace_spawner_ships_launches_forwards(monkeypatch):
     # bundle shipped once (path_exists returned False)
     assert len(t.pushed) == 1
     # The staged archive is import-checked without site-packages before launch.
-    assert any(c.startswith("python3 -S ") and "--help" in c for c in t.runs)
+    assert any(c.startswith("python3 -I -S ") and "--support-json" in c for c in t.runs)
     # a detached launch ran, carrying the nonce via env
     assert any("setsid nohup" in c for c in t.runs)
     assert any(sp._NONCE_ENV in c for c in t.runs)
@@ -872,6 +885,81 @@ async def test_codespace_spawner_fails_fast_on_bundle_preflight(monkeypatch):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("support", [
+    "not-json", "null", "[]",
+    json.dumps({**_HOST_SUPPORT, "version": True}),
+    json.dumps({**_HOST_SUPPORT, "protocol_version": True}),
+    json.dumps({**_HOST_SUPPORT, "contract": "unrelated"}),
+    json.dumps({**_HOST_SUPPORT, "lifetime_policies": ["legacy"]}),
+    json.dumps({**_HOST_SUPPORT, "headless_backends": []}),
+    json.dumps({**_HOST_SUPPORT, "modes": []}),
+    json.dumps({**_HOST_SUPPORT, "transports": "tcp-frame"}),
+])
+async def test_remote_support_refusal_precedes_provision_and_launch(monkeypatch, support):
+    _patch_common(monkeypatch)
+    provision = []
+    monkeypatch.setattr(sp, "_resolve_provision_command", lambda *a: provision.append(a))
+    transport = _FakeTransport({}, preflight_result=(0, support, ""))
+    with pytest.raises(RuntimeError, match="lacks required native ACP support"):
+        await sp.CodeSpaceSpawner(transport).spawn(["copilot"], session_id="unsupported")
+    assert not provision
+    assert len(transport.runs) == 1
+    assert not _FakeForward.instances
+    assert not _FakeRelay.instances
+
+
+@pytest.mark.asyncio
+async def test_remote_preflight_executes_relocated_current_core(monkeypatch, tmp_path):
+    from agent_procutil import no_window_flags
+    from agent_bridge.session_host import bundle as legacy_bundle
+
+    archive, digest = bundle_mod.build_session_host_bundle(tmp_path / "construction")
+    _patch_common(monkeypatch)
+    monkeypatch.setattr(bundle_mod, "build_session_host_bundle", lambda: (archive, digest))
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("fresh remote launch selected the legacy receiving export")
+
+    monkeypatch.setattr(legacy_bundle, "build_session_host_bundle", forbidden)
+    monkeypatch.setattr(sp, "_resolve_provision_command", lambda *args: None)
+    staged = tmp_path / "receiving" / archive.name
+    preflights = []
+
+    class Transport(_FakeTransport):
+        async def push_file(self, local_path, remote_path):
+            staged.parent.mkdir()
+            shutil.copyfile(local_path, staged)
+            archive.unlink()
+            await super().push_file(local_path, remote_path)
+
+        async def run(self, command, *, timeout=60.0):
+            if command.startswith("python3 -I -S "):
+                assert staged.name in command and "--support-json" in command
+                assert not archive.exists()
+                result = subprocess.run(
+                    [sys.executable, "-I", "-S", str(staged), "--support-json"],
+                    cwd=staged.parent, capture_output=True, text=True, timeout=timeout,
+                    env={**os.environ, "PYTHONPATH": "", "PATH": str(tmp_path / "no-guest-suite")},
+                    creationflags=no_window_flags(),
+                )
+                preflights.append(json.loads(result.stdout))
+                return result.returncode, result.stdout, result.stderr
+            return await super().run(command, timeout=timeout)
+
+    transport = Transport({"pid": 111, "child_pid": 222, "port": 51000})
+    spawned = await sp.CodeSpaceSpawner(transport).spawn(["copilot"], session_id="fresh-core")
+    try:
+        assert preflights[0]["automatic_idle_retirement"]["availability"] == "unavailable"
+        assert "acp" in preflights[0]["lifetime_policies"]
+        launch = next(command for command in transport.runs if "setsid nohup" in command)
+        assert "--lifetime-policy acp" in launch
+        assert spawned.nonce == "test-nonce"
+    finally:
+        await spawned.aclose()
+    assert _FakeForward.instances[-1].cancelled
+
+
+@pytest.mark.asyncio
 async def test_codespace_spawner_refresh_endpoint(monkeypatch):
     _patch_common(monkeypatch)
     state = {"pid": 1, "child_pid": 2, "port": 51000}
@@ -1111,6 +1199,8 @@ async def test_codespace_spawner_launch_failure_raises(monkeypatch):
     class _FailTransport(_FakeTransport):
         async def run(self, command, *, timeout=60.0):
             self.runs.append(command)
+            if command.startswith("python3 -I -S "):
+                return (0, json.dumps(_HOST_SUPPORT), "")
             if "setsid nohup" in command:
                 return (1, "", "python3: not found")
             return (0, "", "")
