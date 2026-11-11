@@ -160,6 +160,43 @@ retention, and explicit uninstall/all-code-absent accounting still belong to
 their existing lifecycle owners; external cache routing does not establish
 that those gates have passed or introduce another cleanup policy.
 
+### Platform-cache provider contract
+
+`agent_procutil.python_cache.POLICY_VERSION == 2` advertises the additive
+`policy_arguments(root, runtime=target)` provider. Existing `cache_arguments`
+and `python_cache_args` callers retain their preceding contract; consumer
+migration and update-time collection are separate lifecycle work.
+
+The new provider returns `["-X", "pycache_prefix=<private-platform-cache>"]`
+only for a completed target slot belonging to the addressed installation.
+It returns `["-B"]` for an unsealed target, unsupported ownership, unavailable
+cache or invalid metadata, without allocating per-invocation directories.
+Forward the complete vector rather than extracting a prefix. A new caller
+with an older provider uses its documented no-write fallback.
+
+The base is Windows Local AppData (absolute `LOCALAPPDATA` or its native known
+folder), macOS `~/Library/Caches`, or absolute `XDG_CACHE_HOME` with `~/.cache`
+as the other POSIX default. Relative overrides never select the working
+directory. The owned layout is
+`copilot-extensions/python/v1/<installation>/installed-<identity>/bytecode`.
+Identity includes the normalized installation/target paths and completed
+content; native Python cache tags still separate interpreter bytecode.
+
+Native ownership and permissions must protect executable cache input and its
+ancestors from other unprivileged users' writes or substitution. New
+directories use private creation; existing foreign/shared-writable paths are
+not repaired or trusted. A matching JSON record is not an access boundary.
+Windows validates ownership/DACLs and POSIX validates ownership/modes.
+
+The namespace's bounded `owner.json` lives beside bytecode. Its installation's
+private `catalog.sqlite` indexes ownership before the provider enables cache
+writes, reserving restart-safe collection progress without a directory census.
+Unknown schemas, conflicting records and failed catalog operations take the
+no-write fallback, preserving the existing objects. This provider neither
+deletes a cache nor changes runtime selection, retention or service lifetime.
+The caller still owns target admission and retention across launch; an owner
+record or catalog entry is not a runtime lease or permission to execute it.
+
 ## Windows bootstrap and shell admission
 
 ### Opt-in pre-resume observation admission
