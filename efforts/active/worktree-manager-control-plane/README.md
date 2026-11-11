@@ -2434,6 +2434,17 @@ these original rows and requires source-plan review before functional edits.
   when separately authorized. No new universal UI/native/every-host or
   whole-Manager prerequisite is added.
 
+### Finite registered-stream stderr drain
+
+The [bounded stream-consumer proposal](stream-stderr-drain.md) owns only
+concurrent stderr draining and its list/progress consumer settlement. Existing
+provider/renderer, persistent-channel, Inbox, native and installation owners
+retain their scopes; this does not reopen or transfer their programs.
+
+- [ ] **SSTD:** Review the finite proposal before functional edits, then
+  deliver bounded concurrent stderr capture with real noisy-child, failure,
+  compatibility and cleanup proof through exact-head review/CI and merge.
+
 ### Proposed finite approved-source and venue-consumer contracts
 
 _(Agent-recommended additive tracking proposal. Completed bootstrap,
@@ -2564,6 +2575,11 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
   release.
 
 ## Validation Plan
+
+- [ ] **VSSTD:** Qualify every local
+  [stream-drain control](stream-stderr-drain.md#validation-plan), preserving
+  provider data authority, existing deadlines and exact child/reader custody;
+  source acceptance is not installed/live-provider qualification.
 
 - [x] Qualify the [optional Sync progress flow](phase-3c-optional-sync-progress.md#validation-plan):
   complete versioned results, real incremental local ProgressScreen use,
