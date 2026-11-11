@@ -63,11 +63,24 @@ def _prepare_application(
             ".venv", "__pycache__", ".pytest_cache", ".ruff_cache", "build", "*.egg-info",
         ),
     )
-    if replacement:
-        entry = source / "src" / "agent_remote_driver_app" / "__init__.py"
-        entry.write_text(
-            entry.read_text(encoding="utf-8") + "\n_fixture_generation = 2\n", encoding="utf-8",
-        )
+    entry = source / "src" / "agent_remote_driver_app" / "__init__.py"
+    entry.write_text(
+        entry.read_text(encoding="utf-8")
+        + f"\n_fixture_generation = {2 if replacement else 1}\n"
+        "_fixture_driver_main = main\n"
+        "def main():\n"
+        "    import json, os, sys\n"
+        "    from pathlib import Path\n"
+        "    output = os.environ.get('DRIVER_FIXTURE_GENERATION_OUTPUT')\n"
+        "    if output:\n"
+        "        Path(output).write_text(json.dumps({\n"
+        "            'pid': os.getpid(), 'prefix': sys.prefix, 'app': __file__,\n"
+        "            'core': sys.modules[_fixture_driver_main.__module__].__file__,\n"
+        "            'generation': _fixture_generation,\n"
+        "        }), encoding='utf-8')\n"
+        "    return _fixture_driver_main()\n",
+        encoding="utf-8",
+    )
     materializer.materialize_uv_editable_ref_into(
         source_consumer_dir=SOURCE, dest_consumer_dir=source, canonical_root=ROOT,
     )
@@ -195,7 +208,7 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
             selected_slot, json.dumps(expected_generation),
         ], cwd=caller, env=env, deadline=deadline)
 
-    assert_current(None)
+    assert_current(1)
 
     def replace_while_live():
         nonlocal selected_slot, install
@@ -224,7 +237,7 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
         result = _run(install, cwd=caller, env=env, deadline=deadline)
         assert json.loads(result.stdout)["state"] == "installed"
         selected_slot = slot
-        assert_current(None)
+        assert_current(1)
         timings["live_rollback_seconds"] = time.monotonic() - rollback_started
 
     previous_identity = None
@@ -243,8 +256,12 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
             on_live = replace_while_live
         elif selection == "rollback" and mode == "warm":
             on_live = rollback_while_live
+        expected_slot = selected_slot
         observed = await _exercise_installed_host(
-            global_bin, caller, env, interpreter, directory, deadline, on_live=on_live,
+            global_bin, caller, env, interpreter, directory, deadline,
+            expected_slot=expected_slot,
+            expected_generation=2 if expected_slot == replacement_slot else 1,
+            on_live=on_live,
         )
         timings[mode + "_launch_to_ready_seconds"] = observed["launch_to_ready_seconds"]
         if mode == "cold":
@@ -265,9 +282,11 @@ async def test_fresh_application_installs_reuses_and_runs_without_caller_sources
 
 
 async def _exercise_installed_host(
-    slot, caller, env, interpreter, directory, deadline, *, on_live=None,
+    slot, caller, env, interpreter, directory, deadline, *,
+    expected_slot, expected_generation, on_live=None,
 ):
     state = directory / "host-state.json"
+    generation_output = directory / "host-generation.json"
     child = (
         "import json,sys\n"
         "for line in sys.stdin:\n"
@@ -278,7 +297,8 @@ async def _exercise_installed_host(
     process = subprocess.Popen(
         _frontdoor(slot, "--cwd", str(caller), "--state-file", str(state), "--ws-port", "0",
                    "--", interpreter, "-I", "-S", "-u", "-c", child),
-        cwd=caller, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
+        cwd=caller, env={**env, "DRIVER_FIXTURE_GENERATION_OUTPUT": str(generation_output)},
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
     )
     client, child_pid = None, None
     try:
@@ -291,6 +311,14 @@ async def _exercise_installed_host(
         hello = await client.attach(nonce=facts["nonce"].encode())
         ready_at = time.monotonic()
         assert hello.child_pid == child_pid
+        generation = json.loads(generation_output.read_text(encoding="utf-8"))
+        assert generation["pid"] == facts["pid"]
+        assert generation["generation"] == expected_generation
+        assert Path(generation["prefix"]).samefile(expected_slot / ".venv")
+        for module in ("app", "core"):
+            assert Path(generation[module]).resolve().is_relative_to(
+                (expected_slot / ".venv").resolve(),
+            )
         child_identity = (child_pid, process_start_time(child_pid))
         assert child_identity[1] is not None
         literal = 'first line\n"quoted" & literal $value'
