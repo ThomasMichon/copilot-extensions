@@ -173,6 +173,22 @@ the historical Host's limited close. This qualifies prior Host source
 compatibility only, not modern lifetime/authentication capabilities, an old
 installed binary, native Copilot or SDK observer/idle behavior.
 
+## Ordinary Session Host application readiness
+
+Driver's explicit `tests/native/test_session_host_application.py` constructs a
+first-touch locked application through the existing build/install owners, then
+removes its construction inputs before invoking the installed front door.
+It measures package preparation, staged first installation, retained installation,
+cold delivery-to-ready and separate cold/warm launch-to-ready intervals. Readiness
+requires the real TCP HELLO to identify the owned Python ACP child; both launches
+also complete literal TCP/WebSocket exchanges and exact cleanup.
+The `driver_application_readiness` JUnit suite property records measurements,
+not performance-budget acceptance or native Copilot input readiness.
+The existing 300-second construction boundary and ordinary runner containment
+remain; the governed feed is an explicit prerequisite. Select only this file with
+`--allow-explicit-tiers --test-timeout 300`. This private first-touch application
+is not an installed operator runtime or fresh-OS/native SDK qualification.
+
 ## Owner-only hosted Windows escape hatch
 
 `windows-qualification.yml` is an explicit manual lane on a disposable
