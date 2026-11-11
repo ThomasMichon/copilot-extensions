@@ -22,7 +22,7 @@ from agent_vault.extensions import ExtensionRegistry
 KEY = base64.b64encode(bytes(range(32))).decode()
 usable_cache = pytest.mark.skipif(
     not PersistentCache()._crypto_available(),
-    reason="protected-cache decoder unavailable (POSIX optional cryptography)",
+    reason="protected-cache decoder unavailable (POSIX optional pycryptodomex)",
 )
 
 

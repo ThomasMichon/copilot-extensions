@@ -97,7 +97,11 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
 ## Dependency profiles
 
 Native setup can explicitly select `base` or `ssh`. SSH key generation and pair
-validation need the `ssh` profile; ordinary Vault use does not. For example:
+validation need the `ssh` profile; ordinary Vault use does not. It supplies
+`pycryptodomex` in the isolated `Cryptodome` namespace, with native Windows ARM64
+support, and also supports the existing Fernet cache and AES-GCM envelope formats.
+Existing records, wrapped keys and DPAPI caches are not converted or rotated.
+For example:
 
 ```powershell
 pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install -Profile ssh
@@ -545,7 +549,13 @@ agent-vault cache-populate --entry API/OpenAI
 agent-vault cache-verify --entry API/OpenAI
 ```
 
-The cache and `seal`/`unseal` require the optional `cryptography` dependency. Without it, the cache is a safe no-op and KEK commands return a clear error. Install it into the active runtime slot with the environment's package manager. On POSIX, the stable target is `~/.agent-vault/.venv/bin/python`; on Windows, read `%USERPROFILE%\.agent-vault\current-version` and target `%USERPROFILE%\.agent-vault\versions\<version>\Scripts\python.exe`.
+Fernet caches and `seal`/`unseal` use the optional `pycryptodomex` dependency
+(`cache` / `kek` extras), also supplied by the native `ssh` profile above.
+Select that profile through the installer rather than modifying a completed
+runtime. Without it, POSIX caches are inert and KEK commands return a clear
+error. New Windows caches can use native per-user DPAPI without a third-party
+package. Existing Fernet caches require the backend and are never replaced when
+it is unavailable; existing DPAPI caches keep their format after installation.
 
 Password replacement is journaled before the KeePass mutation. Pending
 replacements are never served by cache-first reads and cannot be overwritten by

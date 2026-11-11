@@ -5,16 +5,16 @@ the daemon restarts and cannot serve reads while the vault is locked. The
 *persistent* cache is a separate, **opt-in** tier: a Fernet-encrypted file on disk
 that survives restarts and answers reads without unlocking the vault -- so a
 consumer can fetch a previously-cached secret even when the master password is not
-loaded (e.g. an unattended job on a locked box). On Windows without cryptography,
+loaded (e.g. an unattended job on a locked box). On Windows without PyCryptodome,
 new caches use native user-bound DPAPI directly, including on ARM64. Existing
-Fernet caches require cryptography to read; they are never discarded to create
-a replacement. DPAPI caches remain readable if cryptography is later installed.
+Fernet caches use the same format through PyCryptodome; they are never discarded
+to create a replacement. DPAPI caches remain readable if that package is installed.
 
 It is inert unless enabled. Storing secrets on disk -- even encrypted with a
 local key -- is a deliberate tradeoff, so the cache does nothing until switched on
 via the ``AGENT_VAULT_CACHE`` env var (truthy) or a configured cache directory
 (``AGENT_VAULT_CACHE_DIR``). When disabled, every operation is a safe no-op.
-POSIX caches also require the optional ``cryptography`` dependency.
+POSIX caches also require the optional ``pycryptodomex`` dependency.
 
 Security posture: the Fernet key sits beside the cache file, **wrapped at rest** --
 DPAPI (per-OS-user) on Windows via the ``kek`` module, or a ``0600`` file on POSIX.
@@ -70,7 +70,7 @@ def cache_enabled() -> bool:
 class PersistentCache:
     """Fernet-encrypted on-disk ``(entry, field) -> value`` cache.
 
-    Disabled caches are inert. POSIX requires cryptography; Windows can use
+    Disabled caches are inert. POSIX requires PyCryptodome; Windows can use
     native DPAPI for new caches without that package.
     """
 
@@ -102,7 +102,7 @@ class PersistentCache:
         if self._available is not None:
             return self._available
         try:
-            from cryptography.fernet import Fernet as _F  # noqa: F401
+            from .protected_crypto import Fernet as _F  # noqa: F401
 
             self._available = True
         except ImportError:
@@ -124,16 +124,16 @@ class PersistentCache:
                     self._fernet = DpapiCacheCipher()
                     return self._fernet
             try:
-                from cryptography.fernet import Fernet
+                from .protected_crypto import Fernet
             except ImportError as exc:
                 if self._cache_file.exists() or self._key_file.exists():
                     raise CacheProtectionError(
-                        "legacy cache requires cryptography; existing cache was not replaced"
+                        "legacy cache requires pycryptodomex; existing cache was not replaced"
                     ) from exc
                 self._fernet = DpapiCacheCipher()
                 return self._fernet
         else:
-            from cryptography.fernet import Fernet
+            from .protected_crypto import Fernet
 
         from . import kek
 

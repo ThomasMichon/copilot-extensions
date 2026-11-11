@@ -174,8 +174,10 @@ export AGENT_VAULT_CACHE=1
 <agent-vault catalog argv[0]> cache-clear
 ```
 
-`cache-verify` exits `2` if any requested entry is missing. The cache requires
-`cryptography`; without it, cache operations are a safe no-op.
+`cache-verify` exits `2` if any requested entry is missing. Fernet caches require
+`pycryptodomex` (also supplied by the native `ssh` profile). Without it, POSIX
+caches are inert; new Windows caches can use native DPAPI. An unreadable existing
+cache is preserved, never replaced with an empty store.
 
 ### Shared owner keys
 
@@ -217,7 +219,8 @@ On Windows the catalog names the payload `.cmd` so stdin reaches `seal`.
 Quote ordinary arguments and avoid metacharacter-bearing inline values; use
 files or stdin for structured content.
 
-Requires `cryptography`; otherwise the command returns a clear error.
+Requires `pycryptodomex` (the `kek` extra or native `ssh` profile); otherwise the
+command returns a clear error. Existing KEKs and sealed tokens remain compatible.
 
 ## Locking and prompting
 

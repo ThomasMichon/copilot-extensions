@@ -1449,7 +1449,7 @@ def cmd_cache_status(args):
         return 0
     state = "enabled" if status["enabled"] else "disabled"
     if not status["available"]:
-        state += " (cryptography unavailable)"
+        state += " (cache encryption backend unavailable)"
     print(f"cache: {state}")
     print(f"dir: {status['cache_dir']}")
     print(f"entries: {status['entry_count']} ({status['field_count']} field(s))")
