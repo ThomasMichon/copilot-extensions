@@ -1,5 +1,5 @@
 {
-  "comment": "Qualify canonical frontend generation replacement while retaining the same native conversation.",
+  "comment": "Preserve native terminal receipts across frontend replacement and qualify retained conversations through canonical generation updates.",
   "changes": [
     {
       "plugin": "agent-worktrees",

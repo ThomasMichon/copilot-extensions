@@ -1152,8 +1152,13 @@ owners.
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait.
 The headed path discovers preparation/receipt support against one captured,
-completed immutable runtime slot and uses that slot throughout; each finite
-call independently refuses a changed current selection before effects.
+completed immutable runtime slot for preparation, admission and spawn; each
+finite call independently refuses a changed current selection before effects.
+After actual child exit, terminal observation resolves the then-current provider
+so removal of the outgoing slot does not strand its return receipt. It retains
+the version-1 contract and original execution correlation/operation identity.
+A missing or incompatible current provider leaves that receipt unconfirmed,
+preserving the actual exit without retrying preparation, creation or the callback.
 Older providers retain direct execution without receiving new syntax.
 Before coordinator creation the shell opens a bounded private loopback
 admission channel. It verifies the retained coordinator, exact native argv,
