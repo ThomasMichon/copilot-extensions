@@ -123,7 +123,8 @@ def build(dest: Path, *, source_root: Path) -> list[str]:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ).stdout.strip()
     archive = subprocess.run(
-        ["git", "-C", str(source_root), "archive", "--format=tar", head],
+        ["git", "-c", "core.autocrlf=false", "-c", "core.eol=lf",
+         "-C", str(source_root), "archive", "--format=tar", head],
         check=True, capture_output=True, timeout=120, env=git_env,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ).stdout

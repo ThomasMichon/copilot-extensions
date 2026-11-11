@@ -1194,3 +1194,21 @@ preserving its strict native task ownership assertion and production defaults.
 Two focused configuration controls pass through the actual Codespaces policy
 and native/dependency-free Index role readers. Native registration, runtime
 closure, actual Machines readiness and all later acceptance remain open.
+
+Run 42954102322 at `f6f0ed98a4e2484dce4b0a2327ace1ca5a646c76` passed lean
+bootstrap and actual CLI acquisition, then correctly rejected byte differences
+in the first frozen payload. Sample digests exactly match CRLF artifact bytes
+versus LF installed bytes. A read-only real-Git reproduction shows that archive
+honors ambient `core.autocrlf`: the same committed file produces those two
+digests under true versus false. The builder now supplies per-command
+`core.autocrlf=false` and `core.eol=lf`, without changing repository/global Git
+settings or normalizing an installed payload after acquisition. Explicit source
+attributes remain in effect. The full provenance packet passes 44 tests with
+two platform-inapplicable skips, including two new real-Git controls covering
+ambient autocrlf and text/eol projections.
+
+Required CI independently refused the provenance helper's stale admitted-unit
+source digest. Its single manifest source binding is updated to the corrected
+helper; test nodes, coverage targets, packet budget and controller selection are
+unchanged. Native payload comparison, complete runtime construction and actual
+readiness remain unverified. No failed hosted case is credited as acceptance.
