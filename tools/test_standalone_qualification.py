@@ -330,6 +330,30 @@ def test_chat_preparation_retains_both_canonical_build_resource_owners(tmp_path)
     )
 
 
+@pytest.mark.parametrize("suffix,host", [("linux", "ubuntu-latest"), ("windows", "windows-latest")])
+def test_dispatch_fingerprint_lane_is_unfiltered_and_outside_actor_free_inventory(suffix, host):
+    root = SCRIPT.parent.parent
+    workflow = source_workflow(root, "installation-context-acceptance.yml")
+    job = workflow["jobs"]["uv-deployment-compatibility-" + suffix]
+    assert job["if"] == "${{ inputs.uv_deployment_compatibility }}"
+    assert job["runs-on"] == host and job["timeout-minutes"] == 30
+    target = "tests/test_installer_input_fingerprint.py"
+    steps = [step for step in job["steps"] if target in step.get("run", "")]
+    assert len(steps) == 1
+    step = steps[0]
+    assert step["run"].split() == [
+        "python", "tools/run-plugin-tests.py", "agent-dispatch", "--allow-explicit-tiers",
+        "--test-file", target,
+    ]
+    assert "if" not in step and not step.get("continue-on-error")
+    for settings in (workflow, job, step):
+        assert "PYTEST_ADDOPTS" not in settings.get("env", {})
+    manifest = json.loads((root / "tools/promotion-unit-manifest.json").read_text(encoding="utf-8"))
+    source = "plugins/agent-dispatch/" + target
+    assert source not in manifest["sources"]
+    assert all(node.split("::", 1)[0] != source for node in manifest["nodes"])
+
+
 def test_chat_native_lanes_are_explicit_complete_and_bound_to_the_selected_python():
     workflow = source_workflow(SCRIPT.parent.parent, "installation-context-acceptance.yml")
     triggers = workflow["on"] if "on" in workflow else workflow[True]

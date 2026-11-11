@@ -2115,6 +2115,10 @@ jobs:
           python tools/run-plugin-tests.py agent-dispatch --allow-explicit-tiers
           --test-file tests/test_installer_engine_adoption.py
           -k "package_retry_keeps_optional_extra_and_exact_exit_code or materialized_snapshot_admits_install_without_authoring_checkout"
+      - name: Qualify Dispatch ordinary input fingerprints and immutable refusal
+        run: >-
+          python tools/run-plugin-tests.py agent-dispatch --allow-explicit-tiers
+          --test-file tests/test_installer_input_fingerprint.py
       - name: Qualify the complete coupled Logger batch and offline first-use packet
         run: >-
           python tools/run-plugin-tests.py agent-logger --allow-explicit-tiers

@@ -706,32 +706,19 @@ _payload_hash() {
         "$py" -I -c 'import hashlib,sys; print(hashlib.sha256(sys.argv[1].encode()).hexdigest())' "$SOURCE_RUNTIME_IDENTITY"
         return $?
     fi
-    # Cheap payload fingerprint for the completion marker (#935): sha256 of
-    # pyproject.toml + the vendored-lib version set. Detects a dev-checkout that
-    # changed the payload WITHOUT bumping the version. Fails on any error.
-    local __parts=""
-    if [[ -f "$PLUGIN_DIR/pyproject.toml" ]]; then __parts="$(cat "$PLUGIN_DIR/pyproject.toml")"; fi
-    if [[ -d "$PLUGIN_DIR/libs" ]]; then
-        local __f
-        while IFS= read -r __f; do
-            __parts="$__parts"$'\n'"$(cat "$__f")"
-        done < <(find "$PLUGIN_DIR/libs" -name pyproject.toml 2>/dev/null | sort)
-    fi
-    # Fails (no output) when no SHA-256 implementation works: the caller must
-    # then refuse to publish a slot without its fingerprint.
-    local __d
-    if command -v sha256sum >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | sha256sum 2>/dev/null)" || return 1
-    elif command -v shasum >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | shasum -a 256 2>/dev/null)" || return 1
-    elif command -v openssl >/dev/null 2>&1; then
-        __d="$(printf '%s' "$__parts" | openssl dgst -sha256 -r 2>/dev/null)" || return 1
-    else
-        return 1
-    fi
-    __d="${__d%% *}"
-    [[ "$__d" =~ ^[0-9a-f]{64}$ ]] || return 1
-    printf '%s\n' "$__d"
+    local py digest
+    py="$(_bootstrap_python)" || return 1
+    digest="$("$py" -I -B -c '
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import installer_dependency_policy as policy
+sys.modules["tomllib"] = policy._toml_parser()
+import installer_engine as engine
+print(engine.runtime.fingerprint_source(engine._source_files(engine._package_roots(Path(sys.argv[2])))))
+' "$SCRIPT_DIR" "$PLUGIN_DIR")" || return 1
+    [[ "$digest" =~ ^[0-9a-f]{64}$ ]] || return 1
+    printf '%s\n' "$digest"
 }
 
 _versioned_slot_clean() {
@@ -739,15 +726,16 @@ _versioned_slot_clean() {
     [[ "$VERSIONED_RUNTIME" == 1 ]] || {
         printf '%s\n' 'Construction requires a versioned runtime candidate' >&2; return 1;
     }
-    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers
+    local vr="$SCRIPT_DIR/versioned_runtime.py" py helpers payload_hash
     py="$(_bootstrap_python)" || return 1
     [[ -n "$py" ]] || return 1
+    payload_hash="$(_payload_hash)" || return 1
     if ! declare -F _runtime_construction_begin >/dev/null; then
         helpers="$("$py" -I "$vr" --root "$INSTALL_DIR" construction-shell --shell sh)" || return 1
         eval "$helpers"
     fi
     _runtime_construction_begin "$py" "$vr" "$INSTALL_DIR" "$SRC_VERSION" \
-        "$(_payload_hash)" "$(basename "$LINK_DIR")" || return 1
+        "$payload_hash" "$(basename "$LINK_DIR")" || return 1
     _assert_source_runtime
 }
 
