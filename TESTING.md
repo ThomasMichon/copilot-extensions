@@ -3211,6 +3211,30 @@ idle expiry, attribute observer retirement, or qualify another selected
 runtime/platform. Native and SDK versions must be recorded with each result;
 package availability alone is not runtime support.
 
+The separate T3 file `tests/native/test_native_sdk_backend.py` exercises the
+optional SDK provider through the real Session Host and selected wheel-built
+application. Supply `COPILOT_NATIVE_TEST_DRIVER_SDK_PYTHON` pointing to an
+already-prepared, season-locked optional application interpreter, plus the
+existing native executable selector. The tests never install packages or
+download a runtime. Only the public session's local synthetic-provider and
+instruction/tool fixture configuration is overridden; native launch/admission,
+SDK connection, ACP adaptation, permission relay and broker execute from the
+selected artifact. Private homes, caller-owned scopes and exact process births
+remain mandatory.
+
+These controls prove new/prompt, frontend reconnect, cold text-history load,
+nonempty client/agent/shell inventory, a future schedule after root idle,
+permission approval for the exact fixture command and observed cancellation.
+Shell births are published atomically and pinned before fixture work is
+released. A task registered just before a read may race its notification;
+bounded read-only refreshes may establish a stable snapshot without replaying
+the task or prompt. This is not an atomic idle-retirement proof.
+Focused unit controls additionally cover unknown admission, managed permission
+holds, event overflow, unrepresentable history and missing optional
+dependency/interpreter refusal. Compact receiving runs a real refusal subprocess.
+Python 3.10 installation, other platforms, joined-observer retirement and
+work-arrival/expiry races retain their independent qualification gates.
+
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied
 launch commands. Inline and split resume arguments must be replaced, not duplicated;

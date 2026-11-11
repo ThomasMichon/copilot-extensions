@@ -124,6 +124,24 @@ def test_legacy_receiving_artifact_declares_and_enforces_only_legacy_support(tmp
         assert result.returncode == 2 and not marker.exists()
 
 
+def test_compact_receiving_artifact_never_claims_or_launches_optional_sdk(tmp_path):
+    archive, _ = build_session_host_bundle(tmp_path / "compact")
+    support = subprocess.run(
+        [sys.executable, "-I", "-S", str(archive), "--support-json"],
+        capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+    )
+    assert support.returncode == 0, support.stderr
+    assert json.loads(support.stdout)["headless_backends"] == ["native-acp"]
+    marker = tmp_path / "native-must-not-start"
+    refused = subprocess.run(
+        [sys.executable, "-I", "-S", str(archive), "--cwd", str(tmp_path), "--backend", "sdk", "--",
+         sys.executable, "-c", f"from pathlib import Path; Path({str(marker)!r}).touch()"],
+        cwd=tmp_path, capture_output=True, text=True, timeout=5, **no_window_kwargs(),
+    )
+    assert refused.returncode != 0 and not marker.exists()
+    assert "sdk_backend" in refused.stderr
+
+
 @pytest.mark.parametrize("program,expected,native_exit", [
     ("raise SystemExit(17)", 17, 17),
     pytest.param(
