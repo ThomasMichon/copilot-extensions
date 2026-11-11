@@ -4,6 +4,15 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+The H1 prior-runtime corpus also retains the exact `0.4.0-dev150` frontend
+source beside its existing protocol source. Both come from the same immutable
+release commit and retain their original bytes and Git blob identities.
+Driver's relocated-core controls execute that actual frontend against the
+current modern and legacy compact exports, preserving cursors, literal frames,
+lifetime distinctions and exact child cleanup. This does not substitute a
+current compatibility alias for an older implementation, and does not qualify
+an old installed Host, historical binary rollback or an SDK runtime.
+
 ## Current HTTP-52 owner-membership evidence
 
 The optional `live_delivery_observation: 1` expansion retains HTTP generation

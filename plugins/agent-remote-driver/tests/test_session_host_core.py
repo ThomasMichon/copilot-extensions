@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 import zipfile
 
@@ -43,6 +44,73 @@ def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
     shutil.copyfile(archive, relocated)
     shutil.rmtree(tmp_path / "build")
     return relocated
+
+
+async def _close_frontend(client):
+    await asyncio.wait_for(client.close(), 3)
+
+
+def _prior_frontend(monkeypatch):
+    root = Path(__file__).resolve().parents[3]
+    fixtures = root / "plugins/agent-bridge/contract/fixtures/session-host/prior-runtime-dev150"
+    commit = "4ed08dcdd0e72377b95a67d6bd22aec819bf7fec"
+    package = ModuleType("_driver_dev150_frontend")
+    package.__path__ = []
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    for name, blob in (
+        ("protocol", "dde0d3566ce5d0cd92a49d8f6438dd907d533993"),
+        ("client", "c9e88467f09e4438a214efa432733b59352eefd1"),
+    ):
+        frozen = json.loads((fixtures / (name + "-source.json")).read_text(encoding="utf-8"))
+        captured, raw = frozen["captured_from"], frozen["source_text"].encode("utf-8")
+        assert captured["commit"] == commit and captured["plugin_version"] == "0.4.0-dev150"
+        assert captured["protocol_generation"] == 1 and captured["source_git_blob"] == blob
+        assert captured["source_path"] == f"plugins/agent-bridge/src/agent_bridge/session_host/{name}.py"
+        assert hashlib.sha256(raw).hexdigest() == captured["source_sha256"]
+        assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == blob
+        module = ModuleType(package.__name__ + "." + name)
+        module.__package__ = package.__name__
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+        exec(compile(raw, commit + ":" + captured["source_path"], "exec"), module.__dict__)
+        setattr(package, name, module)
+    return package.client.SessionHostClient
+
+
+def test_prior_frontend_refuses_corrupted_frozen_client(monkeypatch):
+    read_text = Path.read_text
+
+    def corrupted(path, *args, **kwargs):
+        body = read_text(path, *args, **kwargs)
+        if path.name == "client-source.json":
+            frozen = json.loads(body)
+            frozen["source_text"] += "\n"
+            return json.dumps(frozen)
+        return body
+
+    monkeypatch.setattr(Path, "read_text", corrupted)
+    with pytest.raises(AssertionError):
+        _prior_frontend(monkeypatch)
+    assert "_driver_dev150_frontend.client" not in sys.modules
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frontend", ["current", "prior-runtime-dev150"])
+async def test_frontend_close_preserves_abort_recovery_and_bounds_prior(monkeypatch, frontend):
+    client_type = SessionHostClient if frontend == "current" else _prior_frontend(monkeypatch)
+
+    async def stalled():
+        await asyncio.Future()
+
+    transport = SimpleNamespace(abort=Mock())
+    writer = SimpleNamespace(close=Mock(), wait_closed=stalled, transport=transport)
+    client = client_type(asyncio.StreamReader(), writer)
+    if frontend == "current":
+        await _close_frontend(client)
+        transport.abort.assert_called_once_with()
+    else:
+        with pytest.raises(asyncio.TimeoutError):
+            await _close_frontend(client)
+    writer.close.assert_called_once_with()
 
 
 def test_consumers_reach_the_same_core_through_canonical_build_owners(monkeypatch):
@@ -452,13 +520,17 @@ async def test_relocated_core_requires_live_owner_at_actual_child_spawn(tmp_path
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("frontend", ["current", "prior-runtime-dev150"])
 @pytest.mark.parametrize("legacy,reapable", [(False, True), (True, False), (True, True)])
-async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path, legacy, reapable):
+async def test_relocated_core_reconnects_and_stops_exact_child(
+    tmp_path, monkeypatch, legacy, reapable, frontend,
+):
     from agent_procutil._interpreter import physical_executable
     from agent_remote_driver.session_host.osutil import pid_alive
 
     interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert interpreter is not None
+    client_type = SessionHostClient if frontend == "current" else _prior_frontend(monkeypatch)
     archive = _relocate(tmp_path, legacy=legacy)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -495,7 +567,7 @@ async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path, legacy,
             pytest.fail("relocated Host did not publish readiness")
         assert facts["pid"] == proc.pid
         assert facts["lifetime_policy"] == ("legacy" if legacy else "acp")
-        client = await SessionHostClient.connect(port=facts["port"])
+        client = await client_type.connect(port=facts["port"])
         hello = await client.attach(nonce=nonce.encode())
         assert hello.child_pid == facts["child_pid"]
         cursor = 0
@@ -513,7 +585,7 @@ async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path, legacy,
             assert json.loads(frame)["result"]["params"] == params
             await client.ack(cursor)
         await client.detach(reapable=reapable)
-        await client.close()
+        await _close_frontend(client)
         client = None
         if legacy and reapable:
             await asyncio.to_thread(proc.wait, timeout=5)
@@ -522,7 +594,7 @@ async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path, legacy,
             return
         await asyncio.sleep(0.1)
         assert proc.poll() is None
-        client = await SessionHostClient.connect(port=facts["port"])
+        client = await client_type.connect(port=facts["port"])
         restored = await client.attach(cursor, nonce=nonce.encode())
         assert restored.child_pid == hello.child_pid
         assert restored.max_seq == cursor
@@ -557,14 +629,16 @@ async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path, legacy,
         assert proc.returncode == 0
         assert not pid_alive(hello.child_pid)
     finally:
-        if client is not None:
-            await client.close()
-        if proc.poll() is None:
-            proc.kill()
-            await asyncio.to_thread(proc.wait, timeout=5)
-        _stdout, stderr = proc.communicate(timeout=5)
-        if stderr:
-            print(stderr.decode("utf-8", "replace"))
+        try:
+            if client is not None:
+                await _close_frontend(client)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                await asyncio.to_thread(proc.wait, timeout=5)
+            _stdout, stderr = proc.communicate(timeout=5)
+            if stderr:
+                print(stderr.decode("utf-8", "replace"))
 
 
 @pytest.mark.asyncio

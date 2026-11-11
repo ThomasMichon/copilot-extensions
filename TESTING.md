@@ -154,6 +154,16 @@ context, not an installed guest Worktrees runtime. These are bounded synthetic
 ACP-child controls, not native Copilot, historical-release rollback or SDK
 observer/idle qualification.
 
+The same real-process flow additionally executes the exact prior
+`0.4.0-dev150` frontend and protocol sources from their immutable Git blobs.
+It verifies both content hashes before loading them in an isolated module
+namespace; corruption refuses before the client is imported. Both frontends
+exercise the same current compact exports, with bounded stream closure and
+independent child cleanup. The close bound leaves the current client's internal
+timeout/abort recovery room to finish while also bounding the older client.
+This is actual prior frontend source compatibility,
+not an old installed Host, historical binary rollback or native SDK evidence.
+
 ## Owner-only hosted Windows escape hatch
 
 `windows-qualification.yml` is an explicit manual lane on a disposable
