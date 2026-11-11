@@ -233,6 +233,11 @@ Inspection also compares current metadata with a confirmed creation's original
 repository ID and default branch; drift is incomplete, not another protected
 creation. Repository slugs use GitHub's case-insensitive identity in stored and
 observed metadata, while IDs and default-branch names remain exact.
+Existing receipt inspection and separately confirmed protection repair remain
+available after the harness acquires its knowledge binding. They retain
+canonical project/composition, current account and original receipt/identity
+checks; they never change that binding. New creation, acquisition and local
+registration keep their existing unbound-harness admission.
 
 Preview/inspection and apply use aggregate 18/26-second budgets with a
 two-second cleanup reserve, enclosing provider children, all policy pages and

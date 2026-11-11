@@ -31,7 +31,7 @@ def action_target(project: str) -> dict[str, str]:
     return target(project, "knowledge-creation")
 
 
-def _selection(project: str, url: str) -> dict:
+def _selection(project: str, url: str, *, recovery: bool = False) -> dict:
     canonical = protocol.https_url(url)
     parsed = urlsplit(canonical)
     parts = parsed.path.strip("/").removesuffix(".git").split("/")
@@ -42,7 +42,7 @@ def _selection(project: str, url: str) -> dict:
         raise ConfigurationError("unsupported-creation-target", "Choose an exact personal github.com HTTPS repository.")
     owner = identity(parts[0])
     slug = owner + "/" + parts[1]
-    context, registry = context_selection(project)
+    context, registry = context_selection(project, require_unbound=not recovery)
     index = AccountLookupIndex.from_registry(registry)
     login = identity(repos.account_for_github_slug(slug, registry=registry, index=index), allow_empty=True)
     if not login:
@@ -158,7 +158,7 @@ def _worker(request: dict) -> dict:
     project, url, operation = request["project"], request["url"], request["operation"]
     budget = OwnedExecutionBudget(request["deadline"], request["cleanup_reserve"])
     with inrepo_config_source.resolution_budget(deadline=budget.execution_deadline):
-        selected = _selection(project, url)
+        selected = _selection(project, url, recovery=operation != "create")
 
         def checkpoint():
             if time.monotonic() >= budget.execution_deadline:
@@ -166,7 +166,7 @@ def _worker(request: dict) -> dict:
 
         def revalidate():
             checkpoint()
-            if _selection(project, url) != selected:
+            if _selection(project, url, recovery=operation != "create") != selected:
                 raise ConfigurationError("preview-conflict", "Native selection changed; refresh and preview again.")
             checkpoint()
 

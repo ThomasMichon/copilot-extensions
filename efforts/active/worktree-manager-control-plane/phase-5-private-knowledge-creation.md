@@ -284,3 +284,10 @@ retaining exact source/branch, unique parameter, page-size and next-page
 validation. All 33 provider cases pass, including reordered links and rejection
 of duplicate or unrelated query parameters; the native/credential baseline
 above remains unchanged.
+
+Receipt recovery retains canonical project/composition and original provider
+identity checks after knowledge binding. Only new creation, acquisition and
+registration require the harness to remain unbound. The selected lifecycle
+and legacy-admission packet passes 66 cases, including inspection and
+separately confirmed protection completion against an existing binding without
+changing its registry/configuration bytes.

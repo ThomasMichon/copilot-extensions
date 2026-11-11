@@ -439,6 +439,39 @@ def test_equivalent_github_url_casing_remains_inspectable_and_repairable(native,
     assert result["repository"] == completed["repository"] and len(mutations(selected)) == 3
 
 
+def test_confirmed_receipt_can_be_inspected_and_repaired_after_normal_knowledge_binding(native, selected):
+    from agent_worktrees import config as cfg
+    from agent_worktrees.repos_knowledge_registration import context_selection
+
+    proposed = worker("preview")
+    selected["failure"] = "protection-denied"
+    partial = worker("apply", token=proposed["token"])
+    assert partial["creation"] == "confirmed" and partial["status"] == "incomplete"
+    selected["failure"] = ""
+    source = repos._repos_yaml_path()
+    value = yaml.safe_load(source.read_text())
+    value["repos"]["knowledge"] = {
+        "class": "knowledge", "agent": False, "remote": URL, "account": "selected",
+        "default_branch": "provider-default", repos._current_platform(): str(native / "knowledge"),
+    }
+    source.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = cfg.project_dir("sample") / "config.yaml"
+    configuration.parent.mkdir(parents=True, exist_ok=True)
+    configuration.write_text("knowledge_repo: knowledge\n", encoding="utf-8")
+    before_registry, before_binding = source.read_bytes(), configuration.read_bytes()
+    with pytest.raises(ConfigurationError, match="unbound"):
+        context_selection("sample")
+    with pytest.raises(ConfigurationError, match="unbound"):
+        worker("preview")
+    observation = worker("preview", operation="inspect", receipt=partial["receipt"])
+    assert observation["creation"] == "confirmed" and observation["observed_repository"] == partial["repository"]
+    assert observation["observation_status"] == "observed"
+    repair = worker("preview", operation="protect-default", receipt=partial["receipt"])
+    completed = worker("apply", operation="protect-default", receipt=partial["receipt"], token=repair["token"])
+    assert completed["status"] == "protected" and len(mutations(selected)) == 3
+    assert source.read_bytes() == before_registry and configuration.read_bytes() == before_binding
+
+
 def test_actual_worker_timeout_reaps_console_descendant_and_never_replays(native, monkeypatch):
     marker = native / "late-descendant"
     calls = []
