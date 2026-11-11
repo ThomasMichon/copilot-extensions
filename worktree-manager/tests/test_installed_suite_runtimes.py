@@ -328,10 +328,32 @@ def _selection(tmp_path):
 
 @pytest.mark.parametrize(
     "defect", [None, "missing", "extra", "gated", "failed", "foreign-root", "foreign-payload",
-               "readiness-disabled", "reduced-profile"],
+               "readiness-disabled", "reduced-profile", "payload-only", "payload-only-module",
+               "payload-only-root", "payload-only-eligible", "payload-only-status",
+               "payload-only-foreign", "payload-only-missing-runtime", "payload-only-unknown"],
 )
 def test_runtime_observation_requires_the_complete_eligible_private_portfolio(tmp_path, defect):
     profile, portfolio, payloads, home = _selection(tmp_path)
+    if defect and defect.startswith("payload-only"):
+        row = {
+            "eligible": False, "status": "payload-only", "root": None,
+            "payload": payloads["example-guidance"]["path"],
+        }
+        portfolio["example-guidance"] = row
+        if defect == "payload-only-module":
+            row["status"] = "SKIPPED (payload-only)"
+        elif defect == "payload-only-root":
+            row["root"] = str(home / ".example-guidance")
+        elif defect == "payload-only-eligible":
+            row["eligible"] = True
+        elif defect == "payload-only-status":
+            row["status"] = "source dir not found"
+        elif defect == "payload-only-foreign":
+            row["payload"] = str(tmp_path / "foreign-guidance")
+        elif defect == "payload-only-missing-runtime":
+            del portfolio["agent-machines"]
+        elif defect == "payload-only-unknown":
+            portfolio["unknown-guidance"] = portfolio.pop("example-guidance")
     if defect == "missing":
         del portfolio["agent-machines"]
     elif defect == "extra":
@@ -348,7 +370,7 @@ def test_runtime_observation_requires_the_complete_eligible_private_portfolio(tm
         profile["repository_config"]["require_application_readiness"] = False
     elif defect == "reduced-profile":
         del profile["settings"]["enabledPlugins"]["example-guidance@example"]
-    if defect is None:
+    if defect in (None, "payload-only", "payload-only-module"):
         RUNTIMES["validate_portfolio"](profile, portfolio, payloads, home)
     else:
         with pytest.raises(ValueError):
@@ -447,6 +469,10 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
             "eligible": True, "status": "",
         }
     engine = home / ".agent-worktrees" / "versions" / "1.0" / ".venv" / "Scripts" / "python.exe"
+    portfolio["example-guidance"] = {
+        "eligible": False, "status": "payload-only", "root": None,
+        "payload": payloads["example-guidance"]["path"],
+    }
 
     def run(argv, environment, cwd, diagnostics, label, *, timeout):
         assert 0 < timeout <= 120

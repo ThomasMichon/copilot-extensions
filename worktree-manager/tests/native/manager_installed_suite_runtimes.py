@@ -81,8 +81,18 @@ def expected_runtimes(profile: dict) -> set[str]:
 
 def validate_portfolio(profile: dict, portfolio: dict, payloads: dict, home: Path) -> None:
     names = expected_runtimes(profile)
-    if not isinstance(portfolio, dict) or set(portfolio) != names:
+    if not isinstance(portfolio, dict) or not names <= set(portfolio):
         raise ValueError("The installed planner did not select the complete runtime portfolio")
+    for name in set(portfolio) - names:
+        row = portfolio[name]
+        if (
+            profile["inventory"].get(name, {}).get("runtime_scope") != "none"
+            or row.get("eligible") is not False
+            or row.get("status") not in ("payload-only", "SKIPPED (payload-only)")
+            or row.get("root") is not None
+            or Path(row.get("payload", "")).resolve() != Path(payloads[name]["path"]).resolve()
+        ):
+            raise ValueError(f"{name}: the installed planner returned an unexpected non-runtime")
     for name in sorted(names):
         row = portfolio[name]
         if (

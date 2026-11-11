@@ -1276,3 +1276,26 @@ and command ownership, not a released installer, runtime API or operator
 procedure. This journal records the evidence and limitations; no public usage
 documentation changes are needed. The install-contract guard passes for all
 13 plugins.
+
+Run 42966913273 at `d8e7f834e0b74d9cb526cc335bf635112b8c52d1`
+passed normal and repair; fresh reached successful ordinary Manager update
+(exit zero after 518.2 seconds) and then failed the witness's portfolio
+comparison. Its actual installed planner returned all 24 selected plugins:
+13 eligible runtime entries and 11 explicitly ineligible payload-only entries
+with null runtime roots. Comparing that whole map with the runtime-only
+expectation incorrectly treated those legitimate payload entries as extra
+runtimes. Fresh settlement now succeeds with no errors or remaining tasks.
+Required CI independently passes all three required jobs at this exact head.
+
+The observation validator now classifies those extra entries only when the
+frozen inventory declares them payload-only, the planner explicitly reports
+that status with no runtime eligibility/root, and the payload path matches
+the acquired selection. Unknown extras, a missing runtime, a rooted/eligible
+payload-only entry and failed/foreign runtime selections still fail. The
+construction control now models the actual mixed planner response instead of
+an unrealistically runtime-only response. All 48 focused runtime controls pass,
+including the classification's success and refusal cases; lint and whitespace
+checks pass. This remains a fixture-only correction with no operator-document
+or install-contract change. Actual selected imports, Machines readiness and
+Manager lifecycle actions still need the next exact-head disposable run; a
+successful update command alone does not establish those later contracts.
