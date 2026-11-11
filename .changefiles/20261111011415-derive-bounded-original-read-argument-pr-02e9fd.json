@@ -1,0 +1,9 @@
+{
+  "comment": "Derive bounded original read-argument predicates for the existing native pre-tool proof",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

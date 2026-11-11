@@ -490,6 +490,18 @@ bound inside the unchanged ten-minute job; no cases or workers are added by
 the split.
 The residual runs after a primary-step failure unless the job is cancelled;
 either runner's failure still fails the job and the full qualification.
+The same fallback worker then runs the disjoint bare-argument packet; the
+existing job, child/item/group limits and worker count are unchanged. Its
+registered single/mixed-batch controls cover PS5.1/PS7 and legacy/cell admission,
+ordered original/candidate/original/protected observations, one declaration
+load/shared source pass and a real later protected denial. The focused
+`tests/test_native_shell_arguments.py` controls compare every generated boolean
+regex with its actual original Python owner on both native engines, including
+invariant-case behavior, original write/PR indicators and full-match boundaries.
+They exercise original heads/keys/carriers, member precedence and uncertainty,
+128/129 calls, invalid/absent optional facts and the actual preceding shared
+reader with new data. No JSON decoder, original policy owner or budget changes
+are implied by these finite source controls.
 The controls use actual membership and guard-map publication for legacy and
 installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
