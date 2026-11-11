@@ -246,6 +246,21 @@ packet. Controller support does not supply or qualify the candidate fixture.
 Neither packet qualifies new-window/no-mux modes or survival after all caller
 cleanup Jobs close; a detached `embody` result cannot qualify the TTY caller.
 
+`submit --packet native-worktrees-manager-no-mux` selects only
+`test_manager_no_mux_decision` in `tests/native/test_manager_application_launch.py`.
+It constructs and installs a fresh Manager wheel application, then passes a
+saved local resume decision through the real Manager decision dispatcher and
+engine process boundary, rather than calling its PowerShell launcher directly.
+The installed Manager supplies that launcher. Fresh and resumed native Copilot
+legs retain one history, seed non-replay, correlated Manager/engine terminal
+receipts, and exact process/pane cleanup; neither leg may create a Manager mux
+session. The existing private ConPTY supplies terminal transport, not a visible
+new-window claim. This fixed Worktrees packet uses the same feed, native pins
+and sanitizer, with the original 300-second Manager case, 420-second plugin
+aggregate and 180-second native bounds. It does not exercise interactive Picker
+keystrokes, new-window presentation or caller-Job independence. Its protected
+controller support must be reviewed and promoted before submission.
+
 `submit --packet native-worktrees-caller-jobs` separately selects
 `test_public_caller_job_lifetime` in the same source fixture. Only this
 selection uses the existing hosted native application owner, with renewable

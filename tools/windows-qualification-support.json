@@ -5,5 +5,5 @@
   "transport_ref": "refs/qualification/windows-inputs",
   "transport_format": "windows-qualification-transport-v1",
   "selection_kinds": ["plugin", "tools", "packet"],
-  "packets": ["bridge-http52", "mcp-caller-lifetime", "desktop-capability", "native-worktrees-embody", "native-worktrees-copilot", "native-worktrees-caller-jobs", "native-driver-auth-wait", "native-driver-inflight", "native-driver-observation-loss", "native-driver-startup-seed", "native-driver-startup-no-seed", "native-driver-startup-cold-resume"]
+  "packets": ["bridge-http52", "mcp-caller-lifetime", "desktop-capability", "native-worktrees-embody", "native-worktrees-copilot", "native-worktrees-caller-jobs", "native-worktrees-manager-no-mux", "native-driver-auth-wait", "native-driver-inflight", "native-driver-observation-loss", "native-driver-startup-seed", "native-driver-startup-no-seed", "native-driver-startup-cold-resume"]
 }
