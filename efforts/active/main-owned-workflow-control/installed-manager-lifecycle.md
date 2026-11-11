@@ -1472,3 +1472,21 @@ disposable Windows lane must still prove unchanged payloads, complete fresh
 actions and settlement, and resolve or expose the normal bootstrap failure.
 Authentic upgrade, mandatory frozen enforcement and separate Main adoption
 remain open.
+
+Required CI at `c0887c9d3a6ced56286ed93aa95ca6686630f21d` exposes a second
+binding that the native-helper literal change must maintain. The Linux eligible
+unit job passes 4,711 cases, then refuses the closed catalog typing witness:
+`Catalog module/validator/renderer binding changed`. This failure is not waived
+by the source-digest refresh or native controls.
+
+The semantic AST comparison confirms only the module and `render` hashes
+changed; `_load_command`, `load_manifest` and `expected_files` retain their
+reviewed bindings. The closed `python-catalog-inputs.json` declaration now
+records those two reviewed shapes, and its existing eligible-unit source
+digest is refreshed from staged LF bytes. Source membership, validator/enum/
+conversion checks, declared functions, unit nodes, coverage and budgets remain
+unchanged. All 18 catalog correspondence/refusal controls pass. This is binding
+maintenance, not a weaker witness or operator-facing protocol change; the next
+exact-head required CI still owns the full Linux unit result. The already-running
+`c0887c9d` native matrix is left running and will retain its own exact-head
+outcome rather than being cancelled or credited to a later metadata commit.
