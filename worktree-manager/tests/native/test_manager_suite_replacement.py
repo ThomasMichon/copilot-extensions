@@ -12,6 +12,7 @@ from contextlib import contextmanager, nullcontext
 import json
 import os
 from pathlib import Path
+import re
 import runpy
 import socket
 import sys
@@ -157,6 +158,8 @@ def test_assembled_update_capture_preserves_genuine_progress_with_a_finite_budge
     program = (
         "import sys;sys.path.insert(0,sys.argv[1]);"
         "import installer_source_build as builds;"
+        "import itertools;from types import SimpleNamespace;"
+        "builds.time=SimpleNamespace(monotonic=itertools.count().__next__);"
         "progress=builds._SourceProgress('source-selection',180,0);"
         "[progress.renew() for _ in range(100000)];print('settled')"
     )
@@ -245,6 +248,33 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
     trace = json.loads(report.read_text(encoding="utf-8"))
     assert trace["stop_observed"] and trace["scan_errors"] == 0 and not trace["window_armed"]
     assert trace["records"] == [] and not trace["truncated"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
+def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(tmp_path: Path) -> None:
+    from agent_procutil import no_window_kwargs
+    from manager_suite_artifacts import _runtime_process_trace_script
+
+    ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
+    (tmp_path / "process-trace-window").write_text("baseline")
+    private = "private query argument must not enter diagnostics"
+    prefix = (
+        f"function Get-CimInstance {{throw '{private}'}};"
+        "function Start-Sleep {param($Milliseconds);"
+        f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
+    )
+    result = subprocess.run(
+        [shutil.which("pwsh"), "-NoProfile", "-NonInteractive", "-Command",
+         prefix + _runtime_process_trace_script(tmp_path / "h", ready, stop, report)],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 1
+    raw = report.read_text(encoding="utf-8")
+    assert private not in raw
+    trace = json.loads(raw)
+    assert trace["scan_errors"] == 1 and trace["stop_observed"]
+    (failure,) = trace["scan_failures"]
+    assert failure["type"] and isinstance(failure["hresult"], int)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows process inventory")
@@ -522,7 +552,10 @@ def test_native_stop_uses_installed_selection_when_payload_generation_is_not_ins
         [["stop"], ["engine", "stop"]] if component == "agent-index" else [["--stop"]]
     )
     if component == "agent-index":
-        assert all(Path(call["cache"]).samefile(root / "cache" / "python") for call in calls)
+        caches = [Path(call["cache"]) for call in calls]
+        assert all(cache.parent.samefile(root / "cache" / "python") for cache in caches)
+        assert all(re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name) for cache in caches)
+        assert len(set(caches)) == 1
 
 
 @pytest.mark.skipif(os.name != "nt" or shutil.which("pwsh") is None, reason="Native Bridge task resolver")
@@ -1067,7 +1100,7 @@ def test_construction_owner_failure_survives_closed_input_pipe(tmp_path: Path, o
         capture_output=True, text=True, timeout=30, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Construction owner exited (9): fixture owner failure" in result.stdout
+    assert "(construction helper exit 9): fixture owner failure" in result.stdout
 
 
 @pytest.mark.parametrize("mode", ("normal", "repair"))

@@ -90,6 +90,7 @@ def test_fresh_acquisition_owns_its_git_settings_before_any_constructor(
         assert json.loads((project.parent / "setup.json").read_text())["project_root"] == str(project)
         assert outer_settings.read_text() == '{"extraKnownMarketplaces":{"outer-only":{}}}'
         assert (diagnostics / "suite-project-init.stdout.txt").is_file()
+        assert not (project.parent / "process-trace-window").exists()
         raise BeforeConstruction
 
     monkeypatch.setitem(

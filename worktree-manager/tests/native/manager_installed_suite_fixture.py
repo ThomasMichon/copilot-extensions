@@ -139,7 +139,6 @@ def prepare(directory):
     _private_psmux(case / "mux", str(mux), namespace, env)
     setup["mux_namespace"] = namespace
     suite._write(case / "setup.json", setup)
-    (case / "process-trace-window").write_text("fresh", encoding="utf-8")
     artifact = case / "suite-artifact"
     payloads._PROVENANCE["build"](artifact, source_root=suite.REPO)
     candidate = setup["identity"]["candidate_commit"]
@@ -223,6 +222,7 @@ def prepare(directory):
             "mux_sha256": hashlib.sha256(mux.read_bytes()).hexdigest(), "ready": True,
         })
         suite._write(case / "setup.json", setup)
+        (case / "process-trace-window").write_text("fresh", encoding="utf-8")
 
 
 def _verify_prepared(case, setup, run):
@@ -309,6 +309,7 @@ def exercise(directory):
             case, env, suite._python(case / "h" / ".worktree-manager"),
             suite._python(case / "h" / ".agent-worktrees"), Path(setup["copilot"]),
             budget, requests, mux_binary=setup["mux"], run=run,
+            launch_timeout=120,
         ) as witness:
             actions = lifecycle._actions(witness)
     if any(row.status != "settled" for row in cleanup):

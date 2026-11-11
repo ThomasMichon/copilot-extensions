@@ -381,7 +381,7 @@ def _events(path, owner):
 class _Witness:
     def __init__(
         self, root, env, manager_python, engine, copilot, budget, provider_requests=(),
-        *, mux_binary=None, run=None,
+        *, mux_binary=None, run=None, launch_timeout=None,
     ):
         self.root, self.env = root, env
         self.manager_python = manager_python
@@ -396,6 +396,7 @@ class _Witness:
         self.provider_requests = provider_requests
         self.mux_binary = mux_binary
         self.run = installed._run if run is None else run
+        self.launch_timeout = launch_timeout
         self.stack = ExitStack()
 
     def rendered(self, console):
@@ -722,7 +723,33 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
             error.add_note(f"Native owner observation: {diagnostic_error}")
         raise error
 
+    def _turn_started(self, prompt, number):
+        paths = (
+            [self.history] if self.history else sorted(
+                (Path(self.env["COPILOT_HOME"]) / "session-state").glob("*/events.jsonl"),
+            )
+        )
+        observed = any(
+            event["type"] == "user.message" and event["data"].get("content") == prompt
+            for path in paths for event in _events(path, Path(self.env["COPILOT_HOME"]))
+        )
+        self.turn_observation = {
+            "phase": "launch-readiness", "turn": number, "prompt_seen": observed,
+            "histories": len(paths), "provider_requests": len(self.provider_requests),
+        }
+        return observed
+
     def turn(self, prompt, number, console):
+        launch_elapsed = None
+        launch_timeout = getattr(self, "launch_timeout", None)
+        if launch_timeout is not None and number in (1, 4):
+            started = time.monotonic()
+            self.wait(
+                lambda: self._turn_started(prompt, number),
+                f"Native launch/readiness did not record {prompt}", timeout=launch_timeout,
+            )
+            launch_elapsed = time.monotonic() - started
+
         def finished():
             paths = (
                 [self.history]
@@ -767,6 +794,8 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                 "histories": histories,
                 "reply_in_terminal": f"LIFECYCLE_REPLY_{number}" in installed._visible(console.output),
             }
+            if launch_elapsed is not None:
+                self.turn_observation["launch_readiness_seconds"] = launch_elapsed
             if len(matches) > 1:
                 raise RuntimeError("One Manager operation produced multiple conversations")
             if not matches:
@@ -1532,12 +1561,59 @@ def test_lifecycle_conversation_diagnostics_distinguish_history_from_rendering(t
         assert row["event_types_omitted"] == 0
 
 
+@pytest.mark.parametrize(
+    "launch_timeout,execution_deadline,completed,expected_clock",
+    [(None, 200, False, 60), (120, 200, True, 100), (120, 95, False, 100)],
+)
+def test_fullsuite_launch_phase_preserves_core_turn_and_outer_deadlines(
+    tmp_path, monkeypatch, launch_timeout, execution_deadline, completed, expected_clock,
+):
+    from types import SimpleNamespace
+
+    home = tmp_path / "copilot-home"
+    history = home / "session-state" / "fixture-session" / "events.jsonl"
+    history.parent.mkdir(parents=True)
+    clock = [0]
+    witness = _Witness(
+        tmp_path, {"COPILOT_HOME": str(home)}, None, None, None,
+        SimpleNamespace(execution_deadline=execution_deadline), launch_timeout=launch_timeout,
+    )
+    witness._capture_processes = lambda: None
+    witness.one_native = lambda: (101, 1001)
+
+    def sleep(_seconds):
+        clock[0] += 10
+        if clock[0] >= 90:
+            assert witness.history is None
+            events = [{"type": "user.message", "data": {"content": PROMPTS[0]}}]
+            if clock[0] >= 100:
+                events.extend([
+                    {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+                    {"type": "assistant.turn_end", "data": {}},
+                ])
+            history.write_text("".join(json.dumps(row) + "\n" for row in events), encoding="utf-8")
+
+    monkeypatch.setitem(
+        _Witness.turn.__globals__, "time",
+        SimpleNamespace(monotonic=lambda: clock[0], sleep=sleep),
+    )
+    console = SimpleNamespace(output=b"LIFECYCLE_REPLY_1")
+    if completed:
+        assert witness.turn(PROMPTS[0], 1, console) == (101, 1001)
+        assert witness.history == history
+        assert witness.turn_observation["launch_readiness_seconds"] == 90
+    else:
+        with pytest.raises(TimeoutError, match="Native conversation did not finish"):
+            witness.turn(PROMPTS[0], 1, console)
+    assert clock[0] == expected_clock
+
+
 @pytest.mark.parametrize("rendered", [True, False])
 @pytest.mark.parametrize("persisted", [True, False])
 @pytest.mark.parametrize("number", [1, 4])
 @pytest.mark.skipif(os.name != "nt", reason="The native pane uses a private PSMux namespace")
 def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(
-    tmp_path, monkeypatch, rendered, persisted, number,
+    tmp_path, rendered, persisted, number,
 ):
     from types import SimpleNamespace
     from plugin_test_command_safety import private_mux_args
@@ -1586,7 +1662,7 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(
         return f"LIFECYCLE_REPLY_{number}" if rendered else "unfinished"
 
     witness.records = records
-    monkeypatch.setattr(installed, "_run", capture)
+    witness.run = capture
     result = witness.turn(PROMPTS[number - 1], number, SimpleNamespace(output=b"cursor redraw"))
     assert result == (("native-pid", "native-birth") if rendered and persisted else None)
     assert owners == ([history] if rendered and persisted else [])

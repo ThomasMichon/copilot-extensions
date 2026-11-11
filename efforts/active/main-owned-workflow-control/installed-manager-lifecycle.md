@@ -90,8 +90,9 @@ The following implementation decomposition is **agent-recommended**.
   enabled; a manually assembled Manager/engine pair cannot be called a suite
   installation without proving the selected suite closure.
   Frozen payload delivery is verified by #11972 and exact-source run
-  42933306312 for all 24 declared payloads. Complete runtime construction and
-  actual Machines readiness remain unverified; this item stays open.
+  42933306312 for all 24 declared payloads. Run 43014684583 additionally
+  verifies complete fresh runtime construction and actual Machines readiness.
+  Full fresh lifecycle acceptance remains unverified; this item stays open.
 
 ### Phase 2 - Extend the authentic installed consumer
 
@@ -1521,3 +1522,48 @@ candidate, and required CI must independently pass it. Documentation-impact
 review updates the fresh-versus-admitted observation distinction in TESTING.md.
 Complete fresh acceptance, authentic upgrade, frozen enforcement and separate
 Main adoption remain open.
+
+### November 11 - Fresh launch phase and bounded lifecycle observation
+
+Required CI passes at `bedaf3e3eb574d96e3e41811361321762f65693e`.
+Exact-source run 43014684583 passes normal and repair. Fresh preparation now
+passes complete construction, all 13 runtime imports/versions, actual Machines
+readiness, unchanged frozen payload/transport/artifact checks and the separate
+non-admission Manager observation. Exercise still fails: paired worktree and
+instruction preparation finish, but no user history or provider request exists
+when the witness's 60-second completed-turn clock expires. Settlement succeeds.
+No fresh Create/Resume/Open acceptance or source admission is inferred.
+
+Source tracing identifies two existing, independently bounded 60-second New
+required-readiness passes, including one after instruction preparation. Fresh
+now separately waits up to 120 seconds for the actual initial/resumed user event,
+then applies the unchanged 60-second completed-turn proof. Both waits are clipped
+to the unchanged exercise deadline; core timing, production readiness, UI
+actions, duplicate-owner/history checks and rendered reply requirements remain
+unchanged. Three virtual-clock controls prove unchanged core timeout, fresh
+phase completion and refusal at the outer deadline.
+
+The same run's observer consumed its 512 process identities during construction
+and reported one scan error. Its cause is still unproven. Fresh now arms this
+trace only after preparation records readiness. The cap and scan-error failure
+remain; the first eight failures retain only exception type and HRESULT, never
+messages or arguments. A real controlled PowerShell scan failure still exits
+nonzero with sanitized diagnostics.
+
+The focused phase/pane/trace packet passes all 19 controls. A broader local
+packet passes 231 cases before exposing one overstrict synthetic cache
+expectation; both installed stop-selection cases pass after correction.
+Encountered stale test fixtures now use the witness's injected runner, advance
+a virtual progress clock through the real throttled emitter, verify the current
+unsealed Index cache namespace, and retain exact construction exit-code/stderr
+proof without requiring one obsolete leading message. No production runtime
+hunks change in this slice. Four hosted-native acceptance cases were explicitly
+not credited locally: they require their actual executable or prepared disposable
+VM inputs. Ruff, the 13-plugin install contract, documentation consistency and
+whitespace pass.
+
+Documentation-impact review updates TESTING.md's fresh launch and trace phases;
+no public invocation, readiness policy or deadline changes. The next exact-head
+hosted matrix must still prove complete fresh UI actions and settlement.
+Authentic upgrade, mandatory frozen enforcement and separate Main adoption
+remain open, as does the older cooperatively reported normal bootstrap cause.

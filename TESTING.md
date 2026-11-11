@@ -10146,12 +10146,22 @@ module and cache-flag observations. Raw command lines and argument values are
 not retained. Readiness and the final stop/report are checked; scan failures
 remain explicit failures. This trace supplies candidate launch evidence, not
 proof that a particular process wrote a changed file.
+For fresh selected-suite installation, the trace starts only after preparation
+has recorded readiness; constructor processes cannot consume the lifecycle
+record allowance. Scan failures retain at most eight exception types and
+HRESULTs, never exception messages or argument values, and still fail the lane.
 The assembled Manager update retains a finite stderr allowance of 4 MiB per
 declared component plus Manager, rather than applying one component's 4 MiB
 capture to the entire suite. Other fixture calls and stdout keep their existing
 limits; execution deadlines and per-unit source progress remain unchanged.
 
 Cold preparation has an 1800-second owned-process deadline; exercise has 900 seconds.
+The fresh lifecycle witness separately waits up to 120 seconds for the actual
+initial or resumed user event, covering the two existing 60-second New
+required-readiness passes before the unchanged 60-second completed-turn check.
+Both waits remain clipped to the exercise deadline. The installed-core witness
+keeps its existing timing; this phase split neither changes production
+readiness deadlines nor permits incomplete conversation or pane evidence.
 Assertions retain a separate 300-second runner boundary and the usual pytest
 item limit. Settlement runs independently after success, stage failure or
 timeout. The disposable VM owns the outer scheduled-registration and explicit
