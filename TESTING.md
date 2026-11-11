@@ -3096,6 +3096,32 @@ prompt-mode model exposes `manage_schedule`. They do not qualify other agent/she
 modes, complete pending snapshots, ACP idle grace, another pinned runtime or
 survival after caller cleanup Jobs.
 
+The explicit T3 file `tests/native/test_native_acp_inventory.py` distinguishes
+the native ACP and public SDK inventory boundaries. Its ACP control creates and
+prompts a real session, checks that the staged foreground extension did not
+start, and requires explicit method-not-found responses from both SDK inventory
+reads over ACP. This is unavailable evidence, never an empty inventory or a
+permanent claim about future runtimes. A prompt-mode control checks the same
+joined script can load and read the actual arrays.
+
+The public SDK control requires an explicitly selected
+`COPILOT_NATIVE_TEST_SDK_PYTHON`: an isolated interpreter containing a seasoned
+`github-copilot-sdk` installation. It never installs dependencies or downloads
+a runtime itself. The helper launches the selected native CLI's headless TCP
+mode, retains its actual process handle, uses an ephemeral connection token,
+and connects with the public `RuntimeConnection.for_uri` API. It creates one
+session with an explicit local synthetic provider and streaming, reads tasks
+and schedules before and after the real model turn, checks the returned reply,
+then disconnects and retires the exact helper/native process births. No SDK
+private connection or process field is read. The SDK's Python requirement does
+not change Driver's runtime Python floor.
+
+These controls do not migrate Session Host from native ACP to an SDK adapter,
+qualify nonempty headless tasks/schedules or complete pending snapshots, enable
+idle expiry, attribute observer retirement, or qualify another selected
+runtime/platform. Native and SDK versions must be recorded with each result;
+package availability alone is not runtime support.
+
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied
 launch commands. Inline and split resume arguments must be replaced, not duplicated;
