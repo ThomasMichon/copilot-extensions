@@ -274,3 +274,21 @@ synthetic fixtures. Live adoption is a separate explicit decision.
   unchanged. These remain isolated synthetic checks; no live external venue,
   enrollment, installation or deployment was exercised. Updated publication,
   fresh independent review and required CI remain gates before merge.
+
+### 2026-11-11 - Phase 4 aligned-source performance correction
+
+- Skip historical bookkeeping-digest searches when the current source digest
+  already matches the materialized declaration. A real source mismatch still
+  requires the existing bounded proof; acceptance and ownership guards are
+  unchanged.
+- The new regression reproduced 256 unnecessary historical hashes for one
+  aligned assignment before the fix. Both aligned and drift cases now pass:
+  the former performs no historical hashes, while the latter proves the prior
+  revision normally.
+- All 158 tests in the affected topology-dispatch file passed, along with
+  Python F/E9 lint, strict agent-roles checks for Linux and Windows, and
+  whitespace checks. Earlier integration evidence remains applicable; this
+  correction adds no native operation or provisioning path.
+- Validation remains isolated and synthetic, with no live enrollment,
+  installation, deployment or external-venue effects. Publication, fresh
+  independent review and required CI still gate merge.

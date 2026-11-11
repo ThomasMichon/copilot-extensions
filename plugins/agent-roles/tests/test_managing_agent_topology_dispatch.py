@@ -14,7 +14,7 @@ import pytest
 SKILL = Path(__file__).resolve().parents[1] / "skills" / "managing-agent-topology"
 sys.path.insert(0, str(SKILL / "scripts"))
 from topology import BOOKKEEPING_REVISION_WINDOW, Topology  # noqa: E402
-from topology_contract import ContractError, read_json, timestamp, validate  # noqa: E402
+from topology_contract import ContractError, content_revision, read_json, timestamp, validate  # noqa: E402
 
 AT = "2026-01-01T00:01:00Z"
 pytestmark = [
@@ -156,6 +156,30 @@ def test_only_joined_native_acceptance_counts_and_routes(
     assert route["target"]["headRevision"] == 7
     assert route["advisoryOnly"] and route["nativeHeadRecheckRequired"]
     assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("bookkeeping_drift", [False, True])
+def test_overview_searches_historical_digests_only_for_source_drift(
+    document: dict[str, Any], monkeypatch: pytest.MonkeyPatch, bookkeeping_drift: bool,
+) -> None:
+    document["revision"] = BOOKKEEPING_REVISION_WINDOW + 1
+    document["observations"]["dispatch"] = [bind_snapshot(document)]
+    if bookkeeping_drift:
+        document["revision"] += 1
+    historical_revisions: list[int] = []
+
+    def observed_revision(value: dict[str, Any]) -> str:
+        source = value.get("source")
+        if source is not None and source["topologyRevision"] < document["revision"]:
+            historical_revisions.append(source["topologyRevision"])
+        return content_revision(value)
+
+    monkeypatch.setattr("topology.content_revision", observed_revision)
+    overview = report(document).overview()
+    assert overview["coverage"][0]["qualifiedCount"] == 1
+    assert overview["holds"] == []
+    assert historical_revisions == ([document["revision"] - 1] if bookkeeping_drift else [])
 
 
 @pytest.mark.portfolio_tier("T1")

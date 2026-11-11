@@ -381,6 +381,8 @@ class Topology:
         declaration = snapshot["task"]["standing_charter"]["declaration"]
         if declaration["expected_materialization_revision"] != materialization["materializationRevision"]:
             return False
+        if declaration["source_revision"] == materialization["sourceRevision"]:
+            return False
         source = materialization["source"]
         revision = source["topologyRevision"]
         return any(
