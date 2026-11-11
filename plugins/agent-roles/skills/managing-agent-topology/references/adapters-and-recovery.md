@@ -174,11 +174,26 @@ The sequence preserves these boundaries:
 
 `assignmentGeneration` is an optional nonnegative integer (or `null`) on saved
 effects for backward-compatible document reads, but this flow requires a
-nonnegative integer on a launch effect. It identifies the original native
+positive integer on a launch effect matching the positive native task generation.
+Native standing revisions must also be positive before the flow proposes a
+fenced operation. The assignment generation identifies the original native
 reservation, not the document or charter revision. Replacing a reservation
 invalidates the old launch generation;
 never rewrite that old effect to make it current. Succession retains the
 original assignment generation in accepted evidence rather than relaunching.
+
+Saving a prepared allocation or launch can advance the topology document revision
+without changing the effective charter. For a single prepared allocation on an
+unowned queued/proposed task, or a single prepared/admitted/consumed launch on a
+claimed task, `flow` may first propose a source-only `reconcile-standing-charter`.
+It verifies the effective revision and reproduces the old source digest by varying
+only `topologyRevision` over at most the preceding 256 revisions. Changed source
+identity, effective content or unrecognized/older digests remain held; matching
+effective content alone is not enough. This bounded offline check is not native
+authority. Persist the materialization and use the native reconciliation owner,
+retaining the effect, envelope, creation key, reservation and generation unchanged.
+Re-read native evidence to obtain the new standing revision before proceeding.
+Already-started tasks retain their owner-reconciliation hold.
 
 A single unknown effect proposes receipt recovery with `replayAllowed: false`
 and the original effect record. Multiple unknown effects, unsettled conflicting

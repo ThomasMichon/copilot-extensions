@@ -21,6 +21,8 @@ from topology_dispatch import (
     proposed_record,
 )
 
+BOOKKEEPING_REVISION_WINDOW = 256
+
 
 class Topology:
     def __init__(self, document: dict[str, Any], at: datetime):
@@ -321,6 +323,26 @@ class Topology:
     def assignment(self, request_id: str) -> dict[str, Any] | None:
         return next((item for item in self.assignments if item["requestId"] == request_id), None)
 
+    @staticmethod
+    def bookkeeping_only(
+        materialization: dict[str, Any] | None, snapshot: dict[str, Any] | None,
+    ) -> bool:
+        """Prove a prior declaration differs only by a bounded document-revision advance."""
+        if materialization is None or snapshot is None:
+            return False
+        declaration = snapshot["task"]["standing_charter"]["declaration"]
+        if declaration["expected_materialization_revision"] != materialization["materializationRevision"]:
+            return False
+        source = materialization["source"]
+        revision = source["topologyRevision"]
+        return any(
+            content_revision({
+                "source": {**source, "topologyRevision": prior},
+                "effective": materialization["effective"],
+            }) == declaration["source_revision"]
+            for prior in range(revision - 1, max(0, revision - BOOKKEEPING_REVISION_WINDOW - 1), -1)
+        )
+
     def flow(self, request_id: str) -> dict[str, Any]:
         """Plan one native-owner step from saved evidence without executing it."""
         assignment = self.assignment(request_id)
@@ -329,12 +351,18 @@ class Topology:
             holds.extend(self.policy_reasons(
                 self.machines[assignment["machine"]], self.roles[assignment["role"]], assignment["kind"],
             ))
+        snapshot = self.dispatch.get(assignment["nativeTask"]) if assignment else None
+        materialization = (
+            self.materialize(request_id) if assignment and assignment["state"] not in {"completed", "released"}
+            else None
+        )
         result = flow(
-            assignment, self.dispatch.get(assignment["nativeTask"]) if assignment else None,
+            assignment, snapshot,
             self.fresh, lambda owner: self.owners.get(owner_key(owner)),
-            self.materialize(request_id) if assignment and assignment["state"] not in {"completed", "released"} else None,
+            materialization,
             self.seed(request_id) if assignment else None, holds,
             "dispatch" in self.observations,
+            lambda: self.bookkeeping_only(materialization, snapshot),
         )
         if result["phase"] in {"persist-assignment", "persist-allocation", "allocate", "reserve", "reconcile"}:
             result["holds"].extend(self.discovery_holds())

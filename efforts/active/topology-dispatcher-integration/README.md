@@ -194,3 +194,26 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - This correction uses isolated synthetic evidence only. No live fleet effect,
   installation or deployment occurred; corrected publication, fresh review and
   required CI remain the next gates before merge.
+
+### 2026-11-11 - Phase 3 bookkeeping-revision and positive-fence correction
+
+- Saving a prepared allocation or launch can advance the topology document
+  revision without changing the effective charter. `flow` now proposes a
+  source-only standing-charter reconciliation for one prepared allocation on an
+  unowned task, or one prepared/admitted/consumed launch on a claimed task with
+  a matching generation. It proves the old source digest differs only by a
+  bounded `topologyRevision` advance; changed identity, effective content or
+  unrecognized digests remain held, and started tasks keep their
+  owner-reconciliation hold. Effects, envelope, creation key, reservation and
+  generation are retained; nothing is replayed.
+- Native standing revisions and claimed/started task generations must now be
+  positive before a fenced operation is proposed.
+- The affected roles file passed 146 tests. The native assignment integration
+  file passed 3 tests, using real Dispatch reconciliation that preserves task
+  identity, owner, generation, session and relationship while advancing the
+  standing revision, then accepting with unchanged launch-seed bytes. Python
+  F/E9 lint, documentation consistency and all enforced Linux/Windows
+  type-check projects passed.
+- Isolated source evidence only; no live fleet effect, installation or
+  deployment occurred. Corrected publication, fresh review and required CI
+  remain the next gates before merge.

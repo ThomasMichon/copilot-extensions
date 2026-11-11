@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import pytest
@@ -98,13 +98,43 @@ def native_accept(admission, step, **changes):
     })
 
 
-def test_saved_full_seed_reaches_exact_native_acceptance(admission, topology_flow, tmp_path):
+def native_reconcile(admission, step):
+    task = admission.queue.get(admission.task.id)
+    relationship = admission.queue.task_relationship(task.id)
+    materialization = step["materialization"]
+    admission.path.write_text(json.dumps(materialization), encoding="utf-8")
+    admission.declaration = replace(
+        admission.declaration,
+        source_revision=materialization["sourceRevision"],
+        expected_materialization_revision=materialization["materializationRevision"],
+    )
+    reconciled = admission.queue.reconcile_standing_charter(
+        task.title, admission.declaration, repo=task.repo, expected_revision=step["expectedRevision"],
+    )
+    assert reconciled.id == task.id
+    assert reconciled.standing_revision == task.standing_revision + 1
+    assert (reconciled.status, reconciled.owner, reconciled.generation) == (
+        task.status, task.owner, task.generation,
+    )
+    assert reconciled.owner_session_id == task.owner_session_id
+    assert admission.queue.task_relationship(task.id) == relationship
+
+
+@pytest.mark.parametrize("advance_revision", [False, True])
+def test_saved_full_seed_reaches_exact_native_acceptance(admission, topology_flow, tmp_path, advance_revision):
     document, inspect = topology_flow
     assert admission.queue.get(admission.task.id).status == "claimed"
     result = inspect()
     assert result["phase"] == "persist-launch" and result["holds"] == []
     path, effect = persist_launch(document, result["nextStep"], tmp_path)
     saved = path.read_bytes()
+    if advance_revision:
+        document["revision"] += 1
+        result = inspect()
+        assert result["phase"] == "reconcile" and result["holds"] == []
+        assert result["nextStep"]["sourceOnly"] and not result["nextStep"]["replayAllowed"]
+        assert result["nextStep"]["retainedEffects"] == [effect]
+        native_reconcile(admission, result["nextStep"])
     result = inspect()
     assert result["phase"] == "launch"
     assert result["nextStep"]["effect"] == effect
@@ -112,6 +142,13 @@ def test_saved_full_seed_reaches_exact_native_acceptance(admission, topology_flo
     assert inspect("overview")["coverage"][0]["qualifiedCount"] == 0
 
     effect.update(state="consumed", nativeRef="synthetic:launch-consumption")
+    if advance_revision:
+        document["revision"] += 1
+        result = inspect()
+        assert result["phase"] == "reconcile" and result["holds"] == []
+        assert result["nextStep"]["sourceOnly"] and not result["nextStep"]["replayAllowed"]
+        assert result["nextStep"]["retainedEffects"] == [effect]
+        native_reconcile(admission, result["nextStep"])
     result = inspect()
     assert result["phase"] == "accept"
     accepted = native_accept(admission, result["nextStep"])

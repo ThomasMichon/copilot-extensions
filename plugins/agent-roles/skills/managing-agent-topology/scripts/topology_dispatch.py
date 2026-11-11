@@ -20,6 +20,7 @@ def flow(
     seed: dict[str, Any] | None,
     holds: list[str],
     supplied: bool,
+    bookkeeping_only: Callable[[], bool],
 ) -> dict[str, Any]:
     """Describe the next step; native owners must recheck every effect fence."""
     result: dict[str, Any] = {
@@ -78,6 +79,21 @@ def flow(
                     "agent-bridge" if effect["kind"] in {"launch", "relay"} else "agent-worktrees",
                     "recover-effect-receipt", effect=effect, replayAllowed=False)
     if mismatch in native["reasons"]:
+        if len(pending) == 1 and bookkeeping_only():
+            effect = pending[0]
+            allocation = (
+                task["status"] in {"proposed", "queued"}
+                and effect["kind"] == "allocate" and effect["state"] == "prepared"
+            )
+            launch = (
+                task["status"] == "claimed" and effect["kind"] == "launch"
+                and effect["state"] in {"prepared", "admitted", "consumed"}
+                and effect.get("assignmentGeneration") == task["generation"]
+            )
+            if (allocation or launch) and effect["charterRevision"] == assignment["charter"]["revision"]:
+                return step("reconcile", "agent-dispatch", "reconcile-standing-charter",
+                            **fences, materialization=materialization, persistMaterializationRequired=True,
+                            sourceOnly=True, retainedEffects=pending, replayAllowed=False)
         if task["status"] == "started" or pending:
             return hold(mismatch, "retained-owner-revision-reconciliation-required")
         return step("reconcile", "agent-dispatch", "reconcile-standing-charter",
@@ -218,6 +234,10 @@ def lane(
         reasons.append("native-declaration-differs-from-current-materialization")
     if task["id"] != assignment["nativeTask"]:
         reasons.append("native-task-identity-conflict")
+    if task["standing_revision"] < 1:
+        reasons.append("native-standing-revision-unqualified")
+    if task["status"] in {"claimed", "started"} and task["generation"] < 1:
+        reasons.append("native-task-generation-unqualified")
     if relationship is not None:
         request = relationship["request"]
         workspace = request["workspace"]
