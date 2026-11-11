@@ -189,6 +189,10 @@ class SessionHost:
     def child_exit_code(self) -> int | None:
         return self._child_exit
 
+    @property
+    def closing(self) -> bool:
+        return self._closing
+
     # -- child reader ------------------------------------------------------
     async def _reader_loop(self) -> None:
         stdout = self._child.stdout
