@@ -12,10 +12,52 @@ import time
 from uuid import uuid4
 
 from copilot import CopilotClient, RuntimeConnection
+from copilot.generated.rpc import TasksRegisterRequest, TasksRemoveRequest, TasksUpdateRequest
+
+
+async def client_task_control(client, session, options):
+    registration = await session.rpc.tasks.register(TasksRegisterRequest.from_dict({
+        "cancellable": False, "clientTaskId": "isolated-client-task",
+        "description": "Isolated SDK inventory control", "type": "client",
+    }))
+    task = registration.task
+    result = {
+        "registration": registration.to_dict(),
+        "running": (await session.rpc.tasks.list()).to_dict(),
+        "runningRemoval": (await session.rpc.tasks.remove(
+            TasksRemoveRequest.from_dict({"id": task.id}),
+        )).to_dict(),
+    }
+    other = await client.create_session(**options)
+    try:
+        result["otherSessionId"] = other.session_id
+        result["otherTasks"] = (await other.rpc.tasks.list()).to_dict()
+    finally:
+        await asyncio.wait_for(other.disconnect(), 5)
+    result["afterOtherDisconnect"] = (await session.rpc.tasks.list()).to_dict()
+    for label, update in (
+        ("idle", {"kind": "progress", "status": "idle"}),
+        ("completed", {"kind": "completed", "result": "ISOLATED_TASK_COMPLETE"}),
+    ):
+        updated = await session.rpc.tasks.update(TasksUpdateRequest.from_dict({
+            "id": task.id, "sequence": task.sequence + 1, "update": update,
+        }))
+        task = updated.task
+        result[f"{label}Update"] = updated.to_dict()
+        result[label] = (await session.rpc.tasks.list()).to_dict()
+        if label == "idle":
+            result["idleRemoval"] = (await session.rpc.tasks.remove(
+                TasksRemoveRequest.from_dict({"id": task.id}),
+            )).to_dict()
+    result["terminalRemoval"] = (await session.rpc.tasks.remove(
+        TasksRemoveRequest.from_dict({"id": task.id}),
+    )).to_dict()
+    result["afterRemoval"] = (await session.rpc.tasks.list()).to_dict()
+    return result
 
 
 async def main():
-    executable, workspace, logs, identity_path, pinned_path, output_path = sys.argv[1:]
+    executable, workspace, logs, identity_path, pinned_path, output_path, mode = sys.argv[1:]
     connection_token = uuid4().hex + uuid4().hex
     process = subprocess.Popen(
         [
@@ -63,7 +105,7 @@ async def main():
         )
         await client.start()
         status = await client.get_status()
-        session = await client.create_session(
+        options = dict(
             model="gpt-4.1", working_directory=workspace, skip_custom_instructions=True,
             enable_config_discovery=False, enable_file_hooks=False, enable_skills=False,
             mcp_servers={}, request_extensions=False, streaming=True,
@@ -72,8 +114,10 @@ async def main():
                 "wire_api": "completions",
             },
         )
+        session = await client.create_session(**options)
         before_tasks = await session.rpc.tasks.list()
         before_schedules = await session.rpc.schedule.list()
+        control = await client_task_control(client, session, options) if mode == "client-tasks" else None
         response = await session.send_and_wait("ISOLATED_HEADLESS_SDK_INVENTORY_FIXTURE", timeout=30)
         after_tasks = await session.rpc.tasks.list()
         after_schedules = await session.rpc.schedule.list()
@@ -83,6 +127,7 @@ async def main():
             "afterTasks": after_tasks.to_dict(), "afterSchedules": after_schedules.to_dict(),
             "responseType": response.type.value if response else None,
             "responseText": getattr(response.data, "content", None) if response else None,
+            "clientTaskControl": control,
         }
     finally:
         try:

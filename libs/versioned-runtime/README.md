@@ -225,6 +225,8 @@ The persistent lock file is never deleted, and is not evidence of a live owner.
 Version case aliases always share a lease, including on case-insensitive macOS
 volumes; distinct case-only names on a case-sensitive volume conservatively
 serialize too.
+Windows lease-file access uses extended-length paths; ordinary and extended
+spellings retain the same kernel ownership.
 Normal return, exceptions, cancellation, and process death close the descriptor
 and release ownership.
 
