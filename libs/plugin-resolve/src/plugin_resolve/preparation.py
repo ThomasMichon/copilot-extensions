@@ -162,6 +162,7 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
              execution_cwd: Path | None = None,
              check_cancelled: Callable[[], None] = lambda: None,
              runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+             authentication: Callable[[dict[str, Any], Mapping[str, str], Path], dict[str, str]] | None = None,
              ) -> tuple[Path, dict[str, Any], dict[str, Any]]:
     check_cancelled()
     name, marketplace = identity(source)
@@ -231,7 +232,7 @@ def _install(source: str, definition: dict[str, Any], home: Path, repo: Path,
             **_environment(environment), "COPILOT_HOME": str(home),
             "COPILOT_CACHE_HOME": str(cache_root), "COPILOT_AUTO_UPDATE": "false",
         }
-        env = plugin_management_environment(definition, env, execution_cwd or repo)
+        env = (authentication or plugin_management_environment)(definition, env, execution_cwd or repo)
         if not copilot_command:
             raise ValueError("Native installation requires an executable")
         command_prefix = list(copilot_command)
@@ -287,6 +288,7 @@ def prepare_payload(
     copilot_command: tuple[str, ...], environment: Mapping[str, str],
     runner: Callable[..., subprocess.CompletedProcess[str]],
     check_cancelled: Callable[[], None],
+    authentication: Callable[[dict[str, Any], Mapping[str, str], Path], dict[str, str]] | None = None,
 ) -> Path:
     """Acquire one source-qualified payload without repository registration."""
     home = _installation_home(staging, source, definition)
@@ -294,6 +296,7 @@ def prepare_payload(
         payload, _, _ = _install(
             source, definition, home, repo, copilot_command,
             environment=environment, runner=runner, check_cancelled=check_cancelled,
+            authentication=authentication,
         )
     return payload
 

@@ -202,3 +202,14 @@ plugin or successful repository setup.
   including versionless receipt recovery and differing checkout/global
   credential selection. The published-head CI and review gates still apply;
   no caller migration, full repository setup or host rollout is claimed.
+- 2026-11-11: Review identified an authentication-policy gap before native
+  execution: shared acquisition prepared credentials before Worktrees could
+  enforce off/report-only or an existing anonymous-source decision. The
+  acquisition-only entry now accepts the caller's authentication callback
+  before lookup; standalone behavior remains the default. Worktrees reuses
+  its existing mode/anonymous policy for both preparation and execution.
+  The frozen native/preparation/authentication packet passed 99 controls,
+  requiring zero lookup and no token injection in all three non-authenticated
+  cases. Two standalone acquisition/reinstall controls, both strict platform
+  targets, vendored parity and install contracts also passed. Exact-head
+  publication, CI and accepted review remain gates.

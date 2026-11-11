@@ -155,7 +155,9 @@ completed operation receipt; legacy persisted caches remain readable.
 The acquisition-only `plugin_resolve.preparation.prepare_payload` entry reuses
 that same per-source installer without calling repository registration. Its
 caller supplies the staging root, cancellation check and owned process runner;
-the normal venue preparation retains its existing default runner. A consumer
+an optional authentication callback applies caller policy before credential
+lookup, while the default retains standalone credential selection. The normal
+venue preparation retains its existing default runner. A consumer
 of an acquisition-only payload must carry its isolated `COPILOT_HOME` through
 source resolution and native command-catalog emission rather than infer
 provenance from its path or activate it in the target checkout.

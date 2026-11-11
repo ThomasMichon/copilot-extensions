@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -589,7 +590,8 @@ def test_profile_git_prelaunch_failure_confirms_no_native_writer(tool_profile, m
     monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
     monkeypatch.setattr(update_acquisition, "_run_update", lambda *a, **k: pytest.fail("native writer launched"))
 
-    def drive(source, definition, *, staging, repo, copilot_command, environment, runner, check_cancelled):
+    def drive(source, definition, *, staging, repo, copilot_command, environment, runner, check_cancelled,
+              authentication):
         return runner(
             [sys.executable, "-c", "pass"], cwd=repo, timeout=5,
             env={**environment, "COPILOT_HOME": str(native_home)},
@@ -605,12 +607,21 @@ def test_profile_git_prelaunch_failure_confirms_no_native_writer(tool_profile, m
     assert not activation_preservation_pending(native_home)
 
 
-def test_prepared_auth_context(selected, monkeypatch):
+@pytest.mark.parametrize("mode", ["on", "off", "report-only", "anonymous"])
+def test_prepared_auth_context(selected, monkeypatch, mode):
     from agent_procutil import owned_process
     import plugin_resolve.plugin_auth as auth
 
     home, repo, _ = selected
     monkeypatch.setattr(preparation.Path, "home", lambda: home)
+    for key in ("GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"):
+        monkeypatch.delenv(key, raising=False)
+    if mode == "anonymous":
+        report = SimpleNamespace(results=[SimpleNamespace(
+            source=SimpleNamespace(id="marketplace:first"), status="anonymous",
+        )])
+        session = SimpleNamespace(reports={repo: report}, overlays={}, context_required={})
+        monkeypatch.setattr(update_acquisition._auth, "_current", SimpleNamespace(get=lambda: session))
     definition = {"source": {"source": "github", "repo": "example/first"}}
     write(home / ".copilot" / "settings.json", {"extraKnownMarketplaces": {"first": definition}})
     lookups, launches = [], []
@@ -623,7 +634,10 @@ def test_prepared_auth_context(selected, monkeypatch):
         env = kwargs["env"]
         launches.append(Path(kwargs["cwd"]))
         assert Path(kwargs["cwd"]) != repo
-        assert env["GH_TOKEN"] == env["COPILOT_GITHUB_TOKEN"] == "synthetic-checkout-value"
+        if mode == "on":
+            assert env["GH_TOKEN"] == env["COPILOT_GITHUB_TOKEN"] == "synthetic-checkout-value"
+        else:
+            assert not any(key in env for key in ("GH_TOKEN", "GITHUB_TOKEN", "COPILOT_GITHUB_TOKEN"))
         write(Path(env["COPILOT_HOME"]) / "installed-plugins" / "first" / "sample" / "plugin.json", {
             "name": "sample", "version": "1.0.0",
         })
@@ -635,7 +649,7 @@ def test_prepared_auth_context(selected, monkeypatch):
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     monkeypatch.setattr(auth, "_git_token", token)
-    monkeypatch.setattr(update_acquisition._auth, "mode", lambda: "on")
+    monkeypatch.setattr(update_acquisition._auth, "mode", lambda: "on" if mode == "anonymous" else mode)
     monkeypatch.setattr(update_acquisition, "_WINDOWS", False)
     monkeypatch.setattr(owned_process, "require_caller_owned_support", lambda: None)
     monkeypatch.setattr(update_acquisition, "_run_update", run)
@@ -643,7 +657,8 @@ def test_prepared_auth_context(selected, monkeypatch):
         "sample@first", definition, sys.executable, cwd=repo,
         staging=home / "p", revalidate=lambda: None,
     ) == "OK (prepared)"
-    assert len(launches) == 1 and len(lookups) == 2 and all(path == repo for path in lookups)
+    assert len(launches) == 1
+    assert len(lookups) == (2 if mode == "on" else 0) and all(path == repo for path in lookups)
 
 
 @pytest.mark.parametrize("prepared", [False, True])
@@ -670,7 +685,8 @@ def test_final_revalidation_consumes_the_native_launch_budget(selected, monkeypa
         kwargs["on_settled"]()
         return subprocess.CompletedProcess(argv, 0, "", "")
 
-    def drive(source, definition, *, staging, repo, copilot_command, environment, runner, check_cancelled):
+    def drive(source, definition, *, staging, repo, copilot_command, environment, runner, check_cancelled,
+              authentication):
         return runner(
             [sys.executable, "-c", "pass"], cwd=repo, timeout=5,
             env={**environment, "COPILOT_HOME": str(native_home)},

@@ -141,6 +141,18 @@ def child_environment(context: Path | None) -> dict[str, dict[str, str]]:
     return {"env": env} if env is not None else {}
 
 
+def marketplace_auth_enabled(context: Path | None, marketplace: str) -> bool:
+    """Apply the existing mode and anonymous-source policy before lookup."""
+    value = _current.get()
+    report = value.reports.get(context) if value is not None else None
+    return mode() == "on" and not (
+        report is not None and any(
+            item.source.id == "marketplace:" + marketplace and item.status == "anonymous"
+            for item in report.results
+        )
+    )
+
+
 def run_acquisition(
     runner, *args, context: Path | None = None, repository: bool = False,
     marketplace: str | None = None, **kwargs,
@@ -164,11 +176,7 @@ def run_acquisition(
     if marketplace is not None and not repository:
         started = time.monotonic()
         try:
-            anonymous = report is not None and any(
-                item.source.id == "marketplace:" + marketplace and item.status == "anonymous"
-                for item in report.results
-            )
-            if mode() == "on" and not anonymous:
+            if marketplace_auth_enabled(context, marketplace):
                 cwd = Path(context or kwargs.get("cwd") or Path.cwd())
                 definition = sources.settings(cwd).marketplaces.get(marketplace)
                 if isinstance(definition, dict):

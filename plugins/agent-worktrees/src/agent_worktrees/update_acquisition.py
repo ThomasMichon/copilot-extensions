@@ -262,10 +262,16 @@ def acquire_prepared(
 ) -> str:
     """Compose the existing isolated source installer with owned execution."""
     from plugin_resolve.preparation import prepare_payload
+    from plugin_resolve.plugin_auth import plugin_management_environment
     from . import activation_preservation, installer_run
 
     started = monotonic()
     auth_context = cwd
+
+    def authentication(definition, environment, context):
+        if not _auth.marketplace_auth_enabled(context, source.rpartition("@")[2]):
+            return dict(environment)
+        return plugin_management_environment(definition, environment, context)
 
     def run(argv, *, env, cwd, timeout, **_kwargs):
         remaining = min(timeout, _TOTAL_BUDGET_S - (monotonic() - started))
@@ -284,7 +290,7 @@ def acquire_prepared(
     prepare_payload(
         source, definition, staging=staging, repo=cwd,
         copilot_command=(copilot,), environment=dict(os.environ),
-        runner=run, check_cancelled=revalidate,
+        runner=run, check_cancelled=revalidate, authentication=authentication,
     )
     return "OK (prepared)"
 
