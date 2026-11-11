@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Python Bytecode Cache Lifecycle](active/python-bytecode-cache-lifecycle/README.md) | Draft; OS user-cache placement, retirement-aware collection and update-time legacy relief proposal before implementation | #10968 bytecode follow-on; preserves runtime retention, other hygiene tracks and normal update authority; no real cleanup or rollout |
 | [Topology Dispatcher Integration](active/topology-dispatcher-integration/README.md) | Active; Phase 1 liveness/progress evidence in review; native standing join, assignment flow, routing, reconciliation and admission open | #12009; Worktrees, Bridge and Dispatch custody retained; source-only, no fleet activation |
 | [Latest Waiting Update](active/latest-waiting-update/README.md) | Done; reviewed queue source merged and actual Main release verified; pending archive | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Active; legacy mux caller corrections and readiness-only scope proposal | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
