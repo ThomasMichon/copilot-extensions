@@ -43,6 +43,7 @@ def _run_owner(deadline):
         for suffix, text in (("stdout", result.stdout), ("stderr", result.stderr)):
             (diagnostics / f"{label}.{suffix}.txt").write_text(text, encoding="utf-8")
         if result.returncode:
+            suite.retain_driver_logs(diagnostics.parent, "\n".join((result.stdout, result.stderr)))
             raise RuntimeError(installed._command_failure(
                 label, result.returncode,
                 diagnostics / f"{label}.stdout.txt", diagnostics / f"{label}.stderr.txt",

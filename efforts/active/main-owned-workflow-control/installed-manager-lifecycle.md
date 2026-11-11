@@ -1911,3 +1911,39 @@ regression is not admitted lifecycle acceptance. Documentation-impact review
 updates Worktrees' standalone hook contract and TESTING.md. A new exact-head
 hosted matrix is still required; no cache is excluded/deleted/resealed and no
 parent baseline-update, frozen-enforcement or Main-adoption gate is closed.
+
+### November 11 - Retain fresh bootstrap logs before the outer driver error
+
+Required CI 43082224444 passes at
+`552a8e15e1cdba610fe59dffab0ae509d85d0479`. Exact-source native run
+43082234109 passes normal/repair, but fresh fails during preparation, before
+exercise or a payload comparison. The actual bootstrap engine command returns
+`ParticipantError: transaction returned with unclosed participants` through
+`runtime_install_driver._foreground -> driver.drain -> Transaction._close ->
+Witness.close`. No original builder/request error is present in its stderr.
+Preparation returns one; settlement returns zero with no errors or remaining
+tasks. Process tracing never arms and contains no lifecycle observations.
+
+This is not another observed hook-bytecode failure or a Bridge communication
+failure. The earlier #11121 cooperative reports retain the same masking
+boundary, but this run does not expose enough evidence to equate its underlying
+cause with the earlier proof-ownership error. The original contributor's PR
+remains open at `c3770520b3cbde2fc86e23251b393b8832b51c55`; its constructor,
+driver-drain and publication work is not pre-patched or superseded.
+
+The fresh fixture's command owner was missing the existing case-owned request-log
+retention call used by normal/repair. A real failing child reproduces the lost
+unannounced log. One call now delegates to the same bounded collector before
+raising the unchanged command failure. It scans no broader root, retains only
+strict request names under the private case, and changes no admission, custody,
+retry, installation or cleanup behavior. No constructor result is converted to
+success.
+
+All 71 fresh-runtime/diagnostic controls pass, followed by four explicitly
+selected existing bounded-log controls. Their initial empty selection is not
+credited: the native-directory collection exclusion was removed for only those
+four diagnostic controls, with all full-suite actions deselected. The actual
+fresh preparation failure remains unresolved pending its original request
+evidence. Documentation-impact review updates TESTING.md. A changed diagnostic
+candidate may gather that evidence in the existing hosted lane, but no unchanged
+retry, accepted flake, cache waiver or parent completion is claimed.

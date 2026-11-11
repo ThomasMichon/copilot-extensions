@@ -299,6 +299,33 @@ def test_fresh_command_failure_retains_the_original_constructor_diagnostic(
     assert (tmp_path / "construction.stderr.txt").read_text().endswith("driver custody\n")
 
 
+def test_fresh_command_failure_retains_the_case_owned_unannounced_request_log(
+    tmp_path, fresh_fixture,
+):
+    diagnostics = tmp_path / "diagnostics"
+    diagnostics.mkdir()
+    logs = tmp_path / "h" / ".copilot-extensions" / "update-driver"
+    logs.mkdir(parents=True)
+    identifier = "a" * 32
+    (logs / f"{identifier}.log").write_bytes(b"original builder failure\n")
+    owner = fresh_fixture["_run_owner"](time.monotonic() + 10)
+    with pytest.raises(RuntimeError, match="unclosed participants"):
+        owner(
+            [sys.executable, "-I", "-B", "-c",
+             "import sys; sys.stderr.write('transaction returned with unclosed participants'); "
+             "sys.exit(9)"],
+            dict(os.environ), tmp_path, diagnostics, "bootstrap",
+        )
+    assert (tmp_path / "driver-logs" / f"{identifier}.log").read_text() == (
+        "original builder failure\n"
+    )
+    report = json.loads((tmp_path / "driver-diagnostics.json").read_text())
+    assert report == [{
+        "request_id": identifier, "bytes": 25, "retained_bytes": 25, "truncated": False,
+    }]
+    assert "unclosed participants" in (diagnostics / "bootstrap.stderr.txt").read_text()
+
+
 def test_fresh_engine_construction_enters_the_native_driver_for_each_private_root(
     tmp_path, monkeypatch, fresh_fixture,
 ):

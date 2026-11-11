@@ -10129,6 +10129,10 @@ If a driver refuses before advertising its request, diagnostics may retain
 bounded, strictly named request logs from that case's isolated driver directory.
 Advertised requests retain priority; unrelated files, witness data and other
 homes or subdirectories are not scanned.
+The fresh-suite command owner uses that same collector before propagating a
+failed bootstrap command, so an outer participant-close exception does not
+silently discard the case-owned original request log. This is diagnostic
+retention, not recovery, participant release or acceptance of the failed install.
 
 The Index host role is written as YAML readable by both native and
 dependency-free role resolvers. Preparation explicitly provisions its full
