@@ -213,11 +213,11 @@ canonical-or-compatible-companion alternative and recommends a specific
 source design for review. Original Phases 1-4 remain unchanged and open.
 
 - [x] Review the finite full-title source plan before functional edits (#11952).
-- [ ] Retain full new assertions/current storage/history with an explicit sane
+- [x] Retain full new assertions/current storage/history with an explicit sane
   bound, actual ordinary JSON/consumer fidelity and compatible short displays.
-- [ ] Preserve current/prior writer semantics through actual runtime contract
+- [x] Preserve current/prior writer semantics through actual runtime contract
   selection, with no silent truncating receiver or ambiguous-write replay.
-- [ ] Complete only direct F/FV source acceptance after consumer proof,
+- [x] Complete only direct F/FV source acceptance after consumer proof,
   required review/CI and actual merge; keep #3581 and the parent open.
 
 ## Validation Plan
@@ -264,7 +264,7 @@ source design for review. Original Phases 1-4 remain unchanged and open.
       implement.
 - [ ] An unbound worktree's behavior (titling, nudges) is unchanged by this
       effort.
-- [ ] The [finite full-title controls](full-title-source.md#validation-plan)
+- [x] The [finite full-title controls](full-title-source.md#validation-plan)
       prove actual ordinary writer/storage/new-history/export, compact display,
       supported contract skew and fresh-profile CLI behavior without native
       hosting, real title/binding writes or parent-completion substitution.
@@ -275,6 +275,17 @@ _Pending — this effort's plan itself will be submitted for review per the
 repo's `pr-self-merge` profile before Phase 1 implementation begins._
 
 ## Journal
+
+### 2026-11-11 - Finite full-title source accepted
+
+Implementation #11955 actually merged at 07:43:58 UTC after a genuine
+current-head clean Comment, explicitly resolved findings/threads and green
+required CI. The [finite acceptance receipt](full-title-source.md#journal)
+records 347 passing source consumers, 12 unchanged Manager projection controls
+and serialization/whole-record compatibility fixes. Only the finite source
+rows are accepted. Original Phases 1-4 and their Validation Plan remain open;
+#3581 stays Open and this parent stays Draft. Native hosting, productive
+binding/title operations and installed rollout were not performed.
 
 ### 2026-11-10 - Finite full-title source implementation candidate
 
