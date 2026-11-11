@@ -28,18 +28,20 @@ async def main():
         stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
-    identity = Path(identity_path)
-    temporary = identity.with_suffix(".pending")
-    temporary.write_text(json.dumps({
-        "pid": process.pid, "helperPid": os.getpid(),
-    }), encoding="utf-8")
-    temporary.replace(identity)
     errors = []
-    stderr_reader = threading.Thread(target=lambda: errors.append(process.stderr.read()), daemon=True)
-    stderr_reader.start()
-    stdout_reader = None
+    stderr_reader = stdout_reader = None
     client = session = None
     try:
+        identity = Path(identity_path)
+        temporary = identity.with_suffix(".pending")
+        temporary.write_text(json.dumps({
+            "pid": process.pid, "helperPid": os.getpid(),
+        }), encoding="utf-8")
+        temporary.replace(identity)
+        stderr_reader = threading.Thread(
+            target=lambda: errors.append(process.stderr.read()), daemon=True,
+        )
+        stderr_reader.start()
         deadline = time.monotonic() + 15
         while not Path(pinned_path).is_file():
             assert time.monotonic() < deadline, "Native runtime identity was not pinned"
@@ -84,17 +86,20 @@ async def main():
         }
     finally:
         try:
-            if session is not None:
-                await asyncio.wait_for(session.disconnect(), 5)
-            if client is not None:
-                await asyncio.wait_for(client.stop(), 5)
+            try:
+                if session is not None:
+                    await asyncio.wait_for(session.disconnect(), 5)
+            finally:
+                if client is not None:
+                    await asyncio.wait_for(client.stop(), 5)
         finally:
             if process.poll() is None:
                 process.terminate()
             await asyncio.to_thread(process.wait, 10)
-            stderr_reader.join(5)
-            assert not stderr_reader.is_alive(), "Native stderr remained open after retirement"
-            if stdout_reader is not None:
+            if stderr_reader is not None and stderr_reader.ident is not None:
+                stderr_reader.join(5)
+                assert not stderr_reader.is_alive(), "Native stderr remained open after retirement"
+            if stdout_reader is not None and stdout_reader.ident is not None:
                 stdout_reader.join(5)
                 assert not stdout_reader.is_alive(), "Native stdout remained open after retirement"
     Path(output_path).write_text(json.dumps(result), encoding="utf-8")
