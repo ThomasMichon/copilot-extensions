@@ -18,12 +18,14 @@ immutable and versioned".
 
 ## Windows filesystem paths
 
-Version inventory and garbage collection accept ordinary or extended-length
-Windows paths, without requiring a machine-wide long-path setting. Filesystem
+Version inventory, garbage collection and incomplete-slot cleanup accept ordinary
+or extended-length Windows paths, without a machine-wide long-path setting. Filesystem
 access uses the canonical native-path helper. Process-image and launch-path
 matching normalize both forms without resolving symlinks. Current and
 last-known-good selections, explicit keeps, live processes, construction and
 retention leases, and durable references remain deletion barriers.
+Completed deep slots remain complete when `gc --toss-incomplete` follows an
+age-preserving collection pass.
 
 ## Selector sharing on Windows
 

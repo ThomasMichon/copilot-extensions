@@ -1386,6 +1386,7 @@ def toss_incomplete(root: Path, link_name: str = CURRENT_LINK) -> list[str]:
     also protect incomplete slots. Admission and rechecks remain held through
     deletion. Returns the tossed version names.
     """
+    root = _leases._native_path(root)
     tossed: list[str] = []
     for v in list_versions(root):
         with _cleanup_lease(root, v) as admitted:
