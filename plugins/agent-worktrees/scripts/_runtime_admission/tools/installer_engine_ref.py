@@ -59,14 +59,7 @@ STANDALONE_NATIVE_ADOPTERS = (
     "libs/update-driver", "plugins/agent-mcp", "plugins/agent-machines",
     "plugins/agent-containers", "plugins/budget-guidance", "plugins/agent-worktrees",
 )
-STANDALONE_NATIVE_FILES = (
-    "installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py",
-    "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
-    "installer_engine_uninstall_windows.py",
-    "installer_engine_footprint.py",
-    "installer_engine_uninstall_controllers.py",
-    "installer_engine_commands.py", "installer_engine_stop.py",
-)
+STANDALONE_NATIVE_FILES = (*FILES, *SUPPORT_FILES)
 
 
 def standalone_python_adopter_dirs(repo: Path) -> tuple[Path, ...]:
