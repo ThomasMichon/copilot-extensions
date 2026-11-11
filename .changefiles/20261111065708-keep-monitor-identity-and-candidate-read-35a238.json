@@ -1,0 +1,9 @@
+{
+  "comment": "Keep monitor identity and candidate-readiness observations from creating or repairing control tokens.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -56,10 +56,18 @@ def control_token_path(runtime_home: Path | None = None) -> Path:
     return (runtime_home if runtime_home is not None else routing_dir().parent) / "status-monitor-control.token"
 
 
+def read_control_token(runtime_home: Path | None = None) -> str | None:
+    try:
+        token = control_token_path(runtime_home).read_text(encoding="utf-8").strip()
+    except FileNotFoundError:
+        return None
+    return token or None
+
+
 def load_or_create_control_token(runtime_home: Path | None = None) -> str:
     path = control_token_path(runtime_home)
     try:
-        token = path.read_text(encoding="utf-8").strip()
+        token = read_control_token(path.parent)
         if token:
             return token
     except OSError:
