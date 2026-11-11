@@ -36,7 +36,7 @@ def _qualify_manager_application(
     worktrees_root=None, worktrees_environment=None,
 ):
     paired = worktrees_python is not None
-    assert not paired or (control == "embody" and worktrees_environment is not None)
+    assert not paired or (control in {"embody", "copilot"} and worktrees_environment is not None)
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
     import build_python_artifacts as builder
     import local_install_profile as profiles
@@ -164,12 +164,12 @@ def _qualify_manager_application(
                      "import os,sys;from pathlib import Path;"
                      "sys.path[:0]=sys.argv[1:3];"
                      "from test_headed_worktrees_copilot import _qualify_native_worktrees;"
-                     "_qualify_native_worktrees(Path(sys.argv[3]),'embody',"
+                     "_qualify_native_worktrees(Path(sys.argv[3]),sys.argv[7],"
                      "worktrees_python=Path(sys.argv[4]),worktrees_root=Path(sys.argv[5]),"
                      "worktrees_environment=dict(os.environ),"
                      "manager_environment={'WORKTREE_MANAGER_ROOT':sys.argv[6]})",
                      str(Path(__file__).parent), str(ROOT / "tools"), str(native),
-                     str(worktrees_python), str(worktrees_root), str(root)],
+                     str(worktrees_python), str(worktrees_root), str(root), control],
                     cwd=caller, env={
                         **worktrees_environment, **lifecycle,
                         "COPILOT_EXTENSIONS_TEST_SANDBOX": os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"],

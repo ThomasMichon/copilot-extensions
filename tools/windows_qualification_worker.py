@@ -221,6 +221,9 @@ def tool_tests(root: Path, selected: dict, output: Path) -> int:
 def execute(root: Path, value: dict, output: Path) -> dict:
     """Run selected source, retaining a truthful manifest even after failure."""
     request(value)
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8", errors="backslashreplace")
     native = NATIVE_PACKETS.get(value["selection"].get("name"))
     output.mkdir(parents=True, exist_ok=True)
     result = {
@@ -332,7 +335,7 @@ def execute(root: Path, value: dict, output: Path) -> dict:
                     status = preparation if preparation in {"failure", "cancelled", "skipped"} else "unknown"
                     raise ValueError(f"Pinned native prerequisite acquisition did not succeed ({status})")
                 return native_prerequisites(
-                    owned, require_feed=selected["name"] == "native-worktrees-embody",
+                    owned, require_feed=native[0] == "agent-worktrees",
                 )
             result["native_prerequisites"] = phase(
                 "native-prerequisites", prepare_native,

@@ -18,6 +18,9 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
   let closed = false;
   let waiting = false;
   let nativeActive = startupPrompt !== null;
+  const startupExpected = startupPrompt !== null;
+  let startupObserved = false;
+  let startupIdle = false;
   let scheduled = false;
   let events = [];
   const seenInputs = new Set();
@@ -27,6 +30,20 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     return {
       controlled, closed, pending: Boolean(pending), sending,
       outstanding: nativeActive || sources.size !== 0, waiting,
+    };
+  }
+
+  function inputStatus() {
+    const available = !closed && controlled && !waiting;
+    const readiness = (ready) => !available ? "unavailable"
+      : !ready ? "pending" : pending || sending ? "busy" : "ready";
+    return {
+      sessionId,
+      startupSeed: !startupExpected ? "not-requested" : startupObserved ? "observed" : "pending",
+      startupTurn: !startupExpected ? "not-requested"
+        : startupIdle ? "idle-observed" : startupObserved ? "active" : "pending",
+      nativeSend: readiness(!startupExpected || startupObserved),
+      prompt: readiness(!startupExpected || startupIdle),
     };
   }
 
@@ -49,7 +66,10 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
       controlled = false;
       finish(new AcpError(-32001, "Native session outcome is unavailable"));
     }
-    if (event?.type === "session.idle" && sources.size === 0) nativeActive = false;
+    if (event?.type === "session.idle" && sources.size === 0) {
+      nativeActive = false;
+      if (startupObserved) startupIdle = true;
+    }
     if (event?.type === "user.message" &&
         ![event.agentId, event.data?.agentId, event.data?.parentToolCallId].some(Boolean)) {
       if (event.id && seenInputs.has(event.id)) return;
@@ -61,6 +81,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
         if (pending) pending.started = true;
       } else if (startupPrompt !== null && event.data?.content === startupPrompt) {
         startupPrompt = null;
+        startupObserved = true;
       } else {
         startupPrompt = null;
         controlled = false;
@@ -113,9 +134,16 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     if (closed || !controlled || waiting) throw new AcpError(-32001, "Headed control is unavailable");
   }
 
+  function requireStartup(turn = false) {
+    if (startupExpected && (!startupObserved || (turn && !startupIdle))) {
+      throw new AcpError(-32002, "Native startup input is not ready; no prompt was dispatched");
+    }
+  }
+
   async function prompt(params) {
     requireSession(params);
     requireControl();
+    requireStartup(true);
     if (pending || sending) throw new AcpError(-32001, "A native prompt is already in flight");
     if (!Array.isArray(params.prompt) || params.prompt.length === 0 ||
         params.prompt.some((part) => part?.type !== "text" || typeof part.text !== "string")) {
@@ -123,7 +151,6 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     }
     const content = params.prompt.map((part) => part.text).join("");
     if (!content) throw new AcpError(-32602, "A nonempty prompt is required");
-    startupPrompt = null;
     const source = `agent-remote-driver-${randomUUID()}`;
     const completion = new Promise((resolve, reject) => {
       pending = {
@@ -153,6 +180,7 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
   async function nativeSend(params) {
     requireSession(params);
     requireControl();
+    requireStartup();
     if (pending || sending) throw new AcpError(-32001, "A native prompt is already in flight");
     if (Object.keys(params).some((key) => !["sessionId", "prompt", "mode", "displayPrompt"].includes(key)) ||
         typeof params.prompt !== "string" || !params.prompt ||
@@ -168,7 +196,6 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
     sources.add(source);
     sending = true;
     nativeActive = true;
-    startupPrompt = null;
     report();
     try {
       const messageId = await session.send({
@@ -199,8 +226,13 @@ export function createHeadedAdapter(session, { emit, cwd, startupPrompt = null, 
           nativeSessionId: sessionId, binding: "existing-native-session",
           automaticIdleRetirement: "unavailable", historyRestoration: "unavailable",
           nativeSend: { version: 1, modes: ["enqueue", "immediate"], receipt: "native-message-id" },
+          inputReadiness: { version: 1, method: "copilot-driver/input-status" },
         },
       };
+    }
+    if (method === "copilot-driver/input-status") {
+      requireSession(params);
+      return inputStatus();
     }
     if (method === "session/load") {
       requireSession(params);

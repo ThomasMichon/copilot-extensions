@@ -140,13 +140,17 @@ class QueueTaskRelationshipsMixin:
         worker_id: str,
         workspace: AssignmentWorkspace | None,
     ) -> Task | None:
-        if task_id is None or workspace is None:
+        if task_id is None:
+            return None
+        task = self.get(task_id)
+        if task is not None and task.kind == "standing-charter":
+            raise TaskError("standing charter requires explicit attachment admission")
+        if workspace is None:
             return None
         value = self.task_relationship(task_id)
         if value is None:
             return None
         request = value["request"]
-        task = self.get(task_id)
         if (
             request["reservation_key"] is not None
             or task.status != Status.CLAIMED

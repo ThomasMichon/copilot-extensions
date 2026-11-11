@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 from pathlib import Path
@@ -99,6 +100,51 @@ def test_native_backend_receipt_selection_preserves_launcher_stages(tmp_path, ba
     assert {path: path.read_text(encoding="utf-8") for path in tmp_path.iterdir()} == documents
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows command-line quoting")
+def test_private_mux_adapter_preserves_census_command_shape(tmp_path):
+    from agent_remote_driver import windows_mux_processes
+    from test_headed_worktrees_copilot import _prepare_private_mux_adapter
+
+    compiler = next((path for framework in ("Framework64", "Framework") if (
+        path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
+        framework / "v4.0.30319" / "csc.exe"
+    ).is_file()), None)
+    assert compiler, "The fixture's private mux adapter requires the system C# compiler"
+    backend = tmp_path / "echo tools"
+    backend.mkdir()
+    source, binary = backend / "Echo.cs", backend / "psmux.exe"
+    source.write_text(
+        "using System; using System.Text;\n"
+        "class Echo { static void Main(string[] args) {\n"
+        "Console.WriteLine(Environment.CommandLine);\n"
+        "foreach (var value in args) Console.WriteLine("
+        "Convert.ToBase64String(Encoding.UTF8.GetBytes(value)));\n"
+        "} }\n",
+        encoding="utf-8",
+    )
+    compiled = run_caller_owned(
+        [str(compiler), "/nologo", f"/out:{binary}", str(source)], cwd=tmp_path, timeout=30,
+        max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    directory, namespace_file = _prepare_private_mux_adapter(
+        tmp_path, binary=binary, manager_target="wt-fixture", environment=dict(os.environ),
+    )
+    arguments = ["--version"]
+    result = run_caller_owned(
+        [str(directory / "psmux.exe"), *arguments], cwd=tmp_path, timeout=15,
+        max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    command, *encoded = result.stdout.splitlines()
+    assert [
+        base64.b64decode(value).decode("utf-8") for value in encoded
+    ] == ["-L", namespace_file.read_text(encoding="utf-8"), *arguments]
+    match = windows_mux_processes._COMMAND.match(command)
+    assert match is not None, command
+    assert match[1] == "-L" and match[2] == "--version"
+
+
 def test_public_fixture_git_mutations_ignore_inherited_repository_selectors(tmp_path):
     from agent_worktrees.git_repository_environment import repository_identity_env
     from test_headed_worktrees_copilot import _initialize_fixture_repository
@@ -159,13 +205,58 @@ def test_fresh_application_owns_native_broker_fresh_and_resume(tmp_path, monkeyp
     os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
     reason="Explicitly select the installed public Windows Worktrees embodiment lane",
 )
-def test_public_embody(tmp_path, monkeypatch):
-    _qualify_native_application(tmp_path, monkeypatch, broker="embody")
+def test_public_embody(monkeypatch):
+    _qualify_public_application(monkeypatch, "embody")
+
+
+@pytest.mark.timeout(900)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
+    reason="Explicitly select the installed public Windows Worktrees TTY lane",
+)
+def test_public_copilot(monkeypatch):
+    _qualify_public_application(monkeypatch, "copilot")
+
+
+def _qualify_public_application(monkeypatch, caller):
+    from plugin_test_containment import TestSandbox
+
+    sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+    with TestSandbox(prefix="p-", dir=sandbox) as directory:
+        _qualify_native_application(Path(directory), monkeypatch, broker=caller)
+
+
+def test_public_application_workspace_is_outside_source_only_repository(tmp_path, monkeypatch):
+    from plugin_test_command_safety import private_mux_args
+    from repository_policy import AgentHostingDenied, require_agent_hosting
+
+    candidate = tmp_path / "candidate"
+    (candidate / ".git").mkdir(parents=True)
+    configuration = candidate / ".agent-worktrees" / "config.yaml"
+    configuration.parent.mkdir()
+    configuration.write_text("expose_agent: false\n", encoding="utf-8")
+    with pytest.raises(AgentHostingDenied, match="expose_agent: false"):
+        require_agent_hosting(candidate, operation="fixture launch")
+    monkeypatch.setitem(_qualify_public_application.__globals__, "ROOT", candidate)
+    observed = []
+
+    def qualify(root, _patch, *, broker):
+        caller = root / "caller"
+        caller.mkdir()
+        assert require_agent_hosting(caller, operation="fixture launch").expose_agent is None
+        assert private_mux_args(root)
+        observed.append((root, broker))
+
+    monkeypatch.setitem(_qualify_public_application.__globals__, "_qualify_native_application", qualify)
+    for caller in ("embody", "copilot"):
+        _qualify_public_application(monkeypatch, caller)
+    assert [caller for _, caller in observed] == ["embody", "copilot"]
+    assert all(not root.exists() for root, _ in observed)
 
 
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
     started = time.monotonic()
-    construction_budget = 420 if broker == "embody" else 300
+    construction_budget = 420 if broker in {"embody", "copilot"} else 300
     deadline = started + construction_budget
     print("Application construction starting", flush=True)
     sys.path.insert(0, str(ROOT / "tools"))
@@ -302,14 +393,14 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False):
         ], cwd=caller, env=environment, deadline=deadline)
     assert json.loads(described.stdout)["contract"] == "agent-worktrees.native-seed"
     print(f"Application packaged admission checked: {time.monotonic() - started:.2f}s", flush=True)
-    if broker == "embody":
+    if broker in {"embody", "copilot"}:
         assert time.monotonic() < deadline, "Public caller preparation exceeded 420 seconds"
         from test_manager_application_launch import _qualify_manager_application
 
         manager = tmp_path / "manager"
         manager.mkdir()
         _qualify_manager_application(
-            manager, monkeypatch, "embody", worktrees_python=python,
+            manager, monkeypatch, broker, worktrees_python=python,
             worktrees_root=root, worktrees_environment=environment,
         )
     elif broker:

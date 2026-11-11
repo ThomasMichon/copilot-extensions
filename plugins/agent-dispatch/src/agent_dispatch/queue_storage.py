@@ -327,6 +327,7 @@ class QueueStorageMixin:
         done_criteria: str | None = None,
         not_before: float = 0.0,
         require_verification: bool = False,
+        standing_parent_id: str | None = None,
         claim_as: str | None = None,
         now: float | None = None,
         _with_outcome: bool = False,
@@ -360,9 +361,21 @@ class QueueStorageMixin:
         open-ended-pickup primitive: ``create(dedup_key=<subject>, claim_as=me)``
         either mints the subject as mine or hands me the row someone else already
         took.
+
+        ``standing_parent_id`` links a new ordinary finite task to an active
+        standing charter in the same lane. The link is immutable provenance only:
+        the child keeps its own claim, verification, completion and exclusive key,
+        and neither its conclusion nor the parent's retirement changes the other.
         """
         if status not in (Status.QUEUED, Status.PROPOSED):
             raise TaskError(f"new task must be 'queued' or 'proposed', not {status!r}")
+        if standing_parent_id is not None and (
+            not isinstance(standing_parent_id, str)
+            or not standing_parent_id
+            or standing_parent_id != standing_parent_id.strip()
+            or len(standing_parent_id) > 1024
+        ):
+            raise TaskError("standing_parent_id must be a bounded task id")
         from .task_categories import category_value
         category_value(category)
         if not isinstance(require_verification, bool):
@@ -445,6 +458,8 @@ class QueueStorageMixin:
             }
             if category != "work":
                 request_fields["category"] = category
+            if standing_parent_id is not None:
+                request_fields["standing_parent_id"] = standing_parent_id
             request_hash = self._producer_request_hash(request_fields)
             compatible_request_hashes.add(request_hash)
             pre_exclusive_fields = dict(request_fields)
@@ -775,6 +790,14 @@ class QueueStorageMixin:
                             "conflicting_task_status": accepted.status,
                         },
                     )
+                if (
+                    accepted is not None
+                    and standing_parent_id is not None
+                    and accepted.standing_parent_id != standing_parent_id
+                ):
+                    raise TaskError(
+                        "dedup_key belongs to a live task with a different standing parent"
+                    )
                 if accepted is None:
                     if claim_as and status == Status.QUEUED:
                         self.require_worker_admission()
@@ -784,6 +807,10 @@ class QueueStorageMixin:
                                 "create queued work and claim it with its original workspace"
                             )
                     self._require_agent_backed_repo(canonical_repo)
+                    if standing_parent_id is not None:
+                        self._require_standing_child_parent(
+                            conn, standing_parent_id, canonical_repo,
+                        )
                     if supersede_exclusive_key:
                         superseded = conn.execute(
                             "SELECT id, status FROM tasks "
@@ -824,8 +851,8 @@ class QueueStorageMixin:
                         " source, origin_ref, evaluator_ref, exclusive_key, dedup_key,"
                         " goal, done_criteria, require_verification,"
                         " producer_fence, producer_request_hash,"
-                        " not_before, created_at, updated_at, category)"
-                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                        " not_before, created_at, updated_at, category, standing_parent_id)"
+                        " VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                         (
                             task_id,
                             title,
@@ -855,6 +882,7 @@ class QueueStorageMixin:
                             ts,
                             ts,
                             category,
+                            standing_parent_id,
                         ),
                     )
                     self._audit(

@@ -1,0 +1,9 @@
+{
+  "comment": "Verify completed lifecycle replies in the actual bound private pane when redraw streams do not contain contiguous text.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Retain private installed liveness flags before failed lifecycle teardown",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

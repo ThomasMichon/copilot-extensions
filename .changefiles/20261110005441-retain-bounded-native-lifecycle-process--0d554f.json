@@ -1,0 +1,9 @@
+{
+  "comment": "Retain bounded native lifecycle process roles and session lock evidence on ambiguity",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import http.server
 import asyncio
 import contextlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -36,13 +37,26 @@ def offline_cli(tmp_path):
         pytest.skip("Select an existing native Copilot executable for the offline acceptance lane")
     assert Path(executable).is_absolute() and Path(executable).is_file()
     requests = []
+    responses = []
+    response_gate = SimpleNamespace(select=lambda _: None)
+    pause_response, response_started, release_response = (threading.Event() for _ in range(3))
 
     class Provider(http.server.BaseHTTPRequestHandler):
         def log_message(self, *_):
             pass
 
         def do_POST(self):
-            requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(request)
+            gate = response_gate.select(request)
+            if gate is not None and not gate.wait(30):
+                self.send_error(504)
+                return
+            if pause_response.is_set():
+                response_started.set()
+                if not release_response.wait(30):
+                    self.send_error(504)
+                    return
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.end_headers()
@@ -51,8 +65,13 @@ def offline_cli(tmp_path):
                 "choices": [{"index": 0, "delta": {"role": "assistant", "content": "FIXTURE"},
                              "finish_reason": "stop"}],
             }
-            self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
-            self.wfile.flush()
+            if responses:
+                body["choices"] = [{"index": 0, **responses.pop(0)}]
+            try:
+                self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
+                self.wfile.flush()
+            except ConnectionError:
+                pass
 
     provider = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     provider.daemon_threads = True
@@ -80,8 +99,13 @@ def offline_cli(tmp_path):
         yield SimpleNamespace(
             executable=executable, env=environment, home=home, workspace=workspace,
             requests=requests, logs=tmp_path / "logs",
+            responses=responses,
+            response_gate=response_gate,
+            pause_response=pause_response, response_started=response_started,
+            release_response=release_response,
         )
     finally:
+        release_response.set()
         provider.shutdown()
         provider.server_close()
         thread.join(timeout=5)
@@ -277,6 +301,60 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
         snapshot = observed["observations"][name]
         assert snapshot["state"] == "available", {name: snapshot}
         assert snapshot["field"] == field and isinstance(snapshot["items"], list)
+    session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
+    assert [path.parent.name for path in session_files] == [observed["sessionId"]]
+    events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
+    assert not any(
+        event.get("data", {}).get("permissionRequest", {}).get("kind") == "extension-permission-access"
+        for event in events
+    )
+    assert len(offline_cli.requests) == 1
+    assert not (offline_cli.home / "permissions-config.json").exists()
+
+
+def test_native_joined_observer_close_returns_no_attributed_outcome(tmp_path, offline_cli):
+    plugin = tmp_path / "observer-plugin"
+    extension = plugin / "extensions" / "observer-fixture"
+    extension.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "observer-fixture", "version": "1.0.0"}), encoding="utf-8",
+    )
+    (extension / "extension.mjs").write_text("""
+import { writeFileSync } from "node:fs";
+import { joinSession } from "@github/copilot-sdk/extension";
+const session = await joinSession();
+const unsubscribe = session.on(() => {});
+const unsubscribeResult = unsubscribe();
+const disconnect = session.disconnect();
+const disconnectIsPromise = typeof disconnect?.then === "function";
+const disconnectResult = await disconnect;
+const repeatedResult = await session.disconnect();
+writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
+    sessionId: session.sessionId,
+    unsubscribeResult: typeof unsubscribeResult,
+    disconnectIsPromise,
+    disconnectResult: typeof disconnectResult,
+    repeatedResult: typeof repeatedResult,
+}));
+""", encoding="utf-8")
+    output = tmp_path / "observer-close.json"
+    result = subprocess.run(
+        [
+            offline_cli.executable, "-p", "ISOLATED_OBSERVER_CLOSE_FIXTURE", "--trust-folder",
+            "--experimental", "--plugin-dir", str(plugin), "--no-auto-update",
+            "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
+            "--log-dir", str(offline_cli.logs),
+        ],
+        cwd=offline_cli.workspace, env={**offline_cli.env, "DRIVER_FIXTURE_OUTPUT": str(output)},
+        capture_output=True, timeout=60, text=True, encoding="utf-8", **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr + _logs(offline_cli.logs)
+    assert output.is_file(), result.stderr + _logs(offline_cli.logs)
+    observed = json.loads(output.read_text(encoding="utf-8"))
+    assert observed == {
+        "sessionId": observed["sessionId"], "unsubscribeResult": "undefined",
+        "disconnectIsPromise": True, "disconnectResult": "undefined", "repeatedResult": "undefined",
+    }
     session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
     assert [path.parent.name for path in session_files] == [observed["sessionId"]]
     events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
@@ -490,6 +568,95 @@ async def test_native_headed_sdk_uses_common_ws_tcp_broker_and_preserves_identit
 async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_pane(
     tmp_path, offline_cli, monkeypatch, delivery,
 ):
+    await _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery)
+
+
+@pytest.mark.asyncio
+async def test_native_headed_startup_seed_observation_precedes_controlled_send(
+    tmp_path, offline_cli, monkeypatch,
+):
+    await asyncio.wait_for(
+        _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, "startup-seed"), 120,
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_headed_startup_no_seed_is_not_an_idle_claim(
+    tmp_path, offline_cli, monkeypatch,
+):
+    await asyncio.wait_for(
+        _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, "startup-no-seed"), 120,
+    )
+
+
+@pytest.mark.asyncio
+async def test_native_headed_startup_cold_resume_preserves_history(
+    tmp_path, offline_cli, monkeypatch,
+):
+    await asyncio.wait_for(
+        _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, "startup-cold-resume"), 120,
+    )
+
+
+def _startup_observation_stage(attempt_directory):
+    from agent_remote_driver.headed.staging import stage_extension
+
+    plugin = stage_extension(attempt_directory)
+    extension = plugin / "extensions" / "copilot-driver-headed" / "extension.mjs"
+    source = extension.read_text(encoding="utf-8")
+    joined = "const session = await joinSession();"
+    requests = "let buffer = Buffer.alloc(0);"
+    assert source.count(joined) == source.count(requests) == 1
+    observer = r"""
+const fixtureFs = await import("node:fs");
+const fixtureOn = session.on.bind(session);
+session.on = (callback) => {
+  let delayed = false, released = false;
+  const queue = [];
+  const unsubscribe = fixtureOn((event) => {
+    const root = event?.type === "user.message" &&
+      ![event.agentId, event.data?.agentId, event.data?.parentToolCallId].some(Boolean);
+    if (!released && (delayed || (root && event.data?.content === binding.startupPrompt))) {
+      if (!delayed) {
+        fixtureFs.writeFileSync(process.env.DRIVER_STARTUP_HELD + ".tmp", JSON.stringify({
+          sessionId: session.sessionId, nativePid: process.ppid, extensionPid: process.pid,
+          eventId: event.id,
+        }));
+        fixtureFs.renameSync(process.env.DRIVER_STARTUP_HELD + ".tmp", process.env.DRIVER_STARTUP_HELD);
+      }
+      delayed = true;
+      if (queue.length >= 2_000) throw Error("Fixture observation bound exceeded");
+      queue.push(event);
+    } else callback(event);
+  });
+  const timer = setInterval(() => {
+    if (!fixtureFs.existsSync(process.env.DRIVER_STARTUP_RELEASE)) return;
+    clearInterval(timer);
+    released = true;
+    for (const event of queue.splice(0)) callback(event);
+  }, 10);
+  timer.unref();
+  return () => { clearInterval(timer); unsubscribe(); };
+};
+"""
+    status = r"""
+const fixtureHandle = adapter.handle.bind(adapter);
+adapter.handle = async (request) => {
+  const response = await fixtureHandle(request);
+  if (request?.method === "copilot-driver/input-status") {
+    fixtureFs.appendFileSync(process.env.DRIVER_STARTUP_STATUS, JSON.stringify(response) + "\n");
+  }
+  return response;
+};
+"""
+    extension.write_text(
+        source.replace(joined, joined + observer).replace(requests, status + requests),
+        encoding="utf-8",
+    )
+    return plugin
+
+
+async def _native_coordinator_flow(tmp_path, offline_cli, monkeypatch, delivery):
     if os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1":
         pytest.skip("Explicitly select the isolated native headed mux lane")
     monkeypatch.syspath_prepend(str(Path(__file__).resolve().parents[1]))
@@ -497,7 +664,9 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
     binary = os.environ.get("PSMUX_TEST_BIN") or shutil.which("psmux.exe")
     if os.name != "nt" or not binary:
         pytest.skip("The native coordinator fixture requires existing Windows PSMux")
-    if delivery == "bridge-client" and not shutil.which("node"):
+    startup = delivery.startswith("startup-")
+    no_seed, cold_resume = delivery == "startup-no-seed", delivery == "startup-cold-resume"
+    if (delivery == "bridge-client" or startup) and not shutil.which("node"):
         pytest.skip("Node is required for the retained Bridge client")
     (offline_cli.home / "config.json").write_text(
         json.dumps({"trustedFolders": [str(offline_cli.workspace)]}), encoding="utf-8",
@@ -505,6 +674,23 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
     (offline_cli.home / ".psmux.conf").write_text("set -g warm off\n", encoding="utf-8")
     session_id = str(uuid4())
     prompts = ['coordinator original\n"quotes" & $literal', "coordinator second"]
+    if no_seed:
+        prompts = prompts[1:]
+    if cold_resume:
+        result = await asyncio.to_thread(
+            subprocess.run,
+            [
+                offline_cli.executable, "--session-id", session_id, "-p", prompts[0],
+                "--no-auto-update", "--disable-builtin-mcps", "--no-custom-instructions",
+                "--no-color", "--no-ask-user", "--log-dir", str(offline_cli.logs),
+            ],
+            cwd=offline_cli.workspace, env=offline_cli.env, capture_output=True,
+            timeout=60, text=True, encoding="utf-8", **no_window_kwargs(),
+        )
+        assert result.returncode == 0, result.stderr + _logs(offline_cli.logs)
+        assert len(offline_cli.requests) == 1
+    if delivery == "startup-seed":
+        offline_cli.pause_response.set()
     receipt_nonce = uuid4().hex + uuid4().hex
     state_file = tmp_path / "host.json"
     coordinator_argv = [
@@ -513,7 +699,9 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
         "--attempt-directory", str(tmp_path / "original-attempt"),
         "--state-file", str(state_file), "--session-id", session_id, "--ws-port", "0",
         "--cwd", str(offline_cli.workspace), "--",
-        offline_cli.executable, "-i", prompts[0], "--session-id", session_id,
+        offline_cli.executable,
+        *(["-i", prompts[0]] if not (no_seed or cold_resume) else []),
+        "--resume" if cold_resume else "--session-id", session_id,
         "--screen-reader", "--no-auto-update", "--disable-builtin-mcps",
         "--no-custom-instructions", "--no-color", "--no-ask-user",
         "--log-dir", str(offline_cli.logs),
@@ -552,14 +740,33 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
             "sys.exit(code if code or certain else 3)",
             str(manifest),
         ]
+    held_file, release_file, status_file = (
+        tmp_path / name for name in ("startup-held.json", "startup-release", "startup-status.jsonl")
+    )
+    if startup:
+        script = (
+            inspect.getsource(_startup_observation_stage)
+            + "\nimport agent_remote_driver.headed.launcher as headed\n"
+            "from agent_remote_driver.session_host.launcher import main\n"
+            "headed.stage_extension = _startup_observation_stage\n"
+            "raise SystemExit(main())\n"
+        )
+        compile(script, "<fixture-startup-observation>", "exec")
+        coordinator_argv = [
+            sys.executable, "-c", script, *coordinator_argv[3:],
+        ]
     fixture = FixtureMux(binary, offline_cli.home, {
         **offline_cli.env, "HOME": str(offline_cli.home), "USERPROFILE": str(offline_cli.home),
         "PSMUX_DATA_DIR": str(tmp_path / "psmux-data"), "PSMUX_CONFIG_FILE": os.devnull,
         "PSMUX_NO_WARM": "1",
         "AGENT_BRIDGE_SESSION_HOST_NONCE": receipt_nonce,
+        **({
+            "DRIVER_STARTUP_HELD": str(held_file), "DRIVER_STARTUP_RELEASE": str(release_file),
+            "DRIVER_STARTUP_STATUS": str(status_file),
+        } if startup else {}),
     })
     target, query = fixture.target, fixture.query
-    identity, state, owner_pid = None, None, None
+    identity, state, owner_pid, client_operation = None, None, None, None
     try:
         absent = await asyncio.to_thread(query, "has-session", "-t", target)
         assert absent.returncode == 1
@@ -612,16 +819,17 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
                 session_id=session_id, nonce=receipt_nonce,
             ) == (state["child_pid"], process_start_time(state["child_pid"]))
         event_file = offline_cli.home / "session-state" / session_id / "events.jsonl"
-        for _ in range(600):
-            if event_file.is_file() and '"assistant.turn_end"' in event_file.read_text():
-                break
-            await asyncio.sleep(0.05)
-        else:
-            pytest.fail("Original coordinator seed did not finish")
+        if not startup:
+            for _ in range(600):
+                if event_file.is_file() and '"assistant.turn_end"' in event_file.read_text():
+                    break
+                await asyncio.sleep(0.05)
+            else:
+                pytest.fail("Original coordinator seed did not finish")
         requests = (
             (1, "initialize", {"protocolVersion": 1}),
             (2, "session/prompt", {
-                "sessionId": session_id, "prompt": [{"type": "text", "text": prompts[1]}],
+                "sessionId": session_id, "prompt": [{"type": "text", "text": prompts[-1]}],
             }),
         )
         if delivery == "ordinary":
@@ -638,7 +846,7 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
                         if response.get("id") == request_id:
                             assert "result" in response, response
                             break
-        elif delivery == "bridge-client":
+        elif delivery == "bridge-client" or startup:
             from agent_procutil.owned_process import run_caller_owned
 
             wrapper = (
@@ -660,19 +868,71 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
                 + json.dumps(json.dumps(declaration)) + ",cwd:" + json.dumps(str(offline_cli.workspace))
                 + ",nativePid:" + str(state["child_pid"]) + "});\n"
                 "try {console.log(JSON.stringify({messageId:await client.send({prompt:"
-                + json.dumps(prompts[1]) + ",mode:'immediate',source:'agent-bridge'})}));}"
+                + json.dumps(prompts[-1]) + ",mode:"
+                + json.dumps("enqueue" if startup else "immediate")
+                + ",source:'agent-bridge'})}));}"
                 "finally {client.close();}\n"
             )
-            accepted = await asyncio.to_thread(
+            client_operation = asyncio.create_task(asyncio.to_thread(
                 run_caller_owned, [shutil.which("node"), "--input-type=module", "-e", script],
                 timeout=20, max_stdout_bytes=4096, max_stderr_bytes=4096,
-            )
+            ))
+            if delivery == "startup-seed":
+                while not (
+                    status_file.is_file() and "\n" in status_file.read_text(encoding="utf-8")
+                ) and not client_operation.done():
+                    await asyncio.sleep(.02)
+                if not status_file.is_file() or "\n" not in status_file.read_text(encoding="utf-8"):
+                    outcome = await client_operation
+                    pytest.fail(
+                        "The real Bridge client exited before startup readiness: "
+                        f"exit={outcome.returncode}; stderr={outcome.stderr[-2048:]!r}"
+                    )
+                statuses = [
+                    json.loads(line)["result"]
+                    for line in status_file.read_text(encoding="utf-8").split("\n")[:-1]
+                ]
+                assert statuses[0]["startupSeed"] == "pending"
+                assert statuses[0]["nativeSend"] == statuses[0]["prompt"] == "pending"
+                for _ in range(100):
+                    if held_file.is_file() and offline_cli.response_started.is_set():
+                        break
+                    await asyncio.sleep(.02)
+                else:
+                    pytest.fail("The actual SDK startup event and original model request were not held")
+                held = json.loads(held_file.read_text(encoding="utf-8"))
+                assert held["sessionId"] == session_id and held["eventId"]
+                assert held["nativePid"] == state["child_pid"]
+                assert held["extensionPid"] == state["extension_pid"]
+                assert len(offline_cli.requests) == 1
+                assert not client_operation.done()
+                release_file.write_text("release original SDK observations", encoding="utf-8")
+            accepted = await client_operation
             assert accepted.returncode == 0, accepted.stderr
             assert not accepted.stderr
             assert isinstance(json.loads(accepted.stdout)["messageId"], str)
+            if startup:
+                statuses = [
+                    json.loads(line)["result"]
+                    for line in status_file.read_text(encoding="utf-8").splitlines()
+                ]
+                assert all(value["sessionId"] == session_id for value in statuses)
+                ready = [value for value in statuses if value["nativeSend"] == "ready"]
+                assert ready
+                if delivery == "startup-seed":
+                    assert ready[-1]["startupSeed"] == "observed"
+                    assert ready[-1]["startupTurn"] == "active" and ready[-1]["prompt"] == "pending"
+                    assert len(offline_cli.requests) == 1
+                    offline_cli.release_response.set()
+                else:
+                    assert ready[-1]["startupSeed"] == ready[-1]["startupTurn"] == "not-requested"
+                    assert not held_file.exists()
             for _ in range(600):
-                events = [json.loads(line) for line in event_file.read_text().splitlines()]
-                if sum(event["type"] == "assistant.turn_end" for event in events) >= 2:
+                events = (
+                    [json.loads(line) for line in event_file.read_text().splitlines()]
+                    if event_file.is_file() else []
+                )
+                if sum(event["type"] == "assistant.turn_end" for event in events) >= len(prompts):
                     break
                 await asyncio.sleep(0.05)
             else:
@@ -720,9 +980,16 @@ async def test_native_headed_coordinator_owns_the_common_broker_in_the_original_
         assert not any(pid_alive(pid) for pid in owned_pids)
         events = [json.loads(line) for line in event_file.read_text().splitlines()]
         assert [event["data"]["content"] for event in events if event["type"] == "user.message"] == prompts
-        assert len(offline_cli.requests) == 2
+        assert len(offline_cli.requests) == len(prompts)
+        if delivery == "startup-seed":
+            assert next(event["id"] for event in events if event["type"] == "user.message") == held["eventId"]
+        if startup:
+            assert [path.parent.name for path in (offline_cli.home / "session-state").glob("*/events.jsonl")] == [session_id]
         assert not (offline_cli.home / "permissions-config.json").exists()
     finally:
+        offline_cli.release_response.set()
+        if client_operation is not None:
+            await asyncio.gather(client_operation, return_exceptions=True)
         for _ in range(100):
             present = await asyncio.to_thread(query, "has-session", "-t", target)
             if present.returncode == 1:

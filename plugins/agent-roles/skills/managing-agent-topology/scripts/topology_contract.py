@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime
 from pathlib import Path
 from typing import Any, cast
+
+from topology_dispatch import linked
 
 ASSETS = Path(__file__).resolve().parents[1] / "assets"
 MAX_BYTES = 2 * 1024 * 1024
@@ -54,6 +57,28 @@ def timestamp(value: str) -> datetime:
 
 def owner_key(owner: dict[str, str]) -> tuple[str, str, str]:
     return owner["machine"], owner["project"], owner["worktree"]
+
+
+def content_revision(value: Any) -> str:
+    encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, allow_nan=False)
+    return "sha256:" + hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+
+
+def validate_materialization(document: Any) -> dict[str, Any]:
+    """Inspect an exported charter without asserting native acceptance or authority."""
+    schema = read_json(ASSETS / "topology.schema.json")
+    _shape(document, schema["$defs"]["materialization"], schema, "$")
+    effective = document["effective"]
+    source = document["source"]
+    if effective["charter"]["scope"] != effective["role"]["scope"]:
+        raise ContractError("materialized charter scope differs from its role")
+    if source["machine"] != effective["machine"]["id"] or source["role"] != effective["role"]["id"]:
+        raise ContractError("materialized source differs from its selected role or machine")
+    if document["materializationRevision"] != content_revision(effective):
+        raise ContractError("materialization content revision differs")
+    if document["sourceRevision"] != content_revision({"source": source, "effective": effective}):
+        raise ContractError("materialization source revision differs")
+    return cast(dict[str, Any], document)
 
 
 def _shape(value: Any, rule: dict[str, Any], schema: dict[str, Any], path: str) -> None:
@@ -119,8 +144,10 @@ def validate(document: Any) -> dict[str, Any]:
     assignments = {item["id"]: item for item in document["assignments"]}
     for field in ("requestId", "creationKey"):
         _unique([item[field] for item in assignments.values()], field)
-    if document["dispatcher"]["owner"]["machine"] not in machines:
+    if document["dispatcher"] is not None and document["dispatcher"]["owner"]["machine"] not in machines:
         raise ContractError("dispatcher references an unknown machine")
+    _unique([item["nativeTask"] for item in assignments.values()
+             if item["nativeTask"] is not None], "native task reference")
     for machine in machines.values():
         if set(machine["allowedRoles"]) - roles.keys():
             raise ContractError("machine references an unknown role")
@@ -135,7 +162,7 @@ def validate(document: Any) -> dict[str, Any]:
         owner = assignment["nativeWorktree"]
         if owner and owner["machine"] != assignment["machine"]:
             raise ContractError("native worktree differs from selected machine")
-        if assignment["state"] != "proposed" and owner is None:
+        if assignment["state"] != "proposed" and owner is None and not linked(assignment, document["observations"]):
             raise ContractError("non-proposed assignment requires a native worktree")
         by_effect = {effect["id"]: effect for effect in assignment["effects"]}
         for effect in assignment["effects"]:
@@ -180,9 +207,12 @@ def validate(document: Any) -> dict[str, Any]:
     observations = document["observations"]
     _unique([item["machine"] for item in observations["machines"]], "machine observation")
     _unique([owner_key(item["owner"]) for item in observations["owners"]], "owner observation")
+    _unique([item["task"]["id"] for item in observations.get("dispatch", [])], "native task observation")
     for observation in [observations["dispatcher"], observations["discovery"],
-                        *observations["machines"], *observations["owners"]]:
-        timestamp(observation["observedAt"])
+                        *observations["machines"], *observations["owners"],
+                        *observations.get("dispatch", [])]:
+        if observation is not None:
+            timestamp(observation["observedAt"])
     for observation in observations["machines"]:
         if observation["machine"] not in machines:
             raise ContractError("observation references an unknown machine")
@@ -190,9 +220,11 @@ def validate(document: Any) -> dict[str, Any]:
         if observation["owner"]["machine"] not in machines:
             raise ContractError("owner observation references an unknown machine")
         assignment_id = observation["assignmentId"]
-        if assignment_id is not None and (
-            assignment_id not in assignments
-            or assignments[assignment_id]["nativeWorktree"] != observation["owner"]
-        ):
-            raise ContractError("owner observation conflicts with its assignment")
+        if assignment_id is not None:
+            assignment = assignments.get(assignment_id)
+            if assignment is None or (
+                assignment["nativeWorktree"] != observation["owner"]
+                and not (linked(assignment, observations) and assignment["nativeWorktree"] is None)
+            ):
+                raise ContractError("owner observation conflicts with its assignment")
     return cast(dict[str, Any], document)

@@ -489,6 +489,127 @@ def _function(plugin: str, name: str, suffix: str):
     return match.group()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows bootstrap selection")
+@pytest.mark.parametrize("host", ["powershell.exe", "pwsh"])
+@pytest.mark.parametrize(
+    "scenario", ["path38", "path39", "launcher39", "unsupported38", "unsupported39",
+                 "missing", "explicit", "retained"],
+)
+def test_logger_manifest_uses_supported_bootstrap(tmp_path, host, scenario):
+    executable = shutil.which(host)
+    if not executable:
+        pytest.skip(f"{host} unavailable")
+    scripts = REPOSITORY / "plugins" / "agent-logger" / "scripts"
+    installer = (scripts / "install.ps1").read_text(encoding="utf-8")
+    start = installer.index("    $publicationPython = $null")
+    end = installer.index("    if ($publicationPython -and", start)
+    admission = installer[start:end]
+    old = tmp_path / "old" / "python.exe"
+    supported = tmp_path / "supported" / "python.exe"
+    alias = tmp_path / "WindowsApps" / "python.exe"
+    launcher = tmp_path / "py.exe"
+    for path in (old, supported, alias, launcher):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    harness = tmp_path / "bootstrap.ps1"
+    harness.write_text(f"""
+Set-StrictMode -Version Latest
+$ErrorActionPreference='Stop'
+. {_ps(scripts / 'versioned_runtime_native.ps1')}
+Rename-Item Function:\\Invoke-Hidden Invoke-RealHidden
+$scenario={_ps(scenario)}
+$old={_ps(old)}; $supported={_ps(supported)}; $fixtureLauncher={_ps(launcher)}
+$calls=New-Object 'System.Collections.Generic.List[string]'
+$published=$null
+function Get-Command {{
+    param($Name,[switch]$All,$CommandType,$ErrorAction)
+    $paths=@()
+    if ($Name -eq 'py') {{ $paths=@($fixtureLauncher) }}
+    if ($Name -eq 'python3' -and $scenario -notin @('launcher39','missing')) {{
+        $paths=@($old,{_ps(alias)})
+        if ($scenario -notlike 'unsupported*') {{ $paths+=@($supported) }}
+    }}
+    if ($scenario -eq 'missing') {{ return }}
+    foreach ($path in $paths) {{
+        [pscustomobject]@{{Source=$path}}
+        if (-not $All) {{ return }}
+    }}
+}}
+function Invoke-Hidden {{
+    param($FilePath,$ArgList,[ref]$ErrorOutput,$InputText,$Environment)
+    $calls.Add([string]$FilePath)
+    if ($ArgList -contains '--write-manifest') {{
+        if ($FilePath -ne $supported) {{ throw 'unsupported command-binding interpreter' }}
+        $script:published=@{{python=$FilePath;argv=@($ArgList);manifest=($InputText|ConvertFrom-Json)}}
+        $global:LASTEXITCODE=0
+        return
+    }}
+    if ($FilePath -eq $fixtureLauncher) {{
+        $global:LASTEXITCODE=0
+        if ($ArgList[0] -eq '-0p') {{ $global:LASTEXITCODE=1; return }}
+        if ($ArgList -notcontains '-c') {{ throw 'unexpected launcher arguments' }}
+        $base=if ($ArgList[0] -eq '-3.10' -and $scenario -eq 'launcher39') {{ $supported }} else {{ $old }}
+        return ConvertTo-Json -Compress $base
+    }}
+    $version=if ($FilePath -eq $old) {{
+        if ($scenario -like '*38') {{ '(3,8)' }} else {{ '(3,9)' }}
+    }} else {{ '(3,10)' }}
+    $prefix='import sys; sys.version_info='+$version+'; sys.executable='+
+        (ConvertTo-Json -Compress ([string]$FilePath))+'; sys._base_executable=sys.executable; '
+    $code=$ArgList[[array]::IndexOf($ArgList,'-c')+1]
+    $errorText=''
+    Invoke-RealHidden -FilePath {_ps(sys.executable)} -ArgList @(
+        '-I','-S','-B','-c',($prefix+$code),'inspect',''
+    ) -ErrorOutput ([ref]$errorText)
+}}
+$env:ProgramFiles={_ps(tmp_path / 'absent')}
+${{env:ProgramFiles(x86)}}=$env:ProgramFiles
+$env:LOCALAPPDATA=$env:ProgramFiles
+$env:COPILOT_EXTENSIONS_CONTEXT=''
+$BootstrapPython=if ($scenario -eq 'explicit') {{ $supported }} else {{ '' }}
+{admission}
+if ($scenario -eq 'retained') {{
+    function Get-Command {{ throw 'admitted Python must not be rediscovered' }}
+}}
+{_function('agent-logger', 'Get-BootstrapPython', 'ps1')}
+{_function('agent-logger', 'Write-LoggerDeployManifest', 'ps1')}
+function Get-GitInfo {{ param($Path) return @{{}} }}
+function Assert-SourceRuntime {{}}
+function Get-PayloadHash {{ return 'fixture' }}
+function Get-SourceRuntimeFields {{ return @{{}} }}
+function Get-SourceKind {{ param($Path) return 'local' }}
+function Write-Ok {{ param($Message) }}
+function Write-DeployManifest {{ return @{{preserved='fixture';source=@{{kind='local'}}}} }}
+$script:SourceRuntimeIdentity=$null
+$InstallDir={_ps(tmp_path / 'runtime')}; $PluginDir={_ps(tmp_path / 'payload')}
+$ScriptDir={_ps(scripts)}; $LinkDir=$InstallDir
+$publicationProject={_ps(tmp_path)}; $PackageVersion='1.2.3'
+$before=$env:PATH
+$refused=$false
+try {{ Write-LoggerDeployManifest }} catch {{
+    if ($_.Exception.Message -notlike 'Command ownership publication requires*') {{ throw }}
+    $refused=$true
+}}
+@{{published=$published;refused=$refused;calls=@($calls.ToArray());
+    unchanged=($env:PATH -ceq $before)}}|ConvertTo-Json -Depth 6 -Compress
+""", encoding="utf-8")
+    result = _run([executable, "-NoProfile", "-NonInteractive", "-File", str(harness)])
+    assert result.returncode == 0, result.stdout + result.stderr
+    details = json.loads(result.stdout)
+    refused = scenario.startswith("unsupported") or scenario == "missing"
+    assert details["refused"] is refused
+    assert details["unchanged"] is True
+    assert str(alias) not in details["calls"]
+    if refused:
+        assert details["published"] is None
+    else:
+        published = details["published"]
+        assert published["python"] == str(supported)
+        assert published["manifest"] == {"preserved": "fixture", "source": {"kind": "local"}}
+        assert published["argv"][4] == str(scripts / "command_binding.py")
+        assert "--publish-legacy" in published["argv"]
+
+
 @pytest.mark.parametrize("plugin", PLUGINS)
 @pytest.mark.parametrize("boundary", ["lease", "completion", "activation", "snapshot"])
 def test_source_boundary_guards_preserve_previous_selection(tmp_path, plugin, boundary):

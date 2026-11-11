@@ -677,7 +677,6 @@ def build_parser() -> argparse.ArgumentParser:
     from .diagnostic_logs import register_log_commands
     register_log_commands(sub)
     from .telemetry_cli import register as register_telemetry
-
     register_telemetry(sub)
     register_coordinator_commands(sub)
     register_create_commands(sub)
@@ -685,7 +684,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     register_task_lifecycle_commands(sub)
     register_task_recovery_commands(sub)
-
+    from .standing_cli import register_standing_commands
+    register_standing_commands(sub)
     register_steering_commands(sub)
     register_attention_commands(sub)
     from .category_cli import register_category_commands

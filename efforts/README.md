@@ -19,7 +19,8 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
-| [Dispatch Standing Charters](active/dispatch-standing-charters/README.md) | Draft; durable-task and admission contract before implementation | #11770; existing registrar, lifecycle, materialization and topology owners retained; no live enrollment or rollout |
+| [Latest Waiting Update](active/latest-waiting-update/README.md) | Draft; latest-wins admission proposal before code | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |
+| [Dispatch Standing Charters](active/dispatch-standing-charters/README.md) | In progress; operator docs and complete isolated discovery/native-owner flows qualified, source delivery open | #11770; existing registrar, lifecycle, materialization and topology owners retained; no live enrollment or rollout |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Active; legacy mux caller corrections and readiness-only scope proposal | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
 | [Derived Disk Hygiene](active/derived-disk-hygiene/README.md) | Active; bytecode, scratch and claim-engine slices merged; guided cleanup delivery, producer/lock integration and rollout observation remain | #10968/#10965/#10966/#10967; independent per-track PRs, no automatic finalize deletion or unapproved cleanup/rollout |
 | [Bridge Delivery Status](active/bridge-delivery-status/README.md) | Draft; model-facing receipt and coalesced host subscription proposal before implementation | #11448; preserves #6394 inbox, #11445 registration and #11298 roster owners; no rollout or peer-session repair |

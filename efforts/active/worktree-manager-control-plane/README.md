@@ -93,6 +93,7 @@ item in this umbrella.
 | Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 | Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
+| Profile preparation implementer | Owns only the reviewed pre-adoption dependency-preparation follow-up under #11989; preserves #356/#8545 setup and #11976 acquisition ownership. | Managed source worktree; public source handle `sluggish-gasket`; coordination through #11989 and the linked subplan. |
 | First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
 | Optional Sync-progress implementer | Bounded #4183 LP1-LP3/LPV Sync producer/local-consumer source increment accepted, including complete CLI comparison; other verbs/runtime/platform lanes stay separate, with no PK/WI ownership or rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
 
@@ -957,6 +958,10 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
       The [proposed concrete caller contract](optional-repository-bootstrap.md)
       preserves #356's first-repository registration/setup/trust/readiness
       ownership; it is not a second registration engine or a shipped option.
+- [ ] Profile-aware dependency preparation (#11989, `sluggish-gasket`):
+      review the [bounded native preparation subplan](profile-aware-repository-preparation.md)
+      before implementation. Preserve reference/no-agent setup and active
+      settings; complete prospective dependencies are not project adoption.
 - [x] Wave 0: review contribution, effective-state, and local-write contracts
       against existing owners; reconcile #543's old direct-repository-write
       premise without claiming its implementation complete.

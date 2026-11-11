@@ -1,0 +1,9 @@
+{
+  "comment": "Honor explicit Manager Refresh through resident-owned reconciliation and its publication barrier",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

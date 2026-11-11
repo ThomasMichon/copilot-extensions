@@ -1,0 +1,9 @@
+{
+  "comment": "Measure the real POSIX foreground and source-auth backend EOF boundary without enabling recovery",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

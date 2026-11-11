@@ -24,6 +24,7 @@ from .client_registrations import RegistrationClientMixin
 from .client_schedules import ScheduleClientMixin
 from .client_spawn_reservations import SpawnReservationClientMixin
 from .client_spawn_terminal import SpawnTerminalClientMixin
+from .client_standing import StandingClientMixin
 from .client_steering import SteeringClientMixin
 from .client_suspend import SuspendClientMixin
 from .client_task_recovery import TaskRecoveryClientMixin
@@ -32,7 +33,7 @@ from .client_verification import VerificationClientMixin
 from .client_worktree_status import WorktreeStatusClientMixin
 
 
-class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin):
+class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlacementClientMixin, TaskRecoveryClientMixin, CleanupRecoveryClientMixin, CategoryClientMixin, ScheduleClientMixin, RegistrationClientMixin, WorktreeStatusClientMixin, CompletionReviewMixin, SuspendClientMixin, VerificationClientMixin, ClearExcludeClientMixin, SpawnTerminalClientMixin, SpawnReservationClientMixin, EventStreamClientMixin, SteeringClientMixin, StandingClientMixin):
     """A synchronous client for one coordinator base URL."""
 
     def __init__(
@@ -98,8 +99,9 @@ class DispatchClient(PoolDeclineClientMixin, PoolStartupClientMixin, PoolPlaceme
 
     # -- reads ---------------------------------------------------------------
 
-    def health(self, repo: str | None = None) -> dict:  # repo: scope `backlog` to one lane
-        return self._unwrap(self._http.get("/health", params={"repo": repo} if repo else None))
+    def health(self, repo: str | None = None, *, timeout: float | None = None) -> dict:
+        options = {"timeout": timeout} if timeout is not None else {}  # repo scopes `backlog`
+        return self._unwrap(self._http.get("/health", params={"repo": repo} if repo else None, **options))
 
     def get(
         self, task_id: str, *, native_restart_policy: bool = False,

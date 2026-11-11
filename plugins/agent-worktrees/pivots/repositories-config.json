@@ -17,6 +17,12 @@
   "actions": [
     {"key": "details", "label": "Inspect effective state / sources / owner boundaries", "kind": "card", "title_from": "card.title", "body_from": "card.body"},
     {
+      "key": "acquire-knowledge", "label": "Acquire a remote knowledge checkout only", "kind": "form",
+      "when": {"knowledge_acquisition_available": "true"}, "fields_from": "knowledge_acquisition_fields", "body_from": "card.body", "confirm": true,
+      "preview": ["agent-worktrees", "repos", "configuration", "knowledge-acquire-preview", "--context-project", "{context_project}", "--repository-url", "{field.url}", "--checkout-path", "{field.path}"],
+      "run": ["agent-worktrees", "repos", "configuration", "knowledge-acquire-apply", "--context-project", "{context_project}", "--repository-url", "{field.url}", "--checkout-path", "{field.path}", "--preview-token", "{configuration_preview}"]
+    },
+    {
       "key": "register-local-knowledge", "label": "Register an existing local knowledge checkout", "kind": "form",
       "when": {"knowledge_registration_available": "true"}, "fields_from": "knowledge_registration_fields", "body_from": "card.body", "confirm": true,
       "preview": ["agent-worktrees", "repos", "configuration", "knowledge-register-preview", "--context-project", "{context_project}", "--repository", "{field.name}", "--checkout-path", "{field.path}", "--default-branch", "{field.branch}", "--account={field.account}"],

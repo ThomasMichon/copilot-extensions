@@ -575,17 +575,27 @@ old association it can publish the additive view without Git/registry traversal;
 an unchanged complete association needs no rewrite.
 
 The registered Windows pre-tool entry also uses that per-call native result
-for its existing exact `view`/`rg`/`glob` read exemption. It still checks the
-four original guard-source digests before returning without a policy child.
-Fallback admission does not qualify, even if the original resolver refreshes
-the association during that call. Changed guard sources, incomplete or changed
-cell observations, other tool names, writes and every `toolCalls` envelope
-retain the original validation and policy path, even with read-labelled
-envelope metadata. The default-installation emergency stop never governs a cell.
+for its [source-bound native proofs](architecture.md#native-windows-pre-tool-entry).
+The exact `view`/`rg`/`glob` read exemption still checks all four guard-source
+digests; complete native read/write batches retain their own additional proof.
+A single prepared PowerShell event may also use the existing relevance owner's
+exact no-argument literal declaration, bound to that source as well as the
+guards. Its object command field retains original precedence; shell arguments,
+JSON argument strings and shell batch members do not gain that proof.
+The same exact literal can come from a raw string, or from `tool_input` only
+when `toolArgs` is absent. A present null, empty or invalid primary value never
+falls through to the fallback carrier. Raw text is compared unchanged, not
+trimmed, unquoted or decoded.
+Fallback admission does not qualify a prepared proof, even if the original
+resolver refreshes the association during that call. Changed sources, incomplete
+or changed cell observations and incompatible declarations retain original
+validation/policy. The default-installation emergency stop never governs a cell.
 This does not qualify installed or composed hook latency.
-After guard-source changes, regenerate the shipped contract with
-`python tools/render-hook-read-policy.py`. Registered-consumer fixtures copy
-that contract unchanged, so a stale digest cannot be hidden by fixture repair.
+After guard or proof-dependency source changes, regenerate the shipped contract
+with `python tools/render-hook-read-policy.py`. Registered-consumer fixtures use
+the actual packaged declaration; literal comparator legs explicitly omit only
+its optional proof and record that contract identity. Stale source digests are
+never repaired in fixtures to manufacture qualification.
 
 New producers remain compatible with old readers, which ignore the additive
 field and retain their old cell path. New readers use an old producer's

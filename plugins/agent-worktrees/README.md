@@ -436,6 +436,12 @@ trace phases. This protects these native entrypoints, not every installer or lau
 publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
 owns the policy schema and decision semantics.
 
+On Windows, an unprovisioned command honors an existing `payload-dir` selection
+and rechecks it under the provision lock. Without a saved selection, a
+payload-local command uses its adjacent `scripts\install.ps1` before installed-plugin
+discovery, so relocating an intact payload does not require a saved pointer.
+Global shims without an adjacent plugin manifest retain installed-plugin discovery.
+
 Cell installers also check before self-staging and runtime-input writes. The
 Python lifecycle repeats admission at entry, under the existing genesis/install
 locks, on candidate handover and in helper callbacks, including when invoked
@@ -509,6 +515,9 @@ The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
 
+The Windows first-use relay preserves empty stderr lines as whitespace, not
+exception type names, while retaining nonempty diagnostics and failure status.
+
 Structured installs capture the payload and canonical development libraries
 in one staging tree, preserving their relative dependency paths. Packaged
 releases retain their local library copies. Dependency builds use the captured
@@ -573,13 +582,20 @@ inventories. Point-of-use execution and mutation admission remain separate.
 
 Worktree Manager's [Repositories Configuration section](docs/repositories-configuration.md)
 uses the native read/preview/apply CLI to inspect registration, routes, state
-binding and tracked pairs. Its only editable setting is the machine-local
-future-launch Copilot login preference; it does not log in or launch agents.
+binding and tracked pairs. It edits the machine-local future-launch Copilot
+login preference and offers separately confirmed remote-checkout acquisition,
+local knowledge registration and binding actions. It does not log in, execute
+downloaded setup code or launch agents.
 
 The standalone [repository authentication inspection](docs/repository-authentication.md)
 separately observes an explicitly configured GitHub account and repository API
 access. It does not acquire credentials or certify Git, Copilot, MCP or complete
 onboarding readiness.
+
+The standalone [registration/provider preflight](docs/repository-registration-preflight.md)
+adds canonical/discovered selection and bounded server default-branch policy
+observations. Unknown or inaccessible policy never implies direct publication;
+this optional read does not add a gate to local binding.
 
 ## Independent Execution Spaces
 
@@ -651,6 +667,11 @@ owners, including already-running daemons. Removing that compatibility barrier
 requires separately qualified peer support; source publication alone does not
 activate different-worktree launch parallelism. The new lease is distinct from
 seed/native admission and the Windows mux check/create lease.
+
+Deferred Windows launches serialize the final canonical PowerShell setup argv
+through the same one-shot manifest used by mux startup. This preserves literal
+drive-qualified arguments and option-leading prompts across `pwsh -File`;
+it does not change the selected admission, seed or conversation owner.
 
 ### Explicit restart Resume
 

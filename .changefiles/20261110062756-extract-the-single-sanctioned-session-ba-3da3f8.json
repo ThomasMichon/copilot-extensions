@@ -1,0 +1,9 @@
+{
+  "comment": "Extract the single sanctioned session backfill sweep without changing its public behavior",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}
