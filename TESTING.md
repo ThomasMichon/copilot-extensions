@@ -303,7 +303,7 @@ packet shares the Worktrees-only feed and pinned prerequisite policy above;
 its protected controller must be promoted before submission.
 
 `submit --packet native-worktrees-copilot-caller-jobs` selects only
-`test_public_copilot_caller_job_lifetime` through that same leased native owner.
+`test_public_attached_caller_job_lifetime` through that same leased native owner.
 The installed public `copilot` entrypoint and two nested caller Jobs inherit the
 fixture's existing private ConPTY. After real target attachment, the fixture
 closes the inner Job while the caller is still running, retains its actual

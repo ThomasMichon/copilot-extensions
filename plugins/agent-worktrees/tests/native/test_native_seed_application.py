@@ -225,7 +225,7 @@ def test_public_caller_job_lifetime(monkeypatch):
     os.name != "nt" or os.environ.get("WORKTREES_NATIVE_CALLER_JOBS") != "1",
     reason="Explicitly select the leased native attached caller-Job lifetime owner",
 )
-def test_public_copilot_caller_job_lifetime(monkeypatch):
+def test_public_attached_caller_job_lifetime(monkeypatch):
     _qualify_public_application(monkeypatch, "copilot", caller_jobs=True)
 
 
@@ -278,6 +278,28 @@ def test_public_application_workspace_is_outside_source_only_repository(tmp_path
         _qualify_public_application(monkeypatch, caller)
     assert [caller for _, caller in observed] == ["embody", "copilot"]
     assert all(not root.exists() for root, _ in observed)
+
+
+@pytest.mark.parametrize("packet", [
+    "native-worktrees-copilot", "native-worktrees-copilot-caller-jobs",
+])
+def test_public_caller_packets_collect_exactly_the_declared_case(tmp_path, monkeypatch, packet):
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    from windows_qualification_contract import NATIVE_PACKETS
+    from windows_qualification_worker import native_command
+
+    command = native_command(ROOT, tmp_path, packet)
+    selected = command[command.index("-k") + 1]
+    reply = run_caller_owned(
+        [sys.executable, "-m", "pytest", "-q", "--collect-only", str(Path(__file__)),
+         "-k", selected, "--basetemp", str(tmp_path / "collection"),
+         "-o", f"cache_dir={tmp_path / 'cache'}"],
+        cwd=SOURCE, env=dict(os.environ), timeout=30,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert reply.returncode == 0, reply.stdout + reply.stderr
+    nodes = [line for line in reply.stdout.splitlines() if "::test_" in line]
+    assert len(nodes) == 1 and nodes[0].endswith("::" + NATIVE_PACKETS[packet][2]), nodes
 
 
 @pytest.mark.parametrize("failed", [False, True])

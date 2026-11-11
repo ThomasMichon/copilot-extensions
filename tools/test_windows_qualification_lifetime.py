@@ -35,7 +35,7 @@ def test_native_capture_retains_real_child_output_and_restores_streams_on_failur
 
 @pytest.mark.parametrize("packet,case", [
     ("native-worktrees-caller-jobs", "test_public_caller_job_lifetime"),
-    ("native-worktrees-copilot-caller-jobs", "test_public_copilot_caller_job_lifetime"),
+    ("native-worktrees-copilot-caller-jobs", "test_public_attached_caller_job_lifetime"),
 ])
 def test_worktrees_lifetime_uses_native_owner_without_weakening_default_containment(
     tmp_path, monkeypatch, packet, case,

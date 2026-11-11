@@ -25,7 +25,7 @@ NATIVE_PACKETS = {
         "native-worktrees-caller-jobs",
     ),
     "native-worktrees-copilot-caller-jobs": (
-        "agent-worktrees", "test_native_seed_application", "test_public_copilot_caller_job_lifetime",
+        "agent-worktrees", "test_native_seed_application", "test_public_attached_caller_job_lifetime",
         "native-worktrees-copilot-caller-jobs",
     ),
     "native-worktrees-manager-no-mux": (
