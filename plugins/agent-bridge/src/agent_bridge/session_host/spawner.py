@@ -239,10 +239,10 @@ def build_remote_launch(
     so it **outlives the channel closing** (the POSIX survival seam, validated in
     the #145 live proof), while ``PR_SET_PDEATHSIG`` inside the Host still ties
     the copilot child's life to the Host. The nonce rides in via the env (off the
-    command line). ``unexpected_reap_seconds`` / ``active_reap_seconds`` bound how
-    long a front-less idle / active child is held before the detached Host lets
-    it go (so a reconnecting front can resume). Paths are POSIX (the far side is
-    Linux).
+    command line). Fresh hosts use ACP lifetime: disconnect is not a stop
+    request, and unqualified idle evidence cannot expire the child. The reap
+    options remain accepted by the core but apply only to legacy lifetime.
+    Paths are POSIX (the far side is Linux).
     """
     import posixpath
 
@@ -265,7 +265,8 @@ def build_remote_launch(
             f"rm -f {shlex.quote(state_remote)} || exit 1; "
         )
     host_cmd = (
-        f"python3 {shlex.quote(bundle_remote)} --port 0 "
+        f"python3 -I -S {shlex.quote(bundle_remote)} --port 0 "
+        "--mode headless --backend native-acp --lifetime-policy acp "
         f"--state-file {shlex.quote(state_remote)} "
         f"--unexpected-reap-seconds {unexpected_reap_seconds} "
         f"--active-reap-seconds {active_reap_seconds} "
@@ -378,7 +379,7 @@ class CodeSpaceSpawner:
 
         from .. import __version__
         from . import protocol as proto
-        from .bundle import build_session_host_bundle
+        from agent_remote_driver.session_host.bundle import build_session_host_bundle
         from ..portable_policy import selected_context
         from .endpoints import (
             CredentialRelayReadinessError,
@@ -396,12 +397,9 @@ class CodeSpaceSpawner:
         if not await self._transport.path_exists(remote_bundle):
             await self._transport.push_file(str(bundle_path), remote_bundle)
 
-        # Import the staged archive with site-packages disabled before starting
-        # it detached. This catches an incomplete bundle immediately instead of
-        # waiting the full readiness timeout for a process that already crashed.
-        preflight = (
-            f"python3 -S {shlex.quote(remote_bundle)} --help >/dev/null"
-        )
+        # Select support from the actual receiving artifact before provisioning
+        # or launching a child, not from the controller's package version.
+        preflight = f"python3 -I -S {shlex.quote(remote_bundle)} --support-json"
         preflight_rc, preflight_out, preflight_err = await self._transport.run(
             preflight, timeout=30.0,
         )
@@ -410,6 +408,25 @@ class CodeSpaceSpawner:
                 "remote Session Host bundle preflight failed "
                 f"(rc={preflight_rc}): {preflight_err or preflight_out}"
             )
+        try:
+            support = json.loads(preflight_out)
+        except (ValueError, TypeError):
+            support = None
+        if not (
+            isinstance(support, dict)
+            and support.get("contract") == "agent-remote-driver.session-host"
+            and type(support.get("version")) is int and support["version"] == 1
+            and type(support.get("protocol_version")) is int
+            and support["protocol_version"] == proto.PROTOCOL_VERSION
+            and all(
+                isinstance(support.get(key), list) and value in support[key]
+                for key, value in (
+                    ("modes", "headless"), ("headless_backends", "native-acp"),
+                    ("transports", "tcp-frame"), ("lifetime_policies", "acp"),
+                )
+            )
+        ):
+            raise RuntimeError("remote Session Host bundle lacks required native ACP support")
 
         # Deploy helpers without running checkout-creating hooks before auth.
         hooks = None
