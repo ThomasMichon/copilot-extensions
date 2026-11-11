@@ -46,6 +46,10 @@ def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
     return relocated
 
 
+async def _close_frontend(client):
+    await asyncio.wait_for(client.close(), 3)
+
+
 def _prior_frontend(monkeypatch):
     root = Path(__file__).resolve().parents[3]
     fixtures = root / "plugins/agent-bridge/contract/fixtures/session-host/prior-runtime-dev150"
@@ -87,6 +91,26 @@ def test_prior_frontend_refuses_corrupted_frozen_client(monkeypatch):
     with pytest.raises(AssertionError):
         _prior_frontend(monkeypatch)
     assert "_driver_dev150_frontend.client" not in sys.modules
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frontend", ["current", "prior-runtime-dev150"])
+async def test_frontend_close_preserves_abort_recovery_and_bounds_prior(monkeypatch, frontend):
+    client_type = SessionHostClient if frontend == "current" else _prior_frontend(monkeypatch)
+
+    async def stalled():
+        await asyncio.Future()
+
+    transport = SimpleNamespace(abort=Mock())
+    writer = SimpleNamespace(close=Mock(), wait_closed=stalled, transport=transport)
+    client = client_type(asyncio.StreamReader(), writer)
+    if frontend == "current":
+        await _close_frontend(client)
+        transport.abort.assert_called_once_with()
+    else:
+        with pytest.raises(asyncio.TimeoutError):
+            await _close_frontend(client)
+    writer.close.assert_called_once_with()
 
 
 def test_consumers_reach_the_same_core_through_canonical_build_owners(monkeypatch):
@@ -561,7 +585,7 @@ async def test_relocated_core_reconnects_and_stops_exact_child(
             assert json.loads(frame)["result"]["params"] == params
             await client.ack(cursor)
         await client.detach(reapable=reapable)
-        await asyncio.wait_for(client.close(), 2)
+        await _close_frontend(client)
         client = None
         if legacy and reapable:
             await asyncio.to_thread(proc.wait, timeout=5)
@@ -607,7 +631,7 @@ async def test_relocated_core_reconnects_and_stops_exact_child(
     finally:
         try:
             if client is not None:
-                await asyncio.wait_for(client.close(), 2)
+                await _close_frontend(client)
         finally:
             if proc.poll() is None:
                 proc.kill()

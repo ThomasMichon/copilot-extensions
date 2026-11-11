@@ -159,7 +159,9 @@ The same real-process flow additionally executes the exact prior
 It verifies both content hashes before loading them in an isolated module
 namespace; corruption refuses before the client is imported. Both frontends
 exercise the same current compact exports, with bounded stream closure and
-independent child cleanup. This is actual prior frontend source compatibility,
+independent child cleanup. The close bound leaves the current client's internal
+timeout/abort recovery room to finish while also bounding the older client.
+This is actual prior frontend source compatibility,
 not an old installed Host, historical binary rollback or native SDK evidence.
 
 ## Owner-only hosted Windows escape hatch
