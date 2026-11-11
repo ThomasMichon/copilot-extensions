@@ -124,8 +124,10 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     assert len(offline_cli.requests) == 1
 
 
-@pytest.mark.parametrize("timeout_helper", [False, True])
-def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, timeout_helper):
+@pytest.mark.parametrize("mode,timeout_helper", [
+    ("empty", False), ("empty", True), ("client-tasks", False),
+])
+def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, mode, timeout_helper):
     interpreter = os.environ.get("COPILOT_NATIVE_TEST_SDK_PYTHON")
     if not interpreter:
         pytest.skip("Select an isolated interpreter with a seasoned public Python SDK")
@@ -134,7 +136,7 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, timeout_hel
     arguments = [
         interpreter, str(Path(__file__).with_name("native_sdk_inventory_probe.py")),
         offline_cli.executable, str(offline_cli.workspace), str(offline_cli.logs),
-        str(identity), str(pinned), str(output),
+        str(identity), str(pinned), str(output), mode,
     ]
     settled = threading.Event()
     if timeout_helper:
@@ -195,6 +197,30 @@ def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, timeout_hel
     assert observed["responseText"] == "FIXTURE", observed
     assert observed["status"]["version"] and observed["status"]["protocolVersion"] >= 1
     assert len(offline_cli.requests) == 1
+    control = observed["clientTaskControl"]
+    if mode == "client-tasks":
+        registered = control["registration"]
+        assert registered["created"] and not registered["reclaimed"]
+        task_id = registered["task"]["id"]
+        assert control["otherSessionId"] != observed["sessionId"]
+        assert control["otherTasks"]["tasks"] == []
+        assert control["runningRemoval"]["removed"] is False
+        assert control["idleRemoval"]["removed"] is False
+        for label, status in (
+            ("running", "running"), ("afterOtherDisconnect", "running"),
+            ("idle", "idle"), ("completed", "completed"),
+        ):
+            tasks = control[label]["tasks"]
+            assert len(tasks) == 1 and tasks[0]["id"] == task_id, control
+            assert tasks[0]["type"] == "client" and tasks[0]["status"] == status, control
+        for label in ("idle", "completed"):
+            assert control[f"{label}Update"]["applied"]
+            assert not control[f"{label}Update"]["duplicate"]
+        assert control["completed"]["tasks"][0]["result"] == "ISOLATED_TASK_COMPLETE"
+        assert control["terminalRemoval"]["removed"]
+        assert control["afterRemoval"]["tasks"] == []
+    else:
+        assert control is None
     session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
     assert [path.parent.name for path in session_files] == [observed["sessionId"]]
     events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
