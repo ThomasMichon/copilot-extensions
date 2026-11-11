@@ -126,17 +126,33 @@ def test_independent_scope_keeps_its_waiting_update(area, difference):
     assert all(r.state == "pending" for r in status(root=area / "state"))
 
 
-def test_bootstrap_and_installed_manager_share_address_despite_different_project_fields(area):
+@pytest.mark.parametrize("flags,project", [((), ""), (("--project", "sample"), "sample"),
+                                         (("--project=sample",), "sample")])
+def test_bootstrap_and_installed_manager_share_address_despite_different_project_fields(
+    area, flags, project,
+):
     manager = area / "manager"
     context = (("WORKTREE_MANAGER_ROOT", str(manager)),)
     old = submit(area, "", spec=RequestSpec(
-        "manager", project=str(manager), cwd=str(area), context=context, source="bootstrap",
+        "manager", flags, project=str(manager), cwd=str(area), context=context, source="bootstrap",
     ))
     new = submit(area, "", spec=RequestSpec(
-        "manager", cwd=str(area), context=context, source="installed", repair=True,
+        "manager", project=project, cwd=str(area), context=context, source="installed", repair=True,
     ))
     assert status(old.id, root=area / "state").exit_code == 125
     assert new.id in status(old.id, root=area / "state").error
+
+
+def test_bootstrap_retains_independent_project_requests(area):
+    manager = area / "manager"
+    spec = RequestSpec(
+        "manager", ("--project", "one"), project=str(manager), cwd=str(area),
+        context=(("WORKTREE_MANAGER_ROOT", str(manager)),),
+    )
+    first = submit(area, "", spec=spec)
+    other = submit(area, "", spec=replace(spec, argv=("--project", "two")))
+    assert first.id != other.id
+    assert all(row.state == "pending" for row in status(root=area / "state"))
 
 
 @pytest.mark.parametrize("backend", ["owning-plugin-provision", "plugin-native-install", "manager-bootstrap"])
@@ -148,6 +164,23 @@ def test_update_never_discards_required_component_work(area, backend):
     assert drain(root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 0) == 0
     assert seen == [component.id, new.id]
     assert status(old.id, root=area / "state").exit_code == 125
+
+
+@pytest.mark.parametrize("arguments", [
+    ("reconcile",), ("bootstrap",), ("staged",),
+    ("automatic", "--auto", "--no-update", "--with-reconcile"),
+])
+def test_independent_launch_phase_neither_replaces_nor_is_replaced_by_updates(area, arguments):
+    first = submit(area, "first")
+    phase = submit(area, "", spec=RequestSpec(
+        "engine-launch-update", arguments, cwd=str(area),
+    ))
+    assert status(first.id, root=area / "state").state == "pending"
+    newest = submit(area, "newest")
+    seen = []
+    assert drain(root=area / "state", executor=lambda tx: seen.append(tx.request.id) or 0) == 0
+    assert seen == [phase.id, newest.id]
+    assert status(first.id, root=area / "state").exit_code == 125
 
 
 def test_failed_successor_insert_rolls_back_supersession(area):

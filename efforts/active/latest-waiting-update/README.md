@@ -147,6 +147,31 @@ expansion of required CI is introduced.
   host installation are not source acceptance proxies for this queue change.
   Native Linux/macOS execution was unavailable here and is not inferred from
   Windows evidence. Required CI retains its existing unit-only scope.
+- Initial implementation CI exposed the module-size cap, unchanged actor-free
+  policy source admission and a bootstrap project-normalization defect.
+  Extracted the focused pending-selection helper, refreshed only the existing
+  policy source's admission hash, and recovered logical bootstrap projects
+  from their retained arguments. No unit nodes, actor permissions or coverage
+  gates were removed or expanded.
+- Review also identified a standalone reconciliation phase outside the automatic
+  `--no-update` shape. Standalone bootstrap, staged and reconciliation phases
+  now remain independent component work. The queue/core/authority packet passed
+  197 cases after these corrections. A separate native bootstrap control adds
+  an actual same-project successor and checks correlated exit 125, no execution
+  of the replaced recipe and retained caller-loss ownership. The original
+  native coalescing/independent-project control remains intact.
+- An initial combined native scenario reached correct supersession and
+  independent-project completion but exhausted its original 90-second limit
+  while the last successor was still running. Split the new latest-wins
+  scenario from the original coalescing test rather than enlarging limits or
+  omitting lifetime, outcome or cleanup assertions. Native validation remains
+  pending until the bounded scenarios complete.
+- The separate local native scenario also exhausted 90 seconds, this time
+  before second-request admission. Repeated local execution stopped rather than
+  enlarging bounds or treating partial progress as a pass. Exact fresh hosted
+  native acceptance remains required before merge. The actor-free source
+  admission reader independently verified every declared binding, and the
+  extracted queue module is 994 lines.
 
 ### 2026-11-10 - Proposal
 

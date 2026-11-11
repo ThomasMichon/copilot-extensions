@@ -591,6 +591,57 @@ def test_native_bootstrap_coalesces_pending_work_and_retains_worker_after_caller
     assert "--project" in effects()[1]["argv"] and "sample" in effects()[1]["argv"]
     assert not list(root.glob("current-version"))
 
+
+@pytest.mark.parametrize("lose_caller", [False, True])
+def test_native_bootstrap_latest_waiter_preserves_active_worker_after_caller_loss(
+    bootstrap, lose_caller,
+):
+    root, _source, driver, start, effects = bootstrap
+    first, first_log = start("--project", "sample")
+    _eventually(
+        lambda: any(row["phase"] == "suite-start" for row in effects()),
+        processes=(first,), timeout=60,
+    )
+    active, = core.status(root=driver)
+    admission, = root.glob("caller-*.json")
+    caller = json.loads(admission.read_text(encoding="utf-8"))
+    second, second_log = start("--project", "sample", "--wait")
+    _eventually(lambda: len(core.status(root=driver)) == 2, processes=(first, second))
+    _active, pending = core.status(root=driver)
+    assert pending.state == "pending"
+    if lose_caller:
+        from agent_procutil.process_retirement import PinnedProcess
+
+        with PinnedProcess(caller["pid"], caller["birth"]) as original_caller:
+            original_caller.terminate()
+            assert original_caller.exited()
+        first.wait(timeout=5)
+    newest, newest_log = start(
+        "--project", "sample", "--no-anchor-sync", "--detach", "--json",
+    )
+    assert newest.wait(timeout=20) == 0, newest_log.read_text(encoding="utf-8")
+    newest_id = json.loads(newest_log.with_suffix(".out").read_text())["request_id"]
+    superseded = core.status(pending.id, root=driver)
+    assert superseded.state == "completed" and superseded.exit_code == 125
+    assert superseded.started_at is None and newest_id in superseded.error
+    assert second.wait(timeout=20) == 125, second_log.read_text(encoding="utf-8")
+    assert f"superseded by update request {newest_id}" in second_log.read_text(encoding="utf-8")
+    assert core.status(active.id, root=driver).state == "running"
+    assert core.status(newest_id, root=driver).state == "pending"
+    assert [row["phase"] for row in effects()] == ["manager", "suite-start"]
+    (root / "release-suite").touch()
+    _eventually(lambda: core.status(newest_id, root=driver).state == "completed")
+    if not lose_caller:
+        assert first.wait(timeout=20) == 23, first_log.read_text(encoding="utf-8")
+    assert core.status(active.id, root=driver).exit_code == 23
+    assert core.status(newest_id, root=driver).exit_code == 23
+    assert [row["phase"] for row in effects()] == [
+        "manager", "suite-start", "suite-end", "manager", "suite-start", "suite-end",
+    ]
+    assert {row["request"] for row in effects()[:3]} == {active.id}
+    assert {row["request"] for row in effects()[3:]} == {newest_id}
+
+
 def test_native_detached_bootstrap_removes_only_its_acquisition_and_retains_worker(bootstrap):
     root, _source, driver, start, effects = bootstrap
     preserved = root / "bootstrap-acquisition" / "failed-earlier"

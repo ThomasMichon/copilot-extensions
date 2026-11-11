@@ -129,14 +129,16 @@ creation, not an implicit permission migration or a read-only status side effect
   active arrivals. Fresh Manager bootstrap also keeps later active arrivals
   separate: its retained Manager/SDK inputs do not pin every marketplace target
   discovered by the following suite update.
-  Update requests (`manager`, `engine`, and software-enabled
+  Update requests (`manager`, `engine`, and software-enabled automatic
   `engine-launch-update`) retain at most one waiting selection per addressed
   installation/project authority. A newer accepted request atomically
   supersedes older never-started waiting updates in that scope, including a
   different retained runner, source or explicit option selection. Manager
-  bootstrap and installed-CLI requests share their addressed Manager root.
+  bootstrap and installed-CLI requests share their addressed Manager root and
+  logical project, including a bootstrap's retained `--project` arguments.
   The running request is unchanged; component provisioning, bootstrap install
-  recipes, reconciliation-only launch work and independent scopes remain
+  recipes, standalone bootstrap/staged/reconciliation launch phases,
+  reconciliation-only automatic launch work and independent scopes remain
   separate. Automatic requests cannot replace a waiting explicit update and
   are refused before admission in that case.
   Superseded records retain their original invocation and finish as
