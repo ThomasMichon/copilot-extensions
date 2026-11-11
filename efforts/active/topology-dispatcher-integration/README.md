@@ -94,14 +94,14 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ### Phase 5 - Vacancy and drift reconciliation
 
-- [ ] Propose reconciliation for required-role vacancies and live off-role drift
+- [x] Propose reconciliation for required-role vacancies and live off-role drift
   through monitor coordination, accepted reassignment and collision-safe
-  replacement.
+  replacement (#12084).
 
 ### Phase 6 - Eligible work admission
 
 - [ ] Propose admission of eligible dormant work and prioritized backlog while
-  preserving operator tasks, interactive reserve and review capacity.
+  preserving operator tasks, interactive reserve and review capacity (#12137).
 
 ## Validation Plan
 
@@ -118,6 +118,31 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - [ ] Reconcile every Plan and Validation Plan item before marking Done.
 
 ## Journal
+
+### 2026-11-11 - Reconciliation delivered; admission source implemented
+
+- Phase 5 merged in #12084. The read-only reconciliation report preserves
+  uncertain ownership and original effects, coordinates retained owners and
+  proposes new demand only after discovery and placement holds clear. Its
+  focused packet passed 268 tests; affected strict Linux/Windows type checks
+  and Python F/E9 lint passed. No live reconciliation or installation occurred.
+- Phase 6 (#12137) adds an optional offline `admission --work` report with a
+  versioned saved-evidence schema. Priority ranking consumes only per-invocation
+  headroom; general work cannot borrow interactive or dedicated review reserve.
+  Dormant work keeps its native owner, generation and exact head. Operator
+  tasks, waits/holds, stale or conflicting evidence and unsettled effects remain
+  held. Native owners still perform all claiming, resumption and allocation.
+- The affected topology packet passed 308 tests, including a real subprocess
+  with unchanged input bytes, empty-work/fresh-state compatibility and explicit
+  help/version behavior. Python F/E9 lint, documentation consistency and
+  install-contract checks passed. The affected strict type-check project passed
+  for Linux and Windows; the final exact-source check is refreshed before
+  publication.
+- Clean-room scope is a fresh synthetic topology with no installed services or
+  optional admission evidence required by legacy commands. No install or
+  provisioning behavior changed. Live external-venue validation remains
+  excluded by source-only authority and requires separate adoption. Phase 6
+  review, required CI, merge and source finalization remain outstanding.
 
 ### 2026-11-10 - Effort opened with Phase 1
 

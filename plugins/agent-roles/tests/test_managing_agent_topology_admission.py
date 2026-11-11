@@ -1,0 +1,328 @@
+"""Admission proposals retain custody and consume only declared free pool budgets."""
+
+from __future__ import annotations
+
+import copy
+import json
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+import pytest
+
+SKILL = Path(__file__).resolve().parents[1] / "skills" / "managing-agent-topology"
+sys.path.insert(0, str(SKILL / "scripts"))
+from topology import Topology  # noqa: E402
+from topology_admission import admission  # noqa: E402
+from topology_contract import ContractError, read_json, timestamp, validate  # noqa: E402
+
+AT = "2026-01-01T00:01:00Z"
+pytestmark = [
+    pytest.mark.effect("filesystem"),
+    pytest.mark.contract("agent_roles.topology"),
+]
+
+
+@pytest.fixture
+def document() -> dict[str, Any]:
+    result: dict[str, Any] = read_json(SKILL / "assets" / "topology.example.json")
+    result["observations"]["machines"][0]["usedSlots"] = 0
+    result["observations"]["owners"][0]["headRevision"] = 7
+    return result
+
+
+def task(name: str = "work-a", **changes: Any) -> dict[str, Any]:
+    return {
+        "id": name, "requestId": "request-" + name, "observedAt": AT,
+        "sourceRef": "synthetic:task-read", "role": "scratch", "kind": "temporary",
+        "priority": 1, "operatorTask": False, "readiness": "ready", "holdReason": None, "status": "queued",
+        "generation": 2, "owner": None, "ownerSessionId": None, **changes,
+    }
+
+
+@pytest.fixture
+def evidence() -> dict[str, Any]:
+    return {
+        "version": 1, "observedAt": AT, "sourceRef": "synthetic:complete-queue-and-reserves",
+        "complete": True, "reviewRoles": ["reviewer"],
+        "machines": [
+            {"machine": "alpha", "interactiveReserveSlots": 1, "reviewReserveSlots": 1},
+            {"machine": "beta", "interactiveReserveSlots": 0, "reviewReserveSlots": 1},
+            {"machine": "gamma", "interactiveReserveSlots": 0, "reviewReserveSlots": 0},
+        ],
+        "tasks": [task()],
+    }
+
+
+def report(document: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    return admission(Topology(validate(document), timestamp(AT)), evidence)
+
+
+def dormant(document: dict[str, Any], **changes: Any) -> dict[str, Any]:
+    observation = document["observations"]["owners"][0]
+    return task(
+        "dormant-review", requestId="request-review-a", role="reviewer", kind="standing",
+        status="suspended", owner=copy.deepcopy(observation["owner"]),
+        ownerSessionId=observation["head"], **changes,
+    )
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_ranked_batch_preserves_interactive_and_separate_review_capacity(
+    document: dict[str, Any], evidence: dict[str, Any],
+) -> None:
+    evidence["tasks"] = [
+        task("low", priority=0), task("z"), task("a"), task("b"), task("c"),
+        task("review", role="reviewer", kind="standing", priority=0),
+        task("operator", operatorTask=True, priority=100),
+    ]
+    before = copy.deepcopy((document, evidence))
+    result = report(document, evidence)
+    assert [item["task"] for item in result["proposals"]] == ["a", "b", "c", "z", "review"]
+    assert {item["task"]: item["reasons"] for item in result["held"]} == {
+        "operator": ["operator-task-preserved"], "low": ["no-eligible-reserved-capacity"],
+    }
+    assert [item["pool"] for item in result["proposals"]] == ["general"] * 4 + ["review"]
+    alpha = next(item for item in result["capacity"] if item["machine"] == "alpha")
+    assert alpha["interactiveReserveSlots"] == 1
+    assert alpha["generalSlotsRemaining"] == 0
+    assert alpha["reviewSlotsRemaining"] == 0
+    assert (document, evidence) == before
+    evidence["tasks"].reverse()
+    assert report(document, evidence) == result
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_dormant_work_retains_owner_generation_and_head(
+    document: dict[str, Any], evidence: dict[str, Any],
+) -> None:
+    evidence["tasks"] = [dormant(document)]
+    result = report(document, evidence)
+    assert result["holds"] == []
+    assert result["proposals"][0]["machine"] == "beta"
+    assert result["proposals"][0]["nextStep"] == {
+        "owner": "agent-dispatch", "operation": "resume-task", "expectedStatus": "suspended",
+        "expectedGeneration": 2, "retainedWorktree": document["observations"]["owners"][0]["owner"],
+        "expectedHead": "synthetic-head-a", "expectedHeadRevision": 7,
+    }
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("change", ["no-dispatcher", "custody", "discovery", "stale", "future", "incomplete"])
+def test_unqualified_global_evidence_holds_all_work(
+    document: dict[str, Any], evidence: dict[str, Any], change: str,
+) -> None:
+    if change == "no-dispatcher":
+        document["dispatcher"] = None
+        document["observations"]["dispatcher"] = None
+    elif change == "custody":
+        document["observations"]["dispatcher"]["custody"] = "unknown"
+    elif change == "discovery":
+        document["observations"]["discovery"]["complete"] = False
+    elif change == "incomplete":
+        evidence["complete"] = False
+    else:
+        evidence["observedAt"] = "2025-01-01T00:00:00Z" if change == "stale" else "2027-01-01T00:00:00Z"
+    result = report(document, evidence)
+    assert result["holds"]
+    assert result["proposals"] == []
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("change", ["stale", "head", "role", "running", "missing", "no-head-revision"])
+def test_dormant_owner_is_not_replaced_or_retargeted(
+    document: dict[str, Any], evidence: dict[str, Any], change: str,
+) -> None:
+    evidence["tasks"] = [dormant(document)]
+    observation = document["observations"]["owners"][0]
+    if change == "stale":
+        observation["observedAt"] = "2025-01-01T00:00:00Z"
+    elif change == "head":
+        observation["head"] = "synthetic-successor"
+    elif change == "role":
+        observation["role"] = "scratch"
+    elif change == "running":
+        observation["state"] = "running"
+    elif change == "missing":
+        document["observations"]["owners"] = []
+    else:
+        observation.pop("headRevision")
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert result["held"][0]["reasons"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("change", ["reserve-missing", "reserve-overflow", "load-unknown", "load-stale", "constraint"])
+def test_capacity_unknowns_do_not_become_free_slots(
+    document: dict[str, Any], evidence: dict[str, Any], change: str,
+) -> None:
+    evidence["tasks"] = [dormant(document)]
+    if change == "reserve-missing":
+        evidence["machines"] = []
+    elif change == "reserve-overflow":
+        evidence["machines"][1]["interactiveReserveSlots"] = 1
+    elif change == "load-unknown":
+        document["observations"]["machines"][1]["usedSlots"] = None
+    elif change == "load-stale":
+        document["observations"]["machines"][1]["observedAt"] = "2025-01-01T00:00:00Z"
+    else:
+        document["machines"][1]["constraints"] = ["synthetic:requires-native-decision"]
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert "no-eligible-reserved-capacity" in result["held"][0]["reasons"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("changes", [
+    {"readiness": "waiting"}, {"readiness": "held"}, {"readiness": "unknown"},
+    {"status": "started"}, {"operatorTask": True},
+    {"holdReason": "synthetic:human-decision-pending"},
+    {"observedAt": "2025-01-01T00:00:00Z"},
+    {"ownerSessionId": "synthetic:retained-head"}, {"requestId": "request-review-a"},
+])
+def test_ineligible_work_never_consumes_budget(
+    document: dict[str, Any], evidence: dict[str, Any], changes: dict[str, Any],
+) -> None:
+    evidence["tasks"] = [task("held", priority=10, **changes), task("eligible")]
+    result = report(document, evidence)
+    assert [item["task"] for item in result["proposals"]] == ["eligible"]
+    assert result["held"][0]["task"] == "held"
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_operator_owner_and_multiple_dormant_tasks_are_not_repurposed(
+    document: dict[str, Any], evidence: dict[str, Any],
+) -> None:
+    evidence["tasks"] = [dormant(document, priority=2), task(
+        "operator", operatorTask=True, status="started",
+        owner=copy.deepcopy(document["observations"]["owners"][0]["owner"]),
+        ownerSessionId="synthetic-head-a",
+    )]
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert "operator-owner-preserved" in result["held"][0]["reasons"]
+    evidence["tasks"][1].update(
+        id="dormant-other", requestId="request-other", operatorTask=False, status="suspended",
+        role="reviewer", kind="standing",
+    )
+    document["machines"][1]["capacitySlots"] = 4
+    evidence["machines"][1]["reviewReserveSlots"] = 3
+    result = report(document, evidence)
+    assert len(result["proposals"]) == 1
+    assert "retained-owner-already-proposed" in result["held"][0]["reasons"]
+    assert "retained-owner-has-other-assignment" in result["held"][0]["reasons"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("change", ["task", "request", "machine", "review-role", "role", "boolean-slots", "generation"])
+def test_bad_saved_contract_fails_explicitly(
+    document: dict[str, Any], evidence: dict[str, Any], change: str,
+) -> None:
+    if change in {"task", "request"}:
+        extra = copy.deepcopy(evidence["tasks"][0])
+        extra["id" if change == "request" else "requestId"] = "other"
+        evidence["tasks"].append(extra)
+    elif change == "machine":
+        evidence["machines"].append(copy.deepcopy(evidence["machines"][0]))
+    elif change == "review-role":
+        evidence["reviewRoles"] = ["undeclared"]
+    elif change == "role":
+        evidence["tasks"][0]["role"] = "undeclared"
+    elif change == "boolean-slots":
+        evidence["machines"][0]["reviewReserveSlots"] = True
+    else:
+        evidence["tasks"][0]["generation"] = -1
+    with pytest.raises(ContractError):
+        report(document, evidence)
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_initial_queued_generation_zero_is_valid_but_dormant_zero_holds(
+    document: dict[str, Any], evidence: dict[str, Any],
+) -> None:
+    evidence["tasks"][0]["generation"] = 0
+    assert report(document, evidence)["proposals"][0]["nextStep"]["expectedGeneration"] == 0
+    evidence["tasks"] = [dormant(document, generation=0)]
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert "dormant-generation-unqualified" in result["held"][0]["reasons"]
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_conflicting_native_snapshot_and_pending_effects_hold(
+    document: dict[str, Any], evidence: dict[str, Any],
+) -> None:
+    from test_managing_agent_topology_dispatch import bind_snapshot
+
+    document["assignments"][0]["nativeTask"] = "synthetic-standing-task"
+    evidence["tasks"] = [dormant(document)]
+    evidence["tasks"][0]["id"] = "synthetic-standing-task"
+    document["observations"]["dispatch"] = [bind_snapshot(document)]
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert "native-task-evidence-conflicting-or-stale" in result["held"][0]["reasons"]
+    document["observations"].pop("dispatch")
+    document["assignments"][0]["effects"][1]["state"] = "unknown"
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert "retained-assignment-requires-reconciliation" in result["held"][0]["reasons"]
+
+
+@pytest.mark.effect("process")
+@pytest.mark.portfolio_tier("T2")
+def test_real_cli_and_fresh_empty_work_are_read_only(
+    document: dict[str, Any], evidence: dict[str, Any], tmp_path: Path,
+) -> None:
+    path = tmp_path / "topology.json"
+    work = tmp_path / "work.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    work.write_text(json.dumps(evidence), encoding="utf-8")
+    before = (path.read_bytes(), work.read_bytes())
+    argv = [
+        sys.executable, str(SKILL / "scripts" / "topology.py"), "admission", str(path),
+        "--work", str(work), "--at", AT,
+    ]
+    result = subprocess.run(
+        argv, capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == report(document, evidence)
+    assert (path.read_bytes(), work.read_bytes()) == before
+    evidence["tasks"] = []
+    assert report(document, evidence)["proposals"] == []
+    legacy = subprocess.run(
+        argv[:2] + ["overview", str(path), "--at", AT],
+        capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert legacy.returncode == 0, legacy.stdout + legacy.stderr
+    assert "coverage" in json.loads(legacy.stdout)
+
+
+@pytest.mark.effect("process")
+@pytest.mark.portfolio_tier("T2")
+def test_cli_support_and_unsupported_work_version_are_explicit(
+    document: dict[str, Any], evidence: dict[str, Any], tmp_path: Path,
+) -> None:
+    argv = [sys.executable, str(SKILL / "scripts" / "topology.py")]
+    help_result = subprocess.run(
+        argv + ["--help"], capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert help_result.returncode == 0
+    assert "admission" in help_result.stdout and "--work" in help_result.stdout
+    path = tmp_path / "topology.json"
+    work = tmp_path / "work.json"
+    path.write_text(json.dumps(document), encoding="utf-8")
+    evidence["version"] = 2
+    work.write_text(json.dumps(evidence), encoding="utf-8")
+    result = subprocess.run(
+        argv + ["admission", str(path), "--work", str(work), "--at", AT],
+        capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert result.returncode == 2
+    assert "unsupported value/version" in json.loads(result.stdout)["error"]

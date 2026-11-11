@@ -81,6 +81,35 @@ def validate_materialization(document: Any) -> dict[str, Any]:
     return cast(dict[str, Any], document)
 
 
+def validate_admission(document: Any, topology: dict[str, Any]) -> dict[str, Any]:
+    schema = read_json(ASSETS / "admission.schema.json")
+    _shape(document, schema, schema, "$")
+    timestamp(document["observedAt"])
+    machines = {item["id"] for item in topology["machines"]}
+    roles = {item["id"] for item in topology["roles"]}
+    if set(document["reviewRoles"]) - roles:
+        raise ContractError("admission review role is not declared")
+    seen_machines: set[str] = set()
+    for machine in document["machines"]:
+        name = machine["machine"]
+        if name not in machines or name in seen_machines:
+            raise ContractError("admission machine is unknown or duplicated")
+        seen_machines.add(name)
+    tasks: set[str] = set()
+    requests: set[str] = set()
+    for task in document["tasks"]:
+        timestamp(task["observedAt"])
+        if task["role"] not in roles:
+            raise ContractError("admission task role is not declared")
+        if task["id"] in tasks or task["requestId"] in requests:
+            raise ContractError("admission task or request is duplicated")
+        tasks.add(task["id"])
+        requests.add(task["requestId"])
+        if task["owner"] is not None and task["owner"]["machine"] not in machines:
+            raise ContractError("admission retained owner machine is not declared")
+    return cast(dict[str, Any], document)
+
+
 def _shape(value: Any, rule: dict[str, Any], schema: dict[str, Any], path: str) -> None:
     # Only the vocabulary used by our bundled schema, never an input-supplied schema.
     if rule.keys() - SCHEMA_KEYWORDS:
