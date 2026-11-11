@@ -9,6 +9,7 @@ from dataclasses import asdict
 from .assignment_workspace import AssignmentWorkspace, same_assignment_worker
 from .queue_common import Task
 from .queue_records import Status, TaskError
+from .queue_standing_schema import STANDING_KIND
 from .queue_task_relationships import latest_relationship, require_relationship
 
 
@@ -31,16 +32,23 @@ def _continue(conn: sqlite3.Connection, event_id: int, value: dict, binding: dic
 
 
 def continue_owner_session(
-    conn: sqlite3.Connection, task: Task, owner_session_id: object,
+    conn: sqlite3.Connection, task: Task, owner_session_id: object, *,
+    standing_succession: bool = False,
 ) -> None:
-    """Rebind only an already-protected suspended owner in its resume transaction."""
+    """Rebind a protected resume or admitted standing succession in its transaction."""
     row = latest_relationship(conn, task.id)
     if row is None:
         return
     require_relationship(conn, task.id)
     value = json.loads(row["task_relationship"])
+    allowed = (
+        task.kind == STANDING_KIND and task.status == Status.STARTED
+        and task.owner_session_id is not None and owner_session_id != task.owner_session_id
+        and isinstance(owner_session_id, str) and bool(owner_session_id.strip())
+        if standing_succession else task.status == Status.SUSPENDED
+    )
     if (
-        task.status != Status.SUSPENDED
+        not allowed
         or not same_assignment_worker(task.owner, row["worker"])
         or current_binding(value)["reservation_key"] is not None
     ):

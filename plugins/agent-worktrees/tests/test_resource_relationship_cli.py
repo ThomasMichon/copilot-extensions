@@ -18,6 +18,9 @@ from agent_worktrees import resource_relationship as relationship, resource_rela
 from agent_worktrees import locks, status_monitor_runtime, tracking, tracking_write
 from test_resource_producer import owner as owner
 from test_resource_relationship import call, reserve
+from test_resource_relationship_incarnation import headed_relationship as headed_relationship
+from test_resource_relationship_incarnation import succeeded_relationship as succeeded_relationship
+from test_resource_relationship_incarnation import concluded_relationship as concluded_relationship
 
 
 def test_actual_lazy_cli_capabilities_and_registered_reservation(owner, monkeypatch):
@@ -31,6 +34,9 @@ def test_actual_lazy_cli_capabilities_and_registered_reservation(owner, monkeypa
     assert capabilities["inspect_absence"] is True
     assert capabilities["expected_creation_nonce"] is True
     assert capabilities["expected_writer_identity"] is True
+    assert capabilities["head_inspect"] == 1
+    assert capabilities["succession_inspect"] == 1
+    assert capabilities["conclusion_inspect"] == 1
     assert capabilities["resident_inspect"] == 1
     assert capabilities["writer_scope"] == "executing-process"
     assert capabilities["writer_contract"] == relationship.writer_contract()
@@ -150,6 +156,19 @@ sys.exit(main.main(argv))
         "expected_writer_identity": inspected["writer_identity"],
     }
     assert execute("inspect", guarded) == inspected
+    tracking.register_session("owner", "current")
+    head = {"session_id": "current", "revision": tracking.load_record(path).replayed_head_transition.revision}
+    before = path.read_bytes()
+    assert execute("inspect", {**guarded, "expected_head": head})["head"] == head
+    stale = execute("inspect", {**guarded, "expected_head": {**head, "revision": head["revision"] + 1}}, expected_code=1)
+    assert "expected active head" in stale["message"] and path.read_bytes() == before
+    live = execute("inspect", {**guarded, "expected_conclusion": head}, expected_code=1)
+    assert "settled session conclusion" in live["message"] and path.read_bytes() == before
+    tracking.conclude_session(tracking.load_record(path), "current")
+    conclusion = {"session_id": "current", "revision": tracking.load_record(path).replayed_head_transition.revision}
+    before = path.read_bytes()
+    assert execute("inspect", {**guarded, "expected_conclusion": conclusion})["conclusion"] == conclusion
+    assert path.read_bytes() == before
     before = path.read_bytes()
     changed = {**inspected["writer_identity"], "runtime_generation": "2" * 32}
     refused = execute("bind", {
@@ -340,4 +359,105 @@ def test_resident_guard_uses_executing_response_and_refuses_prior_handler(owner,
     monkeypatch.setattr(tracking_write.wcs_client, "request", lambda *a, **k: pytest.fail("prior handler dialed"))
     code, refused = resident_inspect(monkeypatch, payload)
     assert code == 1 and "resident lacks" in refused["message"]
+    assert path.read_bytes() == before
+
+
+def test_resident_head_inspection_negotiates_actual_handler(owner, headed_relationship, resident, monkeypatch):
+    path, _ = owner
+    before = path.read_bytes()
+    code, result = resident_inspect(monkeypatch, headed_relationship)
+    assert code == 0, result
+    assert result["head"] == headed_relationship["expected_head"]
+    lock, data, _ = resident
+    data["tracking_write_verb_versions"]["resource_relationship"] = 3
+    lock.write_text(json.dumps(data), encoding="utf-8")
+    baseline = {key: value for key, value in headed_relationship.items() if key != "expected_head"}
+    assert resident_inspect(monkeypatch, baseline)[0] == 0
+    monkeypatch.setattr(tracking_write.wcs_client, "request", lambda *a, **k: pytest.fail("prior head handler dialed"))
+    code, result = resident_inspect(monkeypatch, headed_relationship)
+    assert code == 1 and "contract version 4" in result["message"]
+    assert path.read_bytes() == before
+
+
+@pytest.mark.parametrize("head", [None, {"session_id": "other", "revision": 1}, {"session_id": "current", "revision": True}])
+def test_resident_head_inspection_does_not_trust_a_missing_or_mismatched_response(
+    owner, headed_relationship, resident, monkeypatch, head,
+):
+    path, _ = owner
+    request = tracking_write.wcs_client.request
+    monkeypatch.setattr(tracking_write.wcs_client, "request", lambda *a, **k: {**request(*a, **k), "head": head})
+    before = path.read_bytes()
+    code, result = resident_inspect(monkeypatch, headed_relationship)
+    assert code == 1 and "executing writer" in result["message"]
+    assert path.read_bytes() == before
+
+
+def test_resident_succession_requires_v5_without_breaking_v4_head_reads(
+    owner, succeeded_relationship, resident, monkeypatch,
+):
+    path, _ = owner
+    before = path.read_bytes()
+    code, result = resident_inspect(monkeypatch, succeeded_relationship)
+    assert code == 0, result
+    assert result["head"] == succeeded_relationship["expected_head"]
+    lock, data, _ = resident
+    data["tracking_write_verb_versions"]["resource_relationship"] = 4
+    lock.write_text(json.dumps(data), encoding="utf-8")
+    ordinary = {
+        **succeeded_relationship,
+        "expected_head": {
+            key: value for key, value in succeeded_relationship["expected_head"].items()
+            if key != "predecessor_session_id"
+        },
+    }
+    assert resident_inspect(monkeypatch, ordinary)[0] == 0
+    monkeypatch.setattr(tracking_write.wcs_client, "request", lambda *a, **k: pytest.fail("prior succession handler dialed"))
+    code, refused = resident_inspect(monkeypatch, succeeded_relationship)
+    assert code == 1 and "contract version 5" in refused["message"]
+    assert path.read_bytes() == before
+
+
+def test_resident_succession_requires_the_returned_predecessor(
+    owner, succeeded_relationship, resident, monkeypatch,
+):
+    path, _ = owner
+    before = path.read_bytes()
+    request = tracking_write.wcs_client.request
+
+    def omit_succession(*args, **kwargs):
+        result = request(*args, **kwargs)
+        result["head"].pop("predecessor_session_id")
+        return result
+
+    monkeypatch.setattr(tracking_write.wcs_client, "request", omit_succession)
+    code, result = resident_inspect(monkeypatch, succeeded_relationship)
+    assert code == 1 and "executing writer" in result["message"]
+    assert path.read_bytes() == before
+
+
+def test_resident_conclusion_requires_v6_and_exact_returned_conclusion(
+    owner, concluded_relationship, resident, monkeypatch,
+):
+    path, _ = owner
+    before = path.read_bytes()
+    code, result = resident_inspect(monkeypatch, concluded_relationship)
+    assert code == 0, result
+    assert result["conclusion"] == concluded_relationship["expected_conclusion"]
+    request = tracking_write.wcs_client.request
+    for returned in (None, {"session_id": "current", "revision": 0}, {"session_id": "other", "revision": 1}):
+        monkeypatch.setattr(
+            tracking_write.wcs_client, "request",
+            lambda *a, returned=returned, **k: {**request(*a, **k), "conclusion": returned},
+        )
+        code, mismatched = resident_inspect(monkeypatch, concluded_relationship)
+        assert code == 1 and "executing writer" in mismatched["message"]
+    monkeypatch.setattr(tracking_write.wcs_client, "request", request)
+    lock, data, _ = resident
+    data["tracking_write_verb_versions"]["resource_relationship"] = 5
+    lock.write_text(json.dumps(data), encoding="utf-8")
+    baseline = {key: value for key, value in concluded_relationship.items() if key != "expected_conclusion"}
+    assert resident_inspect(monkeypatch, baseline)[0] == 0
+    monkeypatch.setattr(tracking_write.wcs_client, "request", lambda *a, **k: pytest.fail("prior conclusion handler dialed"))
+    code, refused = resident_inspect(monkeypatch, concluded_relationship)
+    assert code == 1 and "contract version 6" in refused["message"]
     assert path.read_bytes() == before

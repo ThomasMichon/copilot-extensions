@@ -10,7 +10,7 @@ import json
 import pytest
 import yaml
 
-from agent_worktrees import claim_handoffs, claim_providers, config as cfg
+from agent_worktrees import claim_handoffs, claim_providers, config as cfg, config_authority
 from agent_worktrees import finalize, resource_producer as producer, resource_producer_cli as cli
 from agent_worktrees import tracking, tracking_claim_write, tracking_write
 from agent_worktrees.tracking_producer_write import apply_resource_producer
@@ -30,6 +30,7 @@ def owner(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "tracking_dir", lambda: records)
     monkeypatch.setattr(cfg, "load_config", lambda *a, **k: config)
     monkeypatch.setattr(cfg, "load_project_config", lambda *a, **k: config)
+    monkeypatch.setattr(config_authority, "load_project_authority_config", lambda *a, **k: config)
     for name in ("owner", "consumer"):
         checkout = tmp_path / "trees" / name
         checkout.mkdir(parents=True)
@@ -403,13 +404,13 @@ def test_capabilities_and_exact_stdin_cli(owner, monkeypatch, capsys):
 
 
 def test_real_main_capabilities_and_reserve_use_owning_project_without_cluster(owner, monkeypatch):
-    from agent_worktrees import __main__ as main, claims_cli, state_root
+    from agent_worktrees import __main__ as main, claims_cli, state_root, worktree_ops_cli
 
     path, _ = owner
     emitted = []
     monkeypatch.setattr(cli.output, "_json_output", emitted.append)
     monkeypatch.setattr(main, "_ensure_cluster_loaded", lambda: pytest.fail("producer booted the full CLI cluster"))
-    monkeypatch.setattr(cli.worktree_ops_cli, "_resolve_owner_ref", lambda: "m/p/owner")
+    monkeypatch.setattr(worktree_ops_cli, "_resolve_owner_ref", lambda: "m/p/owner")
     monkeypatch.setattr(
         claims_cli, "_coordination_readiness_for_owner_ref",
         lambda *a: state_root.CoordinationReadiness(True, "ready", state_root.StateRoot(str(path.parent), "launch_repo", "p", False, False, True)),

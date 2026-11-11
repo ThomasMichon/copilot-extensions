@@ -59,6 +59,64 @@ os._exit(23)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+def test_native_leases_share_ownership_under_a_long_ordinary_root(tmp_path, long_root):
+    base = str(tmp_path)
+    if base.startswith("\\\\?\\UNC\\"):
+        base = "\\\\" + base[8:]
+    elif base.startswith("\\\\?\\"):
+        base = base[4:]
+    root = Path(base) / "runtime"
+    while (
+        len(str(root)) <= 270 if long_root
+        else len(str(root / ".construction-leases" / ("0" * 64 + ".lock"))) <= 260
+    ):
+        root /= "d" * 32
+    value = str(root)
+    native_root = Path("\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value)
+    native_root.mkdir(parents=True)
+    try:
+        with runtime.construction_lease(root, "Candidate", timeout=1):
+            code = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+try:
+    with runtime.construction_lease(Path(sys.argv[2]), 'candidate', timeout=0):
+        raise SystemExit(9)
+except runtime.ConstructionTimeout:
+    print('blocked')
+"""
+            result = subprocess.run(
+                [sys.executable, "-I", "-S", "-B", "-c", code, str(LIBRARY), str(native_root)],
+                capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.strip() == "blocked"
+        with runtime.construction_lease(native_root, "candidate", timeout=1):
+            pass
+        with runtime._leases.reference_transaction_custody(root, timeout=1):
+            pass
+        observed = []
+
+        def open_lock(directory, name):
+            observed.append(directory)
+            return runtime._leases._windows_private_lease_file(root, directory, name)
+
+        publication = runtime._runtime_component("versioned_runtime_publication")
+        with publication.leases(root, ["fixture"], open_lock=open_lock):
+            assert observed == [root / ".publication-leases"]
+        slot = native_root / "versions" / "candidate"
+        slot.mkdir(parents=True)
+        with runtime.retention_lease(root, "candidate", require_installed=False):
+            pass
+        assert len(list((native_root / ".construction-leases").glob("*.lock"))) == 1
+    finally:
+        shutil.rmtree(native_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
 @pytest.mark.parametrize("operation", ["discard", "gc"])
 @pytest.mark.parametrize("extended_root", [False, True])
 def test_owned_cleanup_removes_long_descendants(tmp_path, operation, extended_root):

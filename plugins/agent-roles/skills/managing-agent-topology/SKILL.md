@@ -24,8 +24,11 @@ no dispatcher, machine, worker, background watch or recurring schedule.
 
 ## Establish one owner and document
 
-1. Resolve the adopter's private writable state home and the native dispatcher
-   worktree. Respect its repository flow and existing effort/task custody; never
+1. Resolve the adopter's private writable state home and, if appointed, the native
+   dispatcher worktree. Without an appointment, set `dispatcher` and
+   `observations.dispatcher` to `null`: read-only validation, materialization and
+   reporting remain available, but placement and routing report a hold. Respect
+   the repository flow and existing effort/task custody; never
    put a private fleet inventory in a public plugin or use a knowledge anchor as
    a writable worktree.
 2. Fill the [dispatcher charter](assets/CHARTER.md) from the original operator
@@ -47,6 +50,9 @@ The JSON document holds dispatcher intent, desired machines/roles, assignments
 and dated observations. Machine registry, native worktree, head-session,
 resource reservation, task, messaging and approval authorities remain external.
 An `authorityRef`, receipt, accepted charter or valid JSON does not grant effects.
+When using native Dispatch standing charters, link assignments by `nativeTask`
+and derive attachment, acceptance and lifecycle from native reads. Do not maintain
+a second writable acceptance or worktree-ownership map in this document.
 
 ## Discover before assigning
 
@@ -95,7 +101,12 @@ they are unlimited.
 6. Record admission, consumption, charter acceptance and goal progress separately.
    `active` means an intended active assignment; qualified coverage additionally
    needs a fresh current head and evidence that it accepted the expected charter.
-   A successful launch receipt alone does not establish that.
+   A successful launch receipt alone does not establish that. For a Dispatch-linked
+   standing assignment, use its native accepted materialization and original
+   relationship instead of copying acceptance into assignment fields.
+   Every coverage entry also reports owner `liveness` and dated `progress`
+   evidence (see [owner progress evidence](references/adapters-and-recovery.md#owner-progress-evidence));
+   neither qualifies, counts nor routes a lane.
 
 ## Relay adjustments and inquiries
 
@@ -137,6 +148,9 @@ blindly or move to another machine.
 Recompute semantic coverage without replacing an uncertain owner. Count each
 native owner at most once in a role/scope lane. Stale, unreachable, wrong-scope,
 unaccepted or unresolved-effect assignments remain visible but unqualified.
+With Dispatch observations, report desired, reserved, accepted, held, unknown,
+retiring and retired lanes separately. Owner-retaining lanes are not vacancies,
+and only a joined, current accepted lane contributes qualified coverage.
 The [recovery reference](references/adapters-and-recovery.md) explains adoption,
 collisions, interrupted allocation, succession and retirement.
 
@@ -150,7 +164,9 @@ to make the overview look clean.
 
 Resolve [the script](scripts/topology.py) from this skill payload. Use a supported
 Python 3.10+ interpreter; it imports only its adjacent
-[contract module](scripts/topology_contract.py) and the standard library.
+[contract module](scripts/topology_contract.py),
+[saved Dispatch observation adapter](scripts/topology_dispatch.py) and the
+standard library. Dispatch is optional; the adapter never imports its runtime.
 No install, service, network or credentials are required.
 
 ```text
@@ -159,6 +175,8 @@ python <resolved-script> overview <private-topology-json>
 python <resolved-script> placement <private-topology-json> --role <role-id> --kind standing
 python <resolved-script> route <private-topology-json> --request <request-id>
 python <resolved-script> seed <private-topology-json> --request <request-id>
+python <resolved-script> materialize <private-topology-json> --request <request-id>
+python <resolved-script> inspect-materialization <private-materialization-json>
 ```
 
 The helper only reads and prints JSON. `validate` checks structure and references;
@@ -166,6 +184,29 @@ The helper only reads and prints JSON. `validate` checks structure and reference
 eligible capacity; `route` returns the retained worktree and observed current head
 or a hold; `seed` exports the complete saved assignment, role and machine context.
 There is no allocate, send, reconcile-write or launch command.
+
+`materialize` exports a nonterminal persisted assignment's complete charter, role,
+machine constraints and dispatcher context in a versioned envelope. Save that
+output only in the adopter's writable state home through its normal publication
+flow. `inspect-materialization` validates the saved envelope, completeness and
+content revisions; a floating template reference is not a materialization.
+Neither command admits an attachment or records worker acceptance.
+
+`materializationRevision` identifies the complete effective content.
+`sourceRevision` also includes the topology ID/revision and assignment identity.
+Observations and pending effects are excluded from both: a new native head does
+not rewrite the charter. Source changes may leave effective content unchanged;
+content changes are detected even if a human forgets to increment a revision.
+These digests identify content, not authority or trusted provenance. Preserve
+expected and accepted revisions separately; never infer acceptance from export,
+inspection or an unchanged digest. Recheck native holds and custody at admission.
+
+To opt into native coverage, include `observations.dispatch` with dated snapshots
+of native standing tasks and their original relationships. See the
+[observation contract](references/adapters-and-recovery.md#native-dispatch-observations)
+for the exact join and receipt projection. Omitting that array preserves the
+legacy assignment/owner acceptance path; supplying an empty array makes linked
+standing assignments unknown, not accepted from old copied fields.
 
 Inputs are limited to 2 MiB. Unsupported versions, duplicate keys/identities,
 dangling references and inconsistent native/effect records return exit 2 with an

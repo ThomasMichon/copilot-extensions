@@ -16,6 +16,49 @@ as the stable runtime-facing path. See
 [`docs/patterns/README.md`](../../docs/patterns/README.md) §"Runtime installs are
 immutable and versioned".
 
+## Selector sharing on Windows
+
+Selector publication uses `FileRenameInfoEx` with replace and POSIX semantics.
+Cooperating Python and PowerShell resolvers open `current-version` and
+`last-known-good` with read, write and delete sharing: a held reader keeps its
+old bytes while a fresh reader sees the replacement. On Windows, selector read
+errors other than absence propagate instead of selecting a fallback; POSIX
+retains its previous fallback on read errors. Write sharing failures are
+retried briefly. Primary-selector and receipt-backed write failures are
+reported; without a receipt, `last-known-good` remains best-effort on every
+platform and activation may succeed with the previous fallback still present.
+If the native rename operation itself reports `ERROR_NOT_SUPPORTED` (50) or
+`ERROR_CALL_NOT_IMPLEMENTED` (120), the writer falls back once to `os.replace`.
+That fallback retains atomic replacement but can fail while a delete-sharing
+reader holds the old file; its failures retain the normal publication policy.
+Other errors, including ambiguous `ERROR_INVALID_PARAMETER` (87), do not
+select this fallback.
+
+Guarded recovery uses the same replacement only for root selectors whose
+current objects have activation-receipt proofs. Generic copy recovery keeps
+`os.replace`, even for selector-named files. Recovery-created objects without
+an activation-object proof also keep `os.replace`; a held reader can therefore
+still cause a visible recovery failure with evidence retained.
+
+This is a cooperative compatibility contract, not a conditional or
+foreign-object compare-and-swap. Previously installed resolvers and distinct
+launchers that still open selectors without delete sharing are not upgraded
+by a source change and can block or miss a concurrent publication. Some
+cleanup/construction probes and generated binstubs in this source tree also
+still use ordinary opens and are not qualified by this change. Newly generated
+CMD launchers from `runtime_application_binstubs.py::global_binstubs` and
+`worktree_manager/runtime_launchers.py::_cmd_binstub` retry the existing
+`set /p` read up to 4,096 times, then make one final diagnostic read. The bound
+is by attempts, not wall-clock time. They still do not share delete, can delay
+a writer, and can fail if contention
+outlasts the retry budget. Their parsing and failure semantics remain those of
+`set /p`; this does not change installed shims or a read already in flight.
+`worktree_manager/runtime_launchers.py::_ps1_binstub` still uses an ordinary
+PowerShell read. An explicit
+incoming installation must not treat an old runtime's provenance or recovery
+state as authority over the new selection; guarded publication still reports
+I/O failures.
+
 ## Package releases and runtime generations
 
 The [immutable development pattern](../../docs/patterns/mutable-dev-slot.md)
@@ -59,8 +102,8 @@ stays out of runtime dependency resolution and ships as plain stdlib files:
 `versioned_runtime_leases.py` owns kernel construction/retention/publication
 ownership; `versioned_runtime_construction.py` owns the finite attached protocol
 and shell adapters; `versioned_runtime_source.py` owns complete-input fingerprints, source receipts and exact
-source-qualified recovery; `versioned_runtime_publication.py` owns created-file
-proofs and caught-failure recovery. The protocol receives explicit typed runtime operations,
+source-qualified recovery; `versioned_runtime_publication.py` owns selector I/O,
+created-file proofs and caught-failure recovery. The protocol receives explicit typed runtime operations,
 never reverse-imports a compatibility root. Each marketplace payload carries the
 complete adjacent family and is independently usable before any venv exists.
 
@@ -182,6 +225,8 @@ The persistent lock file is never deleted, and is not evidence of a live owner.
 Version case aliases always share a lease, including on case-insensitive macOS
 volumes; distinct case-only names on a case-sensitive volume conservatively
 serialize too.
+Windows lease-file access uses extended-length paths; ordinary and extended
+spellings retain the same kernel ownership.
 Normal return, exceptions, cancellation, and process death close the descriptor
 and release ownership.
 

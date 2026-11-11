@@ -506,6 +506,20 @@ nonliteral, duplicate and oversized declarations inside the existing file bound.
 Other selection-only controls retain their explicit policy stub and are not
 represented as full real-worker decisions.
 
+The `literal-shell-carrier` cases extend that same registered fixture to raw
+primary strings and object/raw `tool_input` fallback carriers. Each complete
+record retains the selected carrier, compares original-path/candidate/original-path
+occurrences and requires a real protected denial in that same carrier. Focused
+controls preserve primary-key presence over fallback values, whole-batch
+priority and JSON-string refusal. The original-guard contract exercises every
+canonical literal in all four carrier forms, including protected fallback
+metadata ignored by a valid primary, before requiring actual protected denial.
+No shell grammar or argument decoder is substituted for the original owners.
+Per-sample start/validated progress is flushed to the existing runner output so
+a fatal item timeout does not erase the active occurrence. This observer work
+is outside each subprocess elapsed span and remains part of fixture overhead,
+not isolated hook startup attribution.
+
 The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
 supplied existing Python 3.9 interpreter. Their private fixture publishes real
 project membership and the current original guard map, copies the required
@@ -884,11 +898,41 @@ The existing manual `installation-context-full.yml` workflow accepts
 `portfolio=manager-lifecycle` for this installed-core case on a fresh
 GitHub-hosted Windows VM. Dispatch the published source branch and optionally
 provide its same exact commit as `source_sha`; a mismatched request fails.
+Before the unchanged core case, a separate preflight constructs the installed
+engine, builds the canonical commit-bound whole-tree artifact, and acquires
+every declared payload with the actual pinned CLI. Installed engine discovery
+and complete payload-byte comparison must succeed in the private HOME, with
+the required-readiness profile enabled. A private bare Git repository serializes
+the verified materialized bytes with a packed `git fast-import` stream. A
+context-owned loopback HTTP server invokes the real `git http-backend` for
+read-only advertisement/upload-pack requests against that repository, and the
+CLI registers its HTTP Git URL with `plugin marketplace add`. The pinned CLI
+does not recognize `file:` as a Git transport. A directory marketplace would load live and
+copy nothing, leaving the installed engine's cache-only discovery empty.
+The transport commit/tree are recorded and rechecked separately from the source
+commit; they are not a release, supported upgrade baseline or admission receipt.
+The Git HTTP thread/listener must stop before success. No remote repository,
+host service, persistent daemon or promotion transaction is created. Its separate
+`installed-manager-suite-payloads` receipt explicitly reports runtime
+installation as unobserved: payload delivery is not runtime construction,
+actual Machines readiness, an authentic update or lifecycle acceptance.
+The small transport check uses the CLI's actual `git clone --depth 1 --progress`
+contract; a static/dumb HTTP clone cannot satisfy shallow acquisition. Backend
+processes use the existing bounded command owner, and unresolved backend
+custody fails the case rather than being hidden by a recovered client request.
+The fixture's private Git template disables text conversion in cloned
+`.git/info/attributes`, preserving frozen materialized bytes even when source
+attributes request CRLF checkout. This applies only to the fixture's acquisition
+environment; it changes neither source attributes nor the exact-byte assertion.
+The real shallow-clone control includes LF `.cmd`/`.ps1` blobs with declared
+CRLF attributes. This transport evidence is not an ordinary platform-checkout
+or admitted-upgrade qualification.
 The job reuses the bounded pinned downloader and the existing Copilot 1.0.105 /
 PSMux 3.3.8 prerequisite pins, verifies checkout identity, and preserves the
 900-second runner and 720-second case limits. Its 30-minute job envelope also
 covers checkout, tooling, prerequisite acquisition and artifact retention.
-This changes no existing portfolio, schedule, required PR CI or release gate.
+The preflight shares that job envelope; it adds no schedule, required PR CI
+or release gate.
 The evidence checker rejects absent, skipped, failed, duplicate, stale,
 TTY-only and incomplete lifecycle results. Passing this development lane still
 does not establish complete-suite, actual Machines, authentic ordinary-update
@@ -3095,6 +3139,63 @@ These controls do not call the SDK's internal schedule-add API or assume a
 prompt-mode model exposes `manage_schedule`. They do not qualify other agent/shell
 modes, complete pending snapshots, ACP idle grace, another pinned runtime or
 survival after caller cleanup Jobs.
+
+The explicit T3 file `tests/native/test_native_acp_inventory.py` distinguishes
+the native ACP and public SDK inventory boundaries. Its ACP control creates and
+prompts a real session, checks that the staged foreground extension did not
+start, and requires explicit method-not-found responses from both SDK inventory
+reads over ACP. This is unavailable evidence, never an empty inventory or a
+permanent claim about future runtimes. A prompt-mode control checks the same
+joined script can load and read the actual arrays.
+
+The public SDK control requires an explicitly selected
+`COPILOT_NATIVE_TEST_SDK_PYTHON`: an isolated interpreter containing a seasoned
+`github-copilot-sdk` installation. It never installs dependencies or downloads
+a runtime itself. The helper launches the selected native CLI's headless TCP
+mode, retains its actual process handle, uses an ephemeral connection token,
+and connects with the public `RuntimeConnection.for_uri` API. It creates one
+session with an explicit local synthetic provider and streaming, reads tasks
+and schedules before and after the real model turn, checks the returned reply,
+then disconnects and retires the exact helper/native process births. No SDK
+private connection or process field is read. The SDK's Python requirement does
+not change Driver's runtime Python floor.
+Both successful and model-response-stalled runs use the existing caller-owned
+execution scope. The stalled case must time out, independently retire the
+helper and native child, and confirm whole-scope settlement without relying on
+the helper's shutdown code.
+
+The nonempty client-task control uses public typed registration and update
+requests in Session A. It observes running and idle records, rejects removal
+in both states, and retains the completed result until exact removal. It also
+creates Session B, requires an empty B task list, disconnects B and verifies
+that A's running task is unchanged. The unprompted B session need not create
+a conversation history file. No extension principal or task registry is
+fabricated to make registration succeed.
+
+Additional public SDK controls execute actual synchronous/background shell and
+agent tools through the local model provider. A real running task must be
+observed before work is released. Windows shell process births are pinned
+before release; shell permission is approved once only for the exact fixture
+command and session. A responding agent remains idle until exact cancellation
+and removal. The public pending-work wait returns before the final empty list;
+an optional native background-agent completion follow-up is checked explicitly,
+not counted as a duplicate input. History must contain one root tool execution
+with successful tool completion and only the expected root and nested user inputs.
+Synchronous results must contain the expected shell output or agent reply;
+shell completion also requires a marker written after the real work finishes.
+
+The future-schedule control explicitly enables the real `manage_schedule` tool
+and creates a two-hour recurring prompt through that offered tool. After the
+model turn, public schedule inventory must retain the future entry even though
+task inventory is empty. A second session cannot see it; disconnecting that
+session must leave it unchanged. Public exact stop runs before fixture shutdown,
+and the final schedule list must be empty without the future prompt firing.
+
+These controls do not migrate Session Host from native ACP to an SDK adapter,
+qualify complete pending snapshots or work-arrival races, enable
+idle expiry, attribute observer retirement, or qualify another selected
+runtime/platform. Native and SDK versions must be recorded with each result;
+package availability alone is not runtime support.
 
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied

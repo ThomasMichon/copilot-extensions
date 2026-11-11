@@ -237,6 +237,10 @@ class Task:
     monitor_kind: str | None = None
     monitor_not_before: float | None = None
     category: str = "work"
+    kind: str = "finite"
+    standing_charter: dict | None = None
+    standing_revision: int = 0
+    standing_parent_id: str | None = None
 
     @property
     def card_draft_revision(self) -> str:
@@ -274,6 +278,15 @@ class Task:
             status=row["status"],
             repo=row["repo"],
             category=row["category"] if "category" in columns else "work",
+            kind=row["kind"] if "kind" in columns else "finite",
+            standing_charter=(
+                json.loads(row["standing_charter"])
+                if "standing_charter" in columns and row["standing_charter"] else None
+            ),
+            standing_revision=row["standing_revision"] if "standing_revision" in columns else 0,
+            standing_parent_id=(
+                row["standing_parent_id"] if "standing_parent_id" in columns else None
+            ),
             requires=json.loads(row["requires"] or "[]"),
             excludes=json.loads(row["excludes"] or "[]"),
             affinity=json.loads(row["affinity"] or "{}"),
@@ -484,6 +497,10 @@ _COLUMNS: dict[str, str] = {
     "status": "TEXT NOT NULL DEFAULT 'queued'",
     "repo": "TEXT",
     "category": "TEXT NOT NULL DEFAULT 'work' CHECK(category IN ('work','maintenance'))",
+    "kind": "TEXT NOT NULL DEFAULT 'finite' CHECK(kind IN ('finite','standing-charter'))",
+    "standing_charter": "TEXT",
+    "standing_revision": "INTEGER NOT NULL DEFAULT 0 CHECK(standing_revision >= 0)",
+    "standing_parent_id": "TEXT",
     "requires": "TEXT NOT NULL DEFAULT '[]'",
     "excludes": "TEXT NOT NULL DEFAULT '[]'",
     "affinity": "TEXT NOT NULL DEFAULT '{}'",

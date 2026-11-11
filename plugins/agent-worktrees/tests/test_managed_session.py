@@ -183,6 +183,7 @@ def instrument_prepared_admission(source):
 def qualify_complete_native_entry(
     scripts, entry, executable, event, env, workspace, capsys, *, literal_read=False,
 ):
+    entry_started = time.monotonic()
     shell_event = "toolCalls" not in event and event.get("toolName") == "powershell"
     source_names = (
         "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
@@ -246,13 +247,28 @@ def qualify_complete_native_entry(
     )
     samples = []
     target = workspace / "efforts" / "private.md"
-    protected = (
-        {**event, "toolArgs": {"command": f'Set-Content "{target}" -Value "leak"'}}
-        if shell_event else
-        {**event, "toolCalls": [
+    carrier = None
+    if shell_event:
+        carrier = "toolArgs" if "toolArgs" in event else "tool_input"
+        command = f'Set-Content "{target}" -Value "leak"'
+        protected = {**event, carrier: command if isinstance(event[carrier], str) else {"command": command}}
+    else:
+        protected = {**event, "toolCalls": [
             *event["toolCalls"], {"name": "edit", "args": {"path": "efforts/private.md"}},
         ]}
-    )
+
+    def report_progress(variant, state):
+        with capsys.disabled():
+            print(json.dumps({"complete_native_entry_progress": {
+                "shell": str(executable), "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
+                "argument_carrier": (
+                    carrier + (":raw" if isinstance(event[carrier], str) else ":object")
+                    if carrier else None
+                ),
+                "variant": variant, "state": state,
+                "helper_seconds": time.monotonic() - entry_started,
+            }}), flush=True)
+
     assert not target.exists()
     try:
         for variant, payload in (
@@ -287,6 +303,7 @@ def qualify_complete_native_entry(
                     "catch { [Console]::Error.WriteLine($_.ToString()); [Console]::Error.WriteLine($e) }",
                 )
             command = (writer if attributed else "") + "try { " + command_entry + " } finally { " + tail + " }"
+            report_progress(variant, "command-start")
             started = time.monotonic()
             try:
                 result = subprocess.run(
@@ -361,6 +378,7 @@ def qualify_complete_native_entry(
             assert not target.exists()
             assert (scripts / "hook-read-policy.json").read_bytes() == selected_contract
             sample["validated"] = True
+            report_progress(variant, "validated")
     finally:
         for name, content in original.items():
             (scripts / name).write_bytes(content)
@@ -372,6 +390,10 @@ def qualify_complete_native_entry(
                 "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
                 "source_sha256": source_digests, "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
                 "event_kind": "literal-shell-read" if literal_read else "shell-policy" if shell_event else "native-read",
+                "argument_carrier": (
+                    carrier + (":raw" if isinstance(event[carrier], str) else ":object")
+                    if carrier else None
+                ),
                 "samples": samples, "complete": len(samples) == 4 and all(sample["validated"] for sample in samples),
                 "limits": "Fixture timing only; phases include instrumentation. Outer-minus-last-phase includes startup/exit and marker/module-observer overhead, not isolated startup. Ordered controls are not subtractive attribution or a latency distribution.",
             }}))
@@ -1319,6 +1341,13 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "literal-shell-unprepared", "literal-shell-batch", "literal-shell-prior-reader",
     "literal-shell-key-command", "literal-shell-key-name",
     "literal-shell-key-args", "literal-shell-key-collision",
+    "literal-shell-carrier-raw-attribution", "cell-literal-shell-carrier-raw-attribution",
+    "literal-shell-carrier-input-attribution", "cell-literal-shell-carrier-input-attribution",
+    "literal-shell-carrier-input-raw-attribution", "cell-literal-shell-carrier-input-raw-attribution",
+    "literal-shell-carrier-primary-null", "literal-shell-carrier-primary-invalid",
+    "literal-shell-carrier-primary-empty", "literal-shell-carrier-primary-safe",
+    "literal-shell-carrier-primary-protected", "literal-shell-carrier-input-json",
+    "literal-shell-carrier-input-batch",
     "cell-batch-mixed", "cell-batch-protected",
     "structured-files", "structured-changes", "structured-only", "structured-json",
     "structured-aliases", "structured-duplicates", "structured-limit",
@@ -1351,7 +1380,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "patch-real-policy", "batch-read-only-real-policy",
         "batch-read-only-attribution",
         "shell-entry-attribution", "literal-shell-entry-attribution",
-    }
+    } or case.startswith("literal-shell-carrier-") and case.endswith("-attribution")
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -1608,10 +1637,19 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 event["toolCalls"][-1].update(Keys=[], cwd=str(workspace))
             elif case == "batch-read-only-working-directory":
                 event["workingDirectory"] = event.pop("cwd")
-    if case in {"shell-entry-attribution", "literal-shell-entry-attribution"}:
+    if case in {"shell-entry-attribution", "literal-shell-entry-attribution"} or (
+        case.startswith("literal-shell-carrier-") and case.endswith("-attribution")
+    ):
         event.update(toolName="powershell", toolArgs={"command": "Get-Location"})
-        if case == "literal-shell-entry-attribution":
+        if case != "shell-entry-attribution":
             event["toolArgs"]["description"] = "Read the current fixture location"
+        if case == "literal-shell-carrier-raw-attribution":
+            event["toolArgs"] = "Get-Location"
+        elif case == "literal-shell-carrier-input-attribution":
+            event["tool_input"] = event.pop("toolArgs")
+        elif case == "literal-shell-carrier-input-raw-attribution":
+            event.pop("toolArgs")
+            event["tool_input"] = "Get-Location"
     elif case.startswith("literal-shell-"):
         event.update(toolName="powershell", toolArgs={"command": "Get-Location", "description": "Fixture read"})
         protected_command = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
@@ -1642,6 +1680,26 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             event["tool_input"] = {"command": protected_command}
         elif case == "literal-shell-key-collision":
             event["toolArgs"] = {"command": protected_command, "Command": "Get-Location"}
+        elif case.startswith("literal-shell-carrier-primary-"):
+            event["tool_input"] = {"command": protected_command}
+            if case == "literal-shell-carrier-primary-null":
+                event["toolArgs"] = None
+            elif case == "literal-shell-carrier-primary-invalid":
+                event["toolArgs"] = False
+            elif case == "literal-shell-carrier-primary-empty":
+                event["toolArgs"] = ""
+            elif case == "literal-shell-carrier-primary-protected":
+                event["toolArgs"] = protected_command
+                event["tool_input"] = {"command": "Get-Location"}
+        elif case == "literal-shell-carrier-input-json":
+            event["tool_input"] = json.dumps(event.pop("toolArgs"))
+        elif case == "literal-shell-carrier-input-batch":
+            event.pop("toolArgs")
+            event["tool_input"] = "Get-Location"
+            event["toolCalls"] = [
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "powershell", "args": {"command": protected_command}},
+            ]
     env = environment(tmp_path, workspace)
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
@@ -1711,6 +1769,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             "structured-protected", "batch-read-only-protected", "literal-shell-batch",
             "literal-shell-key-command", "literal-shell-key-name",
             "literal-shell-key-args", "literal-shell-key-collision",
+            "literal-shell-carrier-primary-protected", "literal-shell-carrier-input-batch",
         }
     ), decisions
     map_path = reader.map_path(workspace, registry)
@@ -1850,10 +1909,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         )
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
-    if case in {"batch-read-only-attribution", "shell-entry-attribution", "literal-shell-entry-attribution"}:
+    if case in {"batch-read-only-attribution", "shell-entry-attribution", "literal-shell-entry-attribution"} or (
+        case.startswith("literal-shell-carrier-") and case.endswith("-attribution")
+    ):
         qualify_complete_native_entry(
             scripts, entry["powershell"], executable, event, env, workspace, capsys,
-            literal_read=case == "literal-shell-entry-attribution",
+            literal_read=case.startswith("literal-shell-"),
         )
         assert not membership.exists()
         return
@@ -1919,6 +1980,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "batch-read-only", "batch-read-only-mixed", "batch-read-only-limit",
         "batch-read-only-working-directory", "batch-read-only-real-policy",
         "literal-shell-head",
+        "literal-shell-carrier-primary-safe",
     })
     assert observed.exists() is policy_required, result.stdout
     if policy_required:

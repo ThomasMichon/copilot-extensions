@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify real CLI acquisition of the complete frozen payload suite before installed lifecycle checks.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

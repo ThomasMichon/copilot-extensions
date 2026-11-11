@@ -127,6 +127,44 @@ def test_retained_settlement_supports_recovery_without_live_publication(tmp_path
     assert {path: path.read_bytes() for path in targets} == before
 
 
+@pytest.mark.parametrize("settlement", ["rollback", "recover_owned", "recover_uncontested"])
+def test_copy_recovery_keeps_generic_replace(tmp_path, monkeypatch, settlement):
+    template, before = case(tmp_path)
+    targets = [template.root / "current-version", template.root / "nested" / "current-version"]
+    bindings = []
+    for index, target in enumerate(targets):
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with os.fdopen(publication._created_file(target), "wb") as stream:
+            stream.write(b"old marker\n")
+        before[target] = target.read_bytes()
+        source = tmp_path / f"marker-source-{index}"
+        source.write_bytes(b"new marker\n")
+        bindings.append(publication.CopyBinding(source, target, hashlib.sha256(source.read_bytes()).hexdigest()))
+    transaction = publication.CopyPublication(
+        template.root, template.workspace, [*template.bindings, *bindings],
+    ).publish()
+
+    def reject_selector_replace(_source, _destination):
+        raise AssertionError("generic copy recovery used the selector replacement")
+
+    monkeypatch.setattr(publication, "replace_selector", reject_selector_replace)
+    if settlement == "rollback":
+        transaction.rollback()
+    else:
+        transaction.retain()
+        recovery = transaction.workspace / "external-recovery.jsonl"
+        if settlement == "recover_owned":
+            publication.recover_owned(
+                transaction.context, transaction.receipts, list(before), recovery, transaction.expected,
+            )
+        else:
+            assert publication.recover_uncontested(
+                transaction.context, transaction.receipts, recovery,
+                transaction.expected, transaction.baseline,
+            ) == []
+    assert {path: path.read_bytes() for path in before} == before
+
+
 def test_retained_proofs_survive_the_real_producer_process(tmp_path):
     transaction, before = case(tmp_path)
     script = """

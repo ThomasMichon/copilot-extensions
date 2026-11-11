@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh HTTP-52 contract evidence for the standing-aware agent-worktrees relationship CLI without changing protocol generations or feature floors",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

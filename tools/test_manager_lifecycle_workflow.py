@@ -20,6 +20,96 @@ WORKFLOW = (
 )
 
 
+@pytest.mark.parametrize("outcome", [
+    "passed", "failed", "skipped", "missing", "partial", "stale", "wrong-run", "runtime-claim",
+    "requested-mismatch", "foreign-transport", "duplicate-field",
+])
+def test_payload_preflight_cannot_claim_runtime_or_accept_incomplete_evidence(
+    tmp_path, monkeypatch, outcome,
+):
+    workflow = yaml.safe_load(WORKFLOW.read_text(encoding="utf-8"))
+    step = next(
+        row for row in workflow["jobs"]["manager-lifecycle-windows"]["steps"]
+        if row.get("id") == "suite-payloads"
+    )
+    names = ("agent-worktrees", "agent-machines")
+    data = {
+        "candidate_commit": "a" * 40,
+        "identity": {"candidate_commit": "a" * 40, "run_id": 123, "run_attempt": 2},
+        "profile": {
+            "inventory": {name: {"version": "1.0"} for name in names},
+            "repository_config": {"require_application_readiness": True},
+        },
+        "payloads": {
+            name: {"version": "1.0", "manifest_sha256": "b" * 64} for name in names
+        },
+        "runtime_installation": "not-observed", "copilot_sha256": "c" * 64,
+        "transport": {
+            "repository": str(tmp_path / "transport.git"),
+            "url": "http://127.0.0.1:12345/suite-transport.git",
+            "commit": "d" * 40, "tree": "e" * 40,
+        },
+    }
+    if outcome == "partial":
+        del data["payloads"]["agent-machines"]
+    elif outcome == "stale":
+        data["candidate_commit"] = "d" * 40
+    elif outcome == "wrong-run":
+        data["identity"]["run_id"] = 122
+    elif outcome == "runtime-claim":
+        data["runtime_installation"] = "complete"
+    elif outcome == "foreign-transport":
+        data["transport"]["url"] = "http://example.invalid/suite-transport.git"
+
+    def run(arguments, **limits):
+        assert limits["timeout"] == 1200
+        assert arguments[arguments.index("-k") + 1] == (
+            "test_installed_suite_payload_closure_uses_the_real_cli"
+        )
+        reports = Path(arguments[arguments.index("--junit-dir") + 1])
+        reports.mkdir(parents=True)
+        document = ET.Element("testsuite")
+        if outcome != "missing":
+            case = ET.SubElement(
+                document, "testcase", name="test_installed_suite_payload_closure_uses_the_real_cli",
+            )
+            if outcome == "skipped":
+                ET.SubElement(case, "skipped")
+            encoded = json.dumps(data)
+            if outcome == "duplicate-field":
+                encoded = encoded[:-1] + ',"candidate_commit":"' + "a" * 40 + '"}'
+            ET.SubElement(
+                ET.SubElement(document, "properties"), "property",
+                name="installed-manager-suite-payloads", value=encoded,
+            )
+        ET.ElementTree(document).write(reports / "group.xml")
+        return subprocess.CompletedProcess(arguments, 1 if outcome == "failed" else 0, "", "")
+
+    package = ModuleType("agent_procutil")
+    process = ModuleType("agent_procutil.owned_process")
+    process.run_caller_owned = run
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    monkeypatch.setitem(sys.modules, process.__name__, process)
+    monkeypatch.chdir(tmp_path)
+    catalog = Path(".github/plugin/marketplace.json")
+    catalog.parent.mkdir(parents=True)
+    catalog.write_text(json.dumps({
+        "plugins": [{"name": name, "version": "1.0"} for name in names],
+    }))
+    for key, value in {
+        "GITHUB_SHA": "a" * 40, "GITHUB_RUN_ID": "123", "GITHUB_RUN_ATTEMPT": "2",
+        "RUNNER_TEMP": str(tmp_path / "runner"),
+        "REQUESTED_SOURCE": "d" * 40 if outcome == "requested-mismatch" else "a" * 40,
+    }.items():
+        monkeypatch.setenv(key, value)
+    code = compile(step["run"], "<payload-preflight-workflow>", "exec")
+    if outcome == "passed":
+        exec(code, {})
+    else:
+        with pytest.raises(subprocess.CalledProcessError if outcome == "failed" else AssertionError):
+            exec(code, {})
+
+
 @pytest.mark.parametrize(
     "outcome",
     [

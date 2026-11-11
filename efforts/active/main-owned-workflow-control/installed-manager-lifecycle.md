@@ -95,17 +95,21 @@ The following implementation decomposition is **agent-recommended**.
 - [ ] Reuse the canonical candidate installation, provenance and native
   terminal owners in fresh private HOME, config, registry and mux state.
   Keep configured feed/security policy; do not borrow selected host runtimes.
-- [ ] Invoke generated project entry points, observe the installed Manager,
+- [x] Invoke generated project entry points, observe the installed Manager,
   and use normal UI controls for Create. Prove an actual Git worktree,
   installed launch resolution, real Copilot readiness and a deterministic
   request/response through the local inference endpoint.
-- [ ] Exit Copilot through its normal user flow, close and reopen Manager,
+  Installed-core proof: #11864, exact-source run 42892225611. Complete selected
+  suite installation remains a separate open item above.
+- [x] Exit Copilot through its normal user flow, close and reopen Manager,
   select Resume, and prove the same worktree and durable conversation with a
   further endpoint-backed turn. Do not repair tracking or rewrite session IDs.
-- [ ] Keep a CLI session active while starting a second Manager, select Open
+  The same installed-core run retains the original durable conversation.
+- [x] Keep a CLI session active while starting a second Manager, select Open
   and prove attachment to that exact native process incarnation/session/pane.
   Closing Manager or detaching its view preserves the original owner and its
   ability to complete another turn; no duplicate Copilot is admitted.
+  The same installed-core run verifies native birth/lock ownership and detach.
 - [ ] Exercise the relevant cold and retained/warm backend states without
   allowing accidental reuse of a host server to supply success.
 
@@ -150,15 +154,17 @@ The following implementation decomposition is **agent-recommended**.
 - [ ] Native Windows entry points traverse installed path resolution, actual
   admission, generated launch assets, real terminal and private PSMux. A Linux
   scenario alone cannot qualify the reported Windows failure classes.
-- [ ] Real Manager Create yields the expected Git worktree and real Copilot
+- [x] Real Manager Create yields the expected Git worktree and real Copilot
   conversation. The endpoint records an actual request and deterministic
   response; UI rendering, ready files or process existence are insufficient.
-- [ ] Normal Copilot exit and a fresh Manager invocation reach Resume through
+- [x] Normal Copilot exit and a fresh Manager invocation reach Resume through
   real discovery. The original conversation survives and another turn completes
   without duplicate history, stale-path repair or manual session-state edits.
-- [ ] A second Manager's Open attaches to the exact active owner rather than
+- [x] A second Manager's Open attaches to the exact active owner rather than
   creating a replacement. Original process birth, session and pane identity
   remain consistent; detach/Manager exit leaves that session usable.
+  These three action/continuity items are verified by #11864's installed-core
+  run 42892225611; they do not close selected-suite or promotion acceptance.
 - [ ] Install-success/entry-launch failure, launch/path-resolution refusal and
   fixture-scoped mux connection failure each fail the appropriate lifecycle
   phase. Expected-negative classification requires its specific observed
@@ -847,3 +853,223 @@ Scoped lint, module limits and diff checks pass. The unchanged observer's 88
 source controls remain passing; this changed engine candidate still requires
 exact-source installed qualification, fresh actual review and required CI.
 The earlier startup stall remains a failed result, not an accepted flake.
+
+### 2026-11-10 - Installed core accepted; complete-suite execution started
+
+#11864 merged into Dev as `fa93ea37c295da6b4096e87cafb42f58c98af718`
+after actual current-head Copilot approval 5848798419, all three live-required
+checks passing and all review threads resolved. The configured Maintainer
+completion path verified the merge; no CI gate or unresolved finding was waived.
+
+Exact-source run 42892225611, attempt 1, qualifies
+`4feb77db2944b54cddcdd949faab166013a417bb`, tree
+`5161d5d7fcb8495527ec805dec3b8b6df1c434a5`. Retained JUnit records one test,
+zero failures/errors/skips and 381.634 seconds; the complete receipt measures
+370.75 seconds. Installed origins and exact candidate bytes are verified across
+303 Manager and 697 engine modules. Actual Create, same-owner active Open,
+detach preservation, normal native exit, same-conversation Resume in a different
+native incarnation, all four persisted assistant replies, unusable-entry refusal
+and settled owned cleanup pass. The evidence-aware re-review explicitly
+approved that unchanged source. This closes the action/continuity items marked
+above, not the complete acceptance matrix.
+
+The next active slice is complete selected-suite construction and actual Machines
+readiness through the canonical normal updater, using the accepted readiness
+profile. The existing suite fixture's synthetic V1/V2 versions and substituted
+delivery are not an authentic admitted-baseline update. Reuse its lifecycle and
+disposable Windows venue boundaries, not that synthetic baseline as evidence.
+Inspect the current profile, suite constructor and source/feed owners before
+implementing the independently owned companion; agree concrete shared-helper or
+runner/result edits with their existing owners. Preserve the 1800-second
+preparation and 900-second exercise boundaries.
+
+Ordinary upgrade from an authentic admitted baseline, frozen-candidate mandatory
+enforcement, separately governed Main adoption and the wider parent campaign
+remain open. The worktree remains active for this next slice; merged installed
+core is not effort completion or permission to roll out on an operator machine.
+
+### 2026-11-10 - Complete payload acquisition separated from runtime acceptance
+
+Live ownership reconciliation found #11377 closed and its completion #11814
+and Main adoption #11478 merged. Those historical PRs are not live content
+overlaps or prerequisites for this parent extension. Coordination comments
+6779028766 on #11377 and 6779134232 on #6237 reserve the independently owned
+payload companion and bounded preflight in the existing manual Dev lane.
+No whole-suite runner/result, Main controller or promotion transaction changed.
+
+The companion consumes the canonical whole-tree materializer's commit-bound
+artifact and the accepted complete required-readiness profile. It invokes the
+actual CLI for every declared payload, discovers selected paths through the
+installed engine, and compares private installed payload bytes with the frozen
+artifact. It rejects incomplete discovery, foreign or changed payloads, changed
+CLI/artifact inputs and reduced activation. Inventory hashing is shared per
+parent rather than repeated per payload; nested receipt files remain covered.
+Its result explicitly reports runtime installation as unobserved.
+
+The existing optional `manager-lifecycle` Windows lane now runs that preflight
+before the unchanged installed-core witness, using the existing pinned CLI and
+native engine constructor. It requires one successful, non-skipped test and one
+complete, exact-commit/run/attempt payload receipt, retained separately from the
+core receipt. The same 720-second case, 900-second runner and 30-minute shared
+job envelope remain; no deadline, required CI or release gate is expanded.
+
+The contained payload/profile controls pass all 28 cases. Workflow refusal
+controls, Python lint and alias-aware Actions lint are checked separately.
+Actual CLI acquisition still needs the exact published source's disposable-VM
+run; source controls are not native evidence. Complete runtime construction,
+actual Machines/required-readiness discovery and New after an authentic
+admitted-baseline ordinary update remain open, as do mandatory frozen-candidate
+enforcement, this extension's separate Main adoption and the parent campaign.
+
+Run 42903264094 at `848fc8f7c710c95cad41e029c684464157ae96c2`
+failed its real payload acquisition after the native engine constructor and
+canonical whole-tree materialization. The actual CLI's first `plugin install`
+refused because marketplace `copilot-extensions` was not registered.
+The test ran for 289.98 seconds; no deadline expired and no runtime/Machines or
+payload-closure success is claimed. The subsequent core step did not run.
+This is not a Bridge communication failure: its payload name was only the first
+sorted acquisition target.
+
+The companion now invokes the documented `plugin marketplace add` for that
+exact local frozen artifact through the same actual CLI and bounded private
+HOME executor before installation. Source controls require this command and
+stop immediately on registration failure; no ledger or acquisition result is
+fabricated. A new exact-head native run remains required.
+
+Run 42905375223 at `66e9d22518e29068ca53e30a86c7397c7cfe706b`
+successfully registered the actual local marketplace (6.656 seconds) and ran
+all 24 real CLI plugin installations successfully (roughly 0.8-1 second each).
+It then refused the first installed engine-selected payload location; the case
+failed after 302.54 seconds. This is progress past acquisition, not a complete
+payload-closure or runtime/readiness pass. The original source result did not
+retain the selected paths or CLI inventory, so the exact location discrepancy
+is not yet established.
+
+The witness now retains bounded actual CLI inventory, selected-path and command
+custody diagnostics. It preserves the private-installation and exact-byte
+assertions rather than copying payloads into a guessed layout or substituting
+discovery. Another exact-source native observation is required before deciding
+whether the correction belongs in fixture configuration or product discovery.
+
+Run 42907778944 at `3ce7bdd6bdc3478f2ed44f65cdff9dcea295a45c`
+retains the actual discrepancy. The CLI reports all 24 selected plugins as
+`source: live` from the exact materialized artifact, explicitly stating that
+directory installation copied nothing. The installed engine's cache-only
+discovery therefore returns no paths for all 24. The 281.33-second failure is
+not a completed copied installation or a timeout, and the refusal is retained.
+
+The fixture now uses a real private Git transport for the same verified
+materialized artifact. Its bare repository is outside the artifact; actual Git
+stages all verified bytes, preserves the source commit's date, and records the
+distinct transport commit/tree. The actual CLI registers the `file:` Git URL
+and performs normal Git-backed installation; transport identity is rechecked
+before and after acquisition, while copied private payloads must still match
+the original frozen bytes. The required-readiness profile declares that same
+Git source. Nothing is copied into a guessed installation cache by the fixture.
+
+This is fixture data transport only, not a release composition, publication,
+admitted baseline or promotion writer. It adds no remote repository, service,
+daemon or manual promotion. Exact native validation is still required; no
+runtime/readiness, ordinary-upgrade or parent completion is inferred.
+
+Run 42912342047 at `285a009b27fecac6085bc8bb836370d364c4f409`
+failed before CLI registration: `git add --force --all` exceeded its 120-second
+command bound while indexing the complete artifact. The case lasted 371.09
+seconds; no deadline is increased and no transport/CLI-copy success is claimed.
+The transport now writes a packed `git fast-import` stream from the verified
+artifact inventory instead of indexing and creating loose objects. Generated
+ignored files and the root materialization receipt remain included, source
+timestamps remain attributable, and stream generation checks the original case
+deadline. The real-clone preservation check still applies.
+
+Required CI independently found a missing Worktree Manager changefile: that
+guard covers these test changes too. The canonical changefile tool added the
+required patch entry; no version was hand-edited and no CI exception is used.
+The corrected head must independently clear both native qualification and
+required CI before becoming reviewable.
+
+Run 42915011065 at `215428d79df3a78749f55b0f3fadf051fbfc6e03`
+completed real packed import in 10.750 seconds, well within its unchanged
+120-second limit. It then failed actual CLI registration because the pinned
+CLI interprets a `file:` URL as a local path rather than a Git transport.
+The 276.57-second case is not copied-install or lifecycle success.
+
+The same real private Git repository is now exported with `git update-server-info`
+and served through a context-owned loopback HTTP server for normal Git clone.
+This is actual Git object/ref delivery, not a successful acquisition callback.
+Only the bare repository is exposed, the owned HEAD response is checked before
+use, connection reads are bounded and the server thread/listener must retire
+before success. The small real-Git preservation check now exercises that HTTP
+route. The profile/receipt require that exact loopback Git source; foreign
+origins and invalid identities refuse. No host service, persistent daemon,
+remote repository, release admission or upgrade baseline is introduced.
+
+Run 42918039967 at `25d234b25a8287ac8660519fcdbcbd825a37e160`
+reached the real CLI's HTTP acquisition, but its exact command uses
+`git clone --depth 1 --progress`. The static/dumb Git HTTP transport cannot
+provide shallow capabilities, so it failed after 325.65 seconds. Required
+source CI has a successful pass at this head; native qualification is still
+failed, and neither is waived.
+
+The loopback transport now delegates read-only advertisement/upload-pack
+requests to the actual `git http-backend` through the same bounded native
+process owner. Binary request/response files avoid rewriting pack data;
+backend failures and unconfirmed custody remain fatal even if a client retries.
+The small real-Git check now uses the observed shallow-clone options instead
+of a full-clone proxy. Existing command/case/runner/job limits remain unchanged.
+
+The payload receipt reader also now matches the existing core reader's refusal
+of duplicate JSON fields, including identical duplicate values. Its focused
+malformed-receipt control passes; a complete result must be unambiguous before
+any later release-contract adoption.
+
+Run 42922216324 at `dc8daf766ecc27a0d6bbfa465b956238271cf930`
+completed actual shallow Git HTTP acquisition and all 24 CLI installations.
+The CLI reported copied, enabled installations, and the actual installed engine
+discovered all 24 canonical private-home payload paths. The 460.147-second
+case then refused the first payload, `agent-bridge`, because its full content
+manifest differed from the frozen candidate. No runtime, readiness or lifecycle
+pass follows from this partial acquisition evidence; the core step was skipped.
+
+The comparison previously retained no differing paths, so the cause remains
+unknown. It now retains expected/actual entry counts and up to 20 differing
+relative paths with bounded metadata and hashes, both in the owned diagnostics
+and in the failure. File contents are not reported. Focused controls retain
+strict rejection of changed, missing and extra files, including nested receipts;
+no exclusions, content normalization or acceptance rule changed.
+
+Run 42926168518 at `82a26c0386c3dc968a2a4147a2ebc460d7be79af`
+failed after 480.755 seconds and retained the exact discrepancy: all 3,630
+`agent-bridge` entries were present, with no extras; only the bytes of
+`bin/agent-bridge.cmd`, `bin/agent-bridge.ps1` and
+`scripts/emit-command-catalog.ps1` differed. For each file, the expected hash
+equals the committed LF blob and the actual hash exactly equals that blob's
+CRLF checkout projection. The source `.gitattributes` explicitly declares
+CRLF for `.cmd` and `.ps1`. This identifies ordinary Git checkout conversion,
+not missing payloads or a Bridge communication failure.
+
+The fixture now supplies a private Git template whose `info/attributes` disables
+text conversion when the actual CLI clones its data transport. The complete
+frozen artifact and strict comparison remain unchanged; no bytes are normalized
+after acquisition and no path is excluded. The small actual shallow-clone
+control includes LF script blobs with CRLF source attributes, and acquisition
+controls refuse a foreign or changed template. This is data-transport custody
+only, not ordinary platform-checkout, runtime or admitted-upgrade acceptance.
+The corrected head still requires native qualification.
+
+Run 42928717907 at `089a02c92b31e5fecc3c45df144312c2991d3977`
+passed both exact-source witnesses: actual CLI acquisition, installed-engine
+discovery and strict byte comparison of all 24 payloads took 488.537 seconds;
+the unchanged installed-core lifecycle took 348.119 seconds. The distinct
+payload receipt still reports runtime installation unobserved, so complete
+runtime/Machines readiness, authentic update and release enforcement remain
+open. The PR cleared current required CI and entered review, not merge.
+
+Copilot review 5851705493 identified an error-precedence defect: an earlier
+ordinary HTTP failure could mask a later unreaped-backend failure, allowing
+sandbox deletion despite unresolved custody. Transport exit now prioritizes
+the actual containment owner's `UnreapedProcessError` across backend, caller
+and transport-cleanup failures. Focused controls cover an ordinary request
+failure followed by backend or caller custody failure and verify that the
+real sandbox retains its files. The reviewed correction needs new exact-head
+native qualification and a passing subsequent review.

@@ -213,7 +213,11 @@ def test_native_write_contract_matches_actual_target_and_map_readers():
         assert hashlib.sha256(text.encode("utf-8")).hexdigest() == digest, "Run tools/render-hook-read-policy.py after helper changes"
 
 
-def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monkeypatch):
+@pytest.mark.parametrize("argument_key,raw", [
+    ("toolArgs", False), ("toolArgs", True),
+    ("tool_input", False), ("tool_input", True),
+])
+def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monkeypatch, argument_key, raw):
     import hashlib
     import importlib.util
     from test_managed_session import fixture_linked_worktree, fixture_project
@@ -236,21 +240,26 @@ def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monk
         "hook_pre_relevance.py": hashlib.sha256(text.encode("utf-8")).hexdigest(),
     }
     env = {"AGENT_HOME": str(tmp_path)}
+    protected_command = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
     for command in relevance.SHELL_READ_HEADS:
+        arguments = {
+            "command": command, "description": "Fixture read", "cmd": protected_command,
+        }
         event = {
             "toolName": "powershell", "cwd": str(workspace),
-            "toolArgs": {
-                "command": command, "description": "Fixture read",
-                "cmd": f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture',
-            },
+            argument_key: command if raw else arguments,
         }
+        if argument_key == "toolArgs":
+            event["tool_input"] = {"command": protected_command}
         assert relevance.is_irrelevant(event, False, client._load_sibling)
         for name in policy["guards"]:
             guard = client._load_sibling(name)
             kwargs = {"anchors": [{"name": "example", "path": str(anchor)}]} if name == "anchor_write_guard.py" else {}
             assert guard.decide(event, env=env, home=tmp_path, **kwargs) is None
     guard = client._load_sibling("statelessness_guard.py")
-    protected = {**event, "toolArgs": {"command": event["toolArgs"]["cmd"]}}
+    protected = {
+        **event, argument_key: protected_command if raw else {"command": protected_command},
+    }
     assert guard.decide(protected, env=env, home=tmp_path)["permissionDecision"] == "deny"
 
 
