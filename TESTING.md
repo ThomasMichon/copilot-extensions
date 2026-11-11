@@ -944,6 +944,10 @@ immediately. Failure diagnostics retain at most 16 observed image/name/live
 records, without command lines, inside the existing evidence size budget.
 An early consumer exit also retains up to 16 birth-bound descendant exit codes
 before Job cleanup, distinguishing already-exited processes from live ones.
+Manager module and console entrypoints enable Python fatal-fault reporting on
+their existing stderr descriptor, so a native interpreter fault can retain its
+thread stacks in the same terminal capture. This does not identify externally
+terminated processes or turn a crash into successful qualification.
 The installed-process, keyboard, native-terminal-offer and cleanup assertions
 remain unchanged; the bounded wait is not a larger readiness deadline.
 

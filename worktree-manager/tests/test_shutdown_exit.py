@@ -36,6 +36,53 @@ except ModuleNotFoundError:  # pragma: no cover - exercised on 3.10 only
 from worktree_manager import _shutdown_exit
 
 
+@pytest.mark.parametrize("entry", ["module", "console"])
+def test_real_entry_enables_fault_reporting_with_isolated_python(tmp_path, entry):
+    program = """
+import faulthandler,runpy,sys
+from worktree_manager import _shutdown_exit
+_shutdown_exit._AFFECTED_RUNTIME=False
+assert not faulthandler.is_enabled()
+sys.argv=['worktree-manager','--version']
+try:
+    if ENTRY == 'module':
+        runpy.run_module('worktree_manager',run_name='__main__')
+    else:
+        from worktree_manager.__main__ import console_entry
+        console_entry()
+except SystemExit as error:
+    assert error.code == 0
+assert faulthandler.is_enabled()
+faulthandler.dump_traceback()
+""".replace("ENTRY", repr(entry))
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-X", "utf8", "-c", program],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.startswith("worktree-manager ")
+    assert 'File "<string>"' in result.stderr
+
+
+def test_fault_reporting_preserves_an_existing_handler(monkeypatch):
+    import faulthandler
+    from worktree_manager.__main__ import _enable_fault_diagnostics
+
+    monkeypatch.setattr(faulthandler, "is_enabled", lambda: True)
+    with mock.patch.object(faulthandler, "enable") as enable:
+        _enable_fault_diagnostics()
+    enable.assert_not_called()
+
+
+def test_fault_reporting_tolerates_embedded_stderr_without_descriptor(monkeypatch):
+    import faulthandler
+    from worktree_manager.__main__ import _enable_fault_diagnostics
+
+    monkeypatch.setattr(faulthandler, "is_enabled", lambda: False)
+    with mock.patch.object(faulthandler, "enable", side_effect=OSError("no descriptor")):
+        _enable_fault_diagnostics()
+
+
 @pytest.mark.parametrize("version_code", [0, 23])
 def test_application_probe_finishes_before_affected_runtime_exit(tmp_path, version_code):
     root = Path(__file__).resolve().parents[2]
