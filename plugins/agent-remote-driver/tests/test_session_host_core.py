@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import errno
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -11,7 +12,7 @@ import shutil
 import subprocess
 import sys
 import time
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 import zipfile
 
@@ -35,14 +36,81 @@ for line in sys.stdin:
 """
 
 
-def _relocate(tmp_path: Path) -> Path:
-    archive, _digest = build_session_host_bundle(tmp_path / "build")
+def _relocate(tmp_path: Path, *, legacy: bool = False) -> Path:
+    archive, _digest = build_session_host_bundle(tmp_path / "build", legacy=legacy)
     receiver = tmp_path / "receiver"
     receiver.mkdir()
     relocated = receiver / archive.name
     shutil.copyfile(archive, relocated)
     shutil.rmtree(tmp_path / "build")
     return relocated
+
+
+async def _close_frontend(client):
+    await asyncio.wait_for(client.close(), 3)
+
+
+def _prior_frontend(monkeypatch):
+    root = Path(__file__).resolve().parents[3]
+    fixtures = root / "plugins/agent-bridge/contract/fixtures/session-host/prior-runtime-dev150"
+    commit = "4ed08dcdd0e72377b95a67d6bd22aec819bf7fec"
+    package = ModuleType("_driver_dev150_frontend")
+    package.__path__ = []
+    monkeypatch.setitem(sys.modules, package.__name__, package)
+    for name, blob in (
+        ("protocol", "dde0d3566ce5d0cd92a49d8f6438dd907d533993"),
+        ("client", "c9e88467f09e4438a214efa432733b59352eefd1"),
+    ):
+        frozen = json.loads((fixtures / (name + "-source.json")).read_text(encoding="utf-8"))
+        captured, raw = frozen["captured_from"], frozen["source_text"].encode("utf-8")
+        assert captured["commit"] == commit and captured["plugin_version"] == "0.4.0-dev150"
+        assert captured["protocol_generation"] == 1 and captured["source_git_blob"] == blob
+        assert captured["source_path"] == f"plugins/agent-bridge/src/agent_bridge/session_host/{name}.py"
+        assert hashlib.sha256(raw).hexdigest() == captured["source_sha256"]
+        assert hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest() == blob
+        module = ModuleType(package.__name__ + "." + name)
+        module.__package__ = package.__name__
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+        exec(compile(raw, commit + ":" + captured["source_path"], "exec"), module.__dict__)
+        setattr(package, name, module)
+    return package.client.SessionHostClient
+
+
+def test_prior_frontend_refuses_corrupted_frozen_client(monkeypatch):
+    read_text = Path.read_text
+
+    def corrupted(path, *args, **kwargs):
+        body = read_text(path, *args, **kwargs)
+        if path.name == "client-source.json":
+            frozen = json.loads(body)
+            frozen["source_text"] += "\n"
+            return json.dumps(frozen)
+        return body
+
+    monkeypatch.setattr(Path, "read_text", corrupted)
+    with pytest.raises(AssertionError):
+        _prior_frontend(monkeypatch)
+    assert "_driver_dev150_frontend.client" not in sys.modules
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("frontend", ["current", "prior-runtime-dev150"])
+async def test_frontend_close_preserves_abort_recovery_and_bounds_prior(monkeypatch, frontend):
+    client_type = SessionHostClient if frontend == "current" else _prior_frontend(monkeypatch)
+
+    async def stalled():
+        await asyncio.Future()
+
+    transport = SimpleNamespace(abort=Mock())
+    writer = SimpleNamespace(close=Mock(), wait_closed=stalled, transport=transport)
+    client = client_type(asyncio.StreamReader(), writer)
+    if frontend == "current":
+        await _close_frontend(client)
+        transport.abort.assert_called_once_with()
+    else:
+        with pytest.raises(asyncio.TimeoutError):
+            await _close_frontend(client)
+    writer.close.assert_called_once_with()
 
 
 def test_consumers_reach_the_same_core_through_canonical_build_owners(monkeypatch):
@@ -102,6 +170,61 @@ def test_receiving_archive_publication_stays_on_the_selected_filesystem(tmp_path
     assert build_session_host_bundle(destination) == (archive, digest)
     assert len(publications) == 1
     assert list(destination.iterdir()) == [archive]
+
+
+@pytest.mark.parametrize("winerror", [5, 32, 33])
+def test_host_state_publication_retries_transient_windows_readers(tmp_path, monkeypatch, winerror):
+    from agent_remote_driver.session_host import host_state
+
+    path = tmp_path / "state.json"
+    path.write_text('{"state":"running"}', encoding="utf-8")
+    selected_os = SimpleNamespace(**vars(os))
+    attempts, delays = [], []
+
+    def replace(source, target):
+        attempts.append(source)
+        assert json.loads(path.read_text(encoding="utf-8")) == {"state": "running"}
+        if len(attempts) == 1:
+            error = PermissionError("fixture reader holds the old record")
+            error.winerror = winerror
+            raise error
+        os.replace(source, target)
+
+    selected_os.replace = replace
+    monkeypatch.setattr(host_state, "os", selected_os)
+    monkeypatch.setattr(host_state, "sys", SimpleNamespace(platform="win32"))
+    monkeypatch.setattr(host_state, "time", SimpleNamespace(sleep=delays.append))
+    assert host_state.write_host_state(path, {"state": "child_exited"})
+    assert json.loads(path.read_text(encoding="utf-8")) == {"state": "child_exited"}
+    assert len(attempts) == 2 and attempts[0] == attempts[1]
+    assert delays == [.01] and list(tmp_path.iterdir()) == [path]
+
+
+@pytest.mark.parametrize("platform,winerror,attempts", [
+    ("win32", 5, 20), ("linux", 5, 1), ("win32", 87, 1),
+])
+def test_host_state_publication_refuses_persistent_or_unrelated_errors(
+    tmp_path, monkeypatch, platform, winerror, attempts,
+):
+    from agent_remote_driver.session_host import host_state
+
+    path = tmp_path / "state.json"
+    original = b'{"state":"running"}'
+    path.write_bytes(original)
+    selected_os = SimpleNamespace(**vars(os))
+    error = PermissionError("fixture publication refused")
+    error.winerror = winerror
+    replace = Mock(side_effect=error)
+    selected_os.replace = replace
+    delays = []
+    monkeypatch.setattr(host_state, "os", selected_os)
+    monkeypatch.setattr(host_state, "sys", SimpleNamespace(platform=platform))
+    monkeypatch.setattr(host_state, "time", SimpleNamespace(sleep=delays.append))
+    with pytest.raises(PermissionError) as failure:
+        host_state.write_host_state(path, {"state": "child_exited"})
+    assert failure.value is error and replace.call_count == attempts
+    assert len(delays) == attempts - 1
+    assert path.read_bytes() == original and list(tmp_path.iterdir()) == [path]
 
 
 def test_legacy_receiving_artifact_declares_and_enforces_only_legacy_support(tmp_path):
@@ -397,20 +520,32 @@ async def test_relocated_core_requires_live_owner_at_actual_child_spawn(tmp_path
 
 
 @pytest.mark.asyncio
-async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path):
+@pytest.mark.parametrize("frontend", ["current", "prior-runtime-dev150"])
+@pytest.mark.parametrize("legacy,reapable", [(False, True), (True, False), (True, True)])
+async def test_relocated_core_reconnects_and_stops_exact_child(
+    tmp_path, monkeypatch, legacy, reapable, frontend,
+):
     from agent_procutil._interpreter import physical_executable
+    from agent_remote_driver.session_host.osutil import pid_alive
 
     interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert interpreter is not None
-    archive = _relocate(tmp_path)
+    client_type = SessionHostClient if frontend == "current" else _prior_frontend(monkeypatch)
+    archive = _relocate(tmp_path, legacy=legacy)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
+    (workspace / ".git").mkdir()
+    policy_context = json.dumps({
+        "schema": "agent-bridge.receiving-policy", "version": 1,
+        "marketplaceId": "fixture",
+    })
     state = tmp_path / "state.json"
     nonce = "fixture-only-nonce"
     proc = subprocess.Popen(
         [
             interpreter, "-I", "-S", str(archive),
             "--cwd", str(workspace), "--state-file", str(state),
+            "--repository-policy-context", policy_context,
             "--unexpected-reap-seconds", "0.02",
             "--", interpreter, "-I", "-S", "-u", "-c", _CHILD,
         ],
@@ -431,8 +566,8 @@ async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path):
         else:
             pytest.fail("relocated Host did not publish readiness")
         assert facts["pid"] == proc.pid
-        assert facts["lifetime_policy"] == "acp"
-        client = await SessionHostClient.connect(port=facts["port"])
+        assert facts["lifetime_policy"] == ("legacy" if legacy else "acp")
+        client = await client_type.connect(port=facts["port"])
         hello = await client.attach(nonce=nonce.encode())
         assert hello.child_pid == facts["child_pid"]
         cursor = 0
@@ -449,12 +584,17 @@ async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path):
             cursor, frame = await asyncio.wait_for(anext(client.frames()), 5)
             assert json.loads(frame)["result"]["params"] == params
             await client.ack(cursor)
-        await client.detach(reapable=True)
-        await client.close()
+        await client.detach(reapable=reapable)
+        await _close_frontend(client)
         client = None
+        if legacy and reapable:
+            await asyncio.to_thread(proc.wait, timeout=5)
+            assert proc.returncode == 0, proc.communicate(timeout=5)
+            assert not pid_alive(hello.child_pid)
+            return
         await asyncio.sleep(0.1)
         assert proc.poll() is None
-        client = await SessionHostClient.connect(port=facts["port"])
+        client = await client_type.connect(port=facts["port"])
         restored = await client.attach(cursor, nonce=nonce.encode())
         assert restored.child_pid == hello.child_pid
         assert restored.max_seq == cursor
@@ -468,16 +608,74 @@ async def test_relocated_core_reconnects_and_stops_exact_child(tmp_path):
         await client.ack(next_cursor)
         await client.terminate()
         assert [frame async for frame in client.frames()] == []
+        if legacy:
+            for _ in range(200):
+                if json.loads(state.read_text(encoding="utf-8"))["state"] == "child_exited":
+                    break
+                await asyncio.sleep(.025)
+            else:
+                pytest.fail(
+                    "Legacy Host did not publish its child exit: "
+                    + json.dumps({
+                        "state": json.loads(state.read_text(encoding="utf-8")),
+                        "child_alive": pid_alive(hello.child_pid), "host_exit": proc.poll(),
+                    })
+                )
+            assert not pid_alive(hello.child_pid)
+            assert proc.poll() is None
+            return
         assert not client.child_alive
         await asyncio.to_thread(proc.wait, timeout=5)
         assert proc.returncode == 0
-        from agent_remote_driver.session_host.osutil import pid_alive
-
         assert not pid_alive(hello.child_pid)
     finally:
-        if client is not None:
-            await client.close()
-        if proc.poll() is None:
-            proc.kill()
-            await asyncio.to_thread(proc.wait, timeout=5)
-        proc.communicate(timeout=5)
+        try:
+            if client is not None:
+                await _close_frontend(client)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                await asyncio.to_thread(proc.wait, timeout=5)
+            _stdout, stderr = proc.communicate(timeout=5)
+            if stderr:
+                print(stderr.decode("utf-8", "replace"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("source", ["owner", "server"])
+async def test_legacy_host_cancellation_still_propagates_and_retires_child(
+    tmp_path, monkeypatch, source,
+):
+    from agent_procutil._interpreter import physical_executable
+    from agent_remote_driver.session_host.osutil import pid_alive
+
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
+    state = tmp_path / "state.json"
+    ready = asyncio.Event()
+    cancelled = asyncio.Event()
+    if source == "server":
+        async def cancel_server(self):
+            await cancelled.wait()
+            raise asyncio.CancelledError
+
+        monkeypatch.setattr(launcher.SessionHost, "serve_forever", cancel_server)
+    task = asyncio.create_task(launcher.run_host(
+        [interpreter, "-I", "-S", "-u", "-c", _CHILD],
+        cwd=str(tmp_path), state_file=state, ready=ready, lifetime_policy="legacy",
+    ))
+    try:
+        await asyncio.wait_for(ready.wait(), 5)
+        child_pid = json.loads(state.read_text(encoding="utf-8"))["child_pid"]
+        assert pid_alive(child_pid)
+        if source == "owner":
+            task.cancel()
+        else:
+            cancelled.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 5)
+        assert not pid_alive(child_pid)
+    finally:
+        if not task.done():
+            task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

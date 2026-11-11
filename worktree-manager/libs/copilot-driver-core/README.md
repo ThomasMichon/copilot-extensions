@@ -21,6 +21,15 @@ provides the ordinary application front door. Bridge consumes this same
 library through the existing canonical-reference and wheel-build owners,
 not a sibling plugin source dependency.
 
+The compact legacy export preserves its disconnect-driven lifetime, rather
+than adopting ACP lifetime implicitly. An idle graceful detach closes that
+Host normally; cancellation of its external owner still propagates. Explicit
+legacy child termination need not close the retained broker, so socket EOF
+alone is not evidence that the broker exited.
+Private Host-state publication retries transient Windows sharing failures
+within a short fixed bound; persistent failures still raise without replacing
+the previous record.
+
 The explicit optional `sdk` extra supplies a public-Python-SDK headless provider
 behind that same Host. Native ACP remains the default; the compact export stays
 native-ACP-only. The base Python floor is unchanged, while SDK selection requires

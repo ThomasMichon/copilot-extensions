@@ -767,7 +767,10 @@ async def run_host(
         if child_task is not None:
             tasks.append(child_task)
         if child_task is None:
-            await server_task
+            # Server.close() cancels serve_forever; owner cancellation must still propagate.
+            await asyncio.wait((server_task,))
+            if not server_task.cancelled() or not host.closing:
+                await server_task
         else:
             done, _pending = await asyncio.wait(
                 (server_task, child_task), return_when=asyncio.FIRST_COMPLETED,
