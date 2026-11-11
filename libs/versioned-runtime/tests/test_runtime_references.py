@@ -116,6 +116,96 @@ except runtime.ConstructionTimeout:
         shutil.rmtree(native_root)
 
 
+def _deep_reference_root(tmp_path, *, long_root=False):
+    base = str(tmp_path)
+    if base.startswith("\\\\?\\UNC\\"):
+        base = "\\\\" + base[8:]
+    elif base.startswith("\\\\?\\"):
+        base = base[4:]
+    root = Path(base) / "runtime"
+    temporary = "runtime-references.json." + "0" * 32 + ".tmp"
+    while len(str(root)) <= 270 if long_root else len(str(root / temporary)) <= 260:
+        root /= "d" * 16
+    native = runtime._leases._native_path(root)
+    for version in ("old", "new"):
+        (native / "versions" / version).mkdir(parents=True)
+    return root, native
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+def test_native_reference_publication_preserves_compare_and_transaction_guards(tmp_path, long_root):
+    root, native = _deep_reference_root(tmp_path, long_root=long_root)
+    leases = runtime._leases
+    owner = "fixture/component"
+    try:
+        replace(root, ["old"])
+        expected = {owner: ["old"]}
+        assert leases.read_runtime_references(root) == leases.read_runtime_references(native) == expected
+        original = (native / "runtime-references.json").read_bytes()
+        with pytest.raises(RuntimeError, match="changed"):
+            replace(root, ["new"], expected=[])
+        assert (native / "runtime-references.json").read_bytes() == original
+        with leases.reference_transaction_custody(root, timeout=1):
+            ticket = leases.begin_runtime_reference_transaction(root, owner, timeout=1)
+            assert ticket["owners"] == expected
+            with pytest.raises(ValueError, match="pending"):
+                leases.read_runtime_references(root)
+            leases.commit_runtime_reference_transaction(
+                root, owner, ticket["token"], {owner: ["new"]}, expected=expected,
+            )
+        assert leases.read_runtime_references(root) == {owner: ["new"]}
+        replace(root, [], expected=["new"])
+        assert leases.read_runtime_references(native) == {}
+        assert not list(native.glob("runtime-references.json.*.tmp"))
+    finally:
+        shutil.rmtree(native)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("pending", [False, True])
+def test_native_reference_reader_does_not_hide_existing_deep_evidence(tmp_path, pending):
+    root, native = _deep_reference_root(tmp_path, long_root=True)
+    leases = runtime._leases
+    try:
+        replace(native, ["old"])
+        if pending:
+            with leases.reference_transaction_custody(native, timeout=1):
+                leases.begin_runtime_reference_transaction(native, "fixture/component", timeout=1)
+            with pytest.raises(ValueError, match="pending"):
+                leases.read_runtime_references(root)
+        else:
+            assert leases.read_runtime_references(root) == {"fixture/component": ["old"]}
+    finally:
+        shutil.rmtree(native)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+def test_native_reference_recovery_retains_deep_generations(tmp_path, long_root):
+    root, native = _deep_reference_root(tmp_path, long_root=long_root)
+    leases = runtime._leases
+    deep = "1.0.0+repair." + "a" * 160
+    (native / "versions" / deep).mkdir()
+    try:
+        with leases.reference_transaction_custody(native, timeout=1):
+            leases.begin_runtime_reference_transaction(native, "fixture/prior", timeout=1)
+        with leases.reference_transaction_custody(root, timeout=1):
+            ticket = leases.begin_runtime_reference_transaction(
+                root, "fixture/next", timeout=1, recover_foreign=True,
+            )
+            prefix = leases.reference_recovery_prefix("fixture/prior")
+            recovered = {key: values for key, values in ticket["owners"].items() if key.startswith(prefix)}
+            assert set().union(*map(set, recovered.values())) == {"old", "new", deep}
+            leases.commit_runtime_reference_transaction(
+                root, "fixture/next", ticket["token"], {"fixture/next": ["new"]},
+                expected={"fixture/next": []},
+            )
+        assert leases.read_runtime_references(root) == {**recovered, "fixture/next": ["new"]}
+    finally:
+        shutil.rmtree(native)
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
 @pytest.mark.parametrize("operation", ["discard", "gc"])
 @pytest.mark.parametrize("extended_root", [False, True])
@@ -363,7 +453,7 @@ def test_reference_transaction_commit_is_atomic_and_retryable(tmp_path, monkeypa
     root = case(tmp_path)
     replace(root, ["old"])
     ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
-    path = root / "runtime-references.json"
+    path = runtime._leases._native_path(root / "runtime-references.json")
     before = path.read_bytes()
     original = Path.replace
 
@@ -537,7 +627,7 @@ def test_foreign_recovery_failure_keeps_fence_and_existing_references(tmp_path, 
     root = case(tmp_path)
     replace(root, ["old"], owner="unrelated/component")
     runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
-    path = root / "runtime-references.json"
+    path = runtime._leases._native_path(root / "runtime-references.json")
     before = path.read_bytes()
     original = Path.replace
 

@@ -629,7 +629,7 @@ def _reference_owner(owner: str) -> None:
 def _read_runtime_reference_state(
     root: Path, *, allow_transaction: bool = False,
 ) -> tuple[dict[str, list[str]], dict[str, str] | None]:
-    path = root / _REFERENCES_FILE
+    path = _native_path(root) / _REFERENCES_FILE
     try:
         before = path.lstat()
     except FileNotFoundError:
@@ -716,7 +716,7 @@ def _write_runtime_reference_state(
     raw = json.dumps(value, ensure_ascii=True, sort_keys=True).encode("ascii")
     if len(raw) > _REFERENCES_LIMIT or len(owners) > 256:
         raise ValueError("runtime reference evidence exceeds its bound")
-    path = root / _REFERENCES_FILE
+    path = _native_path(root) / _REFERENCES_FILE
     temporary = path.with_name(path.name + "." + secrets.token_hex(16) + ".tmp")
     try:
         with temporary.open("xb") as stream:
@@ -748,6 +748,7 @@ def _recover_runtime_reference_transaction(root: Path) -> None:
     from contextlib import ExitStack
     import hashlib
 
+    root = _native_path(root)
     with _publication_lease(root):
         _owners, transaction = _read_runtime_reference_state(root, allow_transaction=True)
     if transaction is None:
@@ -815,6 +816,7 @@ def begin_runtime_reference_transaction(
         raise ValueError("invalid runtime reference recovery choice")
     if not math.isfinite(timeout) or timeout < 0 or not math.isfinite(poll_interval) or poll_interval <= 0:
         raise ValueError("invalid runtime reference transaction wait")
+    root = _native_path(root)
     deadline = time.monotonic() + timeout
     recovered = False
     while True:
@@ -869,6 +871,7 @@ def commit_runtime_reference_transaction(
     targets = {version for versions in desired.values() for version in versions}
     if len(targets) > 1024:
         raise ValueError("runtime reference transaction exceeds its target bound")
+    root = _native_path(root)
     with ExitStack() as custody:
         for version in sorted(targets, key=str.lower):
             custody.enter_context(_kernel_lease(root, version, kind="retention", shared=True))
@@ -902,6 +905,7 @@ def replace_runtime_references(
     from contextlib import ExitStack
     _reference_owner(owner)
     versions, expected = _reference_versions(versions), _reference_versions(expected)
+    root = _native_path(root)
     with ExitStack() as custody:
         # Cleanup takes retention before publication; never invert that order.
         for version in versions:
