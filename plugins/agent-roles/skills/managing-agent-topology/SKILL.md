@@ -73,6 +73,15 @@ constraints. Resolve machine purpose and allowed role/assignment kinds from
 declared topology; record unsupported resource dimensions instead of assuming
 they are unlimited.
 
+For tooling and machine upkeep, assign
+[`maintain-agent-fleet`](../maintain-agent-fleet/SKILL.md) as a standing role
+with explicit machine/environment scope and minimum qualified coverage.
+Materialize its complete filled charter in the existing assignment contract;
+no role-specific schema extension is needed. Require separate maintenance authority
+for updates, cutover and recovery, distinct from monitor steering or dispatcher
+launch authority. A live anchor chat is not required: the assigned worktree
+retains the charter and current-head continuity.
+
 ## Handle an operator request
 
 1. Find the request in the saved map before allocating anything. An inquiry or
