@@ -1744,3 +1744,29 @@ updates MCP's healthy-layout contract and TESTING.md's session/cleanup evidence.
 The next unchanged exact-head hosted matrix must still prove complete cleanup,
 strict scan success and the final post-lifecycle checks. Authentic update,
 mandatory frozen enforcement and separate Main adoption remain open.
+
+### November 11 - Reconcile the source-binding conflict before CI
+
+The published `bf22bb3f5e6cbfadd9ff4f83cbf32c80130b3b69` has successful
+trusted lockdown and source-attribution checks, but no PR CI run. Live CI
+triggers match the candidate and still include draft PR updates. GitHub reports
+a merge conflict, not a successful or skipped CI result. Run 43053171740 remains
+owned at its original frozen source; it is neither cancelled nor credited to a
+later reconciled candidate.
+
+A local backup preserves that published tip. Rebase onto
+`7508f32f3ba0abef31d63c192052866079ecf39b` replays 21 owned commits cleanly
+and exposes only the final MCP footprint producer-digest conflict. Both branches
+retain revision 36 and identical semantic contract fields. The resolution
+preserves newer upstream code and source binding, then uses the canonical
+refresher to recompute the merged producer digests. It does not choose an old
+manifest wholesale, change footprint policy, reset files or use shared stash.
+
+The reconciled code at `72611a2eff79a9668c0a62aafa2d9eb484adeaba` passes
+56 MCP bootstrap cases and all 257 locally supported Manager cases, plus
+install-contract, documentation and whitespace checks. Four hosted acceptance
+cases and fourteen native POSIX cases remain uncredited locally. The managed
+rewrite preview confirms the exact old published-head lease; it is not itself
+publication. Actual managed rewrite, current-head CI and a new exact-source
+hosted matrix remain required before review/merge acceptance. No old green
+check or native result is reused across the rebase.
