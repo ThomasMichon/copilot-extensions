@@ -31,7 +31,7 @@
     {
       "name": "agent-remote-driver",
       "description": "User-global SDK extension giving baseline drivability (attach to the live event stream, send/steer, abort) to any copilot CLI session present at launch time - independent of agent-bridge, agent-worktrees, or any other coordination plugin being installed in that venue",
-      "version": "0.1.28-dev1",
+      "version": "0.1.29-dev1",
       "source": "plugins/agent-remote-driver",
       "defaultEnabled": false
     },

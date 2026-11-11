@@ -3222,6 +3222,16 @@ SDK connection, ACP adaptation, permission relay and broker execute from the
 selected artifact. Private homes, caller-owned scopes and exact process births
 remain mandatory.
 
+Each owned runtime reports its version through the public SDK status operation.
+The selected executable's bounded `--version` result, its SHA-256 before/after
+the scenario, and the SDK distribution version are recorded separately.
+Retain the per-mode `native_sdk_versions.<mode>` JUnit suite properties with
+the runner's `--junit-dir` option when collecting qualification evidence.
+CLI and server version disagreement is recorded and refuses qualification,
+not normalized into an assumed equivalent build. Only the CLI banner's trailing
+prose period is removed when parsing its version. A stable executable path
+alone does not establish a stable build.
+
 These controls prove new/prompt, frontend reconnect, cold text-history load,
 nonempty client/agent/shell inventory, a future schedule after root idle,
 permission approval for the exact fixture command and observed cancellation.
