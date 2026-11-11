@@ -61,24 +61,25 @@ print(json.dumps({'prefix':prefix,'accepted':application_admission._ready(result
 _READINESS_DETAILS = """
 import json,sys,time
 from pathlib import Path
-from agent_machines.installation_repair import _invoke,current_platform
+from agent_machines.installation_repair import _binding_inputs,_invoke,current_platform
 from agent_machines.installation_repair_admission import admit_host
 from agent_machines.installation_repair_process import caller_owned_readiness
 requested=set(json.loads(sys.argv[2]))
 deadline=time.monotonic()+30
 host=admit_host(Path(sys.argv[1]),readiness_only=True)
+platform=current_platform()
+modules=[module for module in host.report.modules if module.qualified_id in requested]
+_inputs,owners=_binding_inputs(host,modules,platform)
 with caller_owned_readiness(True):
-    for module in host.report.modules:
-        if module.qualified_id not in requested:
-            continue
-        owner=host.bindings.get(module.owner.owner_id)
+    for module in modules:
+        owner=owners.get(module.owner.owner_id)
         if owner is None or owner.refusal:
             print(json.dumps({'module':module.qualified_id,'status':'owner-not-admitted'}))
             continue
         remaining=deadline-time.monotonic()
         if remaining<=0:
             raise TimeoutError('Readiness diagnostics exhausted their existing stage budget')
-        result=_invoke(module,owner,current_platform(),readonly=True,timeout=min(10,remaining))
+        result=_invoke(module,owner,platform,readonly=True,timeout=min(10,remaining))
         print(json.dumps({'module':module.qualified_id,'status':result.status,
                           'exitCode':result.exit_code,
                           'stdout':result.stdout.decode('utf-8-sig',errors='replace')}),flush=True)

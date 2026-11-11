@@ -426,6 +426,7 @@ def test_readiness_failure_details_reuse_only_the_admitted_readonly_owner(
                                owner=SimpleNamespace(owner_id="fixture::example"))
     ignored = SimpleNamespace(qualified_id="fixture::other/runtime")
     owner = SimpleNamespace(refusal=None)
+    bound_owner = SimpleNamespace(refusal=None, execution_bindings={"readiness": "admitted"})
     host = SimpleNamespace(report=SimpleNamespace(modules=[ignored, selected]),
                            bindings={"fixture::example": owner})
 
@@ -439,7 +440,7 @@ def test_readiness_failure_details_reuse_only_the_admitted_readonly_owner(
         return host
 
     def invoke(module, binding, platform, *, readonly, timeout):
-        assert module is selected and binding is owner and platform == "windows"
+        assert module is selected and binding is bound_owner and platform == "windows"
         assert readonly is True and 0 < timeout <= 10
         calls.append(module.qualified_id)
         return SimpleNamespace(
@@ -447,8 +448,15 @@ def test_readiness_failure_details_reuse_only_the_admitted_readonly_owner(
             stdout=b'{"state":"failed","detail":"actual owner reason"}',
         )
 
+    def bind(admitted, modules, platform):
+        assert admitted is host and modules == [selected] and platform == "windows"
+        calls.append("bound-readiness")
+        return {}, {"fixture::example": bound_owner}
+
     definitions = {
-        "agent_machines.installation_repair": {"_invoke": invoke, "current_platform": lambda: "windows"},
+        "agent_machines.installation_repair": {
+            "_binding_inputs": bind, "_invoke": invoke, "current_platform": lambda: "windows",
+        },
         "agent_machines.installation_repair_admission": {"admit_host": admit},
         "agent_machines.installation_repair_process": {"caller_owned_readiness": caller_owned},
     }
@@ -458,7 +466,7 @@ def test_readiness_failure_details_reuse_only_the_admitted_readonly_owner(
         monkeypatch.setitem(sys.modules, name, module)
     monkeypatch.setattr(sys, "argv", ["diagnostic", str(tmp_path), json.dumps([selected.qualified_id])])
     exec(RUNTIMES["_READINESS_DETAILS"], {})
-    assert calls == [selected.qualified_id]
+    assert calls == ["bound-readiness", selected.qualified_id]
     result = json.loads(capsys.readouterr().out)
     assert result["exitCode"] == 1
     assert json.loads(result["stdout"])["detail"] == "actual owner reason"

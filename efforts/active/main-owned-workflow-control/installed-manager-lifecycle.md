@@ -1335,3 +1335,23 @@ failure diagnostics, not a released runtime or operator procedure. The full
 native clean-room/readiness result remains pending the next exact-head run;
 authentic admitted upgrade, frozen enforcement and separate Main adoption are
 still open.
+
+Run 42977725641 at `162112b586d4505a9ee410ceacdf4b193bb42ed1`
+passed normal and repair; fresh still refused actual Machines readiness for
+Index and Vault, with successful settlement and required CI. The Vault
+installer now confirms that the real `keepassxc-cli` prerequisite is found.
+That removes the known missing-backend input, not the remaining readiness
+failure.
+
+The added failure diagnostic returned `invocation-refused`, not either owner's
+raw reason. It had obtained the host owner bindings but omitted the canonical
+execution-binding step that `repair` performs before `_invoke`. The diagnostic
+now uses `_binding_inputs` on only the requested failed modules before
+read-only invocation. A contained check through the actual Machines API and
+native fixture action proves the difference: the previous program returns
+`invocation-refused`, the corrected program exits with the owner's raw
+`not-ready` reason, and no installer state is created. Four focused regression,
+original-refusal and custody-precedence controls pass; lint and whitespace
+checks pass. No production repair API or acceptance policy changes. Index and
+Vault causes remain unproven until the next exact-head native diagnostic;
+neither the backend input nor this observation fix is fresh acceptance.
