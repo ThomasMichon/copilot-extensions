@@ -180,7 +180,7 @@ class Mux {
 def _qualify_native_worktrees(
     tmp_path, control, *, manager_script=None, manager_environment=None,
     manager_python=None, verify_reuse=True, worktrees_python=None,
-    worktrees_root=None, worktrees_environment=None,
+    worktrees_root=None, worktrees_environment=None, caller_jobs=False,
 ):
     from plugin_test_command_safety import private_mux_args
 
@@ -197,6 +197,12 @@ def _qualify_native_worktrees(
         assert Path(worktrees_python).is_file()
         assert worktrees_environment is not None
     assert not public_caller or installed
+    if caller_jobs:
+        from agent_procutil import contained_test_mode
+        from public_caller_jobs_fixture import application_unavailable, run_public_caller_jobs
+
+        assert control == "embody" and installed and not contained_test_mode()
+        assert worktrees_environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
     owner_python = str(worktrees_python) if installed else physical_executable(
         getattr(sys, "_base_executable", sys.executable),
     )
@@ -271,6 +277,8 @@ def _qualify_native_worktrees(
         UV_PROJECT_ENVIRONMENT=str(tmp_path / "manager-environment"),
     )
     environment.update(manager_environment or {})
+    if caller_jobs:
+        environment.pop("COPILOT_EXTENSIONS_TEST_CONTAINED")
     mux_directory, namespace_file = _prepare_private_mux_adapter(
         tmp_path, binary=binary, manager_target=manager_target, environment=environment,
     )
@@ -609,19 +617,29 @@ def _qualify_native_worktrees(
             assert query("has-session", "-t", outer_target).returncode == 1
             if control == "manager-mux" or public_caller:
                 assert query("has-session", "-t", target).returncode == 1
-            launched = query(
-                "new-session", "-d", "-s", outer_target, "-c", str(checkout),
-                *caller_environment, "--", *caller_command,
-            )
-            assert launched.returncode == 0, launched.stderr + (
-                owner_log.read_text(encoding="utf-8") if owner_log.exists() else ""
-            )
-            observed = query(
-                "display-message", "-p", "-t", outer_target, "#{session_id}:#{session_created}|#{pane_id}",
-            )
-            assert observed.returncode == 0 and "|" in observed.stdout
-            identities[outer_target] = observed.stdout.strip()
-            owner_ready.write_text("ready", encoding="utf-8")
+            if caller_jobs:
+                launched = run_public_caller_jobs(
+                    public_command, python=worktrees_python, cwd=checkout,
+                    environment=environment, directory=tmp_path / (leg + "-caller-jobs"),
+                )
+                owner_log.write_text(launched.stderr + launched.stdout, encoding="utf-8")
+                public_result.write_text(launched.stdout, encoding="utf-8")
+                result_file.write_text(str(launched.returncode), encoding="utf-8")
+                assert launched.returncode == 0, launched.stderr + launched.stdout
+            else:
+                launched = query(
+                    "new-session", "-d", "-s", outer_target, "-c", str(checkout),
+                    *caller_environment, "--", *caller_command,
+                )
+                assert launched.returncode == 0, launched.stderr + (
+                    owner_log.read_text(encoding="utf-8") if owner_log.exists() else ""
+                )
+                observed = query(
+                    "display-message", "-p", "-t", outer_target, "#{session_id}:#{session_created}|#{pane_id}",
+                )
+                assert observed.returncode == 0 and "|" in observed.stdout
+                identities[outer_target] = observed.stdout.strip()
+                owner_ready.write_text("ready", encoding="utf-8")
             startup_seen = None
             startup_diagnostic = None
 
@@ -823,10 +841,16 @@ def _qualify_native_worktrees(
                     detach_tty()
                     write_driver(tty_invocation(reuse_command))
                 else:
-                    reused = run_caller_owned(
-                        reuse_command, env=environment, cwd=checkout, timeout=30,
-                        max_stdout_bytes=65536, max_stderr_bytes=65536,
-                    )
+                    if caller_jobs:
+                        reused = run_public_caller_jobs(
+                            reuse_command, python=worktrees_python, cwd=checkout,
+                            environment=environment, directory=tmp_path / (leg + "-reuse-jobs"),
+                        )
+                    else:
+                        reused = run_caller_owned(
+                            reuse_command, env=environment, cwd=checkout, timeout=30,
+                            max_stdout_bytes=65536, max_stderr_bytes=65536,
+                        )
                     assert reused.returncode == 0, reused.stdout + reused.stderr
                     reply = json.loads(reused.stdout)
                     assert reply["ok"] and reply["created"] is False and reply["launch_action"] == "reuse"
@@ -877,7 +901,20 @@ def _qualify_native_worktrees(
                 assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
                 assert state["child_process_start_time"] == process_start_time(state["child_pid"])
                 assert state["host_process_start_time"] == process_start_time(state["host_pid"])
-            asyncio.run(broker(state, prompt=prompts[1] if leg == "fresh" else prompts[-1]))
+            async def retained_prompt():
+                await asyncio.wait_for(
+                    broker(state, prompt=prompts[1] if leg == "fresh" else prompts[-1]), 30,
+                )
+
+            if caller_jobs:
+                with application_unavailable(worktrees_python):
+                    assert state["child_process_start_time"] == process_start_time(state["child_pid"])
+                    assert state["host_process_start_time"] == process_start_time(state["host_pid"])
+                    asyncio.run(retained_prompt())
+                print(f"Native {control} {leg}: both caller Jobs closed; retained application absent",
+                      flush=True)
+            else:
+                asyncio.run(retained_prompt())
             expected = prompts[:2] if leg == "fresh" else prompts
             if control == "native-input" and leg == "fresh":
                 assert query("send-keys", "-t", target, "-l", "--", prompts[2]).returncode == 0
