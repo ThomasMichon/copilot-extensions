@@ -1,0 +1,247 @@
+"""Source controls; these do not qualify native suite installation."""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+import runpy
+import shutil
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+_SUITE = runpy.run_path(
+    str(Path(__file__).parent / "native" / "manager_installed_suite_payloads.py"),
+)
+_COMMIT = "a" * 40
+
+
+def _artifact(tmp_path):
+    root = tmp_path / "artifact"
+    catalog = {
+        "name": "example-marketplace",
+        "plugins": [
+            {"name": name, "source": "plugins/" + name, "version": "1.0"}
+            for name in ("agent-worktrees", "agent-machines", "example-guidance")
+        ],
+    }
+    (root / ".github" / "plugin").mkdir(parents=True)
+    (root / ".github" / "plugin" / "marketplace.json").write_text(json.dumps(catalog))
+    for row in catalog["plugins"]:
+        payload = root / "plugins" / row["name"]
+        payload.mkdir(parents=True)
+        (payload / "plugin.json").write_text(json.dumps({
+            "name": row["name"], "version": "1.0",
+            "runtimeScope": "none" if row["name"] == "example-guidance" else "universal",
+        }))
+        (payload / "README.md").write_text("Frozen payload bytes\n")
+    (root / "plugins" / "agent-machines" / "MATERIALIZED.json").write_text("{}")
+    (root / "worktree-manager").mkdir()
+    (root / "worktree-manager" / "pyproject.toml").write_text('[project]\nversion="1.0"\n')
+    _seal(root)
+    return root
+
+
+def _seal(root, commit=_COMMIT):
+    provenance = _SUITE["_PROVENANCE"]
+    (root / provenance["RECEIPT"]).write_text(json.dumps({
+        "schema": provenance["SCHEMA"], "version": 1, "source_commit": commit,
+        "paths": provenance["content_manifest"](root),
+    }))
+
+
+@pytest.mark.parametrize("defect", ["wrong-commit", "changed-bytes", "missing-payload", "unsafe-source"])
+def test_suite_profile_refuses_incomplete_or_substituted_artifact(tmp_path, defect):
+    artifact = _artifact(tmp_path)
+    commit = _COMMIT
+    if defect == "wrong-commit":
+        commit = "b" * 40
+    elif defect == "changed-bytes":
+        (artifact / "plugins" / "agent-machines" / "README.md").write_text("Substitute")
+    elif defect == "missing-payload":
+        (artifact / "plugins" / "agent-machines" / "plugin.json").unlink()
+    else:
+        path = artifact / ".github" / "plugin" / "marketplace.json"
+        catalog = json.loads(path.read_text())
+        catalog["plugins"][-1]["source"] = "../outside"
+        path.write_text(json.dumps(catalog))
+        _seal(artifact)
+    with pytest.raises((ValueError, FileNotFoundError)):
+        _SUITE["selected_profile"](artifact, commit, {"stateless": True})
+
+
+@pytest.mark.parametrize("defect", ["foreign-origin", "invalid-tree"])
+def test_suite_profile_refuses_nonfixture_git_transport(tmp_path, defect):
+    artifact = _artifact(tmp_path)
+    transport = {
+        "repository": str(tmp_path / "transport.git"),
+        "url": "http://127.0.0.1:12345/suite-transport.git",
+        "commit": "b" * 40, "tree": "c" * 40,
+    }
+    if defect == "foreign-origin":
+        transport["url"] = "http://example.invalid/suite-transport.git"
+    else:
+        transport["tree"] = "not-a-tree"
+    with pytest.raises(ValueError):
+        _SUITE["selected_profile"](artifact, _COMMIT, {}, transport=transport)
+
+
+@pytest.mark.parametrize("defect", [None, "partial-discovery", "foreign-payload", "changed-payload",
+                                   "changed-nested-receipt", "missing-payload-file",
+                                   "extra-payload-file",
+                                   "changed-artifact", "changed-cli", "reduced-settings", "command-failed",
+                                   "changed-transport", "foreign-transport", "changed-template",
+                                   "foreign-template"])
+def test_suite_acquisition_requires_real_command_closure_and_private_selected_bytes(
+    tmp_path, monkeypatch, defect,
+):
+    artifact = _artifact(tmp_path)
+    config = {"project": "example", "stateless": True, "require_application_readiness": True}
+    repository = tmp_path / "suite-transport.git"
+    template = tmp_path / "suite-checkout-template"
+    (template / "info").mkdir(parents=True)
+    (template / "info" / "attributes").write_bytes(b"* -text\n")
+    transport = {
+        "repository": str(repository), "url": "http://127.0.0.1:12345/suite-transport.git",
+        "commit": "b" * 40, "tree": "c" * 40, "checkout_template": str(template),
+    }
+    if defect == "foreign-transport":
+        transport["repository"] = str(tmp_path.parent / "foreign.git")
+    elif defect == "foreign-template":
+        transport["checkout_template"] = str(tmp_path.parent / "foreign-template")
+    elif defect == "changed-template":
+        (template / "info" / "attributes").write_bytes(b"* text\n")
+    profile = _SUITE["selected_profile"](artifact, _COMMIT, config, transport=transport)
+    project = tmp_path / "project"
+    settings = project / ".github" / "copilot" / "settings.json"
+    settings.parent.mkdir(parents=True)
+    settings.write_text(json.dumps(profile["settings"]))
+    if defect == "reduced-settings":
+        settings.write_text("{}")
+    home = tmp_path / "home"
+    copilot_home = home / ".copilot"
+    copilot = tmp_path / "actual-cli.exe"
+    copilot.write_bytes(b"fixture executable identity")
+    calls = []
+
+    def run(argv, environment, cwd, diagnostics, label, *, timeout):
+        calls.append(argv)
+        if argv[0] == "git":
+            return (
+                "d" * 40 if defect == "changed-transport" and label.endswith("-after")
+                else transport["commit"]
+            ) + "\n" + transport["tree"]
+        if argv[0] == copilot:
+            assert environment["GIT_TEMPLATE_DIR"] == str(template)
+            if defect == "command-failed":
+                raise RuntimeError("actual command refused")
+            if argv[1:4] == ["plugin", "marketplace", "add"]:
+                assert argv[-1] == transport["url"]
+                return ""
+            if argv[1:] == ["plugin", "list", "--json"]:
+                return "{}"
+            name = argv[-1].split("@")[0]
+            shutil.copytree(
+                artifact / "plugins" / name,
+                copilot_home / "installed-plugins" / "example-marketplace" / name,
+            )
+            return ""
+        names = json.loads(argv[-1])
+        selected = {
+            name: str(copilot_home / "installed-plugins" / "example-marketplace" / name)
+            for name in names
+        }
+        if defect == "partial-discovery":
+            del selected["agent-machines"]
+        elif defect == "foreign-payload":
+            selected["agent-machines"] = str(artifact / "plugins" / "agent-machines")
+        elif defect == "changed-payload":
+            (Path(selected["agent-machines"]) / "README.md").write_text("Substitute")
+        elif defect == "changed-nested-receipt":
+            (Path(selected["agent-machines"]) / "MATERIALIZED.json").write_text("Substitute")
+        elif defect == "missing-payload-file":
+            (Path(selected["agent-machines"]) / "README.md").unlink()
+        elif defect == "extra-payload-file":
+            (Path(selected["agent-machines"]) / "extra.txt").write_text("Private contents")
+        elif defect == "changed-artifact":
+            (artifact / "plugins" / "agent-machines" / "README.md").write_text("Substitute")
+        elif defect == "changed-cli":
+            copilot.write_bytes(b"replacement CLI")
+        return json.dumps(selected)
+
+    monkeypatch.setitem(sys.modules, "manager_suite_fixture", SimpleNamespace(require_venue=lambda: None))
+    arguments = dict(
+        repository_config=config, copilot=copilot, engine=tmp_path / "engine.exe",
+        environment={"USERPROFILE": str(home), "COPILOT_HOME": str(copilot_home)},
+        project=project, diagnostics=tmp_path, transport=transport, run=run,
+    )
+    if defect:
+        with pytest.raises((ValueError, RuntimeError)) as failure:
+            _SUITE["install_payload_closure"](artifact, _COMMIT, **arguments)
+        if defect in {
+            "changed-payload", "changed-nested-receipt",
+            "missing-payload-file", "extra-payload-file",
+        }:
+            difference = json.loads(
+                (tmp_path / "suite-payload-difference-agent-machines.json").read_text(),
+            )
+            category = {
+                "missing-payload-file": "missing", "extra-payload-file": "extra",
+            }.get(defect, "changed")
+            path = {
+                "changed-nested-receipt": "MATERIALIZED.json",
+                "extra-payload-file": "extra.txt",
+            }.get(defect, "README.md")
+            assert difference[category + "_count"] == 1
+            assert difference["samples"][0]["path"] == path
+            assert difference["samples"][0]["difference"] == category
+            assert "installed payload differs" in str(failure.value)
+            assert "Private contents" not in str(failure.value)
+            assert "Substitute" not in str(failure.value)
+        if defect == "reduced-settings":
+            assert calls == []
+        if defect == "command-failed":
+            assert [argv for argv in calls if argv[0] == copilot] == [
+                [copilot, "plugin", "marketplace", "add", transport["url"]],
+            ]
+        if defect in {"foreign-transport", "foreign-template", "changed-template"}:
+            assert calls == []
+    else:
+        result = _SUITE["install_payload_closure"](artifact, _COMMIT, **arguments)
+        cli_calls = [argv for argv in calls if argv[0] == copilot]
+        assert cli_calls[0] == [copilot, "plugin", "marketplace", "add", transport["url"]]
+        assert [argv[1:] for argv in cli_calls[1:-1]] == [
+            ["plugin", "install", name + "@example-marketplace"]
+            for name in sorted(profile["inventory"])
+        ]
+        assert cli_calls[-1] == [copilot, "plugin", "list", "--json"]
+        assert set(result["payloads"]) == set(profile["inventory"])
+        assert result["profile"]["repository_config"]["stateless"] is True
+        assert result["runtime_installation"] == "not-observed"
+        assert result["transport"] == transport
+
+
+def test_payload_difference_bounds_paths_metadata_and_total_samples():
+    long_path = "a" * 300
+    expected = {
+        long_path: {"kind": "symlink", "target": "b" * 300},
+        "mode": {"kind": "file", "sha256": "c" * 64, "executable": False},
+    }
+    actual = {
+        long_path: {"kind": "symlink", "target": "d" * 300},
+        "mode": {"kind": "file", "sha256": "c" * 64, "executable": True},
+    }
+    difference = _SUITE["payload_manifest_difference"](expected, actual)
+    assert difference["changed_count"] == 2
+    assert difference["samples"][0]["path_truncated"] is True
+    assert len(difference["samples"][0]["path"]) == 256
+    assert len(difference["samples"][0]["expected"]["target"]) == 256
+    assert difference["samples"][1]["expected"]["executable"] is False
+    assert difference["samples"][1]["actual"]["executable"] is True
+    many = _SUITE["payload_manifest_difference"](
+        {str(index): {"kind": "directory"} for index in range(25)}, actual,
+    )
+    assert many["missing_count"] == 25
+    assert many["extra_count"] == 2
+    assert len(many["samples"]) == 20
+    assert many["omitted_count"] == 7

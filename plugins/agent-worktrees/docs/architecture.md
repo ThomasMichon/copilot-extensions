@@ -3282,12 +3282,15 @@ A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
 Prepared Windows membership also permits a single `powershell` or `pwsh` event
-whose object-valued `toolArgs.command` is exactly one of the no-argument literals
+whose original argument carrier yields exactly one of the no-argument literals
 from `hook_pre_relevance.py`'s canonical `SHELL_READ_HEADS`. The same tuple builds
 the ordinary client's existing conservative expression; its argument grammar and
 contextual refusal are unchanged. Non-command tool metadata remains data, and
-the primary command keeps the original guard precedence. The native consumer
-does not parse shell syntax, normalize text or decode argument strings.
+the primary command keeps the original guard precedence. A present `toolArgs`
+selects that value even when invalid; only its absence selects `tool_input`.
+An object supplies its canonical `command` field, while a raw string supplies
+the whole command. The native consumer does not parse shell syntax, normalize
+text or decode JSON argument strings.
 Arguments, undeclared case/whitespace variants, command aliases, quotes,
 substitutions, redirection and shell members inside batches retain original policy.
 `toolCalls` still takes precedence over top-level tool fields.
@@ -3297,14 +3300,18 @@ The existing version-1 contract carries optional `nativeShellReadCommands` and
 in addition to the four original guards. Current source/control/admission checks
 remain live. Missing, invalid, old or drifted literal-proof data declines this
 optimization without retiring existing read/write proofs. Prior readers ignore
-the additive properties and keep their original shell path. Regenerate the
+the additive properties and keep their original shell path; readers limited to
+primary object arguments retain fallback for other carriers. The additional
+carrier selection uses the same declaration and original guard-source bindings,
+not new caller syntax or a package-version handshake. Regenerate the
 contract after relevance-source changes too. Eligible events return an empty
 no-op response without runtime selection, policy-worker startup or Management
 module initialization; that is not an explicit permission grant. Protected and
 uncertain events retain the original raw payload, guard decisions and owned
-worker cleanup. Nonmatching object-valued PowerShell commands can additionally
-read the bounded contract while declining the proof; their source hashes are not
-scanned merely to reject an undeclared command.
+worker cleanup. Nonmatching PowerShell commands with an object-command or
+raw-string carrier can additionally read the bounded contract while declining
+the proof; their source hashes are not scanned merely to reject an undeclared
+command.
 
 Prepared membership also permits complete all-read native batches of
 `view`, `rg` and `glob`. Read and write branches share one strict batch-envelope

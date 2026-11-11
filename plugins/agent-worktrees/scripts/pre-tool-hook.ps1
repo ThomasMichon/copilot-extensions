@@ -140,11 +140,17 @@ function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $f
     if ($name -isnot [string]) { return $false }
     if ($name -cin @('view', 'rg', 'glob')) { return Test-NativePreToolSources }
     if (-not $PreparedMembership -or $name -cnotin @('powershell', 'pwsh')) { return $false }
-    $args = $Payload['toolArgs']
-    if ($args -isnot [Collections.IDictionary] -or $args['command'] -isnot [string] -or -not $args['command']) {
+    if ($Payload.ContainsKey('toolArgs')) {
+        $args = $Payload['toolArgs']
+    } else {
+        $args = $Payload['tool_input']
+    }
+    $command = $args
+    if ($args -is [Collections.IDictionary]) { $command = $args['command'] }
+    if ($command -isnot [string] -or -not $command) {
         return $false
     }
-    return Test-NativePreToolSources -ShellCommand $args['command']
+    return Test-NativePreToolSources -ShellCommand $command
 }
 
 function Read-NativePreToolText([string]$Path, [int]$Limit) {

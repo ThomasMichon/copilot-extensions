@@ -118,15 +118,9 @@ if ($Action -in @('install', 'update', 'stamp', 'provision')) {
         }
         $publicationCandidates += @{ Path = $BootstrapPython; Prefix = @() }
     } else {
-        $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue |
-            Select-Object -First 1
-        if ($launcher) { $publicationCandidates += @{ Path = $launcher.Source; Prefix = @('-3') } }
-        foreach ($name in @('python3', 'python')) {
-            foreach ($candidate in @(Get-Command $name -All -CommandType Application -ErrorAction SilentlyContinue)) {
-                if ($candidate.Source -notmatch '[\\/]WindowsApps[\\/]') {
-                    $publicationCandidates += @{ Path = $candidate.Source; Prefix = @() }
-                }
-            }
+        $discoveredPython = Resolve-NativeBootstrapPython -MinimumMinor 10
+        if ($discoveredPython) {
+            $publicationCandidates += @{ Path = $discoveredPython; Prefix = @() }
         }
     }
     foreach ($candidate in $publicationCandidates) {
@@ -817,18 +811,11 @@ function Get-GitInfo {
 # same place.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
-    <# Construction supervision must run outside the candidate being built.
-       Probe a native launcher, then real PATH interpreters (not Store aliases). #>
-    $launcher = Get-Command py -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-    if ($launcher -and $launcher.Source -notmatch '\.(cmd|bat)$') {
-        $exe = (Invoke-Hidden -FilePath $launcher.Source -ArgList @('-3', '-c', 'import sys; print(sys.executable)') | Out-String).Trim()
-        if ($LASTEXITCODE -eq 0 -and $exe -and (Test-Path $exe)) { return $exe }
-    }
-    foreach ($cand in 'python3', 'python') {
-        $c = Get-Command $cand -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($c -and $c.Source -notmatch 'WindowsApps') { return $c.Source }
-    }
-    return $null
+    # Keep publication, construction and command ownership on the admitted
+    # interpreter rather than reselecting an unsupported launcher default.
+    $admitted = Get-Variable publicationPython -Scope Script -ValueOnly -ErrorAction SilentlyContinue
+    if ($admitted) { return $admitted }
+    return Resolve-NativeBootstrapPython -MinimumMinor 10
 }
 
 function Get-PayloadHash {
