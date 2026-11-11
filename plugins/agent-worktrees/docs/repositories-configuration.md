@@ -89,6 +89,71 @@ written. Unrecognized local registry metadata is preserved by this API.
 YAML aliases are detached at the selected registration before an edit, so
 unselected registrations and metadata cannot change through shared mappings.
 
+## Acquire a remote knowledge checkout
+
+For an eligible unbound, canonically registered worktree-class stateless harness,
+**Acquire a remote knowledge checkout only** downloads an existing repository
+to an absent absolute destination. This uses the shared repository-bootstrap
+acquisition owner, not `repos setup`: it neither reference-registers the
+checkout nor inspects or executes its repository setup.
+
+```text
+agent-worktrees repos configuration knowledge-acquire-preview --context-project sample --repository-url https://github.com/example/knowledge.git --checkout-path <absolute-new-checkout>
+agent-worktrees repos configuration knowledge-acquire-apply --context-project sample --repository-url https://github.com/example/knowledge.git --checkout-path <absolute-new-checkout> --preview-token <returned-token>
+```
+
+Preview performs only local inspection. It rejects credential-bearing or
+parameterized URLs, unsupported transports, configured Git URL rewrites,
+existing destinations, indirect ancestors, nested Git repositories and
+registered name/path/provider-identity collisions. The parent must already
+exist. Preview creates no target or lock, contacts no provider and observes no
+credential. Its token binds the selected installation, machine, project,
+normalized URL/path, parent identity, native registry/configuration/policy and
+nonsecret account selection. Malformed binding inputs are not treated as unbound.
+
+Confirmation defaults to Cancel. Apply revalidates the token under the shared
+registry serialization and reserves the destination through exclusive directory
+creation before the shared hooks-disabled clone. A concurrent destination winner
+is preserved, not replaced. Only the configured noninteractive credential route
+is retained: terminal, askpass and GCM browser/device prompts are disabled.
+Explicit account selection requires the shared qualified credential owner; it
+never falls back to ambient credentials. Public access without a credential
+remains supported. No login, account switch, token copying or credential pin
+is added.
+
+Preview and apply have aggregate 18/26-second native budgets, each including a
+two-second cleanup reserve inside the Manager's 30-second action deadline.
+One caller-owned headless worker encloses local Git, clone and credential
+descendants; a timeout does not renew their clocks. Large/slow acquisitions
+may exceed this finite lane. Nonzero Git exit, cancellation, timeout, lost
+receipt, changed native inputs or failed final source qualification report
+failure/incomplete state with the unfinished stage and target presence
+(or unknown presence). Lost or invalid native completion is a sanitized failure,
+not proof that cleanup completed. An unconfirmed native cleanup propagates its
+original `OwnedCleanupError`, including process/Job, retained resources and retry
+operation, through the in-process failure boundary. Callers must retain and
+settle that owner before another attempt; it is not reduced to a PID-only receipt.
+No partial checkout is deleted, reset or retried.
+Inspect local ownership read-only with
+`repos registration inspect --anchor <destination> --default-name <intended-name>`
+before choosing recovery; that inspection does not qualify source completeness.
+
+Success returns `status: acquired`, canonical checkout and acquired commit.
+The source remains unregistered; native registry/configuration and provider
+policy are unchanged apart from normal local registry-lock sidecars. It is
+not bound, paired, launched or New-ready. Refresh, then use the separately
+confirmed local-registration action below with explicit branch/account
+metadata, followed by separate binding confirmation.
+
+The executing version-1 catalog advertises this optional action through its
+dedicated `knowledge_acquisition_available` row/marker. Older providers omit it;
+a newer manifest does not emit acquisition syntax without that marker.
+Older manifests retain registration/binding behavior. Missing or rolled-back
+support affects only acquisition; there is no effectful fallback/replay.
+Hosts that substitute an empty preview token refuse before acquisition.
+Ordinary `repos setup`, including attended authentication, immutable commit
+selection and reference registration, retains its existing defaults.
+
 ## Register an existing local knowledge checkout
 
 For a canonically registered, worktree-class, unbound stateless harness, the native catalog
