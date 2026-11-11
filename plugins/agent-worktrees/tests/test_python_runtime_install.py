@@ -886,7 +886,7 @@ def test_async_predecessor_admission_retains_slot_without_old_wire_contract(
         "pid": 101, "start_time": "1001", "prefix": str(slot / ".venv"),
     })
     monkeypatch.setattr(locks, "lock_is_live", lambda record: True)
-    monkeypatch.setattr(cutover, "load_or_create_control_token", lambda root: "fixture-token")
+    (tmp_path / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
     routing.publish_active(
         tmp_path / "status-monitor-routing", bind="127.0.0.1", port=61001, pid=101,
         process_start_time="1001",
@@ -1899,7 +1899,7 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
     monkeypatch.setattr(monitor, "_monitor_lock_path", lambda: root / "status-monitor.lock")
     monkeypatch.setattr(monitor, "_status_monitor_enabled", lambda: True)
     monkeypatch.setattr(cutover, "routing_dir", lambda *a: directory)
-    monkeypatch.setattr(cutover, "load_or_create_control_token", lambda *a: "fixture")
+    (root / "status-monitor-control.token").write_text("fixture", encoding="utf-8")
     def client(url, **kwargs):
         def observed_health():
             if url.endswith(":61001"):
@@ -1962,7 +1962,14 @@ def test_previous_only_installation_starts_and_settles_the_incoming_monitor(
     assert result["runtime_version"] == "2.0.0" and result["retirement_pending"]
     assert routing.read_table(directory)["active"]["pid"] == 303
     assert (root / "deploy-manifest.json").is_file()
-    assert list((root / "status-monitor-observations").glob("*.json"))
+    if discovery == "unknown-slot" and not release:
+        # A native-known owner outside this runtime needs retirement, not recovery archival.
+        assert [record for _path, record in retirements._records(root)] == [{
+            "version": 1, "pid": 202, "start": "2002", "slot": None,
+            "release_claim": None, "state": "retiring",
+        }]
+    else:
+        assert list((root / "status-monitor-observations").glob("*.json"))
     if release:
         assert result["dev_claim_release_pending"]
         assert driver.runtime.read_dev_claim(root, strict=True) == claim
