@@ -9096,6 +9096,27 @@ def test_worktree_claiming_task_uses_account_scope_for_account_scoped_pivots():
     assert inst._worktree_claiming_task(rec) == (task_row, "group")
 
 
+@pytest.mark.parametrize("width", [48, 118, 600])
+def test_full_canonical_title_is_only_shortened_at_the_actual_picker_consumer(width):
+    from textual.widgets.option_list import Option
+    from worktree_manager.production_picker.picker_tui.engine_views import WorktreesView
+
+    title = "Full identifying title " * 21 + "complete"
+    record = derive.norm(
+        {"id": "fixture-full-title", "title": title, "state": "wip"}, "fixture", "Win",
+    )
+    view = WorktreesView(types.SimpleNamespace(_worktree_claiming_task=lambda _record: None))
+    line = view._detail_line(record, width)
+    option = Option(line)
+    assert option.prompt.cell_len <= width
+    assert record["title"] == title
+    if width < len(title) + 6:
+        assert option.prompt.plain.rstrip().endswith("\u2026")
+        assert title not in option.prompt.plain
+    else:
+        assert title in option.prompt.plain
+
+
 def test_detail_line_shows_task_phase_badge_for_a_claimed_worktree():
     """The Worktrees-list detail line renders a `` · <Phase>`` badge, in the
     same task_phase palette the Tasks pivot's own PHASE column uses, when a

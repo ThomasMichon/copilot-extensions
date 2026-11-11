@@ -250,6 +250,47 @@ async def _preview(app, pilot, value="chosen"):
     return app.screen
 
 
+def test_periodic_catalog_refresh_waits_for_configuration_editor_preview_and_result(tmp_path, monkeypatch):
+    from worktree_manager.production_picker.picker_tui import engine as engine_module
+
+    _owner(tmp_path, monkeypatch)
+    monkeypatch.setattr(engine_module, "POLL_SECS", .001)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            engine = await _ready(app, pilot)
+            runtime = engine._pivot_runtime(engine._reg_pivot())
+            await _wait(pilot, lambda: runtime.actions_ready(("",)))
+            polls = []
+            monkeypatch.setattr(runtime, "repoll", polls.append)
+
+            def periodic():
+                polls.clear()
+                engine._last_pivot_poll = 0
+                engine._maybe_repoll_pivot()
+                return list(polls)
+
+            assert periodic() == [""]
+            _edit(engine)
+            await pilot.pause()
+            assert isinstance(app.screen, ConfigurationFormScreen)
+            assert periodic() == []
+            await _preview(app, pilot)
+            assert app.screen.preview and not app.screen.preview.blocked
+            assert periodic() == []
+            await pilot.click("#config-preview-apply")
+            await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending)
+            assert "set completed; local override only" in str(app.screen.query_one("#config-result").render())
+            assert polls == [""], "completion must still refresh its originating scope"
+            assert periodic() == []
+            app.screen.action_close()
+            await pilot.pause()
+            assert periodic() == [""]
+
+    asyncio.run(run())
+
+
 @pytest.mark.parametrize("stage", ["cancel", "set", "reset"])
 def test_production_ui_real_owner_set_reset_cancel_and_unchanged_sources(tmp_path, monkeypatch, stage):
     root = _owner(tmp_path, monkeypatch)

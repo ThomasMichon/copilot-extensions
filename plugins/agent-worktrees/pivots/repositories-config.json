@@ -17,6 +17,23 @@
   "actions": [
     {"key": "details", "label": "Inspect effective state / sources / owner boundaries", "kind": "card", "title_from": "card.title", "body_from": "card.body"},
     {
+      "key": "create-knowledge", "label": "Create a personal private knowledge repository", "kind": "form",
+      "when": {"knowledge_creation_available": "true"}, "fields_from": "knowledge_creation_fields", "body_from": "card.body", "confirm": true,
+      "preview": ["agent-worktrees", "repos", "configuration", "knowledge-create-preview", "--context-project", "{context_project}", "--repository-url", "{field.url}"],
+      "run": ["agent-worktrees", "repos", "configuration", "knowledge-create-apply", "--context-project", "{context_project}", "--repository-url", "{field.url}", "--preview-token", "{configuration_preview}"]
+    },
+    {
+      "key": "inspect-knowledge-creation", "label": "Inspect prior creation read-only", "kind": "form",
+      "when": {"knowledge_creation_recovery_available": "true"}, "fields_from": "knowledge_creation_recovery_fields", "body_from": "card.body",
+      "run": ["agent-worktrees", "repos", "configuration", "knowledge-create-inspect", "--context-project", "{context_project}", "--repository-url", "{field.url}", "--creation-receipt", "{field.receipt}"]
+    },
+    {
+      "key": "protect-knowledge", "label": "Complete safeguards for a confirmed creation", "kind": "form",
+      "when": {"knowledge_creation_recovery_available": "true"}, "fields_from": "knowledge_creation_recovery_fields", "body_from": "card.body", "confirm": true,
+      "preview": ["agent-worktrees", "repos", "configuration", "knowledge-protect-preview", "--context-project", "{context_project}", "--repository-url", "{field.url}", "--creation-receipt", "{field.receipt}"],
+      "run": ["agent-worktrees", "repos", "configuration", "knowledge-protect-apply", "--context-project", "{context_project}", "--repository-url", "{field.url}", "--creation-receipt", "{field.receipt}", "--preview-token", "{configuration_preview}"]
+    },
+    {
       "key": "acquire-knowledge", "label": "Acquire a remote knowledge checkout only", "kind": "form",
       "when": {"knowledge_acquisition_available": "true"}, "fields_from": "knowledge_acquisition_fields", "body_from": "card.body", "confirm": true,
       "preview": ["agent-worktrees", "repos", "configuration", "knowledge-acquire-preview", "--context-project", "{context_project}", "--repository-url", "{field.url}", "--checkout-path", "{field.path}"],
