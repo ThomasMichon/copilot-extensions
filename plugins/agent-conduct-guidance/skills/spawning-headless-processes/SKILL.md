@@ -224,8 +224,8 @@ the daemon's launch, admission or cleanup owner.
 
 ## Verifying the fix
 
-After changing a launch site, confirm no window actually appears rather than
-trusting the flag alone:
+After changing a launch site, verify the real launch mechanism and owned
+lifetime rather than trusting a mocked flag alone:
 
 1. Launch from the real parent shape you built for (a windowless script, a
    scheduled task, a detached daemon) -- not an interactive terminal, which
@@ -241,6 +241,15 @@ trusting the flag alone:
    Include a bounded child that dies with its owner and a different-inner/
    shared-outer negative that cannot claim independence. Do not mistake parent
    exit, arbitrary Job membership or test containment for production durability.
+
+Prefer unattended native evidence such as the actual GUI-subsystem executable
+and controlled descendants' console state. Window/focus observation is an
+opportunistic diagnostic when an observable console or RDP session is already
+active. Otherwise record why it was skipped; do not require the operator to
+unlock, focus or attend a desktop. Absent/inconclusive visual observation is not
+a publication, CI or enrollment gate, and must never be reported as a visual
+pass. Keep real execution, result, deadline and cleanup assertions intact; this
+does not authorize an admin/CI bypass or ignoring a confirmed regression.
 
 ## Boundaries
 

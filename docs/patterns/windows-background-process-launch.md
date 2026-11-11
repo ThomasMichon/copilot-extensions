@@ -231,9 +231,9 @@ also needs a focused live regression:
 1. Launch from the real windowless parent (`pythonw.exe`, scheduled launcher, or
    service daemon).
 2. Exercise a real console child and any configured proxy/transport descendant.
-3. Observe at least two periodic cycles with Win32 window enumeration and
-   foreground tracking; record zero visible windows, Default Terminal hosts, and
-   focus transitions.
+3. Exercise at least two cycles for periodic work. Check the real visibility
+   mechanism without requiring a desktop: for example, the selected executable's
+   GUI subsystem and controlled console descendants' native console state.
 4. Force timeout/cancellation and prove the full process tree exits.
 5. Verify local routing does not cross a remote process boundary.
 6. For durable daemons, close the launching caller's containment boundary after
@@ -241,6 +241,16 @@ also needs a focused live regression:
 
 Keep the live test out of the fast required lane when it needs a Windows host;
 the static guard and unit contract remain the portable CI gate.
+
+Win32 window enumeration and foreground tracking are opportunistic diagnostics
+on an already active, observable console or RDP session. Preserve their capture
+and coverage checks, and record a reason when the session or observation is
+unavailable. Do not ask the operator to maintain an unlocked/focused desktop or
+make absent/inconclusive visual evidence a publication, CI or enrollment gate.
+Never report unobserved coverage as zero windows or focus changes. Such
+observation can still reveal a genuine regression; it does not replace automated
+execution, result, timeout and complete-tree cleanup controls or waive their
+failures.
 
 ## See Also
 
