@@ -38,7 +38,7 @@ NATIVE_WRITE_PHASES = {
     "native-proof-start", "policy-start", "prepared-event-json", "prepared-paths",
     "prepared-marker-opened", "prepared-marker-json", "prepared-marker-decoded",
     "json-entry", "json-utility-load", "json-utility-ready", "json-web-load",
-    "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize",
+    "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize", "json-deserialized",
     "command-complete", "admission-start", "admission-complete", "read-proof-start",
     "read-proof-complete", "source-proof-start", "source-proof-complete", "policy-complete",
     "runtime-start", "runtime-complete",
@@ -51,6 +51,15 @@ NATIVE_WRITE_PHASE_WRITER = (
     "Write-NativeWriteFixturePhase 'command-entry'; "
 )
 NATIVE_WRITE_LOAD_WRITER = """
+function Write-NativeWriteFixtureCpuPhase([string]$Name) {
+    $process = [Diagnostics.Process]::GetCurrentProcess()
+    try { $cpu = $process.TotalProcessorTime.Ticks }
+    finally { $process.Dispose() }
+    [Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' +
+        [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString(
+            [Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name +
+        ' cpu_ticks=' + $cpu.ToString([Globalization.CultureInfo]::InvariantCulture))
+}
 function Write-NativeWriteFixtureAssemblyState([string]$Name) {
     $utility = 0
     $web = 0
@@ -166,11 +175,17 @@ def native_write_fixture_stderr(stderr):
     for line in stderr.splitlines(keepends=True):
         match = re.fullmatch(
             rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)"
-            rb"( cpu_ticks=[0-9]{1,20} utility=[01] web=[01])?\r?\n", line,
+            rb"( cpu_ticks=[0-9]{1,20}( utility=[01] web=[01])?)?\r?\n", line,
         )
         if (
             match and match[2].decode("ascii") in NATIVE_WRITE_PHASES
-            and (not match[3] or match[2] in {b"json-web-load", b"json-resolver-type"})
+            and (
+                not match[3]
+                or match[4] and match[2] in {b"json-web-load", b"json-resolver-type"}
+                or not match[4] and match[2] in {
+                    b"json-resolver-create", b"json-serializer-create", b"json-deserialize", b"json-deserialized",
+                }
+            )
         ):
             phases.append(
                 f"{match[1].decode('ascii')} {match[2].decode('ascii')}"
@@ -207,9 +222,18 @@ def instrument_prepared_admission(source):
         assert statement in source
         writer = (
             "Write-NativeWriteFixtureAssemblyState"
-            if boundary in {"json-web-load", "json-resolver-type"} else "Write-NativeWriteFixturePhase"
+            if boundary in {"json-web-load", "json-resolver-type"} else
+            "Write-NativeWriteFixtureCpuPhase"
+            if boundary in {"json-resolver-create", "json-serializer-create", "json-deserialize"} else
+            "Write-NativeWriteFixturePhase"
         )
         source = source.replace(statement, f"{writer} '{boundary}'\n" + statement, 1)
+    source = source.replace(
+        "    return ,($script:managedWorktreesJson.DeserializeObject($Text))",
+        "    $fixtureDecoded = $script:managedWorktreesJson.DeserializeObject($Text)\n"
+        "    Write-NativeWriteFixtureCpuPhase 'json-deserialized'\n"
+        "    return ,$fixtureDecoded", 1,
+    )
     return NATIVE_WRITE_LOAD_WRITER + source
 
 
@@ -484,6 +508,8 @@ def test_native_write_fixture_stderr_preserves_errors(newline):
     phase = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
     before = b"NATIVE_WRITE_FIXTURE_PHASE 124 json-web-load cpu_ticks=250000 utility=1 web=0" + newline
     after = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-resolver-type cpu_ticks=500000 utility=1 web=1" + newline
+    deserialize = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-deserialize cpu_ticks=625000" + newline
+    decoded = b"NATIVE_WRITE_FIXTURE_PHASE 127 json-deserialized cpu_ticks=750000" + newline
     errors = (
         newline + b"real error\xff" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 124 unknown-stage" + newline
@@ -492,11 +518,14 @@ def test_native_write_fixture_stderr_preserves_errors(newline):
         + b"NATIVE_WRITE_FIXTURE_PHASE 128 command-entry cpu_ticks=1 utility=1 web=0" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 129 json-web-load cpu_ticks=1 utility=1 web=2" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 130 json-web-load cpu_ticks=" + b"1" * 21 + b" utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 131 json-deserialize cpu_ticks=1 utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 132 json-web-load cpu_ticks=1" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
     )
-    assert native_write_fixture_stderr(phase + before + after + errors) == (
+    assert native_write_fixture_stderr(phase + before + after + deserialize + decoded + errors) == (
         "123 command-entry\n124 json-web-load cpu_ticks=250000 utility=1 web=0\n"
-        "126 json-resolver-type cpu_ticks=500000 utility=1 web=1", errors,
+        "126 json-resolver-type cpu_ticks=500000 utility=1 web=1\n"
+        "126 json-deserialize cpu_ticks=625000\n127 json-deserialized cpu_ticks=750000", errors,
     )
 
 
@@ -511,6 +540,7 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
     command = (
         NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LOAD_WRITER
         + "Write-NativeWriteFixtureAssemblyState 'json-web-load'; "
+        + "Write-NativeWriteFixtureCpuPhase 'json-deserialize'; "
         + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
     )
     with pytest.raises(subprocess.TimeoutExpired) as captured:
@@ -520,7 +550,8 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
         )
     progress, errors = native_write_fixture_stderr(captured.value.stderr)
     assert re.fullmatch(
-        r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+ utility=[01] web=[01]", progress,
+        r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+ utility=[01] web=[01]\n"
+        r"[0-9]+ json-deserialize cpu_ticks=[0-9]+", progress,
     ), progress
     assert errors == b"real fixture error\r\n"
     assert captured.value.stdout == b""
