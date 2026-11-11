@@ -230,10 +230,18 @@ keep their restrictive containment. Canonical test-environment preparation has
 invocation close before native broker/history checks, and an ordinary bounded
 child must die with them. Fresh/resume/reuse and seed non-replay still apply.
 The same native conversation must also serve its broker while only its
-disposable Worktrees application slot is temporarily unavailable; the slot is
-restored even on failure. Its fixture directory stays under the outer native
+disposable Worktrees frontend is replaced. During the fresh leg, regular
+application installation constructs a fresh same-source repair generation
+from the emitted application, publishes both current and last-known-good
+selections, and acknowledges startup. Canonical GC with live-process and
+retention protection must retire the outgoing slot before the installed global
+launcher reuses the same native conversation without seed replay. A protected
+outgoing slot fails this proof rather than being force-deleted. The resume leg
+uses the incoming generation and temporarily withdraws/restores that slot during
+its broker prompt. No completed virtualenv is copied. Its fixture directory stays under the outer native
 owner until leased residents settle; existing packets retain immediate inner
-sandbox cleanup. This does not qualify an updater, another caller or
+sandbox cleanup. This tests the selected application installer/generation
+transition, not a whole-suite updater, another caller or
 launch mode, a restrictive external outer Job, or desktop behavior. The fixed
 packet shares the Worktrees-only feed and pinned prerequisite policy above;
 its protected controller must be promoted before submission.

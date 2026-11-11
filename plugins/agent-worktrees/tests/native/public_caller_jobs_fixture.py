@@ -108,6 +108,49 @@ def run_public_caller_jobs(command, *, python, cwd, environment, directory):
     return subprocess.CompletedProcess(command, **reply)
 
 
+def replace_application(python, incoming, *, shell, cwd, environment):
+    """Use regular installation and canonical GC, never overwrite a built venv."""
+    sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"]).resolve()
+    outgoing = Path(python).resolve().parent.parent.parent
+    incoming = Path(incoming).resolve()
+    assert outgoing.is_relative_to(sandbox) and incoming.is_relative_to(sandbox)
+    assert outgoing.parent.name == "versions" and incoming.parent == outgoing.parent
+    assert incoming != outgoing and (incoming / "application.json").is_file()
+    assert not (incoming / ".venv").exists()
+    root = outgoing.parent.parent
+    assert (root / "current-version").read_text().strip() == outgoing.name
+    projects = (root / "projects.yaml").read_bytes()
+
+    def run(command, timeout):
+        reply = subprocess.run(
+            list(map(str, command)), cwd=cwd, env=environment,
+            capture_output=True, text=True, encoding="utf-8", timeout=timeout,
+            **pu.no_window_kwargs(),
+        )
+        assert reply.returncode == 0, reply.stdout + reply.stderr
+        return reply
+
+    installed = run([
+        shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File", incoming / "install.ps1",
+    ], 60)
+    assert json.loads(installed.stdout.splitlines()[-1])["state"] == "installed"
+    for selector in ("current-version", "last-known-good"):
+        assert (root / selector).read_text().strip() == incoming.name
+    assert json.loads((incoming / "install-success.json").read_text()) == {
+        "state": "installed", "version": incoming.name,
+    }
+    assert (root / "projects.yaml").read_bytes() == projects
+    selected_python = incoming / ".venv" / "Scripts" / "python.exe"
+    assert selected_python.is_file()
+    collected = run([
+        selected_python, "-I", "-B", incoming / "runtime" / "versioned_runtime.py",
+        "--root", root, "--json", "gc", "--protect-pids", "--min-age-days", "0",
+    ], 30)
+    assert json.loads(collected.stdout) == {"removed": [outgoing.name]}, collected.stdout
+    assert not outgoing.exists() and incoming.is_dir()
+    return selected_python
+
+
 @contextmanager
 def application_unavailable(python):
     """Temporarily withdraw only the fixture's selected ordinary application."""

@@ -180,7 +180,7 @@ class Mux {
 def _qualify_native_worktrees(
     tmp_path, control, *, manager_script=None, manager_environment=None,
     manager_python=None, verify_reuse=True, worktrees_python=None,
-    worktrees_root=None, worktrees_environment=None, caller_jobs=False,
+    worktrees_root=None, worktrees_environment=None, caller_jobs=False, replacement_slot=None,
 ):
     from plugin_test_command_safety import private_mux_args
 
@@ -199,10 +199,13 @@ def _qualify_native_worktrees(
     assert not public_caller or installed
     if caller_jobs:
         from agent_procutil import contained_test_mode
-        from public_caller_jobs_fixture import application_unavailable, run_public_caller_jobs
+        from public_caller_jobs_fixture import (
+            application_unavailable, replace_application, run_public_caller_jobs,
+        )
 
         assert control == "embody" and installed and not contained_test_mode()
         assert worktrees_environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
+    assert replacement_slot is None or caller_jobs
     owner_python = str(worktrees_python) if installed else physical_executable(
         getattr(sys, "_base_executable", sys.executable),
     )
@@ -906,7 +909,34 @@ def _qualify_native_worktrees(
                     broker(state, prompt=prompts[1] if leg == "fresh" else prompts[-1]), 30,
                 )
 
-            if caller_jobs:
+            if replacement_slot is not None and leg == "fresh":
+                outgoing = Path(worktrees_python).parent.parent.parent
+                worktrees_python = replace_application(
+                    worktrees_python, replacement_slot, shell=shell, cwd=checkout,
+                    environment=worktrees_environment,
+                )
+                prefix[0] = owner_python = str(worktrees_python)
+                assert state["child_process_start_time"] == process_start_time(state["child_pid"])
+                assert state["host_process_start_time"] == process_start_time(state["host_pid"])
+                public_launcher = outgoing.parent.parent.parent / ".local" / "bin" / "agent-worktrees.ps1"
+                reused = run_public_caller_jobs(
+                    [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+                     str(public_launcher), "--project", "native-copilot", "embody",
+                     "--worktree-id", worktree_id, "--recovery",
+                     "--seed", "MUST NOT REPLAY AFTER REPLACEMENT"],
+                    python=worktrees_python, cwd=checkout, environment=environment,
+                    directory=tmp_path / "replacement-reuse-jobs",
+                )
+                assert reused.returncode == 0, reused.stdout + reused.stderr
+                reply = json.loads(reused.stdout)
+                assert reply["ok"] and not reply["created"] and not reply["seeded"]
+                assert reply["launch_action"] == "reuse" and reply["session"] == target
+                assert set(record.parent.glob("launch-attempts/*")) == launched_attempts
+                assert not outgoing.exists()
+                asyncio.run(retained_prompt())
+                print("Native embody fresh: incoming generation selected; outgoing collected; "
+                      "public launcher reused retained conversation", flush=True)
+            elif caller_jobs:
                 with application_unavailable(worktrees_python):
                     assert state["child_process_start_time"] == process_start_time(state["child_pid"])
                     assert state["host_process_start_time"] == process_start_time(state["host_pid"])

@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify canonical frontend generation replacement while retaining the same native conversation.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
