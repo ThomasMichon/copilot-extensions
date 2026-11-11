@@ -95,11 +95,14 @@ def support_sources() -> tuple[tuple[str, bytes], ...]:
 
 
 def build_mux_support() -> tuple[bytes, str]:
-    """Return a deterministic portable asset archive and its source identity."""
+    """Package the selected compact core and portable assets through their owners."""
+    from agent_remote_driver.session_host.bundle import build_session_host_bundle
     from .portable_policy import policy_sources
 
+    core, _ = build_session_host_bundle()
     sources = (
         *support_sources(), *policy_sources(),
+        ("driver.pyz", core.read_bytes()),
         ("receiver.py", Path(__file__).with_name("receiving_mux.py").read_bytes()),
     )
     digest = hashlib.sha256()

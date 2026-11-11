@@ -11,9 +11,11 @@ from pathlib import Path
 from pathlib import PurePosixPath
 import shlex
 import shutil
+import socket
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from types import SimpleNamespace
 
@@ -30,7 +32,8 @@ from agent_bridge.loop_governance import LoopGovernance
 from agent_bridge.models import ServiceConfig
 from test_loop_governance_custody import installation as installation
 
-pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node not installed")
+NODE = shutil.which("node")
+pytestmark = pytest.mark.skipif(NODE is None, reason="node not installed")
 ROOT = Path(__file__).resolve().parents[3]
 CHILD = Path(__file__).parent / "fixtures" / "portable-mux-sdk.mjs"
 
@@ -54,22 +57,62 @@ def _cli(argv, payload=None):
 
 
 class Consumer:
-    def __init__(self, client, environment, cwd, *, duplicate):
+    def __init__(self, client, environment, cwd, *, duplicate, core_command):
         self.client = client
         self.calls, self.effects, self.errors, self.logs = [], [], [], []
         self.ready = threading.Event()
         self.consumed = threading.Event()
         self.refused = threading.Event()
+        boundary = core_command.index("--")
+        # A synthetic Copilot parent preserves the extension-worker parent PID.
+        supervisor = (
+            "const {spawn}=require('node:child_process');"
+            "const child=spawn(process.execPath,[process.argv[1],process.argv[2]],"
+            "{stdio:'inherit',windowsHide:true});"
+            "child.on('error',()=>process.exit(1));"
+            "child.on('exit',code=>process.exit(code??1));"
+        )
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+        listener.settimeout(10)
+        command = [
+            *core_command[:boundary + 1], NODE, "-e", supervisor,
+            str(CHILD), json.dumps({
+                "duplicateDriver": duplicate, "carrierPort": listener.getsockname()[1],
+            }),
+            *core_command[boundary + 2:],
+        ]
+        self.state_file = Path(core_command[core_command.index("--state-file") + 1])
         self.process = subprocess.Popen(
-            ["node", str(CHILD), json.dumps({"duplicateDriver": duplicate})],
-            cwd=cwd, env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            command,
+            cwd=cwd, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
             stderr=subprocess.PIPE, text=True, encoding="utf-8", **no_window_kwargs(),
         )
+        try:
+            self.carrier, _ = listener.accept()
+        finally:
+            listener.close()
+        self.messages = self.carrier.makefile("r", encoding="utf-8")
         self.writer = threading.Lock()
         self.reader = threading.Thread(target=self._read, daemon=True)
         self.stderr = threading.Thread(target=self._stderr, daemon=True)
         self.reader.start()
         self.stderr.start()
+
+    def broker_state(self):
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline:
+            if self.state_file.exists():
+                state = json.loads(self.state_file.read_text(encoding="utf-8"))
+                if state["state"] == "running":
+                    assert state["host_pid"] == self.process.pid
+                    assert state["child_pid"] != state["host_pid"]
+                    assert state["extension_pid"] not in (state["host_pid"], state["child_pid"])
+                    return state
+            assert self.process.poll() is None, "".join(self.logs)
+            time.sleep(.02)
+        pytest.fail("The selected common broker did not reach running")
 
     def _stderr(self):
         for line in self.process.stderr:
@@ -79,15 +122,18 @@ class Consumer:
 
     def _write(self, value):
         with self.writer:
-            self.process.stdin.write(json.dumps(value) + "\n")
-            self.process.stdin.flush()
+            self.carrier.sendall((json.dumps(value) + "\n").encode())
 
     def _read(self):
         try:
-            for line in self.process.stdout:
+            for line in self.messages:
                 message = json.loads(line)
                 if message.get("ready"):
                     self.ready.set()
+                elif message.get("stopped"):
+                    self.carrier.shutdown(socket.SHUT_WR)
+                elif "stage" in message:
+                    self.logs.append(message["stage"])
                 elif "effect" in message:
                     self.effects.append(message["effect"])
                 elif "method" in message:
@@ -112,6 +158,10 @@ class Consumer:
             self.ready.set()
 
     def close(self):
+        from agent_remote_driver.session_host.osutil import process_start_time
+
+        state = json.loads(self.state_file.read_text(encoding="utf-8")) if self.state_file.exists() else {}
+        extension_birth = process_start_time(state["extension_pid"]) if "extension_pid" in state else None
         try:
             if self.process.poll() is None:
                 self._write({"stop": True})
@@ -120,15 +170,24 @@ class Consumer:
             if self.process.poll() is None:
                 self.process.terminate()
                 self.process.wait(timeout=10)
+            try:
+                self.carrier.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.carrier.close()
             self.reader.join(timeout=10)
             self.stderr.join(timeout=10)
-            for stream in (self.process.stdin, self.process.stdout, self.process.stderr):
+            for stream in (self.messages, self.process.stderr):
                 try:
                     stream.close()
                 except OSError:
                     pass
         assert not self.reader.is_alive() and not self.stderr.is_alive()
         assert self.process.returncode == 0, "".join(self.logs)
+        if "child_pid" in state:
+            assert process_start_time(state["child_pid"]) != state["child_process_start_time"]
+        if extension_birth is not None:
+            assert process_start_time(state["extension_pid"]) != extension_birth
         assert not self.errors
 
 
@@ -252,11 +311,19 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
             assert executable == "bash" and arguments[2:4] == [
                 "--aw-manager-root", str(attempt / "support/mux"),
             ]
-            assert arguments[4:7] == ["copilot", "--session-id", json.loads(
+            assert arguments[4:8] == receiving_mux._core_executable(attempt / "support")
+            assert arguments[arguments.index("--mode") + 1] == "headed"
+            child = arguments[arguments.index("--") + 1:]
+            assert child[:3] == ["copilot", "--session-id", json.loads(
                 (attempt / "launch.json").read_text(),
             )["session_id"]]
-            state.consumer = Consumer(client, environment, cwd, duplicate=duplicate)
-            assert state.consumer.ready.wait(10), state.consumer.logs
+            state.consumer = Consumer(
+                client, environment, cwd, duplicate=duplicate, core_command=arguments[4:],
+            )
+            assert state.consumer.ready.wait(10), (
+                state.consumer.logs,
+                state.consumer.state_file.read_text() if state.consumer.state_file.exists() else "no core state",
+            )
             assert not state.consumer.errors
             return subprocess.CompletedProcess(argv, 0, "$1:1234|%2\n", "")
 
@@ -345,6 +412,9 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
             assert first["seeded"] is True
             assert state.pending is None
             consumer = state.consumer
+            broker = consumer.broker_state()
+            assert broker["session_id"] == first["session_id"]
+            assert broker["lifetime_policy"] == "cli"
             if duplicate:
                 assert consumer.refused.wait(12), "\n".join(consumer.logs)
                 assert not consumer.effects
@@ -360,6 +430,7 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
             ])
             assert second.returncode == 0, second.stdout
             assert json.loads(second.stdout)["session_id"] == first["session_id"]
+            assert consumer.broker_state()["child_pid"] == broker["child_pid"]
             assert len(state.native) == len(state.observations) == 1
             assert len(provider_calls) == 2
             messages = tmp_db.execute_read("SELECT * FROM live_messages WHERE kind NOT LIKE 'control:%'")

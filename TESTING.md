@@ -1301,7 +1301,14 @@ Bridge's opt-in `--test-file tests/test_portable_mux_joined.py
 provider, support archive/receiver, extracted Bridge and standalone-driver
 extensions, SQLite retained handoff and driver HTTP route. It proves one
 admitted/consumed send and same-conversation rejoin, with a duplicate-loadout
-refusal. Provider process/SSH/forwards, the native mux, SDK and the
+refusal. It executes the copied compact headed core and its launch-bound
+extension in real processes, with a synthetic native parent/SDK worker and
+independently checked Host/native/extension identities and child settlement.
+`tests/test_receiving_mux.py` additionally runs the copied core declaration
+after removing its construction archive, rejects incompatible core support
+before prerequisite/registration/mux effects, and preserves unknown/reuse
+semantics without a legacy fallback.
+Provider process/SSH/forwards, the native mux, SDK and the
 POSIX-to-private-scratch carrier remain synthetic. Separate focused enrollment,
 readiness and producer controls preserve ordinary remote refusal, original
 reservation/attempt and predecessor CAS, readiness-only polling, operation-bound

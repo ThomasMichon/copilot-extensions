@@ -93,6 +93,10 @@ def test_provider_command_carries_selected_policy_and_exact_support(monkeypatch)
     with zipfile.ZipFile(io.BytesIO(base64.b64decode(envelope["support"]))) as archive:
         assert "repository_policy/receiving.py" in archive.namelist()
         assert "receiver.py" in archive.namelist()
+        with zipfile.ZipFile(io.BytesIO(archive.read("driver.pyz"))) as core:
+            assert "agent_remote_driver/headed/launcher.py" in core.namelist()
+            assert "agent_remote_driver/headed/extension.mjs" in core.namelist()
+            assert not any(name.startswith("agent_bridge/") for name in core.namelist())
 
 
 def test_provider_cli_advertises_support_without_touching_a_daemon(capsys, monkeypatch):

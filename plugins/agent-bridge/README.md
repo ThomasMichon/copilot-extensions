@@ -1010,6 +1010,16 @@ receiving export and already-running legacy hosts keep their original
 disconnect-reaping contract; reconnect never replaces them just to change
 lifetime policy.
 
+Fresh portable mux receiving also carries that canonical compact core in its
+existing support archive. The receiver requires declared headed execution,
+TCP-frame transport, CLI lifetime and native-child receipts before preparing
+prerequisites or creating the private mux. The pane runs the common broker,
+which injects its scoped extension into the same native conversation alongside
+the selected Bridge/Driver extensions. The original attempt retains the core,
+broker state, socket and registration; unsupported support never falls back
+to direct Copilot creation. Reuse observes the retained mux without another
+broker or seed. Already-running portable attempts keep their original custody.
+
 After a frontend restart, agent-bridge first reattaches from its local HostIndex.
 If that row was lost but the session DB survived, it inspects the far-side
 record for an already-running CodeSpace, validates boot/PID identity, rebuilds
