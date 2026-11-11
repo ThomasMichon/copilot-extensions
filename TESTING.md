@@ -1307,6 +1307,8 @@ independently checked Host/native/extension identities and child settlement.
 Its constructor- and stop-timeout controls settle the owned process tree,
 listener and streams before propagating failure. POSIX observation keeps the
 Host unreaped until its group settles; Windows retains the owned Job.
+Fault actors use the same synthetic Node worker shape as the joined fixture,
+not additional Python producer roles in the capture provenance.
 `tests/test_receiving_mux.py` additionally runs the copied core declaration
 after removing its construction archive, rejects incompatible core support
 before prerequisite/registration/mux effects, and preserves unknown/reuse

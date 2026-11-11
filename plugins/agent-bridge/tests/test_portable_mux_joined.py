@@ -235,17 +235,23 @@ def test_carrier_failures_settle_owned_tree_and_streams(tmp_path, monkeypatch, p
 
     marker = tmp_path / "child.json"
     program = """
-import json,socket,subprocess,sys,time
-from pathlib import Path
-from agent_procutil import no_window_kwargs
-child=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"],**no_window_kwargs())
-marker=Path(sys.argv[1])
-pending=marker.with_suffix(".pending")
-pending.write_text(json.dumps({"child":child.pid}),encoding="utf-8")
-pending.replace(marker)
-if sys.argv[2]=="stop":
-    carrier=socket.create_connection(("127.0.0.1",json.loads(sys.argv[-1])["carrierPort"]))
-time.sleep(60)
+const fs=require('node:fs'), net=require('node:net');
+const {spawn}=require('node:child_process');
+const child=spawn(process.execPath,['-e',"process.send('ready');setTimeout(()=>{},60000)"],
+    {stdio:['ignore','inherit','inherit','ipc'],windowsHide:true});
+child.on('error',()=>process.exit(2));
+child.once('message',message=>{
+    if(message!=='ready')process.exit(2);
+    const marker=process.argv[1], pending=marker+'.pending';
+    fs.writeFileSync(pending,JSON.stringify({child:child.pid}));
+    fs.renameSync(pending,marker);
+    if(process.argv[2]==='stop'){
+        const config=JSON.parse(process.argv.at(-1));
+        const carrier=net.createConnection({host:'127.0.0.1',port:config.carrierPort});
+        carrier.on('error',()=>process.exit(2));
+    }
+});
+setTimeout(()=>{},60000);
 """
     spawned, births, listeners = [], [], []
     spawn = spawn_sync_in_kill_on_close_job
@@ -275,7 +281,7 @@ time.sleep(60)
         return Consumer(
             None, dict(os.environ), str(tmp_path), duplicate=False,
             core_command=[
-                sys.executable, "-c", program, str(marker), phase,
+                NODE, "-e", program, str(marker), phase,
                 "--state-file", str(tmp_path / "host.json"), "--",
             ],
         )
