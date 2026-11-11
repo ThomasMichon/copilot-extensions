@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+from dataclasses import asdict
 from pathlib import Path
 import re
 import stat
@@ -12,6 +13,19 @@ from typing import TYPE_CHECKING, Mapping, Sequence
 
 if TYPE_CHECKING:
     from .core import RequestSpec, TrustedRunner
+
+
+def spec_document(spec: RequestSpec) -> dict:
+    """Serialize a request while preserving ordinary downlevel identities."""
+    document = asdict(spec)
+    if not spec.repair:
+        # Preserve identities and downlevel readability of ordinary queued jobs.
+        document.pop("repair")
+    if not spec.killswitch_path:
+        document.pop("killswitch_path")
+    if not spec.authority:
+        document.pop("authority")
+    return document
 
 
 def validate_spec(spec: RequestSpec) -> RequestSpec:

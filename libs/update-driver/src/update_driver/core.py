@@ -22,6 +22,7 @@ from typing import Callable, Mapping, Sequence, TextIO
 from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import _invocation, authority, boot, foundation_state
 from ._directory import create_queue_directory
+from ._invocation import spec_document as _spec_document
 from .pending_updates import capture_home as _capture_home
 from .pending_updates import supersede_waiting as _supersede_waiting
 
@@ -141,18 +142,6 @@ def _vector(value: object) -> tuple[str, ...]:
 
 def _spec(spec: RequestSpec) -> RequestSpec:
     return _invocation.validate_spec(spec)
-
-
-def _spec_document(spec: RequestSpec) -> dict:
-    document = asdict(spec)
-    if not spec.repair:
-        # Preserve identities and downlevel readability of ordinary queued jobs.
-        document.pop("repair")
-    if not spec.killswitch_path:
-        document.pop("killswitch_path")
-    if not spec.authority:
-        document.pop("authority")
-    return document
 
 
 def automatic_update_refusal(spec: RequestSpec) -> str | None:
