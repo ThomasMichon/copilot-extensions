@@ -222,6 +222,15 @@ def test_public_caller_job_lifetime(monkeypatch):
 
 @pytest.mark.timeout(900)
 @pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("WORKTREES_NATIVE_CALLER_JOBS") != "1",
+    reason="Explicitly select the leased native attached caller-Job lifetime owner",
+)
+def test_public_attached_caller_job_lifetime(monkeypatch):
+    _qualify_public_application(monkeypatch, "copilot", caller_jobs=True)
+
+
+@pytest.mark.timeout(900)
+@pytest.mark.skipif(
     os.name != "nt" or os.environ.get("COPILOT_DRIVER_HEADED_MUX_E2E") != "1",
     reason="Explicitly select the installed public Windows Worktrees TTY lane",
 )
@@ -271,15 +280,38 @@ def test_public_application_workspace_is_outside_source_only_repository(tmp_path
     assert all(not root.exists() for root, _ in observed)
 
 
+@pytest.mark.parametrize("packet", [
+    "native-worktrees-copilot", "native-worktrees-copilot-caller-jobs",
+])
+def test_public_caller_packets_collect_exactly_the_declared_case(tmp_path, monkeypatch, packet):
+    monkeypatch.syspath_prepend(str(ROOT / "tools"))
+    from windows_qualification_contract import NATIVE_PACKETS
+    from windows_qualification_worker import native_command
+
+    command = native_command(ROOT, tmp_path, packet)
+    selected = command[command.index("-k") + 1]
+    reply = run_caller_owned(
+        [sys.executable, "-m", "pytest", "-q", "--collect-only", str(Path(__file__)),
+         "-k", selected, "--basetemp", str(tmp_path / "collection"),
+         "-o", f"cache_dir={tmp_path / 'cache'}"],
+        cwd=SOURCE, env=dict(os.environ), timeout=30,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    assert reply.returncode == 0, reply.stdout + reply.stderr
+    nodes = [line for line in reply.stdout.splitlines() if "::test_" in line]
+    assert len(nodes) == 1 and nodes[0].endswith("::" + NATIVE_PACKETS[packet][2]), nodes
+
+
 @pytest.mark.parametrize("failed", [False, True])
-def test_native_fixture_directory_remains_owned_by_outer_settlement(tmp_path, monkeypatch, failed):
+@pytest.mark.parametrize("caller", ["embody", "copilot"])
+def test_native_fixture_directory_remains_owned_by_outer_settlement(tmp_path, monkeypatch, failed, caller):
     sandbox = tmp_path / "outer-sandbox"
     sandbox.mkdir()
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_SANDBOX", str(sandbox))
     observed = []
 
     def qualify(directory, _patch, *, broker, caller_jobs):
-        assert broker == "embody" and caller_jobs is True
+        assert broker == caller and caller_jobs is True
         assert directory.is_relative_to(sandbox)
         observed.append(directory)
         (directory / "resident-owned.log").write_text("held until outer settlement", encoding="utf-8")
@@ -289,9 +321,9 @@ def test_native_fixture_directory_remains_owned_by_outer_settlement(tmp_path, mo
     monkeypatch.setitem(_qualify_public_application.__globals__, "_qualify_native_application", qualify)
     if failed:
         with pytest.raises(RuntimeError, match="native failed"):
-            _qualify_public_application(monkeypatch, "embody", caller_jobs=True)
+            _qualify_public_application(monkeypatch, caller, caller_jobs=True)
     else:
-        _qualify_public_application(monkeypatch, "embody", caller_jobs=True)
+        _qualify_public_application(monkeypatch, caller, caller_jobs=True)
     assert len(observed) == 1
     assert (observed[0] / "resident-owned.log").read_text() == "held until outer settlement"
 
@@ -419,11 +451,92 @@ def test_generation_replacement_refuses_unowned_or_prebuilt_input(tmp_path, monk
             replace_application(python, selected, shell="must-not-run", cwd=sandbox, environment={})
 
 
-def test_lifetime_selection_cannot_disable_an_existing_contained_owner(tmp_path, monkeypatch):
+@pytest.mark.parametrize("caller", ["embody", "copilot"])
+def test_lifetime_selection_cannot_disable_an_existing_contained_owner(tmp_path, monkeypatch, caller):
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     with pytest.raises(AssertionError):
-        _qualify_native_application(tmp_path, monkeypatch, broker="embody", caller_jobs=True)
+        _qualify_native_application(tmp_path, monkeypatch, broker=caller, caller_jobs=True)
     assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("early_exit", [False, True])
+def test_attached_caller_jobs_close_before_claiming_caller_and_control_exit(
+    tmp_path, monkeypatch, early_exit,
+):
+    import public_caller_jobs_fixture as fixture
+
+    monkeypatch.setattr(fixture, "_require_native_tty_owner", lambda *args: tmp_path)
+    monkeypatch.setattr(fixture.sys.stdin, "isatty", lambda: True)
+    monkeypatch.setattr(fixture.sys.stdout, "isatty", lambda: True)
+    (tmp_path / "request.json").write_text(json.dumps({
+        "command": ["installed-public-caller"], "cwd": str(tmp_path),
+    }), encoding="utf-8")
+    if not early_exit:
+        (tmp_path / "close.json").write_text('{"close":true}', encoding="utf-8")
+    events = []
+    closed = set()
+
+    def wait_caller(timeout):
+        assert timeout == 5 and "inner" in closed
+        events.append("caller-exit")
+        return -1
+
+    caller = SimpleNamespace(pid=101, poll=lambda: 0 if early_exit else None, wait=wait_caller)
+    control = SimpleNamespace(pid=102)
+
+    def bounded(command, **kwargs):
+        assert kwargs["stdin"] is kwargs["stdout"] is kwargs["stderr"] is subprocess.DEVNULL
+        assert kwargs == {
+            "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL,
+            "stderr": subprocess.DEVNULL, **fixture.pu.no_window_kwargs(),
+        }
+        return control
+
+    def close(name):
+        events.append(name + "-close")
+        closed.add(name)
+
+    def spawn(command, **kwargs):
+        assert kwargs["require_job"] is kwargs["allow_breakaway"] is True
+        assert not any(key in kwargs for key in ("stdin", "stdout", "stderr", "creationflags"))
+        if command[0] == "installed-public-caller":
+            return caller, SimpleNamespace(close=lambda: close("inner"))
+        assert command[-2:] == ["tty-leaf", str(tmp_path)]
+        fixture._tty_leaf(tmp_path)
+        return SimpleNamespace(wait=lambda timeout: 0), SimpleNamespace(close=lambda: close("outer"))
+
+    monkeypatch.setattr(fixture.subprocess, "Popen", bounded)
+    monkeypatch.setattr(fixture.pu, "spawn_sync_in_kill_on_close_job", spawn)
+    monkeypatch.setattr(fixture, "process_start_time", lambda pid: f"birth-{pid}")
+    monkeypatch.setattr(
+        fixture, "pid_alive",
+        lambda pid: "inner" not in closed if pid == 101 else "outer" not in closed,
+    )
+    if early_exit:
+        with pytest.raises(AssertionError, match="returned before Job closure"):
+            fixture._tty_leaf(tmp_path)
+        assert events == ["inner-close", "caller-exit"]
+        assert not (tmp_path / "inner-closed.json").exists()
+    else:
+        fixture._tty_middle(tmp_path)
+        proof = fixture.close_public_tty_jobs(tmp_path)
+        assert events == ["inner-close", "caller-exit", "outer-close"]
+        assert proof["callerExitCode"] == -1
+        assert proof["caller"] == {"pid": 101, "birth": "birth-101"}
+        assert proof["control"] == {"pid": 102, "birth": "birth-102"}
+
+
+def test_attached_caller_fixture_refuses_contained_owner_before_creating_ticket(tmp_path, monkeypatch):
+    import public_caller_jobs_fixture as fixture
+
+    monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
+    ticket = tmp_path / "not-created"
+    with pytest.raises(AssertionError):
+        fixture.prepare_public_tty_jobs(
+            ["must-not-run"], python=sys.executable, cwd=tmp_path,
+            environment=dict(os.environ), directory=ticket,
+        )
+    assert not ticket.exists()
 
 
 def test_manager_install_retains_only_the_selected_runner_lifecycle(tmp_path, monkeypatch):
@@ -574,7 +687,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
         from agent_procutil import contained_test_mode
         from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
 
-        assert broker == "embody" and not contained_test_mode()
+        assert broker in {"embody", "copilot"} and not contained_test_mode()
         assert os.environ.get(TEST_CONTEXT_ENV), "The native runner must own the daemon lease"
     started = time.monotonic()
     construction_budget = 420 if broker in {"embody", "copilot"} else 300
@@ -650,7 +763,7 @@ def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_j
     slot = root / "versions" / declaration["construction"]["runtime_version"]
     shutil.copytree(application, slot)
     replacement = None
-    if caller_jobs:
+    if caller_jobs and broker == "embody":
         assert not (application / ".venv").exists()
         assert not (application / engine.runtime.COMPLETE_MARKER).exists()
         replacement = slot.with_name(slot.name + ".repair." + uuid4().hex)

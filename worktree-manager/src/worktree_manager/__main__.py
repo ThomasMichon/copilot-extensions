@@ -16,17 +16,7 @@ from __future__ import annotations
 
 import sys
 from . import terminal_launch as _terminal_launch
-
-
-def _enable_fault_diagnostics() -> None:
-    import faulthandler
-
-    if not faulthandler.is_enabled() and sys.stderr is not None:
-        try:
-            faulthandler.enable()
-        except (AttributeError, OSError, ValueError):
-            # Embedded callers may supply a stream without a native descriptor.
-            pass
+from .fault_diagnostics import enable as _enable_fault_diagnostics
 
 
 if __name__ == "__main__":
