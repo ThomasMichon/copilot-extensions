@@ -236,3 +236,29 @@ not a full typing pass. Required exact-head CI and review remain independent.
 No launch primitive changes, native desktop qualification, cold installation,
 installed-runtime observation, live provider effect or rollout is included.
 The native creation/protection owner and its real consumer sequence stay open.
+
+### 2026-11-10 - Standalone native creation and protection owner
+
+The standalone source owner implements separate create, read-only inspect and
+protect-default operations, with selected-runtime inventory capability
+`knowledge_repository_creation: 1`. It does not expose a Configuration catalog
+action or consumer yet. Named configured account selection, personal-private
+identity, initial provider README/branch, complete no-bypass safeguard reads,
+one-attempt creation and independently confirmed protection use the existing
+credential and finite caller-owned process boundaries.
+
+All 94 selected controls pass, including the actual native CLI, worker and
+synthetic credential/provider subprocess, separately confirmed protection
+repair after denial, timeout/descendant cleanup, cancellation, stale receipt
+serialization and affected legacy parser/set/reset/registration/binding
+contracts. Native source, configuration and credential sentinels remain
+unchanged apart from the operation's own receipt/lock evidence. These fixtures
+simulate remote effects in private local state, not GitHub enforcement.
+
+An earlier broad selection exceeded its unchanged 300-second group budget;
+it is not a full-suite pass. The final affected-contract selection preserves
+those deadlines. Worktrees remains pending for typing admission: its optional
+whole-project probe stops on duplicate setup modules, not a typing pass.
+Exact-head required CI and code review remain independent publication gates.
+Live creation/protection, installed/receiving evidence and the optional real
+Configuration consumer remain open; no launch primitive or rollout changes.

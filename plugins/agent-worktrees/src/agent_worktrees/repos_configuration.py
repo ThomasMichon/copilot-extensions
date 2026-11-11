@@ -164,6 +164,8 @@ def command(argv: list[str]) -> int:
         "catalog", "identities", "preview", "apply", "knowledge-resolve", "knowledge-preview", "knowledge-apply",
         "knowledge-register-preview", "knowledge-register-apply",
         "knowledge-acquire-preview", "knowledge-acquire-apply",
+        "knowledge-create-preview", "knowledge-create-apply", "knowledge-create-inspect",
+        "knowledge-protect-preview", "knowledge-protect-apply",
     ))
     parser.add_argument("--context-project", required=True)
     parser.add_argument("--repository")
@@ -178,6 +180,7 @@ def command(argv: list[str]) -> int:
     parser.add_argument("--repository-url")
     parser.add_argument("--default-branch")
     parser.add_argument("--account", default="")
+    parser.add_argument("--creation-receipt", default="")
     try:
         args = parser.parse_args(argv)
         # Native loaders may warn about source content. Return sanitized findings,
@@ -186,12 +189,18 @@ def command(argv: list[str]) -> int:
             project = resource_name(args.context_project)
             registration = args.command in {"knowledge-register-preview", "knowledge-register-apply"}
             acquisition = args.command in {"knowledge-acquire-preview", "knowledge-acquire-apply"}
+            creation = args.command in {
+                "knowledge-create-preview", "knowledge-create-apply", "knowledge-create-inspect",
+                "knowledge-protect-preview", "knowledge-protect-apply",
+            }
+            if args.creation_receipt and not creation:
+                raise ConfigurationError("invalid-request", "A creation receipt requires a creation/protection operation.")
             if not registration and (args.default_branch is not None or args.account):
                 raise ConfigurationError("invalid-request", "Registration fields require a local-registration operation.")
             if args.checkout_path is not None and not (registration or acquisition):
                 raise ConfigurationError("invalid-request", "A checkout path requires registration or acquisition.")
-            if args.repository_url is not None and not acquisition:
-                raise ConfigurationError("invalid-request", "A repository URL requires an acquisition operation.")
+            if args.repository_url is not None and not (acquisition or creation):
+                raise ConfigurationError("invalid-request", "A repository URL requires acquisition or creation.")
             portable = args.harness_id is not None or args.knowledge_id is not None
             if args.accepted_default and (not portable or args.command not in {"knowledge-preview", "knowledge-apply"}):
                 raise ConfigurationError("invalid-request", "Accepted defaults require a portable binding preview/apply.")
@@ -200,7 +209,26 @@ def command(argv: list[str]) -> int:
                 or not args.harness_id or not args.knowledge_id or args.repository is not None
             ):
                 raise ConfigurationError("invalid-request", "Supply both portable IDs instead of a repository name.")
-            if acquisition:
+            if creation:
+                from .repos_knowledge_creation import invoke
+
+                protection = args.command.startswith("knowledge-protect-")
+                inspection = args.command == "knowledge-create-inspect"
+                applying = args.command.endswith("-apply")
+                if (
+                    portable or args.accepted_default or args.repository is not None
+                    or not args.repository_url or args.checkout_path is not None
+                    or args.operation != "set" or args.login or args.workspace
+                    or not applying and args.preview_token
+                    or (protection or inspection) != bool(args.creation_receipt)
+                ):
+                    raise ConfigurationError("invalid-request", "Supply only the explicit HTTPS target and required native receipt.")
+                result = invoke(
+                    project, args.repository_url,
+                    "inspect" if inspection else "protect-default" if protection else "create",
+                    token=args.preview_token if applying else None, receipt=args.creation_receipt,
+                )
+            elif acquisition:
                 from . import repos_knowledge_acquisition
 
                 if (
