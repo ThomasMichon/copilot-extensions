@@ -7266,8 +7266,8 @@
       "sha256": "09735f5cffc107fa6966e9e1fac7bc83f2f9e0065102261d8d5c78f0c62081d4"
     },
     "plugins/agent-worktrees/src/agent_worktrees/tracking_session_lifecycle_write.py": {
-      "blob": "3fdf1e9ac12eae80420c55762f8b5064206de1f5",
-      "sha256": "039472151fff159d0b575ac9aba74aea65b16e6091a53f41404cb99ce00fd564"
+      "blob": "1a1dcfd9b80e5fc2015cf38a7e8fa757191d155c",
+      "sha256": "741f06729488e1be7f7bab706d7c16d1967bbe3881adbe122c88f47e491a86b3"
     },
     "plugins/agent-worktrees/src/agent_worktrees/tracking_session_registration_write.py": {
       "blob": "09c9a3c9781b538ac3974e9037580c44e7314398",
@@ -9422,7 +9422,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "cd666ac3c4ef6ac6d665589d6a0706c52443f8456917237c2debcad5a33ebcea",
+  "execution_closure_sha256": "8d0ee79eeec9220ad6b89fbf852694306393c83a13bfe79812aa748f0b046313",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -9588,7 +9588,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "552fdce66d02050481e22e06bea3ae345a474054",
+    "commit": "403bc77ededb531da4f6e3e5894afeeb866e9261",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",
