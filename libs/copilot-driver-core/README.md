@@ -14,6 +14,14 @@ provides the ordinary application front door. Bridge consumes this same
 library through the existing canonical-reference and wheel-build owners,
 not a sibling plugin source dependency.
 
+The explicit optional `sdk` extra supplies a public-Python-SDK headless provider
+behind that same Host. Native ACP remains the default; the compact export stays
+native-ACP-only. The base Python floor is unchanged, while SDK selection requires
+Python 3.11+ and its selected dependency closure before native creation.
+See the [optional provider contract](../../plugins/agent-remote-driver/README.md#optional-headless-sdk-provider)
+for supported ACP operations, permission limits and separate activity snapshots.
+Inventory availability does not enable automatic idle retirement.
+
 Worktrees' mux-creation adapter also consumes this core. The core owns its
 short native check/create lease, neutral client working directory, nesting
 scrub and uncertain-creation handling. Workspace allocation, pane argument
@@ -75,6 +83,10 @@ authenticated inventory when every live native server is covered elsewhere.
 An unreachable or unregistered live server, unsupported process mode or changing
 inventory remains unknown. Listings share one absence-coverage
 snapshot within their finite budget; live positive rows use their own reads.
+Native process classification accepts paired double-quotes around the same
+supported `-L` and command tokens as their ordinary Windows argument spelling.
+Unknown options, malformed quoting and ambiguous server forms still refuse
+classification; quoting support does not reduce census or registration coverage.
 Selected-namespace absence uses qualified registration identities while still
 covering every native server. The legacy name-only inventory API retains its
 ambiguity refusal for duplicate logical names across namespaces.

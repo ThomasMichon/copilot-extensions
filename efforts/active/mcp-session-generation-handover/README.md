@@ -23,6 +23,15 @@ Current operator reaffirmation:
 fresh physical-generation execution and preserved session reattachment. It does
 not replace the original Request or waive release and installed-consumer gates.
 
+### Selected originating-owner design
+
+> explicit-launcher-handoff
+
+The controlled launcher supplies the actual originating client process's native
+PID and birth at its launch boundary. Ancestor guessing and discovery through
+another plugin's session files are not the selected design. This source design
+choice does not itself qualify automatic caller adoption or installed rollout.
+
 ### Application-state ownership boundary
 
 > Install shouldn't be messing with a live DB or state file; this is one area where we do have to figure out lock management with the outgoing version, during boot of the incoming service versions
@@ -321,6 +330,10 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
   The internal explicit-owner path and hosted packet are now qualified on
   disposable hosted Windows. Next, supply originating-owner acquisition for
   eligible ordinary callers without weakening native lifetime admission.
+  - [ ] **Explicit launcher CLI handoff:** accept the paired native owner on
+    `bridge` and `forward`, preserve unproven callers' existing selection, and
+    qualify the real CLI through the hosted lifetime packet. Controlled
+    production launcher capture and automatic adoption remain separate work.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -468,6 +481,8 @@ backend execution. This plan does not assert that reattachment or legacy live
 migration already works.
 
 ## Journal
+
+- [2026-11-10 - Explicit originating-owner CLI handoff](journal/2026/11.10-explicit-owner-cli.md)
 
 ### 2026-11-10 - Explicit originating-session lifetime prepared
 

@@ -192,16 +192,21 @@ def _filter_list_worktree(records, raw_id: str):
     return matches
 
 
-def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
+def _refresh_list_record(
+    rec: tracking.WorktreeRecord, *, strict: bool = False,
+) -> tracking.WorktreeRecord | None:
     """Repair and refresh one record before an explicit Picker row read."""
+    if strict:
+        from .record_liveness_refresh import refresh_record
+
+        return refresh_record(rec)
     if getattr(rec, "sessions", None) is None:
         try:
+            from .record_liveness_refresh import initialize_registry
+
             discovered = sessions.backfill_sessions([rec])
-            rec.sessions = [
-                tracking.SessionEntry(session_id=session_id, started_at="")
-                for session_id in discovered.get(rec.worktree_id, [])
-            ]
-            tracking.save_record(rec)
+            if not initialize_registry(rec, discovered.get(rec.worktree_id, [])):
+                return None
         except Exception:
             pass
 

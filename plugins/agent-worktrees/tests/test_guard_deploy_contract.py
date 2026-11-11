@@ -211,3 +211,108 @@ def test_native_write_contract_matches_actual_target_and_map_readers():
     for name, digest in policy["nativeWriteDependencies"].items():
         text = (_SCRIPTS / name).read_text(encoding="utf-8-sig")
         assert hashlib.sha256(text.encode("utf-8")).hexdigest() == digest, "Run tools/render-hook-read-policy.py after helper changes"
+
+
+@pytest.mark.parametrize("argument_key,raw", [
+    ("toolArgs", False), ("toolArgs", True),
+    ("tool_input", False), ("tool_input", True),
+])
+def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monkeypatch, argument_key, raw):
+    import hashlib
+    import importlib.util
+    from test_managed_session import fixture_linked_worktree, fixture_project
+
+    anchor, _registry = fixture_project(tmp_path)
+    workspace, _admin = fixture_linked_worktree(tmp_path, anchor)
+    config = workspace / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("stateless: true\n", encoding="utf-8")
+    policy = json.loads((_SCRIPTS / "hook-read-policy.json").read_text("utf-8"))
+    spec = importlib.util.spec_from_file_location("native_shell_contract_client", _SCRIPTS / "hook_client.py")
+    client = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(client)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.syspath_prepend(str(_SCRIPTS))
+    relevance = client._load_sibling("hook_pre_relevance.py")
+    assert tuple(policy["nativeShellReadCommands"]) == relevance.SHELL_READ_HEADS
+    text = (_SCRIPTS / "hook_pre_relevance.py").read_text(encoding="utf-8-sig")
+    assert policy["nativeShellReadDependencies"] == {
+        "hook_pre_relevance.py": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+    }
+    env = {"AGENT_HOME": str(tmp_path)}
+    protected_command = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
+    for command in relevance.SHELL_READ_HEADS:
+        keys = policy["nativeShellReadCommandKeys"]
+        for index, key in enumerate(keys[:1] if raw else keys):
+            arguments = {earlier: None for earlier in keys[:index]}
+            arguments.update({key: command, "description": "Fixture read"})
+            if index + 1 < len(keys):
+                arguments[keys[index + 1]] = protected_command
+            event = {
+                "toolName": "powershell", "cwd": str(workspace),
+                argument_key: command if raw else arguments,
+            }
+            if argument_key == "toolArgs":
+                event["tool_input"] = {"command": protected_command}
+            assert relevance.is_irrelevant(event, False, client._load_sibling)
+            for name in policy["guards"]:
+                guard = client._load_sibling(name)
+                assert tuple(keys) == guard.CMD_ARG_KEYS
+                kwargs = {"anchors": [{"name": "example", "path": str(anchor)}]} if name == "anchor_write_guard.py" else {}
+                assert guard.decide(event, env=env, home=tmp_path, **kwargs) is None
+    guard = client._load_sibling("statelessness_guard.py")
+    protected = {
+        **event, argument_key: protected_command if raw else {"command": protected_command},
+    }
+    assert guard.decide(protected, env=env, home=tmp_path)["permissionDecision"] == "deny"
+
+
+@pytest.mark.parametrize("declaration", [
+    "()",
+    "['Get-Location']",
+    "('Get-Location', 'Get-Location')",
+    "('Get-Location', False)",
+    "tuple(['Get-Location'])",
+    repr(tuple(f"Read-{index}-" + "a" * 80 for index in range(64))),
+])
+def test_native_shell_renderer_rejects_invalid_or_oversized_declarations(tmp_path, declaration):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "native_shell_contract_renderer", _PLUGIN.parents[1] / "tools" / "render-hook-read-policy.py",
+    )
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    for name in (*renderer.GUARDS, *renderer.WRITE_DEPENDENCIES):
+        (tmp_path / name).write_bytes((_SCRIPTS / name).read_bytes())
+    (tmp_path / "hook_pre_relevance.py").write_text("SHELL_READ_HEADS = " + declaration + "\n", encoding="utf-8")
+    with pytest.raises(ValueError):
+        renderer.render(tmp_path)
+
+
+@pytest.mark.parametrize("declaration", [
+    None, "()", "('',)", "['command']", "('command', 'command')", "('command', False)",
+    "tuple(['command'])", "('different',)", "('command',)\nCMD_ARG_KEYS = ('command',)",
+    "reordered",
+    repr(tuple(f"key-{index}" for index in range(129))),
+])
+def test_native_shell_renderer_rejects_invalid_original_key_selection(tmp_path, declaration):
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "native_selection_renderer", _PLUGIN.parents[1] / "tools" / "render-hook-read-policy.py",
+    )
+    renderer = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(renderer)
+    for name in (*renderer.GUARDS, *renderer.WRITE_DEPENDENCIES, "hook_pre_relevance.py"):
+        (tmp_path / name).write_bytes((_SCRIPTS / name).read_bytes())
+    guard = tmp_path / renderer.GUARDS[-1]
+    if declaration == "reordered":
+        keys = renderer.literal_strings(guard.read_text("utf-8"), "CMD_ARG_KEYS")
+        declaration = repr(keys[1:] + keys[:1])
+    changed = "" if declaration is None else "CMD_ARG_KEYS = " + declaration
+    source, count = re.subn(r"(?m)^CMD_ARG_KEYS = .*$", lambda _: changed, guard.read_text("utf-8"))
+    assert count == 1
+    guard.write_text(source, encoding="utf-8")
+    with pytest.raises(ValueError):
+        renderer.render(tmp_path)

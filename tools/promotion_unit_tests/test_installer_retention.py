@@ -1,9 +1,11 @@
-"""Retained-input work bounds; threaded readers stay in the development suite."""
-from contextlib import contextmanager
+"""Retained-input lifetime and work bounds without process-producing tests."""
+from contextlib import ExitStack, contextmanager
 from datetime import datetime, timezone
+import gc
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 from subprocess import CompletedProcess
 import tempfile
@@ -36,12 +38,76 @@ def source_project(path, name="fixture-source"):
     return path
 
 
-@pytest.fixture
-def retention_policy(tmp_path, monkeypatch):
+def _load_retention_policy():
     path = Path(__file__).resolve().parents[2] / "libs" / "installer-engine" / "installer_dependency_policy.py"
     spec = importlib.util.spec_from_file_location("retention_unit_policy", path)
     policy = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(policy)
+    return policy
+
+
+@pytest.fixture
+def unmocked_retention_policy():
+    return _load_retention_policy()
+
+
+def test_abandoned_temporary_inputs_survive_collection(tmp_path, unmocked_retention_policy):
+    retained = ExitStack()
+    root = Path(retained.enter_context(unmocked_retention_policy._temporary_inputs(tmp_path)))
+    marker = root / "held-input"
+    marker.write_bytes(b"retained")
+    del retained
+    gc.collect()
+    assert marker.read_bytes() == b"retained"
+
+
+def test_explicit_temporary_input_exit_removes_contents(tmp_path, unmocked_retention_policy):
+    with ExitStack() as retained:
+        root = Path(retained.enter_context(unmocked_retention_policy._temporary_inputs(tmp_path)))
+        (root / "held-input").write_bytes(b"retained")
+    assert not root.exists()
+
+
+@pytest.mark.parametrize("primary_failure", [False, True])
+def test_hidden_parent_does_not_suppress_cleanup_failure(
+    tmp_path, monkeypatch, capsys, primary_failure, unmocked_retention_policy,
+):
+    policy = unmocked_retention_policy
+    denied = PermissionError("retained parent cannot be searched")
+    primary = RuntimeError("primary failure")
+    attempts = []
+    exists = os.path.exists
+    remove = policy._configuration.shutil.rmtree
+    expected = RuntimeError if primary_failure else policy.RetainedInputCleanupError
+    with pytest.raises(expected) as caught:
+        with policy._temporary_inputs(tmp_path) as directory:
+            native = policy._native_retained_path(directory)
+
+            def hidden(path):
+                return False if os.fspath(path) == native else exists(path)
+
+            def refused(path, *args, **kwargs):
+                if os.fspath(path) == native:
+                    attempts.append(native)
+                    raise denied
+                return remove(path, *args, **kwargs)
+
+            monkeypatch.setattr(os.path, "exists", hidden)
+            monkeypatch.setattr(policy._configuration.shutil, "rmtree", refused)
+            if primary_failure:
+                raise primary
+    assert attempts == [native]
+    if primary_failure:
+        assert caught.value is primary
+        assert "retained-input-cleanup:" in capsys.readouterr().err
+    else:
+        assert caught.value.__cause__ is denied
+        assert capsys.readouterr().err == ""
+
+
+@pytest.fixture
+def retention_policy(tmp_path, monkeypatch):
+    policy = _load_retention_policy()
 
     @contextmanager
     def temporary_inputs(_parent):

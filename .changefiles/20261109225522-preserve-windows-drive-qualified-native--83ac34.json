@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve Windows drive-qualified native arguments through deferred final launch handoffs.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

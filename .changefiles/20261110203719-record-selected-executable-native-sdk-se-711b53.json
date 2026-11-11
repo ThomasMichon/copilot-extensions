@@ -1,0 +1,9 @@
+{
+  "comment": "Record selected executable, native SDK server and SDK distribution versions separately in native acceptance evidence, and detect executable replacement during each scenario.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

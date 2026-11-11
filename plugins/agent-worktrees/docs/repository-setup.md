@@ -546,6 +546,51 @@ any required trust through its admitted repository/worktree setup owner;
 untrusted repository-only acquisition remains unsuccessful. Execution consent
 for `repos setup` is not itself a Copilot folder-trust record.
 
+#### Optional tool-profile dependency selection
+
+The ordinary observation additively advertises
+`capabilities: ["tool-profile-dependencies-v1"]`. A caller requiring the selected
+checkout's `copilot_plugin_profile` dependencies must inspect that response from
+the **actual selected engine** before sending new syntax:
+
+```text
+agent-worktrees prepare-plugin-payloads --repo <absolute-checkout> --include-tool-profile
+agent-worktrees prepare-plugin-payloads --repo <absolute-checkout> --include-tool-profile --apply --expected-plan-digest <digest>
+```
+
+These results retain schema/version 1 and explicitly identify
+`selectionMode: "tool-profile-dependencies-v1"`. The census includes active
+plugins and profile dependencies, not an assertion that the dependencies are
+active. Each entry additionally supplies `selection` (`active` or
+`profile-dependency`) and `payloadContext.copilotHome`. A catalog consumer must
+carry that exact qualified context as `COPILOT_HOME` when invoking the selected
+payload's native catalog emitter; a payload path alone is insufficient.
+
+The existing profile parser reads the actual checkout's configuration and
+profile. Its revision, configuration, selected profile and complete marketplace
+definitions bind the plan. It does not substitute a registered anchor's default
+branch. Missing profiles preserve the ordinary census. Invalid profiles,
+source/path escapes, conflicting marketplace identities and contradictory
+explicit plugin choices refuse before acquisition.
+
+Profile-only remote dependencies use the existing source installer in isolated
+native homes under the selected inventory's `prepared-payloads` directory.
+The existing bounded executor and activation-preservation owner remain in
+control. Completed native catalog receipts and source resolution qualify these
+payloads; a directory or zero installer exit alone does not. Local dependencies
+retain their authored source qualification. This operation never registers a
+project, changes its class, stages an activation overlay, or writes profile
+choices into user/repository settings. Explicit apply authorizes acquiring the
+selected dependencies; it does not grant repository code execution or trust.
+Existing active-only acquisition keeps its preceding native trust contract.
+
+Provider expansion does not migrate any setup caller automatically. Older
+callers keep the active-only behavior. New callers must refuse a missing
+capability **before effects**, require the explicit selection discriminator and
+qualified context, and retain that refusal after provider rollback. Do not retry
+an active-only apply after missing support, parser rejection or an unknown
+outcome. No legacy form is retired by this addition.
+
 ## Manager caller and current qualification
 
 The [Manager setup caller](../../../worktree-manager/README.md#optional-repository-setup)

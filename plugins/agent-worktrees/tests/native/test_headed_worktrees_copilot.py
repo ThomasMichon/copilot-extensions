@@ -80,6 +80,103 @@ def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tm
     _qualify_native_worktrees(tmp_path, control)
 
 
+def _prepare_private_mux_adapter(tmp_path, *, binary, manager_target, environment):
+    from plugin_test_command_safety import private_mux_args
+
+    mux_directory = tmp_path / "discovery"
+    mux_directory.mkdir()
+    namespace = private_mux_args(tmp_path)
+    namespace_file = mux_directory / "namespace.txt"
+    namespace_file.write_text(namespace[1], encoding="utf-8")
+    compiler = next((path for framework in ("Framework64", "Framework") if (
+        path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
+        framework / "v4.0.30319" / "csc.exe"
+    ).is_file()), None)
+    assert compiler, "The fixture's private mux adapter requires the system C# compiler"
+    source = mux_directory / "Mux.cs"
+    source.write_text(
+        r'''
+using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
+class Mux {
+    static string Quote(string value) {
+        if (value.Length > 0 && !Regex.IsMatch(value, "[\\s\"]")) return value;
+        return "\"" + Regex.Replace(
+            Regex.Replace(value, "(\\\\*)\"", "$1$1\\\""), "(\\\\+)$", "$1$1") + "\"";
+    }
+    static int Main(string[] args) {
+        if (args.Length == 0 || args.Any(value =>
+            value == "-L" || value == "-S" || value == ";" || value == "kill-server"))
+            return 2;
+        var reads = new[] {
+            "list-sessions", "has-session", "display-message", "list-panes", "list-windows"
+        };
+        var writes = new[] { "new-session", "set-option", "source-file" };
+        var attach = args.SequenceEqual(new[] { "attach-session", "-t", MANAGER_TARGET });
+        if (writes.Contains(args[0])) {
+            var selector = args[0] == "new-session" ? "-s" : "-t";
+            var index = Array.IndexOf(args, selector);
+            if (args.Count(value => value == selector) != 1 || index + 1 >= args.Length ||
+                args[index + 1] != MANAGER_TARGET ||
+                args.Contains("-g"))
+                return 2;
+            File.AppendAllText(COMMAND_LOG,
+                              args[0] + Environment.NewLine);
+        } else if (!reads.Contains(args[0]) && !attach &&
+                   !(args.Length == 1 && args[0] == "--version")) {
+            return 2;
+        }
+        using (var child = Process.Start(new ProcessStartInfo {
+            FileName = BINARY,
+            Arguments = String.Join(" ", new[] {
+                "-L", File.ReadAllText(NAMESPACE_FILE)
+            }.Concat(args).Select(Quote)),
+            // headless-guard: allow the real attach client to inherit the private fixture ConPTY
+            UseShellExecute = false, CreateNoWindow = !attach,
+            RedirectStandardOutput = !attach, RedirectStandardError = !attach
+        })) {
+            if (attach) {
+                child.WaitForExit();
+                return child.ExitCode;
+            }
+            var stdout = child.StandardOutput.ReadToEndAsync();
+            var stderr = child.StandardError.ReadToEndAsync();
+            if (!child.WaitForExit(5000)) { child.Kill(); child.WaitForExit(); return 2; }
+            if (!System.Threading.Tasks.Task.WaitAll(
+                new System.Threading.Tasks.Task[] { stdout, stderr }, 5000))
+                return 2;
+            Console.Out.Write(stdout.Result);
+            Console.Error.Write(stderr.Result);
+            if (writes.Contains(args[0]) || reads.Contains(args[0])) {
+                try {
+                    File.AppendAllText(COMMAND_LOG,
+                        String.Join(" ", args.TakeWhile(value => value != "--")) +
+                        " exit=" + child.ExitCode + " " +
+                        (reads.Contains(args[0]) ? stdout.Result : "") +
+                        stderr.Result + Environment.NewLine);
+                } catch (IOException) {}
+            }
+            return child.ExitCode;
+        }
+    }
+}
+'''.replace("BINARY", '@"' + str(binary).replace('"', '""') + '"')
+        .replace("MANAGER_TARGET", '@"' + manager_target + '"')
+        .replace("COMMAND_LOG", '@"' + str(tmp_path / "mux-commands.txt").replace('"', '""') + '"')
+        .replace("NAMESPACE_FILE", '@"' + str(namespace_file).replace('"', '""') + '"'),
+        encoding="utf-8",
+    )
+    compiled = run_caller_owned(
+        [str(compiler), "/nologo", f"/out:{mux_directory / 'psmux.exe'}", str(source)],
+        env=environment, cwd=tmp_path, timeout=30, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    return mux_directory, namespace_file
+
+
 def _qualify_native_worktrees(
     tmp_path, control, *, manager_script=None, manager_environment=None,
     manager_python=None, verify_reuse=True, worktrees_python=None,
@@ -174,96 +271,9 @@ def _qualify_native_worktrees(
         UV_PROJECT_ENVIRONMENT=str(tmp_path / "manager-environment"),
     )
     environment.update(manager_environment or {})
-    mux_directory = tmp_path / "discovery"
-    mux_directory.mkdir()
-    namespace = private_mux_args(tmp_path)
-    namespace_file = mux_directory / "namespace.txt"
-    namespace_file.write_text(namespace[1], encoding="utf-8")
-    compiler = next((path for framework in ("Framework64", "Framework") if (
-        path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
-        framework / "v4.0.30319" / "csc.exe"
-    ).is_file()), None)
-    assert compiler, "The fixture's private mux adapter requires the system C# compiler"
-    source = mux_directory / "Mux.cs"
-    source.write_text(
-        r'''
-using System;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
-using System.Text.RegularExpressions;
-class Mux {
-    static string Quote(string value) {
-        return "\"" + Regex.Replace(
-            Regex.Replace(value, "(\\\\*)\"", "$1$1\\\""), "(\\\\+)$", "$1$1") + "\"";
-    }
-    static int Main(string[] args) {
-        if (args.Length == 0 || args.Any(value =>
-            value == "-L" || value == "-S" || value == ";" || value == "kill-server"))
-            return 2;
-        var reads = new[] {
-            "list-sessions", "has-session", "display-message", "list-panes", "list-windows"
-        };
-        var writes = new[] { "new-session", "set-option", "source-file" };
-        var attach = args.SequenceEqual(new[] { "attach-session", "-t", MANAGER_TARGET });
-        if (writes.Contains(args[0])) {
-            var selector = args[0] == "new-session" ? "-s" : "-t";
-            var index = Array.IndexOf(args, selector);
-            if (args.Count(value => value == selector) != 1 || index + 1 >= args.Length ||
-                args[index + 1] != MANAGER_TARGET ||
-                args.Contains("-g"))
-                return 2;
-            File.AppendAllText(COMMAND_LOG,
-                              args[0] + Environment.NewLine);
-        } else if (!reads.Contains(args[0]) && !attach &&
-                   !(args.Length == 1 && args[0] == "--version")) {
-            return 2;
-        }
-        using (var child = Process.Start(new ProcessStartInfo {
-            FileName = BINARY,
-            Arguments = String.Join(" ", new[] {
-                "-L", File.ReadAllText(NAMESPACE_FILE)
-            }.Concat(args).Select(Quote)),
-            // headless-guard: allow the real attach client to inherit the private fixture ConPTY
-            UseShellExecute = false, CreateNoWindow = !attach,
-            RedirectStandardOutput = !attach, RedirectStandardError = !attach
-        })) {
-            if (attach) {
-                child.WaitForExit();
-                return child.ExitCode;
-            }
-            var stdout = child.StandardOutput.ReadToEndAsync();
-            var stderr = child.StandardError.ReadToEndAsync();
-            if (!child.WaitForExit(5000)) { child.Kill(); child.WaitForExit(); return 2; }
-            if (!System.Threading.Tasks.Task.WaitAll(
-                new System.Threading.Tasks.Task[] { stdout, stderr }, 5000))
-                return 2;
-            Console.Out.Write(stdout.Result);
-            Console.Error.Write(stderr.Result);
-            if (writes.Contains(args[0]) || reads.Contains(args[0])) {
-                try {
-                    File.AppendAllText(COMMAND_LOG,
-                        String.Join(" ", args.TakeWhile(value => value != "--")) +
-                        " exit=" + child.ExitCode + " " +
-                        (reads.Contains(args[0]) ? stdout.Result : "") +
-                        stderr.Result + Environment.NewLine);
-                } catch (IOException) {}
-            }
-            return child.ExitCode;
-        }
-    }
-}
-'''.replace("BINARY", '@"' + str(binary).replace('"', '""') + '"')
-        .replace("MANAGER_TARGET", '@"' + manager_target + '"')
-        .replace("COMMAND_LOG", '@"' + str(tmp_path / "mux-commands.txt").replace('"', '""') + '"')
-        .replace("NAMESPACE_FILE", '@"' + str(namespace_file).replace('"', '""') + '"'),
-        encoding="utf-8",
+    mux_directory, namespace_file = _prepare_private_mux_adapter(
+        tmp_path, binary=binary, manager_target=manager_target, environment=environment,
     )
-    compiled = run_caller_owned(
-        [str(compiler), "/nologo", f"/out:{mux_directory / 'psmux.exe'}", str(source)],
-        env=environment, cwd=tmp_path, timeout=30, max_stdout_bytes=4096, max_stderr_bytes=4096,
-    )
-    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
     environment["PATH"] = os.pathsep.join((str(mux_directory), environment.get("PATH", "")))
     native = str(uuid4())
     prompts = ['Worktrees original\nsingle \' double " & $literal', "fresh broker", "resumed broker"]

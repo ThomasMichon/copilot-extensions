@@ -1,0 +1,9 @@
+{
+  "comment": "Keep private device-status queries inert in the passive lifecycle terminal observer",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

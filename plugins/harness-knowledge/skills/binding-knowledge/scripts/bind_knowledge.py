@@ -88,6 +88,7 @@ class _CommandsModule(Protocol):
     run: Callable[..., subprocess.CompletedProcess[str] | None]
     registration_argv: Callable[..., list[str]]
     render_command: Callable[[list[str]], str]
+    preflight_command: Callable[..., int]
 
 
 MANAGED_MARKER = "<!-- managed by harness-knowledge -->"
@@ -827,6 +828,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--harness", default="", help="The stateless harness repo name.")
     p.add_argument("--knowledge", default="", help="The knowledge repo name.")
     p.add_argument("--capabilities", action="store_true", help="Report binding support without effects.")
+    p.add_argument("--preflight", action="store_true", help="Read native repository/provider policy without binding.")
     p.add_argument("--configuration", choices=("preview", "apply", "apply-locked"), help="Confirm an existing canonical binding.")
     p.add_argument("--preview-token", default="")
     p.add_argument(
@@ -861,6 +863,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--home", default=None, help="Home dir override (testing).")
     p.add_argument("--json", action="store_true", help="Emit the summary as JSON.")
     args = p.parse_args(argv)
+    if args.preflight:
+        return _binding_commands.preflight_command(args, runner=_run_agent_worktrees, error=p.error)
     if args.capabilities:
         print(json.dumps({
             "version": 1, "registration_classes": ["knowledge", "worktree"],
@@ -868,6 +872,7 @@ def main(argv: list[str] | None = None) -> int:
             "existing_binding_configuration": 2,
             "portable_binding_precondition": 1,
             "binding_precondition_freshness": 1,
+            "repository_registration_preflight": 1,
         }))
         return 0
     if not args.control_plane and not (args.harness and args.knowledge):

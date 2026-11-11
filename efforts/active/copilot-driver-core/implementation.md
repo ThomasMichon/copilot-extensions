@@ -113,6 +113,95 @@ Textual tool-result heuristics alone are not complete pending-work evidence.
 This is distinct from an explicitly requested maintenance broadcast followed
 by subsequent idle; no extra cleanup-audit gate is added to that operation.
 
+### Inventory-capable SDK backend proposal
+
+This refinement closes the vision's `mode-appropriate-session-lifetime` and
+`idle-expiration-preserves-pending-work` requirements without changing mode
+defaults. It remains a proposal until reviewed; inventory qualification is not
+production adoption or automatic-retirement qualification.
+
+The native controls in #11994, #12005 and #12008 establish that the public
+Python SDK can list session-scoped client tasks, agents, shells and future
+schedules. A root-idle event and an empty task list can coexist with a future
+schedule. Native ACP currently does not expose that inventory: a missing method
+is unavailable evidence, never an empty set. These are distinct provider
+capabilities, not a reason to send SDK RPC methods over the ACP wire.
+
+**Recommended boundary.** Preserve direct native ACP as the default headless
+backend. Add an explicitly selected, optional public-SDK headless provider at
+the existing core backend edge; it owns one native process and one selected
+session behind the same Session Host. The SDK owns its native protocol, while
+the adapter translates the supported public ACP operations and native events.
+It must not implement an internal SDK wire client, copy generated SDK code,
+create a parallel broker or join a second conversation merely for inventory.
+Prove new/load/prompt/cancel, restoration and reconnect semantics before
+migrating a caller. Unknown acceptance cannot trigger another backend or seed
+replay.
+
+The existing headed `createHeadedAdapter` remains the canonical adapter for a
+launch-joined extension. Its current text-input, control-loss and native-input
+readiness semantics are not interchangeable with headless new/load semantics.
+Share backend-independent activity interpretation and Host lifecycle policy,
+not an invented cross-language SDK transport. Python SDK qualification does
+not prove that a joined JavaScript extension exposes the same inventory or
+observer-drain operations; headed support needs its own native controls.
+Coordinate changes in the receiver-owned auth seams through their existing
+owner rather than folding them into this provider work.
+
+**Distribution.** Keep the base core and native-ACP path usable on Python
+3.10. The measured Python SDK requires 3.11 or newer; carry it only in an
+explicitly selected optional application dependency closure using the existing
+locked build/install owner and dependency-age rules. Selection on an
+ineligible interpreter or artifact refuses before process/session creation;
+there is no automatic interpreter download, global install or silent floor
+bump. Declare support from the executing artifact and running backend, not
+from an installed SDK version. The dependency-free compact receiver stays
+TCP-only and native-ACP-only unless a separately reviewed receiving closure
+qualifies SDK delivery. Ordinary base-only installation and supported rollback
+must remain usable without this optional dependency. A Node SDK provider is
+an alternative only after equivalent public-API and delivery qualification,
+not an assumed substitute for the measured Python path.
+
+**Observation and retirement.** Represent foreground state, session-scoped
+tasks and future schedules separately, each with explicit known/unknown state.
+Install observation before the initial inventory and reconcile concurrent
+changes without treating a locally synthesized counter as native completeness.
+Coalesce callbacks into bounded work; no synchronous SDK calls, per-event
+processes or unbounded polling in event handlers. Terminal task retention is
+not pending work, but idle-yet-live agents and future schedules are.
+Inventory loss, session mismatch, overflow, reconnect gaps and SDK failure
+invalidate the retirement decision while preserving execution and custody.
+
+Inventory availability and automatic idle retirement are separate capabilities.
+Keep `automaticIdleRetirement: unavailable` until the provider qualifies
+complete initial/ongoing evidence and the final admission/retirement race,
+including internally scheduled work. Two empty lists or freezing only Driver
+inputs cannot establish an atomic native idle boundary. If the public native
+contract cannot supply a safe boundary, retain unavailable status rather than
+substituting timed polling, tool-output parsing or `wait_for_pending`.
+That SDK wait covers agent/shell follow-ups, not client tasks or future
+schedules.
+
+Explicit caller stop remains distinct from idle expiry and observer retirement.
+A public SDK `disconnect`/`stop` return is not proof that an old joined
+observer drained or that every native descendant settled. Preserve the
+independently owned observer-close/drain and whole-session-settlement gates
+before auth recovery can be enabled; this proposal does not lift those holds.
+CLI foreground lifetime remains independent of all ACP idle policy.
+
+**Promotion order and validation.** First review this boundary, then add a
+provider-first inventory adapter with truthful capabilities and automatic
+retirement still unavailable. Qualify through the real broker and selected
+artifact: native session identity, initial nonempty client/agent/shell/schedule
+inventory, future-schedule retention after root idle, isolation from a second
+session, cancellation/completion/removal, callback races and unknown outcomes.
+Exercise missing optional dependency/interpreter, base-only 3.10 installation,
+compact-receiver refusal and supported older consumer/provider rollback.
+Keep process/native/clean-room lanes explicit and bounded, not in required
+unit-only CI. Only a later qualified lifecycle slice can enable idle grace;
+neither this plan nor an inventory-only merge completes the parent's lifetime,
+caller-convergence, receiving or observer-retirement gates.
+
 ## Evidence before each functional promotion
 
 Retain focused tests that fail without the extraction or adapter behavior.

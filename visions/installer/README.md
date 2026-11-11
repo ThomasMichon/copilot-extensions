@@ -9,7 +9,7 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-09
+- **Last revised:** 2026-11-10
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
@@ -697,6 +697,13 @@ or supported recovery, never by an independent competing installer.
 
 Equivalent same-target requests debounce and share the active operation's
 observable result; different-target requests wait or queue rather than race.
+An addressed update has at most one waiting successor. A newer accepted update
+replaces the older waiting selection, retaining an attributable superseded
+outcome instead of running stale queued installer code. This does not cancel
+the active update, replay uncertain work, or discard subordinate component
+installation. Independent installations retain independent selections.
+Automatic requests cannot displace an explicit user's waiting selection or
+inherit its authority; a superseded request never reports installation success.
 One authoritative desired-version selection supplies normal installation
 targets, keeping automatic advancement monotonic instead of allowing competing
 callers to cause accidental rollback. Deliberate repair or rollback selection

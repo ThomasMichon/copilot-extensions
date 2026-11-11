@@ -194,7 +194,7 @@ def test_cached_then_delayed_result_needs_a_new_source_read(source: str, monkeyp
         assert daemon._desired()
         assert not daemon.pool_source_snapshot().complete
         if source == "declarations":
-            future.set_result(([_registration()], True, ""))
+            future.set_result(([_registration()], True, "", DeclarationRead((declaration,), True)))
         else:
             rows = daemon.client.list_registrations(machine="host-a", env="default", include_paused=False)
             future.set_result((0, rows, copy.deepcopy(rows)))
@@ -312,6 +312,7 @@ def test_registrar_adapter_uses_same_refresh_report(
     trusted: ScanAuthority, plugins: ScanAuthority, findings: tuple, complete: bool,
 ) -> None:
     declarations = (_declaration(),)
+    observations = (object(),)
     calls = []
     report = SimpleNamespace(
         trusted_authority=trusted,
@@ -319,6 +320,7 @@ def test_registrar_adapter_uses_same_refresh_report(
             declarations=declarations,
             plugins=SimpleNamespace(snapshot=SimpleNamespace(authority=plugins), findings=findings),
         ),
+        source_observations=observations,
     )
     def refresh() -> Any:
         calls.append("refresh")
@@ -327,6 +329,7 @@ def test_registrar_adapter_uses_same_refresh_report(
     result = read_supervisor_declarations(SimpleNamespace(refresh=refresh))
     assert result.complete == complete
     assert result.declarations is declarations
+    assert result.source_observations is observations
     assert calls == ["refresh"]
     assert bool(result.reason) != complete
 

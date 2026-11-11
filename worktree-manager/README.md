@@ -2321,6 +2321,18 @@ existing installer publication and per-slot leases remain in force underneath.
 Manager and engine retain their process boundary, including the engine's
 `--no-manager` re-entry, which does not bypass execution ownership.
 
+Project-controller discovery requires a capable selected engine. A legacy
+`Unknown key: 'update-controller'` response is not proof that the repository
+has no controller, even when durable authority has not been configured.
+Manager refuses that uncertainty with an engine setup/recovery diagnostic
+instead of choosing standalone execution. A confirmed no-project response is
+neutral only when the caller did not explicitly select a project. Fixed legacy
+diagnostics are recognized across UTF-8 stdout, stderr and JSON error responses;
+arbitrary stdout is not exposed as an error message.
+Only a classified no-project response permits that fallback. Mixed channels,
+extended diagnostics and unexpected exit codes remain failures even if their
+text contains a no-project phrase.
+
 ```text
 worktree-manager update --wait
 worktree-manager update --detach --json
@@ -2336,11 +2348,19 @@ successful-installation claim. The status operation is read-only and does not
 create a driver, fetch source or run installers. `--supervised-debug` keeps
 supervision in the foreground but uses the same queue and exclusive authority;
 it cannot bypass an active transaction. The engine exposes the same options.
-Equivalent pending requests can coalesce; a request arriving after execution
-starts remains separate. These requests may refer to moving source refs, so
+Equivalent pending requests can coalesce. Each addressed installation/project
+authority retains at most one waiting update: a newer accepted update replaces
+the previous waiting selection, preserving the running update. A superseded
+request remains inspectable with exit code **125** and an error naming its
+successor; it did not run and is not successful installation. Automatic work
+cannot displace an explicit waiting update. Independent installation scopes and
+required component provisioning are not discarded.
+A request arriving after execution starts remains separate from the active
+request. These requests may refer to moving source refs, so
 identical arguments do not establish the pinned target required for the shared
 driver's active-request opt-in. Explicit options, invocation context,
-installation scope and pinned runner identity are retained rather than collapsed.
+installation scope and pinned runner identity are retained in history, including
+superseded requests.
 The engine resolves the caller's marketplace context before submission, so a
 queued engine-to-Manager-to-engine round trip cannot replace it with anchor
 settings. Accepted provider argv and the explicit

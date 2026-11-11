@@ -804,24 +804,18 @@ def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatc
     monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
     consumer = fake_repo / "libs" / "update-driver"
     consumer.mkdir()
-    for name in (
-        "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
-        "installer_engine_uninstall_windows.py",
-        "installer_engine_footprint.py",
-        "installer_engine_uninstall_controllers.py",
-        "installer_engine_commands.py", "installer_engine_stop.py",
-    ):
+    for name in contract.SUPPORT_FILES:
         (sync_installer_engine.CANONICAL_DIR / name).write_text(
-            "canonical uninstall\n", encoding="utf-8",
+            "canonical native support\n", encoding="utf-8",
         )
     assert len(sync_installer_engine.verify()) == len(contract.STANDALONE_NATIVE_FILES)
     assert len(sync_installer_engine.sync()) == len(contract.STANDALONE_NATIVE_FILES)
     assert sync_installer_engine.verify() == []
-    for name in contract.STANDALONE_NATIVE_FILES:
+    for name in (*contract.STANDALONE_NATIVE_FILES, *contract.SUPPORT_FILES):
         assert (consumer / "scripts" / name).read_bytes() == (
             sync_installer_engine.CANONICAL_DIR / name
         ).read_bytes()
-    (consumer / "scripts" / "installer-engine.ps1").write_text("drift", encoding="utf-8")
+    (consumer / "scripts" / "installer_dependency_config.py").write_text("drift", encoding="utf-8")
     assert len(sync_installer_engine.verify()) == 1
     assert len(sync_installer_engine.sync()) == 1
     assert sync_installer_engine.verify() == []

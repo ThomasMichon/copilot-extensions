@@ -4,8 +4,8 @@
 
 The current internal checkpoint, custody host and conduit are not yet an
 activated production reattachment feature. The serve provider can advertise a
-backend capability only from an admitted physical generation; ordinary
-CLI/installer paths do not yet select custody adoption.
+backend capability only from an admitted physical generation. Paired explicit
+owner CLI arguments select custody; default callers and installers do not.
 
 An explicitly custody-bound single-stdio `BridgeSession` can export quiescent
 JSON data and reconstruct its decorator pipeline over a supplied retained
@@ -214,7 +214,22 @@ watchdog. A shim's exit alone therefore does not close its original stdio or
 custody connection. Verified owner exit closes only this client's connection,
 initiating the existing exact upstream/session settlement. Other attached
 clients and the shared custody host retain their independent lifetimes.
-Normal forwarders and installer selection do not invoke this internal path.
+`agent-mcp bridge` and `agent-mcp forward` accept the paired
+`--session-owner-pid PID --session-owner-birth NATIVE_BIRTH` arguments to invoke
+this path explicitly. The controlled originating launcher must supply the actual
+client process identity captured at its native launch boundary, before a shim
+can exit. These arguments are lifetime inputs, not an authentication grant.
+They are not discovered from environment assertions, ancestors or another
+plugin's session files. A missing pair, unverifiable owner or disabled serve
+startup refuses rather than silently starting an ordinary replacement session.
+The `forward` command retains its explicit `--socket` selection; `bridge` uses
+the normal configured handle.
+An older CLI can refuse these additive arguments before startup. A launcher must
+qualify the selected consumer's support before supplying them, including after
+rollback; passing the pair is not capability negotiation.
+
+Without those arguments, both commands retain their existing behavior.
+Controlled production launchers do not yet populate the pair automatically.
 Source controls are not native caller-Job, installed-consumer or rollout proof.
 `run_adopted` is a dedicated process entrypoint, not a returning library pump.
 After the connection and native owner pin close, successful completion exits
@@ -228,7 +243,8 @@ child control, restrictive shared-outer refusal, shim exit, physical backend
 replacement and owner death while the original input pipe remains open.
 The independent owner launches its shim inside a real caller cleanup Job.
 That shim uses canonical daemon admission with explicitly borrowed stdio
-descriptors to launch the conduit outside the caller-owned Jobs. Native
+descriptors and the real `agent-mcp forward` CLI with paired owner arguments
+to launch the conduit outside the caller-owned Jobs. Native
 membership checks precede closure; a separate bounded child must die when the
 shim's Job closes, while the same conduit and original owner remain alive.
 The restrictive-outer negative covers that stdio launch as well as custody
@@ -284,7 +300,7 @@ one listener, an in-flight mutation plus server request, early notifications,
 preparation failure before and after the backend handshake, backoff,
 quiescence failure and synchronous conduit use across a handover.
 Physical-generation metadata and upstream transports are simulated in these
-composition tests. No ordinary launcher, CLI or installer selects custody yet; native
+composition tests. No default launcher or installer selects custody yet; native
 Windows/POSIX separate-process, process-count and installed reattachment
 acceptance remain unqualified.
 

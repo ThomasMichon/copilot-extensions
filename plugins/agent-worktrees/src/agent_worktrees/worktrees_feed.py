@@ -113,6 +113,8 @@ class WorktreesFeed:
             if payload.get("passive") is True:
                 # A subscription is producer demand; passive reads are point reads.
                 raise ProjectionError("passive reads cannot subscribe to the feed")
+            if "refresh_id" in payload:
+                raise ProjectionError("point refresh cannot subscribe to the feed")
         except ProjectionError as exc:
             yield {"type": "error", **self._owner._failure("invalid-request", str(exc))}
             return

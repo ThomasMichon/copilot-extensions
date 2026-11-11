@@ -1,0 +1,9 @@
+{
+  "comment": "Document standing-charter adoption prerequisites without activating them",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

@@ -39,6 +39,8 @@ def _invocation_cwd() -> Path:
 
 def _request_context(*, controller: bool = False, cwd: Path | None = None) -> tuple[tuple[str, str], ...]:
     context = dict(_context())
+    if context.get("AGENT_HOME", "").strip():
+        context["AGENT_HOME"] = str(cfg._home())
     selected = update_cli._invocation_update_context()
     if selected is not None:
         context["AGENT_WORKTREES_UPDATE_CONTEXT"] = str(selected)

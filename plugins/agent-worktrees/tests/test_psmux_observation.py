@@ -260,6 +260,10 @@ def test_relative_data_directory_refuses_before_native_observation(monkeypatch):
     ("-L example attach-session -t fixture", {}),
     ("-L example new-session -d -s fixture", {}),
     ("-L example set-option -t fixture status on", {}),
+    ('"server" "-s" "fixture"', {101: "123"}),
+    ('"-L" "example" "attach-session" "-t" "fixture"', {}),
+    ('"-L" "example" "new-session" "-d" "-s" "fixture"', {}),
+    ('"-L" "example" "set-option" "-t" "fixture" "status" "on"', {}),
 ])
 def test_native_census_distinguishes_clients_without_executing_them(monkeypatch, mode, expected):
     monkeypatch.setattr(native, "_processes", lambda: [(101, "psmux.exe")])
@@ -272,6 +276,8 @@ def test_native_census_distinguishes_clients_without_executing_them(monkeypatch,
     (None, ["123", "123"]),
     ("psmux server", ["123", "456"]),
     ("psmux -L other server", ["123", "123"]),
+    ('"psmux.exe" "-L" "other" "server"', ["123", "123"]),
+    ('"psmux.exe" "--unknown" "server"', ["123", "123"]),
 ])
 def test_native_census_refuses_unreadable_reused_or_unknown_processes(monkeypatch, command, times):
     monkeypatch.setattr(native, "_processes", lambda: [(101, "psmux.exe")])

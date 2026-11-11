@@ -49,14 +49,15 @@ suites to fast PR CI or transfer the promotion writer.
 
 | Participant | Role in this effort | Reached via |
 |-------------|---------------------|-------------|
-| Campaign driver | Lead portfolio audit, shared plan, sequencing, measurements and accepted implementation slices | Umbrella issue #6237 and per-slice managed worktrees |
+| Campaign driver | Lead portfolio audit, shared plan, sequencing, measurements, accepted implementation slices and the new installed-lifecycle witness | Umbrella issue #6237 and per-slice managed worktrees |
 | CI/release controller | Own active release qualification, promotion writer, CI integration and release admission | #3336 and coordinated #6237 slices |
 | Trusted Linux offload owner | Own backend selection and runner-routing source contracts; coordinate CI edits | #7122 and its existing participant |
 | Test portfolio owner | Preserve selected coverage, platform/stress boundaries and coverage equivalence | #1303 and component test owners |
 | Capacity operator | Qualify the selected image/venue and enforce admitted shared-host limits | #7122 capacity handoff; provider-specific state stays downstream |
 | Remediation owner | Own failure signatures, bounded repair and named escalation | #6142 and the existing remediation effort |
 | PR completion steward | Own Phase 5a readiness, author guidance, consent automation and completion visibility; coordinate shared provider and release seams | #6237 Phase 5a; #3638, #4234 and the linked completion contract |
-| Installed Manager qualification coordinator | Retain authentic installation, native TTY and agreed lifecycle-witness source ownership | Existing #11377 effort; exact extension seam must be accepted before edits |
+| Installed Manager qualification coordinator | Retain authentic installation, native TTY helpers and shared gate interfaces | Existing #11377 effort; coordinate actual shared-file edits |
+| Required-readiness contributor | New profile/input companion and focused controls for actual Machines readiness and ordinary-upgrade/New | Accepted bounded contribution on #11377; existing native/runner/workflow files retained |
 | Repository owner | Critical-path acceptance and bounded administrative decisions | Owner-authored PRs and issue steering |
 | Automated reviewer | Review each plan and implementation PR | Repository Copilot review flow |
 
@@ -100,9 +101,10 @@ suites to fast PR CI or transfer the promotion writer.
 - **November 9 installed lifecycle:** the Campaign driver captures the
   CI/promotion requirement and reviewed contract. #11377 retains its native
   fixture and open Main-activation work; #3336/#7529 retain candidate,
-  construction and publication authority. Coordinate an exact non-overlapping
-  implementation seam before native/workflow edits. A request or posted
-  handoff is not acceptance, a new writer or live activation.
+  construction and publication authority. Coordinate actual overlapping
+  native-helper, runner/result and workflow edits before touching those files.
+  Independent new-file witness/profile work does not wait for the whole Main
+  PR to merge. A posted handoff is not acceptance or live activation.
 
 ## Context
 
@@ -240,6 +242,14 @@ The [installed lifecycle contract](installed-manager-lifecycle.md) is the
 **agent-recommended** realization. It extends existing qualification rather
 than treating installed TTY rendering or direct launch-plan tests as proof of
 the full requested user flow.
+
+**2026-11-09 - Avoid whole-PR coordination barriers (verbatim):**
+
+> Do what we can to avoid blocking on someone else's PR. Identify the source agent across all our machines if we own it and coordinate with it
+
+The concrete new-file split and shared-interface coordination below are
+**agent-recommended**. The existing Main adoption remains with its owner;
+its completion is not a prerequisite for independent Dev qualification work.
 
 ## Plan
 
@@ -506,6 +516,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   substitute only deterministic inference. Existing #11377/#3336/#7529 owners
   retain source and activation custody. Failed or incomplete exact-candidate
   evidence must block promotion, not merely report an informational check.
+  Installed-core action/continuity proof merged in #11864 at `fa93ea37c2`,
+  backed by exact-source native run 42892225611 and current-head approval.
+  Complete-suite construction/actual Machines readiness is now the active slice;
+  authentic-baseline update, mandatory enforcement and Main adoption remain open.
 - [ ] Complete the [test validation burndown](test-validation-burndown.md):
   measured promotion/PR CI history, reliable parallel unit suites, per-suite
   coverage baselines and conservative PR selection, full unit execution on
@@ -802,6 +816,7 @@ credential changes, broad policy weakening or unreviewed releases.
 Historical entries are preserved verbatim in dated files; each links back to
 this contract. New evidence belongs in its date file, not another peer effort.
 
+- [2026-11-09 - Installed Manager lifecycle contract](journal/2026/11.09-installed-manager-lifecycle.md)
 - [2026-10-12](journal/2026/10.12.md)
 - [2026-10-13](journal/2026/10.13.md)
 - [2026-10-14](journal/2026/10.14.md)

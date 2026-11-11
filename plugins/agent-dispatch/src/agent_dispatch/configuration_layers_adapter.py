@@ -55,7 +55,7 @@ def configuration_report(root: Path) -> dict[str, Any] | None:
     return report
 
 
-def surface_layers(report: dict[str, Any], surface: str):
+def surface_layers(report: dict[str, Any], surface: str, *, observe_sources: bool = False):
     context = context_from_owner(report)
     base = Path(context["base_root"])
     roots = [(base, "repository", "base")]
@@ -69,6 +69,10 @@ def surface_layers(report: dict[str, Any], surface: str):
             directories = [root / surface]
         elif tier == "repository_machine" and root == base:
             directories = [root / repo_config.CANONICAL_REPO_CONFIG_DIR / f"{surface}.local"]
+        elif observe_sources:
+            from .registrar_observations import observed_repo_directories
+
+            directories = observed_repo_directories(root)
         else:
             directories = repo_config.layered_repo_surface_dirs(root, surface)
         for directory in directories:
@@ -88,24 +92,40 @@ def layer_record(context, root, path, tier, origin, values):
     return layer
 
 
-def read_registrar_layers(report, *, owner=None):
+def read_registrar_layers(report, *, owner=None, directory_reads=None, document_reads=None):
     from .registrar import RegistrarError
     from .registrar_discovery import _decode, _iter_declaration_files, read_declaration_file_set
     from .registrar_document import expand_declaration_document
+    from .registrar_source_revision import record_document_read
 
     context = context_from_owner(report)
     records = {}
     atomic = {}
     origins = {}
-    for root, directory, tier, origin in surface_layers(report, "registrar"):
+    for root, directory, tier, origin in surface_layers(
+        report, "registrar", observe_sources=directory_reads is not None,
+    ):
         names = set()
-        for path in _iter_declaration_files(directory):
-            document = dict(_decode(path.read_text(encoding="utf-8"), path.suffix, where=str(path)))
+        observed = {}
+        paths = _iter_declaration_files(directory, directory_reads=observed)
+        if directory_reads is not None:
+            # Optional local preferences are normally absent. Their absence
+            # must not hide a missing repository declaration source.
+            directory_reads.update({
+                path: status for path, status in observed.items()
+                if status != "missing" or tier == "repository"
+            })
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            record_document_read(document_reads, path, text)
+            document = dict(_decode(text, path.suffix, where=str(path)))
             # Resource/recipe kinds keep their native whole-document supplier,
             # reference and activation contracts; ordinary lane preferences
             # merge before the existing strict native parser.
             if document.get("kind", "supervised-lane") != "supervised-lane" or "extends" in document:
-                for declaration in read_declaration_file_set(path, repo_root=root):
+                for declaration in read_declaration_file_set(
+                    path, repo_root=root, document_reads=document_reads,
+                ):
                     if declaration.name in names:
                         raise RegistrarError(f"duplicate profile name {declaration.name!r} under {directory}")
                     names.add(declaration.name)

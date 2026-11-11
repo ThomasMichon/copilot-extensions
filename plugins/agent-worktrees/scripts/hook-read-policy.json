@@ -10,5 +10,26 @@
   "nativeWriteDependencies": {
     "tool_call_forms.py": "faa348d246fe91676f26e097d9cc00e2356be6af7cc852d2e3eacbebced14d21",
     "guarded_anchor_map.py": "19e5b15f8f90dc503f1dea0947ae451a82937bcb1fffa85ebbd1410d15e4cb7f"
+  },
+  "nativeShellReadCommands": [
+    "Get-Date",
+    "Get-Item",
+    "Get-ChildItem",
+    "Get-Content",
+    "Get-Location",
+    "pwd",
+    "ls",
+    "cat"
+  ],
+  "nativeShellReadCommandKeys": [
+    "command",
+    "cmd",
+    "script",
+    "commandLine",
+    "commandline",
+    "input"
+  ],
+  "nativeShellReadDependencies": {
+    "hook_pre_relevance.py": "5b6109ab45b8d81afe26b98bfd2bcfa1df45163724b93a8833c2d63b5ebebcae"
   }
 }

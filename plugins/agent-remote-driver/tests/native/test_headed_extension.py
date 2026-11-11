@@ -37,6 +37,8 @@ def offline_cli(tmp_path):
         pytest.skip("Select an existing native Copilot executable for the offline acceptance lane")
     assert Path(executable).is_absolute() and Path(executable).is_file()
     requests = []
+    responses = []
+    response_gate = SimpleNamespace(select=lambda _: None)
     pause_response, response_started, release_response = (threading.Event() for _ in range(3))
 
     class Provider(http.server.BaseHTTPRequestHandler):
@@ -44,7 +46,12 @@ def offline_cli(tmp_path):
             pass
 
         def do_POST(self):
-            requests.append(json.loads(self.rfile.read(int(self.headers["Content-Length"]))))
+            request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+            requests.append(request)
+            gate = response_gate.select(request)
+            if gate is not None and not gate.wait(30):
+                self.send_error(504)
+                return
             if pause_response.is_set():
                 response_started.set()
                 if not release_response.wait(30):
@@ -58,8 +65,13 @@ def offline_cli(tmp_path):
                 "choices": [{"index": 0, "delta": {"role": "assistant", "content": "FIXTURE"},
                              "finish_reason": "stop"}],
             }
-            self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
-            self.wfile.flush()
+            if responses:
+                body["choices"] = [{"index": 0, **responses.pop(0)}]
+            try:
+                self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
+                self.wfile.flush()
+            except ConnectionError:
+                pass
 
     provider = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     provider.daemon_threads = True
@@ -87,6 +99,8 @@ def offline_cli(tmp_path):
         yield SimpleNamespace(
             executable=executable, env=environment, home=home, workspace=workspace,
             requests=requests, logs=tmp_path / "logs",
+            responses=responses,
+            response_gate=response_gate,
             pause_response=pause_response, response_started=response_started,
             release_response=release_response,
         )
@@ -287,6 +301,60 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
         snapshot = observed["observations"][name]
         assert snapshot["state"] == "available", {name: snapshot}
         assert snapshot["field"] == field and isinstance(snapshot["items"], list)
+    session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
+    assert [path.parent.name for path in session_files] == [observed["sessionId"]]
+    events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]
+    assert not any(
+        event.get("data", {}).get("permissionRequest", {}).get("kind") == "extension-permission-access"
+        for event in events
+    )
+    assert len(offline_cli.requests) == 1
+    assert not (offline_cli.home / "permissions-config.json").exists()
+
+
+def test_native_joined_observer_close_returns_no_attributed_outcome(tmp_path, offline_cli):
+    plugin = tmp_path / "observer-plugin"
+    extension = plugin / "extensions" / "observer-fixture"
+    extension.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
+        json.dumps({"name": "observer-fixture", "version": "1.0.0"}), encoding="utf-8",
+    )
+    (extension / "extension.mjs").write_text("""
+import { writeFileSync } from "node:fs";
+import { joinSession } from "@github/copilot-sdk/extension";
+const session = await joinSession();
+const unsubscribe = session.on(() => {});
+const unsubscribeResult = unsubscribe();
+const disconnect = session.disconnect();
+const disconnectIsPromise = typeof disconnect?.then === "function";
+const disconnectResult = await disconnect;
+const repeatedResult = await session.disconnect();
+writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
+    sessionId: session.sessionId,
+    unsubscribeResult: typeof unsubscribeResult,
+    disconnectIsPromise,
+    disconnectResult: typeof disconnectResult,
+    repeatedResult: typeof repeatedResult,
+}));
+""", encoding="utf-8")
+    output = tmp_path / "observer-close.json"
+    result = subprocess.run(
+        [
+            offline_cli.executable, "-p", "ISOLATED_OBSERVER_CLOSE_FIXTURE", "--trust-folder",
+            "--experimental", "--plugin-dir", str(plugin), "--no-auto-update",
+            "--disable-builtin-mcps", "--no-custom-instructions", "--no-color", "--no-ask-user",
+            "--log-dir", str(offline_cli.logs),
+        ],
+        cwd=offline_cli.workspace, env={**offline_cli.env, "DRIVER_FIXTURE_OUTPUT": str(output)},
+        capture_output=True, timeout=60, text=True, encoding="utf-8", **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stderr + _logs(offline_cli.logs)
+    assert output.is_file(), result.stderr + _logs(offline_cli.logs)
+    observed = json.loads(output.read_text(encoding="utf-8"))
+    assert observed == {
+        "sessionId": observed["sessionId"], "unsubscribeResult": "undefined",
+        "disconnectIsPromise": True, "disconnectResult": "undefined", "repeatedResult": "undefined",
+    }
     session_files = list((offline_cli.home / "session-state").glob("*/events.jsonl"))
     assert [path.parent.name for path in session_files] == [observed["sessionId"]]
     events = [json.loads(line) for line in session_files[0].read_text(encoding="utf-8").splitlines()]

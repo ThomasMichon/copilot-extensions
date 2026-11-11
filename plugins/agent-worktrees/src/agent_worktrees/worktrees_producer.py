@@ -8,8 +8,9 @@ import time
 
 from . import config as cfg
 from . import reclaim, sessions, tracking, push_timeout, git_ops
-from .worktrees_current_rows import materialize
+from .worktrees_current_rows import materialize, selection_row
 from .mux_list_result import MuxObservationUnavailable
+from .worktrees_projection_index import ProjectionError, ProjectionUnavailable, SelectionIndex
 
 
 def publish_project_rosters(
@@ -85,6 +86,47 @@ def _publish_active_project(
     records = tracking.list_records(cfg.tracking_dir(project))
     if observe_records is not None:
         observe_records(project, records)
+    refresh_requests = runtime.refreshes.pending(project)
+    refreshed = set()
+    if refresh_requests:
+        from .list_cli import _refresh_list_record
+        from .worktrees_refresh import record_identity
+
+        positions = {record.worktree_id: index for index, record in enumerate(records)}
+        selection_index = SelectionIndex(selection_row(record) for record in records)
+        accepted_requests = []
+        for request_id, selection in refresh_requests:
+            try:
+                selected_ids = selection_index.select(selection)
+            except ProjectionError as error:
+                runtime.refreshes.reject(request_id, str(error))
+                continue
+            except ProjectionUnavailable as error:
+                runtime.refreshes.reject(request_id, str(error), code="refresh-unavailable")
+                continue
+            if len(selected_ids) != 1:
+                runtime.refreshes.reject(
+                    request_id, "Point refresh requires one readable selected record",
+                    code="refresh-unavailable",
+                )
+                continue
+            record = records[positions[selected_ids[0]]]
+            try:
+                if record.worktree_id not in refreshed:
+                    previous_mux = (
+                        managed_mux_cache.get(project, record.worktree_id)
+                        if managed_mux_cache is not None else None
+                    )
+                    record = _refresh_list_record(record, strict=True)
+                    records[positions[record.worktree_id]] = record
+                    if record.mux_live is False:
+                        runtime.refreshes.supersede_mux(project, record.worktree_id, previous_mux)
+                    refreshed.add(record.worktree_id)
+            except (OSError, ValueError, MuxObservationUnavailable, push_timeout.ObservationUnavailable) as error:
+                runtime.refreshes.reject(request_id, str(error), code="refresh-unavailable")
+                continue
+            accepted_requests.append((request_id, record_identity(selection_row(record))))
+        refresh_requests = tuple(accepted_requests)
     session_ctx = sessions.scan_sessions_fast(records)
     try:
         mux_map = sessions.mux_status_many([rec.worktree_id for rec in records])
@@ -92,13 +134,26 @@ def _publish_active_project(
     except MuxObservationUnavailable:
         mux_map = {}
         mux_observed = False
+    if refresh_requests and not mux_observed:
+        for request_id, _selector in refresh_requests:
+            runtime.refreshes.reject(
+                request_id, "Point-refresh publication lacks a current mux observation",
+                code="refresh-unavailable",
+            )
+        refresh_requests = ()
     # Fresh receipt alone cannot qualify cached counts during observation loss.
     if managed_mux_cache is not None and mux_observed:
         from .mux_link import MAPPING_STALE_AFTER_SECONDS
 
         now = time.time()
         for record in records:
+            if record.worktree_id in refreshed:
+                continue
             entry = managed_mux_cache.get(project, record.worktree_id)
+            if entry is not None and not runtime.refreshes.mux_observation_current(
+                project, record.worktree_id, entry,
+            ):
+                continue
             received_at = entry.get("received_at") if entry else None
             if (
                 not entry or not entry.get("live")
@@ -135,6 +190,7 @@ def _publish_active_project(
         delegate_cli.annotate_delegate_graph(rows, current_only=True)
         runtime.publish(
             project, rows, observed_at=observed_at, collected_from=collected_from,
+            refresh_requests=refresh_requests,
             record_heads={
                 record.worktree_id: {
                     "creation_nonce": record.creation_nonce,

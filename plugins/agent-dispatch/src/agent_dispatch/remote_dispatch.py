@@ -200,6 +200,9 @@ def build_remote_create_argv(
         argv += ["--origin-ref", args.origin_ref]
     if getattr(args, "dedup_key", None):
         argv += ["--dedup-key", args.dedup_key]
+    if getattr(args, "standing_parent", None):
+        # An older target rejects the unknown flag instead of creating an unlinked child.
+        argv += ["--standing-parent", args.standing_parent]
     if getattr(args, "producer_id", None):
         argv += ["--producer-id", args.producer_id]
     if getattr(args, "producer_generation", None) is not None:
@@ -347,6 +350,9 @@ def build_remote_browse_argv(
             argv += ["--target-machine", args.target_machine]
         if getattr(args, "target_repo", None):
             argv += ["--target-repo", args.target_repo]
+        if getattr(args, "standing_parent", None):
+            # An older peer rejects the unknown flag instead of widening the read.
+            argv += ["--standing-parent", args.standing_parent]
     return argv
 
 

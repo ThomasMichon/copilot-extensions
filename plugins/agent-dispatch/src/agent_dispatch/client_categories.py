@@ -2,10 +2,20 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .task_categories import category_value
 from .client_errors import DispatchError, DispatchUpgradeRequired
+from .client_standing import standing_support
+from .queue_standing_schema import LEGACY_CLAIM_FENCE, STANDING_KIND
+
+_STANDING_FENCE = json.loads(LEGACY_CLAIM_FENCE)
+
+
+def _legacy_standing(task: dict) -> bool:
+    """Older coordinators omit ``kind`` but still serialize the claim fence."""
+    return task.get("kind", "finite") == STANDING_KIND or task.get("requires") == _STANDING_FENCE
 
 
 def require_endpoint_categories(endpoint: str, *, token: str | None = None) -> None:
@@ -42,8 +52,27 @@ class CategoryClientMixin:
         if params.get("category") is not None:
             category_value(params["category"], selection=True)
             self.require_task_categories()
+        legacy_finite = False
+        if params.get("standing_parent_id") is not None or params.get("kind") == "standing-charter":
+            # Older coordinators silently ignore unknown query parameters.
+            self.require_standing_charters()
+        elif params.get("kind") == "finite" and standing_support(self.health()) is None:
+            # A rolled-back coordinator ignores the selector yet still reads
+            # retained standing rows, so exclude them by their claim fence.
+            legacy_finite = True
+            params = {**params, "kind": None}
         clean = {k: v for k, v in params.items() if v is not None}
-        return self._unwrap(self._http.get("/tasks", params=clean))
+        tasks = self._unwrap(self._http.get("/tasks", params=clean))
+        if not legacy_finite:
+            return tasks
+        finite = [task for task in tasks if not _legacy_standing(task)]
+        if tasks and not finite and len(tasks) >= (200 if params.get("limit") is None else params["limit"]):
+            # Draining visible finite rows reveals older ones; a full page of
+            # standing rows never drains and would hide finite work forever.
+            raise DispatchUpgradeRequired(
+                "coordinator cannot exclude standing charters before its list limit"
+            )
+        return finite
 
     def lookup_dedup(self, dedup_key: str, *, repo: str | None) -> list[dict]:
         """Read [] or the exact key's current create-dedup occupant in one repo."""
@@ -82,6 +111,10 @@ class CategoryClientMixin:
         if category == "maintenance":
             self.require_task_categories()
             kwargs["category"] = category
+        if kwargs.get("standing_parent_id") is None:
+            kwargs.pop("standing_parent_id", None)
+        else:
+            self.require_standing_charters()
         # Omitted/work requests retain the old wire shape for older peers.
         return self._unwrap(self._http.post("/tasks", json={"title": title, **kwargs}))
 

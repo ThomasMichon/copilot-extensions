@@ -41,6 +41,7 @@ NATIVE_WRITE_PHASES = {
     "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize",
     "command-complete", "admission-start", "admission-complete", "read-proof-start",
     "read-proof-complete", "source-proof-start", "source-proof-complete", "policy-complete",
+    "runtime-start", "runtime-complete",
 }
 NATIVE_WRITE_PHASE_WRITER = (
     "function Write-NativeWriteFixturePhase([string]$Name) { "
@@ -49,14 +50,132 @@ NATIVE_WRITE_PHASE_WRITER = (
     "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name) }; "
     "Write-NativeWriteFixturePhase 'command-entry'; "
 )
+NATIVE_WRITE_LOAD_WRITER = """
+function Write-NativeWriteFixtureAssemblyState([string]$Name) {
+    $utility = 0
+    $web = 0
+    foreach ($assembly in [AppDomain]::CurrentDomain.GetAssemblies()) {
+        $assemblyName = $assembly.GetName().Name
+        if ($assemblyName -ceq 'Microsoft.PowerShell.Commands.Utility') { $utility = 1 }
+        if ($assemblyName -ceq 'System.Web.Extensions') { $web = 1 }
+    }
+    $process = [Diagnostics.Process]::GetCurrentProcess()
+    try { $cpu = $process.TotalProcessorTime.Ticks }
+    finally { $process.Dispose() }
+    [Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' +
+        [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString(
+            [Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name +
+        ' cpu_ticks=' + $cpu.ToString([Globalization.CultureInfo]::InvariantCulture) +
+        ' utility=' + $utility.ToString() + ' web=' + $web.ToString())
+}
+"""
+# Prior reader retained to exercise additive-declaration compatibility.
+NATIVE_READ_V1 = r"""
+function Test-NativePreToolSources([bool]$WriteProof = $false) {
+    try {
+        $policy = Read-PreToolJson ([IO.Path]::Combine($PSScriptRoot, 'hook-read-policy.json')) 4096
+        if ($policy.schema -isnot [string] -or $policy.schema -cne 'agent-worktrees.native-read-policy' -or
+            ($policy.version -isnot [int] -and $policy.version -isnot [long]) -or $policy.version -ne 1 -or
+            $policy.guards -isnot [Collections.IDictionary]) { return $false }
+        $names = @('statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'pr_supersede_guard.py')
+        if ($policy.guards.Count -ne $names.Count) { return $false }
+        $sources = $policy.guards
+        if ($WriteProof) {
+            $dependencies = $policy.nativeWriteDependencies
+            $extra = @('tool_call_forms.py', 'guarded_anchor_map.py')
+            if ($dependencies -isnot [Collections.IDictionary] -or $dependencies.Count -ne $extra.Count) {
+                return $false
+            }
+            $sources = @{}
+            foreach ($guard in $names) { $sources[$guard] = $policy.guards[$guard] }
+            foreach ($dependency in $extra) { $sources[$dependency] = $dependencies[$dependency] }
+            $names += $extra
+        }
+        foreach ($guard in $names) {
+            $expected = $sources[$guard]
+            if ($expected -isnot [string] -or $expected -cnotmatch '^[0-9a-f]{64}$') { return $false }
+            $path = [IO.Path]::Combine($PSScriptRoot, $guard)
+            $info = [IO.FileInfo]::new($path)
+            if (-not $info.Exists -or $info.Length -gt 131072 -or
+                ($info.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+            $text = [IO.File]::ReadAllText($path, $utf8).Replace("`r`n", "`n")
+            $hasher = [Security.Cryptography.SHA256]::Create()
+            try {
+                $actual = ([BitConverter]::ToString($hasher.ComputeHash($utf8.GetBytes($text)))).Replace('-', '').ToLowerInvariant()
+            } finally { $hasher.Dispose() }
+            if ($actual -cne $expected) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
+    if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
+        $Payload -isnot [Collections.IDictionary]) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) {
+        if (-not $PreparedMembership) { return $false }
+        $calls = Get-NativePreToolBatch $Payload['toolCalls']
+        if ($null -eq $calls) { return $false }
+        foreach ($call in $calls) {
+            if ($call['name'] -cnotin @('view', 'rg', 'glob')) { return $false }
+        }
+        return Test-NativePreToolSources -WriteProof $true
+    }
+    $name = $Payload.toolName
+    if (-not $name) { $name = $Payload.tool_name }
+    if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
+    return Test-NativePreToolSources
+}
+"""
+
+
+NATIVE_SHELL_READ_V1 = r"""
+function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
+    if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
+        $Payload -isnot [Collections.IDictionary]) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) {
+        if (-not $PreparedMembership) { return $false }
+        $calls = Get-NativePreToolBatch $Payload['toolCalls']
+        if ($null -eq $calls) { return $false }
+        foreach ($call in $calls) {
+            if ($call['name'] -cnotin @('view', 'rg', 'glob')) { return $false }
+        }
+        return Test-NativePreToolSources -WriteProof $true
+    }
+    $name = $Payload.toolName
+    if (-not $name) { $name = $Payload.tool_name }
+    if ($name -isnot [string]) { return $false }
+    if ($name -cin @('view', 'rg', 'glob')) { return Test-NativePreToolSources }
+    if (-not $PreparedMembership -or $name -cnotin @('powershell', 'pwsh')) { return $false }
+    if ($Payload.ContainsKey('toolArgs')) {
+        $args = $Payload['toolArgs']
+    } else {
+        $args = $Payload['tool_input']
+    }
+    $command = $args
+    if ($args -is [Collections.IDictionary]) { $command = $args['command'] }
+    if ($command -isnot [string] -or -not $command) {
+        return $false
+    }
+    return Test-NativePreToolSources -ShellCommand $command
+}
+"""
 
 
 def native_write_fixture_stderr(stderr):
     phases, errors = [], []
     for line in stderr.splitlines(keepends=True):
-        match = re.fullmatch(rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)\r?\n", line)
-        if match and match[2].decode("ascii") in NATIVE_WRITE_PHASES:
-            phases.append(f"{match[1].decode('ascii')} {match[2].decode('ascii')}")
+        match = re.fullmatch(
+            rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)"
+            rb"( cpu_ticks=[0-9]{1,20} utility=[01] web=[01])?\r?\n", line,
+        )
+        if (
+            match and match[2].decode("ascii") in NATIVE_WRITE_PHASES
+            and (not match[3] or match[2] in {b"json-web-load", b"json-resolver-type"})
+        ):
+            phases.append(
+                f"{match[1].decode('ascii')} {match[2].decode('ascii')}"
+                + (match[3].decode("ascii") if match[3] else "")
+            )
         else:
             errors.append(line)
     return "\n".join(phases), b"".join(errors)
@@ -86,18 +205,32 @@ def instrument_prepared_admission(source):
         ("prepared-marker-decoded", "        $scope = $value['scope']"),
     ):
         assert statement in source
-        source = source.replace(
-            statement, f"Write-NativeWriteFixturePhase '{boundary}'\n" + statement, 1,
+        writer = (
+            "Write-NativeWriteFixtureAssemblyState"
+            if boundary in {"json-web-load", "json-resolver-type"} else "Write-NativeWriteFixturePhase"
         )
-    return source
+        source = source.replace(statement, f"{writer} '{boundary}'\n" + statement, 1)
+    return NATIVE_WRITE_LOAD_WRITER + source
 
 
-def qualify_complete_native_entry(scripts, entry, executable, event, env, workspace, capsys):
+def qualify_complete_native_entry(
+    scripts, entry, executable, event, env, workspace, capsys, *, literal_read=False,
+    command_key="command",
+):
+    entry_started = time.monotonic()
+    shell_event = "toolCalls" not in event and event.get("toolName") == "powershell"
     source_names = (
         "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
         "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
         "pr_supersede_guard.py", "tool_call_forms.py", "guarded_anchor_map.py",
     )
+    if shell_event:
+        source_names += (
+            "hook_policy_process.py", "hook_client.py", "hook_pre_policy.py", "hook_pre_relevance.py",
+        )
+        for name in source_names:
+            if name not in {"pre-tool-hook.ps1", "managed-session.ps1"}:
+                assert (scripts / name).read_bytes() == (SCRIPTS / name).read_bytes()
     source_digests = {
         name: hashlib.sha256((SCRIPTS / name).read_bytes()).hexdigest() for name in source_names
     }
@@ -114,7 +247,7 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
         ("pre-tool-hook.ps1", "Test-NativePreToolRead",
          "[object]$Payload, [bool]$PreparedMembership = $false", "read-proof"),
         ("pre-tool-hook.ps1", "Test-NativePreToolSources",
-         "[bool]$WriteProof = $false", "source-proof"),
+         "[bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments", "source-proof"),
         ("pre-tool-hook.ps1", "Invoke-PreToolPolicy",
          "[string]$Python, [string]$Payload, [ref]$Diagnostic", "policy"),
     ):
@@ -134,19 +267,61 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
     instrumented["pre-tool-hook.ps1"] = instrumented["pre-tool-hook.ps1"].replace(
         script_entry, script_entry + "\nWrite-NativeWriteFixturePhase 'script-entry'", 1,
     )
+    if shell_event:
+        for phase, statement in (
+            ("runtime-start", "    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }"),
+            ("runtime-complete", "    $script:preToolBoundary = 'policy worker execution'"),
+        ):
+            assert instrumented["pre-tool-hook.ps1"].count(statement) == 1
+            instrumented["pre-tool-hook.ps1"] = instrumented["pre-tool-hook.ps1"].replace(
+                statement, f"Write-NativeWriteFixturePhase '{phase}'\n" + statement, 1,
+            )
     writer = "$global:nativeEntryClock=[Diagnostics.Stopwatch]::StartNew(); " + NATIVE_WRITE_PHASE_WRITER.replace(
         "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()", "$global:nativeEntryClock.ElapsedMilliseconds",
     )
     samples = []
-    protected = {**event, "toolCalls": [
-        *event["toolCalls"], {"name": "edit", "args": {"path": "efforts/private.md"}},
-    ]}
+    target = workspace / "efforts" / "private.md"
+    carrier = None
+    if shell_event:
+        carrier = "toolArgs" if "toolArgs" in event else "tool_input"
+        command = f'Set-Content "{target}" -Value "leak"'
+        protected = {**event, carrier: command if isinstance(event[carrier], str) else {"command": command}}
+        if command_key != "command":
+            protected[carrier] = {**event[carrier], command_key: command}
+    else:
+        protected = {**event, "toolCalls": [
+            *event["toolCalls"], {"name": "edit", "args": {"path": "efforts/private.md"}},
+        ]}
+
+    def report_progress(variant, state):
+        with capsys.disabled():
+            print(json.dumps({"complete_native_entry_progress": {
+                "shell": str(executable), "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
+                "argument_carrier": (
+                    carrier + (":raw" if isinstance(event[carrier], str) else ":object")
+                    if carrier else None
+                ),
+                "variant": variant, "state": state,
+                "command_key": command_key if shell_event else None,
+                "helper_seconds": time.monotonic() - entry_started,
+            }}), flush=True)
+
+    assert not target.exists()
     try:
         for variant, payload in (
             ("phase-free-before", event), ("attributed-read", event),
             ("phase-free-after", event), ("attributed-protected", protected),
         ):
             attributed = variant.startswith("attributed-")
+            native_literal = literal_read and variant == "attributed-read"
+            selected_contract = contract
+            if shell_event and variant != "attributed-protected" and not native_literal:
+                prior = json.loads(contract)
+                if any(key in prior for key in ("nativeShellReadCommands", "nativeShellReadDependencies")):
+                    prior.pop("nativeShellReadCommands", None)
+                    prior.pop("nativeShellReadDependencies", None)
+                    selected_contract = (json.dumps(prior, indent=2) + "\n").encode("utf-8")
+            (scripts / "hook-read-policy.json").write_bytes(selected_contract)
             for name, content in original.items():
                 (scripts / name).write_bytes(
                     instrumented[name].encode("utf-8") if attributed else content,
@@ -165,6 +340,7 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                     "catch { [Console]::Error.WriteLine($_.ToString()); [Console]::Error.WriteLine($e) }",
                 )
             command = (writer if attributed else "") + "try { " + command_entry + " } finally { " + tail + " }"
+            report_progress(variant, "command-start")
             started = time.monotonic()
             try:
                 result = subprocess.run(
@@ -194,6 +370,8 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                 "variant": variant, "outer_seconds": elapsed,
                 "shell_version": builds[0] if len(builds) == 1 else None,
                 "management_module_loaded": bool(management[0]) if len(management) == 1 else None,
+                "contract_sha256": hashlib.sha256(selected_contract).hexdigest(),
+                "literal_proof_present": "nativeShellReadCommands" in json.loads(selected_contract),
                 "phases_monotonic_ms": phases,
                 "stdout": result.stdout.decode("utf-8", errors="backslashreplace"), "validated": False,
             }
@@ -201,7 +379,9 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
             assert result.returncode == 0 and not errors, (variant, result.stdout, result.stderr)
             assert len(builds) == 1, (variant, builds, result.stderr)
             assert len(management) == 1, (variant, management, result.stderr)
-            assert bool(management[0]) is (variant == "attributed-protected"), (variant, sample)
+            assert bool(management[0]) is (
+                shell_event and not native_literal or variant == "attributed-protected"
+            ), (variant, sample)
             assert [tick for tick, _ in phases] == sorted(tick for tick, _ in phases), phases
             names = [name for _, name in phases]
             if attributed:
@@ -209,7 +389,13 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                     "command-entry", "script-entry", "admission-start", "admission-complete",
                     "read-proof-start",
                 ]
-                if variant == "attributed-read":
+                if shell_event and not native_literal:
+                    required += [
+                        "source-proof-start", "source-proof-complete", "read-proof-complete",
+                        "runtime-start", "runtime-complete",
+                        "policy-start", "policy-complete",
+                    ]
+                elif variant == "attributed-read":
                     required += ["source-proof-start", "source-proof-complete", "read-proof-complete"]
                 else:
                     required += [
@@ -222,19 +408,30 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
                 assert not phases, (variant, phases)
             if variant == "attributed-protected":
                 assert json.loads(result.stdout)["permissionDecision"] == "deny", result.stdout
+            elif shell_event and not native_literal:
+                assert json.loads(result.stdout) == {}, result.stdout
             else:
                 assert result.stdout == b"", result.stdout
-            assert (scripts / "hook-read-policy.json").read_bytes() == contract
+            assert not target.exists()
+            assert (scripts / "hook-read-policy.json").read_bytes() == selected_contract
             sample["validated"] = True
+            report_progress(variant, "validated")
     finally:
         for name, content in original.items():
             (scripts / name).write_bytes(content)
+        (scripts / "hook-read-policy.json").write_bytes(contract)
         with capsys.disabled():
             print(json.dumps({"complete_native_entry": {
                 "shell": str(executable),
                 "executable_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
                 "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
                 "source_sha256": source_digests, "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
+                "event_kind": "literal-shell-read" if literal_read else "shell-policy" if shell_event else "native-read",
+                "command_key": command_key if shell_event else None,
+                "argument_carrier": (
+                    carrier + (":raw" if isinstance(event[carrier], str) else ":object")
+                    if carrier else None
+                ),
                 "samples": samples, "complete": len(samples) == 4 and all(sample["validated"] for sample in samples),
                 "limits": "Fixture timing only; phases include instrumentation. Outer-minus-last-phase includes startup/exit and marker/module-observer overhead, not isolated startup. Ordered controls are not subtractive attribution or a latency distribution.",
             }}))
@@ -243,13 +440,22 @@ def qualify_complete_native_entry(scripts, entry, executable, event, env, worksp
 @pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
 def test_native_write_fixture_stderr_preserves_errors(newline):
     phase = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
+    before = b"NATIVE_WRITE_FIXTURE_PHASE 124 json-web-load cpu_ticks=250000 utility=1 web=0" + newline
+    after = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-resolver-type cpu_ticks=500000 utility=1 web=1" + newline
     errors = (
         newline + b"real error\xff" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 124 unknown-stage" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE invalid json-entry" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 127 json-web-load cpu_ticks=NaN utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 128 command-entry cpu_ticks=1 utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 129 json-web-load cpu_ticks=1 utility=1 web=2" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 130 json-web-load cpu_ticks=" + b"1" * 21 + b" utility=1 web=0" + newline
         + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
     )
-    assert native_write_fixture_stderr(phase + errors) == ("123 command-entry", errors)
+    assert native_write_fixture_stderr(phase + before + after + errors) == (
+        "123 command-entry\n124 json-web-load cpu_ticks=250000 utility=1 web=0\n"
+        "126 json-resolver-type cpu_ticks=500000 utility=1 web=1", errors,
+    )
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -261,7 +467,8 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
     if not executable:
         pytest.skip(f"{shell} is unavailable")
     command = (
-        NATIVE_WRITE_PHASE_WRITER
+        NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LOAD_WRITER
+        + "Write-NativeWriteFixtureAssemblyState 'json-web-load'; "
         + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
     )
     with pytest.raises(subprocess.TimeoutExpired) as captured:
@@ -270,7 +477,9 @@ def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
             input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
         )
     progress, errors = native_write_fixture_stderr(captured.value.stderr)
-    assert progress.endswith(" command-entry")
+    assert re.fullmatch(
+        r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+ utility=[01] web=[01]", progress,
+    ), progress
     assert errors == b"real fixture error\r\n"
     assert captured.value.stdout == b""
 
@@ -1161,6 +1370,34 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "batch-read-only-working-directory", "batch-read-only-real-policy",
     "cell-batch-read-only-real-policy",
     "batch-read-only-attribution", "cell-batch-read-only-attribution",
+    "shell-entry-attribution", "cell-shell-entry-attribution",
+    "literal-shell-entry-attribution", "cell-literal-shell-entry-attribution",
+    "literal-shell-head", "cell-literal-shell-head",
+    "literal-shell-args", "literal-shell-json", "literal-shell-ordinal",
+    "literal-shell-old-proof", "cell-literal-shell-old-proof",
+    "literal-shell-invalid-proof", "literal-shell-relevance-drift",
+    "literal-shell-unprepared", "literal-shell-batch", "literal-shell-prior-reader",
+    "literal-shell-key-command", "literal-shell-key-name",
+    "literal-shell-key-args", "literal-shell-key-collision",
+    "literal-shell-carrier-raw-attribution", "cell-literal-shell-carrier-raw-attribution",
+    "literal-shell-carrier-input-attribution", "cell-literal-shell-carrier-input-attribution",
+    "literal-shell-carrier-input-raw-attribution", "cell-literal-shell-carrier-input-raw-attribution",
+    "literal-shell-carrier-primary-null", "literal-shell-carrier-primary-invalid",
+    "literal-shell-carrier-primary-empty", "literal-shell-carrier-primary-safe",
+    "literal-shell-carrier-primary-protected", "literal-shell-carrier-input-json",
+    "literal-shell-carrier-input-batch",
+    "literal-shell-selection-cmd-attribution", "cell-literal-shell-selection-cmd-attribution",
+    "literal-shell-selection-input-attribution", "cell-literal-shell-selection-input-attribution",
+    "literal-shell-selection-script", "literal-shell-selection-commandLine",
+    "literal-shell-selection-commandline", "literal-shell-selection-skip-null",
+    "literal-shell-selection-skip-invalid", "literal-shell-selection-protected-first",
+    "literal-shell-selection-whitespace-first", "literal-shell-selection-shadowed-members",
+    "literal-shell-selection-case", "literal-shell-selection-json", "literal-shell-selection-batch",
+    "literal-shell-selection-old-proof", "literal-shell-selection-old-proof-command",
+    "literal-shell-selection-invalid-empty", "literal-shell-selection-invalid-type",
+    "literal-shell-selection-invalid-member", "literal-shell-selection-invalid-duplicate",
+    "literal-shell-selection-invalid-overflow",
+    "literal-shell-selection-prior-reader", "literal-shell-selection-prior-reader-command",
     "cell-batch-mixed", "cell-batch-protected",
     "structured-files", "structured-changes", "structured-only", "structured-json",
     "structured-aliases", "structured-duplicates", "structured-limit",
@@ -1192,7 +1429,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "real-policy", "batch-real-policy", "structured-real-policy", "write-name-real-policy",
         "patch-real-policy", "batch-read-only-real-policy",
         "batch-read-only-attribution",
-    }
+        "shell-entry-attribution", "literal-shell-entry-attribution",
+    } or case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -1449,6 +1687,108 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 event["toolCalls"][-1].update(Keys=[], cwd=str(workspace))
             elif case == "batch-read-only-working-directory":
                 event["workingDirectory"] = event.pop("cwd")
+    if case in {"shell-entry-attribution", "literal-shell-entry-attribution"} or (
+        case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
+    ):
+        event.update(toolName="powershell", toolArgs={"command": "Get-Location"})
+        if case != "shell-entry-attribution":
+            event["toolArgs"]["description"] = "Read the current fixture location"
+        if case == "literal-shell-carrier-raw-attribution":
+            event["toolArgs"] = "Get-Location"
+        elif case == "literal-shell-carrier-input-attribution":
+            event["tool_input"] = event.pop("toolArgs")
+        elif case == "literal-shell-carrier-input-raw-attribution":
+            event.pop("toolArgs")
+            event["tool_input"] = "Get-Location"
+        elif case == "literal-shell-selection-cmd-attribution":
+            event["toolArgs"] = {"command": "", "cmd": "Get-Location", "input": "Set-Content ignored"}
+        elif case == "literal-shell-selection-input-attribution":
+            event.pop("toolArgs")
+            event["tool_input"] = {
+                "command": None, "cmd": False, "script": [], "commandLine": 0,
+                "commandline": "", "input": "Get-Location", "description": "Fixture read",
+            }
+    elif case.startswith("literal-shell-"):
+        event.update(toolName="powershell", toolArgs={"command": "Get-Location", "description": "Fixture read"})
+        protected_command = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
+        if case == "literal-shell-head":
+            event.update(toolName="pwsh", toolArgs={
+                "command": "pwd", "description": "Fixture location",
+                "cmd": protected_command,
+            })
+        elif case == "literal-shell-args":
+            event["toolArgs"]["command"] += " ."
+        elif case == "literal-shell-json":
+            event["toolArgs"] = json.dumps(event["toolArgs"])
+        elif case == "literal-shell-ordinal":
+            event["toolArgs"]["command"] += "\u00ad"
+        elif case == "literal-shell-batch":
+            event["toolCalls"] = [
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "powershell", "args": {"command": protected_command}},
+            ]
+        elif case == "literal-shell-key-command":
+            event["toolArgs"] = {"Command": "Get-Location", "cmd": protected_command}
+        elif case == "literal-shell-key-name":
+            event.pop("toolName")
+            event.update(ToolName="powershell", tool_name="edit")
+            event["toolArgs"]["path"] = "efforts/private.md"
+        elif case == "literal-shell-key-args":
+            event["ToolArgs"] = event.pop("toolArgs")
+            event["tool_input"] = {"command": protected_command}
+        elif case == "literal-shell-key-collision":
+            event["toolArgs"] = {"command": protected_command, "Command": "Get-Location"}
+        elif case.startswith("literal-shell-carrier-primary-"):
+            event["tool_input"] = {"command": protected_command}
+            if case == "literal-shell-carrier-primary-null":
+                event["toolArgs"] = None
+            elif case == "literal-shell-carrier-primary-invalid":
+                event["toolArgs"] = False
+            elif case == "literal-shell-carrier-primary-empty":
+                event["toolArgs"] = ""
+            elif case == "literal-shell-carrier-primary-protected":
+                event["toolArgs"] = protected_command
+                event["tool_input"] = {"command": "Get-Location"}
+        elif case == "literal-shell-carrier-input-json":
+            event["tool_input"] = json.dumps(event.pop("toolArgs"))
+        elif case == "literal-shell-carrier-input-batch":
+            event.pop("toolArgs")
+            event["tool_input"] = "Get-Location"
+            event["toolCalls"] = [
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "powershell", "args": {"command": protected_command}},
+            ]
+        elif case.startswith("literal-shell-selection-"):
+            event["toolArgs"] = {"cmd": "Get-Location", "description": "Fixture read"}
+            if case in {
+                "literal-shell-selection-script", "literal-shell-selection-commandLine",
+                "literal-shell-selection-commandline",
+            }:
+                key = case.removeprefix("literal-shell-selection-")
+                event["toolArgs"] = {key: "Get-Location"}
+            elif case == "literal-shell-selection-skip-null":
+                event["toolArgs"]["command"] = None
+            elif case == "literal-shell-selection-skip-invalid":
+                event["toolArgs"]["command"] = {"command": protected_command}
+            elif case == "literal-shell-selection-protected-first":
+                event["toolArgs"]["command"] = protected_command
+            elif case == "literal-shell-selection-whitespace-first":
+                event["toolArgs"]["command"] = " "
+            elif case == "literal-shell-selection-shadowed-members":
+                event["toolArgs"].update(Count=0, Keys=[], ContainsKey=False, get_Keys=None)
+            elif case == "literal-shell-selection-case":
+                event["toolArgs"] = {"CommandLine": "Get-Location", "cmd": protected_command}
+            elif case == "literal-shell-selection-json":
+                event["toolArgs"] = json.dumps(event["toolArgs"])
+            elif case == "literal-shell-selection-batch":
+                event["toolCalls"] = [
+                    {"name": "view", "args": {"path": "read.txt"}},
+                    {"name": "powershell", "args": {"command": protected_command}},
+                ]
+            elif case in {
+                "literal-shell-selection-old-proof-command", "literal-shell-selection-prior-reader-command",
+            }:
+                event["toolArgs"] = {"command": "Get-Location", "cmd": protected_command}
     env = environment(tmp_path, workspace)
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
@@ -1515,7 +1855,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         case.startswith(("personal-state", "protected-write-name-")) or case in PATCH_PROTECTED_CASES or case in {
             "anchor-cwd", "anchor-target", "delegated", "patch-anchor",
             "batch-protected", "batch-multiple-targets", "batch-structured",
-            "structured-protected", "batch-read-only-protected",
+            "structured-protected", "batch-read-only-protected", "literal-shell-batch",
+            "literal-shell-key-command", "literal-shell-key-name",
+            "literal-shell-key-args", "literal-shell-key-collision",
+            "literal-shell-carrier-primary-protected", "literal-shell-carrier-input-batch",
+            "literal-shell-selection-protected-first", "literal-shell-selection-case",
+            "literal-shell-selection-batch",
         }
     ), decisions
     map_path = reader.map_path(workspace, registry)
@@ -1570,11 +1915,13 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
         "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
         "pr_supersede_guard.py", "guarded_anchor_map.py", "tool_call_forms.py",
+        "hook_pre_relevance.py",
     ):
         shutil.copyfile(SCRIPTS / name, scripts / name)
     drift = {
         "guard-drift": "anchor_write_guard.py", "reader-drift": "guarded_anchor_map.py",
         "forms-drift": "tool_call_forms.py", "batch-read-only-forms-drift": "tool_call_forms.py",
+        "literal-shell-relevance-drift": "hook_pre_relevance.py",
     }.get(case)
     if drift:
         with (scripts / drift).open("a", encoding="utf-8") as output:
@@ -1583,6 +1930,26 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         policy = scripts / "hook-read-policy.json"
         value = json.loads(policy.read_text(encoding="utf-8"))
         value.pop("nativeWriteDependencies", None)
+        policy.write_text(json.dumps(value), encoding="utf-8")
+    elif case in {"literal-shell-old-proof", "literal-shell-invalid-proof"}:
+        policy = scripts / "hook-read-policy.json"
+        value = json.loads(policy.read_text(encoding="utf-8"))
+        if case == "literal-shell-old-proof":
+            value.pop("nativeShellReadCommands")
+            value.pop("nativeShellReadDependencies")
+        else:
+            value["nativeShellReadCommands"].append(False)
+        policy.write_text(json.dumps(value), encoding="utf-8")
+    elif case.startswith(("literal-shell-selection-old-proof", "literal-shell-selection-invalid-")):
+        policy = scripts / "hook-read-policy.json"
+        value = json.loads(policy.read_text(encoding="utf-8"))
+        if case.startswith("literal-shell-selection-old-proof"):
+            value.pop("nativeShellReadCommandKeys")
+        else:
+            value["nativeShellReadCommandKeys"] = {
+                "empty": [], "type": "cmd", "member": ["command", False],
+                "duplicate": ["cmd", "cmd"], "overflow": [f"key-{index}" for index in range(129)],
+            }[case.removeprefix("literal-shell-selection-invalid-")]
         policy.write_text(json.dumps(value), encoding="utf-8")
     observed = tmp_path / "policy-input"
     (scripts / "resolve-runtime.ps1").write_text(
@@ -1619,7 +1986,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 "        throw 'Unexpected inventory filesystem probe'\n    }\n"
                 "    return & $script:originalPreparedPath $Path\n}\n",
             )
-    if case in {"old-admission", "batch-read-only-old-admission"}:
+    if case in {"old-admission", "batch-read-only-old-admission", "literal-shell-unprepared"}:
         admission = scripts / "managed-session.ps1"
         admission.write_text(
             admission.read_text(encoding="utf-8").replace(
@@ -1644,11 +2011,26 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         )
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
-    if case == "batch-read-only-attribution":
-        qualify_complete_native_entry(scripts, entry["powershell"], executable, event, env, workspace, capsys)
+    if case in {"batch-read-only-attribution", "shell-entry-attribution", "literal-shell-entry-attribution"} or (
+        case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
+    ):
+        qualify_complete_native_entry(
+            scripts, entry["powershell"], executable, event, env, workspace, capsys,
+            literal_read=case.startswith("literal-shell-"),
+            command_key=(
+                "cmd" if case == "literal-shell-selection-cmd-attribution" else
+                "input" if case == "literal-shell-selection-input-attribution" else "command"
+            ),
+        )
         assert not membership.exists()
         return
     native_entry = scripts / "pre-tool-hook.ps1"
+    if case == "literal-shell-prior-reader" or case.startswith("literal-shell-selection-prior-reader"):
+        source = native_entry.read_text(encoding="utf-8")
+        boundary = "\ntry {\n    $reader = [IO.StreamReader]"
+        assert source.count(boundary) == 1
+        reader = NATIVE_READ_V1 if case == "literal-shell-prior-reader" else NATIVE_SHELL_READ_V1
+        native_entry.write_text(source.replace(boundary, "\n" + reader + boundary, 1), encoding="utf-8")
     # Fixture-only markers classify a timeout without retrying or extending the child.
     instrumented = native_entry.read_text(encoding="utf-8")
     for boundary, source in (
@@ -1704,6 +2086,12 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "batch-target-limit",
         "batch-read-only", "batch-read-only-mixed", "batch-read-only-limit",
         "batch-read-only-working-directory", "batch-read-only-real-policy",
+        "literal-shell-head",
+        "literal-shell-carrier-primary-safe",
+        "literal-shell-selection-script", "literal-shell-selection-commandLine",
+        "literal-shell-selection-commandline", "literal-shell-selection-skip-null",
+        "literal-shell-selection-skip-invalid", "literal-shell-selection-shadowed-members",
+        "literal-shell-selection-old-proof-command", "literal-shell-selection-prior-reader-command",
     })
     assert observed.exists() is policy_required, result.stdout
     if policy_required:
@@ -1711,6 +2099,23 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         assert json.loads(result.stdout)["permissionDecision"] == "deny"
     else:
         assert result.stdout == b""
+    if case == "literal-shell-prior-reader":
+        observed.unlink()
+        read_event = {**event, "toolName": "view", "toolArgs": {"path": "read.txt"}}
+        prior_read = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
+            input=json.dumps(read_event).encode("utf-8"), capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+        _, prior_read.stderr = native_write_fixture_stderr(prior_read.stderr)
+        assert prior_read.returncode == 0 and not prior_read.stderr and prior_read.stdout == b""
+        assert not observed.exists()
+    if case == "patch-protected-input":
+        with capsys.disabled():
+            print(json.dumps({
+                "shell": shell, "case": case, "start_ms": started_ms,
+                "native_entry_seconds": native_seconds, "phases": progress.splitlines(),
+            }))
     if real_policy:
         contract = scripts / "hook-read-policy.json"
         value = json.loads(contract.read_text(encoding="utf-8"))

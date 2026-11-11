@@ -582,13 +582,20 @@ inventories. Point-of-use execution and mutation admission remain separate.
 
 Worktree Manager's [Repositories Configuration section](docs/repositories-configuration.md)
 uses the native read/preview/apply CLI to inspect registration, routes, state
-binding and tracked pairs. Its only editable setting is the machine-local
-future-launch Copilot login preference; it does not log in or launch agents.
+binding and tracked pairs. It edits the machine-local future-launch Copilot
+login preference and offers separately confirmed remote-checkout acquisition,
+local knowledge registration and binding actions. It does not log in, execute
+downloaded setup code or launch agents.
 
 The standalone [repository authentication inspection](docs/repository-authentication.md)
 separately observes an explicitly configured GitHub account and repository API
 access. It does not acquire credentials or certify Git, Copilot, MCP or complete
 onboarding readiness.
+
+The standalone [registration/provider preflight](docs/repository-registration-preflight.md)
+adds canonical/discovered selection and bounded server default-branch policy
+observations. Unknown or inaccessible policy never implies direct publication;
+this optional read does not add a gate to local binding.
 
 ## Independent Execution Spaces
 
@@ -660,6 +667,11 @@ owners, including already-running daemons. Removing that compatibility barrier
 requires separately qualified peer support; source publication alone does not
 activate different-worktree launch parallelism. The new lease is distinct from
 seed/native admission and the Windows mux check/create lease.
+
+Deferred Windows launches serialize the final canonical PowerShell setup argv
+through the same one-shot manifest used by mux startup. This preserves literal
+drive-qualified arguments and option-leading prompts across `pwsh -File`;
+it does not change the selected admission, seed or conversation owner.
 
 ### Explicit restart Resume
 

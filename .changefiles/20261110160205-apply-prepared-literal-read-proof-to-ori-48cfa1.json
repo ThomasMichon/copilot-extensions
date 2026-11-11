@@ -1,0 +1,9 @@
+{
+  "comment": "Apply prepared literal read proof to original raw and fallback argument carriers",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

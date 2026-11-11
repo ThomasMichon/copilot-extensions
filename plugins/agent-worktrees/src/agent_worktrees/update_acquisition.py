@@ -86,6 +86,7 @@ def _run_install(
     argv: list[str], identity: str, *, cwd: Path | None, timeout: float,
     env: Mapping[str, str] | None = None, custody: ActivationCustody | None = None,
     runner: Callable[..., subprocess.CompletedProcess[str]] | None = None,
+    auth_context: Path | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Preserve activation using the caller's bounded executor.
 
@@ -120,7 +121,8 @@ def _run_install(
             )
             result = _auth.run_acquisition(
                 runner or _run_update, argv,
-                context=cwd, marketplace=identity.rpartition("@")[2],
+                context=auth_context if auth_context is not None else cwd,
+                marketplace=identity.rpartition("@")[2],
                 cwd=cwd, timeout=remaining, **environment, **settlement,
             )
         except _QuiescentPayloadTimeout:
@@ -192,6 +194,30 @@ def acquire(
         return status
 
 
+def _run_revalidated(
+    *args, revalidate: Callable[[], None], started: float, **kwargs,
+) -> subprocess.CompletedProcess[str]:
+    from . import activation_preservation, installer_run
+
+    deadline = monotonic() + kwargs["timeout"]
+    try:
+        revalidate()
+    except (ValueError, OSError, RuntimeError) as error:
+        raise installer_run.InstallerLaunchError(
+            "payload selection changed before acquisition"
+        ) from error
+    now = monotonic()
+    reserve = activation_preservation.SETTLEMENT_RETRY_RESERVE_S + (
+        installer_run._REAP_GRACE_S if _WINDOWS else _POSIX_CLEANUP_S
+    )
+    kwargs["timeout"] = min(deadline - now, _TOTAL_BUDGET_S - (now - started) - reserve)
+    if kwargs["timeout"] <= 0:
+        raise installer_run.InstallerLaunchError("payload acquisition budget exhausted")
+    if _WINDOWS:
+        kwargs["native_write_deadline"] = now + kwargs["timeout"]
+    return _run_update(*args, **kwargs)
+
+
 def acquire_missing(
     name: str, marketplace: str, copilot: str, *, cwd: Path,
     revalidate: Callable[[], None], copilot_home: Path,
@@ -203,13 +229,7 @@ def acquire_missing(
     started = monotonic()
 
     def checked_runner(*args, **kwargs):
-        try:
-            revalidate()
-        except (ValueError, OSError) as error:
-            raise installer_run.InstallerLaunchError(
-                "payload selection changed before acquisition"
-            ) from error
-        return _run_update(*args, **kwargs)
+        return _run_revalidated(*args, revalidate=revalidate, started=started, **kwargs)
 
     try:
         with activation_preservation.activation_custody(home=copilot_home) as custody:
@@ -236,6 +256,45 @@ def acquire_missing(
         ))
         return f"payload install failed (exit {result.returncode})"
     return "OK (installed)"
+
+
+def acquire_prepared(
+    source: str, definition: dict, copilot: str, *, cwd: Path,
+    staging: Path, revalidate: Callable[[], None],
+) -> str:
+    """Compose the existing isolated source installer with owned execution."""
+    from plugin_resolve.preparation import prepare_payload
+    from plugin_resolve.plugin_auth import plugin_management_environment
+    from . import activation_preservation, installer_run
+
+    started = monotonic()
+    auth_context = cwd
+
+    def authentication(definition, environment, context):
+        if not _auth.marketplace_auth_enabled(context, source.rpartition("@")[2]):
+            return dict(environment)
+        return plugin_management_environment(definition, environment, context)
+
+    def run(argv, *, env, cwd, timeout, **_kwargs):
+        remaining = min(timeout, _TOTAL_BUDGET_S - (monotonic() - started))
+        if remaining <= 0:
+            raise installer_run.InstallerLaunchError("payload acquisition budget exhausted")
+
+        def checked(*args, **kwargs):
+            return _run_revalidated(*args, revalidate=revalidate, started=started, **kwargs)
+
+        with activation_preservation.activation_custody(home=Path(env["COPILOT_HOME"])) as custody:
+            return _run_install(
+                argv, source, cwd=cwd, timeout=remaining, env=env,
+                custody=custody, runner=checked, auth_context=auth_context,
+            )
+
+    prepare_payload(
+        source, definition, staging=staging, repo=cwd,
+        copilot_command=(copilot,), environment=dict(os.environ),
+        runner=run, check_cancelled=revalidate, authentication=authentication,
+    )
+    return "OK (prepared)"
 
 
 def _acquire(

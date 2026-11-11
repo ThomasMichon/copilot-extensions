@@ -66,8 +66,8 @@ def _spawn(keeper, backend, root):
 def attach(handle, bridge, admission, *, ensure=True):
     """Prepare an adopted conduit without changing ordinary forwarder selection.
 
-    Existing caller syntax stays unchanged. Until native qualification completes,
-    no ordinary launcher invokes this internal path. A keeper connect failure
+    Default caller selection stays unchanged. An explicit owner CLI handoff can
+    invoke this path. A keeper connect failure
     must never escape as authority to delete a healthy backend's fixed handle.
     """
     if not isinstance(admission, incoming.Admission):
@@ -109,7 +109,7 @@ def run_adopted(handle, bridge, *, owner_pid, owner_birth):
 
     The originating launcher supplies its own native identity before any shim
     can exit. Unsupported or unverifiable ownership refuses before custody
-    startup; ordinary forwarders do not select this entrypoint yet.
+    startup; default forwarders do not select this entrypoint.
     """
     from .custody_lifetime import SessionOwner
 

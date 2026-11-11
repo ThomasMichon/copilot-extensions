@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the Configuration acquisition, separate registration/binding, and prior-provider consumer contracts.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

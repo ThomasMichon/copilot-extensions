@@ -1,0 +1,21 @@
+{
+  "comment": "Add an explicitly selected public SDK headless backend to the shared Driver Host while preserving native ACP defaults and unavailable automatic idle retirement.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -89,6 +89,174 @@ written. Unrecognized local registry metadata is preserved by this API.
 YAML aliases are detached at the selected registration before an edit, so
 unselected registrations and metadata cannot change through shared mappings.
 
+## Acquire a remote knowledge checkout
+
+For an eligible unbound, canonically registered worktree-class stateless harness,
+**Acquire a remote knowledge checkout only** downloads an existing repository
+to an absent absolute destination. This uses the shared repository-bootstrap
+acquisition owner, not `repos setup`: it neither reference-registers the
+checkout nor inspects or executes its repository setup.
+
+```text
+agent-worktrees repos configuration knowledge-acquire-preview --context-project sample --repository-url https://github.com/example/knowledge.git --checkout-path <absolute-new-checkout>
+agent-worktrees repos configuration knowledge-acquire-apply --context-project sample --repository-url https://github.com/example/knowledge.git --checkout-path <absolute-new-checkout> --preview-token <returned-token>
+```
+
+Preview performs only local inspection. It rejects credential-bearing or
+parameterized URLs, unsupported transports, configured Git URL rewrites,
+existing destinations, indirect ancestors, nested Git repositories and
+registered name/path/provider-identity collisions. The parent must already
+exist. Preview creates no target or lock, contacts no provider and observes no
+credential. Its token binds the selected installation, machine, project,
+normalized URL/path, parent identity, native registry/configuration/policy and
+nonsecret account selection. Malformed binding inputs are not treated as unbound.
+
+Confirmation defaults to Cancel. Apply revalidates the token under the shared
+registry serialization and reserves the destination through exclusive directory
+creation before the shared hooks-disabled clone. A concurrent destination winner
+is preserved, not replaced. Only the configured noninteractive credential route
+is retained: terminal, askpass and GCM browser/device prompts are disabled.
+Explicit account selection requires the shared qualified credential owner; it
+never falls back to ambient credentials. Public access without a credential
+remains supported. No login, account switch, token copying or credential pin
+is added.
+
+Preview and apply have aggregate 18/26-second native budgets, each including a
+two-second cleanup reserve inside the Manager's 30-second action deadline.
+One caller-owned headless worker encloses local Git, clone and credential
+descendants; a timeout does not renew their clocks. Large/slow acquisitions
+may exceed this finite lane. Nonzero Git exit, cancellation, timeout, lost
+receipt, changed native inputs or failed final source qualification report
+failure/incomplete state with the unfinished stage and target presence
+(or unknown presence). Lost or invalid native completion is a sanitized failure,
+not proof that cleanup completed. An unconfirmed native cleanup propagates its
+original `OwnedCleanupError`, including process/Job, retained resources and retry
+operation, through the in-process failure boundary. Callers must retain and
+settle that owner before another attempt; it is not reduced to a PID-only receipt.
+No partial checkout is deleted, reset or retried.
+Inspect local ownership read-only with
+`repos registration inspect --anchor <destination> --default-name <intended-name>`
+before choosing recovery; that inspection does not qualify source completeness.
+
+Success returns `status: acquired`, canonical checkout and acquired commit.
+The source remains unregistered; native registry/configuration and provider
+policy are unchanged apart from normal local registry-lock sidecars. It is
+not bound, paired, launched or New-ready. Refresh, then use the separately
+confirmed local-registration action below with explicit branch/account
+metadata, followed by separate binding confirmation.
+
+The executing version-1 catalog advertises this optional action through its
+dedicated `knowledge_acquisition_available` row/marker. Older providers omit it;
+a newer manifest does not emit acquisition syntax without that marker.
+Older manifests retain registration/binding behavior. Missing or rolled-back
+support affects only acquisition; there is no effectful fallback/replay.
+Hosts that substitute an empty preview token refuse before acquisition.
+Ordinary `repos setup`, including attended authentication, immutable commit
+selection and reference registration, retains its existing defaults.
+
+## Create a personal private knowledge repository
+
+The standalone native owner supports explicitly confirmed personal-private
+GitHub creation for an eligible unbound stateless harness. Hosted creation is
+optional: public foundation installation, local-only storage and existing
+acquisition/registration/binding do not require personal GitHub sign-in.
+Organization destinations and other providers are unsupported.
+
+```text
+agent-worktrees repos configuration knowledge-create-preview --context-project sample --repository-url https://github.com/chosen-login/knowledge
+agent-worktrees repos configuration knowledge-create-apply --context-project sample --repository-url https://github.com/chosen-login/knowledge --preview-token <returned-token>
+agent-worktrees repos configuration knowledge-create-inspect --context-project sample --repository-url https://github.com/chosen-login/knowledge --creation-receipt <returned-receipt>
+agent-worktrees repos configuration knowledge-protect-preview --context-project sample --repository-url https://github.com/chosen-login/knowledge --creation-receipt <returned-receipt>
+agent-worktrees repos configuration knowledge-protect-apply --context-project sample --repository-url https://github.com/chosen-login/knowledge --creation-receipt <returned-receipt> --preview-token <returned-token>
+```
+
+The canonical registry selects an explicit repository account, owner mapping
+or configured default. The named GitHub CLI store entry is acquired and its
+authenticated user verified without ambient fallback, sign-in or a global
+account switch. The requested personal namespace must match that user.
+Preview performs bounded provider reads only; it creates no receipt, lock,
+repository, credential or configuration. A metadata 404 is not proof of
+absence: the authenticated-user create endpoint independently rejects an
+existing name, which this operation never adopts or overwrites.
+
+The nested proposal is version 2, scope `remote-repository`, with operation
+`create` or `protect-default`; version-1 machine-local set/reset is unchanged.
+Its token binds the installation, machine, project, registry/configuration,
+account selection, exact target and current observed repair state. Apply
+revalidates before effects under the native registry lock. Native inventory
+advertises `knowledge_repository_creation: 1` from the executing runtime,
+not the marketplace payload. This provider-first delivery does not yet expose
+a catalog action or Manager form. Older consumers retain their existing
+operations; an unsupported remote-proposal version must refuse before apply.
+
+Creation makes one POST to the authenticated user's repository endpoint with
+private visibility and initial README creation. The returned private personal
+identity and provider-selected default branch are qualified, not inferred as
+`main`. Equivalent active classic/ruleset deletion and non-fast-forward
+safeguards with no applicable bypass are recognized without adding a policy.
+If missing, a separate POST adds only an active default-branch ruleset with
+`deletion`, `non_fast_forward`, no bypass actors and no feature-branch or PR
+requirement. Complete effective policy, rule details and exact repository
+identity are re-read before protection is reported verified. Incomplete pages,
+denied reads, disabled/evaluate rules, identity/branch drift and unsupported
+private-repository plans cannot establish protection.
+
+Creation and protection are not atomic. Before the first POST, the owner
+persists a sanitized attempt receipt below this installation's native
+project directory, in `knowledge-creation/<receipt>.json`. This is local
+operation evidence, not registration, binding or a credential. A confirmed
+creation is retained independently of its later policy result. Timeout,
+cancellation, nonzero provider exit, malformed/lost response and unconfirmed
+cleanup preserve partial or unknown outcomes; no operation automatically
+replays, renames, deletes a repository, changes visibility or rolls back policy.
+The same creation target cannot be retried through a fresh create preview.
+The durable key binds the validated installation registry, project and
+case-insensitive repository identity, not a versioned runtime directory.
+Runtime updates and rollback retain receipt lookup and replay prevention;
+preview tokens still bind the currently executing runtime and require refresh.
+
+Inspect the existing receipt and provider read-only first. Inspection reports
+current metadata/policy separately without promoting unknown creation into
+authorization to alter an existing repository. The protect operations require
+this owner's confirmed creation, independently revalidate the current
+account/private identity/default branch/policy, and require a new confirmation.
+Receipt changes under a waiting confirmation refuse before mutation. After a
+failed protection attempt, a fresh observation/confirmation is distinct from
+replaying the previous token. The original creation outcome remains preserved.
+Missing credentials, repository lookup failures and denied policy reads retain
+the prior receipt and any completed metadata observation, alongside sanitized
+current observation failures. They report incomplete inspection without
+changing the stored original outcome. Protection repair starts incomplete even
+from a formerly successful receipt, including the record saved before its
+POST, and becomes successful only after final verified safeguards.
+Inspection also compares current metadata with a confirmed creation's original
+repository ID and default branch; drift is incomplete, not another protected
+creation. Repository slugs use GitHub's case-insensitive identity in stored and
+observed metadata, while IDs and default-branch names remain exact.
+Existing receipt inspection and separately confirmed protection repair remain
+available after the harness acquires its knowledge binding. They retain
+canonical project/composition, current account and original receipt/identity
+checks; they never change that binding. New creation, acquisition and local
+registration keep their existing unbound-harness admission.
+
+Preview/inspection and apply use aggregate 18/26-second budgets with a
+two-second cleanup reserve, enclosing provider children, all policy pages and
+local configuration checks. Captured bytes and pages are capped. Full local
+composition is revalidated at effect/qualification boundaries, not repeated
+for every policy page; child checkpoints retain the same aggregate deadline.
+Unconfirmed in-process cleanup retains the original `OwnedCleanupError` and
+its custody; a lost outer completion reports unknown cleanup, not success.
+No daemon, background enrollment or provider retry loop is added.
+
+Only verified private identity plus safeguards returns `created`/`protected`.
+An incomplete receipt exits nonzero; read-only inspection retains that original
+outcome while adding separate current observations. Even verified completion
+does not clone, register, bind, allocate a pair/worktree, launch or make New
+ready. Continue through separate acquisition, registration and binding
+confirmations. Synthetic provider/process tests are not live GitHub enforcement
+or installed-runtime qualification; live creation and destructive branch trials
+need an independently authorized disposable target.
+
 ## Register an existing local knowledge checkout
 
 For a canonically registered, worktree-class, unbound stateless harness, the native catalog

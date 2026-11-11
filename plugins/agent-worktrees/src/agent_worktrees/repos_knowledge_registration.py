@@ -103,15 +103,13 @@ def _checkout(path: str, branch: str, budget: OwnedExecutionBudget) -> dict:
     }
 
 
-def _selection(project: str, name: str, path: str, branch: str, account: str, budget) -> tuple[dict, repos.ReposRegistry]:
+def context_selection(project: str, *, require_unbound: bool = True) -> tuple[dict, repos.ReposRegistry]:
+    """Resolve canonical context; new setup operations require it unbound."""
     from .repos_configuration_catalog import inspect_project
     from .repos_knowledge_configuration import binding_names_supported
 
-    if (
-        project != resource_name(project) or name != resource_name(name)
-        or not binding_names_supported(project, name) or name == project
-    ):
-        raise ConfigurationError("invalid-registration-name", "Choose distinct exact harness and knowledge names.")
+    if project != resource_name(project) or not binding_names_supported(project, project):
+        raise ConfigurationError("invalid-registration-name", "Choose an exact harness name.")
     registry = repos.read_registry(strict=True)
     fingerprint([repos._repos_yaml_path()])
     if project not in registry.repos:
@@ -119,13 +117,29 @@ def _selection(project: str, name: str, path: str, branch: str, account: str, bu
     if registry.repos[project].repo_class != "worktree":
         raise ConfigurationError("context-not-worktree", "Knowledge registration requires a worktree-class harness.")
     inspection = inspect_project(project, "")
-    if not eligible(inspection):
+    if require_unbound and not eligible(inspection):
         raise ConfigurationError("knowledge-registration-unavailable", "Registration requires an unbound stateless harness.")
+    if not require_unbound and inspection.findings:
+        raise ConfigurationError("knowledge-recovery-unavailable", "Native harness composition requires owner inspection.")
     config = cfg.load_project_config(project, include_control_plane_related_pr=False)
+    policy = cfg._load_inrepo_config(config.default_repo.anchor, strict=True)
+    return {
+        "anchor": config.default_repo.anchor, "registry_revision": registry._baseline,
+        "configuration_revision": defaults(project).revision,
+        "policy_revision": hashlib.sha256(yaml.safe_dump(policy, sort_keys=True).encode()).hexdigest(),
+    }, registry
+
+
+def _selection(project: str, name: str, path: str, branch: str, account: str, budget) -> tuple[dict, repos.ReposRegistry]:
+    from .repos_knowledge_configuration import binding_names_supported
+
+    if name != resource_name(name) or not binding_names_supported(project, name) or name == project:
+        raise ConfigurationError("invalid-registration-name", "Choose distinct exact harness and knowledge names.")
+    context, registry = context_selection(project)
     selected = _checkout(path, branch, budget)
     root = Path(selected["path"])
     checkout_paths = {root, (root / ".git").resolve()}
-    if Path(config.default_repo.anchor).resolve() in checkout_paths:
+    if Path(context["anchor"]).resolve() in checkout_paths:
         raise ConfigurationError("registration-conflict", "The harness cannot be its own knowledge repository.")
     for existing_name, entry in registry.repos.items():
         if existing_name.casefold() == name.casefold() or (
@@ -139,12 +153,9 @@ def _selection(project: str, name: str, path: str, branch: str, account: str, bu
                 raise ConfigurationError("registry-identity-unavailable", "A registered origin needs owner inspection.") from error
             if existing_id == selected["repository_id"]:
                 raise ConfigurationError("registration-conflict", "The repository identity is already registered.")
-    policy = cfg._load_inrepo_config(config.default_repo.anchor, strict=True)
     selected.update(
         name=name, default_branch=branch, account=identity(account, allow_empty=True),
-        target=action_target(project), registry_revision=registry._baseline,
-        configuration_revision=defaults(project).revision,
-        policy_revision=hashlib.sha256(yaml.safe_dump(policy, sort_keys=True).encode()).hexdigest(),
+        target=action_target(project), **context,
     )
     if time.monotonic() >= budget.execution_deadline:
         raise TimeoutError("Local registration inspection budget expired.")

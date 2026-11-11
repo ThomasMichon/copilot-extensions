@@ -158,8 +158,8 @@
     }
   },
   "producers": {
-    "scripts": "fa8c61e473744d3089736f96c2ffa259f4164f16f7ae63a8caca32711506dff4",
-    "src": "6ff417d734d798d079b74edaf43aaf9493d53f44426278f94a5c80076d951e4c"
+    "scripts": "7088cff6dee55196b1b3607448956c8106b19cd89cfc15ac51df2702a5456f1d",
+    "src": "1a8cc807d59b14822919336777ee07bc8b0f97a5f0a44358ba743be591b83293"
   },
   "change": null
 }

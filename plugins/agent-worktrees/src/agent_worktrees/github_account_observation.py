@@ -45,7 +45,10 @@ class SelectedGitHubAccount:
         self._environment["GH_PAGER"] = "cat"
         self._verified = False
 
-    def capture(self, stage, arguments, *, binary=False, limit=256 * 1024):
+    def capture(
+        self, stage, arguments, *, binary=False, limit=256 * 1024,
+        allow_graphql_errors=False, input_text=None,
+    ):
         """Bound each child by the same deadline and live caller checkpoint."""
         self.checkpoint()
         timeout = self.budget.execution_deadline - time.monotonic()
@@ -56,6 +59,7 @@ class SelectedGitHubAccount:
                 [self.executable, *arguments], timeout=timeout, budget=self.budget,
                 env=dict(self._environment), binary=binary,
                 max_stdout_bytes=limit, max_stderr_bytes=64 * 1024,
+                **({"input_text": input_text} if input_text is not None else {}),
             )
         except OwnedCleanupError:
             raise
@@ -69,6 +73,16 @@ class SelectedGitHubAccount:
         if result.returncode:
             output = result.stdout.decode("ascii", errors="ignore") if binary else result.stdout
             status = re.match(r"HTTP/\S+ ([1-5][0-9]{2})(?:\s|$)", output)
+            if (
+                allow_graphql_errors and not binary and arguments[:2] == ["api", "graphql"]
+                and status is not None and status[1] == "200"
+            ):
+                try:
+                    value = json.loads(re.split(r"\r?\n\r?\n", output, maxsplit=1)[1])
+                    if isinstance(value, dict) and isinstance(value.get("errors"), list) and value["errors"]:
+                        return output
+                except (ValueError, TypeError, IndexError, RecursionError):
+                    pass
             raise CredentialObservationError(
                 stage, "credential-unavailable" if stage == "credential" else "access-unconfirmed",
                 exit_code=result.returncode,

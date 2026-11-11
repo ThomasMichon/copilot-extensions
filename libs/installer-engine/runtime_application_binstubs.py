@@ -145,8 +145,16 @@ def global_binstubs(
             "@echo off\r\nsetlocal EnableExtensions DisableDelayedExpansion\r\n"
             f'if not defined {root_environment} set "{root_environment}={cmd_root}"\r\n'
             f'set "ROOT=%{root_environment}%"\r\n'
-            'set "VERSION="\r\nset /p "VERSION="<"%ROOT%\\current-version"\r\n'
+            'set "VERSION="\r\n'
+            "for /L %%R in (1,1,4096) do (\r\n"
+            '    (set /p "VERSION="<"%ROOT%\\current-version") 2>nul\r\n'
+            "    if errorlevel 1 goto selector_final\r\n"
+            "    if defined VERSION goto selector_read\r\n"
+            ")\r\n"
+            ":selector_final\r\n"
+            'set /p "VERSION="<"%ROOT%\\current-version"\r\n'
             "if errorlevel 1 exit /b 1\r\n"
+            ":selector_read\r\n"
             "setlocal EnableDelayedExpansion\r\n"
             'if "!VERSION!"=="" exit /b 1\r\n'
             'for /f "delims=0123456789" %%I in ("!VERSION:~0,1!") do exit /b 1\r\n'

@@ -8,13 +8,13 @@ never invokes an adapter and its copied observations do not authenticate one.
 
 | Concern | Existing owner and required evidence |
 |---------|--------------------------------------|
-| State home and writer | Harness/knowledge binding and native worktree/effort custody; one writable task workspace and one accepted dispatcher owner |
+| State home and writer | Harness/knowledge binding and native worktree/effort custody; one writable task workspace, plus an accepted dispatcher owner before effects |
 | Machine selection | Machine/related-repository registry and venue owner; canonical machine IDs, purpose, permitted work, resource admission and supported transport |
 | Discovery | Worktrees' bounded status/current-head readers, plus the selected venue's inventory; preserve observation times, coverage gaps and existing obligations |
 | Allocation | Worktrees' native keyed creation; persist one logical creation key and retain remote request IDs, exact destination and returned writer/worktree association |
 | Embodiment | Bridge's supported creation into that existing worktree, including the native writer evidence required by the selected receiving path |
 | Follow-up | Current-head resolution plus Bridge's qualified exact-head/idempotent send and receipt-only read where supported |
-| Task lifecycle | Dispatch only when the adopter already uses it for this work; preserve its claims and task identity instead of inventing a second task |
+| Task lifecycle | Optional native Dispatch standing declarations, original attachments, accepted materializations and holds; preserve native claims and task identity rather than a second writable lifecycle map |
 | Supervision and exit | Existing native events/watches and lifecycle/claim owners, within the charter's observation budget and original effect limits |
 
 Use `agent-worktrees`' and `agent-bridge`'s exact session command catalogs and
@@ -50,6 +50,92 @@ or required receiving support is unavailable, record the missing capability and
 use an explicit owner handoff; do not build a replacement allocator or transport.
 Optional safeguards are not universal new grants, and this document does not
 authorize installing or upgrading a missing adapter.
+
+## Native Dispatch observations
+
+The optional `observations.dispatch` array contains saved reads, not commands.
+Each entry has `observedAt`, `sourceRef`, a native standing-charter `task` and
+its original `relationship` (or `null` when not observed). Preserve native field
+names and the original request's task, event, generation and workspace identity.
+Project a relationship receipt to **only** `{"ref": "<native-reference>"}` or
+`null`; never copy receipt tokens into topology. Native authorities retain the
+full record. An assignment's `nativeTask` selects its observation; both links and
+observations must have unique task IDs.
+
+Coverage joins the task's active lifecycle, started state, unheld status, bound
+relationship, accepted materialization and a fresh current native head. Match
+request/event IDs, original assignment generation and relationship reference.
+Acceptance must match the current task generation and precede its standing
+revision. First acceptance retains its expected generation; succession advances
+it by one with a distinct `head.predecessor_session_id`. The relationship's
+assignment generation stays unchanged across succession. The observed head needs
+both `head` and `headRevision`, matching acceptance and the task's owner session.
+Native owner/workspace, role/scope, policy and pending effects must also agree.
+
+The declaration and acceptance must match the current materialization's source
+and effective revisions. A declaration content update does not increment its
+enrollment generation or imply acceptance; retain the old accepted record until
+the native owner accepts the update. Native reconcile may advance the standing
+revision after acceptance, so coverage does not require the acceptance to be the
+immediately preceding mutation.
+
+These are advisory joins, not native admission or authenticated proof. Missing,
+stale, contradictory or future-dated evidence cannot qualify coverage. Reservations,
+held/unknown owners and retiring attachments retain their workspace for
+reconciliation; do not treat them as free slots or replace them. A closed detached
+relationship does not resurrect its former owner. Unmapped native tasks hold
+placement until reconciled. The overview derives status counts and owner-retaining
+counts, while routes still require a fresh native-head recheck before effects.
+
+No dispatcher appointment is required to inspect this evidence or export a
+materialization. A null dispatcher or missing dispatcher custody holds placement
+and routes; it does not erase valid observed coverage. Without the optional array,
+legacy assignments continue using their existing acceptance evidence.
+
+## Owner progress evidence
+
+An owner observation may carry an optional saved `progress` read: `observedAt`,
+`sourceRef`, `state` (`advancing`, `waiting`, `blocked`, `complete` or `unknown`),
+`workRef`, `lastAdvancedAt` and `blockingOwner`. It comes from the adopter's
+existing native readers or an assigned `monitor-agent-fleet` analysis, never a
+new poller. `lastAdvancedAt` cannot follow its own `observedAt`.
+
+Each qualified and unqualified coverage entry reports `liveness` (the owner
+observation's state, freshness, time and source, or `unobserved`) beside
+`progress`, and each role reports `progressCounts`. Missing, stale or
+future-dated progress is `unknown` with an explicit reason, retaining any
+last-known work and blocking-owner references for reconciliation.
+`sinceAdvancedSeconds` is derived only from fresh evidence.
+
+Presence, acceptance and progress stay separate. Advancing progress does not
+qualify a reserved, held or unreachable lane, and blocked or stalled progress does
+not unqualify an accepted one or authorize replacement. Use these fields to
+report material progress and the blocking owner, then observe or escalate
+through the rightful owner.
+
+## Desired, proposed and adopted intent
+
+`intent` reports one lane per standing assignment with three separate records:
+`desired` (the checked-in assignment and its current materialization's source
+and effective revisions, or `null` revisions when terminal), `proposed` (the
+saved native standing-charter declaration, lifecycle, status and freshness) and
+`adopted` (the native accepted materialization and its accepting head). It never
+copies the relationship or its receipt and writes no ledger.
+
+`proposedMatchesDesired`, `adoptedMatchesProposed` and `adoptedMatchesDesired`
+compare revisions only. Each is `null` when either side is missing, stale,
+future-dated, incomplete or desired-terminal; a `null` comparison is unknown, not
+a mismatch. `state` is `aligned`, `adoption-pending` (not adopted, or adopted
+content differs from the proposal), `proposal-pending` (the declaration differs
+from desired intent), `proposal-inactive` (the native lane is not active),
+`unknown`, `unlinked` or `desired-terminal`, with explicit reasons.
+`proposedWithoutDesired` lists native standing charters no assignment links.
+
+An adopted record is not current-head, presence or progress proof, and
+`aligned` does not qualify coverage: `overview` remains the coverage authority.
+No state grants effect authority. Resolve a pending proposal or adoption through
+the native declaration owner and its accepting head, never by editing saved
+observations, and recheck current native evidence before any effect.
 
 ## State and effect protocol
 

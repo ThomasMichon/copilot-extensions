@@ -1,0 +1,9 @@
+{
+  "comment": "Stage exact candidate companion payloads and explicitly scope native lifecycle pane reads",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

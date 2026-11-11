@@ -3281,6 +3281,47 @@ contract tests also exercise each real guard's read decision, not just hashes.
 A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
+Prepared Windows membership also permits a single `powershell` or `pwsh` event
+whose original argument carrier yields exactly one of the no-argument literals
+from `hook_pre_relevance.py`'s canonical `SHELL_READ_HEADS`. The same tuple builds
+the ordinary client's existing conservative expression; its argument grammar and
+contextual refusal are unchanged. Non-command tool metadata remains data, and
+the primary command keeps the original guard precedence. A present `toolArgs`
+selects that value even when invalid; only its absence selects `tool_input`.
+An object supplies the first nonempty string under the original guards' ordered
+command keys, derived by the existing renderer from all four identical
+`CMD_ARG_KEYS` declarations. Earlier null, empty or nonstring values are skipped;
+an earlier whitespace or protected command is not skipped for a later safe value.
+A raw string supplies the whole command. The native consumer does not parse
+shell syntax, normalize text or decode JSON argument strings.
+Arguments, undeclared case/whitespace variants, shell command aliases, quotes,
+substitutions, redirection and shell members inside batches retain original policy.
+`toolCalls` still takes precedence over top-level tool fields.
+
+The existing version-1 contract carries optional `nativeShellReadCommands` and
+`nativeShellReadDependencies`; the latter binds the canonical relevance source
+in addition to the four original guards. Current source/control/admission checks
+remain live. Missing, invalid, old or drifted literal-proof data declines this
+optimization without retiring existing read/write proofs. Prior readers ignore
+the additive properties and keep their original shell path; readers limited to
+primary object arguments retain fallback for other carriers. The additional
+carrier selection uses the same declaration and original guard-source bindings.
+Optional `nativeShellReadCommandKeys` supplies ordered selection data, not another
+permission list. Its absence preserves the command-only object baseline and raw
+strings; a supplied empty, duplicate, nonstring or over-128-key list declines shell
+exemption. Older command-only consumers ignore this addition and retain fallback
+for alternate keys; they do not enforce the new optimization. No existing form
+is retired, and rollback to older data or readers retains its original path.
+There is no new caller syntax or package-version handshake. Regenerate the
+contract after relevance-source changes too. Eligible events return an empty
+no-op response without runtime selection, policy-worker startup or Management
+module initialization; that is not an explicit permission grant. Protected and
+uncertain events retain the original raw payload, guard decisions and owned
+worker cleanup. Nonmatching PowerShell commands with an object-command or
+raw-string carrier can additionally read the bounded contract while declining
+the proof; their source hashes are not scanned merely to reject an undeclared
+command.
+
 Prepared membership also permits complete all-read native batches of
 `view`, `rg` and `glob`. Read and write branches share one strict batch-envelope
 validator: 1..128 dictionary members, nonempty string names and only
@@ -3323,7 +3364,8 @@ the original raw-event policy path. Eligible installation cells retain the
 same complete native membership proof; unprepared cells retain validation.
 This exemption additionally fingerprints the original target-form and map
 readers in `hook-read-policy.json`. Regenerate that contract after either
-reader changes. Shell commands and Git/PR operations are not exempted.
+reader changes. Other shell commands and Git/PR operations are not covered by
+this write proof; the exact literal read proof above is separate.
 Patch arguments may be objects, JSON objects or freeform patch strings.
 The existing collector unions direct/structured aliases with every original
 Add/Update/Delete/Move header in every `input`, `patch` and `command` field,

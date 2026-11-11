@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh canonical process source archives for async foreground custody",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}

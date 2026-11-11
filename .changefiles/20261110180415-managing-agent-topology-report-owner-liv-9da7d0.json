@@ -1,0 +1,9 @@
+{
+  "comment": "managing-agent-topology: report owner liveness and dated task progress beside role coverage without affecting qualification or routing",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

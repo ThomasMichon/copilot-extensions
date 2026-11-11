@@ -53,7 +53,7 @@ function Get-NativePreToolStop {
     } catch { return $null }
 }
 
-function Test-NativePreToolSources([bool]$WriteProof = $false) {
+function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments) {
     try {
         $policy = Read-PreToolJson ([IO.Path]::Combine($PSScriptRoot, 'hook-read-policy.json')) 4096
         if ($policy.schema -isnot [string] -or $policy.schema -cne 'agent-worktrees.native-read-policy' -or
@@ -62,10 +62,49 @@ function Test-NativePreToolSources([bool]$WriteProof = $false) {
         $names = @('statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'pr_supersede_guard.py')
         if ($policy.guards.Count -ne $names.Count) { return $false }
         $sources = $policy.guards
+        $extra = @()
         if ($WriteProof) {
             $dependencies = $policy.nativeWriteDependencies
             $extra = @('tool_call_forms.py', 'guarded_anchor_map.py')
-            if ($dependencies -isnot [Collections.IDictionary] -or $dependencies.Count -ne $extra.Count) {
+        } elseif ($ShellCommand -or $null -ne $ShellArguments) {
+            if ($null -ne $ShellArguments) {
+                $keys = @('command')
+                if ($policy.ContainsKey('nativeShellReadCommandKeys')) {
+                    $keys = $policy['nativeShellReadCommandKeys']
+                    if ($keys -isnot [Collections.IList] -or $keys.Count -lt 1 -or $keys.Count -gt 128) {
+                        return $false
+                    }
+                    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+                    foreach ($key in $keys) {
+                        if ($key -isnot [string] -or -not $key -or -not $seen.Add($key)) { return $false }
+                    }
+                }
+                $ShellCommand = $null
+                if ($ShellArguments -is [string]) {
+                    $ShellCommand = $ShellArguments
+                } elseif ($ShellArguments -is [Collections.IDictionary]) {
+                    foreach ($key in $keys) {
+                        $value = $ShellArguments[$key]
+                        if ($value -is [string] -and $value) { $ShellCommand = $value; break }
+                    }
+                }
+                if (-not $ShellCommand) { return $false }
+            }
+            $commands = $policy.nativeShellReadCommands
+            if ($commands -isnot [Collections.IList] -or $commands.Count -lt 1 -or $commands.Count -gt 128) {
+                return $false
+            }
+            $matched = $false
+            foreach ($command in $commands) {
+                if ($command -isnot [string] -or -not $command) { return $false }
+                if ([string]::Equals($command, $ShellCommand, [StringComparison]::Ordinal)) { $matched = $true }
+            }
+            if (-not $matched) { return $false }
+            $dependencies = $policy.nativeShellReadDependencies
+            $extra = @('hook_pre_relevance.py')
+        }
+        if ($extra.Count) {
+            if ($dependencies -isnot [Collections.IDictionary] -or $dependencies.get_Count() -ne $extra.Count) {
                 return $false
             }
             $sources = @{}
@@ -121,8 +160,18 @@ function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $f
     }
     $name = $Payload.toolName
     if (-not $name) { $name = $Payload.tool_name }
-    if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
-    return Test-NativePreToolSources
+    if ($name -isnot [string]) { return $false }
+    if ($name -cin @('view', 'rg', 'glob')) { return Test-NativePreToolSources }
+    if (-not $PreparedMembership -or $name -cnotin @('powershell', 'pwsh')) { return $false }
+    if ($Payload.ContainsKey('toolArgs')) {
+        $args = $Payload['toolArgs']
+    } else {
+        $args = $Payload['tool_input']
+    }
+    if ($args -isnot [Collections.IDictionary] -and ($args -isnot [string] -or -not $args)) {
+        return $false
+    }
+    return Test-NativePreToolSources -ShellArguments $args
 }
 
 function Read-NativePreToolText([string]$Path, [int]$Limit) {

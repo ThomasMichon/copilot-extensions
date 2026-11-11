@@ -432,6 +432,14 @@ Registered entries assert that membership-marker opening precedes marker JSON
 decoding, so a similarly shaped content reader cannot stand in for that stage.
 They never retry the child, extend its ten-second bound or classify the
 unobserved stalled phase as a known flake.
+On PS5.1, the copied admission helper records process CPU ticks (100 ns units)
+and whether Utility/Web assemblies are already loaded immediately before and
+after the original `System.Web.Extensions` load. Enumeration uses only the
+current AppDomain; it does not load an assembly or warm another child.
+The `patch-protected-input` control retains those successful-call phases too.
+Snapshots include their observer work and cannot establish why an earlier
+unobserved load stalled. Malformed or out-of-bound snapshot markers remain
+real stderr; native timeout controls preserve valid snapshots alongside errors.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
@@ -460,6 +468,82 @@ latency or throughput pass.
 The boolean-only admission controls retain bounded command-entry, helper,
 input, admission and output phases; a timeout reports the partial phases
 without retrying the child or relaxing its original limit.
+The `shell-entry-attribution` cases reuse that complete-entry fixture for a
+read-only `Get-Location` event and the original recognized protected
+`Set-Content` target shape. The hook only inspects the commands: the target
+must remain absent. Both engines and legacy/cell contexts use the actual
+strict policy worker, not the ordinary client's relevance shortcut or a
+policy stub. Fixture-only runtime-selection boundaries include CWD repair
+and selected-context validation; source/worker hashes and actual no-op/deny
+outputs accompany ordered phase-free/attributed calls. The existing fixture
+runtime/context substitutes remain, so this is not installed selection
+qualification. Positive original-worker controls omit only the optional literal
+proof; the protected leg retains the actual packaged declaration. Original guards
+and policy worker remain in use on this path.
+All shell calls may load their original Management module. Timings retain
+instrumentation and outside-command uncertainty under the same 10/30/300
+limits; this does not qualify a shell-only replacement or Git/PR, POSIX,
+lifecycle, composed or productive-throughput acceptance.
+
+The `literal-shell-entry-attribution` cases select that same real registered
+consumer with ordinary non-command metadata and the canonical literal proof.
+They compare original-path/candidate/original-path occurrences before a real
+protected denial. Comparator legs use the same source with only the optional
+proof omitted, not historical binaries. Per-sample contract hashes and proof
+presence make that distinction explicit. Eligible attributed calls must leave
+Management unloaded and skip runtime/policy entry while retaining native
+admission/source/output phases. Protected calls still use the real original
+worker; the inspected tool never executes. No source digest is repaired.
+
+The same existing packet covers primary-command precedence, actual JSON key
+casing and collisions, alias metadata, ordinal literal comparison, argument and
+JSON-string fallback, old/invalid/drifted declarations, unprepared admission and
+late protected shell batches. A retained prior version-1 reader processes a new
+declaration without claiming shell-literal support and still handles its native
+view path. Canonical-source tests compare every declared head with original
+guard decisions and ordinary argument grammar; the renderer refuses malformed,
+nonliteral, duplicate and oversized declarations inside the existing file bound.
+Other selection-only controls retain their explicit policy stub and are not
+represented as full real-worker decisions.
+
+The `literal-shell-carrier` cases extend that same registered fixture to raw
+primary strings and object/raw `tool_input` fallback carriers. Each complete
+record retains the selected carrier, compares original-path/candidate/original-path
+occurrences and requires a real protected denial in that same carrier. Focused
+controls preserve primary-key presence over fallback values, whole-batch
+priority and JSON-string refusal. The original-guard contract exercises every
+canonical literal in all four carrier forms, including protected fallback
+metadata ignored by a valid primary, before requiring actual protected denial.
+No shell grammar or argument decoder is substituted for the original owners.
+Per-sample start/validated progress is flushed to the existing runner output so
+a fatal item timeout does not erase the active occurrence. This observer work
+is outside each subprocess elapsed span and remains part of fixture overhead,
+not isolated hook startup attribution.
+
+The `literal-shell-selection` cases apply original first-nonempty command-key
+selection to the same exact-literal proof. Representative first/final alternate
+keys retain complete real-worker comparisons and same-selected-key protected
+denials in both engines and legacy/cell scopes. Focused controls retain earlier
+null/nonstring/whitespace/protected values, exact key casing, dictionary-member
+metadata, JSON/batch fallback and absent or invalid optional key declarations.
+The retained command-only version-1 read consumer processes the new declaration
+without gaining alternate-key support; the current consumer keeps its
+command-only baseline when that optional field is absent. Original-guard parity
+covers every source-derived key and canonical literal in both object carriers.
+Renderer controls require all four original key declarations to agree and reject
+missing, repeated, nonliteral, invalid, duplicate or oversized data. No argument
+grammar, JSON decoder, runtime selection or time budget is changed.
+
+The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
+supplied existing Python 3.9 interpreter. Their private fixture publishes real
+project membership and the current original guard map, copies the required
+standalone helpers and observes original request entry rather than assuming a
+legacy descriptor qualifies for transport. Read/no-op cases must not enter that
+request path or attempt IPC/subprocess work, while the edit control reaches the
+original path and retains a real denial. Missing fixture prerequisites remain
+explicit skips, not relevance qualification. All these cases preserve original
+deadlines and containment; neither finite ordered observations nor process
+elimination proves full-roster, installed/composed or throughput acceptance.
 
 `python-selection-native.yml` supplies real Python 3.9 and supported Python
 side by side on a disposable hosted Windows runner. Its `TEST_PYTHON39` input
@@ -703,6 +787,170 @@ the deadline cap. The same console-fixture file's explicitly selected T3
 `native_image_query_exit` control uses a real owned Windows process and retained
 handle with an injected image-query failure; it is not proof of the precise
 lifetime of a historical failing PID.
+
+Rendered output and installed process attribution share the original
+30-second readiness window. A rendered frame alone does not freeze one
+possibly incomplete descendant snapshot: the witness resamples at most every
+100 milliseconds until the live installed Manager image is pinned. Foreign
+images never satisfy readiness, and unreadable live handles still fail
+immediately. Failure diagnostics retain at most 16 observed image/name/live
+records, without command lines, inside the existing evidence size budget.
+An early consumer exit also retains up to 16 birth-bound descendant exit codes
+before Job cleanup, distinguishing already-exited processes from live ones.
+The installed-process, keyboard, native-terminal-offer and cleanup assertions
+remain unchanged; the bounded wait is not a larger readiness deadline.
+
+The installed-core Manager lifecycle witness is explicitly selected separately:
+
+```powershell
+$env:COPILOT_NATIVE_TEST_EXECUTABLE = '<native-Copilot-executable>'
+$env:PSMUX_TEST_BIN = '<native-PSMux-executable>'
+$env:COPILOT_DRIVER_HEADED_MUX_E2E = '1'
+python tools\run-plugin-tests.py worktree-manager --test-file tests\native\test_manager_installed_lifecycle.py --allow-explicit-tiers --timeout 900 --plugin-timeout 900 --test-timeout 900
+```
+
+This case uses the existing 720-second execution/cleanup owner, including its
+30-second cleanup reserve, inside the native portfolio's 900-second runner
+bounds. PowerShell 7, the Windows .NET Framework compiler, actual Copilot and
+PSMux executables and the constructor's governed feed are prerequisites; no
+operator Copilot state or inference token is borrowed. Only inference uses a deterministic
+loopback endpoint. Real installed project entry, Manager keyboard controls,
+Git worktree creation, native process incarnation, conversation history and
+private mux attachment participate. The case checks parallel Open, preserved
+work after detaching the first view, normal Copilot exit and a fresh Manager's
+Resume, plus the existing unusable-installed-entry negative control.
+The New seed uses the terminal's enabled bracketed-paste protocol and must
+appear in the current rendered dialog before confirmation. The test-only
+`pyte==0.8.2` dependency incrementally renders the fixed 100x30 ConPTY stream;
+it never supplies UI state or input acknowledgements. Open/Resume waits for
+the current actual CLI prompt frame before sending another turn. No retry
+or deadline increase compensates for dropped input.
+Before Resume, the fresh Manager performs its ordinary per-row Refresh and
+must visibly discover the stopped worktree and offer Resume. The fixture
+checks the original tracking identity before that refresh, selects Refresh
+only after observing its actual highlight, and never injects mux absence
+or substitutes Open for an unavailable Resume.
+The source controls in `test_worktrees_runtime.py`, `test_worktrees_client.py`
+and `test_worktrees_producer.py` exercise explicit Refresh through authenticated
+resident transport and its reconciliation/publication barrier. Old providers,
+unrelated publications, changed request identity, missing mux observations,
+failed publication and wrong/missing receipts cannot satisfy the request.
+These controls do not replace the real installed UI/exit/Resume witness.
+Review controls also cover unavailable Windows process-open/exit/image queries,
+strict Bridge-lock reads, request-local observation failures, hard cleanup
+failure propagation, a second publication with the same superseded mux cache
+and acceptance of a genuinely newer managed observation.
+Strict discovery/persistence controls use real tracking files and reload them
+between publications. Unreadable legacy workspaces, a real contended record
+lock and a no-op writer cannot acknowledge success or change the prior bytes;
+a new explicit request succeeds once contention or the writer fault is removed.
+Backfill controls also preserve the old default and cover strict missing,
+malformed and relative metadata, detached sessions and the single-sweep guard.
+After Resume reaches the actual CLI prompt, its next completed provider-backed
+turn establishes the history lock used to identify the replacement owner.
+The same strict duplicate/extension-host rules apply; pre-turn process presence
+without that binding is not mistaken for completed conversation-owner proof.
+Each turn requires its exact persisted assistant reply as well as rendered
+visibility. The final resumed history must retain all four user and assistant
+messages; a reply visible only on screen cannot earn a lifecycle receipt.
+Normal exit requires zero from the pinned Copilot process handle itself,
+not merely a successful pane wrapper or Manager return.
+Normal and private device-status queries are inert in this passive observer;
+they never generate input or replace the real terminal's responses.
+Completed turns require durable conversation history and the reply in the
+terminal stream or the actual bound private pane's rendered capture. Removing
+escape sequences from a redraw stream is not itself a rendered-screen witness.
+Failure diagnostics retain bounded event-type counts and the private provider's
+request count, never inference request bodies. These distinguish an unfinished
+native turn from completed history whose reply has not rendered.
+Native-process observations retain pinned parent IDs, bounded option names,
+script basenames and the matching history's lock PIDs, never raw argument values.
+Failures retain the rendered Manager screen as well as the bounded stream tail.
+After a conversation exists, timeout diagnostics also project the private
+installed engine's current liveness flags and process identities before
+teardown. They do not request Refresh, retain credential-bearing binding
+values, or hide an unsettled diagnostic process.
+Copilot's extension host shares its executable. Exclude it from conversation-owner
+counting only when its sole argument is an ordinary, owned
+`extension_bootstrap.mjs`, it is a later-born direct child of the sole
+lock-bound conversation owner, and it has no conversation lock itself.
+Unknown children, additional owners and orphaned extension hosts still refuse.
+All processes remain under the original pinned native Job custody.
+The stateless harness has a real private knowledge repository, registered and
+bound before New; the installed coordination-readiness command must resolve it.
+Before constructing runtimes, the case requires an empty, confirmed native
+mux-server cohort. PSMux liveness checks cover the machine-wide server census;
+a private namespace and data directory on a shared mux host cannot guarantee
+complete registration coverage. Existing or unconfirmed servers fail this
+preflight, not skip qualification. Never borrow host registrations, fabricate
+sentinels or stop shared servers to make the test pass.
+If source preparation exhausts the fixed budget on the default temporary
+volume, the runner supports a private, source-external `AGENT_SCRATCH_ROOT`.
+Record the actual placement and timing; changing volumes is not permission to
+increase deadlines or reuse an installed fixture.
+
+The lifecycle witness separately archives the exact candidate and uses the
+canonical marketplace materializer for the observed native launch companions,
+`agent-conduct-guidance` and `agent-roles`, preserving the selected
+Manager/Worktrees bytes and source receipts.
+It validates catalogue paths, manifest identities and versions and retains a
+bounded, explicitly core-and-companions inventory without changing activation.
+This is not a complete catalogue payload closure. Rendered-pane
+reads use the selected real PSMux binary and verified private namespace
+explicitly, not an implicitly routed adapter command.
+This core case still constructs only Manager and Worktrees.
+It cannot satisfy complete selected-suite, actual Machines readiness,
+ordinary baseline-to-candidate update or required promotion-result acceptance.
+Those remain separate obligations in the
+[installed lifecycle contract](efforts/active/main-owned-workflow-control/installed-manager-lifecycle.md).
+The whole-suite replacement fixture remains disposable-hosted-Windows-only:
+its real service and Scheduled Tasks effects must not be enabled locally.
+No native result is counted as unit coverage or inferred from this invocation
+documentation.
+
+The existing manual `installation-context-full.yml` workflow accepts
+`portfolio=manager-lifecycle` for this installed-core case on a fresh
+GitHub-hosted Windows VM. Dispatch the published source branch and optionally
+provide its same exact commit as `source_sha`; a mismatched request fails.
+Before the unchanged core case, a separate preflight constructs the installed
+engine, builds the canonical commit-bound whole-tree artifact, and acquires
+every declared payload with the actual pinned CLI. Installed engine discovery
+and complete payload-byte comparison must succeed in the private HOME, with
+the required-readiness profile enabled. A private bare Git repository serializes
+the verified materialized bytes with a packed `git fast-import` stream. A
+context-owned loopback HTTP server invokes the real `git http-backend` for
+read-only advertisement/upload-pack requests against that repository, and the
+CLI registers its HTTP Git URL with `plugin marketplace add`. The pinned CLI
+does not recognize `file:` as a Git transport. A directory marketplace would load live and
+copy nothing, leaving the installed engine's cache-only discovery empty.
+The transport commit/tree are recorded and rechecked separately from the source
+commit; they are not a release, supported upgrade baseline or admission receipt.
+The Git HTTP thread/listener must stop before success. No remote repository,
+host service, persistent daemon or promotion transaction is created. Its separate
+`installed-manager-suite-payloads` receipt explicitly reports runtime
+installation as unobserved: payload delivery is not runtime construction,
+actual Machines readiness, an authentic update or lifecycle acceptance.
+The small transport check uses the CLI's actual `git clone --depth 1 --progress`
+contract; a static/dumb HTTP clone cannot satisfy shallow acquisition. Backend
+processes use the existing bounded command owner, and unresolved backend
+custody fails the case rather than being hidden by a recovered client request.
+The fixture's private Git template disables text conversion in cloned
+`.git/info/attributes`, preserving frozen materialized bytes even when source
+attributes request CRLF checkout. This applies only to the fixture's acquisition
+environment; it changes neither source attributes nor the exact-byte assertion.
+The real shallow-clone control includes LF `.cmd`/`.ps1` blobs with declared
+CRLF attributes. This transport evidence is not an ordinary platform-checkout
+or admitted-upgrade qualification.
+The job reuses the bounded pinned downloader and the existing Copilot 1.0.105 /
+PSMux 3.3.8 prerequisite pins, verifies checkout identity, and preserves the
+900-second runner and 720-second case limits. Its 30-minute job envelope also
+covers checkout, tooling, prerequisite acquisition and artifact retention.
+The preflight shares that job envelope; it adds no schedule, required PR CI
+or release gate.
+The evidence checker rejects absent, skipped, failed, duplicate, stale,
+TTY-only and incomplete lifecycle results. Passing this development lane still
+does not establish complete-suite, actual Machines, authentic ordinary-update
+or required frozen-candidate promotion enforcement.
 
 Worktrees' opt-in `--test-file tests/native/test_uninstall_windows_owner.py
 --allow-explicit-tiers` packet exercises the emitted Windows census script in
@@ -2869,6 +3117,133 @@ permission grant, checking the native `tasks` and `entries` arrays in the same
 conversation. Missing/failed/invalid reads do not produce an empty snapshot.
 This is SDK read-support qualification, not complete background-agent evidence,
 active-work/schedule mutation coverage or automatic-idle retirement.
+The separate `native_joined_observer_close_returns_no_attributed_outcome`
+control invokes the selected CLI's actual unsubscribe function and awaits its
+public `session.disconnect()` twice. It checks the void return shapes while
+preserving one native conversation and requiring no extension-permission grant.
+It does not attribute why the original SDK observer ended, prove queued
+notification draining, or distinguish an initiated disconnect from an already
+disconnected no-op. Passing this control is not positive auth recovery or
+qualification of another pinned native runtime; unexpected SDK EOF remains
+an independent hold.
+
+The explicit T3 file `tests/native/test_native_pending_work.py` qualifies
+nonempty client-task and schedule snapshots through the selected native CLI.
+One control registers a client task, observes the same task as running, idle
+and completed, and verifies that the terminal record remains until exact
+removal. The Windows terminal control uses the real `/every 2h` command in a
+private mux pane, then the joined SDK's public schedule list/stop methods to
+observe and remove that exact future prompt before it fires. It checks one
+conversation, no extension-permission grant and birth-matched native/extension
+retirement. Select it with `COPILOT_DRIVER_HEADED_MUX_E2E=1` and an existing
+`PSMUX_TEST_BIN`; the client-task control needs only the explicitly selected
+`COPILOT_NATIVE_TEST_EXECUTABLE`. The file requires `--allow-explicit-tiers`.
+On Windows the same file drives actual synchronous/background `powershell` and `task`
+tools using captured native tool descriptors and local synthetic model replies.
+The joined observer must see one running task before its work is released.
+Shells must finish and disappear or be exactly removed after completion.
+Agents remain idle after responding: removal is refused until exact cancellation,
+after which the cancelled record is observed and removed. These controls pin the
+CLI, observer and actual shell process births and require their retirement,
+one native conversation and no extension-permission grant. Model response gates
+keep the root turn open until the observed task settles; they do not simulate
+the task registry or use private SDK task-start operations.
+
+These controls do not call the SDK's internal schedule-add API or assume a
+prompt-mode model exposes `manage_schedule`. They do not qualify other agent/shell
+modes, complete pending snapshots, ACP idle grace, another pinned runtime or
+survival after caller cleanup Jobs.
+
+The explicit T3 file `tests/native/test_native_acp_inventory.py` distinguishes
+the native ACP and public SDK inventory boundaries. Its ACP control creates and
+prompts a real session, checks that the staged foreground extension did not
+start, and requires explicit method-not-found responses from both SDK inventory
+reads over ACP. This is unavailable evidence, never an empty inventory or a
+permanent claim about future runtimes. A prompt-mode control checks the same
+joined script can load and read the actual arrays.
+
+The public SDK control requires an explicitly selected
+`COPILOT_NATIVE_TEST_SDK_PYTHON`: an isolated interpreter containing a seasoned
+`github-copilot-sdk` installation. It never installs dependencies or downloads
+a runtime itself. The helper launches the selected native CLI's headless TCP
+mode, retains its actual process handle, uses an ephemeral connection token,
+and connects with the public `RuntimeConnection.for_uri` API. It creates one
+session with an explicit local synthetic provider and streaming, reads tasks
+and schedules before and after the real model turn, checks the returned reply,
+then disconnects and retires the exact helper/native process births. No SDK
+private connection or process field is read. The SDK's Python requirement does
+not change Driver's runtime Python floor.
+Both successful and model-response-stalled runs use the existing caller-owned
+execution scope. The stalled case must time out, independently retire the
+helper and native child, and confirm whole-scope settlement without relying on
+the helper's shutdown code.
+
+The nonempty client-task control uses public typed registration and update
+requests in Session A. It observes running and idle records, rejects removal
+in both states, and retains the completed result until exact removal. It also
+creates Session B, requires an empty B task list, disconnects B and verifies
+that A's running task is unchanged. The unprompted B session need not create
+a conversation history file. No extension principal or task registry is
+fabricated to make registration succeed.
+
+Additional public SDK controls execute actual synchronous/background shell and
+agent tools through the local model provider. A real running task must be
+observed before work is released. Windows shell process births are pinned
+before release; shell permission is approved once only for the exact fixture
+command and session. A responding agent remains idle until exact cancellation
+and removal. The public pending-work wait returns before the final empty list;
+an optional native background-agent completion follow-up is checked explicitly,
+not counted as a duplicate input. History must contain one root tool execution
+with successful tool completion and only the expected root and nested user inputs.
+Synchronous results must contain the expected shell output or agent reply;
+shell completion also requires a marker written after the real work finishes.
+
+The future-schedule control explicitly enables the real `manage_schedule` tool
+and creates a two-hour recurring prompt through that offered tool. After the
+model turn, public schedule inventory must retain the future entry even though
+task inventory is empty. A second session cannot see it; disconnecting that
+session must leave it unchanged. Public exact stop runs before fixture shutdown,
+and the final schedule list must be empty without the future prompt firing.
+
+These controls do not migrate Session Host from native ACP to an SDK adapter,
+qualify complete pending snapshots or work-arrival races, enable
+idle expiry, attribute observer retirement, or qualify another selected
+runtime/platform. Native and SDK versions must be recorded with each result;
+package availability alone is not runtime support.
+
+The separate T3 file `tests/native/test_native_sdk_backend.py` exercises the
+optional SDK provider through the real Session Host and selected wheel-built
+application. Supply `COPILOT_NATIVE_TEST_DRIVER_SDK_PYTHON` pointing to an
+already-prepared, season-locked optional application interpreter, plus the
+existing native executable selector. The tests never install packages or
+download a runtime. Only the public session's local synthetic-provider and
+instruction/tool fixture configuration is overridden; native launch/admission,
+SDK connection, ACP adaptation, permission relay and broker execute from the
+selected artifact. Private homes, caller-owned scopes and exact process births
+remain mandatory.
+
+Each owned runtime reports its version through the public SDK status operation.
+The selected executable's bounded `--version` result, its SHA-256 before/after
+the scenario, and the SDK distribution version are recorded separately.
+Retain the per-mode `native_sdk_versions.<mode>` JUnit suite properties with
+the runner's `--junit-dir` option when collecting qualification evidence.
+CLI and server version disagreement is recorded and refuses qualification,
+not normalized into an assumed equivalent build. Only the CLI banner's trailing
+prose period is removed when parsing its version. A stable executable path
+alone does not establish a stable build.
+
+These controls prove new/prompt, frontend reconnect, cold text-history load,
+nonempty client/agent/shell inventory, a future schedule after root idle,
+permission approval for the exact fixture command and observed cancellation.
+Shell births are published atomically and pinned before fixture work is
+released. A task registered just before a read may race its notification;
+bounded read-only refreshes may establish a stable snapshot without replaying
+the task or prompt. This is not an atomic idle-retirement proof.
+Focused unit controls additionally cover unknown admission, managed permission
+holds, event overflow, unrepresentable history and missing optional
+dependency/interpreter refusal. Compact receiving runs a real refusal subprocess.
+Python 3.10 installation, other platforms, joined-observer retirement and
+work-arrival/expiry races retain their independent qualification gates.
 
 Manager's focused `tests/test_pane_startup.py` controls also execute its actual
 persisted AHP-binding and final startup-serialization blocks against copied
@@ -2991,10 +3366,13 @@ case's clock before this distinct consumer even starts; this case is not a
 300-second Worktrees construction-performance check. The existing 300-second
 admission case and 300+180 installed execution-owner case remain unchanged,
 as do the native startup and cleanup limits.
-The public application cases allocate a short, fixture-owned sandbox below
-the candidate checkout rather than nesting installed version slots beneath
-pytest's test-name directory. The real console entrypoint must still remain
-below MAX_PATH; no launcher alias or path assertion is substituted.
+The public application cases allocate a short, fixture-owned directory
+directly inside the runner's sandbox rather than nesting installed version
+slots beneath pytest's test-name directory. Their initial caller stays
+outside the source-only checkout while their mux namespace remains inside
+the runner's declared resource scope. Neither guard is relaxed. The real
+console entrypoint must still remain below MAX_PATH; no launcher alias or
+path assertion is substituted.
 
 Select `-k public_copilot` separately with those same prerequisites and bounds
 for the installed public TTY caller. Its real console entrypoint inherits an
@@ -3927,6 +4305,22 @@ mux process identities. Cleanup targets only the test's own namespace and
 birth-checked processes; no default-namespace shutdown or installed update is
 performed. This is an explicit native lane, not additional required PR CI.
 
+## Retained temporary-input lifetime
+
+The admitted cases in `tools/promotion_unit_tests/test_installer_retention.py`
+exercise the actual, unmocked temporary-input owner: collection/GeneratorExit
+preservation, explicit cleanup, and hidden-parent cleanup failure with and
+without a primary exception. These cases create only disposable files and no
+processes. Existing retained-source work-bound cases retain their separate
+mocked fixture.
+
+`tools/test_installer_dependency_compile.py::test_live_temporary_inputs_survive_interpreter_shutdown`
+is the real subprocess control. The existing optional
+`installation-context-acceptance.yml` `dependency_compile=true` Linux and
+Windows jobs select it. A fresh child keeps its input context open until
+interpreter shutdown, and the parent verifies the retained bytes afterward.
+This adds no workflow, permission change or process-producing required unit.
+
 ## Optional immutable Worktrees runtime qualification
 
 The manual `installation-context-acceptance.yml` selector
@@ -4523,8 +4917,9 @@ and agent-ssh)"`. No production credentials, remote hosts or capacity are needed
 ## Optional foreground completion custody
 
 The manual `installation-context-acceptance.yml` selector
-`interactive_completion=true` runs `libs/agent-procutil/tests/test_interactive.py`
-and `test_interactive_session_native.py` on Linux, macOS and Windows. It
+`interactive_completion=true` runs `libs/agent-procutil/tests/test_interactive.py`,
+`test_interactive_session_native.py`, `test_async_foreground.py` and
+`test_async_foreground_native.py` on Linux, macOS and Windows. It
 exercises real finite commands, normal-exit
 descendant cleanup, abrupt caller death, POSIX interruption and controlling-PTY
 input/resize/foreground restoration. Windows also generates a real SIGINT in
@@ -4538,6 +4933,17 @@ job groups, preserve redirected JSON stdout and check that an explicitly
 managed detached workload remains live. Managed-detachment cases skip inside
 the contained local runner rather than bypassing its suppression; they run in
 the explicit disposable native workflow.
+
+The Linux job also selects `test_headed_backend.py -k posix_foreground` through
+the existing Driver plugin runner. It composes the actual source-auth receiver
+and headed backend with the real async foreground provider and a private native
+SDK fixture. Expiry and revocation freeze idle sends, retire the owned native
+scope and preserve SDK EOF observed before independent settlement as a sticky
+hold; a renewed source lease cannot clear it. A bounded confirmation gate makes
+that ordering deterministic without delaying or relabeling the EOF. This is
+negative consumer-composition evidence, not POSIX `AuthPaneChild` support,
+productive Copilot recovery or permission to enable renewal. Same-session
+seedless recovery and pending/unknown-work acceptance remain separate gates.
 
 The same Linux job also runs Manager's
 `tests/native/test_warm_picker_lifetime.py` through its isolated plugin runner.
