@@ -156,8 +156,8 @@ selection and reference registration, retains its existing defaults.
 
 ## Create a personal private knowledge repository
 
-The standalone native owner supports explicitly confirmed personal-private
-GitHub creation for an eligible unbound stateless harness. Hosted creation is
+The native owner supports explicitly confirmed personal-private GitHub creation
+through Configuration or the standalone CLI for an eligible unbound stateless harness. Hosted creation is
 optional: public foundation installation, local-only storage and existing
 acquisition/registration/binding do not require personal GitHub sign-in.
 Organization destinations and other providers are unsupported.
@@ -185,9 +185,22 @@ Its token binds the installation, machine, project, registry/configuration,
 account selection, exact target and current observed repair state. Apply
 revalidates before effects under the native registry lock. Native inventory
 advertises `knowledge_repository_creation: 1` from the executing runtime,
-not the marketplace payload. This provider-first delivery does not yet expose
-a catalog action or Manager form. Older consumers retain their existing
-operations; an unsupported remote-proposal version must refuse before apply.
+not the marketplace payload. The same native declaration gates the optional
+catalog rows; missing, malformed or unsupported support withholds only these
+actions. The newer manifest cannot infer support from its own presence.
+Older consumers retain their existing operations; an unsupported
+remote-proposal version must refuse before apply.
+
+**Create a personal private knowledge repository** uses the existing form and
+remote-effect preview, with Cancel selected by default. **Inspect prior creation
+read-only** takes the exact URL and native receipt reference without a mutation
+confirmation. **Complete safeguards for a confirmed creation** uses those same
+inputs but requires its own current remote-effect preview and default-Cancel
+confirmation. Recovery remains available after ordinary knowledge binding.
+Opening or refreshing the catalog performs no credential or provider reads;
+only submitting an inspection or preview invokes its native owner. Every result,
+including partial failure, retains the receipt and refreshes the originating
+scope. Neither receipt lookup nor refresh automatically replays an operation.
 
 Creation makes one POST to the authenticated user's repository endpoint with
 private visibility and initial README creation. The returned private personal

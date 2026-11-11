@@ -271,7 +271,10 @@ class PickerScreenRuntimeMixin:
         from . import engine as engine_mod
 
         poll_secs = engine_mod.POLL_SECS
-        if poll_secs <= 0 or self.progress is not None:
+        if (
+            poll_secs <= 0 or self.progress is not None
+            or self.is_mounted and self.screen is not self.app.screen
+        ):
             return
         reg = self._reg_pivot()
         if reg is None:

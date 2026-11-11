@@ -31,6 +31,54 @@ def action_target(project: str) -> dict[str, str]:
     return target(project, "knowledge-creation")
 
 
+def action_rows(project: str, inspection) -> list[dict]:
+    from .repos_knowledge_registration import eligible
+    from .repos_list_cli import CAPABILITIES
+
+    support = CAPABILITIES.get("knowledge_repository_creation")
+    if type(support) is not int or support != 1 or inspection.findings:
+        return []
+    base = {
+        "context_project": project, "registration": "optional remote action",
+        "participation": "not binding", "provenance": "executing native owner",
+        "editable": "false", "resettable": "false", "knowledge_bindable": "false",
+        "preferred_knowledge_bindable": "false",
+        "configuration": {"target": action_target(project)},
+    }
+    url = {
+        "name": "url", "type": "text", "label": "Exact personal GitHub HTTPS repository URL",
+        "required": True,
+    }
+    rows = []
+    if eligible(inspection):
+        rows.append({
+            **base, "id": "action:knowledge-creation", "title": "Create a personal private knowledge repository",
+            "effective": "Optional / existing configured credentials",
+            "knowledge_creation_available": "true", "knowledge_creation_fields": [url],
+            "card": {
+                "title": "Create remotely; acquire, register and bind separately",
+                "body": "Optional personal-private GitHub creation and default-branch safeguards. "
+                "No sign-in, clone, registration, binding or launch. Requires an existing configured account "
+                "and provider protection support. Organization destinations are unsupported.",
+            },
+        })
+    rows.append({
+        **base, "id": "action:knowledge-creation-recovery", "title": "Inspect a prior knowledge creation",
+        "effective": "Exact native receipt required", "knowledge_creation_recovery_available": "true",
+        "knowledge_creation_recovery_fields": [
+            url, {"name": "receipt", "type": "text", "label": "Native creation receipt reference", "required": True},
+        ],
+        "card": {
+            "title": "Inspect first; confirm protection separately",
+            "body": "Inspect current provider state read-only using the exact native creation receipt. "
+            "Unknown creation is not permission to repair. Protection completion requires its own current "
+            "remote-effect preview and confirmation. Never replay creation, adopt another repository or delete. "
+            "Historical success alone is not current safeguard proof; no acquire, register or bind is performed.",
+        },
+    })
+    return rows
+
+
 def _selection(project: str, url: str, *, recovery: bool = False) -> dict:
     canonical = protocol.https_url(url)
     parsed = urlsplit(canonical)

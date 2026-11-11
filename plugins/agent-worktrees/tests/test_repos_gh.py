@@ -108,14 +108,15 @@ def test_repos_gh_rejects_unresolved_registered_target(monkeypatch, capfd):
     assert "azdo-proj" in capfd.readouterr().out
 
 
-def test_repos_gh_allows_unregistered_bare_owner(monkeypatch):
+@pytest.mark.parametrize("executable", ["gh", r"C:\fixture tools\gh.cmd"])
+def test_repos_gh_allows_unregistered_bare_owner(monkeypatch, executable):
     """An ordinary unregistered bare owner (no registry entry at all) keeps
     the existing ambient-auth fallback -- only a *registered* target with an
     unresolvable identity is rejected.
     """
     import subprocess
 
-    monkeypatch.setattr(m.shutil, "which", lambda name: "/usr/bin/gh")
+    monkeypatch.setattr(m.shutil, "which", lambda name: executable)
     monkeypatch.setattr(repos, "is_unresolved_registered_target", lambda t: False)
     monkeypatch.setattr(repos, "account_for_github_slug", lambda t, **kwargs: None)
     calls: list[list[str]] = []
@@ -129,7 +130,24 @@ def test_repos_gh_allows_unregistered_bare_owner(monkeypatch):
     rc = m.cmd_repos_dispatch(["gh", "ThomasMichon", "--", "issue", "list"])
 
     assert rc == 0
-    assert calls == [["gh", "issue", "list"]]
+    assert calls == [[executable, "issue", "list"]]
+
+
+def test_named_token_read_uses_resolved_cli_shim_without_changing_arguments(monkeypatch):
+    import subprocess
+    from types import SimpleNamespace
+
+    executable = r"C:\fixture tools\gh.cmd"
+    monkeypatch.setattr(git_ops.shutil, "which", lambda name: executable)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return SimpleNamespace(returncode=0, stdout="fixture-token\n")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    assert git_ops._gh_token_for_owner("fixture-resolved-shim") == "fixture-token"
+    assert calls == [[executable, "auth", "token", "--user", "fixture-resolved-shim"]]
 
 
 # --- `repos account-for` dispatcher (command-level, #3032 follow-up) -------
@@ -248,7 +266,7 @@ def test_repos_gh_omitted_target_infers_github_remote(monkeypatch):
     rc = m.cmd_repos_dispatch(["gh", "--", "issue", "list"])
 
     assert rc == 0
-    assert calls == [["gh", "issue", "list"]]
+    assert calls == [["/usr/bin/gh", "issue", "list"]]
 
 
 def test_repos_gh_omitted_target_refuses_non_github_active_remote(monkeypatch):

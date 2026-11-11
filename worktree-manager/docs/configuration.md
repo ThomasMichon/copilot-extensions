@@ -6,6 +6,24 @@ provider settings that must not be committed to a project. The existing
 `[source]` update-source, AHP provider and restart-recovery tables coexist in this file;
 `worktree-manager source set/reset` preserves all non-source tables.
 
+## Knowledge repository choices
+
+The contributed **Repositories** section keeps hosted creation optional and
+separate from checkout acquisition, local registration and binding. A capable
+executing native owner contributes personal-private GitHub creation and exact
+receipt recovery; a newer payload alone cannot enable them. Creation and
+protection completion use the existing remote-effect preview with default Cancel.
+Read-only inspection never turns an unknown creation into repair authority.
+Partial receipts remain visible and refresh the originating scope without retry.
+Periodic catalog polling pauses while an editor, preview or result is open;
+command completion still refreshes its originating scope. Apply continues to
+recheck the current source.
+
+The [native repository contract](../../plugins/agent-worktrees/docs/repositories-configuration.md#create-a-personal-private-knowledge-repository)
+owns effects, account selection, safeguards, recovery and compatibility.
+Neither remote completion nor an acquired checkout establishes New readiness;
+registration and binding still require their own confirmations.
+
 ## Repository authentication inspection
 
 The standing **Authentication** section is a read-only view of the selected
