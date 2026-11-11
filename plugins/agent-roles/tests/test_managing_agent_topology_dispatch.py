@@ -393,3 +393,112 @@ def test_without_dispatch_adapter_legacy_acceptance_remains_supported() -> None:
     assert topology.route("request-review-a")["status"] == "resolved"
     document["observations"]["dispatch"] = []
     assert report(document).overview()["coverage"][0]["qualifiedCount"] == 0
+
+
+def progress(state: str = "advancing", **changes: Any) -> dict[str, Any]:
+    result: dict[str, Any] = {
+        "observedAt": AT, "sourceRef": "synthetic:progress-read", "state": state,
+        "workRef": "synthetic:child-task", "lastAdvancedAt": "2026-01-01T00:00:00Z",
+        "blockingOwner": None,
+    }
+    result.update(changes)
+    return result
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("state", ["advancing", "waiting", "blocked", "complete", "unknown"])
+def test_progress_is_reported_beside_accepted_coverage(document: dict[str, Any], state: str) -> None:
+    blocker = "synthetic:review-owner" if state == "blocked" else None
+    document["observations"]["owners"][0]["progress"] = progress(state, blockingOwner=blocker)
+    before = copy.deepcopy(document)
+    topology = report(document)
+    lane = topology.overview()["coverage"][0]
+    assert lane["qualifiedCount"] == 1
+    entry = lane["qualified"][0]
+    assert entry["liveness"] == {
+        "state": "idle", "fresh": True, "observedAt": "2026-01-01T00:00:00Z",
+        "sourceRef": "synthetic:current-head-and-charter",
+    }
+    assert entry["progress"] == {
+        "state": state, "workRef": "synthetic:child-task", "blockingOwner": blocker,
+        "observedAt": AT, "sourceRef": "synthetic:progress-read",
+        "sinceAdvancedSeconds": 60, "reasons": [],
+    }
+    assert lane["progressCounts"] == {state: 1}
+    assert topology.route("request-review-a")["status"] == "resolved"
+    assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("evidence,reason", [
+    ("absent", "progress-evidence-missing"),
+    (None, "progress-evidence-missing"),
+    (progress(observedAt="2025-12-31T23:50:00Z", lastAdvancedAt="2025-12-31T23:49:00Z"),
+     "progress-evidence-stale-or-future"),
+    (progress(observedAt="2026-01-01T00:05:00Z"), "progress-evidence-stale-or-future"),
+])
+def test_unqualified_progress_evidence_is_explicitly_unknown(
+    document: dict[str, Any], evidence: Any, reason: str,
+) -> None:
+    owner = document["observations"]["owners"][0]
+    if evidence == "absent":
+        owner.pop("progress", None)
+    else:
+        owner["progress"] = copy.deepcopy(evidence)
+    lane = report(document).overview()["coverage"][0]
+    assert lane["qualifiedCount"] == 1
+    reported = lane["qualified"][0]["progress"]
+    assert reported["state"] == "unknown"
+    assert reported["reasons"] == [reason]
+    assert reported["sinceAdvancedSeconds"] is None
+    assert reported["workRef"] == (evidence["workRef"] if isinstance(evidence, dict) else None)
+    assert lane["progressCounts"] == {"unknown": 1}
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("change", ["reserved-native-task", "unreachable-owner"])
+def test_progress_never_substitutes_for_acceptance_or_presence(
+    document: dict[str, Any], change: str,
+) -> None:
+    owner = document["observations"]["owners"][0]
+    owner["progress"] = progress("advancing")
+    if change == "reserved-native-task":
+        document["observations"]["dispatch"][0]["task"]["status"] = "claimed"
+    else:
+        owner["state"] = "unreachable"
+    topology = report(document)
+    lane = topology.overview()["coverage"][0]
+    assert lane["qualifiedCount"] == 0
+    assert lane["shortfall"] == 1
+    entry = lane["unqualified"][0]
+    assert entry["progress"]["state"] == "advancing"
+    assert entry["liveness"]["state"] == ("unreachable" if change == "unreachable-owner" else "idle")
+    assert entry["nativeStatus"] == ("reserved" if change == "reserved-native-task" else "held")
+    assert topology.route("request-review-a")["target"] is None
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("changes", [
+    {"state": "stalled"},
+    {"observedAt": "2026-01-01T00:00:10Z", "lastAdvancedAt": "2026-01-01T00:00:30Z"},
+    {"lastAdvancedAt": "2026-01-01T00:00:00"},
+    {"workRef": ""},
+    {"unexpected": True},
+])
+def test_progress_contract_rejects_ambiguous_evidence(
+    document: dict[str, Any], changes: dict[str, Any],
+) -> None:
+    document["observations"]["owners"][0]["progress"] = progress(**changes)
+    with pytest.raises(ContractError):
+        validate(document)
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_legacy_lanes_report_progress_without_dispatch_adapter() -> None:
+    document = read_json(SKILL / "assets" / "topology.example.json")
+    document["observations"]["owners"][0]["progress"] = progress("waiting", lastAdvancedAt=None)
+    lane = report(document).overview()["coverage"][0]
+    assert lane["qualifiedCount"] == 1
+    reported = lane["qualified"][0]["progress"]
+    assert (reported["state"], reported["sinceAdvancedSeconds"]) == ("waiting", None)
+    assert lane["qualified"][0]["liveness"]["state"] == "idle"
