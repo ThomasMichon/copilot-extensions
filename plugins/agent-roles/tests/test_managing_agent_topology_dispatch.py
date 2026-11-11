@@ -94,7 +94,7 @@ def set_value(document: dict[str, Any], path: str, value: Any) -> None:
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.parametrize("command,args", [
-    ("validate", []), ("overview", []),
+    ("validate", []), ("overview", []), ("intent", []),
     ("placement", ["--role", "reviewer"]), ("route", ["--request", "request-review-a"]),
     ("seed", ["--request", "request-review-a"]),
     ("materialize", ["--request", "request-review-a"]), ("inspect-materialization", []),
@@ -128,6 +128,9 @@ def test_null_dispatcher_cli_is_read_only(
         assert output["retainedWorktree"] == document["observations"]["owners"][0]["owner"]
     if command in {"materialize", "inspect-materialization"}:
         assert output["effective"]["dispatcher"] is None
+    if command == "intent":
+        assert output["lanes"][0]["state"] == "aligned"
+        assert output["effectAuthorityGranted"] is False
         assert output["effectAuthorityGranted"] is False
 
 
@@ -502,3 +505,152 @@ def test_legacy_lanes_report_progress_without_dispatch_adapter() -> None:
     reported = lane["qualified"][0]["progress"]
     assert (reported["state"], reported["sinceAdvancedSeconds"]) == ("waiting", None)
     assert lane["qualified"][0]["liveness"]["state"] == "idle"
+
+def intent_lane(document: dict[str, Any]) -> dict[str, Any]:
+    return report(document).intent()["lanes"][0]
+
+
+def change_desired_intent(document: dict[str, Any], effective: bool) -> None:
+    document["revision"] += 1
+    if effective:
+        document["assignments"][0]["charter"]["exclusions"] += " No sending."
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_intent_keeps_desired_proposed_and_adopted_records_separate(document: dict[str, Any]) -> None:
+    before = copy.deepcopy(document)
+    result = report(document).intent()
+    lane = result["lanes"][0]
+    desired = report(document).materialize("request-review-a")
+    assert lane["state"] == "aligned" and lane["reasons"] == []
+    assert lane["desired"]["sourceRevision"] == desired["sourceRevision"]
+    assert lane["proposed"]["expectedMaterializationRevision"] == desired["materializationRevision"]
+    assert lane["adopted"]["acceptedHead"] == document["observations"]["owners"][0]["head"]
+    assert (lane["proposedMatchesDesired"], lane["adoptedMatchesProposed"], lane["adoptedMatchesDesired"]) == (
+        True, True, True)
+    assert result["stateCounts"] == {"aligned": 1}
+    assert (result["advisoryOnly"], result["effectAuthorityGranted"], result["qualifiesCoverage"]) == (
+        True, False, False)
+    assert "synthetic:relationship" not in json.dumps(result)
+    assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("effective,reasons", [
+    (False, ["proposed-source-revision-differs-from-desired"]),
+    (True, ["proposed-source-revision-differs-from-desired", "proposed-effective-revision-differs-from-desired"]),
+])
+def test_changed_desired_intent_awaits_a_new_proposal(
+    document: dict[str, Any], effective: bool, reasons: list[str],
+) -> None:
+    change_desired_intent(document, effective)
+    lane = intent_lane(document)
+    assert lane["state"] == "proposal-pending"
+    assert lane["reasons"] == reasons
+    assert lane["proposedMatchesDesired"] is False
+    assert lane["adoptedMatchesProposed"] is True
+    assert lane["adoptedMatchesDesired"] is False
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_updated_proposal_awaits_adoption(document: dict[str, Any]) -> None:
+    snapshot = document["observations"]["dispatch"][0]
+    change_desired_intent(document, True)
+    snapshot["task"]["standing_charter"]["declaration"] = bind_snapshot(document)["task"]["standing_charter"][
+        "declaration"]
+    lane = intent_lane(document)
+    assert lane["state"] == "adoption-pending"
+    assert lane["reasons"] == ["adopted-differs-from-proposed"]
+    assert (lane["proposedMatchesDesired"], lane["adoptedMatchesProposed"], lane["adoptedMatchesDesired"]) == (
+        True, False, False)
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_unaccepted_proposal_is_not_adopted(document: dict[str, Any]) -> None:
+    snapshot = document["observations"]["dispatch"][0]
+    snapshot["task"].update(status="queued", owner=None, owner_session_id=None)
+    snapshot["task"]["standing_charter"]["accepted_materialization"] = None
+    snapshot["relationship"] = None
+    lane = intent_lane(document)
+    assert lane["state"] == "adoption-pending"
+    assert lane["reasons"] == ["not-adopted"]
+    assert lane["adopted"] is None
+    assert lane["proposedMatchesDesired"] is True
+    assert lane["adoptedMatchesProposed"] is None
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("path,value,reason", [
+    ("dispatch.0.observedAt", "2025-12-31T23:00:00Z", "proposed-evidence-stale-or-future"),
+    ("dispatch.0.observedAt", "2026-01-02T00:00:00Z", "proposed-evidence-stale-or-future"),
+    ("dispatch", [], "proposed-evidence-missing"),
+])
+def test_unqualified_native_evidence_leaves_intent_unknown(
+    document: dict[str, Any], path: str, value: Any, reason: str,
+) -> None:
+    set_value(document["observations"], path, value)
+    lane = intent_lane(document)
+    assert lane["state"] == "unknown"
+    assert lane["reasons"] == [reason]
+    assert lane["proposedMatchesDesired"] is None
+    assert lane["adoptedMatchesProposed"] is None
+    assert lane["adoptedMatchesDesired"] is None
+    assert lane["proposed"] is None or lane["proposed"]["fresh"] is False
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_unsupplied_dispatch_evidence_is_not_absent_proposal(document: dict[str, Any]) -> None:
+    del document["observations"]["dispatch"]
+    result = report(document).intent()
+    assert result["dispatchEvidenceSupplied"] is False
+    assert result["lanes"][0]["state"] == "unknown"
+    assert result["lanes"][0]["reasons"] == ["dispatch-evidence-not-supplied"]
+    assert result["lanes"][0]["proposed"] is None
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("status,lifecycle", [("started", "retiring"), ("completed", "retired")])
+def test_inactive_native_lane_is_not_aligned(document: dict[str, Any], status: str, lifecycle: str) -> None:
+    snapshot = document["observations"]["dispatch"][0]
+    snapshot["task"]["status"] = status
+    snapshot["task"]["standing_charter"]["lifecycle"] = lifecycle
+    lane = intent_lane(document)
+    assert lane["state"] == "proposal-inactive"
+    assert lane["reasons"] == ["native-lane-" + lifecycle]
+    assert lane["proposedMatchesDesired"] is True
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_terminal_desired_intent_reports_active_native_lane(document: dict[str, Any]) -> None:
+    document["assignments"][0]["state"] = "completed"
+    lane = intent_lane(document)
+    assert lane["state"] == "desired-terminal"
+    assert lane["reasons"] == ["desired-terminal-native-lane-active"]
+    assert lane["desired"]["sourceRevision"] is None
+    assert lane["proposedMatchesDesired"] is None
+    assert lane["adoptedMatchesDesired"] is None
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_unmapped_native_proposal_has_no_desired_intent(document: dict[str, Any]) -> None:
+    extra = copy.deepcopy(document["observations"]["dispatch"][0])
+    extra["task"]["id"] = "unmapped"
+    document["observations"]["dispatch"].append(extra)
+    result = report(document).intent()
+    assert result["lanes"][0]["state"] == "aligned"
+    assert [item["proposed"]["nativeTask"] for item in result["proposedWithoutDesired"]] == ["unmapped"]
+    assert result["proposedWithoutDesired"][0]["reasons"] == ["proposed-without-desired-intent"]
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_intent_covers_only_standing_assignments() -> None:
+    document = read_json(SKILL / "assets" / "topology.example.json")
+    temporary = copy.deepcopy(document["assignments"][0])
+    temporary.update(
+        id="temporary-a", requestId="temporary-request", creationKey="temporary-key", kind="temporary", effects=[],
+    )
+    document["assignments"].append(temporary)
+    result = report(document).intent()
+    assert [lane["desired"]["assignment"] for lane in result["lanes"]] == ["review-a"]
+    assert result["lanes"][0]["state"] == "unlinked"
+    assert result["lanes"][0]["reasons"] == ["not-linked-to-native-task"]

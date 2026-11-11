@@ -1,0 +1,9 @@
+{
+  "comment": "Add a read-only topology intent view comparing desired assignments with proposed and adopted Dispatch standing charters",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}
