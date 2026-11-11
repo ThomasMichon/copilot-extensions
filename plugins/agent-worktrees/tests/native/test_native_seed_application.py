@@ -459,9 +459,9 @@ def test_lifetime_selection_cannot_disable_an_existing_contained_owner(tmp_path,
     assert list(tmp_path.iterdir()) == []
 
 
-@pytest.mark.parametrize("early_exit", [False, True])
+@pytest.mark.parametrize("early_exit,exit_code", [(False, 0), (False, -1), (True, 0)])
 def test_attached_caller_jobs_close_before_claiming_caller_and_control_exit(
-    tmp_path, monkeypatch, early_exit,
+    tmp_path, monkeypatch, early_exit, exit_code,
 ):
     import public_caller_jobs_fixture as fixture
 
@@ -479,7 +479,7 @@ def test_attached_caller_jobs_close_before_claiming_caller_and_control_exit(
     def wait_caller(timeout):
         assert timeout == 5 and "inner" in closed
         events.append("caller-exit")
-        return -1
+        return exit_code
 
     caller = SimpleNamespace(pid=101, poll=lambda: 0 if early_exit else None, wait=wait_caller)
     control = SimpleNamespace(pid=102)
@@ -521,7 +521,8 @@ def test_attached_caller_jobs_close_before_claiming_caller_and_control_exit(
         fixture._tty_middle(tmp_path)
         proof = fixture.close_public_tty_jobs(tmp_path)
         assert events == ["inner-close", "caller-exit", "outer-close"]
-        assert proof["callerExitCode"] == -1
+        assert proof["callerExitCode"] == exit_code
+        assert proof["callerAliveBeforeClose"] is True
         assert proof["caller"] == {"pid": 101, "birth": "birth-101"}
         assert proof["control"] == {"pid": 102, "birth": "birth-102"}
 
