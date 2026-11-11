@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify the installed Manager no-mux decision path with native caller receipts",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

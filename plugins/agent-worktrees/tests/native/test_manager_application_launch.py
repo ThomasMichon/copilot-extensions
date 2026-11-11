@@ -74,6 +74,27 @@ def _manager_install_environment(home, root, tmp_path, interpreter, *, caller_jo
     return environment
 
 
+def _run_manager_native(directory, control, *, script, python, root, environment, picker_decision):
+    command = [
+        sys.executable, "-I", "-B", "-X", "utf8", "-c",
+        "import sys;from pathlib import Path;"
+        "sys.path[:0]=sys.argv[1:3];"
+        "from test_headed_worktrees_copilot import _qualify_native_worktrees;"
+        "_qualify_native_worktrees(Path(sys.argv[3]),sys.argv[4],"
+        "manager_script=Path(sys.argv[5]),manager_python=Path(sys.argv[6]),"
+        "manager_environment={'WORKTREE_MANAGER_ROOT':sys.argv[7],'WORKTREE_PANE_WAIT_TIMEOUT':'3'},"
+        "verify_reuse=False,manager_picker=sys.argv[8]=='1')",
+        str(Path(__file__).parent), str(ROOT / "tools"), str(directory),
+        control, str(script), str(python), str(root), "1" if picker_decision else "0",
+    ]
+    qualified = run_caller_owned(
+        command, cwd=directory, env=environment, timeout=180,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    print(qualified.stdout, flush=True)
+    assert qualified.returncode == 0, qualified.stdout + qualified.stderr
+
+
 @pytest.mark.parametrize(
     "control", ["manager-no-mux", "manager-mux"] if _NATIVE_COPILOT else ["manager-no-mux"],
 )
@@ -82,12 +103,26 @@ def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(tmp_pa
     _qualify_manager_application(tmp_path, monkeypatch, control)
 
 
+@pytest.mark.skipif(not _NATIVE_COPILOT, reason="Select the isolated native Windows Copilot lane")
+@pytest.mark.timeout(300)
+def test_manager_no_mux_decision(monkeypatch):
+    from plugin_test_containment import TestSandbox
+
+    sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+    with TestSandbox(prefix="m-", dir=sandbox) as directory:
+        _qualify_manager_application(
+            Path(directory), monkeypatch, "manager-no-mux", picker_decision=True,
+        )
+
+
 def _qualify_manager_application(
     tmp_path, monkeypatch, control, *, worktrees_python=None,
     worktrees_root=None, worktrees_environment=None, caller_jobs=False, replacement_slot=None,
+    picker_decision=False,
 ):
     paired = worktrees_python is not None
     assert not paired or (control in {"embody", "copilot"} and worktrees_environment is not None)
+    assert not picker_decision or (not paired and control == "manager-no-mux")
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
     import build_python_artifacts as builder
     import local_install_profile as profiles
@@ -229,17 +264,11 @@ def _qualify_manager_application(
                 print(qualified.stdout, flush=True)
                 assert qualified.returncode == 0, qualified.stdout + qualified.stderr
             elif _NATIVE_COPILOT:
-                from test_headed_worktrees_copilot import _qualify_native_worktrees
-
                 native = tmp_path / "native-launch"
                 native.mkdir()
-                _qualify_native_worktrees(
-                    native, control, manager_script=script, manager_python=python,
-                    manager_environment={
-                        **lifecycle, "WORKTREE_MANAGER_ROOT": str(root),
-                        "WORKTREE_PANE_WAIT_TIMEOUT": "3",
-                    },
-                    verify_reuse=False,
+                _run_manager_native(
+                    native, control, script=script, python=python, root=root,
+                    environment={**os.environ, **lifecycle}, picker_decision=picker_decision,
                 )
             assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
     finally:
