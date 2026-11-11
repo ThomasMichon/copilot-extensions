@@ -1,0 +1,9 @@
+{
+  "comment": "Cover same-owner topology relay reacceptance through native standing admission",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "dev"
+    }
+  ]
+}

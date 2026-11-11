@@ -203,6 +203,49 @@ replacement or regenerating a launch. The helper reads neither envelope content
 nor receipt authority: durable full-seed preservation must be established by the
 writer and native consumer, not inferred from a valid reference or this report.
 
+## Follow-up relay and temporary work
+
+`relay --request <request-id> --followup <followup-id>` sequences a status
+inquiry or adjustment for an existing assignment; it never creates another
+worker or performs an effect. Persist the complete follow-up and, for an
+adjustment, the full revised charter before using the report:
+
+1. Reconcile a changed native standing charter through its existing owner,
+   retaining the worktree and original assignment generation. Re-read native
+   evidence afterward; an older accepted revision is not acceptance of the
+   adjustment.
+2. Save an immutable native request envelope and its linked relay effect before
+   sending. Preserve the exact prompt, mode, sender/caller, destination and
+   revision fences, not just a reference that could later resolve to new bytes.
+3. Use the supported exact-head send contract. The proposal requires
+   `envelopeHeadMatchRequired: true` and `retargetAllowed: false`: the native
+   consumer must compare the saved envelope's destination with the fenced head.
+   The offline helper cannot read or authenticate that content. Missing,
+   mismatched or uncertain envelope evidence is a hold, not permission to
+   regenerate the prompt or retarget the original effect after succession.
+4. Admission or consumption waits for the inquiry response or, for an
+   adjustment, positive joined acceptance of the current charter. An absent
+   rejection reason is not acceptance. Validate owner evidence and conflicting
+   effects before settlement, even when the expected charter is already accepted.
+   Unknown outcomes require recovery with the original envelope and identity,
+   never another send.
+
+Saving the follow-up/effect can advance the document revision without changing
+the charter. For a retained started lane, `relay` tolerates that native
+declaration difference without proposing another reconciliation only when it
+proves the prior source digest by varying only the bounded document revision
+and all other owner/effect fences still hold. Retain the envelope, effect and
+generation unchanged. This relay bookkeeping exception does not relax `flow`'s
+reconciliation hold for an already-started launch.
+
+Unrelated work gets a separate `temporary` proposal with its own complete
+charter, authority limits, native owner and exit policy. The dispatcher worktree
+cannot own that worker assignment. Temporary work remains visible in overview
+but never contributes to a standing role's minimum coverage. Completion is not
+release: retain the assignment until effects settle, obligations are resolved
+and native retirement is confirmed. Never retire or replace a standing owner
+to make room without the original owner's authority.
+
 ## State and effect protocol
 
 Persist intent under the existing native single writer, using the adopter's
@@ -264,6 +307,8 @@ hand-delete directories or clear a claim.
 | Worktree allocated, launch not attempted | Persist launch identity and complete charter; embody only that returned worktree through the supported owner |
 | Launch/send outcome unknown | Read the saved original request envelope and inspect its exact native receipt; no resend, alternate target, replacement or new session |
 | Head succeeded inside the same worktree | Preserve old request envelopes for receipt-only recovery; after unsettled effects are reconciled, resolve the new native head and admit a new authorized follow-up with a new envelope |
+| Saved relay envelope targets a different head | Hold admission; reconcile the original effect before preparing a separately authorized follow-up |
+| Adjustment delivered, old charter still accepted | Retain the owner and pending relay; await joined acceptance of the current revision, not another delivery |
 | Expected charter differs from accepted revision | Retain the owner; relay or inspect the already-pending update, and report coverage as unqualified until accepted |
 | Unreachable, stale, dormant or unaccepted owner | Retain an explicit unknown/unqualified entry; a shortfall is not automatic replacement authority |
 | New unrelated request | Separate temporary assignment and native worker; preserve standing-role coverage and custody |
