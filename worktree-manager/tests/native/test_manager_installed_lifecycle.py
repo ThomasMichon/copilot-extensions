@@ -320,8 +320,8 @@ def _process_arguments(handle, *, owned_root=None):
     }
 
 
-def _case_environment(root):
-    env = installed._environment(root)
+def _case_environment(root, *, environment=None):
+    env = installed._environment(root) if environment is None else dict(environment)
     identities = {
         "SESSION_ID",
         "WORKTREE_ID",
@@ -347,7 +347,7 @@ def _case_environment(root):
     copilot_home = Path(env["USERPROFILE"]) / ".copilot"
     copilot_home.mkdir(parents=True, exist_ok=True)
     data = root / "x"
-    data.mkdir()
+    data.mkdir(exist_ok=environment is not None)
     env.update(
         {
             "COPILOT_HOME": str(copilot_home),
@@ -381,7 +381,7 @@ def _events(path, owner):
 class _Witness:
     def __init__(
         self, root, env, manager_python, engine, copilot, budget, provider_requests=(),
-        *, mux_binary=None,
+        *, mux_binary=None, run=None,
     ):
         self.root, self.env = root, env
         self.manager_python = manager_python
@@ -395,6 +395,7 @@ class _Witness:
         self.input_observation = None
         self.provider_requests = provider_requests
         self.mux_binary = mux_binary
+        self.run = installed._run if run is None else run
         self.stack = ExitStack()
 
     def rendered(self, console):
@@ -564,7 +565,7 @@ for row in rows:
 print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                   "captured_at_ns":time.time_ns(),"rows":observations}),flush=True)
 """
-        return installed._run(
+        return self.run(
             [self.manager_python, "-I", "-B", "-c", program, self.root, PROJECT],
             self.env,
             self.root / PROJECT,
@@ -791,7 +792,7 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
         )
         if self.mux_binary is None:
             raise RuntimeError("Rendered-pane evidence requires the selected native mux binary")
-        rendered = installed._run(
+        rendered = self.run(
             [
                 self.mux_binary, *namespace, "capture-pane", "-p",
                 "-t", "wt-" + record["id"], "-S", "-60",
@@ -814,7 +815,7 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
             " for r in rows if r.kind=='session']))"
         )
         rows = json.loads(
-            installed._run(
+            self.run(
                 [self.engine, "-I", "-B", "-c", code],
                 self.env,
                 self.root,
@@ -1035,7 +1036,7 @@ else:
     data["bootstrap_error"]="No private selected engine; no backend executed"
 print(json.dumps(data),flush=True)
 """
-        installed._run(
+        self.run(
             [self.manager_python, "-I", "-B", "-c", program, self.root, PROJECT],
             self.env,
             self.root / PROJECT,
@@ -1076,11 +1077,12 @@ def _identity():
     }
 
 
-def _project(root, env, engine, copilot):
+def _project(root, env, engine, copilot, *, profile=None, run=None):
+    run = installed._run if run is None else run
     project = root / PROJECT
-    project.mkdir()
+    project.mkdir(exist_ok=profile is not None)
     diagnostics = root / "diagnostics"
-    installed._run(
+    run(
         ["git", "init", "-q", "-b", "main", project],
         env,
         root,
@@ -1088,7 +1090,9 @@ def _project(root, env, engine, copilot):
         "project-init",
         timeout=30,
     )
-    arguments = installed._harness_registration(engine, project, root / "payloads")
+    arguments = installed._harness_registration(
+        engine, project, root / "payloads", profile=profile,
+    )
     arguments[arguments.index("--no-agent")] = "--agent"
     config = project / ".agent-worktrees" / "config.yaml"
     value = yaml.safe_load(config.read_text(encoding="utf-8"))
@@ -1102,10 +1106,10 @@ def _project(root, env, engine, copilot):
     ]
     value["launch"] = {"windows": launch}
     config.write_text(yaml.safe_dump(value), encoding="utf-8")
-    installed._run(arguments, env, project, diagnostics, "register-project", timeout=30)
+    run(arguments, env, project, diagnostics, "register-project", timeout=30)
     knowledge = root / KNOWLEDGE
     knowledge.mkdir()
-    installed._run(
+    run(
         ["git", "init", "-q", "-b", "main", knowledge],
         env,
         root,
@@ -1136,7 +1140,7 @@ def _project(root, env, engine, copilot):
                 ],
             ),
         ):
-            installed._run(
+            run(
                 ["git", "-C", repository, *args],
                 env,
                 root,
@@ -1144,7 +1148,7 @@ def _project(root, env, engine, copilot):
                 name + "-" + label,
                 timeout=30,
             )
-    installed._run(
+    run(
         [
             engine,
             "-I",
@@ -1172,7 +1176,7 @@ def _project(root, env, engine, copilot):
     configuration["knowledge_repo"] = KNOWLEDGE
     binding.write_text(yaml.safe_dump(configuration), encoding="utf-8")
     readiness = json.loads(
-        installed._run(
+        run(
             [engine, "-I", "-B", "-m", "agent_worktrees", "coordination-readiness"],
             env,
             project,
@@ -1185,7 +1189,7 @@ def _project(root, env, engine, copilot):
         knowledge,
     ):
         raise RuntimeError("The installed harness did not resolve its real private knowledge repo")
-    selected = installed._run(
+    selected = run(
         [
             engine,
             "-I",
@@ -2173,7 +2177,8 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
     assert _PROVENANCE["content_manifest"](artifact) == before
     assert not (artifact / ".git").exists()
     with pytest.raises(RuntimeError, match="controlled acquisition failure"):
-        with serve_git_transport(transport, **serving):
+        with serve_git_transport(served, **serving) as resumed:
+            assert resumed["url"] == served["url"]
             raise RuntimeError("controlled acquisition failure")
     with pytest.raises(ValueError, match="fresh fixture-owned"):
         prepare_git_transport(
@@ -2309,6 +2314,83 @@ def test_installed_suite_payload_closure_uses_the_real_cli(record_testsuite_prop
         assert installed._host_state() == before_host
 
 
+def _actions(witness):
+    """The same real Manager controls qualify core and complete-suite installs."""
+    first = witness.manager()
+    first.send(b"\r")
+    witness.wait(
+        lambda: witness._new_create_focused(first),
+        "The real New-worktree dialog did not focus Create",
+    )
+    first.send(b"\t")
+    witness.wait(
+        lambda: witness._new_prompt_focused(first),
+        "The New dialog did not render its focused prompt caret",
+    )
+    _paste_prompt(first, PROMPTS[0])
+    witness.wait(
+        lambda: PROMPTS[0] in witness.rendered(first),
+        "The New dialog did not render the entered prompt",
+    )
+    first.send(b"\r")
+    witness.wait(
+        lambda: witness._new_create_focused(first),
+        "The New dialog did not focus Create after accepting the prompt",
+    )
+    first.send(b"\r")
+    original = witness.turn(PROMPTS[0], 1, first)
+    record = witness.records("records-created")
+    actual = witness.run(
+        ["git", "-C", record["path"], "rev-parse", "--show-toplevel"],
+        witness.env, witness.root, witness.root / "diagnostics",
+        "real-created-worktree", timeout=30,
+    )
+    assert Path(actual).samefile(record["path"])
+
+    second = witness.manager()
+    witness.select(second, record, "Open")
+    second.send(PROMPTS[1].encode() + b"\r")
+    assert witness.turn(PROMPTS[1], 2, second) == original
+    if not first.exited(first.process.process):
+        first.send(b"\x02d")
+    assert first.wait(15000) == 0
+    assert witness.one_native() == original
+    second.send(PROMPTS[2].encode() + b"\r")
+    assert witness.turn(PROMPTS[2], 3, second) == original
+    assert witness.records("records-opened") == record
+    witness.close_cli(second, original)
+    assert not witness.one_native()
+    assert witness.records("records-after-exit") == record
+
+    resumed = witness.manager()
+    witness.select(resumed, record, "Resume")
+    resumed.send(PROMPTS[3].encode() + b"\r")
+    replacement = witness.turn(PROMPTS[3], 4, resumed)
+    assert replacement != original
+    assert witness.records("records-resumed") == record
+    copilot_home = Path(witness.env["COPILOT_HOME"])
+    assert [
+        event["data"]["content"] for event in _events(witness.history, copilot_home)
+        if event["type"] == "user.message"
+    ] == list(PROMPTS)
+    assert [
+        event["data"]["content"] for event in _events(witness.history, copilot_home)
+        if event["type"] == "assistant.message"
+    ] == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)]
+    assert any(
+        all(prompt in json.dumps(request) for prompt in PROMPTS)
+        for request in witness.provider_requests
+    )
+    witness.close_cli(resumed, replacement)
+    assert not witness.one_native()
+    return {
+        "worktree": record["id"], "conversation": witness.history.parent.name,
+        "native_before_open": original, "native_after_resume": replacement,
+        "create": True, "open_existing": True, "detach_preserved": True,
+        "normal_exit": True, "resume_continued": True,
+    }
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Native installed Windows Manager lifecycle")
 @pytest.mark.timeout(900)
 def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsuite_property):
@@ -2395,78 +2477,7 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                 with _Witness(
                     root, env, manager, engine, copilot, budget, requests, mux_binary=psmux,
                 ) as witness:
-                    first = witness.manager()
-                    first.send(b"\r")
-                    witness.wait(
-                        lambda: witness._new_create_focused(first),
-                        "The real New-worktree dialog did not focus Create",
-                    )
-                    first.send(b"\t")
-                    witness.wait(
-                        lambda: witness._new_prompt_focused(first),
-                        "The New dialog did not render its focused prompt caret",
-                    )
-                    _paste_prompt(first, PROMPTS[0])
-                    witness.wait(
-                        lambda: PROMPTS[0] in witness.rendered(first),
-                        "The New dialog did not render the entered prompt",
-                    )
-                    first.send(b"\r")
-                    witness.wait(
-                        lambda: witness._new_create_focused(first),
-                        "The New dialog did not focus Create after accepting the prompt",
-                    )
-                    first.send(b"\r")
-                    original = witness.turn(PROMPTS[0], 1, first)
-                    record = witness.records("records-created")
-                    actual = installed._run(
-                        ["git", "-C", record["path"], "rev-parse", "--show-toplevel"],
-                        env,
-                        root,
-                        root / "diagnostics",
-                        "real-created-worktree",
-                        timeout=30,
-                    )
-                    assert Path(actual).samefile(record["path"])
-
-                    second = witness.manager()
-                    witness.select(second, record, "Open")
-                    second.send(PROMPTS[1].encode() + b"\r")
-                    assert witness.turn(PROMPTS[1], 2, second) == original
-                    if not first.exited(first.process.process):
-                        first.send(b"\x02d")
-                    assert first.wait(15000) == 0
-                    assert witness.one_native() == original
-                    second.send(PROMPTS[2].encode() + b"\r")
-                    assert witness.turn(PROMPTS[2], 3, second) == original
-                    assert witness.records("records-opened") == record
-                    witness.close_cli(second, original)
-                    assert not witness.one_native()
-                    assert witness.records("records-after-exit") == record
-
-                    resumed = witness.manager()
-                    witness.select(resumed, record, "Resume")
-                    resumed.send(PROMPTS[3].encode() + b"\r")
-                    replacement = witness.turn(PROMPTS[3], 4, resumed)
-                    assert replacement != original
-                    assert witness.records("records-resumed") == record
-                    assert [
-                        event["data"]["content"]
-                        for event in _events(witness.history, copilot_home)
-                        if event["type"] == "user.message"
-                    ] == list(PROMPTS)
-                    assert [
-                        event["data"]["content"]
-                        for event in _events(witness.history, copilot_home)
-                        if event["type"] == "assistant.message"
-                    ] == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)]
-                    assert any(
-                        all(prompt in json.dumps(request) for prompt in PROMPTS)
-                        for request in requests
-                    )
-                    witness.close_cli(resumed, replacement)
-                    assert not witness.one_native()
-                    conversation = witness.history.parent.name
+                    actions = _actions(witness)
                 rejected = installed._negative_control(
                     manager,
                     lambda: installed._witness(
@@ -2489,15 +2500,7 @@ def test_installed_manager_creates_resumes_and_opens_one_real_cli(record_testsui
                         "identity": identity,
                         "profile": "installed-core",
                         "installation": {"manager": manager_origin, "engine": engine_origin},
-                        "worktree": record["id"],
-                        "conversation": conversation,
-                        "native_before_open": original,
-                        "native_after_resume": replacement,
-                        "create": True,
-                        "open_existing": True,
-                        "detach_preserved": True,
-                        "normal_exit": True,
-                        "resume_continued": True,
+                        **actions,
                         "launch_refusal": True,
                         "elapsed_seconds": time.monotonic() - (budget.deadline - 720),
                     }

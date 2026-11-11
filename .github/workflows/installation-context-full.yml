@@ -1280,7 +1280,7 @@ jobs:
           version: "0.12.6"
       - name: Prepare pinned native lifecycle prerequisites
         shell: pwsh
-        run: |
+        run: &manager-native-prerequisites |
           $ErrorActionPreference = 'Stop'
           $root = Join-Path $env:RUNNER_TEMP "manager-lifecycle-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $null = New-Item -ItemType Directory -Path $root
@@ -1522,19 +1522,20 @@ jobs:
 
   manager-suite-windows:
     if: github.event_name == 'workflow_dispatch' && inputs.portfolio == 'manager-suite'
-    name: Manager whole-suite replacement (Windows, ${{ matrix.mode }})
+    name: Manager whole-suite acceptance (Windows, ${{ matrix.mode }})
     runs-on: windows-latest
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        mode: [normal, repair]
+        mode: [normal, repair, fresh]
     env:
       UV_PYTHON: "3.12"
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-python@v5
         with:
@@ -1542,6 +1543,10 @@ jobs:
       - uses: astral-sh/setup-uv@v9.0.0
         with:
           version: "0.12.6"
+      - name: Prepare pinned full-suite lifecycle prerequisites
+        if: matrix.mode == 'fresh'
+        shell: pwsh
+        run: *manager-native-prerequisites
       - name: Record exact native source
         shell: pwsh
         env:
@@ -1551,12 +1556,12 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $actual -cne $env:EXPECTED_SOURCE) {
             throw 'Suite replacement source does not match the dispatch SHA'
           }
-      - name: Qualify installed V1 to V2 through the real Manager
+      - name: Qualify the selected installed suite through the real Manager
         shell: pwsh
         run: >-
           python tools\run-manager-suite-acceptance.py
           --root .v --mode ${{ matrix.mode }}
-      - name: Retain synthetic qualification diagnostics
+      - name: Retain installed suite qualification diagnostics
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -1565,6 +1570,8 @@ jobs:
             .v/*-runner.json
             .v/*-process-trace.json
             .v/*/result.json
+            .v/*/setup.json
+            .v/*/diagnostics/*
             .v/*/preparation-error.json
             .v/*/settlement.json
             .v/*/commands.jsonl

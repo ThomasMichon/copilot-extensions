@@ -10035,16 +10035,19 @@ assembled suite's ordinary-update/repair paths or scheduled registrations.
 
 Whole-suite replacement has a separate manual Windows VM portfolio:
 `installation-context-full.yml`, `portfolio=manager-suite`. It runs normal
-update and repair in independent disposable GitHub-hosted Windows jobs:
+update, repair and fresh installation in independent disposable GitHub-hosted
+Windows jobs:
 
 ```text
 python tools/run-manager-suite-acceptance.py --root .v --mode normal
 python tools/run-manager-suite-acceptance.py --root .v --mode repair
+python tools/run-manager-suite-acceptance.py --root .v --mode fresh
 ```
 
-These commands refuse local execution before creating fixtures. Each case
-constructs V1 and V2 through canonical materialization, starts the applicable
-V1 portfolio, and calls the real installed Manager for normal updates or its
+These commands refuse local execution before creating fixtures. Normal and repair
+each construct
+V1 and V2 through canonical materialization, start the applicable
+V1 portfolio, and call the real installed Manager for normal updates or its
 native bootstrap repair entrypoint for repair, against the same default HOME
 and durable data. The private repaired-engine handoff is not a substitute for
 constructing the fresh Manager first. Controlled acquisition replaces only external artifact
@@ -10054,6 +10057,23 @@ fails acceptance rather than reducing the portfolio.
 The disposable project explicitly opts Vault into runtime participation with
 `enabled: true`; plugin visibility alone is not activation. This does not alter
 the default inactive behavior or any operator configuration.
+
+Fresh mode uses the complete frozen required-readiness profile and real CLI
+payload acquisition described above. An explicitly uncounted discovery engine
+precedes construction from the CLI-selected payloads; the installed Manager then
+executes its normal updater. Every eligible installed runtime must import from
+its selected private slot at the exact payload version, and the actual selected
+Machines owner must satisfy required application readiness. The lifecycle
+witness reuses the installed-core Create/Open/detach/exit/Resume actions, mocking
+only inference. It rechecks payload bytes, selected origins and native executable
+hashes across the two stages, retaining the exact Git transport endpoint when
+restarting the bounded fixture server. The outer coordinator keeps its existing
+1800-second preparation, 900-second exercise, 300-second assertion and
+90-second finally-owned settlement limits. Default private HOME roots allow the
+existing registration/resident cleanup owner to settle both failure and success.
+Fresh construction is neither an admitted baseline-to-candidate upgrade nor
+required promotion enforcement. Its result explicitly grants no source admission;
+the original synthetic replacement and installed-core witnesses remain separate.
 
 If baseline preparation reports a Vault activation refusal, the fixture also
 runs the retained payload's read-only activation reader under a bounded native

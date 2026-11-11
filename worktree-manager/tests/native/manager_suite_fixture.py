@@ -645,7 +645,7 @@ def _cleanup(case: Path) -> list[str]:
 def _case(directory: Path, mode: str) -> tuple[Path, dict[str, Any]]:
     require_venue()
     directory = directory.resolve()
-    if mode not in {"normal", "repair"} or directory == REPO or not directory.is_relative_to(REPO):
+    if mode not in {"normal", "repair", "fresh"} or directory == REPO or not directory.is_relative_to(REPO):
         raise ValueError("Native stage must name a prepared mode below this checkout")
     case = directory / mode
     setup = _read(case / "setup.json")

@@ -89,6 +89,9 @@ The following implementation decomposition is **agent-recommended**.
   installation recipe from canonical owners. Enumerate what is installed and
   enabled; a manually assembled Manager/engine pair cannot be called a suite
   installation without proving the selected suite closure.
+  Frozen payload delivery is verified by #11972 and exact-source run
+  42933306312 for all 24 declared payloads. Complete runtime construction and
+  actual Machines readiness remain unverified; this item stays open.
 
 ### Phase 2 - Extend the authentic installed consumer
 
@@ -1073,3 +1076,57 @@ and transport-cleanup failures. Focused controls cover an ordinary request
 failure followed by backend or caller custody failure and verify that the
 real sandbox retains its files. The reviewed correction needs new exact-head
 native qualification and a passing subsequent review.
+
+### 2026-11-11 - Complete payload closure accepted; runtime construction started
+
+PR #11972 merged to Dev as `0286b3f71537d1a3d8128e2833add3a980b9b51f`.
+Exact-source native run 42933306312 at
+`c51a191e0c1cf651fa5e9dadfc652f69104a3f44` passed actual CLI acquisition,
+installed-engine discovery and strict full-manifest comparison for all 24
+private payloads in 308.756 seconds. The unchanged installed-core lifecycle
+passed in 260.986 seconds on that same source. Both producing-run receipts
+passed their workflow validators and retained the original finite limits.
+
+Copilot re-review 5851823621 confirmed no open findings after the custody fix;
+its sole remaining pending-native concern was resolved by that exact run.
+All review threads were resolved. The first managed merge correctly refused
+a newly expected metadata-triggered required PR gate; after CI run
+42935102060 passed, the managed retry merged normally under the configured
+Maintainer flow. Only the separate CODEOWNER vote was omitted; no CI failure,
+review finding, draft, hold or conflict was bypassed. Parent #6237 remains open.
+
+This closes payload acquisition only. Its receipt explicitly reports runtime
+installation unobserved; no full-runtime/Machines, authentic update, mandatory
+candidate enforcement or Main activation acceptance is inferred. The next
+active slice is a separate companion using the existing canonical installation
+and normal Manager update owners to construct the declared runtimes and reach
+actual Machines/required-readiness discovery in the disposable Windows venue.
+Use genuinely merged source admission; the fixture's Git transport commit is
+data delivery, never an admitted baseline. Preserve the existing full-suite
+preparation/exercise limits and coordinate concrete shared-helper/result edits.
+
+### 2026-11-11 - Fresh hosted runtime adapter implemented; native proof pending
+
+The separate runtime companion now calls the installed Manager's normal update,
+requires the complete eligible private runtime portfolio, checks actual installed
+imports and exact versions, and invokes the selected Machines owner's required
+readiness contract. Its refusal controls do not establish native construction.
+
+Fresh mode is integrated alongside normal/repair in the existing hosted
+`manager-suite` portfolio. It retains the original preparation/exercise/assertion/
+settlement limits and default private HOME roots. An uncounted discovery engine
+precedes final construction from actual CLI-selected payloads; the canonical
+Manager/engine constructors and the already-qualified lifecycle action sequence
+are reused. The original core defaults and synthetic replacement witnesses are
+preserved. The Git fixture can reopen its same private endpoint across stages,
+without keeping an unowned server alive between them.
+
+The narrowed contained source packet passed all 45 runtime, profile, transport
+and lifecycle controls; all 58 runner/workflow controls passed. A standalone
+isolated-interpreter invocation also refused this shared host before creating
+its requested fixture. Changed-source lint, workflow syntax and the install
+contract passed. An earlier broad source packet exceeded its aggregate budget;
+it is not accepted evidence. Native fresh construction and actual Machines
+readiness have not yet run. The authentic admitted-baseline update, mandatory
+frozen-candidate enforcement and separate Main adoption remain open, with no
+operator rollout or shared-host repair authorized.

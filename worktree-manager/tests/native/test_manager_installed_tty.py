@@ -414,7 +414,8 @@ def _verify_retained_source(root, slot, component, receipt):
         raise RuntimeError(f"{component} constructor retained another source identity")
 
 
-def _installed(root, payload, component, env, diagnostics):
+def _installed(root, payload, component, env, diagnostics, *, run=None):
+    run = _run if run is None else run
     slot = root / "versions" / (root / "current-version").read_text(encoding="utf-8").strip()
     python = slot / "Scripts" / "python.exe"
     code = (
@@ -424,7 +425,7 @@ def _installed(root, payload, component, env, diagnostics):
         "print(json.dumps({'prefix':sys.prefix,'module':str(p),"
         "'module_hash':hashlib.sha256(p.read_bytes()).hexdigest()}))"
     )
-    observed = json.loads(_run(
+    observed = json.loads(run(
         [python, "-I", "-B", "-c", code], env, payload, diagnostics, component + "-origin",
         timeout=30,
     ))
@@ -721,23 +722,33 @@ def construct(root, identity, component):
              env, root, diagnostics, "install-engine")
 
 
-def _harness_registration(engine_python, project, marketplace_root):
+def _harness_registration(engine_python, project, marketplace_root, *, profile=None):
     config = project / ".agent-worktrees"
-    config.mkdir()
-    (config / "config.yaml").write_text(
-        "project: tty-harness\nexpose_agent: true\nstateless: true\n", encoding="utf-8",
-    )
+    config.mkdir(exist_ok=profile is not None)
     settings = project / ".github" / "copilot"
-    settings.mkdir(parents=True)
-    marketplace_name = json.loads((
-        marketplace_root / ".github" / "plugin" / "marketplace.json"
-    ).read_text(encoding="utf-8"))["name"]
-    (settings / "settings.json").write_text(json.dumps({
-        "extraKnownMarketplaces": {
-            marketplace_name: {"source": {"source": "directory", "path": str(marketplace_root)}},
-        },
-        "enabledPlugins": {"agent-worktrees@" + marketplace_name: True},
-    }), encoding="utf-8")
+    settings.mkdir(parents=True, exist_ok=profile is not None)
+    if profile is None:
+        (config / "config.yaml").write_text(
+            "project: tty-harness\nexpose_agent: true\nstateless: true\n", encoding="utf-8",
+        )
+        marketplace_name = json.loads((
+            marketplace_root / ".github" / "plugin" / "marketplace.json"
+        ).read_text(encoding="utf-8"))["name"]
+        (settings / "settings.json").write_text(json.dumps({
+            "extraKnownMarketplaces": {
+                marketplace_name: {"source": {"source": "directory", "path": str(marketplace_root)}},
+            },
+            "enabledPlugins": {"agent-worktrees@" + marketplace_name: True},
+        }), encoding="utf-8")
+    else:
+        import yaml
+
+        (config / "config.yaml").write_text(
+            yaml.safe_dump(profile["repository_config"]), encoding="utf-8",
+        )
+        (settings / "settings.json").write_text(
+            json.dumps(profile["settings"]), encoding="utf-8",
+        )
     return [
         engine_python, "-I", "-B", "-m", "agent_worktrees", "register", "tty-harness",
         "--repo-dir", project, "--machine", "tty-fixture", "--default-branch", "main", "--no-agent",

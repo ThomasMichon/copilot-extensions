@@ -518,6 +518,11 @@ authorizes critical main-path acceptance or a bounded administrative change.
   evidence must block promotion, not merely report an informational check.
   Installed-core action/continuity proof merged in #11864 at `fa93ea37c2`,
   backed by exact-source native run 42892225611 and current-head approval.
+  Complete frozen-payload acquisition merged in #11972 at `0286b3f715`,
+  backed by exact-source native run 42933306312: the actual CLI installed all
+  24 private payloads and every selected manifest matched the frozen artifact.
+  The separate installed-core lifecycle passed on that same source; the payload
+  receipt explicitly leaves runtime installation unobserved.
   Complete-suite construction/actual Machines readiness is now the active slice;
   authentic-baseline update, mandatory enforcement and Main adoption remain open.
 - [ ] Complete the [test validation burndown](test-validation-burndown.md):
