@@ -222,6 +222,127 @@ def test_uncertain_or_wrong_role_is_not_coverage(
     assert overview["shortfallIsLaunchAuthority"] is False
 
 
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("existing", [False, True])
+def test_reconcile_proposes_only_uncovered_minimum_without_writing(
+    document: dict[str, Any], tmp_path: Path, existing: bool,
+) -> None:
+    if existing:
+        document["roles"][0]["minimum"] = 2
+    else:
+        document["assignments"] = []
+        document["observations"]["owners"] = []
+    code, result = invoke(tmp_path, document, "reconcile")
+    assert code == 0
+    lane = result["lanes"][0]
+    assert lane["qualifiedCount"] == int(existing)
+    assert lane["dispositions"] == [] and lane["holds"] == []
+    assert lane["newAssignmentCount"] == 1
+    assert lane["proposal"]["action"] == "persist-new-standing-assignment"
+    assert [item["machine"] for item in lane["proposal"]["candidates"]] == ["beta", "alpha"]
+    assert result["effectAuthorityGranted"] is False
+    assert result["lanes"][1]["proposal"] is None
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("changes,action", [
+    ({"role": "scratch"}, "coordinate-in-place-reassignment"),
+    ({"scope": "another/repo"}, "coordinate-in-place-reassignment"),
+    ({"acceptedCharterRevision": None}, "reconcile-with-retained-owner"),
+    ({"state": "dormant"}, "reconcile-with-retained-owner"),
+    ({"state": "unreachable"}, "reconcile-with-retained-owner"),
+    ({"observedAt": "2025-12-31T23:00:00Z"}, "reconcile-with-retained-owner"),
+])
+def test_reconcile_retains_unqualified_owner_instead_of_filling_shortfall(
+    document: dict[str, Any], changes: dict[str, Any], action: str,
+) -> None:
+    document["observations"]["owners"][0].update(changes)
+    before = copy.deepcopy(document)
+    result = report(document).reconcile()["lanes"][0]
+    disposition = result["dispositions"][0]
+    assert result["shortfall"] == 1 and result["newAssignmentCount"] == 0
+    assert result["proposal"] is None
+    assert disposition["retainedWorktree"] == document["assignments"][0]["nativeWorktree"]
+    assert disposition["action"] == action and disposition["replacementAllowed"] is False
+    assert disposition["expected"]["scope"] == "example/project"
+    assert disposition["observedOwner"] == document["observations"]["owners"][0]
+    assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_reconcile_retains_unknown_effect_identity(document: dict[str, Any]) -> None:
+    effect = document["assignments"][0]["effects"][1]
+    effect["state"] = "unknown"
+    lane = report(document).reconcile()["lanes"][0]
+    assert lane["newAssignmentCount"] == 0
+    assert lane["dispositions"][0]["pendingEffects"] == [effect]
+    assert lane["dispositions"][0]["action"] == "reconcile-original-effects-no-replay"
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_reconcile_continues_ownerless_assignment_without_duplicate(document: dict[str, Any]) -> None:
+    assignment = document["assignments"][0]
+    assignment.update(state="proposed", nativeWorktree=None, effects=[])
+    document["observations"]["owners"] = []
+    lane = report(document).reconcile()["lanes"][0]
+    assert lane["newAssignmentCount"] == 0
+    disposition = lane["dispositions"][0]
+    assert disposition["action"] == "continue-original-assignment"
+    assert disposition["creationKey"] == assignment["creationKey"]
+    assert disposition["originalFlow"]["assignment"] == assignment["id"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("blocker", ["discovery", "custody", "capacity", "unmapped"])
+def test_reconcile_holds_new_demand_for_unqualified_discovery_or_admission(
+    document: dict[str, Any], blocker: str,
+) -> None:
+    document["assignments"] = []
+    owner = document["observations"]["owners"][0]
+    document["observations"]["owners"] = []
+    if blocker == "discovery":
+        document["observations"]["discovery"]["complete"] = False
+    elif blocker == "custody":
+        document["observations"]["dispatcher"]["custody"] = "unknown"
+    elif blocker == "capacity":
+        for machine in document["machines"]:
+            machine["capacitySlots"] = 0
+    else:
+        owner["assignmentId"] = None
+        document["observations"]["owners"] = [owner]
+    result = report(document).reconcile()
+    lane = result["lanes"][0]
+    assert lane["newAssignmentCount"] == 0 and lane["holds"]
+    if blocker == "unmapped":
+        assert result["adoptions"] == [{"action": "reconcile-owner-in-place", "observation": owner}]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("state,observed", [
+    ("completed", False), ("released", True), ("released", False),
+])
+def test_reconcile_requires_retirement_not_completion_or_stale_owner_evidence(
+    document: dict[str, Any], state: str, observed: bool,
+) -> None:
+    assignment = document["assignments"][0]
+    assignment["state"] = state
+    if state == "released":
+        assignment["effects"].append({
+            "id": "retire-a", "kind": "retire", "state": "confirmed",
+            "charterRevision": 1, "target": assignment["nativeWorktree"],
+            "nativeRequest": None, "nativeRef": "synthetic:retired-a",
+        })
+    document["observations"]["owners"][0]["observedAt"] = "2025-12-31T23:00:00Z"
+    if not observed:
+        document["observations"]["owners"] = []
+    lane = report(document).reconcile()["lanes"][0]
+    settled = state == "released" and not observed
+    assert lane["newAssignmentCount"] == int(settled)
+    if not settled:
+        assert lane["dispositions"][0]["action"] == "reconcile-retirement-with-native-owner"
+
+
 @pytest.mark.portfolio_tier("T1")
 def test_same_native_owner_cannot_satisfy_two_lanes(document: dict[str, Any]) -> None:
     alias = copy.deepcopy(document["assignments"][0])
@@ -232,6 +353,9 @@ def test_same_native_owner_cannot_satisfy_two_lanes(document: dict[str, Any]) ->
     assert coverage["qualifiedCount"] == 1
     assert coverage["shortfall"] == 1
     assert coverage["unqualified"][0]["assignment"] == "alias"
+    reconciliation = report(document).reconcile()["lanes"][0]
+    assert reconciliation["newAssignmentCount"] == 0
+    assert reconciliation["dispositions"][0]["assignment"] == "alias"
     route = report(document).route("alias-request")
     assert route["target"] is None
     assert "assignment-not-accepted-by-owner" in route["holds"]

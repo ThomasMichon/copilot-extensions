@@ -94,7 +94,7 @@ def set_value(document: dict[str, Any], path: str, value: Any) -> None:
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 @pytest.mark.parametrize("command,args", [
-    ("validate", []), ("overview", []), ("intent", []),
+    ("validate", []), ("overview", []), ("reconcile", []), ("intent", []),
     ("placement", ["--role", "reviewer"]), ("route", ["--request", "request-review-a"]),
     ("seed", ["--request", "request-review-a"]),
     ("flow", ["--request", "request-review-a"]),
@@ -120,7 +120,7 @@ def test_null_dispatcher_cli_is_read_only(
     assert result.stderr == ""
     assert path.read_bytes() == before
     output = json.loads(result.stdout)
-    if command in {"placement", "route", "seed", "overview", "flow", "relay"}:
+    if command in {"placement", "route", "seed", "overview", "reconcile", "flow", "relay"}:
         assert "dispatcher-not-appointed" in output["holds"]
     if command == "overview":
         assert output["coverage"][0]["qualifiedCount"] == 1
@@ -156,6 +156,92 @@ def test_only_joined_native_acceptance_counts_and_routes(
     assert route["target"]["headRevision"] == 7
     assert route["advisoryOnly"] and route["nativeHeadRecheckRequired"]
     assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("path,value", [
+    ("task.status", "claimed"),
+    ("task.hold_reason", "synthetic:operator-hold"),
+    ("task.standing_charter.lifecycle", "retiring"),
+    ("observedAt", "2025-12-31T23:00:00Z"),
+    ("relationship", None),
+])
+def test_reconcile_never_replaces_native_retained_or_unknown_owner(
+    document: dict[str, Any], path: str, value: Any,
+) -> None:
+    set_value(document["observations"]["dispatch"][0], path, value)
+    result = report(document).reconcile()["lanes"][0]
+    assert result["newAssignmentCount"] == 0
+    disposition = result["dispositions"][0]
+    assert disposition["nativeTaskOwner"] == "beta/review-a"
+    assert disposition["replacementAllowed"] is False
+    assert disposition["action"] == "reconcile-with-retained-owner"
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_reconcile_native_desired_preserves_original_flow(document: dict[str, Any]) -> None:
+    snapshot = document["observations"]["dispatch"][0]
+    snapshot["task"].update(status="queued", owner=None, owner_session_id=None)
+    snapshot["task"]["standing_charter"]["accepted_materialization"] = None
+    snapshot["relationship"] = None
+    document["observations"]["owners"] = []
+    lane = report(document).reconcile()["lanes"][0]
+    disposition = lane["dispositions"][0]
+    assert lane["newAssignmentCount"] == 0
+    assert disposition["action"] == "continue-original-assignment"
+    assert disposition["originalFlow"]["phase"] == "persist-allocation"
+    assert disposition["nativeTask"] == document["assignments"][0]["nativeTask"]
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_reconcile_unmapped_native_task_requires_adoption(document: dict[str, Any]) -> None:
+    snapshot = document["observations"]["dispatch"][0]
+    document["assignments"] = []
+    result = report(document).reconcile()
+    assert result["lanes"][0]["newAssignmentCount"] == 0
+    assert {"action": "reconcile-native-task-in-place", "snapshot": snapshot} in result["adoptions"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("relationship_state", ["closed", "absent"])
+@pytest.mark.parametrize("blocker", [
+    None, "retaining", "missing", "stale", "owner", "task", "machine", "project", "worktree",
+])
+def test_reconcile_released_native_task_requires_fresh_retired_detachment(
+    document: dict[str, Any], blocker: str | None, relationship_state: str,
+) -> None:
+    assignment = document["assignments"][0]
+    observation = document["observations"]["owners"][0]
+    assignment.update(state="released", nativeWorktree=observation["owner"])
+    assignment["effects"] = [{
+        "id": "retire-a", "kind": "retire", "state": "confirmed",
+        "charterRevision": 1, "target": assignment["nativeWorktree"],
+        "nativeRequest": None, "nativeRef": "synthetic:retired-a",
+    }]
+    snapshot = document["observations"]["dispatch"][0]
+    snapshot["task"].update(status="completed", owner=None, owner_session_id=None)
+    snapshot["task"]["standing_charter"]["lifecycle"] = "retired"
+    snapshot["relationship"]["state"] = relationship_state
+    document["observations"]["owners"] = []
+    if blocker == "retaining":
+        snapshot["relationship"]["state"] = "bound"
+    elif blocker == "missing":
+        document["observations"]["dispatch"] = []
+    elif blocker == "stale":
+        snapshot["observedAt"] = "2025-12-31T23:00:00Z"
+    elif blocker == "owner":
+        document["observations"]["owners"] = [observation]
+    elif blocker == "task":
+        snapshot["relationship"]["request"]["task_id"] = "synthetic-other-task"
+    elif blocker in {"machine", "project", "worktree"}:
+        snapshot["relationship"]["request"]["workspace"][blocker] = "synthetic-other"
+    before = copy.deepcopy(document)
+    lane = report(document).reconcile()["lanes"][0]
+    assert document == before
+    assert lane["newAssignmentCount"] == int(blocker is None)
+    if blocker is not None:
+        assert lane["dispositions"][0]["action"] == "reconcile-retirement-with-native-owner"
+        assert lane["dispositions"][0]["replacementAllowed"] is False
 
 
 @pytest.mark.portfolio_tier("T1")
