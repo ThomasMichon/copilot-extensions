@@ -119,6 +119,21 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ## Journal
 
+### 2026-11-11 - Native admission custody consistency
+
+- Dormant native admission requires a bound relationship receipt, matching task
+  and owner identities and an active charter; the shared native lane also
+  checks declaration and workspace consistency. A retained relationship owner
+  is honored even before its workspace is copied into the intent record.
+- Both stable request/task identities must match. Completed or released intent
+  keeps matching work and owners held until the existing native retirement
+  settlement check succeeds, preserving unknown effects and outstanding custody.
+- The affected topology packet passed 320 tests; Python F/E9 lint and strict
+  Linux/Windows type checks passed. The isolated native Dispatch standing,
+  admission and topology-flow packet passed 179 tests, including restart,
+  concurrent reservation/acceptance, lost replies and release-before-reuse.
+  No live lifecycle effect, installation or deployment occurred.
+
 ### 2026-11-11 - Reconciliation delivered; admission source implemented
 
 - Phase 5 merged in #12084. The read-only reconciliation report preserves

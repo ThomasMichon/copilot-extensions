@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from topology_contract import owner_key, validate_admission
-from topology_dispatch import native_owner
+from topology_dispatch import linked, native_owner
 
 if TYPE_CHECKING:
     from topology import Topology
@@ -81,6 +81,14 @@ def admission(topology: Topology, evidence: Any) -> dict[str, Any]:
                 or native_owner(snapshot) != owner or native["hold_reason"] != task["holdReason"]
             ):
                 reasons.append("native-task-evidence-conflicting-or-stale")
+            relationship = snapshot["relationship"]
+            if dormant and (
+                owner is None or native["owner"] != f'{owner["machine"]}/{owner["worktree"]}'
+                or native["standing_charter"]["lifecycle"] != "active"
+                or relationship is None or relationship["state"] != "bound" or not relationship["receipt"]
+                or relationship["request"]["task_id"] != native["id"]
+            ):
+                reasons.append("dormant-native-custody-unqualified")
         if not dormant and (owner is not None or task["ownerSessionId"] is not None):
             reasons.append("queued-task-retains-owner")
         head_revision = None
@@ -105,19 +113,34 @@ def admission(topology: Topology, evidence: Any) -> dict[str, Any]:
             else:
                 head_revision = observation["headRevision"]
         for assignment in topology.assignments:
-            if assignment["state"] in {"completed", "released"}:
+            assigned_snapshot = topology.dispatch.get(assignment["nativeTask"])
+            retained = native_owner(assigned_snapshot) or assignment["nativeWorktree"]
+            same_identity = assignment["requestId"] == task["requestId"] or assignment["nativeTask"] == task["id"]
+            same_owner = owner is not None and owner in (retained, assignment["nativeWorktree"])
+            if not same_identity and not same_owner:
                 continue
-            if assignment["requestId"] != task["requestId"] and assignment["nativeTask"] != task["id"]:
-                if dormant and owner is not None and assignment["nativeWorktree"] == owner:
-                    reasons.append("retained-owner-has-other-assignment")
+            if assignment["state"] in {"completed", "released"}:
+                if not topology.retirement_settled(assignment):
+                    reasons.append("terminal-assignment-retirement-unsettled")
                 continue
             if not dormant:
                 reasons.append("request-already-assigned")
-            elif (
-                assignment["role"] != task["role"] or assignment["kind"] != task["kind"]
-                or assignment["nativeWorktree"] != owner or topology.pending(assignment)
+                continue
+            if not same_identity:
+                reasons.append("retained-owner-has-other-assignment")
+            if (
+                assignment["requestId"] != task["requestId"]
+                or assignment["nativeTask"] not in (None, task["id"])
             ):
+                reasons.append("retained-assignment-identity-conflict")
+            if (assignment["role"] != task["role"] or assignment["kind"] != task["kind"]
+                    or retained != owner or topology.pending(assignment)):
                 reasons.append("retained-assignment-requires-reconciliation")
+            if linked(assignment, topology.observations):
+                native_lane = topology.native_lane(assignment)
+                reasons.extend(reason for reason in native_lane["reasons"] if reason != "native-task-held")
+                if assigned_snapshot is not None and assigned_snapshot["task"]["hold_reason"] is not None:
+                    reasons.append("native-task-held")
         pool = "reviewSlotsRemaining" if task["role"] in evidence["reviewRoles"] else "generalSlotsRemaining"
         candidates = []
         excluded = []

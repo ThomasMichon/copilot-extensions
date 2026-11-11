@@ -449,6 +449,12 @@ positive head/task generation. No successor, unreachable or missing owner is
 silently replaced. A request already assigned is not new backlog; conflicting
 saved native snapshots, pending assignment effects, other work retained by that
 owner and Operator-owned work remain held.
+Dispatch-linked dormant work also requires consistent native task/owner and
+relationship identities, a bound attachment receipt and an active charter.
+Both request and task IDs must agree with the retained assignment (legacy
+assignments may omit the native task link). Relationship-only owners still
+retain their workspace. A terminal assignment does not release a matching
+request, task or owner until native retirement is settled.
 
 The report uses one homogeneous slot per proposal, **including dormant
 resumption**, conservatively requiring extra activation headroom even if the

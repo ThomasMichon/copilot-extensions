@@ -270,6 +270,86 @@ def test_conflicting_native_snapshot_and_pending_effects_hold(
     assert "retained-assignment-requires-reconciliation" in result["held"][0]["reasons"]
 
 
+def native_dormant(document: dict[str, Any], evidence: dict[str, Any]) -> dict[str, Any]:
+    from test_managing_agent_topology_dispatch import bind_snapshot
+
+    assignment = document["assignments"][0]
+    assignment["nativeTask"] = "synthetic-standing-task"
+    snapshot = bind_snapshot(document)
+    snapshot["task"].update(status="suspended", generation=2)
+    document["observations"]["dispatch"] = [snapshot]
+    evidence["tasks"] = [dormant(document)]
+    evidence["tasks"][0]["id"] = assignment["nativeTask"]
+    return snapshot
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("change", ["owner", "relationship-task", "unbound", "receipt", "retiring", "declaration"])
+def test_native_dormant_requires_consistent_bound_active_custody(
+    document: dict[str, Any], evidence: dict[str, Any], change: str,
+) -> None:
+    snapshot = native_dormant(document, evidence)
+    assert len(report(document, evidence)["proposals"]) == 1
+    if change == "owner":
+        snapshot["task"]["owner"] = "beta/other-worktree"
+    elif change == "relationship-task":
+        snapshot["relationship"]["request"]["task_id"] = "other-task"
+    elif change == "unbound":
+        snapshot["relationship"]["state"] = "unknown"
+    elif change == "receipt":
+        snapshot["relationship"]["receipt"] = None
+    elif change == "retiring":
+        snapshot["task"]["standing_charter"]["lifecycle"] = "retiring"
+    else:
+        snapshot["task"]["standing_charter"]["declaration"]["source_revision"] = "synthetic:drifted"
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert any("native" in reason for reason in result["held"][0]["reasons"])
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("match", ["request", "task", "owner"])
+def test_terminal_assignment_keeps_unsettled_custody_held(
+    document: dict[str, Any], evidence: dict[str, Any], match: str,
+) -> None:
+    native_dormant(document, evidence)
+    document["assignments"][0]["state"] = "completed"
+    document["assignments"][0]["effects"][1]["state"] = "unknown"
+    if match != "request":
+        evidence["tasks"][0]["requestId"] = "different-request"
+    if match != "task":
+        evidence["tasks"][0]["id"] = "different-task"
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert "terminal-assignment-retirement-unsettled" in result["held"][0]["reasons"]
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_relationship_only_owner_still_blocks_other_work(
+    document: dict[str, Any], evidence: dict[str, Any],
+) -> None:
+    native_dormant(document, evidence)
+    assignment = document["assignments"][0]
+    assignment.update(nativeWorktree=None, state="proposed", effects=[])
+    document["observations"]["owners"][0]["assignmentId"] = None
+    evidence["tasks"][0].update(id="other-task", requestId="other-request")
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert "retained-owner-has-other-assignment" in result["held"][0]["reasons"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("field", ["id", "requestId"])
+def test_both_request_and_native_task_identity_must_agree(
+    document: dict[str, Any], evidence: dict[str, Any], field: str,
+) -> None:
+    native_dormant(document, evidence)
+    evidence["tasks"][0][field] = "different"
+    result = report(document, evidence)
+    assert result["proposals"] == []
+    assert "retained-assignment-identity-conflict" in result["held"][0]["reasons"]
+
+
 @pytest.mark.effect("process")
 @pytest.mark.portfolio_tier("T2")
 def test_real_cli_and_fresh_empty_work_are_read_only(
