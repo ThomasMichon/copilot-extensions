@@ -302,6 +302,24 @@ launch mode, a restrictive external outer Job, or desktop behavior. The fixed
 packet shares the Worktrees-only feed and pinned prerequisite policy above;
 its protected controller must be promoted before submission.
 
+`submit --packet native-worktrees-copilot-caller-jobs` selects only
+`test_public_attached_caller_job_lifetime` through that same leased native owner.
+The installed public `copilot` entrypoint and two nested caller Jobs inherit the
+fixture's existing private ConPTY. After real target attachment, the fixture
+closes the inner Job while the caller is still running, retains its actual
+nonzero termination code, closes the outer Job and proves the bounded child
+exited. The original caller pane must also close before checking the same
+broker/native births, mux incarnation and history. Live reattachment repeats
+that loss with a fresh ticket before a broker prompt proves continued use.
+Fresh and cold-resume legs preserve one conversation without seed replay.
+This is abrupt attached-caller loss, not graceful `detach-client` success or
+visible new-window evidence. Frontend replacement remains in the separate
+`embody` packet rather than being repeated. Existing 420/300/180-second phase
+bounds, 15-second renewable lease, 900-second hard maximum, 300-second
+preparation and 1200-second aggregate, native pins, Worktrees-only feed and
+sanitization are unchanged. Actual protected controller support is required
+before staging or submission.
+
 `submit --packet native-driver-auth-wait` selects only the Driver receiver's
 `test_opt_in_receiver_auth_wait_and_same_session_resume` in
 `tests/native/test_native_headed_auth_wait.py`. The candidate must supply that
@@ -958,8 +976,15 @@ records, without command lines, inside the existing evidence size budget.
 An early consumer exit also retains up to 16 birth-bound descendant exit codes
 before Job cleanup, distinguishing already-exited processes from live ones.
 Manager module and console entrypoints enable Python fatal-fault reporting on
-their existing stderr descriptor, so a native interpreter fault can retain its
-thread stacks in the same terminal capture. This does not identify externally
+their existing stderr descriptor. The native witness supplies an existing
+absolute `WORKTREE_MANAGER_FAULT_DIR` inside its own diagnostics directory;
+each Manager process exclusively creates `manager-<pid>.fault.log` there.
+Keeping the fault descriptor open independently of the terminal preserves
+fault headers and thread stacks that ConPTY screen rendering can otherwise
+interleave or overwrite. Normal terminal output and input stay unchanged.
+An existing handler is preserved; unavailable, relative or colliding diagnostic
+paths retain the stderr fallback without creating directories or overwriting
+files. No file sink is selected by default. This does not identify externally
 terminated processes or turn a crash into successful qualification.
 The installed-process, keyboard, native-terminal-offer and cleanup assertions
 remain unchanged; the bounded wait is not a larger readiness deadline.

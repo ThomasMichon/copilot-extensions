@@ -21,6 +21,7 @@ shutdown branch armed, so real hard exit cannot terminate the test runner.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
@@ -64,14 +65,74 @@ faulthandler.dump_traceback()
     assert 'File "<string>"' in result.stderr
 
 
-def test_fault_reporting_preserves_an_existing_handler(monkeypatch):
+@pytest.mark.parametrize("entry", ["module", "console"])
+def test_real_entry_retains_native_fault_without_terminal_rendering(tmp_path, entry):
+    program = """
+import faulthandler,gc,os,runpy,sys
+if os.name == 'nt':
+    import ctypes
+    ctypes.windll.kernel32.SetErrorMode(0x8007)
+else:
+    import resource
+    resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+from worktree_manager import _shutdown_exit
+_shutdown_exit._AFFECTED_RUNTIME=False
+os.environ['WORKTREE_MANAGER_FAULT_DIR']=sys.argv[1]
+sys.argv=['worktree-manager','--version']
+try:
+    if ENTRY == 'module':
+        runpy.run_module('worktree_manager',run_name='__main__')
+    else:
+        from worktree_manager.__main__ import console_entry
+        console_entry()
+except SystemExit as error:
+    assert error.code == 0
+gc.collect()
+assert faulthandler.is_enabled()
+print('FAULT-READY',flush=True)
+faulthandler._sigsegv()
+""".replace("ENTRY", repr(entry))
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-X", "utf8", "-c", program, str(tmp_path)],
+        cwd=tmp_path, capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert result.returncode != 0 and result.stdout.endswith("FAULT-READY\n"), result
+    output, = tmp_path.glob("manager-*.fault.log")
+    trace = output.read_text(encoding="utf-8")
+    assert "most recent call first" in trace and 'File "<string>"' in trace
+    assert trace.startswith((
+        "Windows fatal exception: access violation", "Fatal Python error: Segmentation fault",
+    )), trace
+    assert "most recent call first" not in result.stderr
+
+
+def test_fault_reporting_preserves_an_existing_handler(tmp_path, monkeypatch):
     import faulthandler
     from worktree_manager.__main__ import _enable_fault_diagnostics
 
     monkeypatch.setattr(faulthandler, "is_enabled", lambda: True)
+    monkeypatch.setenv("WORKTREE_MANAGER_FAULT_DIR", str(tmp_path))
     with mock.patch.object(faulthandler, "enable") as enable:
         _enable_fault_diagnostics()
     enable.assert_not_called()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("unavailable", ["missing", "relative", "collision"])
+def test_fault_output_refusal_preserves_stderr_fallback_and_existing_files(tmp_path, monkeypatch, unavailable):
+    import faulthandler
+    from worktree_manager.__main__ import _enable_fault_diagnostics
+
+    directory = {"missing": str(tmp_path / "absent"), "relative": "relative", "collision": str(tmp_path)}
+    retained = tmp_path / f"manager-{os.getpid()}.fault.log"
+    retained.write_bytes(b"retained")
+    monkeypatch.setenv("WORKTREE_MANAGER_FAULT_DIR", directory[unavailable])
+    monkeypatch.setattr(faulthandler, "is_enabled", lambda: False)
+    with mock.patch.object(faulthandler, "enable") as enable:
+        _enable_fault_diagnostics()
+    enable.assert_called_once_with()
+    assert retained.read_bytes() == b"retained"
+    assert not (tmp_path / "absent").exists()
 
 
 def test_fault_reporting_tolerates_embedded_stderr_without_descriptor(monkeypatch):

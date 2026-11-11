@@ -33,8 +33,12 @@ def test_native_capture_retains_real_child_output_and_restores_streams_on_failur
     assert stderr.read_text().splitlines() == ["native error"]
 
 
+@pytest.mark.parametrize("packet,case", [
+    ("native-worktrees-caller-jobs", "test_public_caller_job_lifetime"),
+    ("native-worktrees-copilot-caller-jobs", "test_public_attached_caller_job_lifetime"),
+])
 def test_worktrees_lifetime_uses_native_owner_without_weakening_default_containment(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, packet, case,
 ):
     import plugin_test_cache
     import plugin_test_containment
@@ -66,12 +70,21 @@ def test_worktrees_lifetime_uses_native_owner_without_weakening_default_containm
     root = tmp_path / "candidate"
     result = worktrees_lifetime(
         root, tmp_path / "output", prepare=lambda argv, timeout: prepared.append((argv, timeout)),
+        packet=packet,
     )
     assert result == 0 and len(calls) == 1
     assert prepared == [([
         sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-worktrees", "--prepare-only",
     ], 300)]
     command = calls[0][0]
-    assert command[command.index("-k") + 1] == "public_caller_job_lifetime"
+    assert command[command.index("-k") + 1] == case
     assert "--timeout=900" in command
     assert os.environ["COPILOT_EXTENSIONS_TEST_CONTAINED"] == "1"
+
+
+def test_worktrees_lifetime_refuses_other_packets_before_preparation(tmp_path):
+    with pytest.raises(ValueError, match="selected caller-Job packet"):
+        worktrees_lifetime(
+            tmp_path, tmp_path / "output", packet="native-worktrees-copilot",
+            prepare=lambda *args: pytest.fail("unselected preparation"),
+        )

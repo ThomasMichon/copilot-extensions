@@ -21,14 +21,20 @@ def capture_native_streams(stdout, stderr):
         sys.__stdout__, sys.__stderr__ = original
 
 
-def worktrees_lifetime(root: Path, output: Path, *, prepare) -> int:
+def worktrees_lifetime(
+    root: Path, output: Path, *, prepare, packet: str = "native-worktrees-caller-jobs",
+) -> int:
     """Prepare normally, then use the existing leased, permissive native owner."""
     from _admission_protocol import acquire
     from agent_procutil.daemon_instances import DaemonLeasePolicy
     from plugin_test_cache import ordinary_cache_root
     from plugin_test_containment import Limits, TestSandbox, isolated_environment, run_contained
     from plugin_test_resources import venv_root
+    from windows_qualification_contract import NATIVE_LIFETIME_PACKETS, NATIVE_PACKETS
 
+    if packet not in NATIVE_LIFETIME_PACKETS:
+        raise ValueError("Worktrees lifetime requires a selected caller-Job packet")
+    case = NATIVE_PACKETS[packet][2]
     started = time.monotonic()
     prepare([
         sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-worktrees", "--prepare-only",
@@ -60,7 +66,7 @@ def worktrees_lifetime(root: Path, output: Path, *, prepare) -> int:
                     [
                         str(python), "-m", "pytest", "-q", "-s",
                         str(root / "plugins/agent-worktrees/tests/native/test_native_seed_application.py"),
-                        "-k", "public_caller_job_lifetime",
+                        "-k", case,
                         "--basetemp", str(sandbox / "t"),
                         "-o", f"cache_dir={sandbox / 'pytest-cache'}", "--timeout=900",
                         "--junitxml=" + str(output / "junit/worktrees-lifetime.xml"),
