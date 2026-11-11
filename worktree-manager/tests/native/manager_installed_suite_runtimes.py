@@ -58,6 +58,32 @@ print(json.dumps({'prefix':prefix,'accepted':application_admission._ready(result
                   'readiness':json.loads(result.stdout)}))
 """
 
+_READINESS_DETAILS = """
+import json,sys,time
+from pathlib import Path
+from agent_machines.installation_repair import _invoke,current_platform
+from agent_machines.installation_repair_admission import admit_host
+from agent_machines.installation_repair_process import caller_owned_readiness
+requested=set(json.loads(sys.argv[2]))
+deadline=time.monotonic()+30
+host=admit_host(Path(sys.argv[1]),readiness_only=True)
+with caller_owned_readiness(True):
+    for module in host.report.modules:
+        if module.qualified_id not in requested:
+            continue
+        owner=host.bindings.get(module.owner.owner_id)
+        if owner is None or owner.refusal:
+            print(json.dumps({'module':module.qualified_id,'status':'owner-not-admitted'}))
+            continue
+        remaining=deadline-time.monotonic()
+        if remaining<=0:
+            raise TimeoutError('Readiness diagnostics exhausted their existing stage budget')
+        result=_invoke(module,owner,current_platform(),readonly=True,timeout=min(10,remaining))
+        print(json.dumps({'module':module.qualified_id,'status':result.status,
+                          'exitCode':result.exit_code,
+                          'stdout':result.stdout.decode('utf-8-sig',errors='replace')}),flush=True)
+"""
+
 
 def expected_runtimes(profile: dict) -> set[str]:
     if profile["repository_config"].get("require_application_readiness") is not True:
@@ -273,6 +299,26 @@ def install_runtime_closure(
     ):
         raise ValueError("Application readiness selected a different Machines installation")
     if selection["accepted"] is not True:
+        failed = [
+            row["module"] for row in selection["readiness"].get("outcomes", [])
+            if (row.get("observedAfter") or row.get("observedBefore") or {}).get("state")
+            not in {"ready", "configuration-empty"}
+        ]
+        if failed:
+            from agent_procutil.owned_process import OwnedCleanupError
+
+            try:
+                run(
+                    [prefix[0], "-I", "-B", "-c", _READINESS_DETAILS, str(project), json.dumps(failed)],
+                    environment, project, diagnostics, "suite-readiness-failures",
+                    timeout=min(45, remaining()),
+                )
+            except OwnedCleanupError:
+                raise
+            except Exception as error:
+                raise ValueError(
+                    "The selected Machines owner did not satisfy required application readiness"
+                ) from error
         raise ValueError("The selected Machines owner did not satisfy required application readiness")
     verify_inputs("after")
     _PROVENANCE["verify"](artifact, candidate_commit)

@@ -9,6 +9,7 @@ from pathlib import Path
 import runpy
 import shutil
 import subprocess
+import sys
 import time
 
 import pytest
@@ -414,9 +415,59 @@ def test_runtime_construction_refuses_the_shared_host_before_reading_or_running(
         )
 
 
+def test_readiness_failure_details_reuse_only_the_admitted_readonly_owner(
+    tmp_path, monkeypatch, capsys,
+):
+    from contextlib import contextmanager
+    from types import ModuleType, SimpleNamespace
+
+    calls = []
+    selected = SimpleNamespace(qualified_id="fixture::example/runtime",
+                               owner=SimpleNamespace(owner_id="fixture::example"))
+    ignored = SimpleNamespace(qualified_id="fixture::other/runtime")
+    owner = SimpleNamespace(refusal=None)
+    host = SimpleNamespace(report=SimpleNamespace(modules=[ignored, selected]),
+                           bindings={"fixture::example": owner})
+
+    @contextmanager
+    def caller_owned(enabled):
+        assert enabled is True
+        yield
+
+    def admit(project, *, readiness_only):
+        assert project == tmp_path and readiness_only is True
+        return host
+
+    def invoke(module, binding, platform, *, readonly, timeout):
+        assert module is selected and binding is owner and platform == "windows"
+        assert readonly is True and 0 < timeout <= 10
+        calls.append(module.qualified_id)
+        return SimpleNamespace(
+            status="exited", exit_code=1,
+            stdout=b'{"state":"failed","detail":"actual owner reason"}',
+        )
+
+    definitions = {
+        "agent_machines.installation_repair": {"_invoke": invoke, "current_platform": lambda: "windows"},
+        "agent_machines.installation_repair_admission": {"admit_host": admit},
+        "agent_machines.installation_repair_process": {"caller_owned_readiness": caller_owned},
+    }
+    for name, attributes in definitions.items():
+        module = ModuleType(name)
+        module.__dict__.update(attributes)
+        monkeypatch.setitem(sys.modules, name, module)
+    monkeypatch.setattr(sys, "argv", ["diagnostic", str(tmp_path), json.dumps([selected.qualified_id])])
+    exec(RUNTIMES["_READINESS_DETAILS"], {})
+    assert calls == [selected.qualified_id]
+    result = json.loads(capsys.readouterr().out)
+    assert result["exitCode"] == 1
+    assert json.loads(result["stdout"])["detail"] == "actual owner reason"
+
+
 @pytest.mark.parametrize(
     "defect", [None, "update-refused", "missing-runtime", "wrong-version", "foreign-machines",
-               "readiness-refused", "changed-transport", "changed-cli", "changed-payload"],
+               "readiness-refused", "diagnostic-refused", "diagnostic-custody",
+               "changed-transport", "changed-cli", "changed-payload"],
 )
 def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_recipe(
     tmp_path, monkeypatch, defect,
@@ -473,6 +524,10 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
         "eligible": False, "status": "payload-only", "root": None,
         "payload": payloads["example-guidance"]["path"],
     }
+    from agent_procutil.owned_process import OwnedCleanupError
+
+    custody = OwnedCleanupError(None)
+    refused = defect in {"readiness-refused", "diagnostic-refused", "diagnostic-custody"}
 
     def run(argv, environment, cwd, diagnostics, label, *, timeout):
         assert 0 < timeout <= 120
@@ -504,6 +559,16 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
                 "prefix": str(prefix), "module": str(prefix / "Lib" / "site-packages" / "example.py"),
                 "version": "2.0" if defect == "wrong-version" else "1.0",
             })
+        if label == "suite-readiness-failures":
+            machines = home / ".agent-machines" / "versions" / "1.0" / ".venv" / "Scripts" / "python.exe"
+            assert argv[0] == str(machines)
+            assert argv[4] == RUNTIMES["_READINESS_DETAILS"]
+            assert json.loads(argv[-1]) == ["fixture::agent-machines/runtime"]
+            if defect == "diagnostic-refused":
+                raise RuntimeError("controlled diagnostic failure")
+            if defect == "diagnostic-custody":
+                raise custody
+            return ""
         assert label == "suite-machines-readiness"
         if defect == "changed-cli":
             cli.write_bytes(b"substituted executable")
@@ -512,7 +577,11 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
         machines = home / ".agent-machines" / "versions" / "1.0" / ".venv" / "Scripts" / "python.exe"
         return json.dumps({
             "prefix": [str(tmp_path / "foreign.exe" if defect == "foreign-machines" else machines)],
-            "accepted": defect != "readiness-refused", "readiness": {"status": "observed"},
+            "accepted": not refused, "readiness": {
+                "status": "observed",
+                "outcomes": [{"module": "fixture::agent-machines/runtime",
+                              "observedBefore": {"state": "failed" if refused else "ready"}}],
+            },
         })
 
     arguments = {
@@ -532,6 +601,12 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
         assert result["upgrade"] == "not-exercised"
         assert calls.index("suite-runtime-update") < calls.index("suite-runtime-portfolio")
         assert calls[-1] == "suite-runtime-transport-after"
-    else:
-        with pytest.raises((ValueError, RuntimeError)):
+    elif defect == "diagnostic-custody":
+        with pytest.raises(OwnedCleanupError) as failure:
             RUNTIMES["install_runtime_closure"](artifact, controls["_COMMIT"], **arguments)
+        assert failure.value is custody
+    else:
+        with pytest.raises((ValueError, RuntimeError)) as failure:
+            RUNTIMES["install_runtime_closure"](artifact, controls["_COMMIT"], **arguments)
+        if refused:
+            assert "did not satisfy required application readiness" in str(failure.value)

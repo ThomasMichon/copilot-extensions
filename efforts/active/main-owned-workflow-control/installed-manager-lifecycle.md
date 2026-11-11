@@ -1299,3 +1299,39 @@ checks pass. This remains a fixture-only correction with no operator-document
 or install-contract change. Actual selected imports, Machines readiness and
 Manager lifecycle actions still need the next exact-head disposable run; a
 successful update command alone does not establish those later contracts.
+
+Run 42970992493 at `04df70053e6920a9eaee2852d3f1fc9b53085f34`
+passed normal and repair again. Fresh passed the mixed planner observation and
+all 13 selected runtime import/version checks, then correctly refused actual
+Machines required-readiness: Index and Vault reported failed. Fresh settlement
+again succeeds without errors or remaining tasks; required CI also passes.
+No fresh result or lifecycle acceptance is credited.
+
+Vault's native installation log explicitly reports missing `keepassxc-cli`.
+Its readiness contract correctly requires that real backend even when no
+database is configured. The fresh disposable job now provides the official
+portable KeePassXC 2.7.11 archive, released 2025-11-23, through the existing
+bounded downloader, with its published SHA-256 verified before extraction.
+The same archive was independently downloaded, hash-checked and its actual
+CLI returned version 2.7.11 without host installation, service startup or vault
+state creation. Only the fresh job receives this path; the shared prerequisite
+anchor, installed-core and normal/repair cases are unchanged.
+
+Index's raw failed-readiness detail was not retained by Machines' normalized
+observation. Its installer reported a healthy service cutover and an activation
+role warning; neither establishes why the readiness adapter failed. The witness
+now retains bounded failure-only details through the selected Machines runtime,
+its admitted owner binding and canonical read-only invocation. It does not
+apply repair or change acceptance. Ordinary diagnostic errors retain the
+original readiness refusal, and unresolved cleanup custody still takes
+precedence. The next hosted run must establish the exact Index reason rather
+than treating a warning, unknown corpus state or successful service start as
+satisfied readiness.
+
+All 51 runtime controls and 58 workflow/coordinator controls pass. Changed-source
+lint, whitespace, YAML loading and native PowerShell syntax checks pass.
+Documentation-impact review: these are disposable qualification inputs and
+failure diagnostics, not a released runtime or operator procedure. The full
+native clean-room/readiness result remains pending the next exact-head run;
+authentic admitted upgrade, frozen enforcement and separate Main adoption are
+still open.
