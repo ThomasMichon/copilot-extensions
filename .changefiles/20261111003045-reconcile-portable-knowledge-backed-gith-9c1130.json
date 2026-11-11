@@ -1,0 +1,9 @@
+{
+  "comment": "Reconcile portable knowledge-backed GitHub account slots into missing local choices while preserving explicit overrides.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

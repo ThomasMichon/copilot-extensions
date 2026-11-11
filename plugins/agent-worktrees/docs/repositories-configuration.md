@@ -37,6 +37,9 @@ capabilities, not a generic source-file editor.
 
 ## Local account preference
 
+For GitHub CLI/Git account selection (not Copilot launch identity), see
+[portable account slots](repository-authentication.md#portable-github-account-slots).
+
 **Set future-launch Copilot preference** changes only the selected registered
 repository's existing `copilot_account` in the native machine-local registry.
 **Reset** removes that key and resumes current native inheritance: selected

@@ -29,6 +29,11 @@ def render_registry(registry: ReposRegistry) -> str:
         for owner in sorted(registry.account_map):
             lines.append(f"  {json.dumps(owner)}: {json.dumps(registry.account_map[owner])}")
         lines.append("")
+    if registry.account_projection:
+        lines.extend([
+            "account_projection: " + json.dumps(registry.account_projection, sort_keys=True),
+            "",
+        ])
     # Always render the ``repos:`` key explicitly, even when empty: an
     # all-comment document (no keys at all) parses to ``None``, not a
     # mapping, so the reader would record an ``"invalid"`` baseline and the

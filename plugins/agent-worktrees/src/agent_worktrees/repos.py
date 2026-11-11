@@ -167,6 +167,7 @@ class ReposRegistry:
     # override (which stays the finest grain). See :func:`resolve_account` /
     # :func:`account_for_github_owner`. Keys are compared case-insensitively.
     account_map: dict[str, str] = field(default_factory=dict)
+    account_projection: dict[str, dict[str, str]] = field(default_factory=dict, kw_only=True)
     _baseline: tuple[str, str] | None = field(default=None, repr=False, compare=False)
     schema_version: int | None = field(default=None, kw_only=True)
 
@@ -742,6 +743,9 @@ def add_repo(
             existing.contributing = contributing
         if account:
             existing.account = account
+            from .account_projection import explicit_repository
+
+            explicit_repository(registry, name)
         if agent is not None:
             existing.agent = agent
         if visibility:
