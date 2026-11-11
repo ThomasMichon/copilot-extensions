@@ -87,17 +87,19 @@ def test_queued_relative_manager_policy_uses_original_cwd(area, monkeypatch, no_
     automatic = enqueue(RequestSpec(
         "engine-launch-update", arguments, cwd=str(caller), context=context,
     ), runner=runner, root=area / "state")
-    manual = enqueue(RequestSpec(
-        "engine-launch-update", flags, cwd=str(caller), context=context, repair=True,
-    ), runner=runner, root=area / "state")
     path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
     monkeypatch.chdir(area)
     observed = []
     assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
-    assert observed == [manual.id]
+    assert observed == []
     refused = status(automatic.id, root=area / "state")
     assert refused.exit_code == 3 and refused.started_at is None
     assert "maintenance.automatic is false" in refused.error
+    manual = enqueue(RequestSpec(
+        "engine-launch-update", flags, cwd=str(caller), context=context, repair=True,
+    ), runner=runner, root=area / "state")
+    assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
+    assert observed == [manual.id]
     assert status(manual.id, root=area / "state").exit_code == 0
 
 

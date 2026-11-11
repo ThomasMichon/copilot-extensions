@@ -21,7 +21,10 @@ def main() -> int:
     package.__path__ = [str(source.parent)]
     config = ModuleType(f"{package.__name__}.config")
     installer = ModuleType(f"{package.__name__}.update_cli")
-    installer.update_options = SimpleNamespace(validate_auth_flags=lambda args: None)
+    installer.update_options = SimpleNamespace(
+        validate_auth_flags=lambda args: None,
+        RUNTIME_BACKEND_INTENT_CAPABILITY="project-runtime-backend-intent/v1",
+    )
 
     def execute(args):
         requests = update_driver.status()

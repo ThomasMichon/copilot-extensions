@@ -10,7 +10,7 @@ queued installer code.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent proposal and implementation PRs against `dev`
 - **Created:** 2026-11-10
-- **Status:** Draft
+- **Status:** Active
 - **Vision:** [single installation execution owner](../../../visions/installer/README.md#single-installation-execution-owner);
   [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #11985
@@ -66,22 +66,22 @@ maintenance enrollment or unrelated product effects.
 
 ### Phase 1 - Reviewed contract
 
-- [ ] Reconcile the Installer vision and land this proposal through review.
+- [x] Reconcile the Installer vision and land this proposal through review.
 
 ### Phase 2 - Admission and observable supersession
 
 The following implementation decomposition is agent-recommended.
 
-- [ ] Define addressed update equivalence using existing installation and
+- [x] Define addressed update equivalence using existing installation and
   execution-authority identity. Replace waiting update selections atomically
   with acceptance of the successor, including old never-started pending rows;
   never select by age, PID or runner version.
-- [ ] Preserve the active operation, unknown/interrupted execution evidence,
+- [x] Preserve the active operation, unknown/interrupted execution evidence,
   independent installations, selected project authority and required component
   provisioning. Automatic requests cannot replace a waiting explicit request.
   Keep ordinary identical-request coalescing where its execution identity is
   truly unchanged, without losing the one-waiting-successor invariant.
-- [ ] Retain the replaced request's identity and invocation plus a durable
+- [x] Retain the replaced request's identity and invocation plus a durable
   non-success superseded outcome naming its successor. Existing wait/status
   callers must terminate honestly, including across restart and version skew.
   Prefer the existing terminal nonzero result contract over a new schema/CLI
@@ -93,16 +93,16 @@ The following implementation decomposition is agent-recommended.
 
 These controls are agent-recommended and must exercise the actual owner.
 
-- [ ] Focused admission/status/wait controls: active A, waiting B, newer C;
+- [x] Focused admission/status/wait controls: active A, waiting B, newer C;
   only A and C execute, B observes explicit supersession and no success.
-- [ ] Burst and actual separate-process enqueue/dequeue races retain one
+- [x] Burst and actual separate-process enqueue/dequeue races retain one
   waiting update per addressed scope and one writer; committed history survives
   a fresh reader. Rollback of failed successor acceptance preserves B.
-- [ ] Old pending bootstrap/source replacement, equivalent arrivals, explicit
+- [x] Old pending bootstrap/source replacement, equivalent arrivals, explicit
   option changes, manual/automatic precedence, independent installation/project
   authority, required component work and unknown-execution refusals remain
   correct. Do not equate synthetic controls with installation acceptance.
-- [ ] Exercise the real supported submission/observation consumer seam and
+- [x] Exercise the real supported submission/observation consumer seam and
   focused clean-room/native fixtures where applicable, documenting unavailable
   tiers explicitly. No production host mutation as a test side effect.
 - [ ] Record reviewed source merge and actual promoted release separately;
@@ -112,11 +112,91 @@ These controls are agent-recommended and must exercise the actual owner.
 
 ## Proposal
 
-No runtime change is implemented by this proposal. Admission remains in the
-existing owner and transaction. No daemon, scheduler, new credential path,
-global auth change or expansion of required CI is proposed.
+The reviewed proposal is implemented within the existing enqueue transaction.
+Supersession uses the existing completed/nonzero/error result without a schema
+or CLI change. No daemon, scheduler, credential path, global auth change or
+expansion of required CI is introduced.
 
 ## Journal
+
+### 2026-11-10 - Reviewed proposal and implementation
+
+- #11987 merged after current-head Copilot approval and required green CI.
+- Added owner-internal update scoping and atomic replacement of never-started
+  waiting selections. Running/uncertain work and component recipes are not
+  changed. Preserved automatic/manual admission authority.
+- Superseded wait/status observers retain the original request and receive
+  terminal exit 125 with the successor identity, never installation success.
+- Focused admission/core/authority packet: 187 passed. Actual concurrent
+  process submitters behind a real active custodian: one passed; only one
+  waiting successor survived, active work completed and replaced requests
+  never started. Public consumer and final publication checks remain open.
+- Admission plus legacy-record readback: 25 passed. The public Manager
+  submission/status control passed through real queue admission without an
+  installer. Broader Manager/bootstrap controls exposed an outdated engine
+  participant fixture capability; that fixture is corrected and the affected
+  real-process handoff controls are being rerun before publication.
+- The affected real-process handoff residual passed all four cases after
+  correcting the fixture's declared capability; the preceding full two-file
+  Manager run passed its other 173 cases. Final addressed-scope packet passed
+  21 cases, including relocated installation homes.
+- Evidence tiers: actual fresh-queue SQLite admission, native Windows
+  concurrent processes and public Manager submission/status were exercised in
+  contained disposable state. No bootstrap construction, service lifecycle or
+  installer effect changed, so a full machine-provisioning clean room and live
+  host installation are not source acceptance proxies for this queue change.
+  Native Linux/macOS execution was unavailable here and is not inferred from
+  Windows evidence. Required CI retains its existing unit-only scope.
+- Initial implementation CI exposed the module-size cap, unchanged actor-free
+  policy source admission and a bootstrap project-normalization defect.
+  Extracted the focused pending-selection helper, refreshed only the existing
+  policy source's admission hash, and recovered logical bootstrap projects
+  from their retained arguments. No unit nodes, actor permissions or coverage
+  gates were removed or expanded.
+- Review also identified a standalone reconciliation phase outside the automatic
+  `--no-update` shape. Standalone bootstrap, staged and reconciliation phases
+  now remain independent component work. The queue/core/authority packet passed
+  197 cases after these corrections. A separate native bootstrap control adds
+  an actual same-project successor and checks correlated exit 125, no execution
+  of the replaced recipe and retained caller-loss ownership. The original
+  native coalescing/independent-project control remains intact.
+- An initial combined native scenario reached correct supersession and
+  independent-project completion but exhausted its original 90-second limit
+  while the last successor was still running. Split the new latest-wins
+  scenario from the original coalescing test rather than enlarging limits or
+  omitting lifetime, outcome or cleanup assertions. Native validation remains
+  pending until the bounded scenarios complete.
+- The separate local native scenario also exhausted 90 seconds, this time
+  before second-request admission. Repeated local execution stopped rather than
+  enlarging bounds or treating partial progress as a pass. Exact fresh hosted
+  native acceptance remains required before merge. The actor-free source
+  admission reader independently verified every declared binding, and the
+  extracted queue module is 994 lines.
+- Hosted run42937626010 qualified the corrected actual bootstrap selection:
+  Windows 83 passed/three platform skips and Linux 84 passed/two platform skips,
+  including the new latest-wins/caller-loss cases and original independent
+  project/coalescing controls. This does not turn the local deadline failures
+  into passes.
+- A further review identified relative `AGENT_HOME` scoping against the source
+  anchor rather than the actual execution directory. Update admission now
+  captures the absolute execution home; old records compare using their retained
+  runner directory. New controls cover two callers sharing an anchor, old
+  relative records and the actual product environment. Fresh review and CI
+  remain required after this correction.
+- The engine adapter must also capture its already-selected home before queue
+  normalization: an explicit project can change the process directory while
+  retaining the original invocation directory. Engine and Manager adapters now
+  persist absolute homes from their actual execution directories. The adapter
+  packet passed 117 engine/JSON cases and 121 Manager cases, including real
+  queue admission and borrowed engine re-entry with installation lookup intact.
+  The engine control covers re-entry at both the selected project and caller
+  directories. Lint and all 13 installation-contract checks passed. Fresh
+  current-head review and hosted qualification remain required.
+- Refreshed the existing Manager adapter source-admission binding after its
+  home-capture change; the admission reader verified every manifest source.
+  Unit nodes, actor permissions and coverage gates are unchanged. Reconciled
+  the effort-index-only conflict with current `dev`, preserving peer entries
+  and status changes; tested adapter and queue code remained byte-identical.
 
 ### 2026-11-10 - Proposal
 
