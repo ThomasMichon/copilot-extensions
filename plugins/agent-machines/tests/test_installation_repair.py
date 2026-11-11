@@ -675,6 +675,56 @@ def test_readiness_only_refuses_effectful_or_unrequired_scope_before_state(monke
         repair_api.repair(Path("unused"), readiness_only=True, **options)
 
 
+@pytest.mark.parametrize("changed", ("missing", "reparse"))
+def test_readonly_invocation_refuses_changed_project_context_before_execution(
+    repair_fixture, monkeypatch, changed,
+):
+    import stat
+    from types import SimpleNamespace
+
+    home, project, _, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home, readiness_only=True)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+    original = Path.lstat
+
+    def lstat(path, *args, **kwargs):
+        if path == project:
+            if changed == "missing":
+                raise FileNotFoundError("project context disappeared")
+            return SimpleNamespace(st_mode=stat.S_IFDIR, st_file_attributes=0x400)
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(repair_api, "run_action", lambda *a, **k: pytest.fail("changed context executed"))
+    result = repair_api._invoke(
+        module, owners[module.owner.owner_id], platform, readonly=True, timeout=1,
+    )
+    assert result.status == "invocation-refused"
+
+
+def test_readiness_project_context_does_not_change_installer_working_directory(
+    repair_fixture, monkeypatch,
+):
+    home, project, payload, _, _ = repair_fixture
+    platform = repair_api.current_platform()
+    host = admit_host(project, home=home)
+    selected = repair_api._closure(host, repair_api._required_modules(host), platform)
+    _inputs, owners = repair_api._binding_inputs(host, selected, platform)
+    module = selected[0]
+
+    def run(argv, *, cwd, readonly, **kwargs):
+        assert cwd == payload and readonly is False
+        return repair_api.ActionResult("exited", 0)
+
+    monkeypatch.setattr(repair_api, "run_action", run)
+    assert repair_api._invoke(
+        module, owners[module.owner.owner_id], platform, readonly=False, timeout=1,
+    ).status == "exited"
+
+
 @pytest.mark.timeout(30)
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
@@ -684,6 +734,25 @@ def test_readiness_only_actual_caller_observes_without_constructing_an_install_p
     from agent_procutil.owned_process import run_caller_owned
 
     home, project, payload, _, _ = repair_fixture
+    windows = payload / "scripts" / "action.ps1"
+    windows.write_text(windows.read_text().replace(
+        "$state =",
+        "if (-not [string]::Equals((Get-Location).ProviderPath, $env:REPAIR_EXPECTED_PROJECT, "
+        "[StringComparison]::OrdinalIgnoreCase)) {\n"
+        "  @{schema='copilot-extensions.module-readiness'; version=1; module=$Module; "
+        "state='failed'; detail='wrong project context'} | ConvertTo-Json -Compress\n"
+        "  exit 1\n}\n$state =",
+        1,
+    ), encoding="utf-8")
+    posix = payload / "scripts" / "action.sh"
+    posix.write_text(posix.read_text().replace(
+        'state="$HOME/',
+        'if [ "$PWD" != "$REPAIR_EXPECTED_PROJECT" ]; then\n'
+        '  printf \'{"schema":"copilot-extensions.module-readiness","version":1,'
+        '"module":"%s","state":"failed","detail":"wrong project context"}\\n\' "$2"\n'
+        '  exit 1\nfi\nstate="$HOME/',
+        1,
+    ), encoding="utf-8")
     plugin = "service-example" if generic else "agent-example"
     if generic:
         payload = payload.rename(payload.with_name(plugin))
@@ -722,10 +791,12 @@ def test_readiness_only_actual_caller_observes_without_constructing_an_install_p
         (home / f"{plugin}-{name}.ready").write_text("ready")
     with (payload / "unrelated.bin").open("wb") as stream:
         stream.truncate(8 * 1024 * 1024 + 1)
+    environment = ordinary_environment(os.environ, home=home, payload=payload)
+    environment["REPAIR_EXPECTED_PROJECT"] = str(project)
     result = run_caller_owned(
         [sys.executable, "-m", "agent_machines", "installation-repair",
          "--project-root", str(project), "--required", "--caller-owned-readiness"],
-        cwd=project, env=ordinary_environment(os.environ, home=home, payload=payload),
+        cwd=home, env=environment,
         timeout=15, max_stdout_bytes=65536, max_stderr_bytes=65536,
     )
     assert result.returncode == 0, result.stderr

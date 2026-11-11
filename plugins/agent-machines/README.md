@@ -251,6 +251,13 @@ agent-machines installation-repair --project-root <project>
 agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module>
 ```
 
+Readiness actions run from the selected project root, even when the caller
+starts elsewhere, so repository-aware owners inspect that project's
+configuration rather than their installed payload directory. The admitted plan
+binds this root, and each probe refuses a missing or indirect project path.
+Manifest action targets remain payload-qualified absolute paths. Installer
+actions retain their payload working directory and existing apply authority.
+
 For an explicit complete required-module selection, use `--required` instead of
 `--module`. It selects every discovered required module and its transitive
 prerequisites, including optional prerequisites, but not unrelated optional

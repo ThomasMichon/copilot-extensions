@@ -1355,3 +1355,41 @@ original-refusal and custody-precedence controls pass; lint and whitespace
 checks pass. No production repair API or acceptance policy changes. Index and
 Vault causes remain unproven until the next exact-head native diagnostic;
 neither the backend input nor this observation fix is fresh acceptance.
+
+Run 42982347366 at `8999810d27bc792acf1acbe67cb46093ab83f0db`
+passed normal and repair, with successful fresh settlement and required CI.
+Its now execution-bound diagnostics report the real refusals: Index cannot
+read effective repository configuration, and Vault cannot resolve activation
+configuration. The selected Machines conductor invokes those repository-aware
+readiness gates from each installed payload directory, losing the explicitly
+requested adopted project context.
+
+The existing actual-caller readiness regression now requires the selected
+project directory inside both native payload-script and payload-command
+actions, while starting the caller outside that project. Both Windows cases
+fail before the correction and pass after it. Machines now binds the admitted
+project root into each owner and the opaque plan digest, revalidates that
+directory before each read-only action, and runs the probe there. Manifest
+action paths, executable/content binding, no-self-provision behavior, installer
+payload working directories and apply authority are unchanged. Missing or
+indirect project contexts refuse execution instead of falling back elsewhere.
+
+This narrow production correction is coordinated on the existing conductor
+issue #6464; it does not supersede #10757's separate inactive-participation
+change. The complete repair test file passes 122 controls, including actual
+native callers, context replacement refusals, unchanged installer context,
+cancellation, changed-input rejection and the original budget cases
+(466.53 seconds; wrapper including preparation/cleanup 491.91 seconds).
+Changed-source lint, whitespace and the 13-plugin install-contract guard pass.
+
+Intent and contract review: this restores the existing selected-project
+readiness contract under the installer vision's authoritative replacement
+goal, not a new conductor or relaxed owner judgment. The internal owner binding
+and opaque digest now include the action's repository context; an earlier
+digest must be replanned rather than reused. No public invocation syntax or
+readiness descriptor changes. Documentation-impact review updates Machines'
+README and the suite's testing guidance; a generated Machines patch changefile
+covers the production behavior. Native tests above exercise Windows; the POSIX
+fixture counterpart is retained but is not claimed as executed on this host.
+The next existing disposable fresh run must still prove real Index/Vault
+configuration and complete Machines readiness before lifecycle acceptance.

@@ -10075,6 +10075,12 @@ Fresh construction is neither an admitted baseline-to-candidate upgrade nor
 required promotion enforcement. Its result explicitly grants no source admission;
 the original synthetic replacement and installed-core witnesses remain separate.
 
+The fresh job also supplies a pinned official portable KeePassXC CLI for Vault's
+real backend readiness; it does not create or unlock a database. Failed required
+readiness retains bounded raw reports through the selected Machines owner's
+admitted, execution-bound read-only actions, without applying repair or relaxing
+the original readiness refusal.
+
 If baseline preparation reports a Vault activation refusal, the fixture also
 runs the retained payload's read-only activation reader under a bounded native
 owner. Caught payload exceptions and a refused configuration owner's bounded

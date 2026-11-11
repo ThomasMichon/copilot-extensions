@@ -104,6 +104,7 @@ def ordinary_environment(
 @dataclass(frozen=True)
 class OwnerBinding:
     installation: PluginInstallation
+    project_root: Path
     source: str
     mode: str
     version: str
@@ -121,6 +122,7 @@ class OwnerBinding:
         return {
             "owner": self.installation.owner_id,
             "source": self.source,
+            "projectRoot": str(self.project_root),
             "sourceFingerprint": self.installation.provenance.source_fingerprint,
             "mode": self.mode,
             "payloadVersion": self.version,
@@ -270,7 +272,7 @@ def _binding(
         if "installerRuntime" in manifest:
             content_digest = digest({"payload": content_digest, "installerRuntime": invocation})
     return OwnerBinding(
-        installation=installation, source=source, mode=mode, version=version,
+        installation=installation, project_root=project_root, source=source, mode=mode, version=version,
         content_digest=content_digest,
         mode_binding=digest(mode_data),
         no_self_provision=no_provision, payload_root_environment=payload_environment,

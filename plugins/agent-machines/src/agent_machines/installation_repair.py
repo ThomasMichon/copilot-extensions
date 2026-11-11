@@ -171,6 +171,8 @@ def _invoke(
 ) -> ActionResult:
     invocation = (module.readiness if readonly else module.installer)[platform]
     try:
+        if readonly:
+            ordinary(owner.project_root, directory=True)
         argv, executable, content_digest, target_digest = _admit_invocation(invocation, platform)
     except (RepairAdmissionError, OSError):
         return ActionResult("invocation-refused", None)
@@ -181,7 +183,8 @@ def _invoke(
     }):
         return ActionResult("invocation-refused", None)
     return run_action(
-        argv, cwd=owner.installation.payload_root, environment=_environment(owner, readonly=readonly),
+        argv, cwd=owner.project_root if readonly else owner.installation.payload_root,
+        environment=_environment(owner, readonly=readonly),
         timeout=timeout, readonly=readonly,
         cmd=platform is Platform.WINDOWS and invocation.target.suffix.lower() == ".cmd",
     )
