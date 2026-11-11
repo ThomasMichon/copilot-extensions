@@ -47,6 +47,7 @@ from .configuration_context import run_list
 from .pivots import RegisteredPivot, format_template, parse_list_payload as parse_list_payload
 from .pivot_requests import PivotRequestsMixin
 from .registered_scopes import action_scopes
+from .stream_stderr import StreamStderr, close_streams, settle_stream
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
@@ -380,12 +381,10 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         ``list --stream`` process is orphaned after the picker quits."""
         self._closed.set()
         self._cancel_pending_lists()
-        with self._procs_lock:
-            procs = list(self._procs)
-            self._procs.clear()
-        for proc in procs:
-            _kill_proc_tree(proc)
-        self._join_scope_retirements()
+        try:
+            close_streams(self)
+        finally:
+            self._join_scope_retirements()
 
     def _spawn_stream(self, argv: Sequence[str]) -> subprocess.Popen:
         """Spawn a tracked, killable streaming child (line-buffered stdout so
@@ -415,6 +414,13 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         proc._picker_scope = getattr(self._request_context, "machine", None)
         with self._procs_lock:
             self._procs.append(proc)
+        try:
+            proc._picker_stderr = StreamStderr(proc, lambda: _kill_proc_tree(proc))
+            proc._picker_stderr.start()
+        except Exception as exc:
+            _kill_proc_tree(proc)
+            _, cleanup_error = settle_stream(self, proc)
+            raise RuntimeError(f"stderr reader setup failed: {exc}; {cleanup_error}") from exc
         # Close the spawn/close race: if close() fired between the guard and the
         # Popen, it never saw this child -- kill it now.
         with self._lock:
@@ -426,12 +432,12 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         return proc
 
     def _untrack(self, proc: subprocess.Popen) -> None:
-        with self._procs_lock:
-            if proc in self._procs:
-                self._procs.remove(proc)
         job = getattr(proc, "_picker_job", None)
         if job is not None:
             job.close()
+        with self._procs_lock:
+            if proc in self._procs:
+                self._procs.remove(proc)
 
     def _run_list(self, machine: object, gen: object = None) -> None:
         run_list(self, machine, gen)
@@ -588,16 +594,14 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                 err_frame = str(exc)[:200]
         finally:
             deadline.close()
-            try:
-                _, stderr = proc.communicate(timeout=5)
-            except Exception:
-                _kill_proc_tree(proc)
-                try:
-                    _, stderr = proc.communicate(timeout=5)
-                except Exception:
-                    stderr = ""
-            self._untrack(proc)
+            stderr, output_error = settle_stream(self, proc)
 
+        if output_error:
+            self._subscribe_live[machine] = False
+            self._finish(machine, ("error", [], output_error[:200]), {})
+            return
+        if self._closed.is_set():
+            return
         if deadline.timed_out.is_set():
             self._subscribe_live[machine] = False
             self._finish(machine, (
@@ -888,16 +892,12 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             cancelled = (should_cancel is not None and should_cancel()) or self._closed.is_set()
             if cancelled and not done:
                 _kill_proc_tree(proc)
-            try:
-                _, stderr = proc.communicate(timeout=5)
-            except Exception:
-                _kill_proc_tree(proc)
-                try:
-                    _, stderr = proc.communicate(timeout=5)
-                except Exception:
-                    stderr = ""
-            self._untrack(proc)
+            stderr, output_error = settle_stream(self, proc)
+            if poller is not None:
+                poller.join(timeout=1)
 
+        if output_error:
+            return (False, output_error[:200])
         if cancelled and not done:
             return (False, "cancelled")
         if done:

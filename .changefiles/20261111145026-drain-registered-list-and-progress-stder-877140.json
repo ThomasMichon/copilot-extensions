@@ -1,0 +1,9 @@
+{
+  "comment": "Drain registered list and progress stderr concurrently with bounded diagnostics and explicit cleanup failures.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
