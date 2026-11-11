@@ -581,7 +581,11 @@ digests; complete native read/write batches retain their own additional proof.
 A single prepared PowerShell event may also use the existing relevance owner's
 exact no-argument literal declaration, bound to that source as well as the
 guards. Its object command field retains original precedence; shell arguments,
-string-valued arguments and shell batch members do not gain that proof.
+JSON argument strings and shell batch members do not gain that proof.
+The same exact literal can come from a raw string, or from `tool_input` only
+when `toolArgs` is absent. A present null, empty or invalid primary value never
+falls through to the fallback carrier. Raw text is compared unchanged, not
+trimmed, unquoted or decoded.
 Fallback admission does not qualify a prepared proof, even if the original
 resolver refreshes the association during that call. Changed sources, incomplete
 or changed cell observations and incompatible declarations retain original
