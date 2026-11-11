@@ -84,7 +84,7 @@ def test_fresh_manager_application_exposes_its_real_launcher_to_worktrees(tmp_pa
 
 def _qualify_manager_application(
     tmp_path, monkeypatch, control, *, worktrees_python=None,
-    worktrees_root=None, worktrees_environment=None, caller_jobs=False,
+    worktrees_root=None, worktrees_environment=None, caller_jobs=False, replacement_slot=None,
 ):
     paired = worktrees_python is not None
     assert not paired or (control in {"embody", "copilot"} and worktrees_environment is not None)
@@ -206,10 +206,12 @@ def _qualify_manager_application(
                     "_qualify_native_worktrees(Path(sys.argv[3]),sys.argv[7],"
                     "worktrees_python=Path(sys.argv[4]),worktrees_root=Path(sys.argv[5]),"
                     "worktrees_environment=dict(os.environ),caller_jobs=sys.argv[8]=='1',"
+                    "replacement_slot=Path(sys.argv[9]) if sys.argv[9] else None,"
                     "manager_environment={'WORKTREE_MANAGER_ROOT':sys.argv[6]})",
                     str(Path(__file__).parent), str(ROOT / "tools"), str(native),
                     str(worktrees_python), str(worktrees_root), str(root), control,
                     "1" if caller_jobs else "0",
+                    str(replacement_slot) if replacement_slot is not None else "",
                 ]
                 native_environment = {
                     **worktrees_environment, **lifecycle,
