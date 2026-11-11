@@ -115,8 +115,35 @@ function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCom
                 if ($command -isnot [string] -or -not $command) { return $false }
                 $null = $heads.Add($command)
             }
+            $readArguments = $null
+            $rejectArguments = $null
             foreach ($command in $selectedCommands) {
-                if (-not $heads.Contains($command)) { return $false }
+                if ($heads.Contains($command)) { continue }
+                # Only bare ASCII argument candidates use the optional original-owner predicates.
+                if ($command -cmatch '[^\x09\x20-\x7e]' -or
+                    $command.Trim([char[]]@(' ', "`t")).IndexOfAny([char[]]@(' ', "`t")) -lt 0) {
+                    return $false
+                }
+                if ($null -eq $readArguments) {
+                    $argumentFacts = $policy['nativeShellReadArguments']
+                    if ($argumentFacts -isnot [Collections.IDictionary] -or $argumentFacts.get_Count() -ne 3 -or
+                        ($argumentFacts['version'] -isnot [int] -and $argumentFacts['version'] -isnot [long]) -or
+                        $argumentFacts['version'] -ne 1 -or $argumentFacts['read'] -isnot [string] -or
+                        -not $argumentFacts['read'] -or $argumentFacts['reject'] -isnot [Collections.IList] -or
+                        $argumentFacts['reject'].Count -ne 5) { return $false }
+                    $options = [Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
+                        [Text.RegularExpressions.RegexOptions]::CultureInvariant
+                    $readArguments = [regex]::new('\A(?:' + $argumentFacts['read'] + ')\z', $options)
+                    $rejectArguments = [Collections.Generic.List[regex]]::new()
+                    foreach ($pattern in $argumentFacts['reject']) {
+                        if ($pattern -isnot [string] -or -not $pattern) { return $false }
+                        $rejectArguments.Add([regex]::new($pattern, $options))
+                    }
+                }
+                if (-not $readArguments.IsMatch($command)) { return $false }
+                foreach ($reject in $rejectArguments) {
+                    if ($reject.IsMatch($command)) { return $false }
+                }
             }
             $shellDependencies = $policy.nativeShellReadDependencies
             if ($shellDependencies -isnot [Collections.IDictionary] -or

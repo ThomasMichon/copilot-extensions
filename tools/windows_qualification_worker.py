@@ -150,7 +150,11 @@ def native_command(
 ) -> list[str]:
     """Select exactly one native consumer with its existing functional bounds."""
     plugin, module, case, _ = NATIVE_PACKETS[packet]
-    limits = ("900", "1200", "900") if plugin == "agent-worktrees" else ("300", "420", "180")
+    limits = (
+        ("300", "420", "300") if packet == "native-worktrees-manager-no-mux"
+        else ("900", "1200", "900") if plugin == "agent-worktrees"
+        else ("300", "420", "180")
+    )
     return [
         sys.executable, str(root / "tools/run-plugin-tests.py"), plugin,
         "--test-file", f"tests/native/{module}.py",

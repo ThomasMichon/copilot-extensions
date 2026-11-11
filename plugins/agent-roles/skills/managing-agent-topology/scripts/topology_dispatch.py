@@ -58,7 +58,8 @@ def flow(
     if not fresh(snapshot):
         return hold("native-task-evidence-stale-or-future")
     task = snapshot["task"]
-    native = lane(assignment, snapshot, fresh, observe, materialization)
+    native = lane(assignment, snapshot, fresh, observe, materialization,
+                  bookkeeping_only=bookkeeping_only())
     fences = {"nativeTask": task["id"], "expectedRevision": task["standing_revision"]}
     mismatch = "native-declaration-differs-from-current-materialization"
     transitional = {
@@ -208,12 +209,16 @@ def lane(
     fresh: Callable[[dict[str, Any] | None], bool],
     observe: Callable[[dict[str, str]], dict[str, Any] | None],
     materialization: dict[str, Any] | None,
+    *,
+    inspect_acceptance: bool = False,
+    bookkeeping_only: bool = False,
 ) -> dict[str, Any]:
     """Join native acceptance and current head evidence without granting effects."""
     owner = native_owner(snapshot) or assignment["nativeWorktree"]
     result: dict[str, Any] = {
         "status": "unknown", "owner": owner, "head": None, "headRevision": None,
         "reasons": [], "holdReason": None, "nativeTask": assignment["nativeTask"],
+        "declarationAccepted": False,
     }
     reasons = result["reasons"]
     if snapshot is None:
@@ -228,7 +233,8 @@ def lane(
     declaration = charter["declaration"]
     relationship = snapshot["relationship"]
     if materialization is not None and (
-        declaration["source_revision"] != materialization["sourceRevision"]
+        (declaration["source_revision"] != materialization["sourceRevision"]
+         and not (task["status"] == "started" and bookkeeping_only))
         or declaration["expected_materialization_revision"] != materialization["materializationRevision"]
     ):
         reasons.append("native-declaration-differs-from-current-materialization")
@@ -261,7 +267,8 @@ def lane(
         result["status"] = "held"
         reasons.append("native-task-held")
         return result
-    if reasons:
+    mismatch = "native-declaration-differs-from-current-materialization"
+    if reasons and not (inspect_acceptance and reasons == [mismatch]):
         result["status"] = "held"
         return result
     if task["status"] in {"proposed", "queued"} and task["owner"] is None and owner is None:
@@ -320,6 +327,7 @@ def lane(
                 reasons.append("native-accepted-head-conflict")
             if observation["assignmentId"] not in (None, assignment["id"]):
                 reasons.append("assignment-not-accepted-by-owner")
+    result["declarationAccepted"] = not any(reason != mismatch for reason in reasons)
     result["status"] = "held" if reasons else "accepted"
     return result
 

@@ -335,6 +335,10 @@ barriers under publication custody, including after the writer process dies.
 Only an absent record means no references; malformed, linked, oversized or
 unreadable evidence refuses deletion. References never expire by PID or age
 and do not provide a new mutation lock, recovery queue or force-release path.
+Reference reads, atomic writes, target checks and recovery use native Windows
+paths internally. Ordinary and extended-length spellings address the same
+evidence even when a root, referenced slot or atomic temporary filename exceeds
+`MAX_PATH`; an inaccessible long spelling is not treated as absent evidence.
 
 For a cohort that spans several bounded owners, hold the external lifecycle
 lock and `reference_transaction_custody(root)` through reconciliation. Use
