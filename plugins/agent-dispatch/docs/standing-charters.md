@@ -196,4 +196,10 @@ reclaiming, rewriting, deleting or spawning a standing task, or from erasing
 its history. Current finite routes (`/claim`, `complete`, `abandon`) refuse a
 standing task with 409, and untargeted claims never select one. Older
 coordinators that ignore unknown query parameters are rejected by the client
-capability check rather than returning an unfiltered view.
+capability check rather than returning an unfiltered view. The one exception
+is `GET /tasks?kind=finite`, which supervisors use to keep finite work ahead of
+standing rows before the list limit: without the capability, the client omits
+the selector and drops retained standing rows by their claim fence. If an
+entire full page is standing rows, it refuses as upgrade-required rather than
+hide older finite work indefinitely. `kind` cannot be combined with `q` or
+`sweep`.

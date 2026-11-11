@@ -410,6 +410,44 @@ def test_client_refuses_before_effects_without_declared_support(health):
     assert "standing_parent_id" not in json.loads(created.content)
 
 
+def test_finite_listing_from_rolled_back_provider_excludes_retained_standing_rows(tmp_path):
+    """An older coordinator over a migrated store ignores ``kind`` and omits it."""
+    from dataclasses import asdict
+
+    from agent_dispatch.queue_standing_charters import StandingCharterDeclaration
+
+    queue = TaskQueue(tmp_path / "queue.sqlite3")
+    older = queue.create("Older finite", repo=REPO)
+    for i in range(3):
+        queue.reconcile_standing_charter(
+            f"D{i}", StandingCharterDeclaration(**{**DECLARATION, "lane_key": f"lane-{i}"}), repo=REPO,
+        )
+    sent: list[dict] = []
+
+    def send(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(200, json={})
+        params = dict(request.url.params)
+        sent.append(params)
+        rows = queue.list(repo=params["repo"], status=params["status"], limit=int(params["limit"]))
+        legacy = [
+            {k: v for k, v in asdict(task).items() if k != "kind" and not k.startswith("standing")}
+            for task in rows
+        ]
+        return httpx.Response(200, json=legacy)
+
+    with DispatchClient("http://old", token="data", transport=httpx.MockTransport(send)) as client:
+        assert [t["id"] for t in client.list(repo=REPO, status="queued", kind="finite", limit=200)] == [
+            older.id,
+        ]
+        assert [t["id"] for t in client.list(repo=REPO, status="queued", kind="finite", limit=4)] == [
+            older.id,
+        ]
+        with pytest.raises(DispatchUpgradeRequired, match="list limit"):
+            client.list(repo=REPO, status="queued", kind="finite", limit=3)
+    assert sent and all("kind" not in params for params in sent)
+
+
 @pytest.mark.parametrize("writer", ["absent", "finite-only"])
 def test_client_refuses_attachment_without_relationship_owner(tmp_path, writer):
     if writer == "absent":
