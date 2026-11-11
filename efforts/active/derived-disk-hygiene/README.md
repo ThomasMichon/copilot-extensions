@@ -105,6 +105,12 @@ during finalize is excluded.
       supported reclamation command.
 
 ### Track B — Stop unsealed bytecode growth (#10966)
+The [Python Bytecode Cache Lifecycle follow-on](../python-bytecode-cache-lifecycle/README.md)
+owns the proposed OS user-cache relocation, retirement-aware incremental
+collection and normal-update legacy bytecode relief. Its design clears review
+before implementation; this does not reopen the accepted #11122 delivery or
+authorize real-cache cleanup.
+
 - [x] Apply the #10812 selector pattern (call `cache_arguments`, reuse
       `installed-<digest>`) to remaining random-minting launchers:
       worktree-manager runtime launchers, payload-invocation shim

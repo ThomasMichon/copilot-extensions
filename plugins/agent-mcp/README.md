@@ -548,6 +548,14 @@ Both **directions** of the bridge are dual-era:
   standard error. A proxying (`http`/`stdio`) bridge is a transparent pass-through:
   the client's own negotiation flows end-to-end to the upstream.
 
+One-shot sessions, including each request-routed target, prepare a copy of the
+outgoing request for their own negotiated upstream era. Legacy targets remove
+the modern protocol-version, client-info and client-capabilities metadata;
+modern targets stamp the upstream's selected version and bridge identity.
+Downstream metadata cannot override that selection. Unrelated metadata such as
+progress tokens and tracing fields remains intact, without modifying the
+caller's original request or changing credential injection.
+
 Set the era per bridge with **`server.protocol`**:
 
 | Value | Behavior |
