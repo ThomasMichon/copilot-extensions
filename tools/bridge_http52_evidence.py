@@ -211,6 +211,7 @@ PROBES = {
     "test_retained_startup_admission_requires_its_original_ready_input": 12,
     "test_readonly_poll_never_claims_or_expires_mutation_controls": 1,
     "test_bridge_provider_receiver_and_extensions_share_one_conversation": 2,
+    "test_carrier_failures_settle_owned_tree_and_streams": 2,
     "test_provider_owner_uses_the_actual_client_interface": 1,
     "test_health_observes_canonical_writer_selection_without_launch": 5,
     "test_repeated_health_reuses_real_resolver_but_refreshes_selected_slot": 2,

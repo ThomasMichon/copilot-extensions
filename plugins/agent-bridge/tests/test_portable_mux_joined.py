@@ -102,7 +102,7 @@ class Consumer:
             self.stderr.start()
         except BaseException as error:
             try:
-                self._abort_start()
+                self._settle()
             except BaseException as cleanup:
                 cleanup.consumer = self
                 raise cleanup from error
@@ -110,7 +110,21 @@ class Consumer:
         finally:
             listener.close()
 
-    def _abort_start(self):
+    def running(self):
+        if self.job is not None:
+            return self.process.poll() is None
+        from agent_procutil.owned_process import _observe_unreaped
+
+        return _observe_unreaped(self.process) is None
+
+    def _wait_for_return(self, timeout):
+        deadline = time.monotonic() + timeout
+        while self.running():
+            if time.monotonic() >= deadline:
+                raise subprocess.TimeoutExpired(self.process.args, timeout)
+            time.sleep(.02)
+
+    def _settle(self):
         if self.process is not None:
             if self.job is not None:
                 self.job.terminate_and_wait(10)
@@ -148,7 +162,7 @@ class Consumer:
                     assert state["child_pid"] != state["host_pid"]
                     assert state["extension_pid"] not in (state["host_pid"], state["child_pid"])
                     return state
-            assert self.process.poll() is None, "".join(self.logs)
+            assert self.running(), "".join(self.logs)
             time.sleep(.02)
         pytest.fail("The selected common broker did not reach running")
 
@@ -195,33 +209,17 @@ class Consumer:
             self.errors.append(traceback.format_exc())
             self.ready.set()
 
-    def close(self):
+    def close(self, *, timeout=10):
         from agent_remote_driver.session_host.osutil import process_start_time
 
         state = json.loads(self.state_file.read_text(encoding="utf-8")) if self.state_file.exists() else {}
         extension_birth = process_start_time(state["extension_pid"]) if "extension_pid" in state else None
         try:
-            if self.process.poll() is None:
+            if self.running():
                 self._write({"stop": True})
-                self.process.wait(timeout=10)
+                self._wait_for_return(timeout)
         finally:
-            if self.process.poll() is None:
-                self.process.terminate()
-                self.process.wait(timeout=10)
-            if self.job is not None:
-                self.job.terminate_and_wait(10)
-            try:
-                self.carrier.shutdown(socket.SHUT_RDWR)
-            except OSError:
-                pass
-            self.carrier.close()
-            self.reader.join(timeout=10)
-            self.stderr.join(timeout=10)
-            for stream in (self.messages, self.process.stderr):
-                try:
-                    stream.close()
-                except OSError:
-                    pass
+            self._settle()
         assert not self.reader.is_alive() and not self.stderr.is_alive()
         assert self.process.returncode == 0, "".join(self.logs)
         if "child_pid" in state:
@@ -231,12 +229,13 @@ class Consumer:
         assert not self.errors
 
 
-def test_carrier_timeout_settles_constructor_owned_tree_and_streams(tmp_path, monkeypatch):
+@pytest.mark.parametrize("phase", ["construction", "stop"])
+def test_carrier_failures_settle_owned_tree_and_streams(tmp_path, monkeypatch, phase):
     from agent_procutil._daemon_instance_identity import birth_identity
 
     marker = tmp_path / "child.json"
     program = """
-import json,os,subprocess,sys,time
+import json,socket,subprocess,sys,time
 from pathlib import Path
 from agent_procutil import no_window_kwargs
 child=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"],**no_window_kwargs())
@@ -244,10 +243,13 @@ marker=Path(sys.argv[1])
 pending=marker.with_suffix(".pending")
 pending.write_text(json.dumps({"child":child.pid}),encoding="utf-8")
 pending.replace(marker)
+if sys.argv[2]=="stop":
+    carrier=socket.create_connection(("127.0.0.1",json.loads(sys.argv[-1])["carrierPort"]))
 time.sleep(60)
 """
     spawned, births, listeners = [], [], []
     spawn = spawn_sync_in_kill_on_close_job
+    accept = socket.socket.accept
 
     def capture(*args, **kwargs):
         process, job = spawn(*args, **kwargs)
@@ -256,23 +258,36 @@ time.sleep(60)
 
     def timeout(listener):
         listeners.append(listener)
+        if phase == "stop":
+            connected = accept(listener)
         deadline = time.monotonic() + 10
         while not marker.exists() and time.monotonic() < deadline:
             time.sleep(.01)
         child = json.loads(marker.read_text(encoding="utf-8"))["child"]
         births.append((child, birth_identity(child)))
-        raise TimeoutError("synthetic carrier timeout")
+        if phase == "construction":
+            raise TimeoutError("synthetic carrier timeout")
+        return connected
 
     monkeypatch.setattr(sys.modules[__name__], "spawn_sync_in_kill_on_close_job", capture)
     monkeypatch.setattr(socket.socket, "accept", timeout)
-    with pytest.raises(TimeoutError, match="synthetic carrier timeout"):
-        Consumer(
+    def construct():
+        return Consumer(
             None, dict(os.environ), str(tmp_path), duplicate=False,
             core_command=[
-                sys.executable, "-c", program, str(marker),
+                sys.executable, "-c", program, str(marker), phase,
                 "--state-file", str(tmp_path / "host.json"), "--",
             ],
         )
+    if phase == "construction":
+        with pytest.raises(TimeoutError, match="synthetic carrier timeout"):
+            construct()
+    else:
+        consumer = construct()
+        with pytest.raises(subprocess.TimeoutExpired):
+            consumer.close(timeout=.1)
+        assert not consumer.reader.is_alive() and not consumer.stderr.is_alive()
+        assert consumer.messages.closed and consumer.carrier.fileno() == -1
     assert len(spawned) == len(births) == len(listeners) == 1
     assert spawned[0].returncode is not None and spawned[0].stderr.closed
     assert listeners[0].fileno() == -1
@@ -533,7 +548,7 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
                 "/messages/ack" in call["path"] or call["path"].endswith("/controls")
                 for call in consumer.calls
             )
-            assert consumer.process.poll() is None
+            assert consumer.running()
         finally:
             if state.consumer:
                 state.consumer.close()
