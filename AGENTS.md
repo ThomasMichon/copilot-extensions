@@ -256,10 +256,12 @@ Background work must remain invisible when launched from a consoleless parent.
 Use the launch-kind matrix in
 `docs/patterns/windows-background-process-launch.md`; never rely on the user's
 default-terminal setting or combine `CREATE_NEW_CONSOLE` with `SW_HIDE`.
-Required CI runs `tools/check-headless-launch.py`. Reviewers require a real
-Windows regression for launch-path changes: exercise a console descendant from
-a windowless parent and observe zero visible windows and foreground transitions
-across at least two periodic cycles.
+Required CI runs `tools/check-headless-launch.py`. Launch-path regressions use
+automated native execution, launch-mechanism and cleanup controls, including two
+cycles for periodic work. Desktop observation is opportunistic on an already
+active console or RDP session; record unavailable/inconclusive coverage rather
+than requiring operator attendance or treating its absence as a publication,
+CI or enrollment gate. See the pattern for evidence boundaries.
 
 ### Branch and Publication
 

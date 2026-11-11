@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify native health job fixtures and preserve bounded descendant cleanup and collection exit results",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}
