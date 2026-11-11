@@ -14,6 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from .. import elevated
 from ..acquisition_contract import AcquisitionRefused
+from ..local_launch_preparation import LocalLaunchPreparationError
 from ..attention_wait import (
     AttentionHistoryChangedError,
     AttentionTokenError,
@@ -760,6 +761,22 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request):
         )
     except DaemonDrainingError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
+    except LocalLaunchPreparationError as exc:
+        # Resolution failed before registration or launch. Surface the cause
+        # as a typed refusal (and log it) instead of an opaque 500 whose
+        # traceback only reaches the daemon's stderr.
+        log.error(
+            "Local launch preparation failed for agent %r (target dir %r): %s",
+            agent_name, target.cwd, exc, exc_info=True,
+        )
+        raise HTTPException(
+            status_code=422,
+            detail={
+                "code": "local_launch_preparation_failed",
+                "message": str(exc),
+                "effect": "not_started",
+            },
+        ) from exc
     except SessionConflictError as exc:
         raise HTTPException(
             status_code=409,
