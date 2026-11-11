@@ -3388,6 +3388,20 @@ terminal receipts and fixture cleanup remain required.
 This is not new-window/no-mux, automatic sessionStart adoption, all-caller-Job
 survival or a measurement of the operator's installed runtime.
 
+The independent Core Host Windows cleanup-Job lane is
+`plugins/agent-remote-driver/tests/native/host_caller_jobs_fixture.py qualify <fresh-private-output-directory>`,
+using an interpreter with the core and process library installed. Run it outside
+the contained test supervisor; the fixture refuses containment rather than
+disabling it. Its renewable instance lease bounds both cases to 180 seconds.
+It closes two nested permissive caller Jobs before exercising the real copied
+Host through its broker, and requires a bounded control to die with its caller.
+A permissive inner/restrictive outer control must refuse before Host entry,
+without starting the synthetic ACP child. Every instance must settle.
+This proves the local headless Host boundary, not native Copilot, every caller,
+headed CLI package replacement or desktop/window visibility.
+`tests/test_host_launch_admission.py` covers borrowed startup-output descriptors
+and exact precreation/pre-resume refusal versus unknown custody.
+
 The adjacent `tests/native/test_manager_application_launch.py` builds and
 installs the real Manager wheel application through the canonical standalone
 source/profile owners, removes disposable source inputs, and exercises the
