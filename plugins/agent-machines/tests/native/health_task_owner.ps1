@@ -6,6 +6,7 @@ param(
     [string]$Definition
 )
 $ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false)
 $scheduler = New-Object -ComObject 'Schedule.Service'
 $scheduler.Connect()
 $folder = $scheduler.GetFolder('\')
@@ -36,7 +37,7 @@ function Get-OwnedTask {
     return $task
 }
 if ($Operation -eq 'register') {
-    [xml]$xml = Get-Content -LiteralPath $Definition -Raw
+    [xml]$xml = Get-Content -LiteralPath $Definition -Raw -Encoding UTF8
     $ns = New-Object Xml.XmlNamespaceManager($xml.NameTable)
     $ns.AddNamespace('t', 'http://schemas.microsoft.com/windows/2004/02/mit/task')
     if ($xml.SelectSingleNode('/t:Task/t:RegistrationInfo/t:Description', $ns).InnerText -cne $uri) {

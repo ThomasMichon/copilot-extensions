@@ -53,7 +53,7 @@ def _control(operation, name="", definition=None):
     if definition is not None:
         command += ["-Definition", str(definition)]
     child = subprocess.run(
-        command, cwd=OWNER.parent, capture_output=True, text=True, timeout=20,
+        command, cwd=OWNER.parent, capture_output=True, text=True, encoding="utf-8", timeout=20,
         **no_window_kwargs(),
     )
     assert child.returncode == 0, (operation, child.stdout, child.stderr)
@@ -101,8 +101,9 @@ def _payload(tmp_path, *, delay_seconds=0):
     shutil.copytree(PLUGIN / "src/agent_machines", site / "agent_machines")
     shutil.copytree(REPO / "libs/agent-procutil/src/agent_procutil", site / "agent_procutil")
     (site / "fixture-dependencies.pth").write_text(
-        "\n".join(str(Path(p).resolve()) for p in sys.path if p and Path(p).is_dir()) + "\n",
-        encoding="utf-8",
+        "import sys; sys.path.extend(" + ascii([
+            str(Path(p).resolve()) for p in sys.path if p and Path(p).is_dir()
+        ]) + ")\n", encoding="ascii",
     )
     (site / "fixture_console_probe.py").write_text(
         "import ctypes, json, os\nfrom ctypes import wintypes\n"
@@ -135,7 +136,7 @@ def _payload(tmp_path, *, delay_seconds=0):
     (scripts / "installation-context/installation-context.ps1").write_text(
         """[Console]::Out.WriteLine('{"status":"ready","reason":"policy-default-false","""
         """"actualMode":"legacy","desiredMode":"legacy"}')\nexit 0\n""",
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     home = tmp_path / "home"
     home.mkdir()
@@ -150,7 +151,7 @@ def _payload(tmp_path, *, delay_seconds=0):
         "$env:COPILOT_EXTENSIONS_CONTEXT = $null\n"
         f"$env:USERPROFILE = {_ps(home)}\n$env:HOME = {_ps(home)}\n"
         f"$AgentRtPy = {_ps(python)}\n",
-        encoding="utf-8",
+        encoding="utf-8-sig",
     )
     return payload
 
@@ -418,7 +419,7 @@ def test_native_failed_slot_preserves_policy_existing_data_and_reports_failure(t
             _control("run", name)
             completed = _until(
                 lambda: (row if (row := _control("read", name))["state"] == 3
-                         and row["last_result"] != 267009 else None),
+                         and row["last_result"] not in (267009, 267011) else None),
                 30, "failed storage action result",
             )
             assert completed["last_result"] == 2
@@ -426,3 +427,31 @@ def test_native_failed_slot_preserves_policy_existing_data_and_reports_failure(t
     assert (store / "policy.json").read_bytes() == before
     assert all((slot / "sentinel").read_bytes() == b"not replaceable" for slot in blocked)
     assert not list(store.glob("*.tmp.*"))
+
+
+@pytest.mark.timeout(60)
+def test_native_unicode_payload_and_store_paths_survive_powershell_decoding(tmp_path):
+    root = tmp_path / "unicode-\u00e9"
+    root.mkdir()
+    payload = _payload(root)
+    identity = _control("identity")
+    assert identity["interactive"]
+    with listener(response(QUALIFYING_BODY), count=2) as (port, requests):
+        store = _store(root, port)
+        definition = _definition(payload, store, identity["sid"], enabled=True, calendar=False)
+        with _task(root, definition) as (name, registered):
+            xml = ET.fromstring(registered["xml"])
+            assert xml.find("t:Actions/t:Exec/t:WorkingDirectory", NS).text == str(payload)
+            _control("run", name)
+            completed = _until(
+                lambda: (row if (row := _control("read", name))["state"] == 3
+                         and row["last_result"] not in (267009, 267011) else None),
+                30, "Unicode-path action completion",
+            )
+            assert completed["last_result"] == 0
+        assert len(requests) == 1
+    assert (root / "resolver.jsonl").is_file()
+    consoles = [
+        json.loads(line) for line in (root / "console.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert len(consoles) == 2 and all(row["console_window"] == 0 for row in consoles)

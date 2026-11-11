@@ -100,7 +100,18 @@ def test_optional_desktop_admission_accepts_active_console_and_rdp_without_chang
     incomplete = {
         "passed": False, "violations": [{"kind": "sampled-foreground", "identity": [11, 22, 33]}],
     }
-    assert classify(incomplete, {(11, 33)}, [])
+    for kind in (
+        "sampled-foreground", "foreground-capture-changed",
+        "foreground-enumeration-identity-mismatch",
+    ):
+        changed = {"passed": False, "violations": [{"kind": kind, "identity": [11, 22, 33]}]}
+        assert classify(changed, {(11, 33)}, [])
+    assert classify({
+        "passed": False, "violations": [{
+            "kind": "foreground-capture-changed", "identity": [12, 22, 34],
+            "previous_identity": [11, 22, 33],
+        }],
+    }, {(11, 33)}, [])
     assert not classify(incomplete, {(11, 34)}, [])
     assert not classify(incomplete, {(12, 33)}, [])
     assert classify({"passed": False}, set(), [{"kind": "task-visible-window"}])

@@ -222,7 +222,8 @@ def test_windowless_job_root_propagates_result_and_bounded_owned_cleanup(
 
 
 @pytest.mark.parametrize("outcome", [
-    "absent", "inconclusive", "confirmed-focus", "confirmed-window",
+    "absent", "inconclusive", "confirmed-focus", "confirmed-capture-change",
+    "confirmed-mismatch", "confirmed-window",
     "functional-failure", "cleanup-failure",
 ])
 def test_optional_desktop_does_not_gate_absence_or_mask_functional_and_cleanup_failures(
@@ -253,8 +254,16 @@ def test_optional_desktop_does_not_gate_absence_or_mask_functional_and_cleanup_f
         return {
             "passed": False, "samples": 1, "maximum_gap": .02, "hook_count": 2,
             "violations": [
-                {"kind": "sampled-foreground", "identity": (11, 22, 33)}
-                if outcome == "confirmed-focus" else {"kind": "foreground"}
+                {
+                    "kind": {
+                        "confirmed-focus": "sampled-foreground",
+                        "confirmed-capture-change": "foreground-capture-changed",
+                        "confirmed-mismatch": "foreground-enumeration-identity-mismatch",
+                    }[outcome],
+                    "identity": (11, 22, 33),
+                } if outcome in (
+                    "confirmed-focus", "confirmed-capture-change", "confirmed-mismatch",
+                ) else {"kind": "foreground"}
             ], "sealed": True, "hooks_closed": True,
         }
 

@@ -1416,3 +1416,12 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   skip; three unchanged overlap/deadline cases were deliberately deselected
   after their earlier full pass. The 27-case pure packet additionally proves
   positive violation classification, reused-PID refusal and closed process pins.
+- Expanded the same positive-focus rule to both pinned endpoints of an
+  enumeration-time focus change and to enumeration identity mismatches, rather
+  than dropping those confirmed observations. Windows PowerShell XML/JSON
+  handling is explicitly UTF-8, generated scripts carry a BOM, and fixture
+  dependency paths use ASCII-safe Python escapes.
+- The final focused encoding/focus packet passed all 26 selected cases,
+  including a real scheduler action under a non-ASCII payload/store path;
+  five unchanged native cases were deselected. The 27-case pure packet passed
+  all pinned focus kinds and the earlier ownership/admission controls.

@@ -27,11 +27,18 @@ def require_observable_session(facts, *, station_name, connection_state, inherit
 def task_owned_visual_violations(packet, identities, visible_confirmations):
     confirmed = list(visible_confirmations)
     for event in packet.get("violations", []):
-        identity = event.get("identity")
-        if (
-            event.get("kind") == "sampled-foreground"
-            and isinstance(identity, (list, tuple)) and len(identity) == 3
-            and (identity[0], identity[2]) in identities
+        kind = event.get("kind")
+        if kind not in (
+            "sampled-foreground", "foreground-capture-changed",
+            "foreground-enumeration-identity-mismatch",
+        ):
+            continue
+        endpoints = [event.get("identity")]
+        if kind == "foreground-capture-changed":
+            endpoints.append(event.get("previous_identity"))
+        if any(
+            isinstance(identity, (list, tuple)) and len(identity) == 3
+            and (identity[0], identity[2]) in identities for identity in endpoints
         ):
             confirmed.append(event)
     return confirmed
