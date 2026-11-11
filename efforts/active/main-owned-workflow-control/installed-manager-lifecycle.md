@@ -2082,3 +2082,54 @@ existing unchanged owner and budgets. This is not a third retry of the
 unexecuted `99e9` run; another startup failure still does not license a retry
 loop. Required current CI, native artifact/census/cleanup evidence and every
 parent gate remain open.
+
+### November 11 - Isolate the remaining real-provider census failure
+
+Exact-source run 43104575507 at
+`0935a801f18b548e5c664295ccf0365a7d2b0c5a` completes normal and repair
+successfully. Fresh preparation, exercise, result assertions and settlement
+also return zero. Its retained result records all five authentic lifecycle
+actions, the complete 24-plugin closure, unchanged frozen payloads and all six
+daemon instances settled. This remains a controlled candidate construction,
+not an admitted historical-baseline upgrade.
+
+The outer fresh observer still fails: two real CIM queries report generic
+`CimException` status/native code 1, HRESULT -2146233088, after 2348 and
+1930 milliseconds, with 39 and 298 accumulated records. Session creation and
+closure, baseline-window arming and cooperative stop are recorded. The bounded
+512-record list is truncated. These are fatal census failures, not full fresh
+acceptance; the existing query deadline is not evidence that either exception
+was a timeout.
+
+A separate short read-only provider probe does not support a buffering fix.
+All three inline and three buffered queries succeed despite deliberate
+300-millisecond consumption per owned row. Only the six probe-owned children
+are signalled and reaped. This is diagnostic evidence, not a local full-suite
+run or an acceptance retry.
+
+The existing observer now adds bounded aggregate scan/query-pipeline timing,
+failure phase, fixed error category and numeric-only embedded HRESULT
+classification. It never writes raw error messages or command arguments.
+The same one-second DCOM operations, 100-millisecond cadence, record/failure
+caps and fatal-error policy remain. Query-pipeline timing includes consumption;
+it is not claimed to measure only the provider.
+
+Thirteen focused real-PowerShell controls pass through the contained runner.
+Its first attempt exhausts the 240-second aggregate during preparation, before
+pytest reports a result. The completed cache fingerprint matches the candidate,
+and the same selection then passes with unchanged limits in 75.05 seconds.
+The two new six-second real-provider profiles are T3, skipped by default
+(two skips verified) and selected only explicitly through the existing
+owner-only Windows Tools qualification lane. Their hosted result is pending;
+neither a profile pass nor these controls waive the original census failure.
+F/E9 lint and whitespace pass. Documentation-impact review updates only the
+testing command/reference and this journal; no runtime interface, policy or
+installer behavior changes.
+
+The published Git ref identifies `0935`, but both PR provider surfaces still
+report the preceding `a31ad9` head. No repush, dummy commit, forced metadata
+edit, close/reopen or draft-readiness change is used to manufacture convergence.
+Publication and current-head CI remain separate gates. The next step is the
+narrow hosted quiet/churn profile, not an unchanged whole-suite retry.
+Admitted-baseline upgrade, complete fresh acceptance, frozen enforcement and
+separate Main adoption remain open under the parent.

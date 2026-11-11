@@ -229,6 +229,11 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(
     assert private not in raw and "CommandLine" not in raw and "foreign_module" not in raw
     assert trace["stop_observed"] and trace["scan_errors"] == int(close_fails)
     assert trace["cim_session_created"] and trace["cim_session_closed"] is (not close_fails)
+    assert trace["timing"]["scan_attempts"] == trace["timing"]["scan_successes"] == 2
+    assert trace["timing"]["query_pipeline_attempts"] == 2
+    assert trace["timing"]["scan_total_ms"] >= trace["timing"]["scan_max_ms"] >= 0
+    assert trace["timing"]["query_pipeline_total_ms"] >= trace["timing"]["query_pipeline_max_ms"] >= 0
+    assert trace["timing"]["session_create_ms"] >= 0
     if close_fails:
         assert trace["scan_failures"][0]["phase"] == "session-close"
     assert trace["window_armed"]
@@ -279,13 +284,15 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
     assert trace["stop_observed"] and trace["scan_errors"] == 0 and not trace["window_armed"]
     assert not trace["cim_session_created"] and trace["cim_session_closed"] is None
     assert trace["records"] == [] and not trace["truncated"]
+    assert trace["timing"]["scan_attempts"] == trace["timing"]["query_pipeline_attempts"] == 0
+    assert trace["timing"]["session_create_ms"] is None
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
-@pytest.mark.parametrize("cim", (False, True))
+@pytest.mark.parametrize("kind", ("non-cim", "cim", "timeout", "access-denied"))
 @pytest.mark.parametrize("stage", ("session", "scan"))
 def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(
-    tmp_path: Path, cim: bool, stage: str,
+    tmp_path: Path, kind: str, stage: str,
 ) -> None:
     from agent_procutil import no_window_kwargs
     from manager_suite_artifacts import _runtime_process_trace_script
@@ -293,7 +300,11 @@ def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(
     ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
     (tmp_path / "process-trace-window").write_text("baseline")
     private = "private query argument must not enter diagnostics"
-    error = f"[Microsoft.Management.Infrastructure.CimException]::new('{private}')" if cim else f"'{private}'"
+    code = {"timeout": "0x80041069", "access-denied": "0x80070005"}.get(kind, "")
+    error = (
+        f"[Microsoft.Management.Infrastructure.CimException]::new('{private} {code}')"
+        if kind != "non-cim" else f"'{private}'"
+    )
     target = "New-CimSession" if stage == "session" else "Get-CimInstance"
     prefix = (
         _trace_session_fixture() +
@@ -317,7 +328,13 @@ def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(
     assert failure["type"] and isinstance(failure["hresult"], int)
     assert isinstance(failure["elapsed_ms"], int) and failure["elapsed_ms"] >= 0
     assert failure["records_at_failure"] == 0
-    if cim:
+    assert failure["phase"] == ("session-create" if stage == "session" else "query-pipeline")
+    assert failure["error_category"]
+    assert failure["classification"] == {"cim": "cim-error", "non-cim": "non-cim-error"}.get(kind, kind)
+    assert failure["embedded_hresult"] == (int(code, 16) if code else None)
+    assert trace["timing"]["scan_attempts"] == 1 and trace["timing"]["scan_successes"] == 0
+    assert trace["timing"]["query_pipeline_attempts"] == int(stage == "scan")
+    if kind != "non-cim":
         assert failure["type"] == "Microsoft.Management.Infrastructure.CimException"
         assert isinstance(failure["native_error_code"], int) and isinstance(failure["status_code"], int)
     else:

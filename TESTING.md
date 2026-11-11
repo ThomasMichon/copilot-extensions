@@ -281,6 +281,17 @@ Omitting files is an error unless `--full-suite` explicitly selects the named
 plugin/library suite or tool suite. Broad runs are an escape hatch, not the
 default after a timeout.
 
+For a narrow Manager census diagnosis, select
+`submit --tools --test-file tools/test_manager_census_native.py --allow-explicit-tiers`.
+The two T3 cases run the same one-second local DCOM census with six seconds
+of quiet or bounded caller-owned Python process churn. They retain sanitized
+failure phase/category/numeric HRESULT and aggregate scan/query-pipeline timing
+in the JUnit `census_profile` property. Query-pipeline timing includes record
+consumption; it is not a provider-only measurement. Any census or session-close
+error still fails. Children remain contained and are reaped. This short profile
+does not install the suite, qualify lifecycle acceptance, waive a prior failed
+census or change the full native packet's deadlines.
+
 `submit --packet bridge-http52 --source <full-commit>` invokes the candidate's
 canonical capture with `--write`, a separate same-source no-write capture,
 the independent contract verifier and the canonical artifact exporter.
