@@ -655,6 +655,10 @@ async def test_relocated_core_reconnects_and_stops_exact_child(
 async def test_current_frontend_reconnects_to_exact_prior_host(
     tmp_path, monkeypatch, idle_detach,
 ):
+    from agent_procutil._interpreter import physical_executable
+
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
     prior = _prior_components(monkeypatch)
     servers, handlers = [], []
     start_server = asyncio.start_server
@@ -677,7 +681,7 @@ async def test_current_frontend_reconnects_to_exact_prior_host(
         **{**vars(asyncio), "start_server": owned_server},
     ))
     child = await asyncio.create_subprocess_exec(
-        sys.executable, "-I", "-S", "-u", "-c", _CHILD,
+        interpreter, "-I", "-S", "-u", "-c", _CHILD,
         cwd=tmp_path, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE, **no_window_kwargs(),
     )
@@ -705,7 +709,10 @@ async def test_current_frontend_reconnects_to_exact_prior_host(
                 "method": method, "params": params, "sessionId": "fixture-native",
             }
             cursor = next_cursor
-            await client.ack(cursor)
+            if identifier != 3:
+                await client.ack(cursor)
+        # A lost attach cursor must replay this retained frame and fail below.
+        assert host.ack_cursor == cursor - 1 and host.buffered_seqs == [cursor]
         await client.detach(reapable=False)
         await _close_frontend(client)
         client = None
