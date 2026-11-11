@@ -213,8 +213,14 @@ standing charters, each prerequisite below needs its own authorized owner:
   calling client must run a promoted release whose `/health` advertises the
   capability above. A change merged to `dev` is not yet released; until then,
   clients refuse as upgrade-required rather than fall back.
-- **Control credential.** Configure `AGENT_DISPATCH_CONTROL_TOKEN` for the
-  coordinator and every caller of the standing commands and source-set routes.
+- **Control credential.** Each coordinator serving standing routes needs its
+  control token (`AGENT_DISPATCH_CONTROL_TOKEN` or its `_COMMAND` form), and
+  every caller of the standing commands and source-set routes must present the
+  same bearer for the coordinator it reaches. Local-client callers resolve it the
+  same way. Callers using `--shared`, `central` task
+  authority or the legacy shared URL resolve it only from
+  `AGENT_DISPATCH_SHARED_CONTROL_TOKEN` (or its `_COMMAND` form) and never fall
+  back to the local token.
 - **Attachment owner.** `attachment` stays false until the coordinator's trusted
   relationship admission (`RELATIONSHIP_ADMISSION` and `RELATIONSHIP_AUTHORITY`;
   see [Configuration](configuration.md)) supplies standing admission: the
