@@ -143,6 +143,17 @@ def test_native_packet_preserves_public_caller_selection_and_functional_bounds(t
     assert "--allow-host-state" not in argv
 
 
+def test_manager_no_mux_packet_uses_its_own_case_and_original_manager_bounds(tmp_path):
+    argv = worker.native_command(tmp_path, tmp_path / "out", "native-worktrees-manager-no-mux")
+    assert argv[2] == "agent-worktrees"
+    assert argv[argv.index("--test-file") + 1] == "tests/native/test_manager_application_launch.py"
+    assert argv[argv.index("-k") + 1] == "manager_no_mux_decision"
+    assert [argv[argv.index(flag) + 1] for flag in (
+        "--timeout", "--plugin-timeout", "--test-timeout",
+    )] == ["300", "420", "300"]
+    assert "--allow-explicit-tiers" in argv and "--allow-host-state" not in argv
+
+
 @pytest.mark.parametrize("packet,module,case", [
     ("native-driver-auth-wait", "test_native_headed_auth_wait", "opt_in_receiver_auth_wait_and_same_session_resume"),
     ("native-driver-inflight", "test_native_headed_auth_wait", "opt_in_receiver_inflight_expiry_preserves_hold"),
@@ -167,6 +178,7 @@ def test_receiver_packet_selects_only_its_native_fixture_and_existing_deadlines(
     ("desktop-capability", False),
     ("native-worktrees-embody", True), ("native-worktrees-copilot", True),
     ("native-worktrees-caller-jobs", True),
+    ("native-worktrees-manager-no-mux", True),
     ("native-driver-auth-wait", True), ("native-driver-inflight", True),
     ("native-driver-observation-loss", True),
     ("native-driver-startup-seed", True), ("native-driver-startup-no-seed", True),
@@ -801,6 +813,7 @@ def test_status_correlates_request_not_latest_success(tmp_path, monkeypatch):
 @pytest.mark.parametrize("unsupported", [
     "version", "selector", "packet", "inflight", "observation-loss",
     "startup-seed", "startup-no-seed", "startup-cold-resume", "copilot", "caller-jobs",
+    "manager-no-mux",
     "workflow", "unprotected", "desktop",
 ])
 def test_actual_provider_support_refuses_before_staging_or_creating_request_state(
@@ -816,6 +829,7 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "startup-cold-resume": "native-driver-startup-cold-resume",
         "copilot": "native-worktrees-copilot",
         "caller-jobs": "native-worktrees-caller-jobs",
+        "manager-no-mux": "native-worktrees-manager-no-mux",
         "desktop": contract.DESKTOP_PACKET,
     }.get(unsupported)
     selected = (
@@ -825,7 +839,9 @@ def test_actual_provider_support_refuses_before_staging_or_creating_request_stat
         "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
         "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",
         "plugins/agent-worktrees/tests/native/test_headed_worktrees_copilot.py",
-    ] if packet in {"native-worktrees-copilot", "native-worktrees-caller-jobs"} else [
+    ] if packet in {
+        "native-worktrees-copilot", "native-worktrees-caller-jobs", "native-worktrees-manager-no-mux",
+    } else [
         f"plugins/agent-remote-driver/tests/native/{contract.NATIVE_PACKETS[packet][1]}.py",
         "plugins/agent-remote-driver/tests/headed_mux_fixture.py",
     ] if packet else ["plugins/sample/tests/test_sample.py"]
@@ -1209,7 +1225,8 @@ def test_manual_workflow_never_adds_required_ci_or_candidate_write_credentials()
                 assert step["env"]["UV_DEFAULT_INDEX"] == (
                     "${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || "
                     "needs.admit.outputs.packet == 'native-worktrees-copilot' || "
-                    "needs.admit.outputs.packet == 'native-worktrees-caller-jobs') && "
+                    "needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || "
+                    "needs.admit.outputs.packet == 'native-worktrees-manager-no-mux') && "
                     "secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}"
                 )
                 if step["name"].startswith("Sanitize"):

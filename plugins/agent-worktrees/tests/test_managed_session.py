@@ -223,7 +223,7 @@ def instrument_prepared_admission(source):
 
 def qualify_complete_native_entry(
     scripts, entry, executable, event, env, workspace, capsys, *, literal_read=False,
-    command_key="command", literal_batch=False,
+    command_key="command", literal_batch=False, argument_read=False,
 ):
     entry_started = time.monotonic()
     shell_event = "toolCalls" not in event and event.get("toolName") == "powershell"
@@ -286,7 +286,7 @@ def qualify_complete_native_entry(
             instrumented["pre-tool-hook.ps1"] = instrumented["pre-tool-hook.ps1"].replace(
                 statement, f"Write-NativeWriteFixturePhase '{phase}'\n" + statement, 1,
             )
-    if literal_batch:
+    if literal_batch or argument_read:
         source = instrumented["pre-tool-hook.ps1"]
         declaration = "function Read-PreToolJson"
         assert source.count(declaration) == 1
@@ -346,7 +346,10 @@ function FixtureOriginalReadPreToolJson""", 1)
             selected_contract = contract
             if shell_proof and variant != "attributed-protected" and not native_literal:
                 prior = json.loads(contract)
-                if any(key in prior for key in ("nativeShellReadCommands", "nativeShellReadDependencies")):
+                if argument_read:
+                    prior.pop("nativeShellReadArguments", None)
+                    selected_contract = (json.dumps(prior, indent=2) + "\n").encode("utf-8")
+                elif any(key in prior for key in ("nativeShellReadCommands", "nativeShellReadDependencies")):
                     prior.pop("nativeShellReadCommands", None)
                     prior.pop("nativeShellReadDependencies", None)
                     selected_contract = (json.dumps(prior, indent=2) + "\n").encode("utf-8")
@@ -359,7 +362,7 @@ function FixtureOriginalReadPreToolJson""", 1)
                 "Write-NativeWriteFixturePhase 'command-complete'; " if attributed else ""
             ) + (
                 "[Console]::Error.WriteLine('NATIVE_BATCH_PROOF_READS policy=' + $global:batchPolicyReads "
-                "+ ' sources=' + $global:batchSourceReads); " if literal_batch and attributed else ""
+                "+ ' sources=' + $global:batchSourceReads); " if (literal_batch or argument_read) and attributed else ""
             ) + (
                 "[Console]::Error.WriteLine('NATIVE_ENTRY_BUILD ' + $PSVersionTable.PSVersion.ToString()); "
                 "[Console]::Error.WriteLine('NATIVE_ENTRY_MANAGEMENT ' + "
@@ -407,6 +410,7 @@ function FixtureOriginalReadPreToolJson""", 1)
                 "management_module_loaded": bool(management[0]) if len(management) == 1 else None,
                 "contract_sha256": hashlib.sha256(selected_contract).hexdigest(),
                 "literal_proof_present": "nativeShellReadCommands" in json.loads(selected_contract),
+                "argument_proof_present": "nativeShellReadArguments" in json.loads(selected_contract),
                 "batch_proof_reads": proof_reads,
                 "phases_monotonic_ms": phases,
                 "stdout": result.stdout.decode("utf-8", errors="backslashreplace"), "validated": False,
@@ -443,11 +447,13 @@ function FixtureOriginalReadPreToolJson""", 1)
                 assert names == required, (variant, phases)
             else:
                 assert not phases, (variant, phases)
-            if literal_batch and attributed:
+            if (literal_batch or argument_read) and attributed:
                 declaration = json.loads(contract)
                 source_count = sum(len(declaration[field]) for field in (
-                    "guards", "nativeWriteDependencies", "nativeShellReadDependencies",
+                    "guards", "nativeShellReadDependencies",
                 ))
+                if literal_batch:
+                    source_count += len(declaration["nativeWriteDependencies"])
                 assert proof_reads == [{
                     "policy": 1, "sources": source_count if native_literal else 0,
                 }], (variant, proof_reads)
@@ -474,6 +480,8 @@ function FixtureOriginalReadPreToolJson""", 1)
                 "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
                 "source_sha256": source_digests, "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
                 "event_kind": (
+                    "argument-shell-batch" if argument_read and literal_batch else
+                    "argument-shell-read" if argument_read else
                     "literal-shell-batch" if literal_batch else
                     "literal-shell-read" if literal_read else "shell-policy" if shell_event else "native-read"
                 ),
@@ -1471,6 +1479,8 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "literal-batch-invalid-proof", "literal-batch-missing-dependencies",
     "literal-batch-guard-drift", "literal-batch-forms-drift", "literal-batch-relevance-drift",
     "literal-batch-unprepared",
+    "argument-shell-attribution", "cell-argument-shell-attribution",
+    "argument-batch-attribution", "cell-argument-batch-attribution",
     "cell-batch-mixed", "cell-batch-protected",
     "structured-files", "structured-changes", "structured-only", "structured-json",
     "structured-aliases", "structured-duplicates", "structured-limit",
@@ -1504,6 +1514,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "batch-read-only-attribution",
         "shell-entry-attribution", "literal-shell-entry-attribution",
         "literal-batch-all-shell", "literal-batch-mixed",
+        "argument-shell-attribution", "argument-batch-attribution",
     } or case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
     executable = shutil.which(shell)
     if not executable:
@@ -1753,7 +1764,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 event["toolCalls"][-1]["name"] = "unknown"
             elif case == "batch-read-only-shell":
                 event["toolCalls"][-1] = {
-                    "name": "powershell", "args": {"command": "Get-Content source.py"},
+                    "name": "powershell", "args": {"command": "Get-Content 'source.py'"},
                 }
             elif case == "batch-read-only-malformed":
                 event["toolCalls"][-1] = None
@@ -1808,7 +1819,16 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             event["toolCalls"].append(None)
         elif case == "literal-batch-old-proof-command":
             first["args"]["command"] = "Get-Location"
-    if case in {"shell-entry-attribution", "literal-shell-entry-attribution"} or (
+    if case in {"argument-shell-attribution", "argument-batch-attribution"}:
+        event.update(toolName="powershell", toolArgs={"command": " Get-Content .\\read.txt -Tail 1\t"})
+        if case == "argument-batch-attribution":
+            event["toolCalls"] = [
+                {"name": "powershell", "args": event["toolArgs"]},
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "pwsh", "args": {"input": "ls . -Name"}},
+                {"name": "powershell", "args": {"command": "Get-Location"}},
+            ]
+    elif case in {"shell-entry-attribution", "literal-shell-entry-attribution"} or (
         case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
     ):
         event.update(toolName="powershell", toolArgs={"command": "Get-Location"})
@@ -2135,6 +2155,13 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         )
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    if case in {"argument-shell-attribution", "argument-batch-attribution"}:
+        qualify_complete_native_entry(
+            scripts, entry["powershell"], executable, event, env, workspace, capsys,
+            literal_read=True, literal_batch=case == "argument-batch-attribution", argument_read=True,
+        )
+        assert not membership.exists()
+        return
     if case in {"literal-batch-all-shell", "literal-batch-mixed"}:
         qualify_complete_native_entry(
             scripts, entry["powershell"], executable, event, env, workspace, capsys,
@@ -2218,6 +2245,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "batch-read-only", "batch-read-only-mixed", "batch-read-only-limit",
         "batch-read-only-working-directory", "batch-read-only-real-policy",
         "literal-shell-head",
+        "literal-shell-args", "literal-batch-args",
         "literal-shell-carrier-primary-safe",
         "literal-shell-selection-script", "literal-shell-selection-commandLine",
         "literal-shell-selection-commandline", "literal-shell-selection-skip-null",

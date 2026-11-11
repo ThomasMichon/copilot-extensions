@@ -44,7 +44,7 @@ def topology_flow(admission, materialization, tmp_path):
     )
     path = tmp_path / "topology.json"
 
-    def inspect(verb="flow"):
+    def inspect(verb="flow", followup=None):
         relationship = admission.queue.task_relationship(admission.task.id)
         document["observations"]["dispatch"] = [{
             "observedAt": AT, "sourceRef": "synthetic:native-dispatch-read",
@@ -56,7 +56,12 @@ def topology_flow(admission, materialization, tmp_path):
         }]
         path.write_text(json.dumps(document), encoding="utf-8")
         before = path.read_bytes()
-        arguments = ["--request", document["assignments"][0]["requestId"]] if verb == "flow" else []
+        arguments = (
+            ["--request", document["assignments"][0]["requestId"]]
+            if verb in {"flow", "relay", "route"} else []
+        )
+        if followup is not None:
+            arguments += ["--followup", followup]
         result = module.run_background_capture(
             [*command, verb, str(path), "--at", AT, *arguments], input_text="", timeout=15,
         )
@@ -166,6 +171,82 @@ def test_saved_full_seed_reaches_exact_native_acceptance(admission, topology_flo
     assert path.read_bytes() == saved
     assert any("inspect-materialization" in call for call in admission.calls)
     assert any("--resident-only" in call for call in admission.calls)
+
+
+@pytest.mark.parametrize("advance_head", [False, True])
+def test_adjustment_relay_reaccepts_through_retained_native_head(
+    admission, topology_flow, tmp_path, advance_head,
+):
+    document, inspect = topology_flow
+    assignment = document["assignments"][0]
+    _, launch = persist_launch(document, inspect()["nextStep"], tmp_path)
+    launch.update(state="consumed", nativeRef="synthetic:launch-consumption")
+    started = native_accept(admission, inspect()["nextStep"])
+    launch["state"] = "accepted"
+    assert inspect()["phase"] == "accepted"
+    relationship = admission.queue.task_relationship(started.id)
+
+    assignment["charter"].update(revision=2, objective="Review the revised synthetic scope.")
+    followup = {"id": "adjust-a", "kind": "adjustment", "content": "Accept the revised charter.",
+                "charterRevision": 2, "effectId": None}
+    assignment["followups"].append(followup)
+    result = inspect("relay", "adjust-a")
+    assert result["phase"] == "reconcile" and result["holds"] == []
+    assert result["retainedWorktree"] == assignment["nativeWorktree"]
+    native_reconcile(admission, result["nextStep"])
+    result = inspect("relay", "adjust-a")
+    assert result["phase"] == "persist-relay" and result["holds"] == []
+    fences = {key: result["nextStep"][key] for key in ("target", "expectedHead", "expectedHeadRevision")}
+    assert fences == {"target": assignment["nativeWorktree"], "expectedHead": admission.head["session_id"],
+                      "expectedHeadRevision": admission.head["revision"]}
+    envelope = tmp_path / "saved-relay-envelope.json"
+    envelope.write_text(json.dumps(result["nextStep"]), encoding="utf-8")
+    saved = envelope.read_bytes()
+    effect = {
+        "id": "synthetic-relay", "kind": "relay", "state": "prepared", "charterRevision": 2,
+        "target": copy.deepcopy(fences["target"]), "nativeRef": None,
+        "nativeRequest": {"mode": "bridge-native", "envelopeRef": "synthetic:immutable-relay-envelope"},
+    }
+    assignment["effects"].append(effect)
+    followup["effectId"] = effect["id"]
+    document["revision"] += 1
+    result = inspect("relay", "adjust-a")
+    assert result["phase"] == "relay" and result["nextStep"]["effect"] == effect
+    assert {key: result["nextStep"][key] for key in fences} == fences
+    assert not result["nextStep"]["replayAllowed"] and not result["nextStep"]["retargetAllowed"]
+
+    effect.update(state="admitted", nativeRef="synthetic:relay-admission")
+    if advance_head:
+        admission.head["revision"] += 1
+        document["observations"]["owners"][0]["headRevision"] = admission.head["revision"]
+    result = inspect("relay", "adjust-a")
+    assert result["phase"] == "await-acceptance"
+    step = result["nextStep"]
+    assert step["sameHeadReacceptance"] and step["ownerSessionId"] == admission.head["session_id"]
+    assert step["expectedHeadRevision"] == admission.head["revision"]
+    assert step["workspace"] == relationship["request"]["workspace"]
+    calls = len(admission.calls)
+    reaccepted = native_accept(admission, step)
+    assert (reaccepted.status, reaccepted.owner, reaccepted.generation, reaccepted.owner_session_id) == (
+        started.status, started.owner, started.generation, started.owner_session_id,
+    )
+    assert reaccepted.standing_revision == step["expectedRevision"] + 1
+    assert admission.queue.task_relationship(reaccepted.id) == relationship
+    assert any("inspect-materialization" in call for call in admission.calls[calls:])
+    result = inspect("relay", "adjust-a")
+    assert result["phase"] == "settle-relay"
+    assert result["nextStep"]["acceptance"] == reaccepted.standing_charter["accepted_materialization"]
+    assert inspect("overview")["coverage"][0]["qualifiedCount"] == 0
+    effect.update(state="accepted", nativeRef="synthetic:relay-acceptance")
+    document["revision"] += 1
+    assert inspect("relay", "adjust-a")["phase"] == "settled"
+    assert inspect()["phase"] == "accepted"
+    assert inspect("overview")["coverage"][0]["qualifiedCount"] == 1
+    assert inspect("route")["target"] == {
+        "owner": assignment["nativeWorktree"], "head": admission.head["session_id"],
+        "headRevision": admission.head["revision"],
+    }
+    assert envelope.read_bytes() == saved
 
 
 def test_replaced_reservation_refuses_saved_launch_generation(admission, topology_flow, tmp_path):
