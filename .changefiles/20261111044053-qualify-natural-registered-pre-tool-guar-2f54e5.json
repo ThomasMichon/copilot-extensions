@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify natural registered pre-tool guard composition and selected runtime/grant behavior",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

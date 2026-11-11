@@ -822,6 +822,41 @@ Original batch expansion and all four real guards supply separate parity
 evidence. Ordered records retain actual source/build identities and all failures;
 unchanged 10/30/300 limits are not relaxed to qualify an incomplete record.
 
+Natural full-policy composition has a separate focused selection:
+`--test-file tests/test_native_pre_policy.py -k legacy` and, separately,
+`-k cell`, each with `--allow-explicit-tiers --test-timeout 30 --timeout 300`.
+The existing path-gated native workflow keeps these two bounded groups apart;
+required unit-only CI does not acquire another subprocess matrix.
+
+The registered PS5.1/PS7 command retains its current read declaration and original
+admission, runtime selector, strict worker and four guards. Original producers
+publish the prepared map; the original grant writer supplies selected grants
+and revocation. A real stamped cell and disposable no-pip version slot exercise
+selection without substituting a context validator or a permission decision.
+The slot marker is fixture setup, not an installer or installed-runtime pass.
+An independent selected-runtime assertion prevents ambient Python from masking
+a broken selector.
+
+Controls reach delegation and standalone-anchor decisions after statelessness
+does not deny, compose earlier ask/warn with a later deny, observe changed modes
+and revoked grants, and distinguish a producer's complete-empty inventory from
+an unavailable map. The anchor case retains the original all-platform registry
+selection rather than treating local supplemental postures as its equivalent.
+The missing-guard negative removes only a copied helper and requires truthful
+unavailable guidance, not a fabricated denial or successful evaluation.
+PR-close author/login observations are not exercised by these local-write cases.
+
+`natural_registered_policy` records bind source, registered command, executable
+hash/build and fixture identities to complete-entry observations. Passive worker
+markers affect only the disposable copy.
+`natural_policy_progress` retains inclusive fixture/owner/runtime/native-entry
+boundaries even when an aggregate timeout prevents final JUnit publication.
+The inspected tools never execute and their targets remain absent.
+These are natural-policy and explicit failure
+controls, not deliberately older-proof read comparators, a latency distribution,
+causal subtraction, shell-only replacement, nativeCLI/ACP/model admission,
+installed composition or productive-throughput acceptance.
+
 The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
 supplied existing Python 3.9 interpreter. Their private fixture publishes real
 project membership and the current original guard map, copies the required

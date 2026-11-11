@@ -16,6 +16,7 @@ on:
       - "plugins/agent-worktrees/scripts/registry_root.py"
       - "plugins/agent-worktrees/tests/test_managed_session.py"
       - "plugins/agent-worktrees/tests/test_native_shell_arguments.py"
+      - "plugins/agent-worktrees/tests/test_native_pre_policy.py"
       - "plugins/agent-worktrees/scripts/hook-facts.ps1"
       - "plugins/agent-worktrees/scripts/post-tool-hook.ps1"
       - "plugins/agent-worktrees/tests/test_post_tool_shell.py"
@@ -56,6 +57,10 @@ jobs:
             select: "registered_file_local_write_reuses_original_guard_facts and patch and (invalid or targetless or fragment or malformed or unknown-header or overflow or foreign or nested or anchor or oversized or nonobject)"
           - packet: patch-policy
             select: "registered_file_local_write_reuses_original_guard_facts and patch-real-policy"
+          - packet: policy-composition-legacy
+            select: "registered_full_policy_composition and legacy"
+          - packet: policy-composition-cell
+            select: "registered_full_policy_composition and cell"
     steps:
       - uses: actions/checkout@v4
         with:
@@ -74,6 +79,7 @@ jobs:
         run: >-
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_managed_session.py
+          --test-file tests/test_native_pre_policy.py
           -k "${{ matrix.select }}"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
       - name: Qualify literal batches on the same fallback worker
