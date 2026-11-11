@@ -1645,3 +1645,49 @@ head; that alone does not establish its cause or repair, and its cooperative
 the extra history events and prove strict final sequence and scan success.
 Authentic upgrade, mandatory frozen enforcement and separate Main adoption
 remain open.
+
+### November 11 - Attribute runtime system context and retained image teardown
+
+Required CI and run 43036181824's normal/repair cases pass at
+`a50ae2b375035634d28cdd1e835a99ac30dd3de1`. Fresh preparation and settlement
+pass. The reduced four-property census completes with zero scan errors and no
+truncation in this shorter run; that is not complete-window acceptance.
+The failure occurs after the third completed provider-backed turn: native
+image lookup returns access denied. Source inspection finds this observer
+calls the raw query rather than the installed-TTY helper already designed
+for image teardown preceding the retained handle's exit signal.
+
+Native attribution now reuses that existing helper, with no shared-helper edit.
+It may ignore a query failure only when the same pinned handle confirms exit
+within the helper's existing 250-millisecond bound (clipped by its deadline).
+Live/unverified query failures still propagate. Focused controls prove both
+outcomes and exact handle closure, without reopening a PID or relaxing
+native-owner/birth/history binding.
+
+The message projection identifies two extra startup user events explicitly
+marked by the actual CLI as `source: system`, one before the first reply and
+one between that reply and its duplicate. Operator prompts retain their
+unmarked source. These are runtime context events, not duplicate operator
+input. Fresh alone now validates this distinction: exactly four ordered
+operator prompts and matching replies, with an additional matching reply
+permitted only after new explicitly marked system context. Unmarked or
+non-text context, duplicate operator prompts even when marked system,
+unpaired/foreign replies and missing operator replies fail. Core retains its
+original exact four-user/four-assistant comparison.
+
+Fresh turn completion additionally requires the current prompt's exact reply
+followed by a turn-end event; the extra hook turn cannot inflate a cumulative
+count into false completion. Neither the system-context classification nor
+image helper supplies an inference result, history, owner or success callback.
+The selected-suite adapter alone enables this observed all-plugin contract.
+No frozen-candidate source admission or promotion enforcement is inferred.
+
+The initial 34 focused context/deadline/pane/trace and retained-image controls
+pass, including the existing helper's own two attribution controls.
+The broader affected-file packet passes all 250 locally supported cases after
+adding malformed-context refusal; four hosted acceptance cases remain explicitly
+uncredited locally. Changed-source lint passes.
+Documentation-impact review records the distinct core/fresh history contract
+and confirmed-exit-only image behavior in TESTING.md. Complete fresh lifecycle,
+ordinary admitted-baseline update, mandatory frozen enforcement and separate
+Main adoption remain open.

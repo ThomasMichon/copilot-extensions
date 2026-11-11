@@ -406,10 +406,63 @@ def _message_sequence(events):
     return {"messages": messages, "omitted": count - len(messages)}
 
 
+def _assert_conversation_sequence(events, *, system_context=False):
+    if not system_context:
+        assert [
+            event["data"]["content"] for event in events if event["type"] == "user.message"
+        ] == list(PROMPTS)
+        assert [
+            event["data"]["content"] for event in events if event["type"] == "assistant.message"
+        ] == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)]
+        return
+    prompts, replies = [], []
+    replied = system_since_reply = False
+    for event in events:
+        if event["type"] == "user.message":
+            content = event["data"]["content"]
+            assert isinstance(content, str), "Native conversation input is not text"
+            if event["data"].get("source") == "system" and content not in PROMPTS:
+                system_since_reply = True
+                continue
+            assert not prompts or replied, "An operator prompt lost its completed reply"
+            assert len(prompts) < len(PROMPTS) and content == PROMPTS[len(prompts)], (
+                "Operator conversation input is missing, duplicated, reordered or unattributed"
+            )
+            prompts.append(content)
+            replied = system_since_reply = False
+        elif event["type"] == "assistant.message":
+            assert prompts and event["data"]["content"] == f"LIFECYCLE_REPLY_{len(prompts)}", (
+                "The assistant reply does not match the current operator prompt"
+            )
+            assert not replied or system_since_reply, "An assistant reply duplicated without system context"
+            if not replied:
+                replies.append(event["data"]["content"])
+            replied, system_since_reply = True, False
+    assert prompts == list(PROMPTS), "The original operator conversation is incomplete"
+    assert replies == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)], (
+        "The original operator replies are incomplete"
+    )
+
+
+def _prompt_turn_complete(events, prompt, reply):
+    prompt_seen = reply_seen = False
+    for event in events:
+        if event["type"] == "user.message" and event["data"].get("content") == prompt:
+            prompt_seen, reply_seen = True, False
+        elif (
+            event["type"] == "assistant.message" and prompt_seen
+            and event["data"].get("content") == reply
+        ):
+            reply_seen = True
+        elif event["type"] == "assistant.turn_end" and reply_seen:
+            return True
+    return False
+
+
 class _Witness:
     def __init__(
         self, root, env, manager_python, engine, copilot, budget, provider_requests=(),
-        *, mux_binary=None, run=None, launch_timeout=None,
+        *, mux_binary=None, run=None, launch_timeout=None, system_context=False,
     ):
         self.root, self.env = root, env
         self.manager_python = manager_python
@@ -425,6 +478,7 @@ class _Witness:
         self.mux_binary = mux_binary
         self.run = installed._run if run is None else run
         self.launch_timeout = launch_timeout
+        self.system_context = system_context
         self.stack = ExitStack()
 
     def rendered(self, console):
@@ -687,11 +741,11 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                             console,
                             handle,
                         )
-                        or not installed._image(
-                            console,
-                            handle,
-                        ).samefile(self.copilot)
                     ):
+                        console._close(handle)
+                        continue
+                    image = installed._live_image(console, handle)
+                    if image is None or not image.samefile(self.copilot):
                         console._close(handle)
                         continue
                     identity = (pid, console.birth(handle))
@@ -818,6 +872,10 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                     prompt in texts
                     and turn_ends >= number
                     and histories[-1]["reply_seen"]
+                    and (
+                        not getattr(self, "system_context", False)
+                        or _prompt_turn_complete(events, prompt, f"LIFECYCLE_REPLY_{number}")
+                    )
                 ):
                     matches.append(path)
             self.turn_observation = {
@@ -1740,6 +1798,108 @@ def test_lifecycle_completed_turn_uses_the_bound_rendered_pane(
     ]] if persisted else [])
 
 
+@pytest.mark.parametrize(
+    "fault", (
+        "none", "unmarked-context", "nontext-context", "duplicate-prompt",
+        "unpaired-reply", "wrong-reply", "missing-reply",
+    ),
+)
+def test_fullsuite_history_requires_operator_continuity_despite_runtime_system_context(fault):
+    events = []
+    for index, prompt in enumerate(PROMPTS, 1):
+        events.append({"type": "user.message", "data": {"content": prompt}})
+        if index == 1:
+            events.append({"type": "user.message", "data": {"content": "startup annotation", "source": "system"}})
+        events.extend([
+            {"type": "assistant.message", "data": {"content": f"LIFECYCLE_REPLY_{index}"}},
+            {"type": "assistant.turn_end", "data": {}},
+        ])
+        if index == 1:
+            events.extend([
+                {"type": "user.message", "data": {"content": "runtime guidance", "source": "system"}},
+                {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+                {"type": "assistant.turn_end", "data": {}},
+            ])
+        if index == 3:
+            events.append({"type": "user.message", "data": {"content": "resume annotation", "source": "system"}})
+    if fault == "unmarked-context":
+        events[1]["data"].pop("source")
+    elif fault == "nontext-context":
+        events[1]["data"]["content"] = None
+    elif fault == "duplicate-prompt":
+        events[1]["data"]["content"] = PROMPTS[0]
+    elif fault == "unpaired-reply":
+        del events[4]
+    elif fault == "wrong-reply":
+        events[5]["data"]["content"] = "foreign response"
+    elif fault == "missing-reply":
+        events = [event for event in events if event["data"].get("content") != "LIFECYCLE_REPLY_2"]
+    if fault == "none":
+        _assert_conversation_sequence(events, system_context=True)
+        with pytest.raises(AssertionError):
+            _assert_conversation_sequence(events)
+    else:
+        with pytest.raises(AssertionError):
+            _assert_conversation_sequence(events, system_context=True)
+
+
+@pytest.mark.parametrize("previous_ends,completed", ((0, False), (4, False), (4, True)))
+def test_fullsuite_completion_cannot_borrow_earlier_system_turn_ends(previous_ends, completed):
+    events = [
+        *[{"type": "assistant.turn_end", "data": {}} for _ in range(previous_ends)],
+        {"type": "user.message", "data": {"content": PROMPTS[3]}},
+        {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_4"}},
+    ]
+    if completed:
+        events.append({"type": "assistant.turn_end", "data": {}})
+    assert _prompt_turn_complete(events, PROMPTS[3], "LIFECYCLE_REPLY_4") is completed
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native retained process attribution")
+@pytest.mark.parametrize("exited_after_query", (False, True))
+def test_lifecycle_native_image_failure_ignores_only_the_same_confirmed_exited_handle(
+    tmp_path, monkeypatch, exited_after_query,
+):
+    from types import SimpleNamespace
+    import agent_procutil._windows_caller_owned as windows
+
+    handle, job = object(), object()
+    checks, closed = [], []
+    error = PermissionError("controlled native image teardown")
+    error.winerror = 5
+    console = SimpleNamespace(job=SimpleNamespace(handle=job), handles={handle}, pin=lambda _: handle)
+
+    def exited(actual, timeout=0):
+        assert actual is handle
+        checks.append(timeout)
+        return exited_after_query if timeout else False
+
+    def close(actual):
+        assert actual is handle
+        closed.append(actual)
+        console.handles.remove(actual)
+
+    def unreadable(actual_console, actual_handle):
+        assert actual_console is console and actual_handle is handle
+        raise error
+
+    console.exited, console._close = exited, close
+    monkeypatch.setattr(windows, "_job_pids", lambda actual: [101] if actual is job else [])
+    monkeypatch.setitem(_Witness.native.__globals__, "_job_member", lambda *_: True)
+    monkeypatch.setattr(installed, "_image", unreadable)
+    monkeypatch.setattr(installed, "_WORK_DEADLINE", None)
+    witness = _Witness(tmp_path, {}, None, None, tmp_path / "copilot.exe", None)
+    witness.consoles.append(console)
+    if exited_after_query:
+        assert witness.native() == {}
+    else:
+        with pytest.raises(PermissionError) as caught:
+            witness.native()
+        assert caught.value is error
+    assert checks == [0, 0, 250] and closed == [handle]
+    assert not witness.native_handles
+
+
 def test_lifecycle_diagnostic_write_cannot_mask_unsettled_custody(tmp_path):
     from plugin_test_containment import UnreapedProcessError
 
@@ -2583,14 +2743,10 @@ def _actions(witness):
     assert replacement != original
     assert witness.records("records-resumed") == record
     copilot_home = Path(witness.env["COPILOT_HOME"])
-    assert [
-        event["data"]["content"] for event in _events(witness.history, copilot_home)
-        if event["type"] == "user.message"
-    ] == list(PROMPTS)
-    assert [
-        event["data"]["content"] for event in _events(witness.history, copilot_home)
-        if event["type"] == "assistant.message"
-    ] == [f"LIFECYCLE_REPLY_{number}" for number in range(1, 5)]
+    _assert_conversation_sequence(
+        _events(witness.history, copilot_home),
+        system_context=getattr(witness, "system_context", False),
+    )
     assert any(
         all(prompt in json.dumps(request) for prompt in PROMPTS)
         for request in witness.provider_requests

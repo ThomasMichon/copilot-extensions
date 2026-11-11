@@ -1221,8 +1221,16 @@ request count, never inference request bodies. These distinguish an unfinished
 native turn from completed history whose reply has not rendered.
 The final message-sequence diagnostic retains at most 32 user/assistant labels,
 content sizes/hashes and fixed envelope/source classifications, not message
-text. Extra messages are diagnostic observations, not exemptions from the exact
-history-sequence assertions.
+text. Extra messages are diagnostic observations, not by themselves valid
+conversation-continuity evidence.
+The installed-core case keeps that exact four-user/four-assistant contract.
+The fresh all-plugin case separately accounts for actual CLI user events
+explicitly marked `source: system`: all four operator prompts still occur
+exactly once in order with their matching replies. A repeated matching reply
+is valid only after another marked system-context event, never an unmarked
+input, duplicate operator prompt, foreign reply or unexplained duplicate.
+Each requested reply must have its own subsequent turn-end event; earlier hook
+turns cannot supply that completion.
 Native-process observations retain pinned parent IDs, bounded option names,
 script basenames and the matching history's lock PIDs, never raw argument values.
 Failures retain the rendered Manager screen as well as the bounded stream tail.
@@ -1236,6 +1244,10 @@ counting only when its sole argument is an ordinary, owned
 lock-bound conversation owner, and it has no conversation lock itself.
 Unknown children, additional owners and orphaned extension hosts still refuse.
 All processes remain under the original pinned native Job custody.
+Native image attribution reuses the installed-TTY retained-handle helper:
+an image query failure is ignored only after that same handle confirms exit
+within its existing bounded wait. A live or unverified access denial still
+fails; an exited process ID is never reopened as a substitute identity.
 The stateless harness has a real private knowledge repository, registered and
 bound before New; the installed coordination-readiness command must resolve it.
 Before constructing runtimes, the case requires an empty, confirmed native

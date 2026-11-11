@@ -309,7 +309,7 @@ def exercise(directory):
             case, env, suite._python(case / "h" / ".worktree-manager"),
             suite._python(case / "h" / ".agent-worktrees"), Path(setup["copilot"]),
             budget, requests, mux_binary=setup["mux"], run=run,
-            launch_timeout=120,
+            launch_timeout=120, system_context=True,
         ) as witness:
             actions = lifecycle._actions(witness)
     if any(row.status != "settled" for row in cleanup):
