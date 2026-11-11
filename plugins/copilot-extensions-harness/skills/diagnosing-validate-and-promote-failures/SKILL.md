@@ -65,6 +65,13 @@ commands below use `<agent-worktrees catalog argv[0]>` as that placeholder.
 
    Note every failing job's exact name and numeric ID from the output.
 
+   For a workflow internal error, startup failure or unstarted runner, read the
+   [GitHub Actions errata](references/github-actions.md). Any external-service
+   outage claim must include a matching
+   [provider bulletin receipt](../../references/external-service-outages.md)
+   in the report; otherwise label the attribution unconfirmed. Missing job logs
+   are not evidence of a test failure or proof of a provider-wide outage.
+
 3. **Pull each failing job's full log** and grep for the failure summary —
    the log is large (tens of KB), so save it to a file and grep rather than
    reading it inline:
