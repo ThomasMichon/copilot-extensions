@@ -1,6 +1,8 @@
 """Configuration consumes the real native owner, never writes its files itself."""
 
 import asyncio
+import base64
+from contextlib import nullcontext
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import replace
 from functools import partial
@@ -17,6 +19,7 @@ import threading
 import time
 
 from agent_procutil import no_window_kwargs
+from knowledge_creation_fixture import URL as CREATED_URL, github_proxy, private_knowledge_provider as private_knowledge_provider
 import pytest
 from test_config_actions import _wait
 from test_picker_tui import _fixture_source, _wait_for_initial_setup
@@ -36,7 +39,11 @@ SECRET = "github_pat_SENTINEL_DO_NOT_RENDER"
 
 
 @pytest.fixture
-def public_https_knowledge(tmp_path, monkeypatch):
+def public_https_knowledge(tmp_path, monkeypatch, request):
+    private = request.node.callspec.params.get("remote") == "created"
+    provider = request.getfixturevalue("private_knowledge_provider") if private else None
+    hostname = "github.com" if private else "localhost"
+    branch = "provider-default" if private else "main"
     source, web = tmp_path / "https-source", tmp_path / "web"
     source.mkdir()
     web.mkdir()
@@ -48,7 +55,7 @@ def public_https_knowledge(tmp_path, monkeypatch):
         )
         assert result.returncode == 0, result.stderr
 
-    git("init", "-b", "main", str(source))
+    git("init", "-b", branch, str(source))
     (source / "README").write_text("Disposable remote knowledge source\n", encoding="utf-8")
     (source / ".agent-worktrees").mkdir()
     (source / ".agent-worktrees" / "repository-setup.json").write_text(json.dumps({
@@ -68,7 +75,8 @@ def public_https_knowledge(tmp_path, monkeypatch):
     git("-C", str(source), "add", ".")
     git("-C", str(source), "-c", "user.name=Example", "-c", "user.email=example@example.invalid",
         "-c", "commit.gpgsign=false", "commit", "-qm", "Fixture")
-    bare = web / "knowledge.git"
+    bare = web / "selected" / "knowledge" if private else web / "knowledge.git"
+    bare.parent.mkdir(parents=True, exist_ok=True)
     git("clone", "--bare", "--quiet", str(source), str(bare))
     git("--git-dir", str(bare), "update-server-info")
     executable = shutil.which("openssl")
@@ -84,42 +92,72 @@ def public_https_knowledge(tmp_path, monkeypatch):
     result = subprocess.run([
         executable, "req", "-x509", "-newkey", "rsa:2048", "-nodes",
         "-keyout", str(key), "-out", str(certificate), "-days", "1",
-        "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost",
+        "-subj", "/CN=" + hostname, "-addext", "subjectAltName=DNS:" + hostname,
     ], capture_output=True, text=True, timeout=15, **no_window_kwargs())
     assert result.returncode == 0, result.stderr
     config = tmp_path / "fixture.gitconfig"
     for setting, value in (
         ("http.sslCAInfo", str(certificate)), ("http.schannelUseSSLCAInfo", "true"),
-        ("credential.helper", ""),
+        ("credential.helper", "manager" if private else ""),
     ):
         git("config", "--file", str(config), setting, value)
     monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
     monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
     monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
-    observed = {"requests": 0}
+    observed = {"requests": 0, "errors": 0, "authentication": set()}
 
     class Handler(SimpleHTTPRequestHandler):
         def do_GET(self):
             observed["requests"] += 1
+            if private:
+                state = json.loads(provider.read_text("utf-8"))
+                if not state["created"] or not state["protected"]:
+                    self.send_error(404)
+                    return
+                authorization = self.headers.get("Authorization", "").split()
+                if not authorization:
+                    self.send_response(401)
+                    self.send_header("WWW-Authenticate", 'Basic realm="fixture"')
+                    self.end_headers()
+                    return
+                assert authorization[0].casefold() == "basic"
+                credentials = {
+                    b"selected:fixture-git-password": "credential-helper",
+                    b"x-access-token:fixture-token": "configured-gh",
+                }
+                authenticated = base64.b64decode(authorization[1], validate=True)
+                assert authenticated in credentials
+                observed["authentication"].add(credentials[authenticated])
             super().do_GET()
 
         def log_message(self, *_):
             pass
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(web)))
+    class Server(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):
+            observed["errors"] += 1
+            super().handle_error(request, client_address)
+
+    server = Server(("127.0.0.1", 0), partial(Handler, directory=str(web)))
     tls = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     tls.load_cert_chain(certificate, key)
     server.socket = tls.wrap_socket(server.socket, server_side=True)
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     try:
-        yield f"https://localhost:{server.server_port}/{bare.name}", observed
+        with github_proxy(server.server_port) if private else nullcontext(None) as proxy_port:
+            if private:
+                git("config", "--file", str(config), "http.https://github.com/.proxy",
+                    f"http://127.0.0.1:{proxy_port}")
+                observed["provider"] = provider
+            yield CREATED_URL if private else f"https://localhost:{server.server_port}/{bare.name}", observed
     finally:
         server.shutdown()
         server.server_close()
         worker.join(timeout=5)
         assert not worker.is_alive()
+        assert observed["errors"] == 0
 
 
 @pytest.mark.parametrize("placement", ["config", "left"])
@@ -795,9 +833,20 @@ def test_remote_knowledge_case_skips_before_preparing_native_fixtures(tmp_path, 
         )
 
 
-@pytest.mark.timeout(120)
-@pytest.mark.parametrize(("empty", "remote"), [(False, False), (True, False), (False, True)])
+@pytest.mark.parametrize(("empty", "remote"), [
+    pytest.param(False, False, marks=pytest.mark.timeout(120)),
+    pytest.param(True, False, marks=pytest.mark.timeout(120)),
+    pytest.param(False, True, marks=pytest.mark.timeout(120)),
+    pytest.param(False, "created", marks=pytest.mark.timeout(180), id="created"),
+])
 def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeypatch, request, empty, remote):
+    started = time.monotonic()
+
+    def stage(label):
+        if remote == "created":
+            print(f"creation consumer: {label} at {time.monotonic() - started:.2f}s", flush=True)
+
+    stage("starting")
     owner_python = os.environ.get("REPOSITORIES_CONFIG_TEST_PYTHON")
     if not owner_python:
         pytest.skip("set REPOSITORIES_CONFIG_TEST_PYTHON to the isolated native engine interpreter")
@@ -859,7 +908,9 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
             result = subprocess.run(["git", "-C", str(path), *arguments],
                                     capture_output=True, text=True, timeout=10, **no_window_kwargs())
             assert result.returncode == 0, result.stderr
-    write(home / ".agent-worktrees" / "repos.yaml", {"repos": {
+    write(home / ".agent-worktrees" / "repos.yaml", {
+        **({"account_map": {"selected": "selected"}} if remote == "created" else {}),
+        "repos": {
         name: {"class": "worktree" if name == "sample" else "knowledge",
                platform: str(path), "default_branch": "main"}
         for name, path in paths.items()
@@ -873,6 +924,9 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
         "repo_name": "sample", "machine": "fixture",
         "repos": {"sample": {"anchor": str(paths["sample"]), "worktree_root": str(tmp_path / "worktrees")}},
     })
+    (home / "credential-sentinel").write_text(SECRET, encoding="utf-8")
+    git_configuration = Path(os.environ["GIT_CONFIG_GLOBAL"]) if remote == "created" else None
+    git_configuration_bytes = git_configuration.read_bytes() if git_configuration else None
     blocked = native("resolve", "--json", "--new", cwd=paths["sample"])
     assert blocked.returncode != 0 and not (tmp_path / "worktrees").exists()
     settings = paths["sample"] / ".github" / "copilot" / "settings.json"
@@ -926,6 +980,8 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
                 ))
 
                 async def propose_action(action_key, marker, values):
+                    stage("preview " + action_key)
+                    await _wait(pilot, lambda: engine._pivot_runtime(reg).actions_ready(("",)))
                     row = next(row for row in engine._task_rows() if row.get(marker) == "true")
                     action = next(action for action in reg.actions if action.key == action_key)
                     assert entry_matches(action.when, row)
@@ -944,17 +1000,99 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
 
                 acquisition_args = ("acquire-knowledge", "knowledge_acquisition_available",
                                     (https[0], str(paths["knowledge"])))
-                await propose_action(*acquisition_args)
-                assert app.focused.id == "config-preview-cancel" and https[1]["requests"] == 0
-                await pilot.press("enter")
-                await pilot.pause()
-                assert (snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])) == before
+                if remote == "created":
+                    provider = https[1]["provider"]
+
+                    async def apply_remote():
+                        await pilot.click("#config-preview-apply")
+                        await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
+                                    and not app.screen.pending)
+                        rendered = str(app.screen.query_one("#config-result").render())
+                        assert SECRET not in rendered and "fixture-token" not in rendered
+                        return rendered
+
+                    await propose_action("create-knowledge", "knowledge_creation_available", (CREATED_URL,))
+                    assert app.screen.preview.operation == "create"
+                    assert app.screen.preview.scope == "remote-repository"
+                    assert app.focused.id == "config-preview-cancel"
+                    await pilot.press("enter")
+                    await pilot.pause()
+                    assert not json.loads(provider.read_text())["posts"]
+                    assert (snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])) == before
+                    await propose_action("create-knowledge", "knowledge_creation_available", (CREATED_URL,))
+                    result = await apply_remote()
+                    assert '"status": "incomplete"' in result and '"creation": "confirmed"' in result, result
+                    assert '"http_status": 403' in result and '"binding_changed": false' in result
+                    stage("creation confirmed / safeguards incomplete")
+                    attempt = next((home / ".sample" / "knowledge-creation").glob("*.json"))
+                    reference = json.loads(attempt.read_text())["receipt"]
+                    assert len(json.loads(provider.read_text())["posts"]) == 2
+                    app.screen.action_close()
+                    await _wait(pilot, lambda: engine._pivot_runtime(reg).actions_ready(("",)))
+                    recovery = next(row for row in engine._task_rows()
+                                    if row.get("knowledge_creation_recovery_available") == "true")
+                    action = next(action for action in reg.actions if action.key == "inspect-knowledge-creation")
+                    engine._open_pivot_form(
+                        reg, action, recovery, engine._task_action_ctx(reg, recovery), recovery["title"],
+                    )
+                    await pilot.pause()
+                    for field, value in zip(app.screen._q, (CREATED_URL, reference)):
+                        field["primary"].value = value
+                    inspected_before = snapshot(home), provider.read_bytes()
+                    app.screen.dismiss(app.screen._collect())
+                    await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
+                                and not app.screen.pending)
+                    result = str(app.screen.query_one("#config-result").render())
+                    assert '"observation_status": "observed"' in result and '"status": "incomplete"' in result
+                    assert (snapshot(home), provider.read_bytes()) == inspected_before
+                    stage("read-only inspection complete")
+                    app.screen.action_close()
+                    await _wait(pilot, lambda: engine._task_state()[0] == "ready")
+                    protect_args = ("protect-knowledge", "knowledge_creation_recovery_available",
+                                    (CREATED_URL, reference))
+                    await propose_action(*protect_args)
+                    assert app.screen.preview.operation == "protect-default"
+                    assert app.focused.id == "config-preview-cancel"
+                    await pilot.press("enter")
+                    await pilot.pause()
+                    assert len(json.loads(provider.read_text())["posts"]) == 2
+                    state = json.loads(provider.read_text())
+                    state["failure"] = ""
+                    provider.write_text(json.dumps(state), encoding="utf-8")
+                    await propose_action(*protect_args)
+                    assert '"status": "protected"' in await apply_remote()
+                    stage("safeguards verified")
+                    assert len(json.loads(provider.read_text())["posts"]) == 3
+                    assert engine._knowledge_readiness["ready"] is False
+                    assert not paths["knowledge"].exists()
+                    protected = snapshot(home)
+                    for key, value in before[0].items():
+                        assert protected[key] == value
+                    assert protected.keys() - before[0].keys() <= {
+                        str(Path(".sample") / "knowledge-creation"),
+                        str(attempt.relative_to(home)),
+                        str(Path(".agent-worktrees") / "repos.lock"),
+                        str(Path(".agent-worktrees") / "pr-rewrite-authority.lock"),
+                    }
+                    app.screen.action_close()
+                    await _wait(pilot, lambda: engine._task_state()[0] == "ready")
+                    before = snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])
+                if remote != "created":
+                    await propose_action(*acquisition_args)
+                    assert app.focused.id == "config-preview-cancel" and https[1]["requests"] == 0
+                    await pilot.press("enter")
+                    await pilot.pause()
+                    assert (snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])) == before
                 await propose_action(*acquisition_args)
                 await pilot.click("#config-preview-apply")
                 await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending)
                 receipt = str(app.screen.query_one("#config-result").render())
                 assert '"status": "acquired"' in receipt and '"registration_changed": false' in receipt, receipt
+                stage("checkout acquired")
                 assert https[1]["requests"] > 0 and paths["knowledge"].is_dir()
+                if remote == "created":
+                    assert "get" in json.loads(https[1]["provider"].read_text())["git_credentials"]
+                    assert https[1]["authentication"] == {"credential-helper"}
                 assert not (tmp_path / "unexpected-setup").exists()
                 after = snapshot(home)
                 missing = object()
@@ -971,13 +1109,15 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
                 assert not any(row["id"] == "knowledge" for row in engine._task_rows())
                 await propose_action(
                     "register-local-knowledge", "knowledge_registration_available",
-                    ("knowledge", str(paths["knowledge"]), "main", ""),
+                    ("knowledge", str(paths["knowledge"]), "provider-default" if remote == "created" else "main",
+                     "selected" if remote == "created" else ""),
                 )
                 assert app.focused.id == "config-preview-cancel"
                 await pilot.click("#config-preview-apply")
                 await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending)
                 receipt = str(app.screen.query_one("#config-result").render())
                 assert '"status": "persisted"' in receipt and '"binding_changed": false' in receipt, receipt
+                stage("checkout registered")
                 app.screen.action_close()
                 await _wait(pilot, lambda: any(row["id"] == "knowledge" for row in engine._task_rows()))
                 before = snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])
@@ -990,6 +1130,7 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
             action = next(action for action in reg.actions if action.key == "bind-knowledge")
 
             async def preview():
+                stage("preview binding")
                 engine._open_pivot_form(reg, action, row, engine._task_action_ctx(reg, row), row["title"])
                 await pilot.pause()
                 assert isinstance(app.screen, ConfigurationFormScreen)
@@ -998,20 +1139,35 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
                             and not app.screen.query_one("#config-preview-retry", Button).disabled)
                 assert app.screen.preview is not None, str(app.screen.query_one("#config-preview").render())
                 assert not app.screen.preview.blocked, app.screen.preview.describe()
+                stage("binding preview complete")
 
+            if remote != "created":
+                await preview()
+                assert app.focused.id == "config-preview-cancel"
+                await pilot.press("enter")
+                await pilot.pause()
+                assert (snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])) == before
             await preview()
             assert app.focused.id == "config-preview-cancel"
-            await pilot.press("enter")
-            await pilot.pause()
-            assert (snapshot(home), snapshot(paths["sample"]), snapshot(paths["knowledge"])) == before
-            await preview()
+            stage("click binding Apply")
             await pilot.click("#config-preview-apply")
+            stage("binding Apply click returned")
             await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending)
             receipt = str(app.screen.query_one("#config-result").render())
             assert '"status": "persisted"' in receipt, receipt
+            stage("binding persisted")
             app.screen.action_close()
             await _wait(pilot, lambda: engine._knowledge_readiness.get("ready") is True)
             assert "KB" not in engine.button_set()
+            if remote == "created":
+                await _wait(pilot, lambda: engine._pivot_runtime(reg).actions_ready(("",)))
+                assert any(row.get("knowledge_creation_recovery_available") == "true"
+                           for row in engine._task_rows())
+                assert not any(row.get("knowledge_creation_available") == "true"
+                               for row in engine._task_rows())
+                assert (home / "credential-sentinel").read_text("utf-8") == SECRET
+                assert git_configuration.read_bytes() == git_configuration_bytes
+                assert len(json.loads(https[1]["provider"].read_text())["posts"]) == 3
             assert engine._config_return[3] == 0
             engine._leave_configuration()
             await pilot.pause()
@@ -1032,6 +1188,9 @@ def test_missing_knowledge_to_confirmed_native_binding_and_new(tmp_path, monkeyp
     admitted = native("resolve", "--json", "--new", "--no-mux", cwd=paths["sample"])
     assert admitted.returncode == 0, admitted.stdout + admitted.stderr
     assert (tmp_path / "worktrees").is_dir()
+    if remote == "created":
+        assert https[1]["authentication"] == {"credential-helper", "configured-gh"}
+    stage("New admitted")
 
 
 def test_remote_acquisition_is_optional_for_prior_catalog_and_manifest_contracts(tmp_path, monkeypatch):
@@ -1077,3 +1236,76 @@ def test_remote_acquisition_is_optional_for_prior_catalog_and_manifest_contracts
     assert state == "ready", error
     available = {action.key for action in rollback.actions if entry_matches(action.when, rows[0])}
     assert "set" in available and "acquire-knowledge" not in available
+
+
+def test_creation_consumer_withholds_old_catalog_and_refuses_provider_rollback_without_replay(tmp_path, monkeypatch):
+    from worktree_manager.production_picker.picker_tui.pivot_actions import entry_matches, format_form_template
+
+    root = Path(__file__).resolve().parents[3]
+    raw = json.loads((root / "plugins" / "agent-worktrees" / "pivots" / "repositories-config.json").read_text())
+    keys = {"create-knowledge", "inspect-knowledge-creation", "protect-knowledge"}
+    prior = pivots.parse_manifest(
+        {**raw, "actions": [action for action in raw["actions"] if action["key"] not in keys]},
+        name="repositories", source_path="prior-manifest",
+    )
+    assert {"set", "reset", "acquire-knowledge", "register-local-knowledge", "bind-knowledge"} <= {
+        action.key for action in prior.actions
+    }
+    provider = tmp_path / "prior-provider.py"
+    provider.write_text(
+        "import argparse,json,sys\n"
+        "p=argparse.ArgumentParser(allow_abbrev=False)\n"
+        "p.add_argument('command',choices=['catalog'])\n"
+        "p.add_argument('--context-project',required=True)\n"
+        "p.add_argument('--workspace',default='')\n"
+        "a=p.parse_args(sys.argv[3:])\n"
+        "print(json.dumps({'entries':[{'id':'sample','title':'sample','editable':'true',"
+        "'context_project':a.context_project,'repository':'sample'}]}))\n",
+        encoding="utf-8",
+    )
+    prefix = [sys.executable, str(provider)]
+    raw["list"] = [*prefix, *raw["list"][1:]]
+    for action in raw["actions"]:
+        for key in ("run", "preview"):
+            if key in action:
+                action[key] = [*prefix, *action[key][1:]]
+    current = pivots.parse_manifest(raw, name="repositories", source_path="prior-provider")
+    monkeypatch.setattr(context, "_project", "sample")
+    monkeypatch.setattr(context, "_bootstrap", None)
+    runtime = tasks.RegisteredPivotRuntime(current)
+    before = snapshot(tmp_path)
+    runtime._run_list("")
+    state, rows, error = runtime.get("")
+    assert state == "ready", error
+    available = {action.key for action in current.actions if entry_matches(action.when, rows[0])}
+    assert "set" in available and not keys & available
+    # A provider rollback after an old capable read must not trigger another operation.
+    ctx = {"context_project": "sample", "configuration_preview": "a" * 64}
+    fields = {"url": CREATED_URL, "receipt": "b" * 64}
+    for action in current.actions:
+        if action.key not in keys:
+            continue
+        if action.preview:
+            ok, result = runtime.preview_resolved(format_form_template(action.preview, ctx, fields))
+            assert not ok and "invalid choice" in result
+        ok, result = runtime.run_resolved(
+            format_form_template(action.run, ctx, fields), preserve_output=True,
+        )
+        assert not ok and "invalid choice" in result
+    assert snapshot(tmp_path) == before
+
+
+def test_created_binding_account_uses_the_selected_credential_cli_shim(tmp_path, monkeypatch, private_knowledge_provider):
+    home = tmp_path / "home"
+    registry = home / ".agent-worktrees"
+    registry.mkdir(parents=True)
+    (registry / "repos.yaml").write_text("account_map:\n  selected: selected\nrepos: {}\n", encoding="utf-8")
+    for key in ("AGENT_HOME", "HOME", "USERPROFILE"):
+        monkeypatch.setenv(key, str(home))
+    result = subprocess.run(
+        [os.environ["REPOSITORIES_CONFIG_TEST_PYTHON"], "-B", "-m", "agent_worktrees", "repos", "gh",
+         "selected/knowledge", "--", "api", "user", "--jq", ".login"],
+        capture_output=True, text=True, timeout=15, env=tasks._child_process_env(), **no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "selected"

@@ -1029,13 +1029,14 @@ def _gh_token_for_owner(owner: str) -> str | None:
 
     Cached per-owner so a push/fetch pair makes at most one ``gh`` call.
     """
-    if not owner or shutil.which("gh") is None:
+    executable = shutil.which("gh") if owner else None
+    if executable is None:
         return None
     from agent_procutil import no_window_kwargs
 
     try:
         result = subprocess.run(
-            ["gh", "auth", "token", "--user", owner],
+            [executable, "auth", "token", "--user", owner],
             capture_output=True, text=True, timeout=60, **no_window_kwargs(),
         )
     except (OSError, subprocess.SubprocessError):

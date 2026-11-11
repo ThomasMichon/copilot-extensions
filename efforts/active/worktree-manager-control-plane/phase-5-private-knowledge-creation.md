@@ -1,7 +1,8 @@
 # Phase 5 - Explicit personal private knowledge creation
 
-- **Status:** Contract reviewed in #12004; receiver qualified in source,
-  native provider and consumer acceptance remain open.
+- **Status:** Contract and shared receiver reviewed; native provider delivered
+  in #12019. Optional Configuration consumer is source-qualified; publication
+  gates and installed/live-provider acceptance remain open.
 - **Parent:** [Configuration workbench](phase-5-configuration-workbench.md).
 - **Coordination:** #1419 Track 3 KO1/KO5/KO6; bounded source slice
   `shiny-actuator`.
@@ -171,28 +172,28 @@ admission remains with the existing New owner.
 ## Dependency-ordered delivery and validation
 
 - [x] Review this proposal before runtime or consumer implementation; #12004.
-- [ ] Deliver the standalone native preview/apply owner, capability and honest
+- [x] Deliver the standalone native preview/apply owner, capability and honest
   complete/partial/unknown outcomes, including separately confirmed protection
   completion, without changing existing operations.
 - [x] Expand the existing shared proposal reader for explicit version-2 remote
   create/protect scope; retain the exact version-1 local baseline and prove
   unsupported versions refuse before apply rather than creating another modal.
-- [ ] Connect the optional real Configuration form through that selected owner;
+- [x] Connect the optional real Configuration form through that selected owner;
   preserve confirmation, current-source revalidation, receipt and refresh.
-- [ ] Cover configured exact/default policy, nonpersonal destinations, missing
+- [x] Cover configured exact/default policy, nonpersonal destinations, missing
   selection/store, mismatch, existing target, private identity, server-chosen
   branch, denial/unsupported plan and target/registry drift before effects.
-- [ ] Cover equivalent classic/ruleset safeguards, incomplete or stale policy,
+- [x] Cover equivalent classic/ruleset safeguards, incomplete or stale policy,
   active no-bypass default-only creation, and preservation of direct/fast-forward
   and unaffected feature-branch semantics.
-- [ ] Cover failure/cancellation/timeout before and after each mutation,
+- [x] Cover failure/cancellation/timeout before and after each mutation,
   malformed/lost receipts, one-attempt behavior, no automatic deletion/replay,
   bounded sanitized output and fatal retained cleanup custody.
-- [ ] Prove the real native CLI/provider and production Manager form/process
+- [x] Prove the real native CLI/provider and production Manager form/process
   boundaries with synthetic private fixtures. Compare complete local registry,
   binding, Git/configuration and credential-sentinel bytes; remote effects are
   fixture-owned, never performed against an operator repository.
-- [ ] Cover old/new callers/providers, absent/malformed support, rollback,
+- [x] Cover old/new callers/providers, absent/malformed support, rollback,
   default Cancel, unchanged acquisition/register/bind behavior, and the complete
   separately confirmed consumer sequence through existing New admission.
 - [ ] Run required source checks, exact-head review and CI before merge.
@@ -291,3 +292,39 @@ registration require the harness to remain unbound. The selected lifecycle
 and legacy-admission packet passes 66 cases, including inspection and
 separately confirmed protection completion against an existing binding without
 changing its registry/configuration bytes.
+
+### 2026-11-11 - Optional Configuration consumer source qualification
+
+The executing native catalog now advertises creation and exact-receipt recovery
+only with its own supported capability. The existing remote-effect form owns
+preview, default Cancel, confirmation, receipt and originating-scope refresh.
+Periodic catalog polling pauses while a modal is open without bypassing the
+current-source check. Named credential reads and scoped CLI execution use the
+resolved executable, including Windows command shims.
+
+The complete private synthetic flow passes creation with denied safeguards,
+read-only inspection, separately confirmed protection completion, credential-gated
+HTTPS checkout, local registration, binding, refreshed action availability and
+existing New admission. The fixture retains the original HTTPS identity and TLS
+verification, confines Git helper lookup, requires the selected GCM route during
+acquisition and accepts only the exact configured synthetic credentials in later
+native Git operations. Unexpected server-thread errors fail teardown. Native
+registry, configuration, source and credential sentinels are compared, and
+creation is never replayed.
+
+The flow reaches New admission in 142 seconds under its existing 180-second
+case allowance. Parameter-specific markers keep the three older cases at
+120 seconds; a function-level marker must not shadow the new case's allowance.
+Native 18/26-second operation, Manager 30-second action and 300-second group
+bounds are unchanged. Readiness and catalog refresh are awaited independently.
+The affected native creation/catalog packet passes 82 cases, the existing
+Manager packet passes 28, and the scoped credential packet passes 89. Broader
+native selections that exceeded the fixed group budget are not full-suite passes.
+
+All 41 admitted typing projects pass both analysis targets; Worktrees and
+Manager remain pending, so this is not whole-project typing admission.
+The source-qualified flow does not establish installed UI/runtime, productive
+credentials, live GitHub safeguards, native desktop/window behavior, first-model,
+cold onboarding or receiving acceptance. No launcher, installation, rollout or
+productive provider mutation is included. Exact-head review and required CI
+remain independent publication gates.
