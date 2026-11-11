@@ -29,7 +29,7 @@ if (-not $python -or -not (Test-Path -LiteralPath $script -PathType Leaf)) {
 }
 $env:PYTHONPATH = ''
 try {
-    & $python.Source $script
+    & $python.Source -B $script
     if ($LASTEXITCODE -ne 0) {
         [Console]::Out.Write('{}')
     }

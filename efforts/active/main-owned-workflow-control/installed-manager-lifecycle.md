@@ -1844,3 +1844,38 @@ Documentation-impact review updates Index's read-only scope contract and
 TESTING.md. The next unchanged exact-head hosted matrix must still prove the
 final immutable comparison and complete result; authentic update, mandatory
 frozen enforcement and separate Main adoption remain open.
+
+### November 11 - Identify and stop snapshot-guidance payload bytecode
+
+Required CI 43069145815 is green at
+`594d9a3ff5d9a185e4100cc99f9f9faed4390239`. Exact-source native run
+43069195469 passes normal/repair. Fresh completes the actual four actions,
+same-conversation history and six settled daemon instances, then refuses
+post-lifecycle SSH payload immutability. Preparation and settlement return
+zero; settlement has no errors or remaining tasks.
+
+The actual difference report is captured first: seven added entries, no removed
+or changed original entry, without truncation. Four bytecode files belong to
+the payload's process primitive, snapshot dispatcher, runtime selector and
+installation-context primitive. Three cache directories account for the rest.
+This is not a Bridge communication failure.
+
+The SSH writer and retained mesh wrappers invoke isolated snapshot helpers
+without explicit `-B`; nested runtime and optional Worktrees request workers
+also load payload helpers. Environment cache controls do not survive `-I`.
+Four actual cold-copy Windows controls reproduce payload mutation while
+returning a valid bound external-state snapshot. The source correction adds
+explicit `-B` throughout those read-only caller chains, retaining isolation,
+UTF-8, invocation governance, current selections, output and production budgets.
+Ordinary runtime caching, payload integrity and admission are unchanged.
+No cache entry is excluded, deleted after admission or resealed.
+
+The focused after packet passes 54 tests, with four platform skips and six
+unselected longer native/latency controls uncredited. The four new Windows
+controls each repeat the actual caller and compare every file and directory
+in both SSH and Worktrees payloads. The cold fixture skips payload precompilation
+without changing default fixture behavior or installed-runtime preparation.
+Documentation-impact review updates SSH's read-only snapshot contract and
+TESTING.md. A fresh exact-head hosted matrix remains required before readiness;
+authentic baseline update, frozen enforcement and separate Main adoption are
+still open.

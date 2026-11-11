@@ -43,7 +43,7 @@ def state_root(cwd: Path, own: dict | None) -> tuple[Path | None, str]:
     python = Path(sys.executable)
     if python.name.casefold() == "pythonw.exe":
         python = python.with_name("python.exe")
-    argv = [str(python), "-I", "-X", "utf8", "-m", "agent_ssh._worktrees", "state-root", "--json"]
+    argv = [str(python), "-I", "-X", "utf8", "-B", "-m", "agent_ssh._worktrees", "state-root", "--json"]
     environment = os.environ.copy()
     environment["AGENT_WORKTREES_NO_SELFPROVISION"] = "1"
     environment["AGENT_SSH_NO_SELFPROVISION"] = "1"

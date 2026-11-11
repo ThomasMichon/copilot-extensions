@@ -424,7 +424,7 @@ def test_native_fixture_selects_transitive_declared_sources_without_unrelated_tr
     }
 
 
-def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
+def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False, cold_payload=False):
     original_home = Path.home()
     original_peer_site = None
     original_peer_python = None
@@ -498,8 +498,9 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
             else root / "payloads" / plugin
         )
         source = _REPO / "plugins" / plugin
-        shutil.copytree(source / "scripts", payload / "scripts")
-        shutil.copytree(source / "src", payload / "src")
+        ignore = shutil.ignore_patterns("__pycache__", "*.pyc") if cold_payload else None
+        shutil.copytree(source / "scripts", payload / "scripts", ignore=ignore)
+        shutil.copytree(source / "src", payload / "src", ignore=ignore)
         shutil.copyfile(source / "plugin.json", payload / "plugin.json")
         shutil.copytree(source / "bin", payload / "bin")
         procutil = payload / "libs" / "agent-procutil" / "src" / "agent_procutil"
@@ -610,7 +611,7 @@ def _cell(root, monkeypatch, *, host_context=False, legacy=False, nested=False):
         )
         _compile_native_fixture(
             environment_root / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
-            [site / "agent_worktrees" if native_peer else site, *payload_inputs],
+            [site / "agent_worktrees" if native_peer else site, *([] if cold_payload else payload_inputs)],
         )
         (slot / ".install-complete.json").write_text(
             json.dumps(

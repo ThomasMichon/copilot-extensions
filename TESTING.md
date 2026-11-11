@@ -8067,6 +8067,14 @@ actual performance assertions are unchanged.
 
 ### SSH snapshot split gates under load
 
+`tests/test_snapshot_payload_stability.py` uses real completed SSH/Worktrees
+fixture runtimes with cold, uncompiled payloads. The ordinary contained runner
+executes the actual writer and mesh wrappers through native PowerShell 5/7 or
+POSIX Bash twice, requires a bound external-state snapshot and compares every
+payload file and directory entry. Environment cache controls stay enabled to
+cover their being ignored by isolated child interpreters. Platform skips are
+not qualification, and this packet does not prove latency or host rollout.
+
 The same opt-in profile also accepts only `agent-ssh`'s complete
 `tests/test_snapshot_runtime.py` and `tests/test_snapshot_windows_visibility.py`
 files, separately or together:

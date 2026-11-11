@@ -11,7 +11,7 @@ try {
             Where-Object { $_.Source -notmatch '\\WindowsApps\\' }
     } | Select-Object -First 1
     if ((Test-Path -LiteralPath $native -PathType Leaf) -and $python) {
-        $result = @(& $python.Source -I -X utf8 $native snapshot 2>$null)
+        $result = @(& $python.Source -I -X utf8 -B $native snapshot 2>$null)
     } else {
         $result = @(& $hostExe -NoProfile -File $command session-snapshot --guidance 2>$null)
     }
