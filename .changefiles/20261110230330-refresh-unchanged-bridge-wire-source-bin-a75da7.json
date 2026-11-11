@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh unchanged Bridge wire source binding for explicit Worktrees session-claim recovery",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}
