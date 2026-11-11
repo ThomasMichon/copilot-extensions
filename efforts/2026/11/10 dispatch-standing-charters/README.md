@@ -12,8 +12,8 @@ attachment controls without changing finite-task behavior.
 - **Repo:** copilot-extensions
 - **Branch(es):** Independent per-slice PRs targeting `dev`.
 - **Created:** 2026-11-09
-- **Status:** In progress - implementation, operator documentation and complete isolated discovery/native-owner flows qualified locally; source publication and promotion remain open.
-- **Vision:** [Agent topology](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md).
+- **Status:** Done for source scope - plan #11882 and implementation #11962 merged and promoted to `main`; adoption prerequisites documented; no installation, enrollment or adoption.
+- **Vision:** [Agent topology](../../../../visions/agent-fabric/agentic-factory/agent-topology/README.md).
 - **Umbrella issue:** [#11770](https://github.com/ThomasMichon/copilot-extensions/issues/11770).
 
 ## Guiding Intent
@@ -51,7 +51,7 @@ It does not introduce another assignment ledger, scheduler or daemon.
 
 - [Issue and design additions](https://github.com/ThomasMichon/copilot-extensions/issues/11770)
   define the durable task, local deny, materialization and finite-child outcomes.
-- [Topology capability](../../../plugins/agent-roles/skills/managing-agent-topology/SKILL.md)
+- [Topology capability](../../../../plugins/agent-roles/skills/managing-agent-topology/SKILL.md)
   owns desired intent and derived role coverage.
 - Dispatch already expands registrar documents, reconciles stable registrations,
   materializes revision-selected worker templates and fences native task owners.
@@ -117,17 +117,18 @@ later narrowing and explicit holds; recover missing authority before effects.
   evidence without requiring an appointed dispatcher or a second writable map.
 - [x] Derive desired, reserved, accepted, held, unknown and retiring coverage
   from native evidence; retain proposed-versus-adopted intent.
-- [ ] Prove a complete isolated declaration-to-accepted-owner flow, finite child
+- [x] Prove a complete isolated declaration-to-accepted-owner flow, finite child
   completion, owner succession and explicit retirement using real consumer
-  boundaries, then publish the source slices.
-- [ ] Record promotion separately from merge. Document installation/adoption
+  boundaries, then publish the source slices. Plan #11882 and implementation
+  #11962 merged.
+- [x] Record promotion separately from merge. Document installation/adoption
   prerequisites without installing or activating this capability.
 
 ### Phase 5 - Close source acceptance
 
-- [ ] Reconcile every issue acceptance item to evidence and remaining tracked
+- [x] Reconcile every issue acceptance item to evidence and remaining tracked
   work; update operator-facing docs and the effort index.
-- [ ] Mark this source effort Done only when every Plan/Validation item is
+- [x] Mark this source effort Done only when every Plan/Validation item is
   resolved or explicitly transferred to a named tracked objective. Keep #11770
   open until its implementation acceptance is actually satisfied.
 
@@ -182,17 +183,20 @@ later narrowing and explicit holds; recover missing authority before effects.
 - **External venue:** No authorized live venue, enrollment or deployment is
   available within this source-only scope. External adoption was not run and
   remains separately authorized, not inferred from passing local evidence.
-- **Delivery gates:** Source review/CI, merge and promotion remain open.
+- **Delivery gates:** #11962 merged to `dev` after an approving exact-head
+  review, resolved threads and required CI. One unrelated Windows timeout
+  (#11995) passed on rerun; pre-existing failures are tracked separately in
+  #11745, #11922, #11986 and #11988. Promotion is recorded in the journal.
   These results do not authorize runtime installation or role appointment.
 
 ## Publication impact assessments
 
 ### Documentation
 
-The [standing-charter operator guide](../../../plugins/agent-dispatch/docs/standing-charters.md)
+The [standing-charter operator guide](../../../../plugins/agent-dispatch/docs/standing-charters.md)
 documents declaration discovery, source-set reconciliation, attachment controls,
 compatibility and adoption prerequisites. The
-[topology skill](../../../plugins/agent-roles/skills/managing-agent-topology/SKILL.md),
+[topology skill](../../../../plugins/agent-roles/skills/managing-agent-topology/SKILL.md),
 its schema, dispatcher charter and references describe the consuming contract.
 This closes existing agent-topology vision intent rather than changing it.
 Architecture and installation references remain unchanged: this change adds no
@@ -493,3 +497,39 @@ Derived overview reads use bounded native queries; no second persistent map.
   documentation and required source checks, then review, merge and promotion.
   No live enrollment, materialization, appointment, installation or adoption
   occurred.
+
+### 2026-11-10 - Source delivery complete
+
+- #11962 merged to `dev` at `842e2ef771` after an approving exact-head review,
+  resolved threads and required CI; plan #11882 merged earlier at `17aa9b7740`.
+  Promotion run `42934747810` then released it to `main` through #12001; every
+  changed source file is identical there, and only its changefiles were
+  consumed. Promotion is not installation or adoption.
+- Added adoption prerequisites to the operator guide: a promoted release at
+  every caller, the control credential, a standing attachment owner, complete
+  materialization, local deny policy and separately authorized enrollment.
+- #11770 acceptance reconciliation:
+  - **Reviewed design:** the #11882 Proposal defines states and transitions,
+    qualified keys, attachment history, retirement and multi-lane staffing,
+    plus dedup, exclusive-key, hold, verification, evaluator and recovery rules.
+  - **Registrar kind:** complete-set discovery reconciles idempotently across
+    repeats, restarts and competing processes. Removal from an ordered,
+    committed source retires the lane with its history; unordered, partial or
+    unreadable sources never infer removal.
+  - **Focused tests:** reserve and accept (attach); release and cancel (detach,
+    yield and unassignment); confirmed succession without timed takeover;
+    retirement; independent lanes; and refusal of every finite terminal path.
+  - **Topology:** the skill, schema and dispatcher charter reference Dispatch
+    evidence and derive coverage from it without a second writable map.
+  - **Finite compatibility:** the 336-test evaluator, verification, submission,
+    emitter and `effort-driver-loop` packet passed; finite wire shapes are
+    unchanged.
+  - **Additions:** template-only and incomplete materializations fail
+    admission; local deny overrides repository enable; malformed or
+    unsupported policy holds; clearing a deny launches nothing; deny/admit
+    races and existing occupants are tested; finite children complete
+    independently of their standing parent.
+- Every Plan and Validation item is resolved. Fresh-OS clean-room and
+  external-venue adoption were not run; they belong to the adopter's separately
+  authorized installation and are not claimed. No enrollment, materialization,
+  appointment, installation, schedule or deployment occurred.

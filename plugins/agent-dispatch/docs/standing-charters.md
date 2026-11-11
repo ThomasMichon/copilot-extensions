@@ -203,3 +203,40 @@ the selector and drops retained standing rows by their claim fence. If an
 entire full page is standing rows, it refuses as upgrade-required rather than
 hide older finite work indefinitely. `kind` cannot be combined with `q` or
 `sweep`.
+
+## Adoption prerequisites
+
+Merging this source installs and activates nothing. Before an adopter relies on
+standing charters, each prerequisite below needs its own authorized owner:
+
+- **Promoted release at every caller.** The coordinator, supervisor and every
+  calling client must run a promoted release whose `/health` advertises the
+  capability above. A change merged to `dev` is not yet released; until then,
+  clients refuse as upgrade-required rather than fall back.
+- **Control credential.** Configure `AGENT_DISPATCH_CONTROL_TOKEN` for the
+  coordinator and every caller of the standing commands and source-set routes.
+- **Attachment owner.** `attachment` stays false until the coordinator's trusted
+  relationship admission (`RELATIONSHIP_ADMISSION` and `RELATIONSHIP_AUTHORITY`;
+  see [Configuration](configuration.md)) supplies standing admission: the
+  workspace's own host, an absolute local policy path, the materialization
+  owner's absolute read command and a `materialization_ref` resolver, plus native
+  head and conclusion inspection. Declaration and reconciliation work without
+  it; reserve, accept, cancel and release do not.
+- **Complete materialization.** Acceptance re-reads `materialization_ref` through
+  that owner (for agent-roles, `inspect-materialization` in
+  [managing-agent-topology](../../agent-roles/skills/managing-agent-topology/SKILL.md))
+  and requires a standing materialization for the same host whose source and
+  effective revisions match the declaration. A floating template reference is
+  not a materialization.
+- **Local deny policy.** Host-local vetoes are `standing-charter:` records in
+  the policy file the standing admission names, normally the machine-local
+  overrides store (`~/.agent-dispatch/overrides.json` or
+  `AGENT_DISPATCH_OVERRIDES`). Each selects a namespace and charter key,
+  optionally one lane. A veto refuses later admission only; it changes no task,
+  occupant or process, and clearing it launches nothing. Malformed or
+  unsupported policy holds admission. There is no standing-deny CLI; records
+  are written through the overrides module's standing deny and clear functions.
+- **Separate enrollment.** Adding a registrar pointer or standing source to a
+  live supervisor enrolls lanes and needs the adopter's own authorization.
+  Launching, appointing, materializing and stopping agents remain with their
+  existing owners.
