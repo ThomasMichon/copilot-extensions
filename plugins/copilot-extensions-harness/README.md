@@ -44,6 +44,12 @@ without a competing `sessionStart` output.
   [diagnosing-validate-and-promote-failures](skills/diagnosing-validate-and-promote-failures/SKILL.md)
   skill.
 
+External-service outage reports carry
+[first-party bulletin receipts and scoped attribution](references/external-service-outages.md).
+The release guide's [GitHub Actions errata](skills/diagnosing-validate-and-promote-failures/references/github-actions.md)
+distinguish platform startup/runner failures from executed test failures and
+retain normal recovery and publication gates.
+
 | Skill | Priority | Covers |
 |-------|----------|--------|
 | [reviewing-copilot-extensions-vision](skills/reviewing-copilot-extensions-vision/SKILL.md) | Explicit review assignment | Applies the public [Maintainer's Vision Adherence Review](references/maintainer-vision-adherence-review.md) as a conceptual repository lens; can pair with a generic reviewer without replacing CI, tactical review or merge gates |
