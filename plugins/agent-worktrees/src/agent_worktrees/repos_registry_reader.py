@@ -139,6 +139,8 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                 "repository registry has conflicting preferred account entries"
             )
         account_map: dict[str, str] = {}
+        if not isinstance(data.get("account_projection", {}), dict):
+            raise RepositoryResolutionError("repository account projection must be a mapping")
         if isinstance(raw_map, dict):
             for owner, login in raw_map.items():
                 if owner and login:
@@ -222,7 +224,8 @@ def read_registry(path: Path, *, strict: bool = False) -> ReposRegistry:
                     failed(observations, str(path), "registry-fields", "invalid-entry", "visibility normalization discarded a field")
         observe(observations, str(path), "repository-registry", ScanAuthority.COMPLETE)
         return ReposRegistry(
-            srcroot=srcroot, repos=repos, account_map=account_map, _baseline=baseline,
+            srcroot=srcroot, repos=repos, account_map=account_map,
+            account_projection=data.get("account_projection", {}), _baseline=baseline,
             schema_version=schema_version,
         )
     except Exception as exc:

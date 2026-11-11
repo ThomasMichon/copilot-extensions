@@ -105,6 +105,10 @@ def command_account(args: list[str]) -> int:
     from . import output, repos
 
     action, rest = (args[0], args[1:]) if args else ("list", [])
+    if action == "reconcile":
+        from .account_reconciliation import command
+
+        return command(rest)
     if action == "default":
         if rest in (["--help"], ["-h"]):
             print("Usage: repos account default [<login>|--unset]")
@@ -121,6 +125,9 @@ def command_account(args: list[str]) -> int:
         ):
             output.err("Usage: repos account default [<login>|--unset]")
             return 1
+        from .account_projection import explicit_default
+
+        explicit_default(registry)
         registry.default_account = "" if rest[0] == "--unset" else rest[0]
         repos.write_registry(registry)
         output.ok("Preferred GitHub account updated.")
@@ -168,5 +175,5 @@ def command_account(args: list[str]) -> int:
         output.err(f"No account_map entry for '{rest[0]}'")
         return 1
     output.err(f"Unknown 'repos account' subcommand: {action}")
-    output.info("Usage: repos account [list|default [<login>|--unset]|set <owner> <login>|unset <owner>]")
+    output.info("Usage: repos account [list|default [<login>|--unset]|set <owner> <login>|unset <owner>|reconcile --help]")
     return 1

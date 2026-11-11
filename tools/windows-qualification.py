@@ -15,7 +15,8 @@ import uuid
 from pathlib import Path
 
 from windows_qualification_contract import (
-    NATIVE_PACKETS, PACKETS, SUPPORT_PATH, TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
+    DESKTOP_FILES, DESKTOP_PACKET, NATIVE_PACKETS, PACKETS, SUPPORT_PATH,
+    TRANSPORT_MARKER, TRANSPORT_REF, VERSION, WORKFLOW,
     canonical, request, selection, sha, validate_result,
 )
 from windows_qualification_transport import Transport, command, rejected_attempt
@@ -124,7 +125,9 @@ class Client:
         files = [base + file for file in selected.get("files", [])]
         if selected["kind"] == "packet":
             native = NATIVE_PACKETS.get(selected["name"])
-            if native and native[0] == "agent-worktrees":
+            if selected["name"] == DESKTOP_PACKET:
+                files = list(DESKTOP_FILES)
+            elif native and native[0] == "agent-worktrees":
                 files = [
                     "plugins/agent-worktrees/tests/native/test_native_seed_application.py",
                     "plugins/agent-worktrees/tests/native/test_manager_application_launch.py",

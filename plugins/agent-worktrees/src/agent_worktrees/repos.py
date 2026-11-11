@@ -167,6 +167,7 @@ class ReposRegistry:
     # override (which stays the finest grain). See :func:`resolve_account` /
     # :func:`account_for_github_owner`. Keys are compared case-insensitively.
     account_map: dict[str, str] = field(default_factory=dict)
+    account_projection: dict[str, dict[str, str]] = field(default_factory=dict, kw_only=True)
     _baseline: tuple[str, str] | None = field(default=None, repr=False, compare=False)
     schema_version: int | None = field(default=None, kw_only=True)
 
@@ -635,6 +636,10 @@ def set_account_map(owner: str, login: str) -> None:
         if key.casefold() == owner.casefold():
             del registry.account_map[key]
     registry.account_map[owner] = login
+    if owner.casefold() == DEFAULT_ACCOUNT_OWNER:
+        from .account_projection import explicit_default
+
+        explicit_default(registry)
     write_registry(registry)
     output.ok(f"account_map: {owner} -> {login}")
 
@@ -648,6 +653,10 @@ def unset_account_map(owner: str) -> bool:
             del registry.account_map[key]
             removed = True
     if removed:
+        if owner.casefold() == DEFAULT_ACCOUNT_OWNER:
+            from .account_projection import explicit_default
+
+            explicit_default(registry)
         write_registry(registry)
         output.ok(f"account_map: removed {owner}")
     return removed
@@ -762,6 +771,10 @@ def add_repo(
         )
         registry.repos[name] = entry
 
+    if account:
+        from .account_projection import explicit_repository
+
+        explicit_repository(registry, name)
     write_registry(registry)
     agent_note = "" if entry.agent else " no-agent"
     output.ok(
@@ -811,6 +824,9 @@ def remove_repo(name: str) -> bool:
     if name not in registry.repos:
         return False
     del registry.repos[name]
+    from .account_projection import explicit_repository
+
+    explicit_repository(registry, name)
     write_registry(registry)
     output.ok(f"Repo '{name}' removed from registry")
     return True

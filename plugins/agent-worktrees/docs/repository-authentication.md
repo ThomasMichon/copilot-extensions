@@ -1,5 +1,71 @@
 # Repository authentication inspection
 
+## Portable GitHub account slots
+
+An adopter can keep non-secret login choices in the bound knowledge repository's
+`.agent-worktrees/github-accounts.json`:
+
+```json
+{
+  "version": 1,
+  "accounts": {"work": "operator-work", "public": "operator-public"},
+  "repositories": {"Publisher/tool": "public"}
+}
+```
+
+Slot names are operator-defined labels, not authenticated account types.
+This optional file is selected through the native knowledge-binding owner.
+It is not a credential store, a shared harness configuration or a
+`copilot_account` preference. Edit it through the knowledge repository's normal
+writable-worktree/publication flow; reconciliation never writes it.
+
+The independent native CLI projects these choices into its machine-local
+registry. Preview is the default; `--apply` opts into writing:
+
+```text
+agent-worktrees repos account reconcile --capabilities --json
+agent-worktrees repos account reconcile --default-slot work --bootstrap-from-context --repository-slot Publisher/tool=public --json
+agent-worktrees repos account reconcile --default-slot work --bootstrap-from-context --repository-slot Publisher/tool=public --apply --json
+```
+
+Run inside a registered project, or supply `--context-project <name>` to select
+it explicitly without changing the caller's directory. Adopters choose the
+default slot and optional exact repository exceptions; this engine supplies no
+organization-specific defaults. When the default slot is absent,
+`--bootstrap-from-context` may use only an existing explicit account or owner
+mapping for the selected project. `--identity-source <registered-name-or-owner/repo>`
+selects another explicit source instead. Namespace spelling, account suffixes,
+ambient login and the global preferred account are not bootstrap evidence.
+
+Existing repository, owner-map and preferred-default choices win. Reconciliation
+records its own projections alongside the registry, so a later knowledge-slot
+change or removal refreshes only that owner's unchanged managed values.
+Native explicit `repos account default` and `repos add --account` take over
+their fields, even when the value is unchanged; manual value changes are also
+preserved. Warm reconciliation does not rewrite an unchanged registry.
+Repository slots apply to matching registered repositories, not every repository
+under their owner. An unregistered target remains `not-registered`; registration
+is a separate native operation. Missing slots and conflicts are actionable
+partial results, never a request to invent a login.
+
+The response identifies `schema: agent-worktrees.account-reconciliation` and
+integer `version: 1`. The effect-free `--capabilities --json` operation advertises
+integer `portable_account_slots: 1`; callers must confirm support on their
+selected executable before sending projection syntax. Older runtimes report
+unsupported: keep all old account commands available and do not replay another
+writer or install an update automatically. This is additive provider expansion,
+not retirement of an existing operation.
+
+The policy is strict, bounded JSON (64 KiB); invalid or concurrently changed
+policy refuses projection. Existing native registry locking, read-baseline
+comparison and atomic replacement protect concurrent local choices.
+Exit 0 with `status: ready` means configuration composition only, not verified
+identity or access. No operation contacts GitHub, reads credentials, signs in,
+changes global authentication or provisions a runtime. Verify the selected
+repository-scoped identity separately before publication.
+
+## Read-only authentication observation
+
 The native engine owns this optional, read-only observation. It is separate
 from registration, future-launch Copilot preferences and credential acquisition:
 
