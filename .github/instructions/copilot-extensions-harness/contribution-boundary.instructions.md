@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.34-dev1","renderedBytes":1523,"schema":"copilot-extensions.instruction-projection","sourceId":"contribution-boundary","templateSha256":"f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd","version":2} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","deliveryKind":"selector","destination":".github/instructions/copilot-extensions-harness/contribution-boundary.instructions.md","plugin":"copilot-extensions-harness@copilot-extensions","pluginVersion":"0.1.35-dev1","renderedBytes":1523,"schema":"copilot-extensions.instruction-projection","sourceId":"contribution-boundary","templateSha256":"f482a287e533f53d982fc06cf4f6ba74bdd4f2665f9bcb66a77583a306a445dd","version":2} -->
 
 Guidance locator only; no instruction body is delivered here.
 Managed candidate: `.github/instructions/agent-worktrees-generated/copilot-extensions/copilot-extensions-harness/contribution-boundary.local.instructions.md`; reviewed fallback: `.github/copilot/context-fallbacks/copilot-extensions-harness/contribution-boundary.md`.

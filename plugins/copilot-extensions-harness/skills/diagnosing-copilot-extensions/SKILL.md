@@ -29,6 +29,11 @@ error names a symptom, not a root cause. Read the literal error, form a
 hypothesis, gather evidence, and only then act. For an idempotent step a single
 retry is a fine first move; never force-deploy or kill a process on a hunch.
 
+For any external-service outage attribution, bring the
+[provider bulletin and scoped evidence](../../references/external-service-outages.md)
+in the operator-facing report. Without a matching receipt, label the suspected
+provider cause unconfirmed rather than presenting it as an outage.
+
 ## Identify the owner; repair artifacts, never monkey-patch code
 
 This is the primary purpose of this skill, and it binds **every** consumer of

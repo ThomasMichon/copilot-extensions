@@ -106,7 +106,8 @@ def deliver(provider_python: str, project: str, body: bytes) -> dict:
         raise AgendaError("publisher project must be nonempty text")
     decode(body, "committed observation", limit=32 * 1024)
     # Leave settlement time inside the outer publisher's ten-second deadline.
-    status = asyncio.run(_invoke([str(interpreter), "-I", "-B", "-c", PROVIDER, project], body, timeout=7))
+    status = asyncio.run(_invoke(
+        [str(interpreter), "-I", "-X", "utf8", "-B", "-c", PROVIDER, project], body, timeout=7))
     if status["state"] == "delivered":
         return status["reply"]
     return {"ok": False, "contract_version": 2, "error": status["error"]}

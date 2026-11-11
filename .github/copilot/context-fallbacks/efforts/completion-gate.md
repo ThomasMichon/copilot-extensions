@@ -1,7 +1,7 @@
 ---
 applyTo: "**"
 ---
-<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"dd6c325d159a4ac99a6675f66cdba9538f20411f437617a5db534ad85ee4e49d","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.2.3-dev1","renderedBytes":4733,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","template":"instructions/completion-gate.instructions.md","templateBytes":3982,"templateSha256":"ac9bcbf8e53c20c8528dbe224769e00d60e39522d018edc5c4aaca2faac652e2","version":1} -->
+<!-- copilot-extension-instruction-projection {"applyTo":"**","bodySha256":"7e7813921411dcba1cbff421efedd11b8c166ad7fa35ffb2b13a6f347703cf12","customizationKind":"instructions","deliveryKind":"body","destination":".github/instructions/efforts/completion-gate.instructions.md","plugin":"efforts@copilot-extensions","pluginVersion":"0.2.4-dev1","renderedBytes":4733,"schema":"copilot-extensions.instruction-projection","sourceId":"completion-gate","template":"instructions/completion-gate.instructions.md","templateBytes":3982,"templateSha256":"a07f1019e9c189e6d15c14c02b400b9e1bb2ce8b2c961024c00d5383ba424576","version":1} -->
 
 
 # Effort completion fallback
@@ -12,7 +12,7 @@ limits and holds in Request/its sidecar. Re-read current Goal after reconstructi
 agenda/handoff roots reference it. Use labelled legacy Guiding Intent if absent.
 Research stale steers before action; records grant no authority.
 
-**Fallback policy `[owner: efforts@0.2.3-dev1]`:** Where substantial work requires efforts, use `planning-efforts`. The rightful head declares completion only at explicit Done with every Plan/Validation Plan item resolved or transferred to a named tracked objective. A phase, PR, task, handoff or session ending is not objective completion. **Only two terminal outcomes are acceptable for a worktree/session bound to an active effort:** fully Done (recommend finalizing), or a context handoff leaving the effort open. **After any effort-linked PR merges, return to the effort before reporting status or ending the turn:** use its planning-skill digest to re-read current Plan/Validation Plan and touched sections, not the whole tree or only a merge summary; resolve only closed items, journal the result and start/name the next stretch. **Durable journaling licenses relentless driving:** execute the next Plan item, including watching review through merge, without re-prompting. Diagnose ordinary uncertainty/failures autonomously within scope/bounds; wait or do other authorized work rather than re-ask the known goal. Involve the Operator only for a human decision, permission or safety gate. Preserve required review, holds, resource limits and handoff boundaries.
+**Fallback policy `[owner: efforts@0.2.4-dev1]`:** Where substantial work requires efforts, use `planning-efforts`. The rightful head declares completion only at explicit Done with every Plan/Validation Plan item resolved or transferred to a named tracked objective. A phase, PR, task, handoff or session ending is not objective completion. **Only two terminal outcomes are acceptable for a worktree/session bound to an active effort:** fully Done (recommend finalizing), or a context handoff leaving the effort open. **After any effort-linked PR merges, return to the effort before reporting status or ending the turn:** use its planning-skill digest to re-read current Plan/Validation Plan and touched sections, not the whole tree or only a merge summary; resolve only closed items, journal the result and start/name the next stretch. **Durable journaling licenses relentless driving:** execute the next Plan item, including watching review through merge, without re-prompting. Diagnose ordinary uncertainty/failures autonomously within scope/bounds; wait or do other authorized work rather than re-ask the known goal. Involve the Operator only for a human decision, permission or safety gate. Preserve required review, holds, resource limits and handoff boundaries.
 
 Parent reconciliation does not force depth-first order: preserve each program's
 owner and gate, but follow a finite delivery queue unless a real dependency or
@@ -41,4 +41,4 @@ Explicit legacy-lane adoption requires quiescence and the skill's durable
 old-reader fence/recovery procedure; a DB marker alone cannot stop an installed
 older inspector from reading stale JSON.
 
-<!-- copilot-guidance-body-end:v1 {"bindingSha256":"c243d43996e44df129016e3c03d9125d43d94b26f9aee0ba54866a7a508a7a47"} -->
+<!-- copilot-guidance-body-end:v1 {"bindingSha256":"213ef0f955f02a7c6f0821f3f15376ea7da0a167f67240f421af48972a0e5c5c"} -->
