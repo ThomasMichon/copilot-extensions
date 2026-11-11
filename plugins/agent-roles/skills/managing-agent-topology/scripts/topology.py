@@ -17,9 +17,11 @@ from topology_contract import (
     timestamp, validate, validate_materialization,
 )
 from topology_dispatch import (
-    LIVE_STATES, RETAINING_STATES, adopted_record, intent_lane, lane, linked, native_owner,
+    LIVE_STATES, RETAINING_STATES, adopted_record, flow, intent_lane, lane, linked, native_owner,
     proposed_record,
 )
+
+BOOKKEEPING_REVISION_WINDOW = 256
 
 
 class Topology:
@@ -77,6 +79,16 @@ class Topology:
             if linked(assignment, self.observations)
             if (owner := native_owner(self.dispatch.get(assignment["nativeTask"]))) is not None
         }
+        mapped.update(
+            owner_key(assignment["nativeWorktree"]) for assignment in self.assignments
+            if assignment["state"] not in {"completed", "released"}
+            and assignment["nativeWorktree"] is not None
+            and any(
+                effect["kind"] == "allocate" and effect["state"] == "confirmed"
+                and effect["target"] == assignment["nativeWorktree"]
+                for effect in assignment["effects"]
+            )
+        )
         return [item for item in self.observations["owners"]
                 if item["assignmentId"] is None and owner_key(item["owner"]) not in mapped]
 
@@ -311,6 +323,67 @@ class Topology:
     def assignment(self, request_id: str) -> dict[str, Any] | None:
         return next((item for item in self.assignments if item["requestId"] == request_id), None)
 
+    @staticmethod
+    def bookkeeping_only(
+        materialization: dict[str, Any] | None, snapshot: dict[str, Any] | None,
+    ) -> bool:
+        """Prove a prior declaration differs only by a bounded document-revision advance."""
+        if materialization is None or snapshot is None:
+            return False
+        declaration = snapshot["task"]["standing_charter"]["declaration"]
+        if declaration["expected_materialization_revision"] != materialization["materializationRevision"]:
+            return False
+        source = materialization["source"]
+        revision = source["topologyRevision"]
+        return any(
+            content_revision({
+                "source": {**source, "topologyRevision": prior},
+                "effective": materialization["effective"],
+            }) == declaration["source_revision"]
+            for prior in range(revision - 1, max(0, revision - BOOKKEEPING_REVISION_WINDOW - 1), -1)
+        )
+
+    def flow(self, request_id: str) -> dict[str, Any]:
+        """Plan one native-owner step from saved evidence without executing it."""
+        assignment = self.assignment(request_id)
+        holds = self.custody_holds()
+        if assignment is not None:
+            holds.extend(self.policy_reasons(
+                self.machines[assignment["machine"]], self.roles[assignment["role"]], assignment["kind"],
+            ))
+        snapshot = self.dispatch.get(assignment["nativeTask"]) if assignment else None
+        materialization = (
+            self.materialize(request_id) if assignment and assignment["state"] not in {"completed", "released"}
+            else None
+        )
+        result = flow(
+            assignment, snapshot,
+            self.fresh, lambda owner: self.owners.get(owner_key(owner)),
+            materialization,
+            self.seed(request_id) if assignment else None, holds,
+            "dispatch" in self.observations,
+            lambda: self.bookkeeping_only(materialization, snapshot),
+        )
+        if result["phase"] in {"persist-assignment", "persist-allocation", "allocate", "reserve", "reconcile"}:
+            result["holds"].extend(self.discovery_holds())
+        if assignment and result["phase"] in {"persist-allocation", "allocate"}:
+            placement = self.placement(assignment["role"], assignment["kind"])
+            foreign_allocation = any(
+                item["id"] != assignment["id"] and item["machine"] == assignment["machine"]
+                and any(effect["kind"] == "allocate" for effect in self.pending(item))
+                for item in self.assignments
+            )
+            result["holds"].extend(
+                reason for item in placement["excluded"] if item["machine"] == assignment["machine"]
+                for reason in item["reasons"] if reason != "allocation-outcome-unsettled" or foreign_allocation
+            )
+        if result["holds"]:
+            result.update(phase="held", nextStep=None)
+        return {
+            "topology": self.document["id"], "revision": self.document["revision"],
+            "evaluatedAt": self.at.isoformat(), "requestId": request_id, **result,
+        }
+
     def route(self, request_id: str) -> dict[str, Any]:
         assignment = self.assignment(request_id)
         if assignment is None:
@@ -397,7 +470,7 @@ class Topology:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=[
-        "validate", "overview", "intent", "placement", "route", "seed", "materialize",
+        "validate", "overview", "intent", "placement", "flow", "route", "seed", "materialize",
         "inspect-materialization",
     ])
     parser.add_argument("document", type=Path)
@@ -420,6 +493,10 @@ def main(argv: list[str] | None = None) -> int:
             result = topology.overview()
         elif args.command == "intent":
             result = topology.intent()
+        elif args.command == "flow":
+            if not args.request:
+                raise ContractError("flow requires --request")
+            result = topology.flow(args.request)
         elif args.command == "placement":
             if not args.role:
                 raise ContractError("placement requires --role")

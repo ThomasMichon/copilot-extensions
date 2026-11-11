@@ -187,6 +187,7 @@
         "kind": {"enum": ["allocate", "launch", "relay", "retire"]},
         "state": {"enum": ["prepared", "unknown", "admitted", "consumed", "accepted", "confirmed", "failed"]},
         "charterRevision": {"type": "integer", "minimum": 1},
+        "assignmentGeneration": {"type": ["integer", "null"], "minimum": 0, "description": "Native Dispatch assignment generation retained before launch. Optional for legacy records; the standing flow holds launch/accept when absent or mismatched."},
         "target": {"type": ["object", "null"], "additionalProperties": false, "required": ["machine", "project", "worktree"], "properties": {"machine": {"$ref": "#/$defs/text"}, "project": {"$ref": "#/$defs/text"}, "worktree": {"$ref": "#/$defs/text"}}},
         "nativeRequest": {
           "type": ["object", "null"],

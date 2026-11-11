@@ -340,7 +340,12 @@ def execute(root: Path, value: dict, output: Path) -> dict:
             result["native_prerequisites"] = phase(
                 "native-prerequisites", prepare_native,
             )
-            phase(native[3], lambda: owned(native_command(root, output, selected["name"]), 1800))
+            if selected["name"] == "native-worktrees-caller-jobs":
+                from windows_qualification_lifetime import worktrees_lifetime
+
+                phase(native[3], lambda: worktrees_lifetime(root, output, prepare=owned))
+            else:
+                phase(native[3], lambda: owned(native_command(root, output, selected["name"]), 1800))
         elif selected["name"] == MCP_LIFETIME_PACKET:
             phase("prepare-mcp-test-runtime", lambda: owned([
                 sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-mcp",
