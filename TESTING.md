@@ -3398,6 +3398,18 @@ disconnected no-op. Passing this control is not positive auth recovery or
 qualification of another pinned native runtime; unexpected SDK EOF remains
 an independent hold.
 
+The actor-free Driver file `tests/test_headed_recovery.py` exercises the additive
+Python crash-candidate and recovery reducer with a fixture-owned SQLite CAS
+adapter. Reopening after retire/resume intent, duplicate/conflicting operations,
+changed bindings, stale authority, missing settlement and lost commit
+acknowledgements preserve the original transition and unknown effects.
+Restored observation does not clear legacy EOF holds or claim completed work.
+The source provides no production store or process/credential/launch callbacks;
+this packet is not native recovery, deployment or platform settlement evidence.
+Select it through `tools/run-plugin-tests.py agent-remote-driver --test-file
+tests/test_headed_recovery.py`. Existing native/required packet selection is
+unchanged.
+
 The explicit T3 file `tests/native/test_native_pending_work.py` qualifies
 nonempty client-task and schedule snapshots through the selected native CLI.
 One control registers a client task, observes the same task as running, idle
