@@ -55,13 +55,17 @@ def test_candidate_serving_uses_owned_slot_for_nested_runtime_prefix(tmp_path, m
 @pytest.mark.parametrize("failure", [None, "pid", "native", "authentication", "route"])
 def test_missing_legacy_lock_uses_only_a_verified_routed_owner(tmp_path, monkeypatch, failure):
     token = "fixture-token"
+    directory = tmp_path / "status-monitor-routing"
+    (tmp_path / "status-monitor-control.token").write_text(
+        "wrong-token" if failure == "authentication" else token, encoding="utf-8",
+    )
     pid = os.getpid()
     events = []
 
     def handle(action, payload):
         assert action == "health"
         if failure == "route":
-            routing.clear_if_owner(tmp_path, pid=pid)
+            routing.clear_if_owner(directory, pid=pid)
         return {
             "status": "ready", "pid": pid + 1 if failure == "pid" else pid,
             "published": True,
@@ -72,9 +76,9 @@ def test_missing_legacy_lock_uses_only_a_verified_routed_owner(tmp_path, monkeyp
     server.start()
     try:
         routing.publish_active(
-            tmp_path, bind="127.0.0.1", port=server.port, pid=pid, version="old",
+            directory, bind="127.0.0.1", port=server.port, pid=pid, version="old",
         )
-        monkeypatch.setattr(control, "routing_dir", lambda: tmp_path)
+        monkeypatch.setattr(control, "routing_dir", lambda: directory)
         monkeypatch.setattr(control, "_monitor_lock_is_live", lambda: False)
         monkeypatch.setattr(status_monitor_runtime, "_status_monitor_enabled", lambda: True)
         monkeypatch.setattr(
@@ -89,15 +93,6 @@ def test_missing_legacy_lock_uses_only_a_verified_routed_owner(tmp_path, monkeyp
         monkeypatch.setattr(
             status_monitor_reap_stale, "schedule_delayed_daemon_health_reap", lambda: None,
         )
-        original_client = control.ControlClient
-
-        class Client(original_client):
-            def __init__(self, url, **kwargs):
-                super().__init__(
-                    url, token="wrong-token" if failure == "authentication" else token, **kwargs,
-                )
-
-        monkeypatch.setattr(control, "ControlClient", Client)
         if failure == "native":
             monkeypatch.setattr(locks, "process_start_time", lambda pid: None)
 
@@ -135,6 +130,8 @@ def test_absent_route_and_legacy_lock_keep_no_monitor_semantics(tmp_path, monkey
 
 def test_darwin_routed_owner_uses_native_birth_identity(tmp_path, monkeypatch):
     pid = os.getpid()
+    directory = tmp_path / "status-monitor-routing"
+    (tmp_path / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
     server = control.ControlServer(
         lambda *_args: {"status": "ready", "pid": pid, "runtime_slot": "serving"},
         token="fixture-token",
@@ -142,17 +139,12 @@ def test_darwin_routed_owner_uses_native_birth_identity(tmp_path, monkeypatch):
     server.start()
     try:
         monkeypatch.setattr(diagnostics, "process_start_time", lambda *_args: None)
-        routing.publish_active(tmp_path, bind="127.0.0.1", port=server.port, pid=pid)
-        monkeypatch.setattr(control, "routing_dir", lambda: tmp_path)
+        routing.publish_active(directory, bind="127.0.0.1", port=server.port, pid=pid)
+        monkeypatch.setattr(control, "routing_dir", lambda: directory)
         monkeypatch.setattr(locks.platform, "system", lambda: "Darwin")
         monkeypatch.setattr(locks, "_start_time_darwin", lambda observed: "123456:789" if observed == pid else None)
         monkeypatch.setattr(locks, "lock_is_live", lambda *_args: True)
         monkeypatch.setattr(diagnostics, "_pid_alive", lambda observed: observed == pid)
-        original_client = control.ControlClient
-        monkeypatch.setattr(
-            control, "ControlClient",
-            lambda url: original_client(url, token="fixture-token"),
-        )
         assert control.routed_monitor_identity() == (pid, "123456:789", "serving")
     finally:
         server.close()
