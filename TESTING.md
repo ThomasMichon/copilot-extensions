@@ -534,6 +534,20 @@ Renderer controls require all four original key declarations to agree and reject
 missing, repeated, nonliteral, invalid, duplicate or oversized data. No argument
 grammar, JSON decoder, runtime selection or time budget is changed.
 
+The `literal-batch-all-shell` and `literal-batch-mixed` cases compose the same
+complete-entry fixture over whole batches in both engines and legacy/cell
+scopes. Comparator legs omit only the optional literal proof; the candidate
+retains the packaged declaration. A later protected shell member must still
+reach the real worker and deny without executing a tool. Fixture-only counters
+require one declaration load and one shared source pass, not per-member hashes.
+Counters live only inside that disposable shell process. Focused controls retain
+member/top-level precedence, raw/object selection, 128-member bounds, member
+key shadowing, old/new readers, absent optional key metadata and whole byte-exact
+fallback for malformed, unknown, nonliteral, argument-bearing or JSON input.
+Original batch expansion and all four real guards supply separate parity
+evidence. Ordered records retain actual source/build identities and all failures;
+unchanged 10/30/300 limits are not relaxed to qualify an incomplete record.
+
 The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
 supplied existing Python 3.9 interpreter. Their private fixture publishes real
 project membership and the current original guard map, copies the required
