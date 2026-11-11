@@ -281,6 +281,26 @@ def _verify_prepared(case, setup, run):
     return env
 
 
+def _verify_native_cleanup(case, cleanup):
+    unsettled = sum(row.status != "settled" for row in cleanup)
+    failure = RuntimeError("The private native lifecycle did not settle") if unsettled else None
+    try:
+        suite._write(case / "diagnostics" / "lifecycle-daemon-cleanup.json", {
+            "unsettled": unsettled, "omitted": max(0, len(cleanup) - 32),
+            "instances": [
+                {"instance_id": row.instance_id, "status": row.status, "reason": row.reason}
+                for row in cleanup[:32]
+            ],
+        })
+    except OSError as write_error:
+        if failure is None:
+            raise
+        failure.add_note(f"Cleanup diagnostic write: {write_error}")
+        raise failure from write_error
+    if failure is not None:
+        raise failure
+
+
 def exercise(directory):
     from agent_procutil.daemon_instances import daemon_test_lifecycle
     from agent_procutil.owned_budget import OwnedExecutionBudget
@@ -312,8 +332,7 @@ def exercise(directory):
             launch_timeout=120, system_context=True,
         ) as witness:
             actions = lifecycle._actions(witness)
-    if any(row.status != "settled" for row in cleanup):
-        raise RuntimeError("The private native lifecycle did not settle")
+    _verify_native_cleanup(case, cleanup)
     _verify_prepared(case, setup, run)
     suite._write(case / "result.json", {
         "schema": RESULT_SCHEMA, "identity": setup["identity"], "mode": "fresh",

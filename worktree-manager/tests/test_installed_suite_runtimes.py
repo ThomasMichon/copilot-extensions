@@ -23,6 +23,41 @@ def fresh_fixture():
     return runpy.run_path(str(NATIVE / "manager_installed_suite_fixture.py"))
 
 
+@pytest.mark.parametrize("last_status", ("settled", "held"))
+def test_fresh_cleanup_diagnostics_cannot_hide_a_held_tail(tmp_path, fresh_fixture, last_status):
+    from types import SimpleNamespace
+
+    cleanup = [
+        SimpleNamespace(instance_id=str(index), status="settled", reason="observed")
+        for index in range(33)
+    ]
+    (tmp_path / "diagnostics").mkdir()
+    cleanup[-1].status = last_status
+    verify = fresh_fixture["_verify_native_cleanup"]
+    if last_status == "held":
+        with pytest.raises(RuntimeError, match="did not settle"):
+            verify(tmp_path, cleanup)
+    else:
+        verify(tmp_path, cleanup)
+    report = json.loads((tmp_path / "diagnostics" / "lifecycle-daemon-cleanup.json").read_text())
+    assert report["unsettled"] == int(last_status == "held")
+    assert report["omitted"] == 1 and len(report["instances"]) == 32
+
+
+def test_fresh_cleanup_diagnostic_write_cannot_mask_held_custody(tmp_path, monkeypatch, fresh_fixture):
+    from types import SimpleNamespace
+
+    def failed_write(*_):
+        raise OSError("controlled diagnostic write failure")
+
+    monkeypatch.setattr(fresh_fixture["suite"], "_write", failed_write)
+    with pytest.raises(RuntimeError, match="did not settle") as caught:
+        fresh_fixture["_verify_native_cleanup"](tmp_path, [
+            SimpleNamespace(instance_id="fixture", status="held", reason="launch-outcome-unknown"),
+        ])
+    assert any("controlled diagnostic write failure" in note for note in caught.value.__notes__)
+
+
 def test_fresh_suite_refuses_shared_host_before_creating_a_case(tmp_path, monkeypatch, fresh_fixture):
     monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
     with pytest.raises(RuntimeError, match="disposable GitHub-hosted Windows VM"):

@@ -1691,3 +1691,56 @@ Documentation-impact review records the distinct core/fresh history contract
 and confirmed-exit-only image behavior in TESTING.md. Complete fresh lifecycle,
 ordinary admitted-baseline update, mandatory frozen enforcement and separate
 Main adoption remain open.
+
+### November 11 - Complete actions reach strict daemon cleanup
+
+Required CI and run 43043246633's normal/repair cases pass at
+`fa0dd539837130678948d90916358b95ff2ad684`. Fresh preparation and all four
+actions, typed-system-context history, native ownership, final normal exit and
+provider-continuity checks complete. Exercise then correctly refuses its
+unsettled daemon-instance results: two MCP launch reservations remain held
+with unknown launch outcome and no PID. Independent settlement succeeds, but
+does not convert those held outcomes into accepted lifecycle evidence.
+
+The verified MCP interpreter is physically under its selected generation's
+`.venv`. The canonical resolver supports that layout, but the bootstrap's
+healthy-generation shortcut accepts only flat `Scripts/python.exe` or
+`bin/python`. Four new healthy nested controls reproduce unnecessary
+provision-supervisor submission before the fix, in PowerShell 7 and Windows
+PowerShell for ordinary and source-repair generations. The shortcut now
+recognizes the canonical nested paths as well, preserving exact selected
+generation/source, completion and resolver link checks. Its synchronized
+POSIX block is updated consistently in Bridge, Dispatch and MCP; no shared
+service is repaired or installed. Current paginated #11121 file inspection
+shows no overlapping bootstrap files; its constructor/publication hunks
+remain untouched.
+
+The complete MCP bootstrap packet passes 56 cases after the correction,
+including flat/nested healthy, incomplete, wrong-generation and foreign-source
+controls. Fourteen native POSIX cases remain untested on Windows; block
+synchronization is separately verified. Patch changefiles cover all three
+affected plugins. MCP's canonical footprint refresher updates only the script
+producer digest: revision 36, contract semantics and the `src` digest remain
+unchanged. The full install-contract guard passes after that binding refresh.
+
+The same native run reports three generic CIM scan failures taking 5,754,
+1,940 and 1,284 milliseconds, despite the existing one-second operation limit.
+Their exact underlying cause remains unproven. The tracer now lazily creates
+one owned local DCOM session after arming and reuses it, rather than relying
+on implicit per-poll sessions. A bounded three-scan read-only host probe verifies
+the client path is supported; it is not full-suite acceptance. Creation and
+query limits, cadence, cap and fatal-error policy stay unchanged. `finally`
+closes that exact session; close failure is also fatal. No service, remote
+endpoint or credential deployment is introduced.
+
+Thirteen Manager controls pass, including actual two-poll mock-session reuse,
+creation/query/close failure, pre-window no-acquisition, strict held cleanup
+beyond the 32-record diagnostic sample and preservation of original custody
+failure on diagnostic-write error. Fresh teardown now retains that bounded
+cleanup projection before refusing. No reservation is fabricated, deleted or
+reclassified as settled. Changed-source lint, the 13-plugin install contract,
+documentation consistency and whitespace pass. Documentation-impact review
+updates MCP's healthy-layout contract and TESTING.md's session/cleanup evidence.
+The next unchanged exact-head hosted matrix must still prove complete cleanup,
+strict scan success and the final post-lifecycle checks. Authentic update,
+mandatory frozen enforcement and separate Main adoption remain open.

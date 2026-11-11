@@ -103,7 +103,9 @@ try {
                         . $resolver -TraceMode read-only
                         $provisioned = $AgentRtPy -and (
                             $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\Scripts\python.exe") -or
-                            $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\bin\python"))
+                            $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\bin\python") -or
+                            $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\.venv\Scripts\python.exe") -or
+                            $AgentRtPy -eq (Join-Path $InstallDir "versions\$cv\.venv\bin\python"))
                     } finally {
                         $env:AGENT_RT_ROOT = $previousRoot
                     }

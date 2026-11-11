@@ -10170,6 +10170,10 @@ argument values, and still fail the lane.
 The census requests only its four consumed process properties. Scan-error
 samples also retain elapsed milliseconds and the record count at failure;
 query timeout, polling cadence and failure policy remain unchanged.
+After the observation window arms, one owned local DCOM CIM session is reused
+for the census and closed in `finally`. Creation and queries retain their
+one-second limits. A scan or session-close failure remains fatal; an unarmed
+window creates no session. No service or remote endpoint is provisioned.
 The assembled Manager update retains a finite stderr allowance of 4 MiB per
 declared component plus Manager, rather than applying one component's 4 MiB
 capture to the entire suite. Other fixture calls and stdout keep their existing
@@ -10191,6 +10195,10 @@ product-daemon lifetime boundary; this flow does not run inside a restrictive
 local test Job. The workflow retains synthetic diagnostics and cannot pass on
 failed or missing settlement. Neither this test flow nor a passing component
 test asserts that whole-suite acceptance has already passed.
+Fresh lifecycle teardown also retains a bounded daemon-instance outcome
+projection with total unsettled and omitted counts. A held reservation outside
+the sample still fails, and a diagnostic-write error cannot mask the original
+unsettled-custody refusal.
 
 The bootstrap RedirectionGuard controls create links as an unprivileged user:
 Windows deliberately [trusts administrator-created links](https://www.microsoft.com/en-us/msrc/blog/2025/06/redirectionguard-mitigating-unsafe-junction-traversal-in-windows).

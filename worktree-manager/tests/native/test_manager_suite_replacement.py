@@ -180,7 +180,10 @@ def test_assembled_update_capture_preserves_genuine_progress_with_a_finite_budge
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
 @pytest.mark.parametrize("extra", (0, 512))
-def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path: Path, extra: int) -> None:
+@pytest.mark.parametrize("close_fails", (False, True))
+def test_process_trace_scopes_birth_identity_and_omits_argument_values(
+    tmp_path: Path, extra: int, close_fails: bool,
+) -> None:
     from agent_procutil import no_window_kwargs
     from manager_suite_artifacts import _runtime_process_trace_script
 
@@ -194,10 +197,15 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
         "CreationDate=$birth;CommandLine=$line}};"
     ) if extra else ""
     prefix = (
-        "function Get-CimInstance {param($ClassName,$Filter,$OperationTimeoutSec,$Property);"
+        _trace_session_fixture(close_fails=close_fails) +
+        "$script:censusCalls=0;"
+        "function Get-CimInstance {param($ClassName,$Filter,$OperationTimeoutSec,$Property,$CimSession);"
         "if(($Property -join ',') -ne 'ProcessId,ParentProcessId,CreationDate,CommandLine')"
         "{throw 'Unexpected census projection'};"
-        f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');"
+        "if($OperationTimeoutSec -ne 1 -or -not [object]::ReferenceEquals($CimSession,$script:ownedCim))"
+        "{throw 'The census did not use its bounded owned session'};"
+        "$script:censusCalls++;if($script:censusCalls -eq 2){"
+        f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop')}};"
         "$birth=[DateTime]::Parse('2026-01-01T00:00:00Z');"
         f"$line='\"{str(interpreter).replace(chr(39), chr(39) * 2)}\" "
         f"-B -m agent_worktrees {private}';"
@@ -215,11 +223,14 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
          prefix + _runtime_process_trace_script(home, ready, stop, report)],
         capture_output=True, text=True, timeout=15, **no_window_kwargs(),
     )
-    assert result.returncode == 0, result.stderr
+    assert result.returncode == int(close_fails), result.stderr
     raw = report.read_text(encoding="utf-8")
     trace = json.loads(raw)
     assert private not in raw and "CommandLine" not in raw and "foreign_module" not in raw
-    assert trace["stop_observed"] and trace["scan_errors"] == 0
+    assert trace["stop_observed"] and trace["scan_errors"] == int(close_fails)
+    assert trace["cim_session_created"] and trace["cim_session_closed"] is (not close_fails)
+    if close_fails:
+        assert trace["scan_failures"][0]["phase"] == "session-close"
     assert trace["window_armed"]
     assert trace["truncated"] is bool(extra)
     records = trace["records"]
@@ -230,6 +241,22 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
     assert [row["no_bytecode"] for row in records[:2]] == [True, False]
 
 
+def _trace_session_fixture(*, close_fails=False):
+    return (
+        "$script:ownedCim=$null;$script:sessionCreations=0;"
+        "function New-CimSessionOption {param($Protocol);"
+        "if($Protocol -ne 'Dcom'){throw 'Expected local DCOM'};return 'fixture-dcom'};"
+        "function New-CimSession {param($SessionOption,$OperationTimeoutSec);"
+        "if($SessionOption -ne 'fixture-dcom' -or $OperationTimeoutSec -ne 1 -or $script:sessionCreations -ne 0)"
+        "{throw 'Unexpected census session creation'};"
+        "$script:sessionCreations++;"
+        "$script:ownedCim=[pscustomobject]@{owner='fixture'};return $script:ownedCim};"
+        "function Remove-CimSession {param($CimSession);"
+        "if(-not [object]::ReferenceEquals($CimSession,$script:ownedCim)){throw 'Foreign census session'};"
+        + ("throw 'controlled session close failure'" if close_fails else "$script:ownedCim=$null") + "};"
+    )
+
+
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
 def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp_path: Path) -> None:
     from agent_procutil import no_window_kwargs
@@ -237,6 +264,7 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
 
     ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
     prefix = (
+        _trace_session_fixture() +
         "function Get-CimInstance {throw 'must not scan before baseline'};"
         "function Start-Sleep {param($Milliseconds);"
         f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
@@ -249,12 +277,16 @@ def test_process_trace_does_not_consume_its_bound_before_the_baseline_window(tmp
     assert result.returncode == 0, result.stderr
     trace = json.loads(report.read_text(encoding="utf-8"))
     assert trace["stop_observed"] and trace["scan_errors"] == 0 and not trace["window_armed"]
+    assert not trace["cim_session_created"] and trace["cim_session_closed"] is None
     assert trace["records"] == [] and not trace["truncated"]
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native diagnostic script")
 @pytest.mark.parametrize("cim", (False, True))
-def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(tmp_path: Path, cim: bool) -> None:
+@pytest.mark.parametrize("stage", ("session", "scan"))
+def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(
+    tmp_path: Path, cim: bool, stage: str,
+) -> None:
     from agent_procutil import no_window_kwargs
     from manager_suite_artifacts import _runtime_process_trace_script
 
@@ -262,8 +294,10 @@ def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(tmp_path
     (tmp_path / "process-trace-window").write_text("baseline")
     private = "private query argument must not enter diagnostics"
     error = f"[Microsoft.Management.Infrastructure.CimException]::new('{private}')" if cim else f"'{private}'"
+    target = "New-CimSession" if stage == "session" else "Get-CimInstance"
     prefix = (
-        f"function Get-CimInstance {{throw {error}}};"
+        _trace_session_fixture() +
+        f"function {target} {{throw {error}}};"
         "function Start-Sleep {param($Milliseconds);"
         f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');}}"
     )
@@ -277,6 +311,8 @@ def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(tmp_path
     assert private not in raw
     trace = json.loads(raw)
     assert trace["scan_errors"] == 1 and trace["stop_observed"]
+    assert trace["cim_session_created"] is (stage == "scan")
+    assert trace["cim_session_closed"] is (True if stage == "scan" else None)
     (failure,) = trace["scan_failures"]
     assert failure["type"] and isinstance(failure["hresult"], int)
     assert isinstance(failure["elapsed_ms"], int) and failure["elapsed_ms"] >= 0
