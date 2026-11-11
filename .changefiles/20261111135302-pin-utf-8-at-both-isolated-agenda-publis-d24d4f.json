@@ -1,0 +1,9 @@
+{
+  "comment": "Pin UTF-8 at both isolated agenda publisher subprocess boundaries so Unicode observations and structured errors survive Windows redirected stdio without relaxing isolation or strict decoding.",
+  "changes": [
+    {
+      "plugin": "efforts",
+      "type": "patch"
+    }
+  ]
+}
