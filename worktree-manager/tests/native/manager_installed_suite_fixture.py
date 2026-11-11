@@ -139,8 +139,11 @@ def prepare(directory):
     candidate = setup["identity"]["candidate_commit"]
     project = case / lifecycle.PROJECT
     project.mkdir()
+    setup["project_root"] = str(project)
+    suite._write(case / "setup.json", setup)
     # Trusted CLI settings resolve from the Git root, not an arbitrary nested directory.
-    run(["git", "init", project], env, project, case / "diagnostics", "suite-project-init", timeout=30)
+    run(["git", "init", "-q", "-b", "main", project],
+        env, project, case / "diagnostics", "suite-project-init", timeout=30)
     base = Path(getattr(sys, "_base_executable", sys.executable))
     bootstrap_payload = artifact / "plugins" / "agent-worktrees"
     # Discovery alone needs an engine; this separate root is never suite evidence.

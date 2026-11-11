@@ -1090,6 +1090,16 @@ def _project(root, env, engine, copilot, *, profile=None, run=None):
         "project-init",
         timeout=30,
     )
+    if profile is not None:
+        origin = root / "project-origin.git"
+        run(
+            ["git", "init", "--bare", "-q", "-b", "main", origin],
+            env, root, diagnostics, "project-origin-init", timeout=30,
+        )
+        run(
+            ["git", "-C", project, "remote", "add", "origin", origin],
+            env, root, diagnostics, "project-origin-select", timeout=30,
+        )
     arguments = installed._harness_registration(
         engine, project, root / "payloads", profile=profile,
     )
@@ -1148,6 +1158,11 @@ def _project(root, env, engine, copilot, *, profile=None, run=None):
                 name + "-" + label,
                 timeout=30,
             )
+    if profile is not None:
+        run(
+            ["git", "-C", project, "push", "-u", "origin", "main"],
+            env, root, diagnostics, "project-origin-push", timeout=30,
+        )
     run(
         [
             engine,
@@ -2163,7 +2178,7 @@ def test_frozen_git_transport_preserves_ignored_artifact_bytes_without_mutating_
     }
     with serve_git_transport(transport, **serving) as served:
         run(
-            ["git", "clone", "--depth", "1", "--progress", served["url"], copied],
+            ["git", "clone", "--depth", "1", "--progress", "--branch", "main", served["url"], copied],
             {**environment, "GIT_TEMPLATE_DIR": transport["checkout_template"]},
             project, tmp_path, "clone", timeout=30,
         )

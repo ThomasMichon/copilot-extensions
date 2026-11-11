@@ -1239,3 +1239,40 @@ first-touch CLI/transport checks, not complete native suite acceptance. A fresh
 hosted run must still prove all frozen payloads, complete runtime construction
 and actual Machines readiness; the authentic upgrade, frozen enforcement and
 separate Main adoption remain open.
+
+Run 42961736606 at `9202df599847242d1600c1f645ae765551ad247d`
+passed normal and repair again. Fresh passed complete frozen payload acquisition
+and reached the ordinary Manager update, but did not complete runtime
+construction. Vault activation configuration refused the adopted harness's
+missing stable remote identity; Manager self-update also tried to clone the
+fixture's raw commit as a branch. Settlement independently failed with an owned
+Index resident still live, despite the stop command returning zero: its retained
+stderr reported missing repository context. These failures remain failures.
+
+The fresh fixture now initializes `main` explicitly and persists its actual
+project root before construction, so cooperative shutdown enters that root
+rather than the replacement fixture's otherwise-unused `project` directory.
+The shared command owner accepts only an existing direct fixture child; normal,
+repair and pre-project cleanup keep their previous working directory. Fresh
+adoption alone creates a real private bare origin before registration and
+pushes the actual project commit, supplying a resolvable canonical identity and
+an ordinary cloneable anchor. The synthetic replacement profiles are unchanged.
+Manager source selection uses the frozen transport's sole `main` branch, with
+the same exact commit/tree verification before and after the update.
+
+The focused contained packet passes 70 controls with 158 unrelated tests
+deselected. It covers real Git registration input and cloning, explicit `main`
+selection, retained payload bytes under conflicting attributes, shutdown
+working-directory ownership and unchanged strict runtime/readiness refusals.
+Changed-source lint and whitespace checks pass. This is unit and lightweight
+integration evidence; the real private clones are first-touch inputs, not an
+authentic admitted upgrade baseline. The next disposable hosted run owns full
+native clean-room construction, Machines readiness and cooperative settlement.
+No shared-host installation, cleanup waiver, source admission or Main activation
+is authorized or credited by these controls.
+
+Documentation-impact review: these corrections change only native test inputs
+and command ownership, not a released installer, runtime API or operator
+procedure. This journal records the evidence and limitations; no public usage
+documentation changes are needed. The install-contract guard passes for all
+13 plugins.

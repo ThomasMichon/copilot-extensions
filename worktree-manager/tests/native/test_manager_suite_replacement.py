@@ -35,6 +35,44 @@ def test_fullsuite_refuses_execution_outside_the_disposable_venue(monkeypatch: p
         require_venue()
 
 
+@pytest.mark.parametrize("selection", ("default", "normal", "repair", "fresh", "outside", "missing", "case"))
+def test_command_owner_uses_only_the_existing_fixture_project_root(
+    tmp_path, monkeypatch, selection,
+):
+    from agent_procutil import _caller_owned
+
+    project = tmp_path / "project"
+    project.mkdir()
+    setup = {"mode": selection}
+    if selection not in {"default", "normal", "repair"}:
+        project = {
+            "fresh": tmp_path / "tty-harness",
+            "outside": tmp_path.parent,
+            "missing": tmp_path / "absent",
+            "case": tmp_path,
+        }[selection]
+        if selection == "fresh":
+            project.mkdir()
+        setup["project_root"] = str(project)
+    if selection != "default":
+        (tmp_path / "setup.json").write_text(json.dumps(setup))
+    calls = []
+
+    def run(argv, **options):
+        calls.append(options)
+        return subprocess.CompletedProcess(argv, 0, "cooperative stop", "")
+
+    monkeypatch.setattr(_caller_owned, "run", run)
+    if selection in {"outside", "missing", "case"}:
+        with pytest.raises(ValueError, match="fixture-owned project root"):
+            fixture._run(["not-executed"], tmp_path)
+        assert not calls
+    else:
+        assert fixture._run(["not-executed"], tmp_path).returncode == 0
+        assert calls[0]["cwd"] == project
+        assert calls[0]["allow_daemon_breakaway"] is True
+
+
 @pytest.mark.parametrize("nested", [False, True])
 def test_selected_runtime_python_uses_its_native_installed_layout(tmp_path, nested):
     root = tmp_path / "runtime"

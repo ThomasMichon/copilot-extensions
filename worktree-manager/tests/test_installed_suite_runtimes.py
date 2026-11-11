@@ -85,6 +85,8 @@ def test_fresh_acquisition_owns_its_git_settings_before_any_constructor(
 
     def before_construction(payload, root, env, project, diagnostics, label, run):
         assert Path(git("-C", project, "rev-parse", "--show-toplevel")).resolve() == project.resolve()
+        assert git("-C", project, "symbolic-ref", "--short", "HEAD") == "main"
+        assert json.loads((project.parent / "setup.json").read_text())["project_root"] == str(project)
         assert outer_settings.read_text() == '{"extraKnownMarketplaces":{"outer-only":{}}}'
         assert (diagnostics / "suite-project-init.stdout.txt").is_file()
         raise BeforeConstruction
@@ -94,6 +96,71 @@ def test_fresh_acquisition_owns_its_git_settings_before_any_constructor(
     )
     with pytest.raises(BeforeConstruction):
         fresh_fixture["prepare"](tmp_path / "qualification")
+
+
+def test_fresh_adoption_registers_a_real_private_origin_and_publishes_main(
+    tmp_path, fresh_fixture,
+):
+    import yaml
+
+    profile, _portfolio, _payloads, _home = _selection(tmp_path)
+    lifecycle = fresh_fixture["lifecycle"]
+    project = tmp_path / lifecycle.PROJECT
+    knowledge = tmp_path / lifecycle.KNOWLEDGE
+    home = tmp_path / "h"
+    binding = home / ("." + lifecycle.PROJECT) / "config.yaml"
+    binding.parent.mkdir(parents=True)
+    binding.write_text("{}")
+    (tmp_path / "diagnostics").mkdir()
+    environment = {
+        key: value for key, value in os.environ.items() if not key.upper().startswith("GIT_")
+    }
+    environment.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_NOSYSTEM="1", USERPROFILE=str(home))
+    registrations = []
+
+    def run(argv, env, cwd, diagnostics, label, *, timeout):
+        if argv[0] == "git":
+            return subprocess.run(
+                list(map(str, argv)), cwd=cwd, env=env, capture_output=True, text=True,
+                check=True, timeout=timeout, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            ).stdout.strip()
+        if label == "register-project":
+            origin = run(
+                ["git", "-C", project, "remote", "get-url", "origin"],
+                env, cwd, diagnostics, "origin", timeout=timeout,
+            )
+            assert Path(origin) == tmp_path / "project-origin.git"
+            assert Path(origin).is_dir()
+            registrations.append(origin)
+        elif label == "knowledge-readiness":
+            return json.dumps({"ready": True, "state_root": {"path": str(knowledge)}})
+        elif label == "selected-native-launch":
+            return json.dumps({
+                "launch": yaml.safe_load(
+                    (project / ".agent-worktrees" / "config.yaml").read_text(),
+                )["launch"]["windows"],
+                "agent": True,
+            })
+        else:
+            assert label == "knowledge-register"
+        return ""
+
+    lifecycle._project(tmp_path, environment, "unexecuted-engine", "actual-cli", profile=profile, run=run)
+    assert len(registrations) == 1
+    clone = tmp_path / "consumer"
+    run(
+        ["git", "clone", "--branch", "main", registrations[0], clone],
+        environment, tmp_path, tmp_path, "clone", timeout=15,
+    )
+    assert (clone / ".github" / "copilot" / "settings.json").read_bytes() == (
+        project / ".github" / "copilot" / "settings.json"
+    ).read_bytes()
+    assert run(
+        ["git", "-C", clone, "rev-parse", "HEAD"], environment, tmp_path, tmp_path, "head", timeout=15,
+    ) == run(
+        ["git", "-C", project, "rev-parse", "HEAD"],
+        environment, tmp_path, tmp_path, "head", timeout=15,
+    )
 
 
 def test_harness_registration_preserves_the_full_profile_before_adoption(
@@ -389,7 +456,7 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
             commit = "d" * 40 if defect == "changed-transport" and label.endswith("-after") else transport["commit"]
             return commit + "\n" + transport["tree"]
         if label == "suite-manager-source":
-            assert argv[-4:] == ["--repo", transport["url"], "--ref", transport["commit"]]
+            assert argv[-4:] == ["--repo", transport["url"], "--ref", "main"]
             return ""
         if label == "suite-runtime-update":
             assert argv[1:] == ["-I", "-B", "-m", "worktree_manager", "update", "--project", project.name]

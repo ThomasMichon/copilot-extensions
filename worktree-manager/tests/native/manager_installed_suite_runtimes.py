@@ -195,7 +195,7 @@ def install_runtime_closure(
     verify_inputs("before")
     run(
         [manager, "-I", "-B", "-m", "worktree_manager", "source", "set",
-         "--repo", transport["url"], "--ref", transport["commit"]],
+         "--repo", transport["url"], "--ref", "main"],
         environment, project, diagnostics, "suite-manager-source", timeout=min(30, remaining()),
     )
     run(
