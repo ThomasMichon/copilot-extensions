@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
+
+import pytest
 
 from agent_dispatch import overrides as ov
 
@@ -103,3 +106,188 @@ def test_mutations_are_serialized_without_losing_unrelated_entries(tmp_path):
         "first": {"disabled": True},
         "second": {"disabled": True},
     }
+
+
+def test_standing_deny_selectors_clear_and_read_only_admission(tmp_path):
+    path = tmp_path / "overrides.json"
+    lane = ov.StandingAttachmentSelector("owner", "charter", "first")
+    other_lane = ov.StandingAttachmentSelector("owner", "charter", "second")
+    all_lanes = ov.StandingAttachmentSelector("owner", "charter")
+    with ov.standing_attachment_admission(path, lane) as policy:
+        original_revision = policy["policy_revision"]
+    assert not path.exists()
+
+    unrelated = ov.set_override(path, "unrelated", reason="preserve")
+    ov.set_standing_attachment_deny(path, lane, reason="maintenance", now=10)
+    with pytest.raises(ValueError, match="denied locally: maintenance"):
+        with ov.standing_attachment_admission(path, lane):
+            pytest.fail("denied admission ran")
+    with ov.standing_attachment_admission(path, other_lane) as policy:
+        assert policy["policy_revision"] == original_revision
+    ov.set_standing_attachment_deny(path, all_lanes, reason="all lanes", now=11)
+    assert ov.clear_standing_attachment_deny(path, lane)
+    with pytest.raises(ValueError, match="all lanes"):
+        with ov.standing_attachment_admission(path, lane):
+            pytest.fail("narrow clear bypassed inherited veto")
+    assert ov.clear_standing_attachment_deny(path, all_lanes)
+    assert not ov.clear_standing_attachment_deny(path, all_lanes)
+    before = path.read_bytes()
+    with ov.standing_attachment_admission(path, lane) as policy:
+        assert policy["policy_revision"] == original_revision
+    assert path.read_bytes() == before
+    assert ov.load_overrides(path) == {"unrelated": unrelated}
+
+
+@pytest.mark.parametrize("raw", [
+    "not json at all",
+    '{"a": {"disabled": true}, "b": "nope"}',
+    None,
+])
+def test_ordinary_writers_preserve_malformed_maps_and_standing_holds(tmp_path, raw):
+    path = tmp_path / "overrides.json"
+    if raw is None:
+        selector = ov.StandingAttachmentSelector("owner", "charter", "lane")
+        ov.set_standing_attachment_deny(path, selector, reason="hold", now=1)
+        held = path.read_text(encoding="utf-8")
+        raw = held.replace('"disabled": true', '"disabled": true, "disabled": false')
+        assert raw != held
+    path.write_text(raw, encoding="utf-8")
+
+    for write in (
+        lambda: ov.set_override(path, "unrelated"),
+        lambda: ov.clear_override(path, "unrelated"),
+        lambda: ov.mutate_overrides(path, lambda current: current.clear()),
+    ):
+        with pytest.raises(ValueError):
+            write()
+        assert path.read_text(encoding="utf-8") == raw
+    ov.load_overrides(path)
+
+
+def test_supervise_override_reports_preserved_malformed_map(tmp_path, monkeypatch, capsys):
+    import argparse
+
+    from agent_dispatch import config, supervise_cli
+
+    path = tmp_path / "overrides.json"
+    path.write_text("not json at all", encoding="utf-8")
+    monkeypatch.setattr(config, "overrides_path", lambda: path)
+    args = argparse.Namespace(override_command="disable", machine=None, id="unit", reason="r")
+    assert supervise_cli._cmd_supervise_override(args) == 2
+    assert "override map preserved" in capsys.readouterr().err
+    assert path.read_text(encoding="utf-8") == "not json at all"
+
+
+@pytest.mark.parametrize("damage", [
+    "json", "entry", "version", "selector", "flag", "unknown", "duplicate-veto", "duplicate-selector",
+])
+def test_standing_policy_corruption_holds_without_rewriting(tmp_path, damage):
+    path = tmp_path / "overrides.json"
+    selector = ov.StandingAttachmentSelector("owner", "charter", "lane")
+    ov.set_standing_attachment_deny(path, selector, reason="stop")
+    data = ov.load_overrides(path)
+    record = data[selector.override_id]
+    if damage == "json":
+        path.write_text("{", encoding="utf-8")
+    elif damage == "duplicate-veto":
+        path.write_text(
+            json.dumps(data).replace('"disabled": true', '"disabled": true, "disabled": false'),
+            encoding="utf-8",
+        )
+    elif damage == "duplicate-selector":
+        path.write_text(
+            "{" + json.dumps(selector.override_id) + ":" + json.dumps(record) + ","
+            + json.dumps(selector.override_id) + ":" + json.dumps({**record, "disabled": False}) + "}",
+            encoding="utf-8",
+        )
+    else:
+        if damage == "entry":
+            data["unknown"] = None
+        elif damage == "version":
+            record["version"] = 2
+        elif damage == "selector":
+            record["selector"]["charter_key"] = "other"
+        elif damage == "flag":
+            record["disabled"] = 0
+        else:
+            record["allow"] = True
+        ov.save_overrides(path, data)
+    before = path.read_bytes()
+    with pytest.raises(ValueError):
+        with ov.standing_attachment_admission(path, selector):
+            pytest.fail("corrupt policy admitted work")
+    with pytest.raises(ValueError):
+        ov.clear_standing_attachment_deny(path, selector)
+    assert path.read_bytes() == before
+
+
+def test_standing_policy_unreadable_is_not_absent(tmp_path, monkeypatch):
+    def unreadable(*args, **kwargs):
+        raise PermissionError("test policy cannot be read")
+
+    monkeypatch.setattr(ov.Path, "read_text", unreadable)
+    with pytest.raises(PermissionError):
+        with ov.standing_attachment_admission(
+            tmp_path / "overrides.json", ov.StandingAttachmentSelector("owner", "charter", "lane"),
+        ):
+            pytest.fail("unreadable policy admitted work")
+
+
+def test_standing_deny_waits_for_admission_and_preserves_occupant(tmp_path):
+    path = tmp_path / "overrides.json"
+    selector = ov.StandingAttachmentSelector("owner", "charter", "lane")
+    entered = threading.Event()
+    finished = threading.Event()
+    failures = []
+    occupant = {}
+
+    def deny():
+        entered.set()
+        try:
+            ov.set_standing_attachment_deny(path, selector, reason="stop future admissions")
+        except BaseException as exc:
+            failures.append(exc)
+        finally:
+            finished.set()
+
+    with ov.standing_attachment_admission(path, selector) as policy:
+        thread = threading.Thread(target=deny)
+        thread.start()
+        assert entered.wait(5)
+        assert not finished.wait(0.1)
+        occupant.update({"reservation": "original-native-reservation", "policy": policy})
+    thread.join(10)
+    assert not thread.is_alive() and not failures
+    assert occupant["reservation"] == "original-native-reservation"
+    assert occupant["policy"] == policy
+    with pytest.raises(ValueError, match="denied locally"):
+        with ov.standing_attachment_admission(path, selector):
+            pytest.fail("later admission bypassed the deny")
+
+
+def test_standing_admission_waits_for_in_progress_deny(tmp_path):
+    path = tmp_path / "overrides.json"
+    selector = ov.StandingAttachmentSelector("owner", "charter", "lane")
+    entered = threading.Event()
+    results = []
+
+    def admit():
+        entered.set()
+        try:
+            with ov.standing_attachment_admission(path, selector):
+                results.append("admitted")
+        except ValueError as exc:
+            results.append(str(exc))
+
+    with ov.locked_overrides(path) as overrides:
+        thread = threading.Thread(target=admit)
+        thread.start()
+        assert entered.wait(5)
+        overrides[selector.override_id] = {
+            "version": 1, "selector": {"namespace": "owner", "charter_key": "charter", "lane_key": "lane"},
+            "disabled": True, "reason": "deny ordered first", "at": 1,
+        }
+        ov.save_overrides(path, overrides)
+    thread.join(10)
+    assert not thread.is_alive()
+    assert len(results) == 1 and "denied locally: deny ordered first" in results[0]

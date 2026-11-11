@@ -17,6 +17,29 @@ from agent_dispatch.registrar_discovery import RegistrarSources, add_pointer
 from tests.test_pool_publication_custody import owner as owner
 
 
+@pytest.mark.parametrize("state", ["empty", "missing", "failed"])
+def test_serialized_reader_preserves_actual_registrar_source_metadata(
+    owner: Any, tmp_path: Any, state: str,
+) -> None:
+    daemon, _queue, _calls = owner
+    trusted = tmp_path / "trusted"
+    if state != "missing":
+        trusted.mkdir()
+    if state == "failed":
+        (trusted / "broken.json").write_text("{", encoding="utf-8")
+    base = tmp_path / "registrar"
+    add_pointer("trusted", trusted, base=base)
+    sources = RegistrarSources(
+        base=base, dropins=tmp_path / "absent-dropins", activation_source=lambda: None,
+    )
+    result = daemon._read_source_declarations(lambda: read_supervisor_declarations(sources))
+    assert isinstance(result, DeclarationRead) and tuple(result) == ()
+    assert result.complete is (state != "failed")
+    assert result.source_observations == sources.last_report.source_observations
+    observation, = result.source_observations
+    assert observation.status == {"empty": "complete", "missing": "missing", "failed": "error"}[state]
+
+
 def test_timed_out_actual_registrar_recheck_cannot_restore_confirmed_deletion(
     owner: Any, tmp_path: Any, monkeypatch: Any,
 ) -> None:

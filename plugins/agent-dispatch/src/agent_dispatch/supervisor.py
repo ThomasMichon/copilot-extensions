@@ -437,26 +437,29 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
     # -- helpers -------------------------------------------------------------
 
     def _eligible(self, now: float) -> list[dict]:
-        """Queued, due tasks in the lane matching the label opt-in (oldest first).
+        """Queued, due finite tasks in the lane matching the label opt-in (oldest first).
 
-        Server-side per-label filtering applies before the 200-row limit.
-        A shared newest-first page could otherwise hide older matching tasks
-        behind other lanes' work. Deduplicate the per-label results locally.
+        Server-side per-label and finite-kind filtering applies before the
+        200-row limit. A shared newest-first page could otherwise hide older
+        matching tasks behind other lanes' work or standing charters, which only
+        explicit attachment admission may select. Deduplicate locally.
         """
         if self.labels:
             seen: dict[str, dict] = {}
             for label in sorted(self.labels):
                 for t in self.client.list(
-                    repo=self.repo, status=Status.QUEUED, label=label, limit=200
+                    repo=self.repo, status=Status.QUEUED, label=label, kind="finite", limit=200
                 ):
                     seen[t["id"]] = t
             tasks = list(seen.values())
         else:
             # No label restriction (a catch-all pool) -- nothing to scope the
             # server-side query to; same broad page as before.
-            tasks = self.client.list(repo=self.repo, status=Status.QUEUED, limit=200)
+            tasks = self.client.list(repo=self.repo, status=Status.QUEUED, kind="finite", limit=200)
         out: list[dict] = []
         for t in tasks:
+            if t.get("kind", "finite") != "finite":
+                continue  # standing charters are never finite executable work
             if (t.get("not_before") or 0) > now:
                 continue  # deferred: not due yet
             if t.get("awaiting_steer"):

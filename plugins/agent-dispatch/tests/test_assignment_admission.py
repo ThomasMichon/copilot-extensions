@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sys
 from dataclasses import replace
+from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -132,6 +133,31 @@ def test_config_reads_are_passive_and_source_reuse_distinguishes_admission(monke
         config_identity(replace(cfg, relationship_admission=None, relationship_authority=None)),
     }
     assert len(identities) == 4
+
+
+def test_standing_policy_is_optional_and_retained_from_the_configured_owner(monkeypatch, tmp_path):
+    standing = module.StandingAdmission(
+        "host", tmp_path / "overrides.json", (sys.executable, "selected-owner"),
+        lambda reference: tmp_path / "materialization.json",
+    )
+    policy = ModuleType("policy")
+    admission = module.RelationshipAdmission(lambda *_: None, lambda *_: None, standing)
+    policy.factory = lambda: admission
+    monkeypatch.setitem(sys.modules, "policy", policy)
+    selections = []
+    monkeypatch.setattr(
+        assignment_relationship_owner.WorktreeRelationshipWriter, "selected",
+        lambda **kwargs: selections.append(kwargs) or kwargs,
+    )
+    assert module.configured_writer("policy:factory", "local")["standing"] is standing
+    admission = replace(admission, standing=None)
+    assert "standing" not in module.configured_writer("policy:factory", "local")
+    with pytest.raises(ValueError, match="configured owner"):
+        replace(admission, standing={"machine": "host"})
+    with pytest.raises(ValueError, match="absolute policy"):
+        replace(standing, overrides_path=Path("relative-policy.json"))
+    with pytest.raises(ValueError, match="selected owner"):
+        replace(standing, materialization_command=("implicit-path-command",))
 
 
 @pytest.mark.parametrize("authority", [None, "local"])

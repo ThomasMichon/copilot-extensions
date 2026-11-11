@@ -12,6 +12,7 @@ from dropin_registry import ScanAuthority
 
 from .pool_instances import PoolDefinitionError, PoolInstanceDefinition, ordered_pool_instances
 from .registrar import ProfileDeclaration
+from .registrar_observations import RegistrarSourceObservation
 from .registrations import RegistrationKind
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ class DeclarationRead:
     declarations: tuple[ProfileDeclaration, ...]
     complete: bool
     reason: str = ""
+    source_observations: tuple[RegistrarSourceObservation, ...] = ()
 
     def __iter__(self) -> Iterator[ProfileDeclaration]:
         return iter(self.declarations)
@@ -55,7 +57,7 @@ def read_supervisor_declarations(
             complete, reason = False, "legacy-source-unavailable"
         names = {declaration.name for declaration in declarations}
         declarations = (*declarations, *(profile for profile in profiles if profile.name not in names))
-    return DeclarationRead(declarations, complete, reason)
+    return DeclarationRead(declarations, complete, reason, report.source_observations)
 
 
 @dataclass(frozen=True)

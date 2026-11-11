@@ -7,7 +7,10 @@ Keep the complete worker charters in the topology document, not only links here.
 |-------|----------------|
 | Canonical objective / effort | |
 | Topology document and current revision | |
-| Native dispatcher machine / project / worktree | |
+| Saved complete materialization, source and expected effective revisions | |
+| Native owner's accepted effective revision and acceptance evidence | |
+| Native dispatcher machine / project / worktree, or explicitly unappointed | |
+| Optional Dispatch declaration/task and original relationship references | |
 | Existing single-writer custody owner and evidence | |
 | Original operator authority reference and exact limits | |
 | Compatible harness / installed native adapters | |
@@ -30,6 +33,17 @@ resource limits, supervision and exit policy. Preserve original grants and later
 holds; a newer charter cannot enlarge authority. Distinguish expected and accepted
 charter revisions. The dispatcher delegates implementation rather than becoming
 another worker.
+
+An exported materialization retains the complete effective charter and context,
+not only its source template. Keep its source revision, expected content revision
+and native owner's accepted revision distinct. Export and inspection are read-only
+preparation, not activation or proof of acceptance.
+
+For native Dispatch standing charters, keep desired intent here and derive
+attachment, current accepted materialization, holds and retirement from dated
+native observations. Store only relationship receipt references, never tokens.
+Do not duplicate native ownership or acceptance as another writable map.
+An unappointed dispatcher may inspect and report; it may not allocate or relay.
 
 Use [the runbook](../SKILL.md) and
 [native-adapter recovery](../references/adapters-and-recovery.md).
