@@ -65,6 +65,10 @@ and protection writes remain separate.
 The [remote knowledge-checkout acquisition proposal](phase-5-knowledge-checkout-acquisition.md)
 composes the shared acquisition owner without reference registration or
 repository setup; local registration and binding remain separately confirmed.
+The [personal private knowledge-creation proposal](phase-5-private-knowledge-creation.md)
+defines explicitly confirmed personal GitHub creation and default-branch
+safeguards. It does not widen acquisition, registration or binding, enable
+organization creation, or authorize live provider effects.
 
 ## Plan
 

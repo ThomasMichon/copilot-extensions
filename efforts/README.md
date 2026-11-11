@@ -20,7 +20,6 @@ rewriting historical journal evidence or treating a source merge as rollout.
 | Effort | Status | Coordination |
 |--------|--------|--------------|
 | [Latest Waiting Update](active/latest-waiting-update/README.md) | Draft; latest-wins admission proposal before code | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |
-| [Dispatch Standing Charters](active/dispatch-standing-charters/README.md) | In progress; operator docs and complete isolated discovery/native-owner flows qualified, source delivery open | #11770; existing registrar, lifecycle, materialization and topology owners retained; no live enrollment or rollout |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Active; legacy mux caller corrections and readiness-only scope proposal | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
 | [Derived Disk Hygiene](active/derived-disk-hygiene/README.md) | Active; bytecode, scratch and claim-engine slices merged; guided cleanup delivery, producer/lock integration and rollout observation remain | #10968/#10965/#10966/#10967; independent per-track PRs, no automatic finalize deletion or unapproved cleanup/rollout |
 | [Bridge Delivery Status](active/bridge-delivery-status/README.md) | Draft; model-facing receipt and coalesced host subscription proposal before implementation | #11448; preserves #6394 inbox, #11445 registration and #11298 roster owners; no rollout or peer-session repair |
@@ -182,6 +181,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Outcome | Coordination |
 |--------|---------|--------------|
+| [Dispatch Standing Charters](2026/11/10%20dispatch-standing-charters/README.md) | Done for source scope; plan #11882 and implementation #11962 merged after approval and required CI, implementation promoted through #12001; adoption prerequisites documented | #11770; existing registrar, lifecycle, materialization and topology owners retained; no enrollment, materialization or rollout |
 | [CWD-Owned Command Context](2026/11/10%20cwd-owned-command-context/README.md) | Done for requested source-and-audit scope; owner-reference removal merged in #11895, 595 inputs/declarations classified and implementation worktree finalized | #11883; 143 migration candidates remain individually tracked in #11891/#11892/#11893; no rollout |
 | [Portable Agent Topology](2026/11/09%20portable-agent-topology/README.md) | Done for source scope; portable dispatcher, schema and read-only helper merged in #11738 after approval and required CI | #11715 retains archive and native settlement; normal promotion and authorized live adoption remain separate, no rollout |
 | [Mux Question Answers](2026/11/09%20mux-question-answers/README.md) | Done; reviewed source released, both authorized installed environments accepted a fresh mux answer and same-conversation continuation | #11371 retains archive review/Main publication and exact resource settlement; #10486 keeps broader MCP handover/whole-suite acceptance |
