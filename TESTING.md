@@ -262,6 +262,19 @@ aggregate and 180-second native bounds. It does not exercise interactive Picker
 keystrokes, new-window presentation or caller-Job independence. Its protected
 controller support must be reviewed and promoted before submission.
 
+`submit --packet native-worktrees-manager-mux` selects the distinct
+`test_manager_mux_decision` case in that Manager application fixture. A default
+saved decision must publish a correlated terminal offer while the Manager
+journal still lacks `launcher-returned`. The installed PowerShell terminal
+helper then consumes the offer and runs the installed launcher and completion
+callback. The callback must finish while the same native broker remains running;
+native process retirement and Manager pane-mapping tombstones are checked
+separately. Fresh/resume history, seed non-replay, native pins, Worktrees-only
+feed, sanitization and the same 300/420/180-second bounds remain unchanged.
+This proves neither interactive Picker keys nor visible new-window behavior
+or survival after all caller cleanup Jobs. Actual protected controller support
+must admit the packet before submission.
+
 `submit --packet native-worktrees-caller-jobs` separately selects
 `test_public_caller_job_lifetime` in the same source fixture. Only this
 selection uses the existing hosted native application owner, with renewable

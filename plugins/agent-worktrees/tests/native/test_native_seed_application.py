@@ -514,6 +514,61 @@ def test_manager_decision_proof_distinguishes_native_exit_from_assertion(tmp_pat
         assert json.loads(marker.read_text(encoding="utf-8")) == {"attempt": "attempt", "exit_code": 1}
 
 
+@pytest.mark.parametrize("damage", ["none", "early-callback", "nonce", "callback", "arguments"])
+def test_manager_mux_decision_retains_proof_only_after_correlated_preparation(tmp_path, monkeypatch, damage):
+    from test_headed_worktrees_copilot import _manager_mux_decision_source
+
+    script, marker = tmp_path / "launch-session.ps1", tmp_path / "decision.json"
+    script.touch()
+    request = tmp_path / "request.json"
+    prepared = {
+        "nonce": "offer", "script": str(script),
+        "arguments": ["--project", "native-copilot", "--worktree-id", "worktree",
+                      "--require-launch-attempt", "--launch-attempt-id", "attempt"],
+        "completion": [sys.executable, "-I", "-B", "-X", "utf8",
+                       "-m", "worktree_manager.terminal_launch", "attempt"],
+    }
+    phases = ["confirmed", "resolution-requested", "resolved", "launch-requested"]
+    if damage == "early-callback":
+        phases.append("launcher-returned")
+    elif damage == "nonce":
+        prepared["nonce"] = "another-offer"
+    elif damage == "callback":
+        prepared["completion"][-1] = "another-attempt"
+    elif damage == "arguments":
+        prepared["arguments"].append("--no-mux")
+    (tmp_path / "result.json").write_text(json.dumps(prepared), encoding="utf-8")
+    manager = ModuleType("worktree_manager")
+    decisions = []
+    manager.__main__ = SimpleNamespace(
+        _run_production_picker=lambda *args, **kwargs: decisions.append(kwargs["initial_decision"]) or 0,
+    )
+    manager.engine_client = SimpleNamespace(set_engine_command=lambda command: None)
+    manager.terminal_launch = SimpleNamespace(validate=lambda: (request, {"nonce": "offer"}))
+    attempts = ModuleType("worktree_manager.launch_attempts")
+    attempts.LaunchAttempts = lambda: SimpleNamespace(
+        record_intent=lambda *args, **kwargs: None,
+        detail=lambda *args, **kwargs: {
+            "events": [{"phase": phase} for phase in phases], "input": {"options": {}},
+        },
+    )
+    relocated = ModuleType("worktree_manager.relocated_launch")
+    relocated._relocated_launch_script = lambda: script
+    for module in (manager, attempts, relocated):
+        monkeypatch.setitem(sys.modules, module.__name__, module)
+    monkeypatch.setattr(sys, "argv", ["fixture", "engine", "worktree", "attempt", str(script), str(marker)])
+    code = compile(_manager_mux_decision_source(), "manager-mux-decision-fixture", "exec")
+    with pytest.raises(SystemExit if damage == "none" else AssertionError) as error:
+        exec(code, {"__name__": "__main__"})
+    assert decisions[0]["options"] == {}
+    assert marker.exists() is (damage == "none")
+    if damage == "none":
+        assert error.value.code == 0
+        assert json.loads(marker.read_text()) == {
+            "attempt": "attempt", "exit_code": 0, "request": str(request),
+        }
+
+
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_jobs=False):
     if caller_jobs:
         from agent_procutil import contained_test_mode
