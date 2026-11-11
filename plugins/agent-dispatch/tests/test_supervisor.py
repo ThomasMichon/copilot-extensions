@@ -530,6 +530,26 @@ def test_eligible_scopes_the_200_limit_per_own_label_not_globally(q, client):
     assert spawned == [old_task.id]
 
 
+def test_eligible_excludes_standing_charters_before_the_200_limit(q, client):
+    """Standing charters stay queued for explicit attachment admission only.
+    A newest-first page full of them must not starve older finite work."""
+    from agent_dispatch.queue_standing_charters import StandingCharterDeclaration
+
+    finite = q.create("older finite work")
+    for i in range(201):
+        q.reconcile_standing_charter(f"Standing {i}", StandingCharterDeclaration(
+            namespace="owner", charter_key="dispatcher", lane_key=f"lane-{i}",
+            effort_ref="efforts/dispatcher", materialization_ref="roles/dispatcher",
+            source_revision="source-1", expected_materialization_revision="effective-1",
+        ), repo=TEST_REPO)
+    assert finite.id not in {t.id for t in q.list(status=Status.QUEUED, limit=200)}
+
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+    assert sup.poll_once() == [finite.id]
+    assert spawn.calls == [finite.id]
+
+
 def test_poll_skips_a_held_queued_task(q, client):
     """PR #2913 review finding: `Supervisor._eligible()` must exclude a
     queued task with a durable operator hold (Phase 1's Pause primitive) --

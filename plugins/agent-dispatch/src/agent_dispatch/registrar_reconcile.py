@@ -188,9 +188,14 @@ def runs_on_machine(decl: ProfileDeclaration, machine: str | None) -> bool:
 def declared_registrations(
     decls: Iterable[ProfileDeclaration], *, machine: str | None, env: str = "default"
 ) -> list[dict]:
-    """Convert the declarations that run on ``machine`` into daemon registrations."""
+    """Convert the declarations that run on ``machine`` into daemon registrations.
+
+    Standing-charter declarations are durable task records, not processes.
+    """
+    from .registrar_standing import is_standing_declaration
+
     return [
         declaration_to_registration(decl, machine=machine, env=env)
         for decl in decls
-        if runs_on_machine(decl, machine)
+        if not is_standing_declaration(decl) and runs_on_machine(decl, machine)
     ]

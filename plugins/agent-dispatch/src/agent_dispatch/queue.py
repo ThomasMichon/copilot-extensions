@@ -120,6 +120,8 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
     spawn_key,
 )
 from .queue_storage import QueueStorageMixin
+from .queue_standing_charters import QueueStandingChartersMixin
+from .queue_standing_sources import QueueStandingSourcesMixin
 from .queue_task_recovery import TaskRecoveryMixin
 from .queue_task_relationships import QueueTaskRelationshipsMixin
 from .assignment_workspace import RelationshipWriter
@@ -165,6 +167,8 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 class TaskQueue(
+    QueueStandingSourcesMixin,
+    QueueStandingChartersMixin,
     QueueSubmissionPreparationMixin,
     QueueTaskRelationshipsMixin,
     PoolDeclineMixin,
@@ -305,6 +309,10 @@ class TaskQueue(
             migrate_relationships(conn)
             from .queue_submission_preparation import migrate_submission_preparation
             migrate_submission_preparation(conn)
+            from .queue_standing_schema import migrate_standing_charters
+            migrate_standing_charters(conn)
+            from .queue_standing_sources import migrate_standing_sources
+            migrate_standing_sources(conn)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS coordinator_fencing ("
                 " singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"

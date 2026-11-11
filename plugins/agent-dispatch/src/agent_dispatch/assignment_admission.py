@@ -5,8 +5,31 @@ from __future__ import annotations
 import importlib
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 from .assignment_workspace import AssignmentWorkspace
+
+
+@dataclass(frozen=True)
+class StandingAdmission:
+    """Host-owned policy and the selected materialization owner's read command."""
+
+    machine: str
+    overrides_path: Path
+    materialization_command: tuple[str, ...]
+    resolve_materialization: Callable[[str], Path]
+
+    def __post_init__(self) -> None:
+        if (
+            not isinstance(self.machine, str) or not self.machine.strip()
+            or self.machine != self.machine.strip() or "/" in self.machine
+            or not isinstance(self.overrides_path, Path) or not self.overrides_path.is_absolute()
+            or not isinstance(self.materialization_command, tuple) or not self.materialization_command
+            or any(not isinstance(arg, str) or not arg.strip() for arg in self.materialization_command)
+            or not Path(self.materialization_command[0]).is_absolute()
+            or not callable(self.resolve_materialization)
+        ):
+            raise ValueError("standing admission requires its host, absolute policy and selected owner")
 
 
 @dataclass(frozen=True)
@@ -15,10 +38,13 @@ class RelationshipAdmission:
 
     admit_workspace: Callable[[AssignmentWorkspace, dict], None]
     admit_request: Callable[[AssignmentWorkspace, dict, dict], None]
+    standing: StandingAdmission | None = None
 
     def __post_init__(self) -> None:
         if not callable(self.admit_workspace) or not callable(self.admit_request):
             raise ValueError("relationship admission requires both independent admission owners")
+        if self.standing is not None and not isinstance(self.standing, StandingAdmission):
+            raise ValueError("standing admission must be supplied by the configured owner")
 
 
 def configured_writer(spec: str | None, authority: str | None):
@@ -45,7 +71,11 @@ def configured_writer(spec: str | None, authority: str | None):
         raise ValueError("relationship admission factory did not return independent admission owners")
     from .assignment_relationship_owner import WorktreeRelationshipWriter
 
-    return WorktreeRelationshipWriter.selected(
-        admit_workspace=admission.admit_workspace,
-        admit_request=admission.admit_request,
-    )
+    selection = {
+        "admit_workspace": admission.admit_workspace,
+        "admit_request": admission.admit_request,
+    }
+    # Without standing policy, retain the original two-owner selection exactly.
+    if admission.standing is not None:
+        selection["standing"] = admission.standing
+    return WorktreeRelationshipWriter.selected(**selection)
