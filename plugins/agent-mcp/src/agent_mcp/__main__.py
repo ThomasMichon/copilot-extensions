@@ -81,7 +81,9 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
     if not target:
         print("agent-mcp bridge: a bridge name or --config FILE is required", file=sys.stderr)
         return 2
-    from . import forward
+    from . import forward, owner_handoff
+    if owner_handoff.requested(args):
+        return owner_handoff.run(target, args)
     return forward.run(target)
 
 
@@ -91,7 +93,9 @@ def _cmd_forward(args: argparse.Namespace) -> int:
         print("agent-mcp forward: a bridge name or --config FILE is required",
               file=sys.stderr)
         return 2
-    from . import forward
+    from . import forward, owner_handoff
+    if owner_handoff.requested(args):
+        return owner_handoff.run(target, args)
     return forward.run(target, socket_path=args.socket)
 
 
@@ -769,6 +773,8 @@ class _LazyVersionAction(argparse.Action):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from .owner_handoff import add_arguments as add_owner_arguments
+
     _h = "bridge name under ~/"
     _h += ".agent-mcp/bridges/"  # marketplace-isolation: allow deployed-runtime-diagnostics
     parser = argparse.ArgumentParser(prog="agent-mcp", description=__doc__)
@@ -782,6 +788,7 @@ def build_parser() -> argparse.ArgumentParser:
                        "AGENT_MCP_NO_MULTIPLEX for the classic in-process bridge)")
     p_bridge.add_argument("name", nargs="?", help=_h)
     p_bridge.add_argument("--config", help="explicit path to a bridge config file")
+    add_owner_arguments(p_bridge)
     p_bridge.set_defaults(func=_cmd_bridge)
 
     p_forward = sub.add_parser(
@@ -792,6 +799,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_forward.add_argument("--config", help="explicit path to a bridge config file")
     p_forward.add_argument("--socket", help="serve socket handle to attach "
                                             "(default: $AGENT_MCP_HOME/serve.sock)")
+    add_owner_arguments(p_forward)
     p_forward.set_defaults(func=_cmd_forward)
 
     p_validate = sub.add_parser("validate", help="validate a bridge config")
