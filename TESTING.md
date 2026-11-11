@@ -10080,6 +10080,10 @@ real backend readiness; it does not create or unlock a database. Failed required
 readiness retains bounded raw reports through the selected Machines owner's
 admitted, execution-bound read-only actions, without applying repair or relaxing
 the original readiness refusal.
+Delivered payloads retain exact full-manifest identity after runtime construction;
+failed comparisons retain bounded path/hash differences without cache exemptions.
+Index configuration, role and catalog helpers explicitly disable bytecode writes;
+the runtime's existing owned-cache policy is unchanged.
 
 If baseline preparation reports a Vault activation refusal, the fixture also
 runs the retained payload's read-only activation reader under a bounded native
@@ -10090,6 +10094,10 @@ Missing payloads and settled probe timeouts/output-limit failures are secondary
 diagnostics: the original assertion or `check=False` result remains intact.
 Unconfirmed execution or cleanup still propagates with its exact process/Job
 custody rather than being reduced to a diagnostic result.
+If a driver refuses before advertising its request, diagnostics may retain
+bounded, strictly named request logs from that case's isolated driver directory.
+Advertised requests retain priority; unrelated files, witness data and other
+homes or subdirectories are not scanned.
 
 The Index host role is written as YAML readable by both native and
 dependency-free role resolvers. Preparation explicitly provisions its full

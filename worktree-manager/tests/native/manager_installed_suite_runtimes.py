@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import shutil
+import sys
 import time
 import tomllib
 
@@ -204,10 +205,20 @@ def install_runtime_closure(
     def verify_inputs(phase):
         for name, row in payloads.items():
             payload = Path(row["path"])
-            if not payload.resolve().is_relative_to(home.resolve()) or (
-                _PROVENANCE["content_manifest"](payload)
-                != _PROVENANCE["content_manifest"](artifact / "plugins" / name)
-            ):
+            if not payload.resolve().is_relative_to(home.resolve()):
+                raise ValueError(f"{name}: runtime construction lost its frozen installed payload")
+            actual = _PROVENANCE["content_manifest"](payload)
+            expected = _PROVENANCE["content_manifest"](artifact / "plugins" / name)
+            if actual != expected:
+                from manager_suite_diagnostics import _snapshot_difference
+
+                try:
+                    (diagnostics / f"suite-runtime-payload-difference-{name}-{phase}.json").write_text(
+                        json.dumps(_snapshot_difference(expected, actual), sort_keys=True),
+                        encoding="utf-8",
+                    )
+                except OSError as error:
+                    print(f"{name}: payload difference diagnostic unavailable: {error}", file=sys.stderr)
                 raise ValueError(f"{name}: runtime construction lost its frozen installed payload")
         observed = run(
             ["git", "--git-dir", transport["repository"], "rev-parse", "HEAD", "HEAD^{tree}"],

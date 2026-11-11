@@ -923,6 +923,22 @@ def test_diagnostics_copy_only_advertised_request_logs(tmp_path: Path) -> None:
     assert (root / "witness.json").read_text(encoding="utf-8") == "opaque witness"
 
 
+def test_early_driver_refusal_retains_only_strictly_named_case_request_logs(tmp_path: Path) -> None:
+    root = tmp_path / "h" / ".copilot-extensions" / "update-driver"
+    root.mkdir(parents=True)
+    identifier = "a" * 32
+    log = root / (identifier + ".log")
+    log.write_text("original builder failure", encoding="utf-8")
+    (root / "operator.log").write_text("not a request log", encoding="utf-8")
+    (root / ("b" * 32 + ".log")).mkdir()
+    (root / "witness.json").write_text("opaque witness", encoding="utf-8")
+    diagnostics.retain_driver_logs(tmp_path, "transaction returned with unclosed participants")
+    copied = list((tmp_path / "driver-logs").iterdir())
+    assert [path.name for path in copied] == [log.name]
+    assert copied[0].read_text() == log.read_text() == "original builder failure"
+    assert (root / "witness.json").read_text() == "opaque witness"
+
+
 def test_diagnostics_bound_logs_without_mutating_the_source(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

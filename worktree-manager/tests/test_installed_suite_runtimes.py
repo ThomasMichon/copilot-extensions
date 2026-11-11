@@ -503,10 +503,10 @@ def test_fresh_index_roles_are_readable_without_runtime_yaml_dependencies(tmp_pa
 @pytest.mark.parametrize(
     "defect", [None, "update-refused", "missing-runtime", "wrong-version", "foreign-machines",
                "readiness-refused", "diagnostic-refused", "diagnostic-custody",
-               "changed-transport", "changed-cli", "changed-payload"],
+               "changed-transport", "changed-cli", "changed-payload", "changed-payload-diagnostic"],
 )
 def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_recipe(
-    tmp_path, monkeypatch, defect,
+    tmp_path, monkeypatch, capsys, defect,
 ):
     monkeypatch.syspath_prepend(str(NATIVE))
     import manager_suite_fixture
@@ -564,6 +564,15 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
 
     custody = OwnedCleanupError(None)
     refused = defect in {"readiness-refused", "diagnostic-refused", "diagnostic-custody"}
+    if defect == "changed-payload-diagnostic":
+        original_write = Path.write_text
+
+        def write(path, *args, **kwargs):
+            if path.name.startswith("suite-runtime-payload-difference-"):
+                raise OSError("controlled diagnostic write refusal")
+            return original_write(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "write_text", write)
 
     def run(argv, environment, cwd, diagnostics, label, *, timeout):
         assert 0 < timeout <= 120
@@ -608,7 +617,7 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
         assert label == "suite-machines-readiness"
         if defect == "changed-cli":
             cli.write_bytes(b"substituted executable")
-        elif defect == "changed-payload":
+        elif defect in {"changed-payload", "changed-payload-diagnostic"}:
             (Path(payloads["agent-machines"]["path"]) / "README.md").write_text("changed")
         machines = home / ".agent-machines" / "versions" / "1.0" / ".venv" / "Scripts" / "python.exe"
         return json.dumps({
@@ -646,3 +655,12 @@ def test_runtime_construction_keeps_update_discovery_and_readiness_in_one_owned_
             RUNTIMES["install_runtime_closure"](artifact, controls["_COMMIT"], **arguments)
         if refused:
             assert "did not satisfy required application readiness" in str(failure.value)
+        if defect == "changed-payload":
+            difference = json.loads(
+                (tmp_path / "suite-runtime-payload-difference-agent-machines-after.json").read_text(),
+            )
+            assert difference["counts"] == {"added": 0, "removed": 0, "changed": 1}
+            assert set(difference["changed"]) == {"README.md"}
+        elif defect == "changed-payload-diagnostic":
+            assert "lost its frozen installed payload" in str(failure.value)
+            assert "controlled diagnostic write refusal" in capsys.readouterr().err

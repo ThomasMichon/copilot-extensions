@@ -1417,3 +1417,58 @@ removed rather than shipped after this smaller input correction was identified.
 This is fixture-only, with no additional runtime protocol or operator-document
 change. The next exact-head disposable run must still prove the installed-owner
 path and full readiness; local parser success alone is not that acceptance.
+
+Run 42995152279 at `0a091a8cda54990e359c6050cd3ae5b926782a81`
+passes all 13 actual runtime import/version checks and actual selected Machines
+required-readiness. All nine required module observations are satisfied,
+including Index and Vault `configuration-empty`. Fresh then correctly fails
+the post-update exact payload comparison for Index; settlement succeeds.
+This is readiness evidence, not a complete runtime-closure or lifecycle result.
+Repair passes. Normal independently fails its initial Manager constructor in
+`driver.drain` with `ParticipantError: transaction returned with unclosed
+participants`; its case also settles successfully.
+
+A contained real-reader comparison demonstrates an immutable-payload defect:
+Index's configuration helper uses `-E`, so the cache environment flag is
+ignored. It creates ten cache paths in a copied payload; explicit `-B` leaves
+the entire manifest unchanged. The native gate's configuration, role and
+session-stamp helpers now use explicit no-bytecode flags on both platforms.
+Generator-owned catalog gates receive the same correction; only Index declares
+that gate, and only its two catalog outputs change on regeneration. Runtime
+owned-cache behavior, source selection and readiness judgments are unchanged.
+A generated Index patch changefile covers this production correction.
+
+Fixture payload failures now retain bounded exact path/hash differences, with
+no bytecode exclusion or resealing. A failed diagnostic write preserves the
+original immutable-payload refusal. The normal builder's original log was not
+advertised before the cleanup exception. PR #11121 owns overlapping foreground
+bootstrap hunks, so the failure is reported cooperatively there rather than
+pre-patched. Only fixture diagnostics change: without an advertised request,
+they may retain bounded strictly named logs from this case's private driver
+directory, never witness data, unrelated files or other homes. The normal
+failure's underlying cause remains unproven and unwaived.
+
+Source validation includes 65 runtime/diagnostic controls and three subsequent
+diagnostic-write/refusal edge controls, plus two passing generated-catalog
+controls with one POSIX execution skip. The broader Index packet exposed stale
+synthetic dispatcher fixtures: a contained old/new-flags comparison reproduces
+the same configuration refusal in both. Those cases now explicitly isolate
+the independent preference owner when using synthetic receipts; native reader
+and readiness cases retain the real owner path by default. Missing source/SDK
+inputs in private fixture payloads and setup runtimes are supplied. After these
+corrections, 51 Index gate/catalog cases pass in the broad packet; its remaining
+two duplicate-copy setup errors are corrected and both targeted cases pass.
+The 37 platform skips are not native POSIX proof. These fixture changes confer
+no namespaced-owner or live acceptance.
+
+Changed-source lint, generated-file consistency, the 13-plugin install contract,
+documentation consistency and whitespace pass. The generator's existing
+eligible-unit source digest is refreshed from the exact staged LF bytes; nodes,
+coverage targets, effect restrictions and budgets are unchanged. Metadata/source
+binding validation is not a substitute for the next exact-head required CI.
+Documentation-impact review updates the suite's evidence/diagnostic guidance;
+there is no new operator syntax or mutable runtime policy. The existing
+disposable Windows lane must still prove unchanged payloads, complete fresh
+actions and settlement, and resolve or expose the normal bootstrap failure.
+Authentic upgrade, mandatory frozen enforcement and separate Main adoption
+remain open.

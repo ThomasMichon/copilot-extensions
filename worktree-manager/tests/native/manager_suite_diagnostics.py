@@ -1,4 +1,4 @@
-"""Read installed planning facts and retain bounded advertised request logs."""
+"""Read installed planning facts and retain bounded case-owned request logs."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import argparse
 from contextlib import contextmanager
 import json
 import hashlib
+from itertools import islice
 import os
 from pathlib import Path
 import re
@@ -267,9 +268,27 @@ def _engine_probe() -> dict[str, Any]:
 
 def retain_driver_logs(case: Path, output: str) -> None:
     identifiers = sorted(set(re.findall(r"\bUpdate request ([0-9a-f]{32})\b", output)))
-    if not identifiers:
-        return
     root = case / "h" / ".copilot-extensions" / "update-driver"
+    if not identifiers:
+        try:
+            if (
+                not root.is_dir() or root.is_symlink()
+                or not root.resolve().is_relative_to(case.resolve())
+            ):
+                return
+            for path in islice(root.iterdir(), 128):
+                if (
+                    re.fullmatch(r"[0-9a-f]{32}\.log", path.name)
+                    and not path.is_symlink() and path.is_file()
+                ):
+                    identifiers.append(path.stem)
+                    if len(identifiers) == 8:
+                        break
+        except OSError as error:
+            print(f"Case request log discovery failed: {error}", file=sys.stderr)
+            return
+        if not identifiers:
+            return
     destination = case / "driver-logs"
     records = []
     for identifier in identifiers:

@@ -92,7 +92,7 @@ try {
     } else {
         (Get-Location).Path
     }
-    $effectiveJson = (& $GatePython.Source -E -X utf8 $EffectiveResolver `
+    $effectiveJson = (& $GatePython.Source -B -E -X utf8 $EffectiveResolver `
         --cwd $effectiveCwd 2>$null | Out-String)
     if ($LASTEXITCODE -ne 0) { throw 'Effective configuration reader failed' }
     $Effective = $effectiveJson | ConvertFrom-Json -ErrorAction Stop
@@ -445,7 +445,7 @@ if ($Command -ceq '__session-stamp') {
         try { $held = $mutex.WaitOne(0) }
         catch [Threading.AbandonedMutexException] { $held = $true }
         if (-not $held) { exit 0 }
-        & $GatePython.Source -I -X utf8 (Join-Path $PSScriptRoot 'session-stamp.py') $Root $PayloadRoot $ActualMode
+        & $GatePython.Source -I -B -X utf8 (Join-Path $PSScriptRoot 'session-stamp.py') $Root $PayloadRoot $ActualMode
         exit $LASTEXITCODE
     } finally {
         if ($held) { [void]$mutex.ReleaseMutex() }
@@ -473,7 +473,7 @@ function Get-ConfiguredRole {
         [Environment]::MachineName
     }
     $roleResolver = Join-Path $PSScriptRoot 'resolve-activation-role.py'
-    $resolverArgs = @('-E', '-X', 'utf8', $roleResolver, '--machine', $machine)
+    $resolverArgs = @('-B', '-E', '-X', 'utf8', $roleResolver, '--machine', $machine)
     if ($env:AGENT_INDEX_CONFIG_DATA_B64) {
         $resolverArgs += @('--data-b64', $env:AGENT_INDEX_CONFIG_DATA_B64)
     } elseif ($env:AGENT_INDEX_EFFECTIVE_CONFIG) {
@@ -481,7 +481,7 @@ function Get-ConfiguredRole {
     } elseif ($env:AGENT_INDEX_REPO) {
         $resolverArgs += @('--repo', $env:AGENT_INDEX_REPO)
     }
-    if ($resolverArgs.Count -gt 6) {
+    if ($resolverArgs.Count -gt 7) {
         $resolved = (& $GatePython.Source @resolverArgs 2>$null | Out-String)
         if ($LASTEXITCODE -ne 0) { throw 'Activation role reader failed' }
         $role = ("$resolved").Trim().ToLowerInvariant()

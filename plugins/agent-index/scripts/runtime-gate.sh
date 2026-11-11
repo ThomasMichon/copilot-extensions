@@ -53,7 +53,7 @@ _emit_inactive() {
 if [ -z "$PY_GATE" ] || [ ! -f "$EFFECTIVE_RESOLVER" ]; then
     _configuration_failure
 fi
-EFFECTIVE_JSON="$("$PY_GATE" -E -X utf8 "$EFFECTIVE_RESOLVER" \
+EFFECTIVE_JSON="$("$PY_GATE" -B -E -X utf8 "$EFFECTIVE_RESOLVER" \
     --cwd "${AGENT_INDEX_REPO:-$PWD}" 2>/dev/null)" || _configuration_failure
 EFFECTIVE_FLAT="$(
     printf '%s' "$EFFECTIVE_JSON" | "$PY_GATE" -E -X utf8 -c '
@@ -335,7 +335,7 @@ if [ "$COMMAND" = __session-stamp ]; then
         exit 126
     fi
     # Python owns the no-follow lock descriptor through every metadata write.
-    "$PY_GATE" -I -X utf8 "$SCRIPT_DIR/session-stamp.py" "$ROOT" "$PAYLOAD_ROOT" "$ACTUAL_MODE"
+    "$PY_GATE" -I -B -X utf8 "$SCRIPT_DIR/session-stamp.py" "$ROOT" "$PAYLOAD_ROOT" "$ACTUAL_MODE"
     exit $?
 fi
 
@@ -358,7 +358,7 @@ _configured_role() {
         args+=(--repo "$AGENT_INDEX_REPO")
     fi
     if [ "${#args[@]}" -gt 2 ]; then
-        role="$("$PY_GATE" -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" \
+        role="$("$PY_GATE" -B -E -X utf8 "$SCRIPT_DIR/resolve-activation-role.py" \
             "${args[@]}" 2>/dev/null)" || return 2
         case "$role" in host|client) printf '%s' "$role"; return 0 ;; esac
         [ "$role" = unconfigured ] || return 2

@@ -147,7 +147,9 @@ def test_activation_import_checks_use_target_slot_python() -> None:
     assert "else { $LinkPython }" not in ps_activate
 
 
-def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
+def _fixture(
+    tmp_path: Path, shell: str, *, native_configuration_owner: bool = True,
+) -> tuple[Path, dict[str, str]]:
     subprocess.run(
         ["git", "init", "--quiet", str(tmp_path)],
         check=True,
@@ -167,6 +169,14 @@ def _fixture(tmp_path: Path, shell: str) -> tuple[Path, dict[str, str]]:
         SOURCE_ROOT, payload / "src",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    if not native_configuration_owner:
+        # Synthetic dispatcher receipts do not qualify the independent preference owner.
+        layers = payload / "src" / "agent_index" / "configuration_layers.py"
+        layers.write_text(
+            layers.read_text(encoding="utf-8")
+            + "\ndef owner_report(*args, **kwargs):\n    return None\n",
+            encoding="utf-8",
+        )
     (payload / "pyproject.toml").write_text(
         '[project]\nname = "agent-index"\nversion = "9.9.9"\n',
         encoding="utf-8",
@@ -413,6 +423,13 @@ def _real_setup_runtime(
         site_packages / "agent_index",
         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
     )
+    # This setup CLI shares the dispatch fixture's synthetic receipt boundary.
+    layers = site_packages / "agent_index" / "configuration_layers.py"
+    layers.write_text(
+        layers.read_text(encoding="utf-8")
+        + "\ndef owner_report(*args, **kwargs):\n    return None\n",
+        encoding="utf-8",
+    )
     dependency_paths = {
         str(Path(value).resolve())
         for value in sys.path
@@ -427,6 +444,7 @@ def _real_setup_runtime(
         {
             str(_procutil_src().resolve()),
             str((PLUGIN / "libs" / "zdd" / "src").resolve()),
+            str((PLUGIN / "scripts" / "configuration-layers" / "src").resolve()),
         }
     )
     (site_packages / "test-runtime-dependencies.pth").write_text(
@@ -473,7 +491,7 @@ def test_fresh_namespaced_setup_reaches_role_writing(
 ) -> None:
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
-    script, env = _fixture(tmp_path, shell)
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
     cell_root = tmp_path / "cell" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
@@ -736,7 +754,7 @@ def test_windows_powershell5_dispatches_from_non_ascii_path(
     if shutil.which("powershell.exe") is None:
         pytest.skip("Windows PowerShell 5 is unavailable")
     unicode_root = tmp_path / "célula-索引"
-    script, env = _fixture(unicode_root, "powershell")
+    script, env = _fixture(unicode_root, "powershell", native_configuration_owner=False)
     cell_root = unicode_root / "célula" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
@@ -858,6 +876,7 @@ def test_installer_readiness_never_provisions_at_session_start(
         pytest.skip("bash is not installed")
     script, env = _fixture(tmp_path, shell)
     env["TEST_PYTHON"] = ""
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     home = Path(env["AGENT_INDEX_HOME"])
 
     result = _run(shell, script, env, "installer-readiness")
@@ -868,6 +887,7 @@ def test_installer_readiness_never_provisions_at_session_start(
     assert payload["detail"]
     assert "::agent-provisioning::" not in result.stdout + result.stderr
     assert not home.exists()
+    assert not list(script.parent.parent.rglob("__pycache__"))
 
 
 @pytest.mark.parametrize("shell", ["bash", "pwsh"])
@@ -1082,6 +1102,13 @@ def test_real_resolver_absent_or_explicit_false_preserves_legacy(
         PLUGIN / "scripts" / "installation-context",
         scripts / "installation-context",
     )
+    shutil.copytree(
+        SOURCE_ROOT, payload / "src",
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"),
+    )
+    shutil.copytree(
+        PLUGIN / "scripts" / "configuration-layers", scripts / "configuration-layers",
+    )
     (scripts / "resolve-runtime.ps1").write_text(
         "$AgentRtPy = $null\n",
         encoding="utf-8",
@@ -1195,7 +1222,7 @@ def test_posix_existing_regular_policy_is_not_treated_as_absent(
 def test_blocked_installation_states_never_fall_back_to_legacy(
     tmp_path: Path, status: str, reason: str
 ) -> None:
-    script, env = _fixture(tmp_path, "pwsh")
+    script, env = _fixture(tmp_path, "pwsh", native_configuration_owner=False)
     env["TEST_INSTALLATION_STATUS"] = json.dumps(
         {
             "status": status,
@@ -1231,7 +1258,7 @@ def test_blocked_installation_states_never_fall_back_to_legacy(
 def test_active_cell_option_command_is_one_validator_argument(
     tmp_path: Path, shell: str, command: str,
 ) -> None:
-    script, env = _fixture(tmp_path, shell)
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
     cell_root = tmp_path / "cell" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
@@ -1268,7 +1295,7 @@ def test_active_cell_option_command_is_one_validator_argument(
 
 
 def test_active_cell_dispatch_sets_cell_roots_and_context(tmp_path: Path) -> None:
-    script, env = _fixture(tmp_path, "pwsh")
+    script, env = _fixture(tmp_path, "pwsh", native_configuration_owner=False)
     cell_root = tmp_path / "cell" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
@@ -1511,7 +1538,7 @@ def test_active_cell_rejects_validator_interpreter_outside_selected_slot(
 ) -> None:
     if shell == "bash" and (os.name == "nt" or shutil.which("bash") is None):
         pytest.skip("POSIX runtime-gate test")
-    script, env = _fixture(tmp_path, shell)
+    script, env = _fixture(tmp_path, shell, native_configuration_owner=False)
     cell_root = tmp_path / "cell" / "plugins" / "agent-index"
     context = cell_root / "install.json"
     context.parent.mkdir(parents=True)
