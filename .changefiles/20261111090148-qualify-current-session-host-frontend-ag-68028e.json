@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify current Session Host frontend against the exact prior dev150 Host source.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

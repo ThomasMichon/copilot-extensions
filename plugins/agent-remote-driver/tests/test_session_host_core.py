@@ -50,7 +50,7 @@ async def _close_frontend(client):
     await asyncio.wait_for(client.close(), 3)
 
 
-def _prior_frontend(monkeypatch):
+def _prior_components(monkeypatch):
     root = Path(__file__).resolve().parents[3]
     fixtures = root / "plugins/agent-bridge/contract/fixtures/session-host/prior-runtime-dev150"
     commit = "4ed08dcdd0e72377b95a67d6bd22aec819bf7fec"
@@ -60,6 +60,7 @@ def _prior_frontend(monkeypatch):
     for name, blob in (
         ("protocol", "dde0d3566ce5d0cd92a49d8f6438dd907d533993"),
         ("client", "c9e88467f09e4438a214efa432733b59352eefd1"),
+        ("host", "de3aed3a2d57a98767c8f69c3ebe6d59eb5d52a4"),
     ):
         frozen = json.loads((fixtures / (name + "-source.json")).read_text(encoding="utf-8"))
         captured, raw = frozen["captured_from"], frozen["source_text"].encode("utf-8")
@@ -73,15 +74,16 @@ def _prior_frontend(monkeypatch):
         monkeypatch.setitem(sys.modules, module.__name__, module)
         exec(compile(raw, commit + ":" + captured["source_path"], "exec"), module.__dict__)
         setattr(package, name, module)
-    return package.client.SessionHostClient
+    return package
 
 
-def test_prior_frontend_refuses_corrupted_frozen_client(monkeypatch):
+@pytest.mark.parametrize("component", ["client", "host"])
+def test_prior_components_refuse_corrupted_frozen_source(monkeypatch, component):
     read_text = Path.read_text
 
     def corrupted(path, *args, **kwargs):
         body = read_text(path, *args, **kwargs)
-        if path.name == "client-source.json":
+        if path.name == component + "-source.json":
             frozen = json.loads(body)
             frozen["source_text"] += "\n"
             return json.dumps(frozen)
@@ -89,14 +91,17 @@ def test_prior_frontend_refuses_corrupted_frozen_client(monkeypatch):
 
     monkeypatch.setattr(Path, "read_text", corrupted)
     with pytest.raises(AssertionError):
-        _prior_frontend(monkeypatch)
-    assert "_driver_dev150_frontend.client" not in sys.modules
+        _prior_components(monkeypatch)
+    assert "_driver_dev150_frontend." + component not in sys.modules
 
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("frontend", ["current", "prior-runtime-dev150"])
 async def test_frontend_close_preserves_abort_recovery_and_bounds_prior(monkeypatch, frontend):
-    client_type = SessionHostClient if frontend == "current" else _prior_frontend(monkeypatch)
+    client_type = (
+        SessionHostClient if frontend == "current"
+        else _prior_components(monkeypatch).client.SessionHostClient
+    )
 
     async def stalled():
         await asyncio.Future()
@@ -530,7 +535,10 @@ async def test_relocated_core_reconnects_and_stops_exact_child(
 
     interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
     assert interpreter is not None
-    client_type = SessionHostClient if frontend == "current" else _prior_frontend(monkeypatch)
+    client_type = (
+        SessionHostClient if frontend == "current"
+        else _prior_components(monkeypatch).client.SessionHostClient
+    )
     archive = _relocate(tmp_path, legacy=legacy)
     workspace = tmp_path / "workspace"
     workspace.mkdir()
@@ -639,6 +647,112 @@ async def test_relocated_core_reconnects_and_stops_exact_child(
             _stdout, stderr = proc.communicate(timeout=5)
             if stderr:
                 print(stderr.decode("utf-8", "replace"))
+
+
+@pytest.mark.asyncio
+@pytest.mark.timeout(30)
+@pytest.mark.parametrize("idle_detach", [False, True])
+async def test_current_frontend_reconnects_to_exact_prior_host(
+    tmp_path, monkeypatch, idle_detach,
+):
+    from agent_procutil._interpreter import physical_executable
+
+    interpreter = physical_executable(getattr(sys, "_base_executable", sys.executable))
+    assert interpreter is not None
+    prior = _prior_components(monkeypatch)
+    servers, handlers = [], []
+    start_server = asyncio.start_server
+
+    async def owned_server(callback, *args, **kwargs):
+        async def owned_front(reader, writer):
+            handlers.append(asyncio.current_task())
+            try:
+                await callback(reader, writer)
+            finally:
+                writer.close()
+                await asyncio.wait_for(writer.wait_closed(), 3)
+
+        server = await start_server(owned_front, *args, **kwargs)
+        servers.append(server)
+        return server
+
+    # The historical close does not await its listener or frontend handlers.
+    monkeypatch.setattr(prior.host, "asyncio", SimpleNamespace(
+        **{**vars(asyncio), "start_server": owned_server},
+    ))
+    child = await asyncio.create_subprocess_exec(
+        interpreter, "-I", "-S", "-u", "-c", _CHILD,
+        cwd=tmp_path, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE, **no_window_kwargs(),
+    )
+    host, client = None, None
+    try:
+        host = prior.host.SessionHost(child, nonce="fixture-only-nonce")
+        port = await asyncio.wait_for(host.serve(), 5)
+        client = await asyncio.wait_for(SessionHostClient.connect(port=port), 5)
+        hello = await asyncio.wait_for(client.attach(nonce=b"fixture-only-nonce"), 5)
+        assert hello.child_pid == child.pid and hello.max_seq == 0
+        cursor = 0
+        literal = 'first line\n"quoted" & literal $value'
+        for identifier, method, params in (
+            (1, "initialize", {"protocolVersion": 1}),
+            (2, "session/new", {"cwd": str(tmp_path), "mcpServers": []}),
+            (3, "session/prompt", {"sessionId": "fixture-native",
+                                   "prompt": [{"type": "text", "text": literal}]}),
+        ):
+            await client.write((json.dumps({
+                "jsonrpc": "2.0", "id": identifier, "method": method, "params": params,
+            }) + "\n").encode())
+            next_cursor, frame = await asyncio.wait_for(anext(client.frames()), 5)
+            assert next_cursor == cursor + 1
+            assert json.loads(frame)["result"] == {
+                "method": method, "params": params, "sessionId": "fixture-native",
+            }
+            cursor = next_cursor
+            if identifier != 3:
+                await client.ack(cursor)
+        # A lost attach cursor must replay this retained frame and fail below.
+        assert host.ack_cursor == cursor - 1 and host.buffered_seqs == [cursor]
+        await client.detach(reapable=False)
+        await _close_frontend(client)
+        client = None
+        await asyncio.sleep(.1)
+        assert child.returncode is None and host.child_alive
+        client = await asyncio.wait_for(SessionHostClient.connect(port=port), 5)
+        restored = await asyncio.wait_for(client.attach(cursor, nonce=b"fixture-only-nonce"), 5)
+        assert restored.child_pid == child.pid and restored.max_seq == cursor
+        params = {"sessionId": "fixture-native", "cwd": str(tmp_path), "mcpServers": []}
+        await client.write((json.dumps({
+            "jsonrpc": "2.0", "id": 4, "method": "session/load", "params": params,
+        }) + "\n").encode())
+        next_cursor, frame = await asyncio.wait_for(anext(client.frames()), 5)
+        assert next_cursor == cursor + 1
+        assert json.loads(frame)["result"]["params"] == params
+        await client.ack(next_cursor)
+        if idle_detach:
+            await client.detach(reapable=True)
+        else:
+            await client.terminate()
+        assert await asyncio.wait_for(anext(client.frames(), None), 5) is None
+        await asyncio.wait_for(child.wait(), 5)
+        assert child.returncode is not None and not host.child_alive
+    finally:
+        try:
+            if client is not None:
+                await _close_frontend(client)
+        finally:
+            try:
+                if host is not None:
+                    await asyncio.wait_for(host.close(), 5)
+            finally:
+                if child.returncode is None:
+                    child.kill()
+                await asyncio.wait_for(child.communicate(), 5)
+                for server in servers:
+                    server.close()
+                    await asyncio.wait_for(server.wait_closed(), 5)
+                if handlers:
+                    await asyncio.wait_for(asyncio.gather(*handlers), 5)
 
 
 @pytest.mark.asyncio
