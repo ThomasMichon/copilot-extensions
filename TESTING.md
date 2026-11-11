@@ -506,6 +506,20 @@ nonliteral, duplicate and oversized declarations inside the existing file bound.
 Other selection-only controls retain their explicit policy stub and are not
 represented as full real-worker decisions.
 
+The `literal-shell-carrier` cases extend that same registered fixture to raw
+primary strings and object/raw `tool_input` fallback carriers. Each complete
+record retains the selected carrier, compares original-path/candidate/original-path
+occurrences and requires a real protected denial in that same carrier. Focused
+controls preserve primary-key presence over fallback values, whole-batch
+priority and JSON-string refusal. The original-guard contract exercises every
+canonical literal in all four carrier forms, including protected fallback
+metadata ignored by a valid primary, before requiring actual protected denial.
+No shell grammar or argument decoder is substituted for the original owners.
+Per-sample start/validated progress is flushed to the existing runner output so
+a fatal item timeout does not erase the active occurrence. This observer work
+is outside each subprocess elapsed span and remains part of fixture overhead,
+not isolated hook startup attribution.
+
 The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
 supplied existing Python 3.9 interpreter. Their private fixture publishes real
 project membership and the current original guard map, copies the required
