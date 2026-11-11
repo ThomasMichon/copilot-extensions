@@ -1,0 +1,9 @@
+{
+  "comment": "Close the Windows coordinator launcher ownership reader before refresh or return.",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

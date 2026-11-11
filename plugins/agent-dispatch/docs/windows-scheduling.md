@@ -66,6 +66,8 @@ available without that additional provider support.
 
 The compatibility PowerShell installer compares generated coordinator and
 supervisor launcher bytes under its existing installation publication mutex.
+The coordinator ownership check closes its first-line reader before publication
+or return, including when it preserves a custom launcher.
 Byte-identical launchers are left untouched, including when a live reader
 denies writes or replacement. Changed launchers use the existing bounded
 atomic publisher: readers permitting replacement retain the complete old
