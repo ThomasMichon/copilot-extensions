@@ -113,7 +113,12 @@
         "head": "synthetic-head-a", "observedAt": "2026-01-01T00:00:00Z",
         "sourceRef": "synthetic:current-head-and-charter", "state": "idle",
         "assignmentId": "review-a", "role": "reviewer", "scope": "example/project",
-        "acceptedCharterRevision": 1, "acceptanceRef": "synthetic:acceptance-a"
+        "acceptedCharterRevision": 1, "acceptanceRef": "synthetic:acceptance-a",
+        "progress": {
+          "observedAt": "2026-01-01T00:00:00Z", "sourceRef": "synthetic:progress-a",
+          "state": "advancing", "workRef": "synthetic:review-task-a",
+          "lastAdvancedAt": "2026-01-01T00:00:00Z", "blockingOwner": null
+        }
       }
     ]
   }

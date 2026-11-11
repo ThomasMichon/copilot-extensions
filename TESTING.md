@@ -3172,8 +3172,27 @@ that A's running task is unchanged. The unprompted B session need not create
 a conversation history file. No extension principal or task registry is
 fabricated to make registration succeed.
 
+Additional public SDK controls execute actual synchronous/background shell and
+agent tools through the local model provider. A real running task must be
+observed before work is released. Windows shell process births are pinned
+before release; shell permission is approved once only for the exact fixture
+command and session. A responding agent remains idle until exact cancellation
+and removal. The public pending-work wait returns before the final empty list;
+an optional native background-agent completion follow-up is checked explicitly,
+not counted as a duplicate input. History must contain one root tool execution
+with successful tool completion and only the expected root and nested user inputs.
+Synchronous results must contain the expected shell output or agent reply;
+shell completion also requires a marker written after the real work finishes.
+
+The future-schedule control explicitly enables the real `manage_schedule` tool
+and creates a two-hour recurring prompt through that offered tool. After the
+model turn, public schedule inventory must retain the future entry even though
+task inventory is empty. A second session cannot see it; disconnecting that
+session must leave it unchanged. Public exact stop runs before fixture shutdown,
+and the final schedule list must be empty without the future prompt firing.
+
 These controls do not migrate Session Host from native ACP to an SDK adapter,
-qualify headless agents, shells, schedules or complete pending snapshots, enable
+qualify complete pending snapshots or work-arrival races, enable
 idle expiry, attribute observer retirement, or qualify another selected
 runtime/platform. Native and SDK versions must be recorded with each result;
 package availability alone is not runtime support.
