@@ -2052,3 +2052,33 @@ The expanded existing control compares every file and directory after both
 startup and resume. Documentation-impact review updates the budget plugin's
 read-only cue contract and TESTING.md. No census rule, payload integrity,
 artifact-publication requirement or parent completion gate is relaxed.
+
+### November 11 - Close the attribution test's admitted type regression
+
+Current-head CI 43101429123 at
+`a31ad9dade070ee165f8aa37c1bb6d115b61af64` completes eligible units successfully,
+but its admitted Python contract reports seven errors in the new attribution
+cold-writer test. This is an owned test regression, not an accepted flake or
+infrastructure waiver. Missing function/return annotations, direct use of the
+private `sys._base_executable` attribute and nullable shell arguments are now
+corrected with explicit types, the existing attribute fallback idiom and real
+non-null assertions. Production behavior and the regression assertions remain
+unchanged.
+
+The canonical `typecheck.py ai-attribution --strict` contract passes all eight
+source targets for both Linux and Windows. Its missing environment is prepared
+only after the checker reports it missing. The corrected cold/repeat writer
+packet passes three native cases, with one POSIX skip uncredited; F/E9 lint and
+whitespace pass. No type admission, target or guard is removed or bypassed.
+Documentation-impact review requires only this validation journal; no operator
+syntax, configuration or policy has changed.
+
+The same CI run publishes a complete unit-evidence artifact
+(13892407316, 1,804,496 bytes). Actual jobs starting and artifact creation
+succeeding are concrete changed Actions boundaries relative to the prior
+startup/upload failures, not proof that every provider path is repaired.
+After publishing the type correction, one new-candidate native run may use the
+existing unchanged owner and budgets. This is not a third retry of the
+unexecuted `99e9` run; another startup failure still does not license a retry
+loop. Required current CI, native artifact/census/cleanup evidence and every
+parent gate remain open.

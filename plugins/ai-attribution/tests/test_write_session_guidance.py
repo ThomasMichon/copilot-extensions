@@ -39,7 +39,7 @@ def _target(home: Path) -> Path:
 
 
 @pytest.mark.parametrize("entrypoint", ["python", "pwsh", "powershell.exe", "bash"])
-def test_cold_writer_preserves_complete_payload(tmp_path, entrypoint):
+def test_cold_writer_preserves_complete_payload(tmp_path: Path, entrypoint: str) -> None:
     from agent_procutil.owned_process import run_caller_owned
 
     if entrypoint == "bash" and os.name == "nt":
@@ -61,7 +61,7 @@ def test_cold_writer_preserves_complete_payload(tmp_path, entrypoint):
         **os.environ, "HOME": str(home), "USERPROFILE": str(home),
         "APPDATA": str(home / "AppData"), "XDG_CONFIG_HOME": str(home / ".config"),
         "COPILOT_PLUGIN_ROOT": str(root),
-        "PATH": str(Path(sys._base_executable).parent) + os.pathsep + os.environ["PATH"],
+        "PATH": str(Path(getattr(sys, "_base_executable", sys.executable)).parent) + os.pathsep + os.environ["PATH"],
     }
     for key in ("PYTHONDONTWRITEBYTECODE", "PYTHONPYCACHEPREFIX", "COPILOT_CUSTOM_INSTRUCTIONS_DIRS"):
         env.pop(key, None)
@@ -73,11 +73,13 @@ def test_cold_writer_preserves_complete_payload(tmp_path, entrypoint):
     if entrypoint == "python":
         argv = [sys.executable, "-I", str(root / "scripts" / "write_session_guidance.py")]
     elif entrypoint == "bash":
+        assert shell is not None
         argv = [shell, str(root / "scripts" / "write-session-guidance.sh")]
     else:
+        assert shell is not None
         argv = [shell, "-NoProfile", "-File", str(root / "scripts" / "write-session-guidance.ps1")]
 
-    def entries():
+    def entries() -> dict[str, bytes | None]:
         return {
             str(path.relative_to(root)): path.read_bytes() if path.is_file() else None
             for path in root.rglob("*")
