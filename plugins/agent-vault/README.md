@@ -554,8 +554,44 @@ Fernet caches and `seal`/`unseal` use the optional `pycryptodomex` dependency
 Select that profile through the installer rather than modifying a completed
 runtime. Without it, POSIX caches are inert and KEK commands return a clear
 error. New Windows caches can use native per-user DPAPI without a third-party
-package. Existing Fernet caches require the backend and are never replaced when
-it is unavailable; existing DPAPI caches keep their format after installation.
+package. Existing Fernet caches require the backend; unreadable originals are
+never overwritten. Existing DPAPI caches keep their format after installation.
+
+`cache-populate` bounds old-cache adoption through a contained helper: ten
+seconds for reading/decoding, with two seconds reserved separately for native
+process cleanup. Store/replacement lock acquisition is bounded to two seconds.
+A compatible cache remains in place. Otherwise, its exact encrypted file and
+wrapped key are copied into an owner-private `preserved-cache` compartment.
+If the original is busy, inaccessible or the reader times out, it is retained
+in place instead. A separately protected, schema-1 cache in that compartment
+then serves the selected Vault/database and installation. This never changes
+the authoritative Vault, SSH keys, signing keys or envelope KEKs.
+
+Recovery uses the same live `get` request as ordinary population. Only missing
+current records are inserted: newer writes, existing values and pending
+password replacements win over a recovery response. Repeating population or
+restarting the CLI does not re-import preserved bytes or reset the new cache.
+`cache-status` (also `--json`) reports whether originals were copied or retained
+in place. It keeps recovery visible even after some entries are populated:
+the cache cannot know that every credential has been recovered. If the Vault
+is locked, unlock it explicitly or use the existing explicit `--prompt` option.
+Owner-key setup recovers only after the owner confirms the existing key; a
+failed/locked owner request does not start cache recovery or initialize a key.
+
+Cache-only, batch/pinned read-only, status and verification operations never
+initiate this recovery, migrate a key or unlock/start a service. They can read
+a previously published current cache. Protected-cache failures remain visible;
+an unknown schema or corrupt ciphertext is not an empty store.
+
+The selected runtime advertises `preserved-cache-recovery-v1` through the
+existing `invocation-contract --json` metadata. This is additive client-local
+behavior, not a new daemon request: existing `get` and owner-setup protocols
+are unchanged. Healthy old caches remain readable by prior clients. After
+fallback, older clients do **not** understand the new compartment selection;
+they see only the retained original, not recovered values. Do not roll back a
+recovery-dependent consumer to such a client or copy stale original records
+over current state. Preserve originals for deliberate inspection; recovery
+does not authorize their deletion or an older writer's takeover.
 
 Password replacement is journaled before the KeePass mutation. Pending
 replacements are never served by cache-first reads and cannot be overwritten by

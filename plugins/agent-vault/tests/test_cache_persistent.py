@@ -289,13 +289,14 @@ def test_get_refresh_fails_when_authoritative_reconciliation_cannot_persist(
     assert "persistent cache could not be reconciled" in captured.err
 
 
-def test_cache_only_migrates_legacy_raw_key_without_service(
+def test_cache_only_reads_legacy_raw_entry_without_migration_or_service(
     enabled_cache,
     monkeypatch,
     capsys,
 ):
     persistent = get_cache()
     assert persistent.put("token", "password", "offline", 4)
+    before = persistent._cache_file.read_bytes()
     monkeypatch.setattr(
         cli.config,
         "resolve_context",
@@ -309,8 +310,9 @@ def test_cache_only_migrates_legacy_raw_key_without_service(
 
     assert cli.cmd_get(_Args(entry="token", cache_only=True)) == 0
     assert capsys.readouterr().out == "offline\n"
-    assert persistent.get("A/token", "password") == "offline"
-    assert persistent.get("token", "password") is None
+    assert persistent.get("A/token", "password") is None
+    assert persistent.get("token", "password") == "offline"
+    assert persistent._cache_file.read_bytes() == before
 
 
 def test_batch_get_preserves_cached_order_duplicates_and_values(
@@ -500,6 +502,11 @@ def test_batch_refuses_corrupt_fernet_cache_without_replacement(
     if failure == "key":
         with pytest.raises(ValueError):
             cli.cmd_get(SimpleNamespace(entry="Example/one", field="password"))
+    elif failure in {"ciphertext", "schema"}:
+        from agent_vault.cache_dpapi import CacheProtectionError
+
+        with pytest.raises(CacheProtectionError):
+            persistent.get("Example/one")
     else:
         assert persistent.get("Example/one") is None
 
@@ -872,11 +879,7 @@ def test_cache_populate_reconciles_legacy_response(
             requests.append(request) or {"ok": True, "value": "fresh"}
         ),
     )
-    monkeypatch.setattr(
-        cli.config,
-        "resolve_context",
-        lambda: SimpleNamespace(group=""),
-    )
+    monkeypatch.setenv("KPDB", str(enabled_cache.parent / "fixture.kdbx"))
 
     args = SimpleNamespace(
         entry=["A/x"],

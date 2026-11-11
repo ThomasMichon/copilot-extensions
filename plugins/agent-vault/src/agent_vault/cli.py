@@ -13,6 +13,7 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
+from .cache_recovery import status_command as cmd_cache_status
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .credential_reads import cmd_get
 from .prompt import prompt_password as gui_prompt_password
@@ -1374,6 +1375,15 @@ def cmd_cache_populate(args):
     from .cache import get_cache
 
     cache = get_cache()
+    if not args.verify:
+        try:
+            adoption = cache.prepare()
+        except (OSError, RuntimeError, ValueError, ImportError):
+            print("Error: protected cache adoption failed; originals retained", file=sys.stderr)
+            return 1
+        if adoption["state"] == "recovering":
+            print("Protected cache is recovering; originals retained. Only missing live entries are populated.",
+                  file=sys.stderr)
     ok = 0
     failures: list[str] = []
     for entry, field in pairs:
@@ -1390,7 +1400,10 @@ def cmd_cache_populate(args):
         )
         failure = None
         with read_lock:
-            resp = send_command(request, timeout=None if args.prompt else 15.0)
+            resp = send_command(
+                request, timeout=None if args.prompt else 15.0,
+                **({"strict_endpoint": True} if cache._recovery else {}),
+            )
             present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
             if (
                 present
@@ -1404,11 +1417,12 @@ def cmd_cache_populate(args):
                 )
                 cache.migrate_entry(entry, cache_entry, field)
                 generation = resp.get("generation")
-                if not cache.reconcile_authoritative(
+                update = cache.recover_missing if cache._recovery else cache.reconcile_authoritative
+                if not update(
                     cache_entry,
                     field,
                     resp["value"],
-                    int(generation) if generation is not None else None,
+                    generation if cache._recovery or generation is None else int(generation),
                 ):
                     present = False
                     failure = f"cache update failed: {entry} [{field}]"
@@ -1421,7 +1435,10 @@ def cmd_cache_populate(args):
     if args.verify:
         print(f"Present: {ok}/{len(pairs)}")
     else:
-        print(f"Cached {ok} credential(s), {fail} failed")
+        if cache._recovery:
+            print(f"Current credential records: {ok}, {fail} failed; live recovery remains required")
+        else:
+            print(f"Cached {ok} credential(s), {fail} failed")
     for failure in failures:
         print(f"  {failure}", file=sys.stderr)
     return 1 if fail > 0 else 0
@@ -1437,27 +1454,6 @@ def cmd_cache_clear(args):
         return 0
     print("Error: could not clear cache", file=sys.stderr)
     return 1
-
-
-def cmd_cache_status(args):
-    """Show persistent-cache status (enabled, location, counts, staleness)."""
-    from .cache import get_cache
-
-    status = get_cache().status()
-    if getattr(args, "json", False):
-        print(json.dumps(status, indent=2, sort_keys=True))
-        return 0
-    state = "enabled" if status["enabled"] else "disabled"
-    if not status["available"]:
-        state += " (cache encryption backend unavailable)"
-    print(f"cache: {state}")
-    print(f"dir: {status['cache_dir']}")
-    print(f"entries: {status['entry_count']} ({status['field_count']} field(s))")
-    if status["oldest"]:
-        print(f"oldest: {status['oldest']}")
-    if status["newest"]:
-        print(f"newest: {status['newest']}")
-    return 0
 
 
 def cmd_cache_verify(args):
@@ -1502,7 +1498,7 @@ def cmd_cache_verify(args):
     present = 0
     missing: list[str] = []
     for entry, field in pairs:
-        if cache.get(entry, field) is not None:
+        if cache.get(entry, field, readonly=True) is not None:
             present += 1
         else:
             missing.append(f"{entry} [{field}]")

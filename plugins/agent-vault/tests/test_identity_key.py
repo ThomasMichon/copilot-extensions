@@ -484,16 +484,18 @@ def test_pinned_missing_cache_reader_and_context_create_no_files(
 
 
 @usable_cache
-def test_setup_corrupt_cache_has_distinct_failure_before_service(
+def test_setup_corrupt_cache_retains_original_when_service_is_unavailable(
     isolated, monkeypatch, tmp_path, capsys,
 ):
     root = Path(identity_key.source_context()["env"]["AGENT_VAULT_CACHE_DIR"])
     root.mkdir(parents=True)
     (root / "credential-cache.enc").write_bytes(b"unreadable fixture")
-    monkeypatch.setattr(cli, "ensure_service", lambda: pytest.fail("corrupt cache started service"))
+    monkeypatch.setattr(cli, "ensure_service", lambda: False)
     assert cli.main(["identity-key", "setup", "--json"]) == 1
-    assert json.loads(capsys.readouterr().out)["error"] == "cache_read_failed"
+    assert json.loads(capsys.readouterr().out)["error"] == "service_unavailable"
+    assert (root / "credential-cache.enc").read_bytes() == b"unreadable fixture"
     assert not (root / "credential-cache.key").exists()
+    assert not (root / "preserved-cache").exists()
 
 
 def test_context_env_exact_aw_allowlist(isolated):
