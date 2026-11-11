@@ -6,13 +6,15 @@ import hashlib
 import json
 import re
 
-from . import config as cfg
+from . import config as cfg, registry_paths
 from .repos_configuration_sources import ConfigurationError
 from .tracking import _atomic_write
 
 
-def reference(target: dict, url: str) -> str:
-    return hashlib.sha256(json.dumps([target, url], sort_keys=True).encode()).hexdigest()
+def reference(project: str, url: str) -> str:
+    """Keep durable identity independent of the selected runtime generation."""
+    identity = [str(registry_paths.registry_root().resolve()), project, url.casefold()]
+    return hashlib.sha256(json.dumps(identity, sort_keys=True).encode()).hexdigest()
 
 
 def path(project: str, receipt: str):
@@ -41,6 +43,9 @@ def read(project: str, receipt: str) -> dict:
             or value.get("status") not in {"incomplete", "created", "protected"}
             or value.get("operation") not in {"create", "protect-default"}
             or type(value.get("protection_attempts")) is not int or value["protection_attempts"] < 0
+            or not isinstance(value.get("target"), dict)
+            or any(not isinstance(value["target"].get(key), str) for key in ("installation", "machine", "resource"))
+            or not isinstance(value.get("url"), str)
         ):
             raise ValueError
         return value

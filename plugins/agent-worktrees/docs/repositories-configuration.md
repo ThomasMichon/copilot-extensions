@@ -210,6 +210,10 @@ cancellation, nonzero provider exit, malformed/lost response and unconfirmed
 cleanup preserve partial or unknown outcomes; no operation automatically
 replays, renames, deletes a repository, changes visibility or rolls back policy.
 The same creation target cannot be retried through a fresh create preview.
+The durable key binds the validated installation registry, project and
+case-insensitive repository identity, not a versioned runtime directory.
+Runtime updates and rollback retain receipt lookup and replay prevention;
+preview tokens still bind the currently executing runtime and require refresh.
 
 Inspect the existing receipt and provider read-only first. Inspection reports
 current metadata/policy separately without promoting unknown creation into
@@ -219,6 +223,12 @@ account/private identity/default branch/policy, and require a new confirmation.
 Receipt changes under a waiting confirmation refuse before mutation. After a
 failed protection attempt, a fresh observation/confirmation is distinct from
 replaying the previous token. The original creation outcome remains preserved.
+Missing credentials, repository lookup failures and denied policy reads retain
+the prior receipt and any completed metadata observation, alongside sanitized
+current observation failures. They report incomplete inspection without
+changing the stored original outcome. Protection repair starts incomplete even
+from a formerly successful receipt, including the record saved before its
+POST, and becomes successful only after final verified safeguards.
 
 Preview/inspection and apply use aggregate 18/26-second budgets with a
 two-second cleanup reserve, enclosing provider children, all policy pages and

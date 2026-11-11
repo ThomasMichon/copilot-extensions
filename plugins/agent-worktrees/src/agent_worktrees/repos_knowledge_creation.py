@@ -59,7 +59,7 @@ def _selection(project: str, url: str) -> dict:
         **context, "target": action_target(project), "url": "https://github.com/" + slug,
         "repository": slug, "account": login, "account_source": provenance,
     }
-    selected["receipt"] = receipts.reference(selected["target"], selected["url"])
+    selected["receipt"] = receipts.reference(project, selected["url"])
     return selected
 
 
@@ -106,9 +106,50 @@ def _prior(project: str, selected: dict, reference: str) -> dict:
     if reference != selected["receipt"]:
         raise ConfigurationError("creation-receipt-mismatch", "The receipt must belong to this exact selected target.")
     previous = receipts.read(project, reference)
-    if previous.get("target") != selected["target"] or previous.get("url") != selected["url"]:
+    if (
+        previous["target"]["resource"] != selected["target"]["resource"]
+        or previous["url"].casefold() != selected["url"].casefold()
+    ):
         raise ConfigurationError("creation-receipt-mismatch", "Creation receipt target changed.")
     return previous
+
+
+def _failure(error, stage: str) -> dict:
+    result = {
+        "stage": error.stage if isinstance(error, CredentialObservationError) else stage,
+        "code": error.code if isinstance(error, (CredentialObservationError, ConfigurationError)) else
+        "owner-operation-incomplete",
+    }
+    if isinstance(error, CredentialObservationError):
+        if error.exit_code is not None:
+            result["exit_code"] = error.exit_code
+        if error.http_status is not None:
+            result["http_status"] = error.http_status
+    return result
+
+
+def _inspect(selected, prior, budget, checkpoint, revalidate) -> dict:
+    result = {
+        **prior, "prior_status": prior["status"], "observation_target": selected["target"],
+        "observation_status": "unavailable", "observed_repository": None,
+        "observed_safeguards": {"status": "not-observed"},
+        "message": "Read-only observation. Unknown prior creation is not promoted into mutation authority.",
+    }
+    try:
+        account = SelectedGitHubAccount(
+            "github.com", selected["account"], selected["repository"], budget=budget, checkpoint=checkpoint,
+        )
+        account.verify()
+        result["observed_repository"] = provider.repository(account)
+        result["observed_safeguards"] = provider.safeguards(account, result["observed_repository"])
+        revalidate()
+        result["observation_status"] = "observed"
+        if result["observed_safeguards"]["status"] != "verified":
+            result["status"] = "incomplete"
+    except (CredentialObservationError, ConfigurationError) as error:
+        result["status"] = "incomplete"
+        result["observation_failure"] = _failure(error, "observation")
+    return result
 
 
 def _worker(request: dict) -> dict:
@@ -127,20 +168,14 @@ def _worker(request: dict) -> dict:
                 raise ConfigurationError("preview-conflict", "Native selection changed; refresh and preview again.")
             checkpoint()
 
+        prior = _prior(project, selected, request["receipt"]) if operation != "create" else None
+        if operation == "inspect":
+            return _inspect(selected, prior, budget, checkpoint, revalidate)
         account = SelectedGitHubAccount(
             "github.com", selected["account"], selected["repository"], budget=budget, checkpoint=checkpoint,
         )
         account.verify()
-        prior = None
         if operation != "create":
-            prior = _prior(project, selected, request["receipt"])
-            if operation == "inspect":
-                observation = provider.repository(account)
-                return {
-                    **prior, "observed_repository": observation,
-                    "observed_safeguards": provider.safeguards(account, observation),
-                    "message": "Read-only observation. Unknown prior creation is not promoted into mutation authority.",
-                }
             if prior.get("creation") != "confirmed" or not isinstance(prior.get("repository"), dict):
                 raise ConfigurationError("creation-unconfirmed", "Unknown creation requires read-only owner reconciliation first.")
             observed = {
@@ -163,7 +198,10 @@ def _worker(request: dict) -> dict:
                 raise ConfigurationError("preview-conflict", "Creation receipt changed; inspect and preview again.")
             if not hmac.compare_digest(request["token"], _token([selected, operation, observed])):
                 raise ConfigurationError("preview-conflict", "Creation inputs or policy changed; preview again.")
-            receipt = _receipt(selected, operation) if prior is None else {**prior, "operation": operation}
+            receipt = _receipt(selected, operation) if prior is None else {
+                **prior, "operation": operation, "status": "incomplete", "target": selected["target"],
+            }
+            receipt["message"] = "Operation remains incomplete until current private identity and safeguards are verified."
             receipt["stage"] = "creation" if operation == "create" else "policy-observation"
             attempted = False
             try:
@@ -205,16 +243,7 @@ def _worker(request: dict) -> dict:
                 if not attempted:
                     raise
                 receipt["status"] = "incomplete"
-                receipt["failure"] = {
-                    "stage": error.stage if isinstance(error, CredentialObservationError) else receipt["stage"],
-                    "code": error.code if isinstance(error, (CredentialObservationError, ConfigurationError)) else
-                    "owner-operation-incomplete",
-                }
-                if isinstance(error, CredentialObservationError):
-                    if error.exit_code is not None:
-                        receipt["failure"]["exit_code"] = error.exit_code
-                    if error.http_status is not None:
-                        receipt["failure"]["http_status"] = error.http_status
+                receipt["failure"] = _failure(error, receipt["stage"])
                 try:
                     receipts.save(project, receipt)
                 except OSError:
@@ -255,7 +284,7 @@ def invoke(project: str, url: str, operation: str, *, token=None, receipt="") ->
         return {
             "status": "incomplete", "operation": operation, "target": action_target(project),
             "stage": "worker", "creation": "unknown", "safeguards": {"status": "unknown"},
-            "receipt": receipts.reference(action_target(project), canonical.removesuffix(".git")),
+            "receipt": receipts.reference(project, canonical.removesuffix(".git")),
             "cleanup": "unknown", "registration_changed": False, "binding_changed": False,
             "message": "Completion receipt unavailable. Inspect the native receipt and provider read-only; "
             "do not replay creation or protection.",

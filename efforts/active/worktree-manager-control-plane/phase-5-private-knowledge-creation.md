@@ -262,3 +262,12 @@ whole-project probe stops on duplicate setup modules, not a typing pass.
 Exact-head required CI and code review remain independent publication gates.
 Live creation/protection, installed/receiving evidence and the optional real
 Configuration consumer remain open; no launch primitive or rollout changes.
+
+The recovery controls additionally cover runtime update/rollback, interrupted
+repair from a prior successful receipt and failed read-only observations.
+Six controls fail on the original implementation; all 44 native-owner cases
+then pass with the corrections. Durable receipt lookup now uses stable
+installation/project/repository identity while previews retain runtime
+freshness. Repair remains incomplete until safeguards are reverified, and
+inspection failures preserve original creation evidence plus any available
+current metadata. These fix concrete recovery failures, not just review shape.

@@ -307,6 +307,106 @@ def test_waiting_protection_confirmation_rechecks_the_receipt_under_its_writer_l
     assert len(mutations(selected)) == 2
 
 
+def test_durable_receipt_survives_runtime_update_and_rollback_but_preview_does_not(native, selected, monkeypatch):
+    proposed = worker("preview")
+    original_target = creation.target
+    with monkeypatch.context() as changed:
+        changed.setattr(creation, "target", lambda *args: {
+            **original_target(*args), "installation": "agent-worktrees:updated-runtime",
+        })
+        with pytest.raises(ConfigurationError, match="changed"):
+            worker("apply", token=proposed["token"])
+        assert mutations(selected) == []
+    completed = worker("apply", token=proposed["token"])
+    reference = completed["receipt"]
+    with monkeypatch.context() as changed:
+        changed.setattr(creation, "target", lambda *args: {
+            **original_target(*args), "installation": "agent-worktrees:updated-runtime",
+        })
+        observed = worker("preview", operation="inspect", receipt=reference)
+        assert observed["receipt"] == reference and observed["creation"] == "confirmed"
+        selected["protected"] = False
+        protection = worker("preview", operation="protect-default", receipt=reference)
+        result = worker("apply", operation="protect-default", receipt=reference, token=protection["token"])
+        assert result["status"] == "protected" and result["receipt"] == reference
+        selected["created"] = False
+        with pytest.raises(ConfigurationError, match="existing native receipt"):
+            worker("preview")
+        selected["created"] = True
+    assert worker("preview", operation="inspect", receipt=reference)["creation"] == "confirmed"
+    assert sum(call[0][-3:] == ["https://api.github.com/user/repos", "--input", "-"]
+               for call in mutations(selected)) == 1
+
+
+@pytest.mark.parametrize("interrupted", [False, True])
+def test_protection_repair_never_inherits_a_previously_successful_status(native, selected, monkeypatch, interrupted):
+    completed = worker("apply", token=worker("preview")["token"])
+    assert completed["status"] == "created"
+    selected["protected"] = False
+    reference = completed["receipt"]
+    proposed = worker("preview", operation="protect-default", receipt=reference)
+    retained = OwnedCleanupError(None, object(), cleanup_resources=(("reader", object()),))
+
+    def unverified(*args):
+        if interrupted:
+            raise retained
+
+    monkeypatch.setattr(creation.provider, "protect", unverified)
+    if interrupted:
+        with pytest.raises(OwnedCleanupError) as caught:
+            worker("apply", operation="protect-default", receipt=reference, token=proposed["token"])
+        assert caught.value is retained
+    else:
+        result = worker("apply", operation="protect-default", receipt=reference, token=proposed["token"])
+        assert result["status"] == "incomplete" and result["safeguards"]["status"] == "missing"
+        assert "remains incomplete" in result["message"]
+    persisted = receipts.read("sample", reference)
+    assert persisted["status"] == "incomplete" and persisted["creation"] == "confirmed"
+
+
+@pytest.mark.parametrize("failure", ["repository-404", "policy-denied", "credential-missing"])
+def test_read_only_inspection_retains_creation_and_available_observations_on_failure(
+    native, selected, monkeypatch, failure,
+):
+    completed = worker("apply", token=worker("preview")["token"])
+    reference = completed["receipt"]
+    before = tree(native)
+    posts = len(mutations(selected))
+
+    def unavailable(*args):
+        raise creation.CredentialObservationError(
+            "repository" if failure == "repository-404" else "policy",
+            "access-unconfirmed", http_status=404 if failure == "repository-404" else 403,
+        )
+
+    if failure == "repository-404":
+        monkeypatch.setattr(creation.provider, "repository", unavailable)
+    elif failure == "policy-denied":
+        monkeypatch.setattr(creation.provider, "safeguards", unavailable)
+    else:
+        monkeypatch.setattr(credentials.shutil, "which", lambda _: None)
+    result = worker("preview", operation="inspect", receipt=reference)
+    assert result["status"] == "incomplete" and result["prior_status"] == "created"
+    assert result["receipt"] == reference and result["creation"] == "confirmed"
+    assert result["repository"] == completed["repository"]
+    assert result["observed_repository"] == (completed["repository"] if failure == "policy-denied" else None)
+    assert result["observation_status"] == "unavailable"
+    assert result["observation_failure"]["code"] in {"access-unconfirmed", "missing-command"}
+    assert tree(native) == before and len(mutations(selected)) == posts
+
+
+def test_read_only_inspection_distinguishes_prior_success_from_current_missing_protection(native, selected):
+    completed = worker("apply", token=worker("preview")["token"])
+    selected["protected"] = False
+    before = tree(native)
+    observed = worker("preview", operation="inspect", receipt=completed["receipt"])
+    assert observed["status"] == "incomplete" and observed["prior_status"] == "created"
+    assert observed["observation_status"] == "observed"
+    assert observed["observed_safeguards"]["status"] == "missing"
+    assert receipts.read("sample", completed["receipt"])["status"] == "created"
+    assert tree(native) == before and len(mutations(selected)) == 2
+
+
 def test_actual_worker_timeout_reaps_console_descendant_and_never_replays(native, monkeypatch):
     marker = native / "late-descendant"
     calls = []
