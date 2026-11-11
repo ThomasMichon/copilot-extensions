@@ -1148,3 +1148,20 @@ receipt on failure. Two controls for each correction passed, with changed-source
 lint and staged diff checks. The unresolved fresh source must be diagnosed
 from the next retained reason; no runtime, readiness or lifecycle result is
 credited from this failed run, and no deadline or provenance rule is waived.
+
+The corrected diagnostics in run 42948793163 at
+`cd0848ac317b6fbbf541b6179d0700a0808bcfbe` identified eight identical native-asset
+refusals: the allocated extraction root retained the Windows `RUNNER~1` short
+spelling while its owner check used the resolved long spelling. The builder now
+canonicalizes only its newly allocated private extraction root before extracting
+or invoking committed materializer code. Derived-asset link, traversal,
+single-link and containment guards remain unchanged.
+
+A real committed-source construction control reproduces an equivalent lexical
+alias and requires canonical root delivery before extraction. It also exposed
+an incomplete test fixture, which now copies the committed materializer's
+Invocation helper rather than relying on an ambient fallback. The full provenance
+packet passes 42 tests with two platform-inapplicable skips; the seven focused
+root/committed-code/diagnostic cases and changed-source lint pass. Native
+construction on this correction remains unverified, and the fresh case on
+`cd0848ac` is still failed, with successful settlement, not superseded acceptance.

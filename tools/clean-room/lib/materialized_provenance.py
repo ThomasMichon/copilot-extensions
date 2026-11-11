@@ -128,7 +128,7 @@ def build(dest: Path, *, source_root: Path) -> list[str]:
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     ).stdout
     with tempfile.TemporaryDirectory(prefix="materialized-source-") as temporary:
-        source = Path(temporary)
+        source = Path(temporary).resolve(strict=True)
         with tarfile.open(fileobj=io.BytesIO(archive)) as tree:
             extract_source(tree, source)
         if (source / RECEIPT).exists() or (source / RECEIPT).is_symlink():

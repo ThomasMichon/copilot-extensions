@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
+from contextlib import contextmanager
 import importlib.util
 import io
 import json
@@ -148,6 +149,7 @@ def source(tmp_path: Path) -> tuple[Path, str]:
     (root / "tools").mkdir()
     for name in (
         "materialize_main.py", "materialize_installer_engine.py",
+        "materialize_payload_invocation.py",
         "materialize_launch_wrapper_assets.py", "nested_uv_editable_ref.py",
         "uv_editable_ref.py", "launch_wrapper_assets_ref.py",
         "installer_engine_ref.py", "standalone_consumers.py",
@@ -197,6 +199,32 @@ def test_builder_does_not_inherit_repository_selection(source, tmp_path, monkeyp
     dest = tmp_path / "candidate"
     PROVENANCE.build(dest, source_root=root)
     assert PROVENANCE.verify(dest, head) == head
+
+
+def test_builder_canonicalizes_its_allocated_source_root_before_extraction(
+    source, tmp_path, monkeypatch,
+):
+    root, head = source
+    allocate = PROVENANCE.tempfile.TemporaryDirectory
+    extract = PROVENANCE.extract_source
+
+    @contextmanager
+    def aliased_temporary_directory(*, prefix):
+        with allocate(prefix=prefix, dir=tmp_path) as raw:
+            alias = Path(raw) / "existing-child"
+            alias.mkdir()
+            yield str(alias / "..")
+
+    def extract_canonical(tree, snapshot):
+        assert snapshot == snapshot.resolve(strict=True)
+        extract(tree, snapshot)
+
+    monkeypatch.setattr(PROVENANCE.tempfile, "TemporaryDirectory", aliased_temporary_directory)
+    monkeypatch.setattr(PROVENANCE, "extract_source", extract_canonical)
+    dest = tmp_path / "candidate"
+    PROVENANCE.build(dest, source_root=root)
+    assert PROVENANCE.verify(dest, head) == head
+    assert (dest / "plugins/example/docs/shared.md").read_text() == "# Materialized\n"
 
 
 @pytest.mark.parametrize("oversized", [False, True])
