@@ -116,7 +116,8 @@ and separately from NDJSON stdout, retaining at most 1 MiB per invocation.
 Exceeding that limit or failing to read or settle the diagnostic pipe is an
 explicit failure, even after a terminal success frame. Diagnostics do not renew
 the list's publication clock. Cancellation and close retire the owned child and
-join its diagnostic reader; an unsettled child or reader remains tracked rather
+join its diagnostic reader; stdout and its communication reader must also settle.
+An unsettled child, stdout pipe or reader remains tracked rather
 than being reported as successfully cleaned up. Older consumers can still block
 on a pipe-filling diagnostic burst; unchanged provider frames alone cannot fix
 that consumer defect.

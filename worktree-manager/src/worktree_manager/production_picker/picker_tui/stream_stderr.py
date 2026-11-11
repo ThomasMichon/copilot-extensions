@@ -13,6 +13,8 @@ class StreamStderr:
         self.output = bytearray()
         self.error = ""
         self.started = False
+        self.consumer_finished = threading.Event()
+        self.settle_lock = threading.Lock()
         self.thread = threading.Thread(
             target=self._read, name="registered-stream-stderr", daemon=True,
         )
@@ -67,8 +69,20 @@ class StreamStderr:
 
 
 def settle_stream(runtime, process):
-    stderr, error = "", ""
     drain = getattr(process, "_picker_stderr", None)
+    if drain is None:
+        return _settle_stream(runtime, process, drain)
+    with drain.settle_lock:
+        drain.consumer_finished.clear()
+        try:
+            return _settle_stream(runtime, process, drain)
+        finally:
+            drain.consumer_finished.set()
+
+
+def _settle_stream(runtime, process, drain):
+    stderr, error = "", ""
+    stdout_settled = False
     from .tasks import _kill_proc_tree
 
     try:
@@ -77,19 +91,20 @@ def settle_stream(runtime, process):
         except Exception:
             _kill_proc_tree(process)
             _, stderr = process.communicate(timeout=5)
+        stdout_settled = True
     except Exception as exc:
         error = f"stream child cleanup failed: {exc}"
     settled = drain is None or drain.finish()
     if drain is not None:
         stderr = drain.text() if settled else ""
         error = drain.error or error
-    if settled and process.returncode is not None:
+    if settled and stdout_settled and process.returncode is not None:
         try:
             runtime._untrack(process)
         except Exception as exc:
             error = f"stream child cleanup failed: {exc}"
     else:
-        error = error or "stream child or stderr reader did not settle"
+        error = error or "stream child, stdout or stderr reader did not settle"
     return stderr or "", error
 
 
@@ -105,6 +120,13 @@ def close_streams(runtime):
             drain = getattr(process, "_picker_stderr", None)
             if drain is not None and not drain.finish():
                 raise RuntimeError(drain.error or "stderr reader did not settle")
+            if not _stdout_closed(process):
+                if drain is None or not drain.consumer_finished.wait(timeout=5):
+                    raise RuntimeError("stdout pipe or reader did not settle")
+                if not _stdout_closed(process):
+                    settle_stream(runtime, process)
+                if not _stdout_closed(process):
+                    raise RuntimeError("stdout pipe or reader did not settle")
             if process.poll() is None:
                 raise RuntimeError("stream child did not settle")
             runtime._untrack(process)
@@ -112,3 +134,12 @@ def close_streams(runtime):
             failures.append(str(exc))
     if failures:
         raise RuntimeError("; ".join(failures))
+
+
+def _stdout_closed(process):
+    pipe = getattr(process, "stdout", None)
+    reader = getattr(process, "_stdout_thread", None)
+    return (
+        (pipe is None or pipe.closed)
+        and (reader is None or not reader.is_alive())
+    )

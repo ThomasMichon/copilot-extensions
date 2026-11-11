@@ -89,6 +89,23 @@ healthy or that a productive configuration was changed.
 
 ## Journal
 
+### 2026-11-11 - Review correction: retain stdout-reader custody
+
+Review #12141 identified a valid High finding: an exited provider and settled
+stderr do not prove stdout or its communication reader settled. A real-child
+control with a descendant retaining stdout fails first because the process was
+removed from tracking after both communication attempts failed.
+
+The correction gates untracking on successful stdout communication as well as
+diagnostic settlement. Close waits for the consuming owner, serializes any
+retry after that owner finishes, and requires the actual stdout pipe closed
+and communication reader stopped. A refused cleanup remains tracked; other
+children still receive retirement attempts. The regression also exercises
+recovery through the normal close owner after releasing the inert fixture,
+with independent finally cleanup. All 125 affected cases pass, followed by
+the expanded real close-owner recovery control. The finding is corrected
+locally; thread resolution, fresh final review and exact-head CI remain open.
+
 ### 2026-11-11 - Bounded source correction and consumer proof
 
 The four original real-child controls passed with 11 diagnostic bytes and

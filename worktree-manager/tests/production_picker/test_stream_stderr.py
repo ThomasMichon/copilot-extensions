@@ -17,6 +17,7 @@ pytestmark = [
 
 _PROVIDER = r'''
 import json
+import subprocess
 import sys
 import time
 
@@ -38,6 +39,16 @@ if behavior == "unsupported" and "--stream" in sys.argv:
 if behavior == "unsupported":
     print(json.dumps([{"id": "legacy"}]), flush=True)
     sys.exit(0)
+if behavior == "descendant":
+    subprocess.Popen(
+        [sys.executable, "-c",
+         "import sys,time; from pathlib import Path\n"
+         "for _ in range(3000):\n"
+         " if Path(sys.argv[1]).exists(): break\n"
+         " time.sleep(.01)\n", sys.argv[4]],
+        stdin=subprocess.DEVNULL, stdout=sys.stdout, stderr=subprocess.DEVNULL,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
 if kind == "list":
     print(json.dumps({"type": "row", "entry": {"id": "one"}}), flush=True)
 else:
@@ -52,6 +63,8 @@ def _runtime(tmp_path, kind, count, behavior="normal"):
     script = tmp_path / "provider.py"
     script.write_text(_PROVIDER, encoding="utf-8")
     argv = [sys.executable, str(script), kind, str(count), behavior]
+    if behavior == "descendant":
+        argv.append(str(tmp_path / "descendant-release"))
     pivot = pivots.parse_manifest(
         {"label": "Fixture", "list": argv, "entry": {"id": "id"}, "stream": True},
         name="fixture", source_path=str(script),
@@ -236,7 +249,10 @@ def test_stderr_diagnostics_do_not_renew_stdout_publication_deadline(tmp_path, m
 
 def test_unsettled_reader_cannot_release_process_tracking():
     untracked = []
-    drain = SimpleNamespace(error="fixture cleanup refused", finish=lambda: False)
+    drain = SimpleNamespace(
+        error="fixture cleanup refused", finish=lambda: False,
+        settle_lock=threading.Lock(), consumer_finished=threading.Event(),
+    )
     process = SimpleNamespace(
         _picker_stderr=drain, returncode=0, communicate=lambda **_: ("", None),
     )
@@ -285,3 +301,53 @@ def test_reader_construction_failure_retires_actual_spawn(tmp_path, monkeypatch)
         assert not runtime._procs
     finally:
         runtime.close()
+
+
+def test_exited_provider_retains_stdout_reader_custody_until_actual_settlement(
+    tmp_path, monkeypatch,
+):
+    runtime, argv = _runtime(tmp_path, "progress", 11, "descendant")
+    spawn = runtime._spawn_stream
+    communicate = []
+    retire = tasks._kill_proc_tree
+
+    def captured(argv):
+        process = spawn(argv)
+        original = process.communicate
+        communicate.append(original)
+
+        def short_communication(**_kwargs):
+            process.wait(timeout=3)
+            return original(timeout=.1)
+
+        process.communicate = short_communication
+        return process
+
+    monkeypatch.setattr(runtime, "_spawn_stream", captured)
+    monkeypatch.setattr(tasks, "_kill_proc_tree", lambda _process: None)
+    try:
+        ok, message = runtime.run_action_stream(
+            SimpleNamespace(run=argv), {}, lambda *_: None,
+        )
+        process = runtime.fixture_children[0]
+        assert not ok and "cleanup failed" in message
+        assert process.returncode == 0 and not process.stdout.closed
+        assert runtime._procs == [process]
+        with pytest.raises(RuntimeError, match="stdout"):
+            runtime.close()
+        assert runtime._procs == [process]
+        monkeypatch.setattr(tasks, "_kill_proc_tree", retire)
+        process.communicate = communicate[0]
+        (tmp_path / "descendant-release").touch()
+        runtime.close()
+        assert not runtime._procs and process.stdout.closed
+        reader = getattr(process, "_stdout_thread", None)
+        assert reader is None or not reader.is_alive()
+    finally:
+        (tmp_path / "descendant-release").touch()
+        for index, process in enumerate(runtime.fixture_children):
+            retire(process)
+            communicate[index](timeout=3)
+        monkeypatch.setattr(tasks, "_kill_proc_tree", retire)
+        runtime.close()
+    _assert_settled(runtime)
