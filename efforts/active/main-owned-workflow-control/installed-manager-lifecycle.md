@@ -1845,6 +1845,43 @@ TESTING.md. The next unchanged exact-head hosted matrix must still prove the
 final immutable comparison and complete result; authentic update, mandatory
 frozen enforcement and separate Main adoption remain open.
 
+### November 11 - Keep the burst pass separate from the actual launch shape
+
+The managed reconciled-head rewrite initially exceeds Git's existing
+30-second command limit. Git and the provider independently still report the
+old `7fe797` ref, so no successful publication or dispatch is inferred.
+One managed retry succeeds using the recorded exact lease, without a manual
+force, hook bypass or timeout change. The actual hook is the managed PR shim
+with no local companion; its generic error suggestion does not prove a
+runtime-update stall.
+
+Current source `c9e546c87d7268ad8c7dce3f234de3640344d1ac` is published,
+mergeable and draft. Its exact CI run 43120307991 passes. The source-bound
+burst request `4f7d4ceb484a48c6a92f71085c877123`, run 43120805625 attempt 1,
+also qualifies on the existing protected controller
+`85ffb5f56366635474bb78fb6864463683e50d5c`. The actual JUnit summary records
+128 short-lived children, 123 observed incarnations, 38 successful scans,
+query-pipeline total/max 1553/102 ms and session creation 255 ms. No scan or
+close error, missing stop, truncation or unowned child cleanup is admitted.
+This six-second pass does not reproduce or waive the original full-run
+failure.
+
+Further source/trace correlation corrects the workload model: the fresh census
+window arms only after runtime installation completes. The retained original
+records near failure show repeated direct parent/child Python launch pairs,
+whereas the short profiles used base Python. The next residual changes only
+that missing launch dimension: the same bounded burst uses an actual private
+standard-library no-pip Windows venv. No suite or dependency installation,
+shared runtime, provider substitution, global machine change or full-suite
+retry is introduced. Venv launcher/base-child behavior remains a hypothesis
+until that source-bound hosted case runs.
+
+The expanded profile's helper parses, F/E9 lint and documentation consistency
+pass, and ordinary contained selection skips all four T3 cases in 0.60 seconds.
+No native provider operation or venv construction runs in that default lane.
+The preceding exact-source CI and hosted burst success are retained at `c9e546`,
+not relabeled as evidence for this new residual.
+
 ### November 11 - Identify and stop snapshot-guidance payload bytecode
 
 Required CI 43069145815 is green at

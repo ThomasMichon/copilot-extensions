@@ -7,6 +7,7 @@ import runpy
 import shutil
 import sys
 import time
+import venv
 
 import pytest
 
@@ -27,6 +28,7 @@ sys.path.insert(0, sys.argv[1])
 from agent_procutil import no_window_kwargs
 home, ready, stop = map(Path, sys.argv[2:5])
 mode = sys.argv[5]
+interpreter = sys.argv[6]
 children = []
 deadline = time.monotonic() + 15
 try:
@@ -35,7 +37,7 @@ try:
             raise TimeoutError('census did not become ready')
         time.sleep(.02)
     children.append(subprocess.Popen(
-        [sys.executable, '-I', '-S', '-B', '-c', 'import time;time.sleep(12)',
+        [interpreter, '-I', '-S', '-B', '-c', 'import time;time.sleep(12)',
          str(home / '.agent-census' / 'persistent')], **no_window_kwargs(),
     ))
     end = time.monotonic() + 6
@@ -45,10 +47,10 @@ try:
             program = (
                 'import time;end=time.monotonic()+.15\n'
                 'while time.monotonic()<end: sum(range(10000))'
-            ) if mode == 'burst' else 'import time;time.sleep(.15)'
-            for _ in range(8 if mode == 'burst' else 1):
+            ) if mode.endswith('burst') else 'import time;time.sleep(.15)'
+            for _ in range(8 if mode.endswith('burst') else 1):
                 children.append(subprocess.Popen(
-                    [sys.executable, '-I', '-S', '-B', '-c', program,
+                    [interpreter, '-I', '-S', '-B', '-c', program,
                      str(home / '.agent-census' / 'ephemeral')], **no_window_kwargs(),
                 ))
                 count += 1
@@ -67,7 +69,7 @@ finally:
 """
 
 
-@pytest.mark.parametrize("mode", ("quiet", "churn", "burst"))
+@pytest.mark.parametrize("mode", ("quiet", "churn", "burst", "venv-burst"))
 def test_real_manager_census_profile(tmp_path, record_property, monkeypatch, mode):
     monkeypatch.syspath_prepend(str(ROOT / "libs" / "agent-procutil" / "src"))
     from agent_procutil.owned_process import run_caller_owned
@@ -77,6 +79,11 @@ def test_real_manager_census_profile(tmp_path, record_property, monkeypatch, mod
     ))["_runtime_process_trace_script"]
     home = tmp_path / "h"
     home.mkdir()
+    interpreter = sys.executable
+    if mode == "venv-burst":
+        environment = home / ".agent-census" / "venv"
+        venv.EnvBuilder(with_pip=False).create(environment)
+        interpreter = str(environment / "Scripts" / "python.exe")
     ready, stop, report = [tmp_path / name for name in ("ready", "stop", "report.json")]
     (tmp_path / "process-trace-window").write_text("profile")
     deadline = time.monotonic() + 23
@@ -85,7 +92,7 @@ def test_real_manager_census_profile(tmp_path, record_property, monkeypatch, mod
         return run_caller_owned(
             [sys.executable, "-I", "-B", "-c", _LOAD,
              str(ROOT / "libs" / "agent-procutil" / "src"),
-             str(home), str(ready), str(stop), mode],
+             str(home), str(ready), str(stop), mode, interpreter],
             timeout=max(.1, min(20, deadline - time.monotonic())),
             max_stdout_bytes=4096, max_stderr_bytes=4096,
             cwd=tmp_path, env=os.environ.copy(),
@@ -110,6 +117,7 @@ def test_real_manager_census_profile(tmp_path, record_property, monkeypatch, mod
     summary.update(
         mode=mode, observed_records=len(trace["records"]),
         load_children=int(load_result.stdout.strip()) if load_result.returncode == 0 else None,
+        interpreter_kind="venv" if mode == "venv-burst" else "base",
     )
     record_property("census_profile", json.dumps(summary, sort_keys=True))
     assert load_result.returncode == 0, "caller-owned load failed"

@@ -283,15 +283,17 @@ default after a timeout.
 
 For a narrow Manager census diagnosis, select
 `submit --tools --test-file tools/test_manager_census_native.py --allow-explicit-tiers`.
-The three T3 cases run the same one-second local DCOM census with six seconds
-of quiet, single-child churn or eight-child CPU/churn bursts. They retain sanitized
+The four T3 cases run the same one-second local DCOM census with six seconds
+of quiet, single-child churn or eight-child CPU/churn bursts using base Python
+or a private no-pip Windows venv (the `venv-burst` case). They retain sanitized
 failure phase/category/numeric HRESULT and aggregate scan/query-pipeline timing
 in the JUnit `census_profile` property. Query-pipeline timing includes record
 consumption; it is not a provider-only measurement. Any census or session-close
 error still fails. Children remain contained and are reaped. This short profile
 does not install the suite, qualify lifecycle acceptance, waive a prior failed
 census or change the full native packet's deadlines. Use `-k burst` to select
-only the concurrent-pressure residual after the lighter cases are measured.
+the concurrent-pressure cases after the lighter cases are measured, or
+`-k venv` for just the venv launcher/base-child residual.
 
 `submit --packet bridge-http52 --source <full-commit>` invokes the candidate's
 canonical capture with `--write`, a separate same-source no-write capture,
