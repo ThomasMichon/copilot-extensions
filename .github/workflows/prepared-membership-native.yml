@@ -36,7 +36,8 @@ jobs:
           - packet: admission-and-safe
             select: "prepared_native_membership_reuses_original_association or (registered_file_local_write_reuses_original_guard_facts and (ordinary or create or path-alias or json-args or cell or batch-read-only) and not (structured or write-name or patch))"
           - packet: fallback
-            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or batch-read-only or structured or write-name or patch)"
+            select: "registered_file_local_write_reuses_original_guard_facts and not (ordinary or create or path-alias or json-args or cell or batch-read-only or structured or write-name or patch or literal-batch)"
+            residual: "registered_file_local_write_reuses_original_guard_facts and literal-batch and not cell"
           - packet: structured
             select: "registered_file_local_write_reuses_original_guard_facts and structured and not (write-name or (patch and not structured-patch))"
           - packet: write-names
@@ -72,6 +73,17 @@ jobs:
           python tools/run-plugin-tests.py agent-worktrees
           --test-file tests/test_managed_session.py
           -k "${{ matrix.select }}"
+          --allow-explicit-tiers --test-timeout 30 --timeout 300
+      - name: Qualify literal batches on the same fallback worker
+        if: ${{ !cancelled() && matrix.residual != '' }}
+        env:
+          AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP: "1"
+          PYTHONUTF8: "0"
+          PYTEST_ADDOPTS: "-vv --tb=short --durations=10"
+        run: >-
+          python tools/run-plugin-tests.py agent-worktrees
+          --test-file tests/test_managed_session.py
+          -k "${{ matrix.residual }}"
           --allow-explicit-tiers --test-timeout 30 --timeout 300
 
   prepared-membership-windows:

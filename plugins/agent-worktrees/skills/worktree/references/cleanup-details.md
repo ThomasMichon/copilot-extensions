@@ -70,6 +70,16 @@ confirms its terminal state; held claims require ordinary settlement or an
 explicit accepted transfer. Neither a missing directory nor `--force` releases
 that responsibility.
 
+For an explicitly finalized, inactive worktree held only by its own `at-rest`
+session claim after a missed session-end release, use the existing lifecycle
+operation: `conclude-session --worktree-id <id> --session-id <session> --state
+concluded`. It rechecks inactive liveness and releases only that exact settled
+self-session claim under the record lock. It does not fabricate a native end
+event, release active claims or alter another session's claim. Unknown or live
+liveness refuses recovery. Then retry ordinary non-forced cleanup; every other
+source, PR, ownership and cleanup gate remains in force. Generic
+`claims reconcile-at-rest` continues to exclude session claims.
+
 **Known limitation:** a record whose tracking `status` is already
 `finalized` can still mask genuinely new WIP or conversation-only content added
 *after* finalize, because `_apply_tracking_override` currently collapses that

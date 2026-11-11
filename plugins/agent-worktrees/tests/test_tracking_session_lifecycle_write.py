@@ -11,11 +11,14 @@ live daemon.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from agent_worktrees import config as cfg, tracking_session_lifecycle_write, tracking_write
-from agent_worktrees.tracking import SessionEntry, WorktreeRecord, load_record, save_record
+from agent_worktrees.tracking import (
+    ResourceClaim, SessionEntry, WorktreeRecord, format_claim_ref, load_record, save_record,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -93,6 +96,267 @@ def test_conclude_rejects_an_unknown_session(record_path):
     assert result["error"] == "lifecycle"
     # Refused -- untouched.
     assert load_record(record_path).session_entry("solo").state == "active"
+
+
+@pytest.mark.parametrize("initial_state", ["active", "concluded"])
+def test_explicit_conclusion_recovers_only_finalized_at_rest_self_claim(
+    record_path, monkeypatch, initial_state,
+):
+    record = load_record(record_path)
+    record.status = "finalized"
+    record.session_entry("solo").state = initial_state
+    own_ref = format_claim_ref(
+        record.execution_machine, record.repo, record.worktree_id, session="solo",
+    )
+    record.resources = [
+        ResourceClaim(kind="session", ref=own_ref, state="at-rest"),
+        ResourceClaim(kind="session", ref="other/repo/tree#solo", state="at-rest"),
+        ResourceClaim(kind="session", ref="other-session", state="active"),
+        ResourceClaim(kind="worktree", ref="child", state="active"),
+    ]
+    save_record(record, record_path)
+    monkeypatch.setattr(
+        tracking_session_lifecycle_write.sessions, "verify_worktree_active",
+        lambda rec, **kwargs: SimpleNamespace(active=False, probes_ok=True),
+    )
+    args = {
+        "worktree_id": "wt-1", "yaml_path": str(record_path),
+        "session_id": "solo", "state": "concluded",
+    }
+
+    assert tracking_session_lifecycle_write.apply_session_conclude(args)["ok"]
+    assert tracking_session_lifecycle_write.apply_session_conclude(args)["ok"]
+
+    saved = load_record(record_path)
+    assert saved.session_entry("solo").state == "concluded"
+    assert [claim.state for claim in saved.resources] == [
+        "released", "at-rest", "active", "active",
+    ]
+
+
+@pytest.mark.parametrize("active,probes_ok", [(True, True), (False, False)])
+def test_session_claim_recovery_preserves_live_or_unknown_worktree(
+    record_path, monkeypatch, active, probes_ok,
+):
+    record = load_record(record_path)
+    record.status = "finalized"
+    record.resources = [ResourceClaim(
+        kind="session",
+        ref=format_claim_ref(
+            record.execution_machine, record.repo, record.worktree_id, session="solo",
+        ),
+        state="at-rest",
+    )]
+    save_record(record, record_path)
+    monkeypatch.setattr(
+        tracking_session_lifecycle_write.sessions, "verify_worktree_active",
+        lambda rec, **kwargs: SimpleNamespace(active=active, probes_ok=probes_ok),
+    )
+
+    result = tracking_session_lifecycle_write.apply_session_conclude({
+        "worktree_id": "wt-1", "yaml_path": str(record_path),
+        "session_id": "solo", "state": "concluded",
+    })
+
+    assert result["error"] == "lifecycle"
+    saved = load_record(record_path)
+    assert saved.session_entry("solo").state == "active"
+    assert saved.resources[0].state == "at-rest"
+
+
+@pytest.mark.parametrize("kind", ["session", "worktree"])
+def test_session_claim_recovery_rejects_colliding_refs(record_path, kind):
+    record = load_record(record_path)
+    record.status = "finalized"
+    own_ref = format_claim_ref(
+        record.execution_machine, record.repo, record.worktree_id, session="solo",
+    )
+    record.resources = [
+        ResourceClaim(kind=kind, ref=own_ref, state="active"),
+        ResourceClaim(kind="session", ref=own_ref, state="at-rest"),
+    ]
+    save_record(record, record_path)
+
+    result = tracking_session_lifecycle_write.apply_session_conclude({
+        "worktree_id": "wt-1", "yaml_path": str(record_path),
+        "session_id": "solo", "state": "concluded",
+    })
+
+    assert result["error"] == "lifecycle"
+    saved = load_record(record_path)
+    assert saved.session_entry("solo").state == "active"
+    assert [claim.state for claim in saved.resources] == ["active", "at-rest"]
+
+
+@pytest.mark.parametrize("missing_directory", [True, False])
+def test_session_claim_recovery_uses_strict_binding_observation(
+    record_path, monkeypatch, tmp_path, missing_directory,
+):
+    from agent_worktrees import process_table_cache, session_liveness, sessions
+
+    session_id = "00000000-0000-4000-8000-000000000001"
+    record = load_record(record_path)
+    record.status = "finalized"
+    record.sessions = [SessionEntry(session_id, "2026-01-01T00:00:00")]
+    record.head_session = session_id
+    record.resources = [ResourceClaim(
+        kind="session",
+        ref=format_claim_ref(
+            record.execution_machine, record.repo, record.worktree_id, session=session_id,
+        ),
+        state="at-rest",
+    )]
+    save_record(record, record_path)
+    state_dir = tmp_path / "session-state"
+    state_dir.mkdir()
+    if not missing_directory:
+        directory = state_dir / session_id
+        directory.mkdir()
+        (directory / "inuse.123.lock").touch()
+    monkeypatch.setattr(sessions, "_session_state_dir", lambda: state_dir)
+    monkeypatch.setattr(
+        sessions, "mux_status_many", lambda ids, **kwargs: {"wt-1": sessions.MuxInfo()},
+    )
+    monkeypatch.setattr(process_table_cache, "cached", lambda build: {})
+    queried = []
+
+    def unavailable(pid):
+        queried.append(pid)
+        return None
+
+    monkeypatch.setattr(session_liveness, "copilot_pid_state", unavailable)
+
+    result = tracking_session_lifecycle_write.apply_session_conclude({
+        "worktree_id": "wt-1", "yaml_path": str(record_path),
+        "session_id": session_id, "state": "concluded",
+    })
+
+    assert result["error"] == "lifecycle"
+    assert queried == ([] if missing_directory else [123])
+    saved = load_record(record_path)
+    assert saved.session_entry(session_id).state == "active"
+    assert saved.resources[0].state == "at-rest"
+
+
+def test_refused_session_claim_release_does_not_conclude(record_path, monkeypatch):
+    from agent_worktrees import claim_handoffs
+
+    record = load_record(record_path)
+    record.status = "finalized"
+    record.resources = [ResourceClaim(
+        kind="session",
+        ref=format_claim_ref(
+            record.execution_machine, record.repo, record.worktree_id, session="solo",
+        ),
+        state="at-rest",
+    )]
+    save_record(record, record_path)
+    monkeypatch.setattr(
+        tracking_session_lifecycle_write.sessions, "verify_worktree_active",
+        lambda rec, **kwargs: SimpleNamespace(active=False, probes_ok=True),
+    )
+
+    def unavailable(*args):
+        raise OSError("handoff registry unavailable")
+
+    monkeypatch.setattr(claim_handoffs, "active_bundle_for_claim", unavailable)
+    before = record_path.read_bytes()
+
+    result = tracking_session_lifecycle_write.apply_session_conclude({
+        "worktree_id": "wt-1", "yaml_path": str(record_path),
+        "session_id": "solo", "state": "concluded",
+    })
+
+    assert result["error"] == "lifecycle"
+    assert "release" in result["message"]
+    assert record_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reactivate", [None, "before-recovery", "before-cleanup"])
+def test_recovery_composes_with_guarded_cleanup_and_reactivation(
+    record_path, monkeypatch, tmp_path, reactivate,
+):
+    from _cleanup_revalidation_helpers import CleanupHarness, S, info
+    from agent_worktrees import config_authority, tracking_session_registration_write
+
+    root = tmp_path / "cleanup"
+    root.mkdir()
+    harness = CleanupHarness(monkeypatch, root)
+    record = load_record(record_path)
+    authority = cfg.load_project_config(record.repo)
+    monkeypatch.setattr(
+        config_authority, "load_project_authority_config", lambda name, **kwargs: authority,
+    )
+    record.status = "finalized"
+    record.worktree_path = str(harness.worktree_root / record.worktree_id)
+    Path(record.worktree_path).mkdir()
+    own_ref = format_claim_ref(
+        record.execution_machine, record.repo, record.worktree_id, session="solo",
+    )
+    record.resources = [ResourceClaim(kind="session", ref=own_ref, state="at-rest")]
+    path = harness.seed(record)
+    harness.set_classifier(info(S.COMPLETED))
+    monkeypatch.setattr(
+        tracking_session_lifecycle_write.sessions, "verify_worktree_active",
+        lambda rec, **kwargs: SimpleNamespace(active=False, probes_ok=True),
+    )
+
+    def resume():
+        result = tracking_session_registration_write.apply_session_register({
+            "worktree_id": record.worktree_id, "yaml_path": str(path),
+            "session_id": "solo", "source_identity": "resumed-launch",
+        })
+        assert result["ok"]
+
+    if reactivate == "before-recovery":
+        resume()
+    result = tracking_session_lifecycle_write.apply_session_conclude({
+        "worktree_id": record.worktree_id, "yaml_path": str(path),
+        "session_id": "solo", "state": "concluded",
+    })
+    assert result["ok"]
+    if reactivate == "before-cleanup":
+        harness.set_finalize_lock(on_acquire=resume)
+
+    outcome = harness.run_reap_one(record.worktree_id)
+
+    if reactivate:
+        assert outcome["removed"] is False
+        assert harness.reaped == []
+        assert Path(record.worktree_path).exists()
+        assert load_record(path).resources[0].state == "active"
+    else:
+        assert outcome["removed"] is True
+        assert harness.reaped == [(record.worktree_id, "completed")]
+
+
+@pytest.mark.parametrize(
+    "status,state,claim_state",
+    [("active", "concluded", "at-rest"),
+     ("finalized", "handed-off", "at-rest"),
+     ("finalized", "concluded", "active")],
+)
+def test_ordinary_conclusion_does_not_release_unqualified_session_claims(
+    record_path, status, state, claim_state,
+):
+    record = load_record(record_path)
+    record.status = status
+    record.resources = [ResourceClaim(
+        kind="session",
+        ref=format_claim_ref(
+            record.execution_machine, record.repo, record.worktree_id, session="solo",
+        ),
+        state=claim_state,
+    )]
+    save_record(record, record_path)
+
+    result = tracking_session_lifecycle_write.apply_session_conclude({
+        "worktree_id": "wt-1", "yaml_path": str(record_path),
+        "session_id": "solo", "state": state,
+    })
+
+    assert result["ok"]
+    assert load_record(record_path).resources[0].state == claim_state
 
 
 def test_conclude_only_if_active_no_ops_an_already_concluded_session(record_path):

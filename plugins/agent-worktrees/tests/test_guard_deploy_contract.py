@@ -267,6 +267,50 @@ def test_native_shell_contract_preserves_original_guard_decisions(tmp_path, monk
     assert guard.decide(protected, env=env, home=tmp_path)["permissionDecision"] == "deny"
 
 
+@pytest.mark.parametrize("mixed", [False, True])
+def test_native_literal_batch_preserves_original_expansion_and_guard_decisions(tmp_path, monkeypatch, mixed):
+    import importlib.util
+    from test_managed_session import fixture_linked_worktree, fixture_project
+
+    anchor, _registry = fixture_project(tmp_path)
+    workspace, _admin = fixture_linked_worktree(tmp_path, anchor)
+    config = workspace / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("stateless: true\n", encoding="utf-8")
+    spec = importlib.util.spec_from_file_location("native_batch_client", _SCRIPTS / "hook_client.py")
+    client = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(client)
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.syspath_prepend(str(_SCRIPTS))
+    policy = json.loads((_SCRIPTS / "hook-read-policy.json").read_text("utf-8"))
+    forms = client._load_sibling("tool_call_forms.py")
+    relevance = client._load_sibling("hook_pre_relevance.py")
+    protected = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
+    env = {"AGENT_HOME": str(tmp_path)}
+    for head in policy["nativeShellReadCommands"]:
+        for index, key in enumerate(policy["nativeShellReadCommandKeys"]):
+            args = {earlier: None for earlier in policy["nativeShellReadCommandKeys"][:index]}
+            args[key] = head
+            calls = [{"name": "powershell", "args": args}, {"name": "pwsh", "args": head}]
+            if mixed:
+                calls.insert(1, {"name": "view", "args": {"command": protected}})
+            event = {
+                "cwd": str(workspace), "toolName": "edit", "toolArgs": {"path": "efforts/private.md"},
+                "tool_input": {"command": protected}, "toolCalls": calls,
+            }
+            expanded = forms.tool_events(event, strict=True)
+            for member in expanded:
+                assert relevance.is_irrelevant(member, False, client._load_sibling)
+                for name in policy["guards"]:
+                    assert client._load_sibling(name).decide(member, env=env, home=tmp_path) is None
+    event["toolCalls"].append({"name": "powershell", "args": {"command": protected}})
+    last = forms.tool_events(event, strict=True)[-1]
+    assert client._load_sibling("statelessness_guard.py").decide(
+        last, env=env, home=tmp_path,
+    )["permissionDecision"] == "deny"
+    assert not (workspace / "efforts" / "private.md").exists()
+
+
 @pytest.mark.parametrize("declaration", [
     "()",
     "['Get-Location']",
