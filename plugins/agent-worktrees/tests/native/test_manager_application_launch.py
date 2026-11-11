@@ -74,6 +74,27 @@ def _manager_install_environment(home, root, tmp_path, interpreter, *, caller_jo
     return environment
 
 
+def _run_manager_native(directory, control, *, script, python, root, environment, picker_decision):
+    command = [
+        sys.executable, "-I", "-B", "-X", "utf8", "-c",
+        "import sys;from pathlib import Path;"
+        "sys.path[:0]=sys.argv[1:3];"
+        "from test_headed_worktrees_copilot import _qualify_native_worktrees;"
+        "_qualify_native_worktrees(Path(sys.argv[3]),sys.argv[4],"
+        "manager_script=Path(sys.argv[5]),manager_python=Path(sys.argv[6]),"
+        "manager_environment={'WORKTREE_MANAGER_ROOT':sys.argv[7],'WORKTREE_PANE_WAIT_TIMEOUT':'3'},"
+        "verify_reuse=False,manager_picker=sys.argv[8]=='1')",
+        str(Path(__file__).parent), str(ROOT / "tools"), str(directory),
+        control, str(script), str(python), str(root), "1" if picker_decision else "0",
+    ]
+    qualified = run_caller_owned(
+        command, cwd=directory, env=environment, timeout=180,
+        max_stdout_bytes=65536, max_stderr_bytes=65536,
+    )
+    print(qualified.stdout, flush=True)
+    assert qualified.returncode == 0, qualified.stdout + qualified.stderr
+
+
 @pytest.mark.parametrize(
     "control", ["manager-no-mux", "manager-mux"] if _NATIVE_COPILOT else ["manager-no-mux"],
 )
@@ -243,17 +264,11 @@ def _qualify_manager_application(
                 print(qualified.stdout, flush=True)
                 assert qualified.returncode == 0, qualified.stdout + qualified.stderr
             elif _NATIVE_COPILOT:
-                from test_headed_worktrees_copilot import _qualify_native_worktrees
-
                 native = tmp_path / "native-launch"
                 native.mkdir()
-                _qualify_native_worktrees(
-                    native, control, manager_script=script, manager_python=python,
-                    manager_environment={
-                        **lifecycle, "WORKTREE_MANAGER_ROOT": str(root),
-                        "WORKTREE_PANE_WAIT_TIMEOUT": "3",
-                    },
-                    verify_reuse=False, manager_picker=picker_decision,
+                _run_manager_native(
+                    native, control, script=script, python=python, root=root,
+                    environment={**os.environ, **lifecycle}, picker_decision=picker_decision,
                 )
             assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == completion
     finally:

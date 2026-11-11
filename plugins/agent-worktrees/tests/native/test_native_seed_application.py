@@ -444,6 +444,40 @@ def test_manager_install_retains_only_the_selected_runner_lifecycle(tmp_path, mo
         _manager_install_environment(*arguments, caller_jobs=True, worktrees_environment={})
 
 
+@pytest.mark.parametrize("failure", ["exit", "timeout"])
+def test_manager_native_phase_propagates_owned_failures_without_inline_retry(tmp_path, monkeypatch, failure):
+    import test_manager_application_launch as fixture
+    from agent_procutil.daemon_instances import TEST_CONTEXT_ENV
+
+    calls = []
+    environment = {TEST_CONTEXT_ENV: "selected fixture lifecycle"}
+
+    def run(command, **kwargs):
+        calls.append(command)
+        assert kwargs["env"] == environment and kwargs["cwd"] == tmp_path
+        assert kwargs["timeout"] == 180
+        assert kwargs["max_stdout_bytes"] == kwargs["max_stderr_bytes"] == 65536
+        assert command[command.index("-c") + 2:][-5:] == [
+            "manager-no-mux", str(tmp_path / "launch-session.ps1"),
+            str(tmp_path / "python.exe"), str(tmp_path / "manager"), "1",
+        ]
+        if failure == "timeout":
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+        return subprocess.CompletedProcess(command, 3, "native failed", "owned cleanup retained")
+
+    monkeypatch.setattr(fixture, "run_caller_owned", run)
+    with pytest.raises(
+        subprocess.TimeoutExpired if failure == "timeout" else AssertionError,
+        match="timed out" if failure == "timeout" else "native failed",
+    ):
+        fixture._run_manager_native(
+            tmp_path, "manager-no-mux", script=tmp_path / "launch-session.ps1",
+            python=tmp_path / "python.exe", root=tmp_path / "manager",
+            environment=environment, picker_decision=True,
+        )
+    assert len(calls) == 1
+
+
 def _qualify_native_application(tmp_path, monkeypatch, *, broker=False, caller_jobs=False):
     if caller_jobs:
         from agent_procutil import contained_test_mode
