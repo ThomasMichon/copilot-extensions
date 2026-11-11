@@ -131,6 +131,25 @@ def test_alias_bootstrap_preserves_exact_name_and_first_slug_match(local):
     assert run(policy, identity_source="Publisher/tool")["default"]["state"] == "missing"
 
 
+def test_repository_slot_projects_each_missing_alias_without_replacing_explicit_accounts(local):
+    _registry, policy = local
+    state = repos.read_registry(strict=True)
+    state.repos["zz-alias"] = repos.RepoEntry(
+        "zz-alias", remote=state.repos["upstream"].remote, account="operator-public",
+    )
+    repos.write_registry(state)
+    policy.write_text(json.dumps({
+        "version": 1, "accounts": {"work": "operator-work", "public": "operator-public"},
+    }), encoding="utf-8")
+    result = run(policy, apply=True)
+    assert result["status"] == "ready"
+    assert repos.account_for_github_slug("Publisher/tool") == "operator-public"
+    state = repos.read_registry(strict=True)
+    assert state.repos["upstream"].account == "operator-public"
+    assert "repo:upstream" in state.account_projection
+    assert "repo:zz-alias" not in state.account_projection
+
+
 def test_portable_and_argument_slot_conflict_refuses_before_writing(local):
     registry, policy = local
     policy.write_text(json.dumps({
@@ -332,3 +351,13 @@ def test_actual_cli_projects_bound_knowledge_policy_without_credentials(tmp_path
         assert result["applied"] is changed
         assert result["default"]["account"] == "operator-work"
     assert repos.read_registry(strict=True).default_account == "operator-work"
+    if explicit_context:
+        before = registry.read_bytes()
+        (local_config / "config.yaml").write_text("knowledge_repo: [", encoding="utf-8")
+        child = subprocess.run(
+            [sys.executable, "-m", "agent_worktrees", *arguments],
+            cwd=roots["example-harness"], capture_output=True, text=True, timeout=15,
+            **no_window_kwargs(),
+        )
+        assert child.returncode == 2, child.stdout + child.stderr
+        assert registry.read_bytes() == before

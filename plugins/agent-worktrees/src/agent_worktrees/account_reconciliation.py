@@ -76,7 +76,7 @@ def _policy(raw):
 
 
 def reconciliation_context(project):
-    from . import config, config_sources
+    from . import config, config_acquisition, config_sources
 
     if not project:
         from .invocation_project import _resolve_active_project
@@ -84,14 +84,21 @@ def reconciliation_context(project):
         project = config.active_project() or _resolve_active_project(None)[0]
     if not project:
         raise ValueError("Account reconciliation requires a registered context project")
-    selected = config.load_config(
-        config.project_dir(project) / "config.yaml",
-        project=project, include_control_plane_related_pr=False,
-        include_knowledge_preferences=False,
-    )
-    source = config_sources.knowledge_config_source(
-        selected, base_anchor=selected.default_repo.anchor,
-    )
+    with config_acquisition.capture_config_observations() as observations:
+        selected = config.load_config(
+            config.project_dir(project) / "config.yaml",
+            project=project, include_control_plane_related_pr=False,
+            include_knowledge_preferences=False, strict_inrepo_config=True,
+        )
+        if any(
+            item.stage in {"config-yaml", "config-dropins", "config-dropin-entry", "config-migration"}
+            and item.authority.value == "indeterminate"
+            for item in observations
+        ):
+            raise ValueError("Account binding configuration is unavailable")
+        source = config_sources.knowledge_config_source(
+            selected, base_anchor=selected.default_repo.anchor,
+        )
     return (Path(source.anchor) / POLICY_FILE if source else None), selected.repo_name
 
 
@@ -171,20 +178,18 @@ def reconcile(
         elif not candidates:
             row["state"] = "not-registered"
         else:
-            existing = {
-                entry.account or repos.account_from_map(target.split("/", 1)[0], registry=registry)
-                for entry in candidates
-            } - {None, ""}
-            if existing:
-                row["state"] = "preserved"
-                if {value.casefold() for value in existing} != {login.casefold()}:
-                    conflicts.append({"target": target, "slot": slot, "state": "local-choice-preserved"})
-            else:
-                for entry in candidates:
+            row["state"] = "preserved"
+            for entry in candidates:
+                existing = entry.account or repos.account_from_map(target.split("/", 1)[0], registry=registry)
+                if existing:
+                    if existing.casefold() != login.casefold():
+                        conflict = {"target": target, "slot": slot, "state": "local-choice-preserved"}
+                        if conflict not in conflicts:
+                            conflicts.append(conflict)
+                else:
                     entry.account = login
                     projection.record(registry, owner, "repo:" + entry.name, login)
-                row["state"] = "projected"
-                changed = True
+                    row["state"] = "projected"
         observations.append(row)
     changed = before != projection.snapshot(registry)
     if apply and changed:
