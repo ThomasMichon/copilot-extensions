@@ -128,6 +128,39 @@ function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $f
 """
 
 
+NATIVE_SHELL_READ_V1 = r"""
+function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
+    if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
+        $Payload -isnot [Collections.IDictionary]) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) {
+        if (-not $PreparedMembership) { return $false }
+        $calls = Get-NativePreToolBatch $Payload['toolCalls']
+        if ($null -eq $calls) { return $false }
+        foreach ($call in $calls) {
+            if ($call['name'] -cnotin @('view', 'rg', 'glob')) { return $false }
+        }
+        return Test-NativePreToolSources -WriteProof $true
+    }
+    $name = $Payload.toolName
+    if (-not $name) { $name = $Payload.tool_name }
+    if ($name -isnot [string]) { return $false }
+    if ($name -cin @('view', 'rg', 'glob')) { return Test-NativePreToolSources }
+    if (-not $PreparedMembership -or $name -cnotin @('powershell', 'pwsh')) { return $false }
+    if ($Payload.ContainsKey('toolArgs')) {
+        $args = $Payload['toolArgs']
+    } else {
+        $args = $Payload['tool_input']
+    }
+    $command = $args
+    if ($args -is [Collections.IDictionary]) { $command = $args['command'] }
+    if ($command -isnot [string] -or -not $command) {
+        return $false
+    }
+    return Test-NativePreToolSources -ShellCommand $command
+}
+"""
+
+
 def native_write_fixture_stderr(stderr):
     phases, errors = [], []
     for line in stderr.splitlines(keepends=True):
@@ -182,6 +215,7 @@ def instrument_prepared_admission(source):
 
 def qualify_complete_native_entry(
     scripts, entry, executable, event, env, workspace, capsys, *, literal_read=False,
+    command_key="command",
 ):
     entry_started = time.monotonic()
     shell_event = "toolCalls" not in event and event.get("toolName") == "powershell"
@@ -213,7 +247,7 @@ def qualify_complete_native_entry(
         ("pre-tool-hook.ps1", "Test-NativePreToolRead",
          "[object]$Payload, [bool]$PreparedMembership = $false", "read-proof"),
         ("pre-tool-hook.ps1", "Test-NativePreToolSources",
-         "[bool]$WriteProof = $false, [string]$ShellCommand", "source-proof"),
+         "[bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments", "source-proof"),
         ("pre-tool-hook.ps1", "Invoke-PreToolPolicy",
          "[string]$Python, [string]$Payload, [ref]$Diagnostic", "policy"),
     ):
@@ -252,6 +286,8 @@ def qualify_complete_native_entry(
         carrier = "toolArgs" if "toolArgs" in event else "tool_input"
         command = f'Set-Content "{target}" -Value "leak"'
         protected = {**event, carrier: command if isinstance(event[carrier], str) else {"command": command}}
+        if command_key != "command":
+            protected[carrier] = {**event[carrier], command_key: command}
     else:
         protected = {**event, "toolCalls": [
             *event["toolCalls"], {"name": "edit", "args": {"path": "efforts/private.md"}},
@@ -266,6 +302,7 @@ def qualify_complete_native_entry(
                     if carrier else None
                 ),
                 "variant": variant, "state": state,
+                "command_key": command_key if shell_event else None,
                 "helper_seconds": time.monotonic() - entry_started,
             }}), flush=True)
 
@@ -390,6 +427,7 @@ def qualify_complete_native_entry(
                 "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
                 "source_sha256": source_digests, "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
                 "event_kind": "literal-shell-read" if literal_read else "shell-policy" if shell_event else "native-read",
+                "command_key": command_key if shell_event else None,
                 "argument_carrier": (
                     carrier + (":raw" if isinstance(event[carrier], str) else ":object")
                     if carrier else None
@@ -1348,6 +1386,18 @@ def test_registered_prepared_cell_membership_read_requires_complete_native_proof
     "literal-shell-carrier-primary-empty", "literal-shell-carrier-primary-safe",
     "literal-shell-carrier-primary-protected", "literal-shell-carrier-input-json",
     "literal-shell-carrier-input-batch",
+    "literal-shell-selection-cmd-attribution", "cell-literal-shell-selection-cmd-attribution",
+    "literal-shell-selection-input-attribution", "cell-literal-shell-selection-input-attribution",
+    "literal-shell-selection-script", "literal-shell-selection-commandLine",
+    "literal-shell-selection-commandline", "literal-shell-selection-skip-null",
+    "literal-shell-selection-skip-invalid", "literal-shell-selection-protected-first",
+    "literal-shell-selection-whitespace-first", "literal-shell-selection-shadowed-members",
+    "literal-shell-selection-case", "literal-shell-selection-json", "literal-shell-selection-batch",
+    "literal-shell-selection-old-proof", "literal-shell-selection-old-proof-command",
+    "literal-shell-selection-invalid-empty", "literal-shell-selection-invalid-type",
+    "literal-shell-selection-invalid-member", "literal-shell-selection-invalid-duplicate",
+    "literal-shell-selection-invalid-overflow",
+    "literal-shell-selection-prior-reader", "literal-shell-selection-prior-reader-command",
     "cell-batch-mixed", "cell-batch-protected",
     "structured-files", "structured-changes", "structured-only", "structured-json",
     "structured-aliases", "structured-duplicates", "structured-limit",
@@ -1380,7 +1430,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "patch-real-policy", "batch-read-only-real-policy",
         "batch-read-only-attribution",
         "shell-entry-attribution", "literal-shell-entry-attribution",
-    } or case.startswith("literal-shell-carrier-") and case.endswith("-attribution")
+    } or case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -1638,7 +1688,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             elif case == "batch-read-only-working-directory":
                 event["workingDirectory"] = event.pop("cwd")
     if case in {"shell-entry-attribution", "literal-shell-entry-attribution"} or (
-        case.startswith("literal-shell-carrier-") and case.endswith("-attribution")
+        case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
     ):
         event.update(toolName="powershell", toolArgs={"command": "Get-Location"})
         if case != "shell-entry-attribution":
@@ -1650,6 +1700,14 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         elif case == "literal-shell-carrier-input-raw-attribution":
             event.pop("toolArgs")
             event["tool_input"] = "Get-Location"
+        elif case == "literal-shell-selection-cmd-attribution":
+            event["toolArgs"] = {"command": "", "cmd": "Get-Location", "input": "Set-Content ignored"}
+        elif case == "literal-shell-selection-input-attribution":
+            event.pop("toolArgs")
+            event["tool_input"] = {
+                "command": None, "cmd": False, "script": [], "commandLine": 0,
+                "commandline": "", "input": "Get-Location", "description": "Fixture read",
+            }
     elif case.startswith("literal-shell-"):
         event.update(toolName="powershell", toolArgs={"command": "Get-Location", "description": "Fixture read"})
         protected_command = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
@@ -1700,6 +1758,37 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 {"name": "view", "args": {"path": "read.txt"}},
                 {"name": "powershell", "args": {"command": protected_command}},
             ]
+        elif case.startswith("literal-shell-selection-"):
+            event["toolArgs"] = {"cmd": "Get-Location", "description": "Fixture read"}
+            if case in {
+                "literal-shell-selection-script", "literal-shell-selection-commandLine",
+                "literal-shell-selection-commandline",
+            }:
+                key = case.removeprefix("literal-shell-selection-")
+                event["toolArgs"] = {key: "Get-Location"}
+            elif case == "literal-shell-selection-skip-null":
+                event["toolArgs"]["command"] = None
+            elif case == "literal-shell-selection-skip-invalid":
+                event["toolArgs"]["command"] = {"command": protected_command}
+            elif case == "literal-shell-selection-protected-first":
+                event["toolArgs"]["command"] = protected_command
+            elif case == "literal-shell-selection-whitespace-first":
+                event["toolArgs"]["command"] = " "
+            elif case == "literal-shell-selection-shadowed-members":
+                event["toolArgs"].update(Count=0, Keys=[], ContainsKey=False, get_Keys=None)
+            elif case == "literal-shell-selection-case":
+                event["toolArgs"] = {"CommandLine": "Get-Location", "cmd": protected_command}
+            elif case == "literal-shell-selection-json":
+                event["toolArgs"] = json.dumps(event["toolArgs"])
+            elif case == "literal-shell-selection-batch":
+                event["toolCalls"] = [
+                    {"name": "view", "args": {"path": "read.txt"}},
+                    {"name": "powershell", "args": {"command": protected_command}},
+                ]
+            elif case in {
+                "literal-shell-selection-old-proof-command", "literal-shell-selection-prior-reader-command",
+            }:
+                event["toolArgs"] = {"command": "Get-Location", "cmd": protected_command}
     env = environment(tmp_path, workspace)
     for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
         monkeypatch.delenv(key, raising=False)
@@ -1770,6 +1859,8 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
             "literal-shell-key-command", "literal-shell-key-name",
             "literal-shell-key-args", "literal-shell-key-collision",
             "literal-shell-carrier-primary-protected", "literal-shell-carrier-input-batch",
+            "literal-shell-selection-protected-first", "literal-shell-selection-case",
+            "literal-shell-selection-batch",
         }
     ), decisions
     map_path = reader.map_path(workspace, registry)
@@ -1849,6 +1940,17 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         else:
             value["nativeShellReadCommands"].append(False)
         policy.write_text(json.dumps(value), encoding="utf-8")
+    elif case.startswith(("literal-shell-selection-old-proof", "literal-shell-selection-invalid-")):
+        policy = scripts / "hook-read-policy.json"
+        value = json.loads(policy.read_text(encoding="utf-8"))
+        if case.startswith("literal-shell-selection-old-proof"):
+            value.pop("nativeShellReadCommandKeys")
+        else:
+            value["nativeShellReadCommandKeys"] = {
+                "empty": [], "type": "cmd", "member": ["command", False],
+                "duplicate": ["cmd", "cmd"], "overflow": [f"key-{index}" for index in range(129)],
+            }[case.removeprefix("literal-shell-selection-invalid-")]
+        policy.write_text(json.dumps(value), encoding="utf-8")
     observed = tmp_path / "policy-input"
     (scripts / "resolve-runtime.ps1").write_text(
         "$AwPy='" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
@@ -1910,20 +2012,25 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
     env["COPILOT_PLUGIN_ROOT"] = str(plugin)
     entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
     if case in {"batch-read-only-attribution", "shell-entry-attribution", "literal-shell-entry-attribution"} or (
-        case.startswith("literal-shell-carrier-") and case.endswith("-attribution")
+        case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
     ):
         qualify_complete_native_entry(
             scripts, entry["powershell"], executable, event, env, workspace, capsys,
             literal_read=case.startswith("literal-shell-"),
+            command_key=(
+                "cmd" if case == "literal-shell-selection-cmd-attribution" else
+                "input" if case == "literal-shell-selection-input-attribution" else "command"
+            ),
         )
         assert not membership.exists()
         return
     native_entry = scripts / "pre-tool-hook.ps1"
-    if case == "literal-shell-prior-reader":
+    if case == "literal-shell-prior-reader" or case.startswith("literal-shell-selection-prior-reader"):
         source = native_entry.read_text(encoding="utf-8")
         boundary = "\ntry {\n    $reader = [IO.StreamReader]"
         assert source.count(boundary) == 1
-        native_entry.write_text(source.replace(boundary, "\n" + NATIVE_READ_V1 + boundary, 1), encoding="utf-8")
+        reader = NATIVE_READ_V1 if case == "literal-shell-prior-reader" else NATIVE_SHELL_READ_V1
+        native_entry.write_text(source.replace(boundary, "\n" + reader + boundary, 1), encoding="utf-8")
     # Fixture-only markers classify a timeout without retrying or extending the child.
     instrumented = native_entry.read_text(encoding="utf-8")
     for boundary, source in (
@@ -1981,6 +2088,10 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
         "batch-read-only-working-directory", "batch-read-only-real-policy",
         "literal-shell-head",
         "literal-shell-carrier-primary-safe",
+        "literal-shell-selection-script", "literal-shell-selection-commandLine",
+        "literal-shell-selection-commandline", "literal-shell-selection-skip-null",
+        "literal-shell-selection-skip-invalid", "literal-shell-selection-shadowed-members",
+        "literal-shell-selection-old-proof-command", "literal-shell-selection-prior-reader-command",
     })
     assert observed.exists() is policy_required, result.stdout
     if policy_required:

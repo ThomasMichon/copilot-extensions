@@ -520,6 +520,20 @@ a fatal item timeout does not erase the active occurrence. This observer work
 is outside each subprocess elapsed span and remains part of fixture overhead,
 not isolated hook startup attribution.
 
+The `literal-shell-selection` cases apply original first-nonempty command-key
+selection to the same exact-literal proof. Representative first/final alternate
+keys retain complete real-worker comparisons and same-selected-key protected
+denials in both engines and legacy/cell scopes. Focused controls retain earlier
+null/nonstring/whitespace/protected values, exact key casing, dictionary-member
+metadata, JSON/batch fallback and absent or invalid optional key declarations.
+The retained command-only version-1 read consumer processes the new declaration
+without gaining alternate-key support; the current consumer keeps its
+command-only baseline when that optional field is absent. Original-guard parity
+covers every source-derived key and canonical literal in both object carriers.
+Renderer controls require all four original key declarations to agree and reject
+missing, repeated, nonliteral, invalid, duplicate or oversized data. No argument
+grammar, JSON decoder, runtime selection or time budget is changed.
+
 The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
 supplied existing Python 3.9 interpreter. Their private fixture publishes real
 project membership and the current original guard map, copies the required

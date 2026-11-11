@@ -580,7 +580,12 @@ The exact `view`/`rg`/`glob` read exemption still checks all four guard-source
 digests; complete native read/write batches retain their own additional proof.
 A single prepared PowerShell event may also use the existing relevance owner's
 exact no-argument literal declaration, bound to that source as well as the
-guards. Its object command field retains original precedence; shell arguments,
+guards. Its object command selection follows the identical ordered key
+declarations derived from all four original guards: the first nonempty string
+wins, including an earlier protected or whitespace value. Optional selection
+metadata absence keeps the command-only baseline; malformed supplied metadata
+retains whole raw fallback. Older command-only readers do not gain alternate-key
+support merely by accepting a new declaration. Shell arguments,
 JSON argument strings and shell batch members do not gain that proof.
 The same exact literal can come from a raw string, or from `tool_input` only
 when `toolArgs` is absent. A present null, empty or invalid primary value never

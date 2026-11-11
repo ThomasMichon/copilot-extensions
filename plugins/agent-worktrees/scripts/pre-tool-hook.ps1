@@ -53,7 +53,7 @@ function Get-NativePreToolStop {
     } catch { return $null }
 }
 
-function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCommand) {
+function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments) {
     try {
         $policy = Read-PreToolJson ([IO.Path]::Combine($PSScriptRoot, 'hook-read-policy.json')) 4096
         if ($policy.schema -isnot [string] -or $policy.schema -cne 'agent-worktrees.native-read-policy' -or
@@ -66,7 +66,30 @@ function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCom
         if ($WriteProof) {
             $dependencies = $policy.nativeWriteDependencies
             $extra = @('tool_call_forms.py', 'guarded_anchor_map.py')
-        } elseif ($ShellCommand) {
+        } elseif ($ShellCommand -or $null -ne $ShellArguments) {
+            if ($null -ne $ShellArguments) {
+                $keys = @('command')
+                if ($policy.ContainsKey('nativeShellReadCommandKeys')) {
+                    $keys = $policy['nativeShellReadCommandKeys']
+                    if ($keys -isnot [Collections.IList] -or $keys.Count -lt 1 -or $keys.Count -gt 128) {
+                        return $false
+                    }
+                    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+                    foreach ($key in $keys) {
+                        if ($key -isnot [string] -or -not $key -or -not $seen.Add($key)) { return $false }
+                    }
+                }
+                $ShellCommand = $null
+                if ($ShellArguments -is [string]) {
+                    $ShellCommand = $ShellArguments
+                } elseif ($ShellArguments -is [Collections.IDictionary]) {
+                    foreach ($key in $keys) {
+                        $value = $ShellArguments[$key]
+                        if ($value -is [string] -and $value) { $ShellCommand = $value; break }
+                    }
+                }
+                if (-not $ShellCommand) { return $false }
+            }
             $commands = $policy.nativeShellReadCommands
             if ($commands -isnot [Collections.IList] -or $commands.Count -lt 1 -or $commands.Count -gt 128) {
                 return $false
@@ -145,12 +168,10 @@ function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $f
     } else {
         $args = $Payload['tool_input']
     }
-    $command = $args
-    if ($args -is [Collections.IDictionary]) { $command = $args['command'] }
-    if ($command -isnot [string] -or -not $command) {
+    if ($args -isnot [Collections.IDictionary] -and ($args -isnot [string] -or -not $args)) {
         return $false
     }
-    return Test-NativePreToolSources -ShellCommand $command
+    return Test-NativePreToolSources -ShellArguments $args
 }
 
 function Read-NativePreToolText([string]$Path, [int]$Limit) {
