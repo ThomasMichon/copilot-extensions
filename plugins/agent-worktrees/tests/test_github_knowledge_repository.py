@@ -133,6 +133,8 @@ def test_incomplete_or_unsupported_policy_is_not_safeguard_proof(account, change
     '<https://other.invalid/>; rel="next"',
     '<https://api.github.com/repos/selected/other/rules/branches/provider-default?per_page=100&page=2>; rel="next"',
     '<https://api.github.com/repos/selected/knowledge/rules/branches/provider-default?per_page=100&page=9>; rel="next"',
+    '<https://api.github.com/repos/selected/knowledge/rules/branches/provider-default?page=2&per_page=100&page=2>; rel="next"',
+    '<https://api.github.com/repos/selected/knowledge/rules/branches/provider-default?page=2&per_page=100&other=1>; rel="next"',
 ])
 def test_partial_or_redirected_policy_pages_are_refused(account, link):
     selected, state = account
@@ -166,14 +168,15 @@ def test_policy_drift_and_repository_replacement_are_refused(account):
 
 
 @pytest.mark.parametrize("slug", ["selected/knowledge", "Selected/Knowledge"])
-def test_complete_policy_pages_are_read_without_following_arbitrary_links(account, slug):
+@pytest.mark.parametrize("query", ["per_page=100&page=2", "page=2&per_page=100"])
+def test_complete_policy_pages_are_read_without_following_arbitrary_links(account, slug, query):
     selected, state = account
     selected.repository = slug
     ruleset(state)
     rules = state["rules"]
     state["pages"] = {
         1: ([rules[0]], 'Link: <https://api.github.com/repos/selected/knowledge/rules/branches/'
-            'provider-default?per_page=100&page=2>; rel="next"'),
+            f'provider-default?{query}>; rel="next"'),
         2: ([rules[1]], ""),
     }
     assert provider.safeguards(selected, provider.repository(selected))["status"] == "verified"

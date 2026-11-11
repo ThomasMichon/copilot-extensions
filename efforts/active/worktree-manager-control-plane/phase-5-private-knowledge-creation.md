@@ -278,3 +278,9 @@ branch names. The complete provider, credential and native-owner selection
 passes 91 cases, including case-equivalent protection repair and paginated
 policy reads. Original creation and current observations remain distinct when
 the provider identity or default branch drifts.
+
+The policy packet additionally accepts either pagination query order while
+retaining exact source/branch, unique parameter, page-size and next-page
+validation. All 33 provider cases pass, including reordered links and rejection
+of duplicate or unrelated query parameters; the native/credential baseline
+above remains unchanged.

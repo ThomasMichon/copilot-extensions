@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from urllib.parse import quote
+from urllib.parse import parse_qsl, quote
 
 from .github_credentials import CredentialObservationError
 from .github_landing_observation import _response
@@ -117,10 +117,20 @@ def _policy(selected, expected: dict) -> tuple[dict, dict]:
                 match = re.fullmatch(
                     r'<https://api\.github\.com/repos/(?i:' + re.escape(selected.repository) + ')'
                     + r'/rules/branches/' + re.escape(branch)
-                    + r'\?per_page=100&page=([1-9][0-9]*)>;\s*rel="(next|prev|first|last)"',
+                    + r'\?([^<>\s]+)>;\s*rel="(next|prev|first|last)"',
                     link.strip(),
                 )
-                if match is None or match[2] == "next" and int(match[1]) != page + 1:
+                try:
+                    query = parse_qsl(match[1], strict_parsing=True, max_num_fields=3) if match else []
+                except ValueError:
+                    query = []
+                parameters = dict(query)
+                if (
+                    match is None or len(query) != 2 or set(parameters) != {"per_page", "page"}
+                    or parameters.get("per_page") != "100"
+                    or not re.fullmatch(r"[1-9][0-9]*", parameters.get("page", ""))
+                    or match[2] == "next" and parameters["page"] != str(page + 1)
+                ):
                     raise CredentialObservationError("ruleset-policy", "invalid-pagination")
                 relations.append(match[2])
         if "next" not in relations:
