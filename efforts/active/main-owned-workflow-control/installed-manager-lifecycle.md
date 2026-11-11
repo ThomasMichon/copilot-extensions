@@ -1988,3 +1988,31 @@ Documentation-impact review updates AI-attribution's standalone-read contract
 and TESTING.md's complete failure-report and cold-writer flows. Full fresh
 acceptance, authentic baseline update, frozen enforcement and Main adoption
 remain open.
+
+### November 11 - Reconcile the attribution candidate with current Dev
+
+GitHub marks published `4bdf4a06e9138599c46ac4a02917eeaa63869a04`
+conflicting, so no current-head PR CI is delivered. The already-dispatched
+43093690653 native run remains owned at that frozen source, not evidence for a
+later reconciled candidate.
+
+The owned branch is backed up and rebased onto
+`a6b3ec102dae86ebe080144922602ad4617e1977`. Only TESTING.md, MCP's README and its
+generated uninstall profile overlap. The sole conflict is producer hashes;
+both sides retain revision 36 and identical footprint semantics. The canonical
+refresh tool preserves the newer upstream source binding while regenerating
+the merged script binding. Range-diff confirms all 29 owned commits remain,
+with no other patch changed. No constructor/publication logic, upstream
+readiness/provider change or source contract is discarded.
+
+Reconciled code `3205bdae272d7d3255afd48460cbcab5b087e0f2` passes 66 focused
+MCP bootstrap/readiness/provider controls, with fourteen platform skips
+uncredited. All 34 owned Python files pass F/E9 lint; strict runtime-resolution,
+13 install contracts, documentation consistency and whitespace also pass.
+Prior attribution/Manager source controls retain identical patches and their
+recorded revisions; the frozen native run is not silently relabeled.
+
+Publication uses the managed history-rewrite flow and exact recorded old-head
+lease, never manual force, a stash or a gate bypass. New current-head CI and
+exact-source native acceptance remain required before draft readiness; the
+earlier CIM scan and preparation masking gaps remain unwaived.
