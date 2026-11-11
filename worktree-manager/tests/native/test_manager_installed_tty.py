@@ -537,6 +537,10 @@ def _consumer_exit_evidence(console, error, descendants, started, input_sent):
 
 
 def _witness(shell, stub, env, project, diagnostics, manager_python, engine_python, *, control=False):
+    label = shell + ("-negative" if control else "")
+    fault_directory = diagnostics / (label + "-faults")
+    fault_directory.mkdir()
+    env = {**env, "WORKTREE_MANAGER_FAULT_DIR": str(fault_directory)}
     argv = _project_entry_command(shell, stub)
     captured = b""
     started = time.monotonic()
