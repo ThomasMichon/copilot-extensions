@@ -14,7 +14,6 @@ from fastapi.responses import StreamingResponse
 
 from .. import elevated
 from ..acquisition_contract import AcquisitionRefused
-from ..local_launch_preparation import LocalLaunchPreparationError
 from ..attention_wait import (
     AttentionHistoryChangedError,
     AttentionTokenError,
@@ -56,6 +55,7 @@ from ..remote_acp_config import is_remote_address
 from ..session_start_selection import find_reusable_caller_session as _find_reusable_session
 from ..worktree_head import resolve_head
 from ..preference_requests import apply_request_preferences, reused_preference_source
+from ._start_refusals import LocalLaunchPreparationError, start_refusal
 from .event_pages import DEFAULT_PAGE_LIMIT, MAX_PAGE_LIMIT, events_before_page, rows_to_events as _rows_to_events
 from .prompts import (  # noqa: F401 -- preserved public route imports
     clear_pending_queue,
@@ -759,24 +759,8 @@ async def _start_session_admitted(req: StartSessionRequest, request: Request):
             model=req.model, effort=req.effort,
             parity_fault=req.parity_fault,
         )
-    except DaemonDrainingError as exc:
-        raise HTTPException(status_code=503, detail=str(exc))
-    except LocalLaunchPreparationError as exc:
-        # Resolution failed before registration or launch. Surface the cause
-        # as a typed refusal (and log it) instead of an opaque 500 whose
-        # traceback only reaches the daemon's stderr.
-        log.error(
-            "Local launch preparation failed for agent %r (target dir %r): %s",
-            agent_name, target.cwd, exc, exc_info=True,
-        )
-        raise HTTPException(
-            status_code=422,
-            detail={
-                "code": "local_launch_preparation_failed",
-                "message": str(exc),
-                "effect": "not_started",
-            },
-        ) from exc
+    except (DaemonDrainingError, LocalLaunchPreparationError) as exc:
+        raise start_refusal(exc, agent_name=agent_name, target_dir=target.cwd, log=log) from exc
     except SessionConflictError as exc:
         raise HTTPException(
             status_code=409,
