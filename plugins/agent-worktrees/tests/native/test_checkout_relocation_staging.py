@@ -15,6 +15,7 @@ from agent_procutil.owned_process import run_caller_owned
 import agent_worktrees
 from agent_worktrees import checkout_relocation as relocation
 from agent_worktrees import checkout_relocation_state as state
+from agent_worktrees.git_repository_environment import repository_identity_env
 from test_checkout_relocation import checkout as checkout
 
 pytestmark = pytest.mark.skipif(os.name != "nt", reason="Windows stage DACL inheritance")
@@ -130,7 +131,27 @@ def test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory
     }
     worker = Path(__file__).with_name("receiving_staging_fixture.py")
     home = tmp_path / "s"
-    env = dict(os.environ, AGENT_HOME=str(home), PYTHONDONTWRITEBYTECODE="1")
+    setup_env = repository_identity_env()
+    setup_env.update(GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM="1")
+    canary = tmp_path / "canary"
+    initialized = run_caller_owned(
+        ["git", "init", "--bare", "--template=", "--quiet", str(canary)],
+        cwd=tmp_path, env=setup_env, timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+    )
+    assert initialized.returncode == 0, initialized.stderr
+    before_canary = {str(path): path.read_bytes() for path in canary.rglob("*") if path.is_file()}
+    poison = tmp_path / "poison-config"
+    poison.write_text("[core]\nrepositoryformatversion = 999\n", encoding="utf-8")
+    inherited = dict(
+        os.environ, GIT_DIR=str(canary), GIT_WORK_TREE=str(tmp_path / "unrelated"),
+        GIT_INDEX_FILE=str(canary / "index"), GIT_CONFIG_GLOBAL=str(poison), GIT_CONFIG_SYSTEM=str(poison),
+        GIT_CONFIG_COUNT="1", GIT_CONFIG_KEY_0="core.repositoryformatversion", GIT_CONFIG_VALUE_0="999",
+    )
+    env = repository_identity_env(inherited)
+    env.update(
+        AGENT_HOME=str(home), PYTHONDONTWRITEBYTECODE="1",
+        GIT_CONFIG_GLOBAL=os.devnull, GIT_CONFIG_SYSTEM=os.devnull, GIT_CONFIG_NOSYSTEM="1",
+    )
     for key in (
         "COPILOT_EXTENSIONS_CONTEXT", "PYTHONPATH", "COPILOT_PLUGIN_ROOT", "AGENT_RT_ROOT",
         "AGENT_WORKTREES_PAYLOAD_ROOT", "AGENT_WORKTREES_STATUS_MONITOR",
@@ -159,6 +180,7 @@ def test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory
         assert Path(result.stdout.strip()) == directory
         assert "SOURCE_LOOKUP_PROOF=" in result.stderr
         assert {str(path): path.read_bytes() for path in home.rglob("*") if path.is_file()} == before
+    assert {str(path): path.read_bytes() for path in canary.rglob("*") if path.is_file()} == before_canary
     for name, digest in expected.items():
         record_property(name + "_sha256", digest)
     record_property("consumer_python", sys.version)

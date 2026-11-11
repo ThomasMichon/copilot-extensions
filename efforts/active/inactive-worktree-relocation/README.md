@@ -182,6 +182,15 @@ Same-volume source qualification is not released/installed-consumer acceptance,
 cross-volume receiving qualification, complete real-owner evidence or permission
 for adoption. Those remaining gates stay open.
 
+The fresh-process fixture now removes inherited Git repository selectors and
+disables inherited global/system configuration before every child launch.
+Its negative control supplies unrelated repository/index selectors and invalid
+configuration, exercises the complete flow, and verifies that the unrelated
+fixture repository remains byte-for-byte unchanged. The reviewed source
+candidate passes all seven Windows controls on Python 3.13.17 through the
+canonical contained runner, including preparation and verified cleanup.
+This fixture correction does not change production relocation admission.
+
 ## Validation Plan
 
 The [focused validation matrix](validation.md) defines assertions and tier
