@@ -542,6 +542,83 @@ async def test_existing_sessionless_allocation_is_embodied_without_create(creati
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("interruption", [None, "native-start", "prompt-admission"])
+async def test_saved_topology_seed_reaches_existing_workspace_once(
+    creation_rig, monkeypatch, tmp_path, interruption,
+):
+    rig = creation_rig
+    skill = Path(__file__).resolve().parents[2] / "agent-roles" / "skills" / "managing-agent-topology"
+    topology = json.loads((skill / "assets" / "topology.example.json").read_text(encoding="utf-8"))
+    assignment = topology["assignments"][0]
+    assignment.update(state="proposed", effects=[], nativeWorktree={
+        "machine": assignment["machine"], "project": rig.target.project, "worktree": rig.row["id"],
+    })
+    topology["observations"]["owners"] = []
+    source = tmp_path / "topology.json"
+    source.write_text(json.dumps(topology), encoding="utf-8")
+    produced = subprocess.run(
+        [sys.executable, str(skill / "scripts" / "topology.py"), "seed", str(source),
+         "--request", assignment["requestId"], "--at", "2026-01-01T00:01:00Z"],
+        capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+    )
+    assert produced.returncode == 0, produced.stdout + produced.stderr
+    seed = json.loads(produced.stdout)
+    assert seed["assignment"] == assignment
+    assert seed["role"] == next(role for role in topology["roles"] if role["id"] == assignment["role"])
+    assert seed["machine"] == next(
+        machine for machine in topology["machines"] if machine["id"] == assignment["machine"]
+    )
+    assert seed["dispatcher"] == topology["dispatcher"]["owner"]
+    assert seed["holds"] == []
+    envelope = tmp_path / "launch-envelope.json"
+    envelope.write_text(json.dumps({
+        "key": assignment["creationKey"], "prompt": produced.stdout,
+    }), encoding="utf-8")
+    target = replace(rig.target, worktree_id=rig.row["id"])
+    start = rig.manager.start_session
+    submit = rig.manager._submit_prompt_locked
+    starts = []
+
+    async def start_once(*args, **kwargs):
+        starts.append(kwargs)
+        session = await start(*args, **kwargs)
+        if interruption == "native-start":
+            raise RuntimeError("native-start response lost")
+        return session
+
+    async def submit_once(*args, **kwargs):
+        turn = await submit(*args, **kwargs)
+        if interruption == "prompt-admission":
+            raise RuntimeError("prompt-admission response lost")
+        return turn
+
+    monkeypatch.setattr(rig.manager, "start_session", start_once)
+    monkeypatch.setattr(rig.manager, "_submit_prompt_locked", submit_once)
+    saved = json.loads(envelope.read_text(encoding="utf-8"))
+    if interruption:
+        with pytest.raises(RuntimeError, match=interruption):
+            await workspace_creation.start(rig.manager, target, **saved)
+        original_session = rig.manager.list_sessions()[0]
+        original_native = original_session.acp_session_id
+    session, receipt = await workspace_creation.start(
+        rig.manager, target, **json.loads(envelope.read_text(encoding="utf-8")),
+    )
+    if interruption:
+        assert session is original_session and receipt["native_session_id"] == original_native
+    replay, replay_receipt = await workspace_creation.start(rig.manager, target, **saved)
+    await asyncio.sleep(0)
+    assert replay is session and replay_receipt["replayed"]
+    assert len(starts) == len(rig.manager.list_sessions()) == 1
+    assert not any(args[0] == "create" for args, _ in rig.calls)
+    turns = rig.db.execute_read("SELECT session_id,turn_index,prompt FROM turns")
+    assert len(turns) == 1
+    assert (turns[0]["session_id"], turns[0]["turn_index"], turns[0]["prompt"]) == (
+        session.session_id, receipt["turn_index"], saved["prompt"],
+    )
+    rig.manager._run_prompt.assert_awaited_once_with(session, receipt["turn_index"], saved["prompt"])
+
+
+@pytest.mark.asyncio
 async def test_caller_session_changes_do_not_redefine_the_owner_worktree(creation_rig):
     rig = creation_rig
     first, _ = await workspace_creation.start(

@@ -154,7 +154,10 @@ The sequence preserves these boundaries:
    reports the declaration step, not permission to create a worker.
 2. Persist an allocation effect and stable creation key before keyed Worktrees
    allocation. Save the returned workspace, then reserve the standing charter
-   through Dispatch with `expectedRevision` and exact workspace evidence.
+   through Dispatch with `expectedRevision` and exact workspace evidence. A
+   confirmed allocation maps only its exact retained workspace before a
+   Dispatch relationship exists; unrelated or unconfirmed owners still hold
+   placement.
 3. After the native relationship is bound, persist the launch effect and the
    full `seed` in the native request envelope. Retain `assignmentGeneration`
    from the reservation and the expected `charterRevision`; a role label or
@@ -164,8 +167,8 @@ The sequence preserves these boundaries:
    current reservation generation and charter revision before this step.
 5. Once delivery is admitted or consumed and a fresh current head is observed,
    accept through Dispatch using its revision, generation, original workspace,
-   `ownerSessionId` and `expectedHeadRevision` fences. Launch success is not
-   acceptance. A joined native accepted materialization permits `settle-launch`
+   `ownerSessionId` and positive `expectedHeadRevision` fences. Launch success
+   is not acceptance. A joined native accepted materialization permits `settle-launch`
    to record that acceptance for the matching effect; `accepted` then has no
    further step.
 

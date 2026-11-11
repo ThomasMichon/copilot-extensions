@@ -714,7 +714,11 @@ def test_flow_persists_assignment_and_declaration_before_allocation(document: di
 
 
 @pytest.mark.portfolio_tier("T1")
-def test_flow_uses_one_keyed_allocation_then_reserves_returned_workspace(document: dict[str, Any]) -> None:
+@pytest.mark.parametrize("discovered", [False, True])
+def test_flow_uses_one_keyed_allocation_then_reserves_returned_workspace(
+    document: dict[str, Any], discovered: bool,
+) -> None:
+    observation = copy.deepcopy(document["observations"]["owners"][0])
     assignment = queued_flow(document)
     result = report(document).flow("request-review-a")
     assert result["phase"] == "persist-allocation"
@@ -729,6 +733,9 @@ def test_flow_uses_one_keyed_allocation_then_reserves_returned_workspace(documen
     owner = {"machine": "beta", "project": "example-control", "worktree": "returned"}
     assignment["nativeWorktree"] = owner
     assignment["effects"][0].update(state="confirmed", target=owner, nativeRef="synthetic:allocated")
+    if discovered:
+        observation.update(owner=owner, head=None, headRevision=None, state="unknown")
+        document["observations"]["owners"].append(observation)
     result = report(document).flow("request-review-a")
     assert result["phase"] == "reserve" and result["holds"] == []
     assert result["nextStep"] == {
@@ -737,6 +744,31 @@ def test_flow_uses_one_keyed_allocation_then_reserves_returned_workspace(documen
         "workspace": owner, "exactWorkspaceEvidenceRequired": True,
     }
     assert result["effectAuthorityGranted"] is False
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("unmapped", ["unconfirmed", "untargeted", "unrelated"])
+def test_flow_requires_exact_confirmed_allocation_to_map_unattached_owner(
+    document: dict[str, Any], unmapped: str,
+) -> None:
+    observation = copy.deepcopy(document["observations"]["owners"][0])
+    assignment = queued_flow(document)
+    owner = observation["owner"]
+    assignment["nativeWorktree"] = owner
+    assignment["effects"] = [{
+        "id": "allocate-flow", "kind": "allocate", "state": "confirmed", "charterRevision": 1,
+        "target": owner, "nativeRequest": None, "nativeRef": "synthetic:allocated",
+    }]
+    if unmapped == "unconfirmed":
+        assignment["effects"][0].update(state="failed", nativeRef=None)
+    elif unmapped == "untargeted":
+        assignment["effects"][0]["target"] = None
+    else:
+        observation["owner"] = {**owner, "worktree": "unrelated"}
+    document["observations"]["owners"].append(observation)
+    result = report(document).flow("request-review-a")
+    assert result["phase"] == "held" and result["nextStep"] is None
+    assert "unmapped-native-owners-require-reconciliation" in result["holds"]
 
 
 @pytest.mark.portfolio_tier("T1")
@@ -811,6 +843,7 @@ def test_flow_recovers_unknown_launch_with_original_envelope_not_new_head(docume
     ("observations.dispatch.0.relationship.request.generation", 2, "native-reservation-generation-conflict"),
     ("observations.dispatch.0.relationship.state", "pending", "native-relationship-not-bound"),
     ("observations.owners.0.headRevision", None, "current-native-head-unqualified"),
+    ("observations.owners.0.headRevision", 0, "current-native-head-unqualified"),
     ("observations.owners.0.head", "successor", "native-reserved-head-conflict"),
     ("observations.owners.0.scope", "other/repo", "role-or-scope-mismatch"),
     ("observations.dispatch.0.observedAt", "2025-12-31T23:00:00Z", "native-task-evidence-stale-or-future"),

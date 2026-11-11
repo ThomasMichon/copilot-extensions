@@ -77,6 +77,16 @@ class Topology:
             if linked(assignment, self.observations)
             if (owner := native_owner(self.dispatch.get(assignment["nativeTask"]))) is not None
         }
+        mapped.update(
+            owner_key(assignment["nativeWorktree"]) for assignment in self.assignments
+            if assignment["state"] not in {"completed", "released"}
+            and assignment["nativeWorktree"] is not None
+            and any(
+                effect["kind"] == "allocate" and effect["state"] == "confirmed"
+                and effect["target"] == assignment["nativeWorktree"]
+                for effect in assignment["effects"]
+            )
+        )
         return [item for item in self.observations["owners"]
                 if item["assignmentId"] is None and owner_key(item["owner"]) not in mapped]
 

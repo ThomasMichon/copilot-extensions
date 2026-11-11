@@ -164,3 +164,22 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - No live external venue, fleet activation or installation was exercised:
   those require separate adoption and effect authority. Publication, review
   and merge remain pending; later phases and the parent objective stay open.
+
+### 2026-11-11 - Phase 3 review corrections
+
+- Corrected the pre-reservation join: only the exact workspace retained by a
+  confirmed allocation is mapped before a Dispatch relationship exists.
+  Unconfirmed, untargeted and unrelated owners still hold placement.
+- Reject zero native head revisions before recommending acceptance, matching
+  Dispatch's positive-revision fence.
+- Added real Bridge workspace-consumer coverage using the saved complete seed
+  and original keyed envelope. Normal delivery, a lost native-start response
+  and a lost prompt-admission response each retain one native session and one
+  prompt turn; recovery does not allocate or deliver again.
+- The affected roles file passed 121 tests (24 flow cases); the Bridge
+  workspace-creation file passed 53 tests with three existing skips, including
+  all three saved-seed cases. Python F/E9 lint passed. No live fleet effects,
+  installation or deployment occurred; review and merge remain pending.
+- Final publication gates passed: Python lint, all 41 enforced type-check
+  projects for Linux and Windows, and the install-contract check across all
+  13 runtime plugins.

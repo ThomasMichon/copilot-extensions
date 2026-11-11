@@ -154,7 +154,7 @@ def flow(
     if not fresh(observation):
         return hold("owner-evidence-stale-missing-or-future")
     if (observation is None or observation["state"] not in LIVE_STATES
-            or not observation["head"] or observation.get("headRevision") is None):
+            or not observation["head"] or not observation.get("headRevision")):
         return hold("current-native-head-unqualified")
     if observation["assignmentId"] not in (None, assignment["id"]):
         return hold("assignment-not-accepted-by-owner")
