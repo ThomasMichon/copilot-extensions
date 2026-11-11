@@ -67,8 +67,11 @@ def offline_cli(tmp_path):
             }
             if responses:
                 body["choices"] = [{"index": 0, **responses.pop(0)}]
-            self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
-            self.wfile.flush()
+            try:
+                self.wfile.write(("data: " + json.dumps(body) + "\n\ndata: [DONE]\n\n").encode())
+                self.wfile.flush()
+            except ConnectionError:
+                pass
 
     provider = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Provider)
     provider.daemon_threads = True
