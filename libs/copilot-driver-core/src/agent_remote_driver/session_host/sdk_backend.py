@@ -211,7 +211,10 @@ class SdkBackend:
             self._request_ids.discard(identifier)
 
     def _require_session(self, params: dict) -> None:
-        if self._session is None or params.get("sessionId") != self._session.session_id:
+        if (
+            not self._bound.is_set() or self._session is None
+            or params.get("sessionId") != self._session.session_id
+        ):
             raise AcpError(-32602, "The bound native session is required")
 
     async def _call(self, method: str, params: dict) -> dict:
@@ -239,17 +242,22 @@ class SdkBackend:
         if method == "session/prompt":
             return await self._send(params)
         if method == "session/cancel":
-            if self._prompt is not None:
+            prompt = self._prompt
+            if prompt is not None:
                 # Abort cannot overtake the original native message admission.
                 started = asyncio.create_task(self._started.wait())
                 try:
                     await asyncio.wait(
-                        (started, self._prompt), return_when=asyncio.FIRST_COMPLETED,
+                        (started, prompt), return_when=asyncio.FIRST_COMPLETED,
                     )
                 finally:
                     started.cancel()
                     await asyncio.gather(started, return_exceptions=True)
-                if self._prompt is None:
+                if self._event_task is not None:
+                    await asyncio.shield(self._event_task)
+                if not self._controlled:
+                    raise AcpError(-32001, "Native SDK control was lost before cancellation")
+                if self._prompt is not prompt or not self._started.is_set():
                     return {}
                 self._cancelled = True
                 await self._session.abort()
@@ -349,7 +357,8 @@ class SdkBackend:
         from copilot.session import PermissionNoResult
 
         if (
-            self._session is None or invocation.get("session_id") != self._session.session_id
+            not self._bound.is_set() or self._session is None
+            or invocation.get("session_id") != self._session.session_id
             or not self._controlled or self._closed
             or invocation.get("managed_settings_enabled", False)
             or getattr(request, "managed_approval_required", False)

@@ -194,6 +194,89 @@ async def test_sdk_cancel_waits_for_admission_and_reports_observed_native_abort(
 
 
 @pytest.mark.asyncio
+async def test_sdk_cancel_refuses_control_lost_in_the_admission_batch(monkeypatch):
+    async with broker() as (client, backend, _host, front, _port):
+        await bind(front)
+        entered, admit, cancelling = asyncio.Event(), asyncio.Event(), asyncio.Event()
+
+        async def held_send(text, **kwargs):
+            client.session.inputs.append(text)
+            entered.set()
+            await admit.wait()
+            client.session.emit("user.message", content=text, source="agent-" + kwargs["source"].agent_id)
+            client.session.emit("user.message", content="foreign input", source="user")
+            await client.session.release.wait()
+
+        started_wait = backend._started.wait
+
+        async def wait_started():
+            cancelling.set()
+            await started_wait()
+
+        monkeypatch.setattr(backend._started, "wait", wait_started)
+        client.session.send_and_wait = held_send
+        await send(front, 2, "session/prompt", {
+            "sessionId": "native-fixture", "prompt": [{"type": "text", "text": "owned input"}],
+        })
+        await asyncio.wait_for(entered.wait(), 2)
+        await send(front, 3, "session/cancel", {"sessionId": "native-fixture"})
+        await asyncio.wait_for(cancelling.wait(), 2)
+        admit.set()
+        reply, _, _ = await until(front, 3)
+        assert reply["error"]["code"] == -32001
+        assert client.session.abort_calls == 0 and not backend._controlled
+        assert backend.returncode is None and client.session.inputs == ["owned input"]
+        client.session.release.set()
+        assert (await until(front, 2))[0]["error"]["code"] == -32001
+
+
+@pytest.mark.asyncio
+async def test_sdk_waiting_cancel_does_not_abort_a_replacement_prompt(monkeypatch):
+    async with broker() as (client, backend, _host, front, _port):
+        await bind(front)
+        entered, finish = asyncio.Event(), asyncio.Event()
+        cancelling, cleanup, continue_cancel = asyncio.Event(), asyncio.Event(), asyncio.Event()
+        original_send = client.session.send_and_wait
+
+        async def first_send(text, **_kwargs):
+            client.session.inputs.append(text)
+            entered.set()
+            await finish.wait()
+
+        async def wait_started():
+            cancelling.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                cleanup.set()
+                await continue_cancel.wait()
+
+        monkeypatch.setattr(backend._started, "wait", wait_started)
+        client.session.send_and_wait = first_send
+        await send(front, 2, "session/prompt", {
+            "sessionId": "native-fixture", "prompt": [{"type": "text", "text": "first input"}],
+        })
+        await asyncio.wait_for(entered.wait(), 2)
+        await send(front, 3, "session/cancel", {"sessionId": "native-fixture"})
+        await asyncio.wait_for(cancelling.wait(), 2)
+        finish.set()
+        assert (await until(front, 2))[0]["result"]["stopReason"] == "end_turn"
+        await asyncio.wait_for(cleanup.wait(), 2)
+        client.session.send_and_wait = original_send
+        await send(front, 4, "session/prompt", {
+            "sessionId": "native-fixture", "prompt": [{"type": "text", "text": "replacement input"}],
+        })
+        _, frame = await asyncio.wait_for(anext(front.frames()), 2)
+        assert json.loads(frame)["method"] == "session/update"
+        continue_cancel.set()
+        assert (await until(front, 3))[0]["result"] == {}
+        assert client.session.abort_calls == 0
+        assert client.session.inputs == ["first input", "replacement input"]
+        client.session.release.set()
+        assert (await until(front, 4))[0]["result"]["stopReason"] == "end_turn"
+
+
+@pytest.mark.asyncio
 async def test_sdk_identical_foreign_input_is_not_mistaken_for_the_admitted_message():
     async with broker() as (client, backend, _host, front, _port):
         await bind(front)
@@ -251,6 +334,36 @@ async def test_sdk_unrepresentable_restoration_is_not_reported_as_success():
         await send(front, 2, "session/new", {"cwd": "fixture"})
         assert (await until(front, 2))[0]["error"]["code"] == -32001
         assert client.created == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("attachments", [[], [{"type": "blob"}]])
+async def test_sdk_load_rejects_concurrent_prompt_until_history_is_validated(attachments):
+    async with broker() as (client, backend, _host, front, _port):
+        reading, release = asyncio.Event(), asyncio.Event()
+
+        async def history():
+            reading.set()
+            await release.wait()
+            return [Event("user.message", content="prior input", attachments=attachments)]
+
+        client.session.get_events.side_effect = history
+        await send(front, 1, "session/load", {"sessionId": "native-fixture", "cwd": "fixture"})
+        await asyncio.wait_for(reading.wait(), 2)
+        await send(front, 2, "session/prompt", {
+            "sessionId": "native-fixture", "prompt": [{"type": "text", "text": "must not send"}],
+        })
+        reply, updates, _ = await until(front, 2)
+        assert reply["error"]["code"] == -32602 and not updates
+        assert not backend._bound.is_set() and client.session.inputs == []
+        release.set()
+        loaded, _, _ = await until(front, 1)
+        if attachments:
+            assert loaded["error"]["code"] == -32001
+            assert not backend._bound.is_set()
+        else:
+            assert loaded["result"] == {} and backend._bound.is_set()
+        assert client.session.inputs == [] and client.resumed == ["native-fixture"]
 
 
 @pytest.mark.asyncio
