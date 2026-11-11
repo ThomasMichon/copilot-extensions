@@ -54,8 +54,9 @@ def main():
         return
     if mode == "shim":
         child = pu.spawn_daemon(
-            [sys.executable, "-I", actor, "conduit-launcher", root, fixed, fixed, config,
-             *sys.argv[7:9]],
+            [sys.executable, "-I", "-m", "agent_mcp", "forward",
+             "--socket", fixed, "--config", config,
+             "--session-owner-pid", sys.argv[7], "--session-owner-birth", sys.argv[8]],
             cwd=area, log_path=area / "conduit-launch.log",
             instance=DaemonInstanceSpec("agent-mcp-conduit", area, Path(actor)),
             stdio_fds=(0, 1, 2),
