@@ -1,0 +1,9 @@
+{
+  "comment": "Compose the existing exact-literal proof across complete bounded read-only batches",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
