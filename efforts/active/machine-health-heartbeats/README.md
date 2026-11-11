@@ -80,11 +80,40 @@ the [request capture](inception-transcript.md#installable-service-contribution-f
 the proposed [service contribution contract](service-contributions.md) is a
 review-before-code amendment, not a new resident collector or activation grant.
 
+The [unattended validation follow-up](inception-transcript.md#unattended-desktop-validation-follow-up)
+removes mandatory operator-attended desktop observation, not the automated
+functional, launch-mechanism, result or cleanup checks.
+
+### Current delivery lane
+
+The current host owner continues beyond source qualification to an installed,
+reversible Windows hourly job and real inbound SSH/Bridge verification.
+Complete these observable outcomes in dependency order:
+
+1. Retain the job's complete installed execution closure independently of the
+   source checkout and replaceable marketplace payload. Prove supported
+   runtime selection, replacement and rollback through the existing owner.
+2. Converge the explicitly adopted local policy and native registration through
+   Agent Machines, preserving unrelated tasks/data and providing exact
+   disable/remove/readback behavior. Qualification is not an enrollment API;
+   the currently rendered disabled definitions cannot be installed ad hoc.
+3. Qualify first install, repeat convergence, failed replacement/rollback and
+   native periodic execution, then deploy only within the separately authorized
+   host scope. Verify actual local hourly results and real peer inbound access.
+
+The [enrollment amendment](local-collection.md#installed-windows-job-enrollment)
+defines the next review-before-code slice. Keep release availability, installed
+adoption, active execution and peer verification distinct. A missing additional
+CODEOWNER vote does not hold a Maintainer-authorized merge after the configured
+review and required CI pass; unresolved feedback, failed/missing CI and task
+holds still do. This lane neither completes the broader preference/carrier
+campaign nor authorizes another host or synchronized storage.
+
 ## Scope Approvals
 
 The operator authorizes source planning, review and implementation. The adopter
 has separately selected default configuration and an initial visible Windows
-cohort. Its explicit latest boundary is **configuration-only: ask before
+cohort. That initial boundary was **configuration-only: ask before
 activating any running service**.
 
 No live service reload/restart, scheduled-job enrollment, Linux rollout,
@@ -92,6 +121,33 @@ credential acquisition, new collector, transport setup, cloud-storage selection
 or remote recovery follows from plan approval. Existing custom sinks and active
 sessions must survive. Exact deployment selectors and original private approval
 evidence remain with the adopter; this public plan does not manufacture a grant.
+
+A subsequent explicit answer, `windows-fixtures-only`, authorizes bounded
+isolated Windows scheduler qualification: create, run and delete only uniquely
+named temporary limited-interactive-user test tasks, using fixture-owned
+data/processes, two accelerated periodic cycles and overlap/deadline/storage/
+exact-cleanup controls. Each action is limited to 60 seconds and a test run
+targets about ten minutes. No elevation, existing-task changes, service/runtime
+updates, production enrollment, credential work or OneDrive writes are covered.
+Linux and actual hourly cohort/carrier qualification remain separate gates.
+
+A later adopter direction delegates expected validation and deployment runs for
+the current host to its fleet monitor, without per-step approval forms. Within
+that host only, this includes native scheduler qualification, health-gated
+installer-owned carrier/job runtime replacement, enrollment after qualification,
+and live inbound Bridge/SSH verification from another host. Every deployment
+retains before-state, reversible rollback and post-change health evidence;
+regression requires rollback. New credentials/secrets, unavailable noninteractive
+elevation, other machines' services or rollout, and destructive changes to
+non-test data remain excluded. Exact private direction and resource selectors
+remain in adopter records, not this public approval summary.
+
+The later validation decision permits an already active console or RDP desktop
+and makes visual observation opportunistic and non-gating. Unavailable or
+inconclusive observation records a reason; it does not require operator
+attendance or block publication, CI or an enrollment decision. No admin/CI
+bypass or fabricated visual pass is permitted. Independent deployment and
+enrollment authority/holds remain unchanged.
 
 ## Plan
 
@@ -170,6 +226,9 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 - [x] Prepare inert Windows/Linux job definitions and qualify collection
   support from the exact selected runtime before forwarding new operations;
   keep scheduler registration and native execution unqualified.
+- [x] Qualify isolated Windows scheduler execution, results, launch mechanism,
+  overlap, deadlines, Unicode paths and exact cleanup; merge the reviewed source.
+  Keep installed-runtime retention/replacement and production enrollment separate.
 - [ ] Qualify the selected carrier's delayed delivery, weekly slot reuse,
   conflicts, offline catch-up and reader-side outage reporting.
 - [ ] Obtain activation authority for the selected cohort, prove actual hourly
@@ -188,7 +247,9 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 - [ ] Outages: exercise the [design controls](design.md#outage-derived-controls),
   including a live process with an unresponsive SSH path and an impaired carrier.
 - [ ] Platforms: portable unit contracts plus isolated Windows/Linux native
-  one-shot, scheduling, headlessness and cleanup qualification before enrollment.
+  one-shot, scheduling, launch-mechanism and cleanup qualification before
+  enrollment; record opportunistic visual coverage separately without an
+  operator-attendance gate.
 - [x] Deployment: default configuration round-trip, custom-sink preservation,
   real readback, no running-service activation and explicit unavailable hosts.
 - [ ] Preferences: separate typed input, permitted settings only, existing
@@ -1267,3 +1328,148 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   before token generation or rendering. Normal CLI controls reject both
   traversal and relative paths without changing the store; an actor-free
   contract ensures the original path reaches that owner unchanged.
+
+### 2026-11-10 - Native preparation merged; fixture qualification gate
+- #11903 merged as `5312b784ba` after current-head Copilot approval with no open
+  issues, all three resolved review threads and green required CI, including
+  actor-free units/coverage. The final focused preparation/composition packet
+  passed 37 cases; the earlier 20 managed cold/payload controls remain valid.
+- Pull-forward safely aborted on the squash-history conflict. All three local
+  commits were confirmed included in the merge, with no difference in their
+  changed paths. A retained backup allowed reconciliation of only those merged
+  commits while preserving unrelated upstream changes, then normal sync passed.
+- Completed only inert native preparation. Native registration/execution,
+  two-cycle headlessness, overlap/late wake, deadline/storage and exact cleanup
+  still require a separately authorized fixture lane; configuration-only
+  approval is not permission to register even a temporary scheduled task.
+- Next seek bounded isolated Windows fixture qualification, without changing
+  existing tasks, installed runtimes, running services, production enrollment
+  or carrier data. Linux qualification, broader domains, preferences, selected
+  carrier evidence and cohort activation remain independent open parent gates.
+  The effort remains Active and the umbrella issue remains open.
+
+### 2026-11-10 - Bounded Windows scheduler fixtures and launch correction
+- Started the separately authorized limited-user fixture lane, using only
+  unique create-only task names, fixture-owned runtime/data, finite trigger
+  expiry, 60-second actions and ownership-checked stop/delete receipts.
+- The desktop observer refused before registration because a shell/foreground
+  window was unobservable. Keep two-cycle window/focus qualification open;
+  no functional scheduler result substitutes for that evidence.
+- The first scheduler readback normalized RegistrationInfo.URI to the task
+  path and omitted the default LeastPrivilege value. Cleanup failed closed
+  rather than deleting by name alone. Exact readback proved the retained task
+  disabled, instance-free and pointed at its fixture action; exact guarded
+  deletion was confirmed. Later fixtures use a retained description marker.
+- Real calendar execution then passed two accelerated one-minute cycles through
+  the copied public payload, selected fresh runtime, actual listener, local
+  record revisions and exact cleanup, preserving policy and sentinel data.
+- Native negative controls exposed two real definition defects: terminating
+  the console host at its limit left the PowerShell descendant alive, and the
+  console host returned success after collection failure. Exact retained
+  process handles settled fixture survivors; no production task was enrolled.
+- Replaced that boundary with a GUI-subsystem finite root and the existing
+  caller-owned Job/stream executor. The root propagates collection failure,
+  bounds execution plus settlement within 55 seconds, and closes its child Job
+  when the scheduler terminates it. The payload still independently selects and
+  qualifies the collection runtime on each invocation.
+- Focused source controls passed 15 cases. The revised native packet passed
+  two calendar cycles, overlap suppression, the inner deadline and forced
+  outer scheduler termination with exact descendant settlement. Failed storage
+  also returned failure and preserved its sentinel; its fixture's HTTP-count
+  assertion incorrectly expected a request despite rejection before I/O.
+  Corrected that assertion and retained an explicit final rerun gate.
+- The final focused source/native packet passed all 22 selected cases, including
+  the corrected failed-storage control and both exact descendant-stop paths.
+  The separate actor-free composition packet passed all 26 cases. Only the
+  productive-desktop case was excluded from the final native selection; its
+  failed prerequisite remains open, not a passing headlessness result.
+- Install, headless-source, documentation, lint and enforced typing gates passed.
+  The typing run covered all 41 existing strict projects on both platform
+  targets; it does not claim new admission for the 32 pending project scopes.
+- Native late wake, productive-desktop observation, Linux, retained-closure
+  replacement/rollback, installed adoption, live peer connectivity and actual
+  hourly carrier receipt remain separate open gates. The parent stays Active;
+  no running service, installed runtime, production job or carrier was changed.
+
+### 2026-11-10 - Independent inbound reachability and desktop admission
+- Returned to the independent inbound-connectivity branch while productive
+  desktop qualification remained unavailable. An enrolled peer completed
+  three fresh, host-pinned SSH commands proving the expected SID, interactive
+  session and non-admin token, followed by a real framed Bridge read and an
+  actual message/reply roundtrip.
+- These prove current reachability after earlier intermittent resets and
+  carrier startup timeouts, not their historical cause or a service repair.
+  No restart, runtime replacement, credential work, security-policy change or
+  other host's service mutation was performed.
+- Compared the selected native owners rather than the unrelated system SSH
+  service. The current target already has authenticated inbound proof,
+  stalled-Bastion recovery and timestamped history. The peer's older
+  generation lacks those observations/recovery but retains the bounded banner
+  cache. Untimestamped historical exits cannot establish causation; the
+  reporting loopback endpoint can propagate an upstream reset too.
+- Prepared an RDP-admission proposal locally, but it had not cleared review
+  or operator approval. The operator selected console-only qualification;
+  removed that unpublished proposal rather than treating it as accepted.
+  The original SDK console-only admission and unfiltered capture remain
+  unchanged. Added actual task-child/session equality without relaxing those
+  checks, and retained correct record expectations across an hour boundary.
+- A readiness cue was followed by an explicit WTS check, which showed an
+  active RDP session rather than Console. No desktop test or task registration
+  was started for that attempt. Console qualification and enrollment stay held.
+- The operator subsequently approved active RDP admission and explicitly
+  removed the forced desktop requirement. Observation is now an opportunistic,
+  non-gating diagnostic on an already observable console/RDP session; absence
+  or inconclusive coverage is recorded, never represented as a visual pass.
+  Automated periodic execution, result, deadline, launch-mechanism and exact
+  cleanup controls remain required, with no admin/CI bypass.
+- Added unattended checks of the actual GUI-subsystem entrypoint and native
+  console state in controlled Python processes. These address the launch
+  boundary without making operator attendance a hidden prerequisite. Other
+  enrollment/deployment holds remain independent.
+- The revised native/source packet passed 26 checks: 21 focused source cases
+  and five real Windows scheduler controls. The separate visual case skipped
+  with recorded `unobserved` reason `own WTS session inactive: state=4`; this
+  did not fail the packet or claim zero visual events. The native controls
+  verified the actual GUI executable and zero console allocation across both
+  cycles, along with results, overlap, both deadline owners and exact cleanup.
+  Pure composition/admission passed 27 cases; two guidance-projection controls
+  and the skill, install, headless-source and documentation guards also passed.
+- Subsequent focused corrections distinguish unavailable/inconclusive capture
+  from confirmed task-owned violations: native PID/birth identity checks and
+  sampled focus identities can prove a violation even with incomplete coverage,
+  and that result fails. Unrelated or reused-PID activity is not attributed to
+  the task. The storage-failure fixture now blocks both adjacent hourly slots
+  across its launch window rather than depending on the controller's hour.
+- The post-correction packet passed 25 selected cases with one optional desktop
+  skip; three unchanged overlap/deadline cases were deliberately deselected
+  after their earlier full pass. The 27-case pure packet additionally proves
+  positive violation classification, reused-PID refusal and closed process pins.
+- Expanded the same positive-focus rule to both pinned endpoints of an
+  enumeration-time focus change and to enumeration identity mismatches, rather
+  than dropping those confirmed observations. Windows PowerShell XML/JSON
+  handling is explicitly UTF-8, generated scripts carry a BOM, and fixture
+  dependency paths use ASCII-safe Python escapes.
+- The final focused encoding/focus packet passed all 26 selected cases,
+  including a real scheduler action under a non-ASCII payload/store path;
+  five unchanged native cases were deselected. The 27-case pure packet passed
+  all pinned focus kinds and the earlier ownership/admission controls.
+
+### 2026-11-11 - Windows scheduler qualification merged
+- #11974 merged as `93dfbd7c15d19a3c60da5fe5c61d2a3718e52e7c` after
+  current-head Copilot approval, green required checks and all three resolved
+  review threads. The authorized Maintainer CODEOWNER-review exception was
+  used per operator direction and documented on the PR. No CI, change request,
+  unresolved thread or deployment hold was bypassed.
+- Reconciled the four local commits only after their combined stable patch
+  matched the squash merge exactly. Pull-forward preserved independent
+  upstream testing documentation and manifest changes. The umbrella issue
+  remains open and this effort remains Active.
+- The isolated Windows fixture gate is complete; optional visual observation
+  remains a recorded diagnostic rather than an attendance requirement.
+  This does not qualify Linux, an installed runtime closure, replacement/
+  rollback, production registration, actual hourly execution or carrier receipt.
+- Next qualify retained installed-runtime closure and reversible replacement
+  through the existing lifecycle owner before current-host job enrollment.
+  Source merge, release availability, installed adoption and live connectivity
+  remain separate evidence. No production task, service or carrier was changed
+  by this merge.

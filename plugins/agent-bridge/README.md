@@ -999,6 +999,17 @@ host/child PIDs and process-start identities, host port, protocol/build version,
 working directory, and credential-relay reverse forwards. It also carries the
 private ATTACH nonce; diagnostics must redact that field.
 
+Fresh remote hosts use the current compact Driver core with native ACP
+lifetime, matching fresh local hosts. Before provisioning or child launch,
+Bridge executes the staged archive's `--support-json` with isolated Python
+and requires headless native ACP, TCP-frame transport and ACP lifetime.
+Disconnect and legacy reap hints do not expire these hosts; automatic idle
+retirement remains unavailable without qualified structured pending-work
+evidence. Explicit owner termination remains supported. The compatibility
+receiving export and already-running legacy hosts keep their original
+disconnect-reaping contract; reconnect never replaces them just to change
+lifetime policy.
+
 After a frontend restart, agent-bridge first reattaches from its local HostIndex.
 If that row was lost but the session DB survived, it inspects the far-side
 record for an already-running CodeSpace, validates boot/PID identity, rebuilds

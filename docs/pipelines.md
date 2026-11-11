@@ -720,7 +720,8 @@ verification remain serial. Only the independent bundle attestations use up
 to four concurrent verifications, with the same pinned identities, read-only
 token and per-subject deadline. Every verification must pass and all workers
 are joined before the caller can publish or emit a success receipt.
-The CLI's exact Public Good verifier-initialization-unavailable error permits
+The CLI's exact Public Good verifier-initialization-unavailable error or
+`error creating Sigstore verifier: no valid Sigstore verifiers could be initialized` permits
 one explicitly logged retry with identical subject, identity constraints and
 read-only authority, sharing the original 120-second per-subject deadline.
 Signature, identity, policy and other failures are not retried; a second
@@ -1995,6 +1996,19 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > `tools/changefile.py add` for a new identity; a rename to a previously unused
 > filename also creates a new release identity. Complete Git history is required
 > to verify freshness, including identities integrated after a PR forked.
+
+**Packaged version manifests propagate bumps.** A release bump can change a
+`plugin.json` or `pyproject.toml` copied into another consumer through
+`packaged-assets.json` or `launch-wrapper-assets.json`, even when that
+manifest's version was unchanged on Dev. Version allocation adds one patch
+bump for each such receiver before materialization, transitively through
+declared copies. Explicit receiver bumps are retained rather than applied
+twice; self-references and cycles do not repeat a bump. Without a new bump
+intent, merely carrying a consumed changefile into another promotion does
+not trigger this propagation. This keeps changed bundled release metadata
+from silently reusing the receiver's immutable runtime version. Receiver
+metadata and asset declarations retain the existing contained,
+non-indirect version-path guard before allocation.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

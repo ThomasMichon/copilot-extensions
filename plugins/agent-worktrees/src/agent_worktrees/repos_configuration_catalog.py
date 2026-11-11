@@ -300,10 +300,17 @@ def catalog(project: str, *, workspace: str = "") -> dict:
         )
     from .repos_knowledge_registration import action_row, eligible
 
-    if (
+    canonical_harness = (
         composition_error is None and project in registry.repos
         and registry.repos[project].repo_class == "worktree"
-        and binding_names_supported(project, project) and eligible(inspection)
+        and binding_names_supported(project, project)
+    )
+    if canonical_harness:
+        from .repos_knowledge_creation import action_rows
+
+        rows[0:0] = action_rows(project, inspection)
+    if (
+        canonical_harness and eligible(inspection)
     ):
         from .repos_knowledge_acquisition import action_row as acquisition_row
 

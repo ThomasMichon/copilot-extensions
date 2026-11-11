@@ -20,6 +20,22 @@ NATIVE_PACKETS = {
         "agent-worktrees", "test_native_seed_application", "test_public_copilot",
         "native-worktrees-public-tty",
     ),
+    "native-worktrees-caller-jobs": (
+        "agent-worktrees", "test_native_seed_application", "test_public_caller_job_lifetime",
+        "native-worktrees-caller-jobs",
+    ),
+    "native-worktrees-copilot-caller-jobs": (
+        "agent-worktrees", "test_native_seed_application", "test_public_attached_caller_job_lifetime",
+        "native-worktrees-copilot-caller-jobs",
+    ),
+    "native-worktrees-manager-no-mux": (
+        "agent-worktrees", "test_manager_application_launch", "test_manager_no_mux_decision",
+        "native-worktrees-manager-no-mux",
+    ),
+    "native-worktrees-manager-mux": (
+        "agent-worktrees", "test_manager_application_launch", "test_manager_mux_decision",
+        "native-worktrees-manager-mux",
+    ),
     "native-driver-auth-wait": (
         "agent-remote-driver", "test_native_headed_auth_wait",
         "test_opt_in_receiver_auth_wait_and_same_session_resume", "native-driver-auth-wait",
@@ -47,9 +63,20 @@ NATIVE_PACKETS = {
         "native-driver-startup-cold-resume",
     ),
 }
+NATIVE_LIFETIME_PACKETS = ("native-worktrees-caller-jobs", "native-worktrees-copilot-caller-jobs")
 MCP_LIFETIME_PACKET = "mcp-caller-lifetime"
 MCP_LIFETIME_CASE = "test_native_caller_jobs_and_session_owner_lifetime"
-PACKETS = ("bridge-http52", MCP_LIFETIME_PACKET, *NATIVE_PACKETS)
+DESKTOP_PACKET = "desktop-capability"
+DESKTOP_CASE = "test_hosted_desktop_capability"
+DESKTOP_FILES = (
+    "tools/test_windows_qualification_desktop_native.py",
+    "tools/windows_qualification_desktop.py",
+    *(f"libs/agent-procutil/tests/{name}.py" for name in (
+        "sdk_visibility", "sdk_desktop_observer", "sdk_desktop_win32",
+        "sdk_native_win32", "sdk_visibility_sources", "sdk_visibility_cases",
+    )),
+)
+PACKETS = ("bridge-http52", MCP_LIFETIME_PACKET, DESKTOP_PACKET, *NATIVE_PACKETS)
 NATIVE_VERSIONS = {"copilot": "1.0.105", "psmux": "3.3.8"}
 SHA = re.compile(r"[0-9a-f]{40}")
 NAME = re.compile(r"[a-z0-9]+(?:-[a-z0-9]+)*")
@@ -184,8 +211,9 @@ def validate_result(
         raise ValueError("missing actual test outcomes")
     native = NATIVE_PACKETS.get(expected["selection"].get("name"))
     lifetime = expected["selection"].get("name") == MCP_LIFETIME_PACKET
+    desktop = expected["selection"].get("name") == DESKTOP_PACKET
     if value["outcome"] == "qualified" and (
-        expected["selection"]["kind"] != "packet" or native or lifetime
+        expected["selection"]["kind"] != "packet" or native or lifetime or desktop
     ):
         if not cases or any(case.get("outcome") != "passed" for case in cases):
             raise ValueError("empty, failed or skipped selection cannot qualify")
@@ -200,6 +228,14 @@ def validate_result(
             or cases[0].get("class", "").split(".")[-1] != "test_custody_native_lifetime"
         ):
             raise ValueError("MCP native lifetime caller identity mismatch")
+        if desktop:
+            if (
+                len(cases) != 1 or cases[0].get("name") != DESKTOP_CASE
+                or cases[0].get("class", "").split(".")[-1] != "test_windows_qualification_desktop_native"
+            ):
+                raise ValueError("desktop capability caller identity mismatch")
+            from windows_qualification_desktop import validate_evidence
+            validate_evidence(value.get("desktop", {}), expected["request_id"])
     if value["outcome"] == "qualified":
         required = {
             "plugin": {"source-and-selection", "canonical-plugin-tests", "test-runtime"},
@@ -221,12 +257,14 @@ def validate_result(
                 "source-and-selection", "prepare-mcp-test-runtime",
                 MCP_LIFETIME_PACKET, "test-runtime",
             }
+        elif desktop:
+            required = {"source-and-selection", DESKTOP_PACKET, "test-runtime"}
         phases = value.get("phases", [])
         if {phase.get("name") for phase in phases} != required or any(
             phase.get("status") != "passed" for phase in phases
         ):
             raise ValueError("required qualification phases are incomplete")
-        if expected["selection"]["kind"] == "packet" and not native and not lifetime and (
+        if expected["selection"]["kind"] == "packet" and not native and not lifetime and not desktop and (
             value.get("packet", {}).get("source_commit") != expected["source_sha"]
             or value.get("packet", {}).get("generation") != 52
             or not value.get("packet", {}).get("case_count")

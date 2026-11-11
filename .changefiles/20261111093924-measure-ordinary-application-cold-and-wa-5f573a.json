@@ -1,0 +1,9 @@
+{
+  "comment": "Measure ordinary application cold and warm broker readiness through both installed transports.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

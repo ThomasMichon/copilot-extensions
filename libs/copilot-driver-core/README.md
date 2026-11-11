@@ -8,11 +8,27 @@ or Manager. Install it as an ordinary first-party distribution and run
 is not required.
 Session Host shutdown closes attached clients before awaiting its cancelled
 server task, so child exit does not depend on a client disconnecting first.
+The local headless launcher uses canonical daemon admission with borrowed
+startup-output descriptors. On Windows it verifies escape from every declared
+caller-owned cleanup Job before Host entry; an inner permissive Job cannot hide
+a restrictive outer Job. Refusal preserves the original creation/cleanup
+evidence rather than accepting a caller-bound lifetime. Contained tests retain
+their supervisor's ownership. This does not qualify every caller or headed CLI
+package-replacement behavior.
 
 The [Driver application and extension connector](../../plugins/agent-remote-driver/README.md)
 provides the ordinary application front door. Bridge consumes this same
 library through the existing canonical-reference and wheel-build owners,
 not a sibling plugin source dependency.
+
+The compact legacy export preserves its disconnect-driven lifetime, rather
+than adopting ACP lifetime implicitly. An idle graceful detach closes that
+Host normally; cancellation of its external owner still propagates. Explicit
+legacy child termination need not close the retained broker, so socket EOF
+alone is not evidence that the broker exited.
+Private Host-state publication retries transient Windows sharing failures
+within a short fixed bound; persistent failures still raise without replacing
+the previous record.
 
 The explicit optional `sdk` extra supplies a public-Python-SDK headless provider
 behind that same Host. Native ACP remains the default; the compact export stays

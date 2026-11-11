@@ -3,7 +3,9 @@
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
+import time
 
 
 def write_host_state(path: Path, payload: dict) -> bool:
@@ -24,7 +26,17 @@ def write_host_state(path: Path, payload: dict) -> bool:
                 pass
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             json.dump(payload, handle)
-        os.replace(temp, path)
+        for attempt in range(20):
+            try:
+                os.replace(temp, path)
+                break
+            except OSError as error:
+                if (
+                    sys.platform != "win32" or getattr(error, "winerror", None) not in (5, 32, 33)
+                    or attempt == 19
+                ):
+                    raise
+                time.sleep(.01)
         return True
     finally:
         if os.path.exists(temp):

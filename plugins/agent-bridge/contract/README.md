@@ -4,6 +4,23 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+The H1 prior-runtime corpus also retains the exact `0.4.0-dev150` frontend
+source beside its existing protocol source. Both come from the same immutable
+release commit and retain their original bytes and Git blob identities.
+Driver's relocated-core controls execute that actual frontend against the
+current modern and legacy compact exports, preserving cursors, literal frames,
+lifetime distinctions and exact child cleanup. This does not substitute a
+current compatibility alias for an older implementation, and does not qualify
+an old installed Host, historical binary rollback or an SDK runtime.
+
+The corpus also retains that release's exact Host source. A reverse control
+uses the current frontend with the unmodified historical Host and a real
+test-owned Python ACP child. It proves literal framing, cursor-preserving
+reattachment, explicit termination and historical idle-detach shutdown.
+The test owner independently settles its listener, frontend handlers and child;
+this is source compatibility, not modern lifetime/authentication support,
+historical binary rollback or native SDK evidence.
+
 ## Current HTTP-52 owner-membership evidence
 
 The optional `live_delivery_observation: 1` expansion retains HTTP generation

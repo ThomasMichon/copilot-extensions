@@ -1,0 +1,13 @@
+{
+  "comment": "Refresh shared Copilot Driver core consumers with verified local Host cleanup-Job admission.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

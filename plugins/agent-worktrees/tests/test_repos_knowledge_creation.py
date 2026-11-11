@@ -100,6 +100,51 @@ def mutations(state):
     return [call for call in state["calls"] if "POST" in call[0]]
 
 
+@pytest.mark.parametrize("support", [None, False, True, "1", 0, 2, [], {}])
+def test_catalog_withholds_only_creation_when_executing_runtime_support_is_unknown(
+    native, selected, monkeypatch, support,
+):
+    from agent_worktrees import repos_list_cli
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    capabilities = {} if support is None else {"knowledge_repository_creation": support}
+    monkeypatch.setattr(repos_list_cli, "CAPABILITIES", capabilities)
+    before = tree(native)
+    rows = catalog("sample")["entries"]
+    assert not any(row.get("knowledge_creation_available") == "true" for row in rows)
+    assert not any(row.get("knowledge_creation_recovery_available") == "true" for row in rows)
+    assert any(row.get("knowledge_acquisition_available") == "true" for row in rows)
+    assert any(row.get("knowledge_registration_available") == "true" for row in rows)
+    assert any(row["id"] == "sample" and row["editable"] == "true" for row in rows)
+    assert tree(native) == before and selected["calls"] == []
+
+
+def test_catalog_is_offline_and_recovery_remains_available_after_binding(native, selected):
+    from agent_worktrees import config as cfg
+    from agent_worktrees.repos_configuration_catalog import catalog
+
+    before = tree(native)
+    rows = catalog("sample")["entries"]
+    assert sum(row.get("knowledge_creation_available") == "true" for row in rows) == 1
+    assert sum(row.get("knowledge_creation_recovery_available") == "true" for row in rows) == 1
+    assert tree(native) == before and selected["calls"] == []
+    registry = repos._repos_yaml_path()
+    value = yaml.safe_load(registry.read_text())
+    value["repos"]["knowledge"] = {
+        "class": "knowledge", repos._current_platform(): str(native / "knowledge"),
+    }
+    registry.write_text(yaml.safe_dump(value), encoding="utf-8")
+    configuration = cfg.project_dir("sample") / "config.yaml"
+    configuration.parent.mkdir(parents=True, exist_ok=True)
+    configuration.write_text("knowledge_repo: knowledge\n", encoding="utf-8")
+    before = tree(native)
+    rows = catalog("sample")["entries"]
+    assert not any(row.get("knowledge_creation_available") == "true" for row in rows)
+    assert not any(row.get("knowledge_acquisition_available") == "true" for row in rows)
+    assert sum(row.get("knowledge_creation_recovery_available") == "true" for row in rows) == 1
+    assert tree(native) == before and selected["calls"] == []
+
+
 def test_create_then_verify_server_branch_preserves_all_native_source_bytes(native, selected):
     before = tree(native)
     proposal = worker("preview")

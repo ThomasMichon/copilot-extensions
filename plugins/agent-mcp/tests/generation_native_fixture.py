@@ -204,6 +204,30 @@ async def spawn(slot, actor, role, root, handle, fixed, config, environment, hom
     )
 
 
+async def check_owner_capabilities(
+    runtime: tuple[str, Path], root: Path, environment: dict[str, str], home: Path,
+    *, selected: bool,
+) -> None:
+    generation, slot = runtime
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    result = await asyncio.to_thread(
+        subprocess.run,
+        [str(python), "-I", "-m", "agent_mcp", "session-owner-capabilities"],
+        cwd=home, env=environment, stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10,
+        **no_window_kwargs(),
+    )
+    reply = json.loads(result.stdout)
+    assert reply["supported"] is selected, result.stderr.decode(errors="replace")
+    assert result.returncode == (0 if selected else 1)
+    if selected:
+        assert reply["selection"]["generation"] == generation
+        assert Path(reply["selection"]["root"]) == root.resolve()
+        assert reply["invocation_allowed"] is True
+    else:
+        assert "selection" not in reply
+
+
 async def shutdown(handle):
     from agent_mcp.cutover import control_request
     from agent_mcp.serve import _control_token_path

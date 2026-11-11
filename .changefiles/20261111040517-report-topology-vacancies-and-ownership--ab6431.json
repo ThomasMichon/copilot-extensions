@@ -1,0 +1,9 @@
+{
+  "comment": "Report topology vacancies and ownership drift without authorizing replacement",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

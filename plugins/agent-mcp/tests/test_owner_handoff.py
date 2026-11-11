@@ -43,6 +43,7 @@ def test_paired_cli_owner_reaches_adopted_entrypoint(
     ["--session-owner-birth", "native:1"],
     ["--session-owner-pid", "0", "--session-owner-birth", "native:1"],
     ["--session-owner-pid", "42", "--session-owner-birth", ""],
+    ["--session-owner-pid", str(1 << 80), "--session-owner-birth", "native:1"],
 ])
 def test_incomplete_or_invalid_owner_refuses_before_native_or_startup_effects(
     monkeypatch: pytest.MonkeyPatch, options: list[str], capsys: pytest.CaptureFixture,

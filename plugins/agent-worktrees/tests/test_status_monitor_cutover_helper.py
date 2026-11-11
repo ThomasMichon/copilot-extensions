@@ -639,7 +639,7 @@ def test_async_admission_keeps_native_custody_without_guarded_preparation_recove
     elif damage == "recovery-capability":
         health["capabilities"] = [CAPABILITY]
     monkeypatch.setattr(identity.cutover, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: health))
-    monkeypatch.setattr(identity.cutover, "load_or_create_control_token", lambda root: "synthetic-token")
+    (tmp_path / "status-monitor-control.token").write_text("synthetic-token", encoding="utf-8")
     assert identity.routed_identity(tmp_path, require_async_retirement=True) == (101, "1001", None)
 
 
@@ -670,7 +670,7 @@ def test_serving_owner_does_not_hide_unretained_live_fallback(tmp_path, monkeypa
             committed=fallback == "retiring",
         )
     table = routing.read_table(directory, strict=True)
-    monkeypatch.setattr(identity.cutover, "load_or_create_control_token", lambda root: "synthetic-token")
+    (tmp_path / "status-monitor-control.token").write_text("synthetic-token", encoding="utf-8")
     monkeypatch.setattr(identity.cutover, "ControlClient", lambda *a, **k: SimpleNamespace(health=lambda: {
         "status": "ready", "pid": 101, "runtime_prefix": str(tmp_path), "runtime_generation": "a" * 32,
         "capabilities": [retirements.CAPABILITY, smc.guarded_recovery.CAPABILITY],
@@ -810,7 +810,7 @@ def test_async_predecessor_without_contract_retains_native_custody(tmp_path, mon
     monkeypatch.setattr(identity.diagnostics, "_pid_alive", lambda pid: True)
     monkeypatch.setattr("zdd.process_exit.observe_original_exit", lambda pid, start: False)
     monkeypatch.setattr(identity.locks, "process_start_time", lambda pid: "1001")
-    monkeypatch.setattr(smc, "load_or_create_control_token", lambda root: "fixture-token")
+    (tmp_path / "status-monitor-control.token").write_text("fixture-token", encoding="utf-8")
     def health():
         if capabilities == "timeout":
             raise TimeoutError("outgoing control unavailable")

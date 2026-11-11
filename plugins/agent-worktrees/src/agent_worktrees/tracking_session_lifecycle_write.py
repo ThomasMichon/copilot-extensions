@@ -38,7 +38,7 @@ import dataclasses
 import logging
 from pathlib import Path
 
-from . import retained_record_writer, tracking, tracking_write
+from . import retained_record_writer, sessions, tracking, tracking_write
 from .execution_spaces import ExecutionSpaceError, require_project_record_mutation
 
 
@@ -60,11 +60,12 @@ def apply_session_conclude(args: dict) -> dict:
     (including its post-save reload, kept for behavior parity). Returns
     ``{"error": "lifecycle", "message": ...}`` for a
     ``tracking.SessionLifecycleError`` rejection (an unknown session or
-    invalid state). Execution-space authority is resolved on the receiving side
+    invalid state). Explicit conclusion can also recover an exact at-rest
+    self-session claim on a finalized, confirmed inactive worktree.
+    Execution-space authority is resolved on the receiving side
     against the fresh, sidecar-locked record before any lifecycle mutation.
 
-    ``only_if_active`` (default ``False``, preserving the public
-    ``conclude-session`` CLI command's existing behavior unchanged) is an
+    ``only_if_active`` (default ``False``) is an
     opt-in guard for a best-effort repair caller
     (``handoff_cutover.py``'s ``_conclude_retired_predecessor``): when set
     and the session's current ``SessionEntry.state`` is not ``"active"``,
@@ -94,11 +95,40 @@ def apply_session_conclude(args: dict) -> dict:
             entry = record.session_entry(session_id)
             if entry is None or entry.state != "active":
                 return {"ok": True, "skipped": "not_active"}
+        session_ref = tracking.format_claim_ref(
+            record.execution_machine, record.repo, record.worktree_id, session=session_id,
+        )
+        matching_claims = [claim for claim in record.resources if claim.ref == session_ref]
+        recover_claim = (
+            state == "concluded" and not only_if_active and record.status == "finalized"
+            and any(
+                claim.kind == "session" and claim.is_at_rest for claim in matching_claims
+            )
+        )
+        if recover_claim:
+            if len(matching_claims) != 1:
+                return {
+                    "error": "lifecycle",
+                    "message": "Session claim recovery requires an unambiguous exact claim.",
+                }
+            verdict = sessions.verify_worktree_active(record, strict=True)
+            if not verdict.probes_ok or verdict.active:
+                return {
+                    "error": "lifecycle",
+                    "message": "Session claim recovery requires confirmed inactive liveness.",
+                }
         try:
+            if recover_claim and tracking.release_resource_claim(
+                record, session_ref, save=False,
+            ) is None:
+                return {
+                    "error": "lifecycle",
+                    "message": "Session claim recovery refused: claim release is reserved or unverified.",
+                }
             tracking.conclude_session(
                 record, session_id, state=state, handoff_token=handoff_token, save=False,
             )
-        except tracking.SessionLifecycleError as exc:
+        except (tracking.SessionLifecycleError, ValueError) as exc:
             return {"error": "lifecycle", "message": str(exc)}
         tracking.save_record(record, yaml_path)
 

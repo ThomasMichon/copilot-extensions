@@ -16,6 +16,17 @@ as the stable runtime-facing path. See
 [`docs/patterns/README.md`](../../docs/patterns/README.md) §"Runtime installs are
 immutable and versioned".
 
+## Windows filesystem paths
+
+Version inventory, garbage collection and incomplete-slot cleanup accept ordinary
+or extended-length Windows paths, without a machine-wide long-path setting. Filesystem
+access uses the canonical native-path helper. Process-image and launch-path
+matching normalize both forms without resolving symlinks. Current and
+last-known-good selections, explicit keeps, live processes, construction and
+retention leases, and durable references remain deletion barriers.
+Completed deep slots remain complete when `gc --toss-incomplete` follows an
+age-preserving collection pass.
+
 ## Selector sharing on Windows
 
 Selector publication uses `FileRenameInfoEx` with replace and POSIX semantics.
@@ -324,6 +335,10 @@ barriers under publication custody, including after the writer process dies.
 Only an absent record means no references; malformed, linked, oversized or
 unreadable evidence refuses deletion. References never expire by PID or age
 and do not provide a new mutation lock, recovery queue or force-release path.
+Reference reads, atomic writes, target checks and recovery use native Windows
+paths internally. Ordinary and extended-length spellings address the same
+evidence even when a root, referenced slot or atomic temporary filename exceeds
+`MAX_PATH`; an inaccessible long spelling is not treated as absent evidence.
 
 For a cohort that spans several bounded owners, hold the external lifecycle
 lock and `reference_transaction_custody(root)` through reconciliation. Use

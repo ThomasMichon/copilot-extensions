@@ -53,12 +53,18 @@ def test_dispatcher_refuses_missing_selected_credential(
     assert "ambient-reader-token" not in text
 
 
-def test_derived_owner_missing_credential_keeps_legacy_execution(
-    registry, monkeypatch, capfd,
+def test_unconfigured_owner_keeps_ambient_execution_without_inventing_an_identity(
+    registry, monkeypatch,
 ):
     pin(registry, "derived")
     monkeypatch.setattr(cli.shutil, "which", lambda name: "gh")
+    monkeypatch.setattr(
+        git_ops, "gh_token_for_account",
+        lambda account: pytest.fail("An unconfigured namespace must not select or acquire an identity."),
+    )
     calls = []
+    warnings = []
+    monkeypatch.setattr(cli.output, "warn", warnings.append)
 
     def run(args, **kwargs):
         calls.append((args, kwargs))
@@ -67,7 +73,7 @@ def test_derived_owner_missing_credential_keeps_legacy_execution(
     monkeypatch.setattr(subprocess, "run", run)
     assert cli.cmd_repos_dispatch(["gh", "sample", "--", "issue", "list"]) == 0
     assert calls[0][1]["env"]["GH_TOKEN"] == "ambient-reader-token"
-    assert "using ambient auth" in capfd.readouterr().out
+    assert warnings == []
 
 
 def test_successful_scoped_dispatch_overrides_inherited_token(registry, monkeypatch):

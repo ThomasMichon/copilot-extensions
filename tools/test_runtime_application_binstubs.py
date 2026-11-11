@@ -1239,6 +1239,44 @@ def test_regular_install_reuses_canonical_completion_without_restamping(applicat
     assert (root / "current-version").read_text().strip() == slot.name
 
 
+def test_fresh_repair_generation_replaces_selection_and_retires_old_frontend(application):
+    root, slot, caller, environment = application
+    environment["UV_PYTHON"] = sys.executable
+    incoming = slot.with_name(slot.name + ".repair." + "d" * 32)
+    assert not (slot / ".venv").exists()
+    shutil.copytree(slot, incoming)
+    extension = ".ps1" if os.name == "nt" else ".sh"
+    first = invoke(slot / ("install" + extension), [], caller, environment)
+    assert first.returncode == 0, first.stdout + first.stderr
+    original = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
+    assert not (incoming / ".venv").exists()
+    updated = invoke(incoming / ("install" + extension), [], caller, environment)
+    assert updated.returncode == 0, updated.stdout + updated.stderr
+    assert json.loads(updated.stdout.splitlines()[-1])["state"] == "installed"
+    for selector in ("current-version", "last-known-good"):
+        assert (root / selector).read_text().strip() == incoming.name
+    assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == original
+    selected_python = incoming / ".venv" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    collected = subprocess.run(
+        [str(selected_python), "-I", "-B", str(incoming / "runtime" / "versioned_runtime.py"),
+         "--root", str(root), "--json", "gc", "--protect-pids", "--min-age-days", "0"],
+        executable=engine._native_retained_path(selected_python),
+        cwd=caller, env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert collected.returncode == 0, collected.stdout + collected.stderr
+    assert json.loads(collected.stdout) == {"removed": [slot.name]}
+    assert not slot.exists() and selected_python.is_file()
+    public = Path(environment["HOME"]) / ".local" / "bin" / ("fixture-app" + extension)
+    result = invoke(public, ["--after-replacement"], caller, environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    facts = json.loads(result.stdout)
+    assert Path(facts["prefix"]).samefile(incoming / ".venv")
+    assert facts["args"] == ["--after-replacement"]
+
+
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])
 def test_global_uses_nested_home_relative_root(application, extension):
     root, slot, caller, environment = application

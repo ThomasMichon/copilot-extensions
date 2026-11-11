@@ -229,6 +229,88 @@ neither runs elevated, enables lingering nor installs a service manager.
 Unsupported or logged-out/unavailable user execution remains visible.
 macOS is unsupported until its own native owner is qualified.
 
+### Installed Windows job enrollment
+
+**Agent-recommended amendment: review before implementation.** Disabled
+definition preparation and isolated task fixtures are not a production
+registration owner. The next slice adds Windows enrollment to the existing
+Agent Machines configuration/lifecycle owner, not a second installer, watchdog
+or resident collector. Linux remains explicitly unsupported for enrollment
+until its corresponding native lifecycle is qualified; existing inert Linux
+preparation and manual collection remain unchanged.
+
+Keep the desired enrollment local and explicitly opted in. It names only the
+existing absolute v2 store and approved policy, the native interactive account
+and enabled/disabled intent. It cannot supply an executable, interpreter,
+arbitrary task XML, service name, credentials or synchronized execution policy.
+An absent configuration never creates a task. A changed store, policy or
+account requires a fresh preview and confirmation through the configuration
+owner; an update does not silently adopt new collection authority.
+
+Normal install/update or declared machine-state convergence owns registration
+and refresh. Reuse its immutable installed runtime, retained payload/source
+and version-retention primitives. Do not copy a checkout or marketplace payload
+to a bespoke deployment directory, hand-register prepared XML, revive the
+update watchdog, or make an interactive Copilot session the periodic owner.
+The installed launcher and every task dependency must survive moving/removing
+the originating checkout and replacing the marketplace payload.
+
+At convergence, resolve the exact installation, qualify collection v1 support
+and validate the local policy before changing native state. Bind the complete
+execution closure: GUI base interpreter, entrypoint, cleanup support, selected
+runtime and any retained payload required by the launch path. Use existing
+runtime retention/publication custody rather than file age or a new pin store.
+Retain an incumbent closure until its exact task instances and descendants
+are settled. Runtime replacement and rollback must refresh or requalify the
+owned registration before retiring any dependency. Missing support refuses
+visibly without provisioning during a scheduled invocation.
+
+Apply the installer's
+[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
+contract. Incoming readiness and complete current selections establish install
+success independently of predecessor recovery, provenance or stale fences.
+Automatic-update inhibition does not veto an explicit authorized update.
+Preserve application state and sessions; unresolved predecessor retirement
+remains separate, identity-checked cleanup through the existing central owner,
+with current-generation protection at mutation time. Retaining dependencies
+for an old job is not permission to block the incoming installation or delete
+an unrelated generation.
+
+Read the exact existing task before effects. Refuse an unowned/conflicting
+definition without overwriting it, and serialize convergence with the existing
+local configuration owner. Create the first definition disabled; verify its
+account, LeastPrivilege, hourly UTC trigger, IgnoreNew, 60-second outer limit
+and GUI action before enabling it. An already matching definition is a no-op,
+not a re-registration that resets cadence or interrupts an instance.
+Disabling or withdrawing enrollment settles only the exact owned instances,
+verifies native state and releases retained dependencies only after confirmed
+removal. Preserve health history, policy and unrelated tasks/data.
+
+Update is health-gated and reversible. Capture the incumbent definition,
+selection and retained closure before mutation; validate the candidate before
+switching. On failure, restore and read back the known-good definition and
+selection, reporting rollback separately from candidate readiness. An unknown
+registration, stop, replacement or removal outcome remains owned and requires
+exact readback before retry; it is not permission to register a duplicate,
+release references or claim rollback. An incompatible old runtime must not
+be re-enabled against a newer policy/store.
+
+The focused unit controls cover desired-state validation, matching no-op,
+foreign-definition refusal, drift/approval, support loss and exact rollback
+planning. The isolated Windows native lane proves fresh registration and
+repeat convergence, two accelerated calendar cycles, disabled withdrawal,
+replacement/rollback with retained dependencies, overlap, late-start coalescing,
+deadline/storage failure and exact descendant/task cleanup. Remove the fixture
+checkout/payload after installed preparation to prove the actual durable
+consumer boundary. Keep optional visual observation non-gating.
+
+The final authorized host lane uses the promoted release and normal installer,
+captures before/after state and a usable rollback, and proves actual local
+hourly publication plus real inbound peer SSH/Bridge. Existing successful peer
+probes are baseline evidence, not proof of post-deployment reliability.
+Carrier writes, other hosts, elevation and new credentials retain their
+independent authority gates.
+
 The action resolves the exact admitted Agent Machines runtime through its
 installation owner and a stable attributable launcher that never provisions or
 updates. Require separately declared `agent-machines.health.collection` v1
@@ -242,6 +324,19 @@ Late wake/start runs once for current health and the preceding hour; it does not
 replay every missed trigger. Disable scheduler restart/retry storms. Require
 headless launch and exact bounded child containment, definition readback and
 separate configured/enabled/running/last-result evidence on both platforms.
+Windows functional qualification must not depend on operator desktop attendance.
+Use non-interactive launch-mechanism, execution and cleanup controls. Supplement
+them opportunistically with unfiltered window/focus capture on an already active,
+observable console or RDP session, binding actual task children to that session.
+Unavailable or inconclusive observation records a reason, not a visual pass or
+a publication/CI/enrollment gate. Preserve capture/identity and exact-cleanup
+checks; do not unlock, move or elevate a session to manufacture evidence.
+On Windows, a GUI-subsystem finite root must own the complete payload child
+tree and propagate its result. A headless console host alone is insufficient:
+its native task timeout can leave the console descendant alive, and its own
+exit code does not attest collection success. Reuse the existing finite
+Job/stream owner within the native 60-second ceiling; retain and refresh the
+selected execution closure through installation replacement and rollback.
 No hook or default setup enrolls this job. An explicitly adopted local policy
 can authorize recurring stage writes without a new human preview every hour,
 but is revalidated at each mutation; it cannot authorize service changes or
@@ -264,9 +359,11 @@ storage and bounded process settlement. Keep subprocess matrices out of required
 unit CI; use the repository's existing explicit integration portfolio.
 
 Before enrollment, qualify fresh and reconcile paths on Windows and Linux:
-actual scheduler definitions, zero visible windows/focus transitions over two
-cycles on Windows, overlap, suspend/late wake, deadline enforcement, failed
+actual scheduler definitions, two automated cycles and non-interactive Windows
+launch-mechanism evidence, overlap, suspend/late wake, deadline enforcement, failed
 storage and exact fixture cleanup while preserving unrelated active work.
+Visual window/focus observation is supplemental and never requires the operator
+to maintain an active desktop for the test.
 Record cold/warm runtime, selected service count, scan bytes/work and storage
 cost for the real consumer; schema-only fixtures do not satisfy these gates.
 Installed adoption, selected-carrier delay/conflict/offline/receipt evidence and

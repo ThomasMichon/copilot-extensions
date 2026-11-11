@@ -1,0 +1,13 @@
+{
+  "comment": "Qualify the exact historical H1 frontend source against relocated current Host exports",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

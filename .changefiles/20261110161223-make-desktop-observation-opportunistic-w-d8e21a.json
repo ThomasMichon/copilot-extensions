@@ -1,0 +1,9 @@
+{
+  "comment": "Make desktop observation opportunistic without operator-attendance publication gates",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

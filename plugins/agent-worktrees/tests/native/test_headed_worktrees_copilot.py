@@ -75,6 +75,83 @@ def _initialize_fixture_repository(checkout, environment):
         assert result.returncode == 0, result.stdout + result.stderr
 
 
+def _manager_decision_source():
+    return (
+        "import json,sys\n"
+        "from pathlib import Path\n"
+        "from worktree_manager import __main__ as cli,engine_client\n"
+        "from worktree_manager.launch_attempts import LaunchAttempts\n"
+        "from worktree_manager.relocated_launch import _relocated_launch_script\n"
+        "engine,worktree,attempt,script,marker=sys.argv[1:]\n"
+        "assert _relocated_launch_script().samefile(script)\n"
+        "engine_client.set_engine_command([engine,'-m','agent_worktrees'])\n"
+        "LaunchAttempts().record_intent(attempt,action='resume',"
+        "project='native-copilot',surface='native-no-mux-decision',"
+        "is_local=True,worktree_id=worktree,options={'no_mux':True})\n"
+        "code=cli._run_production_picker('native-copilot',initial_decision={"
+        "'action':'resume','project':'native-copilot','is_local':True,"
+        "'worktree_id':worktree,'attempt_id':attempt,'options':{'no_mux':True}})\n"
+        "detail=LaunchAttempts().detail(attempt,include_input=True)\n"
+        "assert [event['phase'] for event in detail['events']]==["
+        "'confirmed','resolution-requested','resolved',"
+        "'launch-requested','launcher-returned'],detail\n"
+        "assert detail['events'][-1]['details']['exit_code']==code\n"
+        "assert detail['input']['options']['no_mux'] is True\n"
+        "Path(marker).write_text(json.dumps({'attempt':attempt,'exit_code':code}),encoding='utf-8')\n"
+        "sys.exit(code)\n"
+    )
+
+
+def _manager_mux_decision_source():
+    return (
+        "import json,sys\n"
+        "from pathlib import Path\n"
+        "from worktree_manager import __main__ as cli,engine_client,terminal_launch\n"
+        "from worktree_manager.launch_attempts import LaunchAttempts\n"
+        "from worktree_manager.relocated_launch import _relocated_launch_script\n"
+        "engine,worktree,attempt,script,marker=sys.argv[1:]\n"
+        "assert _relocated_launch_script().samefile(script)\n"
+        "request,offer=terminal_launch.validate()\n"
+        "engine_client.set_engine_command([engine,'-m','agent_worktrees'])\n"
+        "LaunchAttempts().record_intent(attempt,action='resume',"
+        "project='native-copilot',surface='native-mux-decision',"
+        "is_local=True,worktree_id=worktree,options={})\n"
+        "code=cli._run_production_picker('native-copilot',initial_decision={"
+        "'action':'resume','project':'native-copilot','is_local':True,"
+        "'worktree_id':worktree,'attempt_id':attempt,'options':{}})\n"
+        "assert code==0,code\n"
+        "detail=LaunchAttempts().detail(attempt,include_input=True)\n"
+        "assert [event['phase'] for event in detail['events']]==["
+        "'confirmed','resolution-requested','resolved','launch-requested'],detail\n"
+        "assert detail['input']['options']=={},detail\n"
+        "prepared=json.loads((request.parent/'result.json').read_text(encoding='utf-8'))\n"
+        "assert prepared['nonce']==offer['nonce']\n"
+        "assert Path(prepared['script']).samefile(script)\n"
+        "assert prepared['arguments']==['--project','native-copilot','--worktree-id',"
+        "worktree,'--require-launch-attempt','--launch-attempt-id',attempt],prepared\n"
+        "assert Path(prepared['completion'][0]).samefile(sys.executable)\n"
+        "assert prepared['completion'][-3:]==['-m','worktree_manager.terminal_launch',attempt]\n"
+        "Path(marker).write_text(json.dumps({'attempt':attempt,'exit_code':code,"
+        "'request':str(request)}),encoding='utf-8')\n"
+        "sys.exit(code)\n"
+    )
+
+
+def _manager_mux_terminal_source(python, script, arguments):
+    def quote(value):
+        return "'" + str(value).replace("'", "''") + "'"
+
+    return (
+        "$ErrorActionPreference='Stop'\n"
+        f". {quote(script.parent / 'terminal-launch.ps1')}\n"
+        f"Invoke-WorktreeTerminalLaunch -Executable {quote(python)} "
+        f"-Arguments @({','.join(quote(value) for value in arguments)}) "
+        "-QueryArguments @('-I','-B','-X','utf8','-m','worktree_manager','--version') "
+        "-Package worktree_manager\n"
+        "exit $LASTEXITCODE\n"
+    )
+
+
 @pytest.mark.parametrize("control", ["broker", "native-input", "manager-no-mux", "manager-mux"])
 def test_worktrees_native_fresh_and_resume_keep_one_history_and_real_receipts(tmp_path, control):
     _qualify_native_worktrees(tmp_path, control)
@@ -180,7 +257,8 @@ class Mux {
 def _qualify_native_worktrees(
     tmp_path, control, *, manager_script=None, manager_environment=None,
     manager_python=None, verify_reuse=True, worktrees_python=None,
-    worktrees_root=None, worktrees_environment=None,
+    worktrees_root=None, worktrees_environment=None, caller_jobs=False, replacement_slot=None,
+    manager_picker=False,
 ):
     from plugin_test_command_safety import private_mux_args
 
@@ -192,11 +270,23 @@ def _qualify_native_worktrees(
     installed = worktrees_python is not None
     public_caller = control in {"embody", "copilot"}
     public_tty = control == "copilot"
+    assert not manager_picker or (control.startswith("manager-") and manager_python is not None)
     if installed:
         assert control in {"broker", "embody", "copilot"} and worktrees_root is not None
         assert Path(worktrees_python).is_file()
         assert worktrees_environment is not None
     assert not public_caller or installed
+    if caller_jobs:
+        from agent_procutil import contained_test_mode
+        from public_caller_jobs_fixture import (
+            application_unavailable, close_public_tty_jobs, prepare_public_tty_jobs,
+            replace_application, run_public_caller_jobs,
+        )
+
+        assert public_caller and installed and not contained_test_mode()
+        assert worktrees_environment.get("COPILOT_EXTENSIONS_TEST_CONTAINED") != "1"
+    assert replacement_slot is None or (caller_jobs and control == "embody")
+    tty_ticket = None
     owner_python = str(worktrees_python) if installed else physical_executable(
         getattr(sys, "_base_executable", sys.executable),
     )
@@ -271,6 +361,11 @@ def _qualify_native_worktrees(
         UV_PROJECT_ENVIRONMENT=str(tmp_path / "manager-environment"),
     )
     environment.update(manager_environment or {})
+    if manager_picker and control == "manager-mux":
+        for key in ("CE_TERMINAL_LAUNCH", "WORKTREE_NO_MUX"):
+            environment.pop(key, None)
+    if caller_jobs:
+        environment.pop("COPILOT_EXTENSIONS_TEST_CONTAINED")
     mux_directory, namespace_file = _prepare_private_mux_adapter(
         tmp_path, binary=binary, manager_target=manager_target, environment=environment,
     )
@@ -409,14 +504,14 @@ def _qualify_native_worktrees(
             "record=tracking.create_new_record(sys.argv[2],'worktree/native-copilot',str(checkout),"
             "'native-copilot','fixture',cfg.detect_platform() if managed else 'win32',"
             "tracking_path)\n"
-            "if sys.argv[3] in {'embody','copilot'}:\n"
+            "if sys.argv[3] in {'embody','copilot'} or sys.argv[5]=='1':\n"
             "    authority=cfg.inrepo_config_path(checkout);authority.parent.mkdir(parents=True,exist_ok=True)\n"
             "    authority.write_text(json.dumps({'default_branch':'dev'}),encoding='utf-8')\n"
             "print(json.dumps(str(record.yaml_path)))",
-            checkout, worktree_id, control, mux_directory,
+            checkout, worktree_id, control, mux_directory, "1" if manager_picker else "0",
         )
         record = Path(initialized)
-        if public_caller:
+        if public_caller or manager_picker:
             _initialize_fixture_repository(checkout, environment)
         if manager:
             selected = runtime(
@@ -494,6 +589,25 @@ def _qualify_native_worktrees(
                 ]
                 if control == "manager-no-mux":
                     manager_command.append("--no-mux")
+                if manager_picker:
+                    decision_script = tmp_path / (leg + "-manager-decision.py")
+                    decision_proof = tmp_path / (leg + "-manager-decision.json")
+                    decision_script.write_text(
+                        _manager_mux_decision_source() if control == "manager-mux"
+                        else _manager_decision_source(), encoding="utf-8",
+                    )
+                    manager_command = [
+                        str(manager_python), "-I", "-B", "-X", "utf8", str(decision_script),
+                        sys.executable, worktree_id, plan["attempt"], str(manager_script), str(decision_proof),
+                    ]
+                    if control == "manager-mux":
+                        terminal_script = tmp_path / (leg + "-manager-terminal.ps1")
+                        terminal_script.write_text(
+                            _manager_mux_terminal_source(
+                                manager_python, manager_script, manager_command[1:],
+                            ), encoding="utf-8",
+                        )
+                        manager_command = [shell, "-NoProfile", "-File", str(terminal_script)]
                 invocation = (
                     "    import subprocess\n"
                     "    # headless-guard: allow the real Manager consumer to inherit the fixture's private ConPTY\n"
@@ -536,6 +650,14 @@ def _qualify_native_worktrees(
                 )
                 if public_tty:
                     def tty_invocation(command):
+                        nonlocal tty_ticket
+                        assert tty_ticket is None
+                        if caller_jobs:
+                            tty_ticket = tmp_path / (leg + "-tty-jobs-" + uuid4().hex)
+                            command = prepare_public_tty_jobs(
+                                command, python=worktrees_python, cwd=checkout,
+                                environment=environment, directory=tty_ticket,
+                            )
                         return (
                             "    assert sys.stdin.isatty() and sys.stdout.isatty()\n"
                             "    for key in ('TMUX','TMUX_PANE','PSMUX_PANE','PSMUX_SESSION',"
@@ -609,19 +731,29 @@ def _qualify_native_worktrees(
             assert query("has-session", "-t", outer_target).returncode == 1
             if control == "manager-mux" or public_caller:
                 assert query("has-session", "-t", target).returncode == 1
-            launched = query(
-                "new-session", "-d", "-s", outer_target, "-c", str(checkout),
-                *caller_environment, "--", *caller_command,
-            )
-            assert launched.returncode == 0, launched.stderr + (
-                owner_log.read_text(encoding="utf-8") if owner_log.exists() else ""
-            )
-            observed = query(
-                "display-message", "-p", "-t", outer_target, "#{session_id}:#{session_created}|#{pane_id}",
-            )
-            assert observed.returncode == 0 and "|" in observed.stdout
-            identities[outer_target] = observed.stdout.strip()
-            owner_ready.write_text("ready", encoding="utf-8")
+            if caller_jobs and not public_tty:
+                launched = run_public_caller_jobs(
+                    public_command, python=worktrees_python, cwd=checkout,
+                    environment=environment, directory=tmp_path / (leg + "-caller-jobs"),
+                )
+                owner_log.write_text(launched.stderr + launched.stdout, encoding="utf-8")
+                public_result.write_text(launched.stdout, encoding="utf-8")
+                result_file.write_text(str(launched.returncode), encoding="utf-8")
+                assert launched.returncode == 0, launched.stderr + launched.stdout
+            else:
+                launched = query(
+                    "new-session", "-d", "-s", outer_target, "-c", str(checkout),
+                    *caller_environment, "--", *caller_command,
+                )
+                assert launched.returncode == 0, launched.stderr + (
+                    owner_log.read_text(encoding="utf-8") if owner_log.exists() else ""
+                )
+                observed = query(
+                    "display-message", "-p", "-t", outer_target, "#{session_id}:#{session_created}|#{pane_id}",
+                )
+                assert observed.returncode == 0 and "|" in observed.stdout
+                identities[outer_target] = observed.stdout.strip()
+                owner_ready.write_text("ready", encoding="utf-8")
             startup_seen = None
             startup_diagnostic = None
 
@@ -722,13 +854,15 @@ def _qualify_native_worktrees(
                   flush=True)
             assert state["session_id"] == native and state["restoration"] == "unqualified"
             assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
-
             def attached_tty():
                 assert not result_file.exists(), caller_diagnostics()
                 observed = query("display-message", "-p", "-t", target, "#{session_attached}")
                 return observed.returncode == 0 and observed.stdout.strip() == "1"
 
             def detach_tty():
+                nonlocal tty_ticket
+                if caller_jobs and tty_ticket is None:
+                    return
                 _until(attached_tty, f"{leg}: public copilot did not attach its real TTY",
                        diagnostic=caller_diagnostics)
                 observed = query(
@@ -736,15 +870,35 @@ def _qualify_native_worktrees(
                     "#{session_id}:#{session_created}|#{pane_id}",
                 )
                 assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
-                assert query("detach-client", "-s", target).returncode == 0
-                _until(result_file.exists, f"{leg}: public TTY caller did not return after detach",
+                if caller_jobs:
+                    proof = close_public_tty_jobs(tty_ticket)
+                    print(f"Native {control} {leg}: both caller Jobs closed; "
+                          f"actual attached caller exit {proof['callerExitCode']}", flush=True)
+                    tty_ticket = None
+                else:
+                    assert query("detach-client", "-s", target).returncode == 0
+                _until(result_file.exists, f"{leg}: public TTY caller cleanup did not return",
                        diagnostic=caller_diagnostics)
                 assert result_file.read_text(encoding="utf-8") == "0", caller_diagnostics()
                 _until(
                     lambda: query("has-session", "-t", outer_target).returncode == 1,
-                    f"{leg}: detached TTY caller's original pane did not close",
+                    f"{leg}: stopped TTY caller's original pane did not close",
                 )
+                if caller_jobs:
+                    def unattached():
+                        reply = query("display-message", "-p", "-t", target, "#{session_attached}")
+                        return reply.returncode == 0 and reply.stdout.strip() == "0"
+
+                    _until(unattached, f"{leg}: killed caller still owns a target attachment",
+                           diagnostic=caller_diagnostics)
                 assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
+                assert state["child_process_start_time"] == process_start_time(state["child_pid"])
+                assert state["host_process_start_time"] == process_start_time(state["host_pid"])
+                observed = query(
+                    "display-message", "-p", "-t", target,
+                    "#{session_id}:#{session_created}|#{pane_id}",
+                )
+                assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
 
             if public_tty:
                 _until(attached_tty, f"{leg}: public copilot did not retain its attached client",
@@ -761,6 +915,26 @@ def _qualify_native_worktrees(
                     f"{leg}: original Manager caller pane did not close",
                 )
                 assert pid_alive(state["pid"]) and pid_alive(state["child_pid"])
+                if manager_picker:
+                    prepared = json.loads(decision_proof.read_text(encoding="utf-8"))
+                    assert prepared["attempt"] == plan["attempt"] and prepared["exit_code"] == 0
+                    assert not Path(prepared["request"]).parent.exists()
+                    completion = run_caller_owned(
+                        [str(manager_python), "-I", "-B", "-X", "utf8", "-c",
+                         "import json,sys;from worktree_manager.launch_attempts import LaunchAttempts;"
+                         "print(json.dumps(LaunchAttempts().detail(sys.argv[1],include_input=True)))",
+                         plan["attempt"]],
+                        env=environment, cwd=checkout, timeout=10,
+                        max_stdout_bytes=65536, max_stderr_bytes=4096,
+                    )
+                    assert completion.returncode == 0, completion.stdout + completion.stderr
+                    detail = json.loads(completion.stdout)
+                    assert [event["phase"] for event in detail["events"]] == [
+                        "confirmed", "resolution-requested", "resolved",
+                        "launch-requested", "launcher-returned",
+                    ], detail
+                    assert detail["events"][-1]["details"]["exit_code"] == 0
+                    assert detail["input"]["options"] == {}
                 if public_caller:
                     reply = json.loads(public_result.read_text(encoding="utf-8"))
                     assert reply["ok"] and reply["created"]
@@ -823,10 +997,16 @@ def _qualify_native_worktrees(
                     detach_tty()
                     write_driver(tty_invocation(reuse_command))
                 else:
-                    reused = run_caller_owned(
-                        reuse_command, env=environment, cwd=checkout, timeout=30,
-                        max_stdout_bytes=65536, max_stderr_bytes=65536,
-                    )
+                    if caller_jobs:
+                        reused = run_public_caller_jobs(
+                            reuse_command, python=worktrees_python, cwd=checkout,
+                            environment=environment, directory=tmp_path / (leg + "-reuse-jobs"),
+                        )
+                    else:
+                        reused = run_caller_owned(
+                            reuse_command, env=environment, cwd=checkout, timeout=30,
+                            max_stdout_bytes=65536, max_stderr_bytes=65536,
+                        )
                     assert reused.returncode == 0, reused.stdout + reused.stderr
                     reply = json.loads(reused.stdout)
                     assert reply["ok"] and reply["created"] is False and reply["launch_action"] == "reuse"
@@ -860,6 +1040,12 @@ def _qualify_native_worktrees(
                     _until(attached_tty, f"{leg}: live reuse did not attach its real TTY",
                            diagnostic=caller_diagnostics)
                     assert set(record.parent.glob("launch-attempts/*")) == launched_attempts
+                    if caller_jobs:
+                        detach_tty()
+                        assert [
+                            event["data"]["content"] for event in messages()
+                            if event["type"] == "user.message"
+                        ] == (prompts[:1] if leg == "fresh" else prompts[:-1])
                 else:
                     _until(
                         result_file.exists, f"{leg}: Manager reuse caller did not return",
@@ -877,7 +1063,47 @@ def _qualify_native_worktrees(
                 assert observed.returncode == 0 and observed.stdout.strip() == identities[target]
                 assert state["child_process_start_time"] == process_start_time(state["child_pid"])
                 assert state["host_process_start_time"] == process_start_time(state["host_pid"])
-            asyncio.run(broker(state, prompt=prompts[1] if leg == "fresh" else prompts[-1]))
+            async def retained_prompt():
+                await asyncio.wait_for(
+                    broker(state, prompt=prompts[1] if leg == "fresh" else prompts[-1]), 30,
+                )
+
+            if replacement_slot is not None and leg == "fresh":
+                outgoing = Path(worktrees_python).parent.parent.parent
+                worktrees_python = replace_application(
+                    worktrees_python, replacement_slot, shell=shell, cwd=checkout,
+                    environment=worktrees_environment,
+                )
+                prefix[0] = owner_python = str(worktrees_python)
+                assert state["child_process_start_time"] == process_start_time(state["child_pid"])
+                assert state["host_process_start_time"] == process_start_time(state["host_pid"])
+                public_launcher = outgoing.parent.parent.parent / ".local" / "bin" / "agent-worktrees.ps1"
+                reused = run_public_caller_jobs(
+                    [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-File",
+                     str(public_launcher), "--project", "native-copilot", "embody",
+                     "--worktree-id", worktree_id, "--recovery",
+                     "--seed", "MUST NOT REPLAY AFTER REPLACEMENT"],
+                    python=worktrees_python, cwd=checkout, environment=environment,
+                    directory=tmp_path / "replacement-reuse-jobs",
+                )
+                assert reused.returncode == 0, reused.stdout + reused.stderr
+                reply = json.loads(reused.stdout)
+                assert reply["ok"] and not reply["created"] and not reply["seeded"]
+                assert reply["launch_action"] == "reuse" and reply["session"] == target
+                assert set(record.parent.glob("launch-attempts/*")) == launched_attempts
+                assert not outgoing.exists()
+                asyncio.run(retained_prompt())
+                print("Native embody fresh: incoming generation selected; outgoing collected; "
+                      "public launcher reused retained conversation", flush=True)
+            elif caller_jobs:
+                with application_unavailable(worktrees_python):
+                    assert state["child_process_start_time"] == process_start_time(state["child_pid"])
+                    assert state["host_process_start_time"] == process_start_time(state["host_pid"])
+                    asyncio.run(retained_prompt())
+                print(f"Native {control} {leg}: both caller Jobs closed; retained application absent",
+                      flush=True)
+            else:
+                asyncio.run(retained_prompt())
             expected = prompts[:2] if leg == "fresh" else prompts
             if control == "native-input" and leg == "fresh":
                 assert query("send-keys", "-t", target, "-l", "--", prompts[2]).returncode == 0
@@ -941,6 +1167,10 @@ def _qualify_native_worktrees(
             assert int(result_file.read_text(encoding="utf-8")) == (
                 0 if control == "manager-mux" or public_caller else exit_code
             )
+            if manager_picker:
+                proof = json.loads(decision_proof.read_text(encoding="utf-8"))
+                assert proof["attempt"] == plan["attempt"]
+                assert proof["exit_code"] == (0 if control == "manager-mux" else exit_code)
             pane_output = []
 
             def pane_closed():
@@ -976,6 +1206,9 @@ def _qualify_native_worktrees(
             home / "session-state" / native / "events.jsonl",
         ]
         assert not (home / "permissions-config.json").exists()
+        if manager_picker and control == "manager-no-mux":
+            commands = tmp_path / "mux-commands.txt"
+            assert not commands.exists() or "new-session" not in commands.read_text(encoding="utf-8").splitlines()
         if control == "manager-mux" or public_caller:
             commands = (tmp_path / "mux-commands.txt").read_text(encoding="utf-8").splitlines()
             assert commands.count("new-session") == 2
@@ -983,19 +1216,23 @@ def _qualify_native_worktrees(
                 assert "set-option" in commands and "source-file" in commands
     finally:
         try:
-            if state is not None and pid_alive(state["pid"]):
-                asyncio.run(broker(state, stop=True))
-            for owned_target in dict.fromkeys((outer_target, target)):
-                present = query("has-session", "-t", owned_target)
-                assert present.returncode in (0, 1), present.stderr
-                if present.returncode == 0:
-                    observed = query(
-                        "display-message", "-p", "-t", owned_target,
-                        "#{session_id}:#{session_created}|#{pane_id}",
-                    )
-                    assert observed.returncode == 0 and observed.stdout.strip() == identities.get(owned_target)
-                    assert query("kill-session", "-t", owned_target).returncode == 0
+            if tty_ticket is not None:
+                close_public_tty_jobs(tty_ticket)
         finally:
-            provider.shutdown()
-            provider.server_close()
-            thread.join(timeout=5)
+            try:
+                if state is not None and pid_alive(state["pid"]):
+                    asyncio.run(broker(state, stop=True))
+                for owned_target in dict.fromkeys((outer_target, target)):
+                    present = query("has-session", "-t", owned_target)
+                    assert present.returncode in (0, 1), present.stderr
+                    if present.returncode == 0:
+                        observed = query(
+                            "display-message", "-p", "-t", owned_target,
+                            "#{session_id}:#{session_created}|#{pane_id}",
+                        )
+                        assert observed.returncode == 0 and observed.stdout.strip() == identities.get(owned_target)
+                        assert query("kill-session", "-t", owned_target).returncode == 0
+            finally:
+                provider.shutdown()
+                provider.server_close()
+                thread.join(timeout=5)

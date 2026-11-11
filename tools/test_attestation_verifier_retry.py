@@ -1,4 +1,4 @@
-"""Bounded recovery of the CLI's unavailable Public Good verifier."""
+"""Bounded recovery of the CLI's unavailable Sigstore verifiers."""
 from __future__ import annotations
 
 import subprocess
@@ -13,6 +13,9 @@ import publish_python_artifacts as publisher
 INIT_ERROR = (
     "Error: failed to choose verifier based on provided bundle issuer: "
     "public good verifier is not available (initialization may have failed)"
+)
+NO_VERIFIERS_ERROR = (
+    "error creating Sigstore verifier: no valid Sigstore verifiers could be initialized"
 )
 IDENTITY = {
     "repository": "example/plugins",
@@ -33,7 +36,10 @@ def _result(stderr: str = "", returncode: int = 1) -> subprocess.CompletedProces
     return subprocess.CompletedProcess(["gh"], returncode, "", stderr)
 
 
-@pytest.mark.parametrize("stderr", [INIT_ERROR, "Loaded 1 attestation\n\n" + INIT_ERROR + "\n"])
+@pytest.mark.parametrize("stderr", [
+    INIT_ERROR, "Loaded 1 attestation\n\n" + INIT_ERROR + "\n",
+    NO_VERIFIERS_ERROR, "Loaded 1 attestation\n\n" + NO_VERIFIERS_ERROR + "\n",
+])
 def test_init_failure_retries_identical_policy_with_remaining_deadline(
     subject: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
     stderr: str,
@@ -73,6 +79,10 @@ def test_init_failure_retries_identical_policy_with_remaining_deadline(
     (INIT_ERROR + " with another failure", 1),
     (INIT_ERROR + "\nsignature verification failed", 1),
     (INIT_ERROR, 2),
+    (NO_VERIFIERS_ERROR + " with another failure", 1),
+    (NO_VERIFIERS_ERROR + "\nsignature verification failed", 1),
+    (NO_VERIFIERS_ERROR, 2),
+    ("", 1),
 ])
 def test_other_failures_never_retry(
     subject: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
@@ -86,7 +96,9 @@ def test_other_failures_never_retry(
     assert "retrying" not in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("stderr", [INIT_ERROR, "signature verification failed"])
+@pytest.mark.parametrize("stderr", [
+    INIT_ERROR, NO_VERIFIERS_ERROR, "signature verification failed",
+])
 def test_second_failure_is_fatal_without_third_attempt(
     subject: Path, monkeypatch: pytest.MonkeyPatch, stderr: str,
 ) -> None:
@@ -98,11 +110,12 @@ def test_second_failure_is_fatal_without_third_attempt(
 
 
 @pytest.mark.parametrize("elapsed", [120.0, 121.0])
+@pytest.mark.parametrize("initial_error", [INIT_ERROR, NO_VERIFIERS_ERROR])
 def test_exhausted_original_deadline_never_starts_retry(
     subject: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str],
-    elapsed: float,
+    elapsed: float, initial_error: str,
 ) -> None:
-    gh = Mock(return_value=_result(INIT_ERROR))
+    gh = Mock(return_value=_result(initial_error))
     monkeypatch.setattr(publisher, "_gh", gh)
     monkeypatch.setattr(publisher.time, "monotonic", Mock(side_effect=[0.0, elapsed]))
     with pytest.raises(publisher.PromotionArtifactError, match="gh failed"):

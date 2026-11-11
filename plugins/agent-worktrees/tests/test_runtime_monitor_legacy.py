@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 from contextlib import nullcontext
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -63,6 +64,122 @@ def legacy(monkeypatch, tmp_path):
             return not state.get("exit_unconfirmed")
     monkeypatch.setattr(native, "PinnedProcess", Pin)
     return root, (202, "2002", "serving"), guard, state
+
+
+def _token_snapshot(path):
+    if not path.exists():
+        return None
+    stat = path.stat()
+    return path.read_bytes(), stat.st_dev, stat.st_ino, stat.st_mode, stat.st_mtime_ns
+
+
+@pytest.mark.parametrize("observer", ["candidate", "routed", "default-route"])
+@pytest.mark.parametrize("contents", [None, b"", b" \n"])
+def test_identity_observation_never_creates_or_repairs_a_token(
+    legacy, monkeypatch, observer, contents,
+):
+    root, _expected, _guard, state = legacy
+    token = root / "status-monitor-control.token"
+    if contents is None:
+        token.unlink()
+    else:
+        token.write_bytes(contents)
+    before = _token_snapshot(token)
+    state["health"]["published"] = True
+    monkeypatch.setattr(identity.cutover, "routing_dir", lambda *a: root / "status-monitor-routing")
+    monkeypatch.setattr(
+        identity.cutover, "ControlClient",
+        lambda *a, **k: pytest.fail("unauthenticated observation constructed a client"),
+    )
+    if observer == "candidate":
+        assert identity.candidate_serving(root, root / "versions" / "serving") is False
+    else:
+        with pytest.raises(ValueError, match="control token is unavailable"):
+            identity.routed_identity(None if observer == "default-route" else root)
+    assert _token_snapshot(token) == before
+
+
+@pytest.mark.parametrize("observer", ["candidate", "routed", "default-route"])
+def test_identity_observation_propagates_unreadable_token_without_repair(
+    legacy, monkeypatch, observer,
+):
+    root, _expected, _guard, _state = legacy
+    token = root / "status-monitor-control.token"
+    before = _token_snapshot(token)
+    read_text = Path.read_text
+
+    def unreadable(path, *args, **kwargs):
+        if path == token:
+            raise PermissionError("fixture token is unreadable")
+        return read_text(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", unreadable)
+    monkeypatch.setattr(identity.cutover, "routing_dir", lambda *a: root / "status-monitor-routing")
+    monkeypatch.setattr(
+        identity.cutover, "ControlClient",
+        lambda *a, **k: pytest.fail("unreadable token reached a client"),
+    )
+    with pytest.raises(PermissionError, match="fixture token is unreadable"):
+        if observer == "candidate":
+            identity.candidate_serving(root, root / "versions" / "serving")
+        else:
+            identity.routed_identity(None if observer == "default-route" else root)
+    assert _token_snapshot(token) == before
+
+
+@pytest.mark.parametrize("observer", ["candidate", "routed", "default-route"])
+def test_identity_observation_preserves_existing_token_bytes_and_identity(
+    legacy, monkeypatch, observer,
+):
+    root, expected, _guard, state = legacy
+    token = root / "status-monitor-control.token"
+    token.write_bytes(b" fixture-token \n")
+    before = _token_snapshot(token)
+    state["health"]["published"] = True
+    monkeypatch.setattr(identity.cutover, "routing_dir", lambda *a: root / "status-monitor-routing")
+    if observer == "candidate":
+        assert identity.candidate_serving(root, root / "versions" / "serving") is True
+    else:
+        assert identity.routed_identity(None if observer == "default-route" else root) == expected
+    assert _token_snapshot(token) == before
+
+
+@pytest.mark.parametrize("contents", [None, b" \n"])
+def test_missing_token_allows_only_native_retirement_identity(legacy, monkeypatch, contents):
+    root, expected, _guard, _state = legacy
+    token = root / "status-monitor-control.token"
+    if contents is None:
+        token.unlink()
+    else:
+        token.write_bytes(contents)
+    before = _token_snapshot(token)
+    monkeypatch.setattr(identity.locks, "read_lock", lambda path: {
+        "pid": expected[0], "start_time": expected[1],
+        "prefix": str(root / "versions" / expected[2]),
+    })
+    monkeypatch.setattr(
+        identity.cutover, "ControlClient",
+        lambda *a, **k: pytest.fail("missing token reached a client"),
+    )
+    assert identity.routed_identity(root, require_async_retirement=True) == expected
+    with pytest.raises(ValueError, match="runtime prefix is unavailable"):
+        identity.routed_identity(root, require_async_retirement=True, require_capabilities=True)
+    assert _token_snapshot(token) == before
+
+
+@pytest.mark.parametrize("contents", [None, b" \n"])
+def test_service_owned_token_creation_still_initializes_authentication(legacy, contents):
+    root, _expected, _guard, _state = legacy
+    token = root / "status-monitor-control.token"
+    if contents is None:
+        token.unlink()
+    else:
+        token.write_bytes(contents)
+    created = identity.cutover.load_or_create_control_token(root)
+    assert created and token.read_text(encoding="utf-8").strip() == created
+    before = _token_snapshot(token)
+    assert identity.cutover.load_or_create_control_token(root) == created
+    assert _token_snapshot(token) == before
 
 
 def test_unsupported_capability_keeps_authenticated_native_owner(legacy):

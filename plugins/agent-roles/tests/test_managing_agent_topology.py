@@ -222,6 +222,127 @@ def test_uncertain_or_wrong_role_is_not_coverage(
     assert overview["shortfallIsLaunchAuthority"] is False
 
 
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.parametrize("existing", [False, True])
+def test_reconcile_proposes_only_uncovered_minimum_without_writing(
+    document: dict[str, Any], tmp_path: Path, existing: bool,
+) -> None:
+    if existing:
+        document["roles"][0]["minimum"] = 2
+    else:
+        document["assignments"] = []
+        document["observations"]["owners"] = []
+    code, result = invoke(tmp_path, document, "reconcile")
+    assert code == 0
+    lane = result["lanes"][0]
+    assert lane["qualifiedCount"] == int(existing)
+    assert lane["dispositions"] == [] and lane["holds"] == []
+    assert lane["newAssignmentCount"] == 1
+    assert lane["proposal"]["action"] == "persist-new-standing-assignment"
+    assert [item["machine"] for item in lane["proposal"]["candidates"]] == ["beta", "alpha"]
+    assert result["effectAuthorityGranted"] is False
+    assert result["lanes"][1]["proposal"] is None
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("changes,action", [
+    ({"role": "scratch"}, "coordinate-in-place-reassignment"),
+    ({"scope": "another/repo"}, "coordinate-in-place-reassignment"),
+    ({"acceptedCharterRevision": None}, "reconcile-with-retained-owner"),
+    ({"state": "dormant"}, "reconcile-with-retained-owner"),
+    ({"state": "unreachable"}, "reconcile-with-retained-owner"),
+    ({"observedAt": "2025-12-31T23:00:00Z"}, "reconcile-with-retained-owner"),
+])
+def test_reconcile_retains_unqualified_owner_instead_of_filling_shortfall(
+    document: dict[str, Any], changes: dict[str, Any], action: str,
+) -> None:
+    document["observations"]["owners"][0].update(changes)
+    before = copy.deepcopy(document)
+    result = report(document).reconcile()["lanes"][0]
+    disposition = result["dispositions"][0]
+    assert result["shortfall"] == 1 and result["newAssignmentCount"] == 0
+    assert result["proposal"] is None
+    assert disposition["retainedWorktree"] == document["assignments"][0]["nativeWorktree"]
+    assert disposition["action"] == action and disposition["replacementAllowed"] is False
+    assert disposition["expected"]["scope"] == "example/project"
+    assert disposition["observedOwner"] == document["observations"]["owners"][0]
+    assert document == before
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_reconcile_retains_unknown_effect_identity(document: dict[str, Any]) -> None:
+    effect = document["assignments"][0]["effects"][1]
+    effect["state"] = "unknown"
+    lane = report(document).reconcile()["lanes"][0]
+    assert lane["newAssignmentCount"] == 0
+    assert lane["dispositions"][0]["pendingEffects"] == [effect]
+    assert lane["dispositions"][0]["action"] == "reconcile-original-effects-no-replay"
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_reconcile_continues_ownerless_assignment_without_duplicate(document: dict[str, Any]) -> None:
+    assignment = document["assignments"][0]
+    assignment.update(state="proposed", nativeWorktree=None, effects=[])
+    document["observations"]["owners"] = []
+    lane = report(document).reconcile()["lanes"][0]
+    assert lane["newAssignmentCount"] == 0
+    disposition = lane["dispositions"][0]
+    assert disposition["action"] == "continue-original-assignment"
+    assert disposition["creationKey"] == assignment["creationKey"]
+    assert disposition["originalFlow"]["assignment"] == assignment["id"]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("blocker", ["discovery", "custody", "capacity", "unmapped"])
+def test_reconcile_holds_new_demand_for_unqualified_discovery_or_admission(
+    document: dict[str, Any], blocker: str,
+) -> None:
+    document["assignments"] = []
+    owner = document["observations"]["owners"][0]
+    document["observations"]["owners"] = []
+    if blocker == "discovery":
+        document["observations"]["discovery"]["complete"] = False
+    elif blocker == "custody":
+        document["observations"]["dispatcher"]["custody"] = "unknown"
+    elif blocker == "capacity":
+        for machine in document["machines"]:
+            machine["capacitySlots"] = 0
+    else:
+        owner["assignmentId"] = None
+        document["observations"]["owners"] = [owner]
+    result = report(document).reconcile()
+    lane = result["lanes"][0]
+    assert lane["newAssignmentCount"] == 0 and lane["holds"]
+    if blocker == "unmapped":
+        assert result["adoptions"] == [{"action": "reconcile-owner-in-place", "observation": owner}]
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("state,observed", [
+    ("completed", False), ("released", True), ("released", False),
+])
+def test_reconcile_requires_retirement_not_completion_or_stale_owner_evidence(
+    document: dict[str, Any], state: str, observed: bool,
+) -> None:
+    assignment = document["assignments"][0]
+    assignment["state"] = state
+    if state == "released":
+        assignment["effects"].append({
+            "id": "retire-a", "kind": "retire", "state": "confirmed",
+            "charterRevision": 1, "target": assignment["nativeWorktree"],
+            "nativeRequest": None, "nativeRef": "synthetic:retired-a",
+        })
+    document["observations"]["owners"][0]["observedAt"] = "2025-12-31T23:00:00Z"
+    if not observed:
+        document["observations"]["owners"] = []
+    lane = report(document).reconcile()["lanes"][0]
+    settled = state == "released" and not observed
+    assert lane["newAssignmentCount"] == int(settled)
+    if not settled:
+        assert lane["dispositions"][0]["action"] == "reconcile-retirement-with-native-owner"
+
+
 @pytest.mark.portfolio_tier("T1")
 def test_same_native_owner_cannot_satisfy_two_lanes(document: dict[str, Any]) -> None:
     alias = copy.deepcopy(document["assignments"][0])
@@ -232,6 +353,9 @@ def test_same_native_owner_cannot_satisfy_two_lanes(document: dict[str, Any]) ->
     assert coverage["qualifiedCount"] == 1
     assert coverage["shortfall"] == 1
     assert coverage["unqualified"][0]["assignment"] == "alias"
+    reconciliation = report(document).reconcile()["lanes"][0]
+    assert reconciliation["newAssignmentCount"] == 0
+    assert reconciliation["dispositions"][0]["assignment"] == "alias"
     route = report(document).route("alias-request")
     assert route["target"] is None
     assert "assignment-not-accepted-by-owner" in route["holds"]
@@ -336,6 +460,112 @@ def test_dispatcher_collision_and_unknown_launch_hold_same_owner(document: dict[
     assert report(document).overview()["coverage"][0]["qualifiedCount"] == 0
 
 
+@pytest.mark.portfolio_tier("T1")
+def test_dispatcher_is_not_an_unmapped_worker_or_an_assignment_owner(document: dict[str, Any]) -> None:
+    dispatcher = copy.deepcopy(document["observations"]["owners"][0])
+    dispatcher.update(owner=document["dispatcher"]["owner"], assignmentId=None)
+    document["observations"]["owners"].append(dispatcher)
+    assert report(document).overview()["unmappedOwners"] == []
+
+    document["dispatcher"]["owner"] = document["assignments"][0]["nativeWorktree"]
+    document["observations"]["dispatcher"]["owner"] = document["dispatcher"]["owner"]
+    topology = report(document)
+    reason = "dispatcher-cannot-own-worker-assignment"
+    assert reason in topology.route("request-review-a")["holds"]
+    lane = topology.overview()["coverage"][0]
+    assert lane["qualifiedCount"] == 0
+    assert reason in lane["unqualified"][0]["reasons"]
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+def test_status_relay_persists_before_sending_and_waits_for_an_answer(
+    document: dict[str, Any], tmp_path: Path,
+) -> None:
+    assignment = document["assignments"][0]
+    args = ("--request", assignment["requestId"], "--followup", "status-a")
+    _, result = invoke(tmp_path, document, "relay", *args)
+    assert result["phase"] == "persist-followup"
+    followup = {"id": "status-a", "kind": "status", "content": "Report progress.",
+                "charterRevision": 1, "effectId": None}
+    assignment["followups"].append(followup)
+    _, result = invoke(tmp_path, document, "relay", *args)
+    assert result["phase"] == "persist-relay"
+    assert result["nextStep"]["target"] == assignment["nativeWorktree"]
+    assert result["nextStep"]["expectedHead"] == "synthetic-head-a"
+    effect = {"id": "relay-status-a", "kind": "relay", "state": "prepared", "charterRevision": 1,
+              "target": assignment["nativeWorktree"], "nativeRef": None,
+              "nativeRequest": {"mode": "bridge-native", "envelopeRef": "synthetic:status-envelope"}}
+    assignment["effects"].append(effect)
+    followup["effectId"] = effect["id"]
+    _, result = invoke(tmp_path, document, "relay", *args)
+    assert result["phase"] == "relay"
+    assert result["nextStep"]["operation"] == "send-exact-head"
+    assert result["nextStep"]["effect"] == effect
+    assert result["nextStep"]["replayAllowed"] is False
+    assert result["nextStep"]["envelopeHeadMatchRequired"] is True
+    assert result["nextStep"]["retargetAllowed"] is False
+    effect.update(state="admitted", nativeRef="synthetic:admission")
+    _, result = invoke(tmp_path, document, "relay", *args)
+    assert result["phase"] == "await-owner-response"
+    assert result["nextStep"] is None
+    assert result["deliveryIsNotAcceptance"] is True
+    _, result = invoke(tmp_path, document, "relay", "--request", "unrelated", "--followup", "new")
+    assert result["nextStep"]["operation"] == "persist-separate-temporary-assignment"
+    assert result["nextStep"]["standingOwnersRetained"] is True
+    assert assignment["nativeWorktree"]["worktree"] == "review-a"
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("change,reason", [
+    ("stale", "owner-evidence-stale-missing-or-future"),
+    ("unreachable", "current-native-head-unqualified"),
+    ("scope", "role-or-scope-mismatch"),
+    ("dispatcher", "dispatcher-cannot-own-worker-assignment"),
+    ("pending", "effect-outcome-unsettled-no-replay"),
+    ("superseded", "adjustment-charter-revision-superseded"),
+    ("failed", "relay-failed-retry-requires-new-followup-and-original-grant"),
+])
+def test_adjustment_relay_requires_current_owner_acceptance(
+    document: dict[str, Any], change: str, reason: str,
+) -> None:
+    assignment = document["assignments"][0]
+    observation = document["observations"]["owners"][0]
+    assignment["charter"]["revision"] = 2
+    assignment["followups"].append({
+        "id": "adjust-a", "kind": "adjustment", "content": "Use the revised complete charter.",
+        "charterRevision": 2, "effectId": "relay-a",
+    })
+    effect = {"id": "relay-a", "kind": "relay", "state": "consumed", "charterRevision": 2,
+              "target": assignment["nativeWorktree"], "nativeRef": "synthetic:consumption",
+              "nativeRequest": {"mode": "bridge-native", "envelopeRef": "synthetic:adjust-envelope"}}
+    assignment["effects"].append(effect)
+    assert report(document).relay(assignment["requestId"], "adjust-a")["phase"] == "await-acceptance"
+    observation.update(acceptedCharterRevision=2, acceptanceRef="synthetic:accepted-revision-2")
+    settled = report(document).relay(assignment["requestId"], "adjust-a")
+    assert settled["phase"] == "settle-relay"
+    assert settled["nextStep"]["acceptanceRef"] == observation["acceptanceRef"]
+    if change == "stale":
+        observation["observedAt"] = "2025-12-31T23:00:00Z"
+    elif change == "unreachable":
+        observation["state"] = "unreachable"
+    elif change == "scope":
+        observation["scope"] = "another/repo"
+    elif change == "dispatcher":
+        document["dispatcher"]["owner"] = assignment["nativeWorktree"]
+        document["observations"]["dispatcher"]["owner"] = assignment["nativeWorktree"]
+    elif change == "pending":
+        assignment["effects"][1]["state"] = "unknown"
+    elif change == "superseded":
+        assignment["charter"]["revision"] = 3
+    elif change == "failed":
+        effect["state"] = "failed"
+    held = report(document).relay(assignment["requestId"], "adjust-a")
+    assert held["phase"] == "held"
+    assert held["nextStep"] is None
+    assert reason in held["holds"]
+
+
 @pytest.mark.portfolio_tier("T2")
 @pytest.mark.effect("process")
 def test_real_cli_persist_allocate_launch_restart_and_followup(
@@ -438,6 +668,16 @@ def test_unknown_relay_preserves_original_envelope_after_reload_and_succession(
     assert retained["nativeRequest"] == binding
     assert Path(retained["nativeRequest"]["envelopeRef"]).read_bytes() == envelope_bytes
     assert read_json(envelope_path) == envelope
+    reloaded["observations"]["owners"][0]["observedAt"] = "2025-12-31T23:00:00Z"
+    _, recovery = invoke(tmp_path, reloaded, "relay", "--request", "request-review-a", "--followup", "status-a")
+    assert recovery["phase"] == "recover-relay"
+    assert recovery["nextStep"]["effect"] == retained
+    assert recovery["nextStep"]["replayAllowed"] is False
+    assert recovery["nextStep"]["currentHeadLookupAllowed"] is False
+    reloaded["assignments"][0]["effects"][1]["state"] = "unknown"
+    held = report(reloaded).relay("request-review-a", "status-a")
+    assert held["nextStep"] is None
+    assert "multiple-unknown-effects-require-owner-reconciliation" in held["holds"]
 
 
 @pytest.mark.portfolio_tier("T1")
@@ -476,14 +716,20 @@ def test_unrelated_temporary_work_retains_standing_owner_and_native_exit(
         role="scratch", scope="synthetic/scratch",
     )
     document["observations"]["owners"].append(observation)
+    document["roles"][1]["minimum"] = 1
     _, route = invoke(tmp_path, document, "route", "--request", "request-scratch-a")
     assert route["target"]["owner"] == owner
     _, overview = invoke(tmp_path, document, "overview")
     assert overview["coverage"][0]["qualifiedCount"] == 1
+    assert overview["coverage"][1]["qualifiedCount"] == 0
+    assert overview["coverage"][1]["shortfall"] == 1
+    assert overview["temporary"][0]["phase"] == "working"
+    assert overview["temporary"][0]["countsTowardMinimum"] is False
     assert document["assignments"][0] == standing
     temporary["state"] = "completed"
     observation["state"] = "completed"
     assert report(document).route("request-scratch-a")["target"] is None
+    assert report(document).overview()["temporary"][0]["phase"] == "exiting"
     temporary["state"] = "released"
     with pytest.raises(ContractError, match="native retirement"):
         validate(document)
@@ -495,6 +741,8 @@ def test_unrelated_temporary_work_retains_standing_owner_and_native_exit(
     _, overview = invoke(tmp_path, document, "overview")
     assert overview["coverage"][1]["qualifiedCount"] == 0
     assert overview["coverage"][0]["qualifiedCount"] == 1
+    assert overview["temporary"][0]["phase"] == "released"
+    assert overview["temporary"][0]["nativeRetirementConfirmed"] is True
 
 
 @pytest.mark.portfolio_tier("T2")
@@ -504,6 +752,9 @@ def test_cli_bad_input_and_missing_selector_return_structured_error(
 ) -> None:
     code, result = invoke(tmp_path, document, "seed")
     assert code == 2 and "requires --request" in result["error"]
+    for args in [(), ("--request", "request-review-a"), ("--followup", "status-a")]:
+        code, result = invoke(tmp_path, document, "relay", *args)
+        assert code == 2 and "requires --request and --followup" in result["error"]
     document["version"] = 99
     code, result = invoke(tmp_path, document, "validate")
     assert code == 2 and result["valid"] is False

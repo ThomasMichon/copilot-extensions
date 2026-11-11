@@ -137,6 +137,176 @@ No state grants effect authority. Resolve a pending proposal or adoption through
 the native declaration owner and its accepting head, never by editing saved
 observations, and recheck current native evidence before any effect.
 
+## Native assignment flow
+
+`flow <private-topology-json> --request <request-id>` reads the saved standing
+assignment and native observations to recommend one next step. Its `phase`,
+`holds` and `nextStep` distinguish preparation, native admission and acceptance.
+`nextStep` names the owner and operation; it is not an executable command or
+authorization. Obtain current commands and recheck custody, authority, resource
+admission and the returned fences through that native owner before acting.
+
+The sequence preserves these boundaries:
+
+1. Persist the complete assignment before allocation. Export and durably save
+   its materialization before declaring or reconciling the native standing task.
+   A missing assignment reports `persist-assignment`; a missing native link
+   reports the declaration step, not permission to create a worker.
+2. Persist an allocation effect and stable creation key before keyed Worktrees
+   allocation. Save the returned workspace, then reserve the standing charter
+   through Dispatch with `expectedRevision` and exact workspace evidence. A
+   confirmed allocation maps only its exact retained workspace before a
+   Dispatch relationship exists; unrelated or unconfirmed owners still hold
+   placement.
+3. After the native relationship is bound, persist the launch effect and the
+   full `seed` in the native request envelope. Retain `assignmentGeneration`
+   from the reservation and the expected `charterRevision`; a role label or
+   regenerated prompt does not substitute for the saved seed.
+4. Start only the retained workspace through Bridge. The proposal carries
+   `expectedRevision` and `expectedGeneration`; the saved effect must match the
+   current reservation generation and charter revision before this step.
+5. Once delivery is admitted or consumed and a fresh current head is observed,
+   accept through Dispatch using its revision, generation, original workspace,
+   `ownerSessionId` and positive `expectedHeadRevision` fences. Launch success
+   is not acceptance. A joined native accepted materialization permits `settle-launch`
+   to record that acceptance for the matching effect; `accepted` then has no
+   further step.
+
+`assignmentGeneration` is an optional nonnegative integer (or `null`) on saved
+effects for backward-compatible document reads, but this flow requires a
+positive integer on a launch effect matching the positive native task generation.
+Native standing revisions must also be positive before the flow proposes a
+fenced operation. The assignment generation identifies the original native
+reservation, not the document or charter revision. Replacing a reservation
+invalidates the old launch generation;
+never rewrite that old effect to make it current. Succession retains the
+original assignment generation in accepted evidence rather than relaunching.
+
+Saving a prepared allocation or launch can advance the topology document revision
+without changing the effective charter. For a single prepared allocation on an
+unowned queued/proposed task, or a single prepared/admitted/consumed launch on a
+claimed task, `flow` may first propose a source-only `reconcile-standing-charter`.
+It verifies the effective revision and reproduces the old source digest by varying
+only `topologyRevision` over at most the preceding 256 revisions. Changed source
+identity, effective content or unrecognized/older digests remain held; matching
+effective content alone is not enough. This bounded offline check is not native
+authority. Persist the materialization and use the native reconciliation owner,
+retaining the effect, envelope, creation key, reservation and generation unchanged.
+Re-read native evidence to obtain the new standing revision before proceeding.
+Already-started tasks retain their owner-reconciliation hold for effective
+charter changes. Bookkeeping-only source drift uses the narrower qualification
+described below.
+
+A single unknown effect proposes receipt recovery with `replayAllowed: false`
+and the original effect record. Multiple unknown effects, unsettled conflicting
+operations, stale native evidence, incompatible revisions or ambiguous owners
+hold the flow. Reconcile through the existing owner instead of allocating a
+replacement or regenerating a launch. The helper reads neither envelope content
+nor receipt authority: durable full-seed preservation must be established by the
+writer and native consumer, not inferred from a valid reference or this report.
+
+## Follow-up relay and temporary work
+
+`relay --request <request-id> --followup <followup-id>` sequences a status
+inquiry or adjustment for an existing assignment; it never creates another
+worker or performs an effect. Persist the complete follow-up and, for an
+adjustment, the full revised charter before using the report. When native
+Dispatch evidence identifies an owner but the assignment's `nativeWorktree` is
+still null, the report holds with `persist-native-worktree-before-relay`.
+Persist that exact observed worktree and re-read the report before reconciling
+the charter or preparing a relay effect; conflicting owners and unresolved
+effects remain separate holds:
+
+1. Reconcile a changed native standing charter through its existing owner,
+   retaining the worktree and original assignment generation. Re-read native
+   evidence afterward; an older accepted revision is not acceptance of the
+   adjustment.
+2. Save an immutable native request envelope and its linked relay effect before
+   sending. Preserve the exact prompt, mode, sender/caller, destination and
+   revision fences, not just a reference that could later resolve to new bytes.
+3. Use the supported exact-head send contract. The proposal requires
+   `envelopeHeadMatchRequired: true` and `retargetAllowed: false`: the native
+   consumer must compare the saved envelope's destination with the fenced head.
+   The offline helper cannot read or authenticate that content. Missing,
+   mismatched or uncertain envelope evidence is a hold, not permission to
+   regenerate the prompt or retarget the original effect after succession.
+4. Admission or consumption waits for the inquiry response or, for an
+   adjustment, positive joined acceptance of the current charter. An absent
+   rejection reason is not acceptance. Validate owner evidence and conflicting
+   effects before settlement, even when the expected charter is already accepted.
+   While an admitted or consumed adjustment awaits reacceptance, the same
+   owning session may reaccept at a newer observed head revision. Missing or
+   regressed revisions, a different session, a prepared send, or head drift
+   after current-revision acceptance still hold. Reacceptance uses the current
+   head fence without retargeting the saved envelope or sending again.
+   Unknown outcomes require recovery with the original envelope and identity,
+   never another send.
+
+Saving the follow-up/effect can advance the document revision without changing
+the charter. For a retained started lane, `relay` tolerates that native
+declaration difference without proposing another reconciliation only when it
+proves the prior source digest by varying only the bounded document revision
+and all other owner/effect fences still hold. Retain the envelope, effect and
+generation unchanged. The same bounded proof lets a settled started lane qualify
+for coverage, routing and an accepted `flow` result without reconciling its
+unchanged effective charter again. Current joined acceptance, exact accepted-head
+evidence and settled effects remain required; source equivalence alone never
+qualifies an owner. `intent` still reports the exact declaration difference
+rather than treating bookkeeping equivalence as a persisted revision update.
+
+Unrelated work gets a separate `temporary` proposal with its own complete
+charter, authority limits, native owner and exit policy. The dispatcher worktree
+cannot own that worker assignment. Temporary work remains visible in overview
+but never contributes to a standing role's minimum coverage. Completion is not
+release: retain the assignment until effects settle, obligations are resolved
+and native retirement is confirmed. Never retire or replace a standing owner
+to make room without the original owner's authority.
+
+## Vacancy and drift reconciliation
+
+`reconcile <private-topology-json>` reports semantic coverage, eligible placement
+and retained-assignment `dispositions` per role. Every disposition preserves
+the assignment/request/creation identities, native task and worktree evidence,
+expected role/scope/charter revision, proposed/adopted records and pending effects.
+Every disposition sets `replacementAllowed: false`.
+
+| Disposition | Advisory next action |
+|-------------|----------------------|
+| Off-role or wrong-scope owner | Coordinate an in-place reassignment with the current owner and any assigned monitor; preserve its work and obligations, obtain required agreement and accept the complete revised charter through the native owner |
+| Stale, dormant, unreachable, unaccepted or otherwise uncertain owner | Reconcile with that retained owner; neither liveness nor a numerical shortfall authorizes replacement |
+| Unsettled effect | Recover or reconcile the original operation and envelope through its native owner, without replay or a new identity |
+| Saved unowned proposal | Continue the original assignment using its existing `flow` report and holds, not a duplicate assignment |
+| Completed or incompletely released assignment | Reconcile retirement through the native lifecycle owner; completion is not release |
+
+Unmapped owners and native tasks appear as in-place `adoptions` proposals and
+hold new placement. These proposals neither adopt custody nor authorize a
+monitor message. Use existing reader/monitor evidence and the original steering
+grant; do not expand monitoring or add a watcher to obtain the report.
+
+A released assignment stops holding its lane only after its effects are settled
+and no saved owner observation still identifies it or its retained worktree.
+For a Dispatch-linked assignment, require fresh native evidence of a retired
+standing task, null task owner/session and a closed or absent original
+relationship whose task ID and complete workspace match the saved assignment's
+native task and retained worktree. Missing or contradictory retirement evidence
+remains a hold, even when the saved assignment says `released`. Never erase
+observations or change their timestamps to manufacture a vacancy.
+
+A lane proposes `persist-new-standing-assignment` only for a remaining shortfall
+with no custody/discovery holds, no unresolved standing assignments and at least
+one eligible placement candidate. The conservative same-lane hold avoids
+replacing retained owners when several owners are desired. `newAssignmentCount`
+is uncovered demand, not available slots, reserved capacity or launch authority.
+Persist each complete charter and stable identity, then serialize admission
+through the native resource owner and recompute after each outcome. Temporary
+assignments never satisfy standing demand.
+
+The report writes nothing and invokes no adapter. `effectAuthorityGranted` is
+false and `nativeRecheckRequired` is true: recheck current ownership, pending
+effects, acceptance, resources and actual authority before any effect. Resolve
+drift with the rightful owner rather than editing copied evidence or moving the
+assignment to another machine.
+
 ## State and effect protocol
 
 Persist intent under the existing native single writer, using the adopter's
@@ -198,6 +368,8 @@ hand-delete directories or clear a claim.
 | Worktree allocated, launch not attempted | Persist launch identity and complete charter; embody only that returned worktree through the supported owner |
 | Launch/send outcome unknown | Read the saved original request envelope and inspect its exact native receipt; no resend, alternate target, replacement or new session |
 | Head succeeded inside the same worktree | Preserve old request envelopes for receipt-only recovery; after unsettled effects are reconciled, resolve the new native head and admit a new authorized follow-up with a new envelope |
+| Saved relay envelope targets a different head | Hold admission; reconcile the original effect before preparing a separately authorized follow-up |
+| Adjustment delivered, old charter still accepted | Retain the owner and pending relay; await joined acceptance of the current revision, not another delivery |
 | Expected charter differs from accepted revision | Retain the owner; relay or inspect the already-pending update, and report coverage as unqualified until accepted |
 | Unreachable, stale, dormant or unaccepted owner | Retain an explicit unknown/unqualified entry; a shortfall is not automatic replacement authority |
 | New unrelated request | Separate temporary assignment and native worker; preserve standing-role coverage and custody |

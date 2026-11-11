@@ -53,7 +53,7 @@ function Get-NativePreToolStop {
     } catch { return $null }
 }
 
-function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments) {
+function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments, [object[]]$ShellBatch) {
     try {
         $policy = Read-PreToolJson ([IO.Path]::Combine($PSScriptRoot, 'hook-read-policy.json')) 4096
         if ($policy.schema -isnot [string] -or $policy.schema -cne 'agent-worktrees.native-read-policy' -or
@@ -63,11 +63,24 @@ function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCom
         if ($policy.guards.Count -ne $names.Count) { return $false }
         $sources = $policy.guards
         $extra = @()
+        $dependencies = @{}
         if ($WriteProof) {
-            $dependencies = $policy.nativeWriteDependencies
+            $writeDependencies = $policy.nativeWriteDependencies
             $extra = @('tool_call_forms.py', 'guarded_anchor_map.py')
-        } elseif ($ShellCommand -or $null -ne $ShellArguments) {
-            if ($null -ne $ShellArguments) {
+            if ($writeDependencies -isnot [Collections.IDictionary] -or
+                $writeDependencies.get_Count() -ne $extra.Count) { return $false }
+            foreach ($dependency in $extra) { $dependencies[$dependency] = $writeDependencies[$dependency] }
+        }
+        if ($ShellCommand -or $null -ne $ShellArguments -or $null -ne $ShellBatch) {
+            $selectedCommands = [Collections.Generic.List[string]]::new()
+            if ($ShellCommand) { $selectedCommands.Add($ShellCommand) }
+            $carriers = [Collections.Generic.List[object]]::new()
+            if ($null -ne $ShellArguments) { $carriers.Add($ShellArguments) }
+            if ($null -ne $ShellBatch) {
+                if ($ShellBatch.Count -lt 1 -or $ShellBatch.Count -gt 128) { return $false }
+                foreach ($carrier in $ShellBatch) { $carriers.Add($carrier) }
+            }
+            if ($carriers.Count) {
                 $keys = @('command')
                 if ($policy.ContainsKey('nativeShellReadCommandKeys')) {
                     $keys = $policy['nativeShellReadCommandKeys']
@@ -79,29 +92,64 @@ function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCom
                         if ($key -isnot [string] -or -not $key -or -not $seen.Add($key)) { return $false }
                     }
                 }
-                $ShellCommand = $null
-                if ($ShellArguments -is [string]) {
-                    $ShellCommand = $ShellArguments
-                } elseif ($ShellArguments -is [Collections.IDictionary]) {
-                    foreach ($key in $keys) {
-                        $value = $ShellArguments[$key]
-                        if ($value -is [string] -and $value) { $ShellCommand = $value; break }
+                foreach ($carrier in $carriers) {
+                    $command = $null
+                    if ($carrier -is [string]) {
+                        $command = $carrier
+                    } elseif ($carrier -is [Collections.IDictionary]) {
+                        foreach ($key in $keys) {
+                            $value = $carrier[$key]
+                            if ($value -is [string] -and $value) { $command = $value; break }
+                        }
                     }
+                    if (-not $command) { return $false }
+                    $selectedCommands.Add($command)
                 }
-                if (-not $ShellCommand) { return $false }
             }
             $commands = $policy.nativeShellReadCommands
             if ($commands -isnot [Collections.IList] -or $commands.Count -lt 1 -or $commands.Count -gt 128) {
                 return $false
             }
-            $matched = $false
+            $heads = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
             foreach ($command in $commands) {
                 if ($command -isnot [string] -or -not $command) { return $false }
-                if ([string]::Equals($command, $ShellCommand, [StringComparison]::Ordinal)) { $matched = $true }
+                $null = $heads.Add($command)
             }
-            if (-not $matched) { return $false }
-            $dependencies = $policy.nativeShellReadDependencies
-            $extra = @('hook_pre_relevance.py')
+            $readArguments = $null
+            $rejectArguments = $null
+            foreach ($command in $selectedCommands) {
+                if ($heads.Contains($command)) { continue }
+                # Only bare ASCII argument candidates use the optional original-owner predicates.
+                if ($command -cmatch '[^\x09\x20-\x7e]' -or
+                    $command.Trim([char[]]@(' ', "`t")).IndexOfAny([char[]]@(' ', "`t")) -lt 0) {
+                    return $false
+                }
+                if ($null -eq $readArguments) {
+                    $argumentFacts = $policy['nativeShellReadArguments']
+                    if ($argumentFacts -isnot [Collections.IDictionary] -or $argumentFacts.get_Count() -ne 3 -or
+                        ($argumentFacts['version'] -isnot [int] -and $argumentFacts['version'] -isnot [long]) -or
+                        $argumentFacts['version'] -ne 1 -or $argumentFacts['read'] -isnot [string] -or
+                        -not $argumentFacts['read'] -or $argumentFacts['reject'] -isnot [Collections.IList] -or
+                        $argumentFacts['reject'].Count -ne 5) { return $false }
+                    $options = [Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
+                        [Text.RegularExpressions.RegexOptions]::CultureInvariant
+                    $readArguments = [regex]::new('\A(?:' + $argumentFacts['read'] + ')\z', $options)
+                    $rejectArguments = [Collections.Generic.List[regex]]::new()
+                    foreach ($pattern in $argumentFacts['reject']) {
+                        if ($pattern -isnot [string] -or -not $pattern) { return $false }
+                        $rejectArguments.Add([regex]::new($pattern, $options))
+                    }
+                }
+                if (-not $readArguments.IsMatch($command)) { return $false }
+                foreach ($reject in $rejectArguments) {
+                    if ($reject.IsMatch($command)) { return $false }
+                }
+            }
+            $shellDependencies = $policy.nativeShellReadDependencies
+            if ($shellDependencies -isnot [Collections.IDictionary] -or
+                $shellDependencies.get_Count() -ne 1) { return $false }
+            $dependencies['hook_pre_relevance.py'] = $shellDependencies['hook_pre_relevance.py']
+            $extra += 'hook_pre_relevance.py'
         }
         if ($extra.Count) {
             if ($dependencies -isnot [Collections.IDictionary] -or $dependencies.get_Count() -ne $extra.Count) {
@@ -153,8 +201,14 @@ function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $f
         if (-not $PreparedMembership) { return $false }
         $calls = Get-NativePreToolBatch $Payload['toolCalls']
         if ($null -eq $calls) { return $false }
+        $shellArguments = [Collections.Generic.List[object]]::new()
         foreach ($call in $calls) {
-            if ($call['name'] -cnotin @('view', 'rg', 'glob')) { return $false }
+            if ($call['name'] -cin @('view', 'rg', 'glob')) { continue }
+            if ($call['name'] -cnotin @('powershell', 'pwsh')) { return $false }
+            $shellArguments.Add($call['args'])
+        }
+        if ($shellArguments.Count) {
+            return Test-NativePreToolSources -WriteProof $true -ShellBatch $shellArguments.ToArray()
         }
         return Test-NativePreToolSources -WriteProof $true
     }

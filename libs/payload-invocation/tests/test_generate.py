@@ -2688,7 +2688,7 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
     assert plugin in command_ids
 
     generated = generator.expected_files(manifest)
-    assert generator.process_manifest(manifest, check=True) == []
+    assert generator.source_check(manifest) == []
     output_dir = plugin_root / str(data["outputDir"])
     for command_id in command_ids:
         assert output_dir / command_id in generated
@@ -2707,7 +2707,7 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
             continue
         # Exact-session-writer wiring: the sessionStart hook invokes a writer
         # (write-session-guidance.* or hook_client.py) that composes
-        # emit-command-catalog internally rather than emitting it directly.
+        # the catalog internally rather than emitting it directly.
         writer_hooks = [
             hook
             for hook in session_hooks
@@ -2732,7 +2732,9 @@ def test_payload_catalog_adopters_publish_payload_catalogs(plugin: str) -> None:
                     assert "emit_command_catalog.py" in writer_text
                     assert "subprocess" not in writer_text
                     break
-                assert "emit-command-catalog" in writer_text, (
+                assert any(emitter in writer_text for emitter in (
+                    "emit-command-catalog", "_RUNTIME.payload_commands(",
+                )), (
                     f"{plugin}: {writer_name} no longer composes "
                     "emit-command-catalog"
                 )
@@ -2813,7 +2815,10 @@ def test_skill_catalog_references_name_payload_adopters() -> None:
                 (plugin_root / "scripts" / writer_name).is_file()
                 and any(
                     emitter in (plugin_root / "scripts" / writer_name).read_text(encoding="utf-8")
-                    for emitter in ("emit-command-catalog", "emit_command_catalog.py")
+                    for emitter in (
+                        "emit-command-catalog", "emit_command_catalog.py",
+                        "_RUNTIME.payload_commands(",
+                    )
                 )
                 for writer_name in (
                     "write_session_guidance.py",

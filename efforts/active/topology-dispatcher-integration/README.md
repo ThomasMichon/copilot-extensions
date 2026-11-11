@@ -83,14 +83,14 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ### Phase 3 - Native assignment flow
 
-- [ ] Prove reserve, persist, start and accept through native owners, including
-  the full charter seed and stale-generation rejection.
+- [x] Prove reserve, persist, start and accept through native owners, including
+  the full charter seed and stale-generation rejection (#12026, #12030).
 
 ### Phase 4 - Same-owner routing and temporary work
 
-- [ ] Route status and adjustments to the retained owner; allocate unrelated
+- [x] Route status and adjustments to the retained owner; allocate unrelated
   requests separately with bounded temporary-agent lifecycle, and prevent the
-  dispatcher from taking over a worker role.
+  dispatcher from taking over a worker role (#12050, #12067).
 
 ### Phase 5 - Vacancy and drift reconciliation
 
@@ -140,3 +140,195 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - The agent-roles packet passed 216 tests, including a subprocess run proving
   unchanged input bytes; Python F/E9 lint passed. No live fleet effect was
   performed; live venue validation remains outside this source-only authority.
+
+### 2026-11-11 - Phase 3 native assignment flow
+
+- Implemented the read-only `flow` command (#12026): persist complete assignment
+  and materialization, allocate through Worktrees, reserve through Dispatch,
+  preserve the complete launch seed and original envelope, start the retained
+  workspace through Bridge, then accept through Dispatch. The report names
+  owning adapters and revision, generation and head fences without performing
+  effects. Unknown effects require original-identity receipt recovery, never
+  replay; stale generations and incompatible evidence hold the flow.
+- Unit/behavior evidence: the agent-roles packet passed 236 tests and the
+  Dispatch standing-admission/charter packet passed 174 tests. After correcting
+  a test-helper annotation, the affected roles file passed 116 tests and the
+  native assignment integration file passed both tests. Python F/E9 lint and
+  all enforced type-check projects passed, with the corrected agent-roles
+  project checked for both Linux and Windows.
+- Simple E2E and fresh-state evidence: isolated native Dispatch admission and
+  the launch subprocess consumer preserve the complete seed, reject a stale
+  assignment generation and qualify coverage only after native acceptance.
+  Synthetic topology fixtures also cover absent optional evidence and
+  unchanged input bytes. Install-contract and documentation checks passed.
+- No live external venue, fleet activation or installation was exercised:
+  those require separate adoption and effect authority. Publication, review
+  and merge remain pending; later phases and the parent objective stay open.
+
+### 2026-11-11 - Phase 3 review corrections
+
+- Corrected the pre-reservation join: only the exact workspace retained by a
+  confirmed allocation is mapped before a Dispatch relationship exists.
+  Unconfirmed, untargeted and unrelated owners still hold placement.
+- Reject zero native head revisions before recommending acceptance, matching
+  Dispatch's positive-revision fence.
+- Added real Bridge workspace-consumer coverage using the saved complete seed
+  and original keyed envelope. Normal delivery, a lost native-start response
+  and a lost prompt-admission response each retain one native session and one
+  prompt turn; recovery does not allocate or deliver again.
+- The affected roles file passed 121 tests (24 flow cases); the Bridge
+  workspace-creation file passed 53 tests with three existing skips, including
+  all three saved-seed cases. Python F/E9 lint passed. No live fleet effects,
+  installation or deployment occurred; review and merge remain pending.
+- Final publication gates passed: Python lint, all enforced type-check
+  projects for Linux and Windows, and the install-contract check.
+
+### 2026-11-11 - Phase 3 ownership-conflict correction
+
+- Moved the retained owner's assignment-conflict check ahead of launch
+  preparation. The flow now holds incompatible ownership before recommending
+  launch persistence, workspace start or acceptance.
+- The affected roles file passed 130 tests, including the nine-case
+  ownership-conflict regression matrix. Python F/E9 lint, documentation
+  consistency and all enforced Linux/Windows type-check projects passed.
+- This correction uses isolated synthetic evidence only. No live fleet effect,
+  installation or deployment occurred; corrected publication, fresh review and
+  required CI remain the next gates before merge.
+
+### 2026-11-11 - Phase 3 bookkeeping-revision and positive-fence correction
+
+- Saving a prepared allocation or launch can advance the topology document
+  revision without changing the effective charter. `flow` now proposes a
+  source-only standing-charter reconciliation for one prepared allocation on an
+  unowned task, or one prepared/admitted/consumed launch on a claimed task with
+  a matching generation. It proves the old source digest differs only by a
+  bounded `topologyRevision` advance; changed identity, effective content or
+  unrecognized digests remain held, and started tasks keep their
+  owner-reconciliation hold. Effects, envelope, creation key, reservation and
+  generation are retained; nothing is replayed.
+- Native standing revisions and claimed/started task generations must now be
+  positive before a fenced operation is proposed.
+- The affected roles file passed 146 tests. The native assignment integration
+  file passed 3 tests, using real Dispatch reconciliation that preserves task
+  identity, owner, generation, session and relationship while advancing the
+  standing revision, then accepting with unchanged launch-seed bytes. Python
+  F/E9 lint, documentation consistency and all enforced Linux/Windows
+  type-check projects passed.
+- Isolated source evidence only; no live fleet effect, installation or
+  deployment occurred. Corrected publication, fresh review and required CI
+  remain the next gates before merge.
+
+### 2026-11-11 - Phase 3 merged
+
+- Phase 3 merged in #12030, closing #12026 after the native assignment,
+  ownership-conflict and bookkeeping-revision corrections. Later phases and
+  the overall validation gate remain open.
+
+### 2026-11-11 - Phase 4 same-owner relay and temporary work
+
+- Added the read-only `relay` report (#12050), separating complete follow-up
+  persistence, native charter reconciliation, immutable envelope/effect
+  persistence, exact-head delivery and response/acceptance settlement.
+  Delivery does not imply acceptance; settlement requires positive current
+  evidence and respects owner/effect holds. Source-only relay bookkeeping
+  reconciliation preserves the original owner, generation and envelope.
+- Temporary work is reported separately from standing minimum coverage.
+  Dispatcher/worker self-ownership is rejected; completion does not bypass
+  native retirement or obligation settlement.
+- Both focused topology files passed 218 tests, including stale, missing and
+  contradictory evidence, immutable-envelope fences, unresolved effects and
+  unchanged subprocess input bytes. The native Dispatch assignment file passed
+  4 tests; its new relay regression invokes the real helper and native
+  reconciliation/acceptance while preserving the original owner, generation,
+  session, relationship and envelope bytes. Acceptance uses the complete
+  retained workspace, including its creation nonce and path.
+- Python F/E9 lint, all enforced type-check projects, documentation consistency,
+  install-contract and version-consistency checks passed. After the final
+  workspace correction, both focused test packets and the agent-roles strict
+  Linux/Windows type-check project passed again.
+- All evidence is isolated and synthetic. No live fleet effect, installation,
+  deployment or external-venue validation occurred under this source-only
+  authority. Fresh temporary fixtures exercise the helper without prior
+  enrollment; this change adds no installer or provisioning path. Publication,
+  independent review and merge gates remain outstanding; Phase 4 and the parent
+  objective are not complete.
+
+### 2026-11-11 - Phase 4 review corrections
+
+- Settled, accepted assignments retain standing coverage, routing and accepted
+  flow after proven bookkeeping-only source revision drift. Effective charter
+  differences, missing acceptance, unresolved effects and ownership conflicts
+  remain held; the intent report still exposes exact source-declaration drift.
+- Delivered adjustments can propose reacceptance at a monotonically newer
+  observed head revision of the same retained session. Prepared delivery,
+  another session, regressed or missing revisions, and head drift after
+  current-revision acceptance remain held.
+- Both focused topology files passed 222 tests. All 5 native Dispatch
+  assignment tests passed, including unchanged and advanced same-session head
+  revisions and restored coverage, routing and accepted flow after settlement.
+  The regressions preserve native owner, generation, session, relationship and
+  immutable envelope bytes.
+- Python F/E9 lint, all enforced type-check projects, explicit agent-roles
+  Linux/Windows strict checks, documentation consistency and whitespace checks
+  passed. The existing install-contract and version-consistency evidence is
+  unchanged. These remain isolated synthetic checks; no live external venue,
+  enrollment, installation or deployment was exercised. Updated publication,
+  fresh independent review and required CI remain gates before merge.
+
+### 2026-11-11 - Phase 4 aligned-source performance correction
+
+- Skip historical bookkeeping-digest searches when the current source digest
+  already matches the materialized declaration. A real source mismatch still
+  requires the existing bounded proof; acceptance and ownership guards are
+  unchanged.
+- The new regression reproduced 256 unnecessary historical hashes for one
+  aligned assignment before the fix. Both aligned and drift cases now pass:
+  the former performs no historical hashes, while the latter proves the prior
+  revision normally.
+- All 158 tests in the affected topology-dispatch file passed, along with
+  Python F/E9 lint, strict agent-roles checks for Linux and Windows, and
+  whitespace checks. Earlier integration evidence remains applicable; this
+  correction adds no native operation or provisioning path.
+- Validation remains isolated and synthetic, with no live enrollment,
+  installation, deployment or external-venue effects. Publication, fresh
+  independent review and required CI still gate merge.
+
+### 2026-11-11 - Phase 4 merged
+
+- Phase 4 merged in #12067 after independent review and required CI. The final
+  correction requires persisting the exact observed native worktree before
+  relay preparation; incompatible ownership remains held.
+- The final focused topology packet passed 225 tests, including the real CLI
+  unbound/persist/relay sequence and unchanged input bytes. All five native
+  Dispatch assignment cases passed, preserving the original seed, worktree,
+  relationship and exact-head acceptance fences. Python F/E9 lint and strict
+  Linux/Windows type checks passed.
+- All evidence remains isolated and synthetic. No live external venue,
+  enrollment, installation or deployment occurred. Later phases and the parent
+  objective remain open.
+
+### 2026-11-11 - Phase 5 vacancy and drift report
+
+- Added read-only `reconcile` reporting for #12079. It combines qualified
+  coverage with eligible placement, retaining unqualified assignment identities,
+  original pending effects and owner evidence. Off-role drift proposes
+  coordinated in-place reassignment; uncertain owners never become replacement
+  slots. Unmapped owners/tasks propose in-place reconciliation.
+- Completed assignments remain held until release and retirement evidence
+  settle. Dispatch-linked release additionally requires a fresh retired task,
+  null native ownership and a closed or absent original relationship.
+  Only unobstructed uncovered demand proposes new standing assignments, with
+  complete charters, stable identities and serialized native admission.
+- Both focused topology files passed 255 tests. Behavioral cases include stale,
+  dormant, off-role and unknown owners, original-effect identity, original
+  assignment continuation, aliases, custody/discovery/capacity holds and native
+  retirement. A real CLI subprocess proves unchanged input bytes; fresh
+  synthetic legacy/native fixtures exercise optional-evidence boundaries.
+  Python F/E9 lint passed.
+- The skill, recovery reference and plugin entry point document the new report
+  and its advisory-only limits. No installer, runtime service or provisioning
+  path changed. Live external-venue validation, enrollment, installation and
+  deployment remain outside this source-only authority. Strict agent-roles
+  type checks for Linux and Windows, documentation consistency, version
+  consistency and whitespace checks passed. Publication, independent review
+  and required CI still gate merge; Phase 5 is not complete.

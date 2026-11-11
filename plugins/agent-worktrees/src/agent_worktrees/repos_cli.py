@@ -691,7 +691,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 "(repo inferred from the active project when omitted)"
             )
             return 1
-        if shutil.which("gh") is None:
+        executable = shutil.which("gh")
+        if executable is None:
             output.err("gh CLI not found on PATH")
             return 1
         if repos.is_unresolved_registered_target(target):
@@ -709,7 +710,7 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             return 1
         if login and not injected:
             output.warn(f"could not mint a gh token for '{login}'; using ambient auth")
-        return subprocess.run(["gh", *gh_args], env=env).returncode
+        return subprocess.run([executable, *gh_args], env=env).returncode
 
     if sub == "account":
         from .repo_accounts import command_account

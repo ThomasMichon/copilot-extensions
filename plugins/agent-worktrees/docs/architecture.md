@@ -1152,8 +1152,13 @@ owners.
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait.
 The headed path discovers preparation/receipt support against one captured,
-completed immutable runtime slot and uses that slot throughout; each finite
-call independently refuses a changed current selection before effects.
+completed immutable runtime slot for preparation, admission and spawn; each
+finite call independently refuses a changed current selection before effects.
+After actual child exit, terminal observation resolves the then-current provider
+so removal of the outgoing slot does not strand its return receipt. It retains
+the version-1 contract and original execution correlation/operation identity.
+A missing or incompatible current provider leaves that receipt unconfirmed,
+preserving the actual exit without retrying preparation, creation or the callback.
 Older providers retain direct execution without receiving new syntax.
 Before coordinator creation the shell opens a bounded private loopback
 admission channel. It verifies the retained coordinator, exact native argv,
@@ -3294,8 +3299,9 @@ command keys, derived by the existing renderer from all four identical
 an earlier whitespace or protected command is not skipped for a later safe value.
 A raw string supplies the whole command. The native consumer does not parse
 shell syntax, normalize text or decode JSON argument strings.
-Arguments, undeclared case/whitespace variants, shell command aliases, quotes,
-substitutions, redirection and shell members inside batches retain original policy.
+Bare commands outside that exact tuple, shell command aliases, quotes,
+substitutions and redirection retain original policy. Argument-bearing commands
+have the additional conservative proof described below.
 `toolCalls` still takes precedence over top-level tool fields.
 
 The existing version-1 contract carries optional `nativeShellReadCommands` and
@@ -3323,7 +3329,15 @@ the proof; their source hashes are not scanned merely to reject an undeclared
 command.
 
 Prepared membership also permits complete all-read native batches of
-`view`, `rg` and `glob`. Read and write branches share one strict batch-envelope
+`view`, `rg`, `glob` and those exact-literal `powershell`/`pwsh` calls.
+Each shell member selects only its own `args`, never a top-level fallback.
+The existing literal and command-key declarations are loaded once, and the
+shared guard/dependency sources are verified once per event, not per member.
+Shell members additionally require the original relevance-source binding.
+Any uncertain or protected member declines the whole read proof; later safe
+members cannot rescue it. Older readers retain whole raw fallback for shell
+batches, and absent optional command-key metadata retains command-only selection.
+Read and write branches share one strict batch-envelope
 validator: 1..128 dictionary members, nonempty string names and only
 `name`/`args`/`id` keys, including when a caller supplies a key named `Keys`.
 Every member must be a recognized read before the read exemption applies;
@@ -3334,6 +3348,35 @@ shell commands. Missing prepared evidence or incompatible source contracts,
 empty/malformed/oversized envelopes and unsupported members retain the original
 route. A later write must still satisfy the complete write proof below or use
 the original raw-event evaluator.
+
+Optional `nativeShellReadArguments` version 1 extends this same proof to one or
+more unquoted ASCII arguments on the original read heads. The existing renderer
+extracts the original relevance expression, all three guards' write-search
+expressions and both original PR-close invocation expressions without importing
+their owners. Only the explicitly supported ASCII boolean regex syntax and
+original case-insensitive flags are translated; named captures become
+noncapturing groups. Unsupported source expressions, flags or syntax stop
+generation. The native reader uses invariant case-insensitive matching, requires
+the whole original read expression and declines any original write or PR
+invocation match. Rejecting a whole PR invocation is deliberately conservative:
+it can decline an API read that the original close finder would not mutate.
+
+This applies only to argument-bearing commands; no-argument literals retain their
+ordinal comparison. ASCII spaces/tabs and original bare path/option punctuation
+are accepted without rewriting the command. Unicode, other whitespace, quotes,
+JSON strings, substitutions, separators and redirection retain whole raw
+fallback. Missing or invalid optional argument facts decline that argument proof,
+not an independently valid literal proof; a batch needing an unproved argument
+member falls back whole. Literal-only prior readers ignore the addition and keep
+their old argument path. New readers with old declarations do likewise. No form
+is retired and no caller or package-version handshake is added.
+
+The declaration remains bounded to 4096 bytes. Compiled predicates are local to
+one event and reused across members; the same declaration is loaded once and the
+same shared sources are verified once. Original source/input/member bounds,
+current control/context/admission checks and policy-worker cleanup remain
+unchanged. This is native source-proof optimization, not a new permission table,
+shell evaluator, runtime rollout or installed/composed-throughput qualification.
 
 For prepared Windows membership, the original guards' native write
 names (`create`, `edit`, `str_replace`, `str_replace_editor`,
