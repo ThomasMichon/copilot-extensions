@@ -12,6 +12,8 @@ links, shared inodes and nonordinary paths are refused before copying.
 Native canonical-reference conversion retains its existing source checks.
 Standalone native SDK copies also refresh the shared settings and retained-input
 support family through the same canonical/source-preimage checks.
+One declared native file inventory drives materialization, maintenance sync and
+materialized verification.
 The separate invocation owner generates admission-toolkit copies.
 Already-local native references receive the same verified writer refresh.
 The normal and transitive library copy owners also pass the actual canonical
