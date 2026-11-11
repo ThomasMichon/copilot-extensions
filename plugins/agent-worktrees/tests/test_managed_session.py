@@ -1764,7 +1764,7 @@ def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monke
                 event["toolCalls"][-1]["name"] = "unknown"
             elif case == "batch-read-only-shell":
                 event["toolCalls"][-1] = {
-                    "name": "powershell", "args": {"command": "Get-Content source.py"},
+                    "name": "powershell", "args": {"command": "Get-Content 'source.py'"},
                 }
             elif case == "batch-read-only-malformed":
                 event["toolCalls"][-1] = None
