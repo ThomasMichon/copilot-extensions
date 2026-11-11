@@ -410,6 +410,12 @@ measurements are not installed, composed-hook or productive-throughput proof.
 For prepared Windows file-local writes, `prepared-membership-native.yml` runs
 `registered_file_local_write_reuses_original_guard_facts` from
 `tests/test_managed_session.py` in disjoint safe/admission and fallback packets.
+The fallback worker runs the literal-batch residual sequentially in a separate
+runner invocation on the same VM. Both invocations retain the 300-second group
+bound inside the unchanged ten-minute job; no cases or workers are added by
+the split.
+The residual runs after a primary-step failure unless the job is cancelled;
+either runner's failure still fails the job and the full qualification.
 The controls use actual membership and guard-map publication for legacy and
 installation-cell scopes, retain protected-write decisions, and cover current
 metadata, unsupported shapes, incomplete maps and changed guard/reader sources.
@@ -452,13 +458,19 @@ decoding, so a similarly shaped content reader cannot stand in for that stage.
 They never retry the child, extend its ten-second bound or classify the
 unobserved stalled phase as a known flake.
 On PS5.1, the copied admission helper records process CPU ticks (100 ns units)
-and whether Utility/Web assemblies are already loaded immediately before and
-after the original `System.Web.Extensions` load. Enumeration uses only the
-current AppDomain; it does not load an assembly or warm another child.
-The `patch-protected-input` control retains those successful-call phases too.
+immediately before and after the original `System.Web.Extensions` load, without
+enumerating loaded assemblies. CPU-only checkpoints bracket resolver/serializer
+construction and JSON deserialization in the copied helper, including a distinct
+decoded marker.
+These distinguish observed process CPU from elapsed first-touch time without
+changing the production decoder, prewarming it or extending a deadline.
+The `patch-protected-input` and `personal-state` controls retain those
+successful-call phases too.
 Snapshots include their observer work and cannot establish why an earlier
 unobserved load stalled. Malformed or out-of-bound snapshot markers remain
 real stderr; native timeout controls preserve valid snapshots alongside errors.
+The parser still recognizes historical assembly-state snapshots so retained
+failure records remain readable; new timed children do not collect them.
 Invalid
 envelopes and read-only batches retain original policy; installation-cell
 positive and protected batches use the same actual preparation.
@@ -552,6 +564,20 @@ covers every source-derived key and canonical literal in both object carriers.
 Renderer controls require all four original key declarations to agree and reject
 missing, repeated, nonliteral, invalid, duplicate or oversized data. No argument
 grammar, JSON decoder, runtime selection or time budget is changed.
+
+The `literal-batch-all-shell` and `literal-batch-mixed` cases compose the same
+complete-entry fixture over whole batches in both engines and legacy/cell
+scopes. Comparator legs omit only the optional literal proof; the candidate
+retains the packaged declaration. A later protected shell member must still
+reach the real worker and deny without executing a tool. Fixture-only counters
+require one declaration load and one shared source pass, not per-member hashes.
+Counters live only inside that disposable shell process. Focused controls retain
+member/top-level precedence, raw/object selection, 128-member bounds, member
+key shadowing, old/new readers, absent optional key metadata and whole byte-exact
+fallback for malformed, unknown, nonliteral, argument-bearing or JSON input.
+Original batch expansion and all four real guards supply separate parity
+evidence. Ordered records retain actual source/build identities and all failures;
+unchanged 10/30/300 limits are not relaxed to qualify an incomplete record.
 
 The optional `COPILOT_TEST_HOOK_PRE_PYTHON` cached-entry controls use an explicitly
 supplied existing Python 3.9 interpreter. Their private fixture publishes real

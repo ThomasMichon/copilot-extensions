@@ -585,8 +585,13 @@ declarations derived from all four original guards: the first nonempty string
 wins, including an earlier protected or whitespace value. Optional selection
 metadata absence keeps the command-only baseline; malformed supplied metadata
 retains whole raw fallback. Older command-only readers do not gain alternate-key
-support merely by accepting a new declaration. Shell arguments,
-JSON argument strings and shell batch members do not gain that proof.
+support merely by accepting a new declaration. Complete bounded read-only batches
+can compose the same proof over each shell member's own arguments, alongside
+`view`/`rg`/`glob`. Shared declaration and source verification runs once per event,
+including the original batch and relevance owners. Any uncertain or protected
+member retains whole raw fallback; top-level fields cannot rescue it.
+Older readers retain their original shell-batch path. Shell arguments and
+JSON argument strings do not gain that proof.
 The same exact literal can come from a raw string, or from `tool_input` only
 when `toolArgs` is absent. A present null, empty or invalid primary value never
 falls through to the fallback carrier. Raw text is compared unchanged, not

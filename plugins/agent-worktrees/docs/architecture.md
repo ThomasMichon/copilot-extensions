@@ -3295,7 +3295,7 @@ an earlier whitespace or protected command is not skipped for a later safe value
 A raw string supplies the whole command. The native consumer does not parse
 shell syntax, normalize text or decode JSON argument strings.
 Arguments, undeclared case/whitespace variants, shell command aliases, quotes,
-substitutions, redirection and shell members inside batches retain original policy.
+substitutions and redirection retain original policy.
 `toolCalls` still takes precedence over top-level tool fields.
 
 The existing version-1 contract carries optional `nativeShellReadCommands` and
@@ -3323,7 +3323,15 @@ the proof; their source hashes are not scanned merely to reject an undeclared
 command.
 
 Prepared membership also permits complete all-read native batches of
-`view`, `rg` and `glob`. Read and write branches share one strict batch-envelope
+`view`, `rg`, `glob` and those exact-literal `powershell`/`pwsh` calls.
+Each shell member selects only its own `args`, never a top-level fallback.
+The existing literal and command-key declarations are loaded once, and the
+shared guard/dependency sources are verified once per event, not per member.
+Shell members additionally require the original relevance-source binding.
+Any uncertain or protected member declines the whole read proof; later safe
+members cannot rescue it. Older readers retain whole raw fallback for shell
+batches, and absent optional command-key metadata retains command-only selection.
+Read and write branches share one strict batch-envelope
 validator: 1..128 dictionary members, nonempty string names and only
 `name`/`args`/`id` keys, including when a caller supplies a key named `Keys`.
 Every member must be a recognized read before the read exemption applies;

@@ -1181,20 +1181,14 @@ class LiveVerdict:
     Copilot forbids them even when mux absence is confirmed."""
 
 
-def verify_worktree_active(record) -> LiveVerdict:
-    """Authoritatively verify whether ONE worktree has a live session right now.
+def verify_worktree_active(record, *, strict: bool = False) -> LiveVerdict:
+    """Verify one worktree's mux and registered lock-backed Copilot liveness.
 
-    Unlike the batched populate scan, this pays for a precise single-worktree
-    truth-check: the mux ``has-session`` presence AND the authoritative
-    ``inuse.<pid>.lock`` binding resolved by :func:`reclaim.resolve_bound_copilots`
-    (which binds pid<->session<->worktree from the lock file, not a cwd guess, so
-    a bare Copilot -- launched straight in a terminal and ``/resume``-d -- is
-    still found as long as its session is registered on the record). Intended for
-    the exact moments the operator acts on a worktree (Actions-menu open,
-    Enter->Open/Resume), never the fleet-wide populate.
-
-    Returns a :class:`LiveVerdict`. Best-effort and never raises: a mux or
-    reclaim hiccup degrades to whichever signal succeeded.
+    Lock identity, not cwd, also finds bare Copilots resumed elsewhere.
+    Use this point-in-time probe for individual actions, not fleet population.
+    ``strict=True`` treats unavailable lock/process evidence as unconfirmed.
+    Returns a :class:`LiveVerdict`; probe failures retain successful signals
+    and set ``probes_ok=False`` rather than raising.
     """
     from . import reclaim
 
@@ -1213,11 +1207,13 @@ def verify_worktree_active(record) -> LiveVerdict:
     live_ids: list[str] = []
     bare = False
     try:
+        binding_options = {"strict": True} if strict else {}
         bound = reclaim.resolve_bound_copilots(
             worktree_id=wt_id,
             session_ids=[
                 entry.session_id for entry in (getattr(record, "sessions", None) or ())
             ],
+            **binding_options,
         )
         live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
         bare = any(b.get("homing") == "bare" for b in bound)
