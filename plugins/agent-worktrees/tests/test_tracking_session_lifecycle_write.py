@@ -238,6 +238,98 @@ def test_session_claim_recovery_uses_strict_binding_observation(
     assert saved.resources[0].state == "at-rest"
 
 
+def test_refused_session_claim_release_does_not_conclude(record_path, monkeypatch):
+    from agent_worktrees import claim_handoffs
+
+    record = load_record(record_path)
+    record.status = "finalized"
+    record.resources = [ResourceClaim(
+        kind="session",
+        ref=format_claim_ref(
+            record.execution_machine, record.repo, record.worktree_id, session="solo",
+        ),
+        state="at-rest",
+    )]
+    save_record(record, record_path)
+    monkeypatch.setattr(
+        tracking_session_lifecycle_write.sessions, "verify_worktree_active",
+        lambda rec, **kwargs: SimpleNamespace(active=False, probes_ok=True),
+    )
+
+    def unavailable(*args):
+        raise OSError("handoff registry unavailable")
+
+    monkeypatch.setattr(claim_handoffs, "active_bundle_for_claim", unavailable)
+    before = record_path.read_bytes()
+
+    result = tracking_session_lifecycle_write.apply_session_conclude({
+        "worktree_id": "wt-1", "yaml_path": str(record_path),
+        "session_id": "solo", "state": "concluded",
+    })
+
+    assert result["error"] == "lifecycle"
+    assert "release" in result["message"]
+    assert record_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("reactivate", [None, "before-recovery", "before-cleanup"])
+def test_recovery_composes_with_guarded_cleanup_and_reactivation(
+    record_path, monkeypatch, tmp_path, reactivate,
+):
+    from _cleanup_revalidation_helpers import CleanupHarness, S, info
+    from agent_worktrees import config_authority, tracking_session_registration_write
+
+    root = tmp_path / "cleanup"
+    root.mkdir()
+    harness = CleanupHarness(monkeypatch, root)
+    record = load_record(record_path)
+    authority = cfg.load_project_config(record.repo)
+    monkeypatch.setattr(
+        config_authority, "load_project_authority_config", lambda name, **kwargs: authority,
+    )
+    record.status = "finalized"
+    record.worktree_path = str(harness.worktree_root / record.worktree_id)
+    Path(record.worktree_path).mkdir()
+    own_ref = format_claim_ref(
+        record.execution_machine, record.repo, record.worktree_id, session="solo",
+    )
+    record.resources = [ResourceClaim(kind="session", ref=own_ref, state="at-rest")]
+    path = harness.seed(record)
+    harness.set_classifier(info(S.COMPLETED))
+    monkeypatch.setattr(
+        tracking_session_lifecycle_write.sessions, "verify_worktree_active",
+        lambda rec, **kwargs: SimpleNamespace(active=False, probes_ok=True),
+    )
+
+    def resume():
+        result = tracking_session_registration_write.apply_session_register({
+            "worktree_id": record.worktree_id, "yaml_path": str(path),
+            "session_id": "solo", "source_identity": "resumed-launch",
+        })
+        assert result["ok"]
+
+    if reactivate == "before-recovery":
+        resume()
+    result = tracking_session_lifecycle_write.apply_session_conclude({
+        "worktree_id": record.worktree_id, "yaml_path": str(path),
+        "session_id": "solo", "state": "concluded",
+    })
+    assert result["ok"]
+    if reactivate == "before-cleanup":
+        harness.set_finalize_lock(on_acquire=resume)
+
+    outcome = harness.run_reap_one(record.worktree_id)
+
+    if reactivate:
+        assert outcome["removed"] is False
+        assert harness.reaped == []
+        assert Path(record.worktree_path).exists()
+        assert load_record(path).resources[0].state == "active"
+    else:
+        assert outcome["removed"] is True
+        assert harness.reaped == [(record.worktree_id, "completed")]
+
+
 @pytest.mark.parametrize(
     "status,state,claim_state",
     [("active", "concluded", "at-rest"),

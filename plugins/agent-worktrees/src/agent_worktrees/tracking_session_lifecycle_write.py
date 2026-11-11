@@ -118,13 +118,18 @@ def apply_session_conclude(args: dict) -> dict:
                     "message": "Session claim recovery requires confirmed inactive liveness.",
                 }
         try:
+            if recover_claim and tracking.release_resource_claim(
+                record, session_ref, save=False,
+            ) is None:
+                return {
+                    "error": "lifecycle",
+                    "message": "Session claim recovery refused: claim release is reserved or unverified.",
+                }
             tracking.conclude_session(
                 record, session_id, state=state, handoff_token=handoff_token, save=False,
             )
-        except tracking.SessionLifecycleError as exc:
+        except (tracking.SessionLifecycleError, ValueError) as exc:
             return {"error": "lifecycle", "message": str(exc)}
-        if recover_claim:
-            tracking.release_resource_claim(record, session_ref, save=False)
         tracking.save_record(record, yaml_path)
 
     record = tracking.load_record(yaml_path)
