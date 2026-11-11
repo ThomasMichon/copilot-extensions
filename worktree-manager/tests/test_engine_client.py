@@ -311,6 +311,22 @@ def test_legacy_controller_probe_without_a_project_can_fall_back(tmp_path):
         project_update_controller.handoff(["--project", "example"])
 
 
+@pytest.mark.parametrize(("stdout", "stderr", "returncode"), [
+    ("unrelated output", "Could not resolve a project for 'get'.", 1),
+    ("", "Could not resolve a project for 'get'. Additional failure.", 1),
+    (json.dumps({"error": "No active project could be resolved. Additional failure."}), "", 1),
+    ("", "Could not resolve a project for 'get'.", 2),
+], ids=["mixed-channels", "extended-stderr", "extended-json", "wrong-exit"])
+def test_legacy_controller_probe_rejects_unconfirmed_no_project(
+    tmp_path, stdout, stderr, returncode,
+):
+    from worktree_manager import project_update_controller
+
+    _legacy_controller_engine(tmp_path, stdout, stderr=stderr, returncode=returncode)
+    with pytest.raises(ec.EngineError):
+        project_update_controller.handoff([])
+
+
 @pytest.mark.parametrize(("returncode", "extra", "stderr", "expected"), [
     (1, "unrelated output\n", "", "no output"),
     (1, "", "permission denied", "permission denied"),

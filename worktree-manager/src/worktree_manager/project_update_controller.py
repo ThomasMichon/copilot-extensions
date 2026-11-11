@@ -9,6 +9,10 @@ from .engine_progress import error_from_envelope
 from .update_orchestration import extract_project
 
 
+class _NoProjectResolved(engine_client.EngineError):
+    """The fixed diagnostic confirms that no project was selected."""
+
+
 def legacy_controller_error(project: str | None, proc) -> engine_client.EngineError | None:
     """Recognize only fixed downlevel diagnostics, never arbitrary stdout."""
     if proc.returncode != 1:
@@ -36,7 +40,7 @@ def legacy_controller_error(project: str | None, proc) -> engine_client.EngineEr
         "its context from the current directory (like git); run from inside a managed repo or "
         "worktree, or pass --project <name>.",
     }:
-        return engine_client.EngineError("No active project could be resolved")
+        return _NoProjectResolved("No active project could be resolved")
     return None
 
 
@@ -69,13 +73,9 @@ def handoff(
     except engine_client.EngineError as error:
         if managed:
             raise ValueError("selected project update controller is unavailable") from error
-        detail = str(error)
         if error.install_hint:
             return None
-        if project is None and (
-            "No active project could be resolved" in detail
-            or "Could not resolve a project for 'get'." in detail
-        ):
+        if project is None and isinstance(error, _NoProjectResolved):
             return None
         raise
     if not selected:

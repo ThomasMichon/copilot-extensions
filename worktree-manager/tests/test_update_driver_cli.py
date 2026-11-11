@@ -483,10 +483,10 @@ def test_project_controller_preserves_explicit_manager_skip(queued, monkeypatch)
 
 @pytest.mark.parametrize("project", [None, "missing"])
 def test_neutral_controller_probe_does_not_block_manager_update(queued, monkeypatch, project):
-    from worktree_manager import engine_client
+    from worktree_manager import engine_client, project_update_controller
 
     def missing_project(*_args):
-        raise engine_client.EngineError("Could not resolve a project for 'get'.")
+        raise project_update_controller._NoProjectResolved("Could not resolve a project for 'get'.")
 
     seen, _request = queued
     monkeypatch.setattr(engine_client, "get_value", missing_project)

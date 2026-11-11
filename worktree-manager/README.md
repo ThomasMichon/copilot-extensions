@@ -2329,6 +2329,9 @@ instead of choosing standalone execution. A confirmed no-project response is
 neutral only when the caller did not explicitly select a project. Fixed legacy
 diagnostics are recognized across UTF-8 stdout, stderr and JSON error responses;
 arbitrary stdout is not exposed as an error message.
+Only a classified no-project response permits that fallback. Mixed channels,
+extended diagnostics and unexpected exit codes remain failures even if their
+text contains a no-project phrase.
 
 ```text
 worktree-manager update --wait
