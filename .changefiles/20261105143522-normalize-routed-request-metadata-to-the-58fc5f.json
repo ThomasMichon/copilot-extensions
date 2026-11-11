@@ -1,0 +1,9 @@
+{
+  "comment": "Normalize routed request metadata to the negotiated upstream protocol without mutating callers",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

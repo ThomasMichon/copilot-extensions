@@ -337,10 +337,24 @@ class OneShotSession:
         await self._request({"jsonrpc": "2.0", "method": "notifications/initialized"})
 
     def _prepare(self, msg: dict) -> dict:
-        """Stamp modern ``_meta`` on an outgoing request when the era is modern.
-
-        A no-op in legacy mode, so the same list/call code path serves both eras.
-        """
+        """Adapt a copy to the upstream era without changing caller metadata."""
+        msg = dict(msg)
+        params = msg.get("params")
+        if isinstance(params, dict):
+            params = dict(params)
+            msg["params"] = params
+            meta = params.get("_meta")
+            if isinstance(meta, dict):
+                meta = dict(meta)
+                params["_meta"] = meta
+                if not self._modern:
+                    # Downstream wire metadata must not select this upstream's HTTP era.
+                    for key in (
+                        proto.META_PROTOCOL_VERSION,
+                        proto.META_CLIENT_INFO,
+                        proto.META_CLIENT_CAPABILITIES,
+                    ):
+                        meta.pop(key, None)
         if self._modern:
             proto.inject_client_meta(msg, self._protocol_version, CLIENT_INFO)
         return msg
