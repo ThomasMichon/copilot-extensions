@@ -7,6 +7,7 @@ import contextlib
 import copy
 import io
 import json
+import os
 from pathlib import Path
 from pathlib import PurePosixPath
 import shlex
@@ -19,7 +20,7 @@ import time
 import traceback
 from types import SimpleNamespace
 
-from agent_procutil import no_window_kwargs
+from agent_procutil import no_window_kwargs, spawn_sync_in_kill_on_close_job
 from fastapi.testclient import TestClient
 import pytest
 
@@ -84,21 +85,58 @@ class Consumer:
             *core_command[boundary + 2:],
         ]
         self.state_file = Path(core_command[core_command.index("--state-file") + 1])
-        self.process = subprocess.Popen(
-            command,
-            cwd=cwd, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE, text=True, encoding="utf-8", **no_window_kwargs(),
-        )
+        self.process = self.job = self.carrier = self.messages = self.reader = self.stderr = None
         try:
+            self.process, self.job = spawn_sync_in_kill_on_close_job(
+                command, require_job=os.name == "nt", allow_breakaway=False,
+                start_new_session=os.name != "nt",
+                cwd=cwd, env=environment, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                stderr=subprocess.PIPE, text=True, encoding="utf-8", **no_window_kwargs(),
+            )
             self.carrier, _ = listener.accept()
+            self.messages = self.carrier.makefile("r", encoding="utf-8")
+            self.writer = threading.Lock()
+            self.reader = threading.Thread(target=self._read, daemon=True)
+            self.stderr = threading.Thread(target=self._stderr, daemon=True)
+            self.reader.start()
+            self.stderr.start()
+        except BaseException as error:
+            try:
+                self._abort_start()
+            except BaseException as cleanup:
+                cleanup.consumer = self
+                raise cleanup from error
+            raise
         finally:
             listener.close()
-        self.messages = self.carrier.makefile("r", encoding="utf-8")
-        self.writer = threading.Lock()
-        self.reader = threading.Thread(target=self._read, daemon=True)
-        self.stderr = threading.Thread(target=self._stderr, daemon=True)
-        self.reader.start()
-        self.stderr.start()
+
+    def _abort_start(self):
+        if self.process is not None:
+            if self.job is not None:
+                self.job.terminate_and_wait(10)
+            else:
+                from agent_procutil._caller_owned import _confirm_group
+                from agent_procutil.owned_process import _retire_posix_group
+
+                _retire_posix_group(self.process)
+                _confirm_group(self.process)
+            self.process.wait(timeout=10)
+        if self.carrier is not None:
+            try:
+                self.carrier.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.carrier.close()
+        for thread in (self.reader, self.stderr):
+            if thread is not None and thread.ident is not None:
+                thread.join(timeout=10)
+                assert not thread.is_alive()
+        for stream in (
+            self.messages,
+            *(getattr(self.process, name, None) for name in ("stdin", "stdout", "stderr")),
+        ):
+            if stream is not None:
+                stream.close()
 
     def broker_state(self):
         deadline = time.monotonic() + 10
@@ -170,6 +208,8 @@ class Consumer:
             if self.process.poll() is None:
                 self.process.terminate()
                 self.process.wait(timeout=10)
+            if self.job is not None:
+                self.job.terminate_and_wait(10)
             try:
                 self.carrier.shutdown(socket.SHUT_RDWR)
             except OSError:
@@ -189,6 +229,59 @@ class Consumer:
         if extension_birth is not None:
             assert process_start_time(state["extension_pid"]) != extension_birth
         assert not self.errors
+
+
+def test_carrier_timeout_settles_constructor_owned_tree_and_streams(tmp_path, monkeypatch):
+    from agent_procutil._daemon_instance_identity import birth_identity
+
+    marker = tmp_path / "child.json"
+    program = """
+import json,os,subprocess,sys,time
+from pathlib import Path
+from agent_procutil import no_window_kwargs
+child=subprocess.Popen([sys.executable,"-c","import time; time.sleep(60)"],**no_window_kwargs())
+marker=Path(sys.argv[1])
+pending=marker.with_suffix(".pending")
+pending.write_text(json.dumps({"child":child.pid}),encoding="utf-8")
+pending.replace(marker)
+time.sleep(60)
+"""
+    spawned, births, listeners = [], [], []
+    spawn = spawn_sync_in_kill_on_close_job
+
+    def capture(*args, **kwargs):
+        process, job = spawn(*args, **kwargs)
+        spawned.append(process)
+        return process, job
+
+    def timeout(listener):
+        listeners.append(listener)
+        deadline = time.monotonic() + 10
+        while not marker.exists() and time.monotonic() < deadline:
+            time.sleep(.01)
+        child = json.loads(marker.read_text(encoding="utf-8"))["child"]
+        births.append((child, birth_identity(child)))
+        raise TimeoutError("synthetic carrier timeout")
+
+    monkeypatch.setattr(sys.modules[__name__], "spawn_sync_in_kill_on_close_job", capture)
+    monkeypatch.setattr(socket.socket, "accept", timeout)
+    with pytest.raises(TimeoutError, match="synthetic carrier timeout"):
+        Consumer(
+            None, dict(os.environ), str(tmp_path), duplicate=False,
+            core_command=[
+                sys.executable, "-c", program, str(marker),
+                "--state-file", str(tmp_path / "host.json"), "--",
+            ],
+        )
+    assert len(spawned) == len(births) == len(listeners) == 1
+    assert spawned[0].returncode is not None and spawned[0].stderr.closed
+    assert listeners[0].fileno() == -1
+    child, original = births[0]
+    try:
+        current = birth_identity(child)
+    except (OSError, ValueError, RuntimeError):
+        current = None
+    assert current != original
 
 
 @pytest.mark.parametrize("duplicate", [False, True], ids=["one-admitted-send", "duplicate-loadout-holds"])
