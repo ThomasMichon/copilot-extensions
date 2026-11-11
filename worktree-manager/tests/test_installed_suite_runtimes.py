@@ -472,6 +472,34 @@ def test_readiness_failure_details_reuse_only_the_admitted_readonly_owner(
     assert json.loads(result["stdout"])["detail"] == "actual owner reason"
 
 
+def test_fresh_index_roles_are_readable_without_runtime_yaml_dependencies(tmp_path, fresh_fixture):
+    profile, _portfolio, _payloads, _home = _selection(tmp_path)
+    (tmp_path / "h").mkdir()
+    project = tmp_path / fresh_fixture["lifecycle"].PROJECT
+    project.mkdir()
+    fresh_fixture["_roles"](tmp_path, profile)
+    reader = (
+        fresh_fixture["suite"].REPO / "plugins" / "agent-index" / "scripts"
+        / "resolve_effective_config.py"
+    )
+    configuration = project / ".copilot-extensions" / "agent-index" / "config.yaml"
+    program = (
+        "import importlib.util,json,runpy,sys;from pathlib import Path;"
+        "assert importlib.util.find_spec('yaml') is None;"
+        "reader=runpy.run_path(sys.argv[1]);"
+        "state,data=reader['_load_yaml_mapping'](Path(sys.argv[2]));"
+        "assert state=='ready',(state,data);"
+        "assert len(data['indexers'])==2;"
+        "print(json.dumps(data))"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", program, str(reader), str(configuration)],
+        check=True, capture_output=True, text=True, timeout=15,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+    )
+    assert {"machine": "tty-fixture"} in json.loads(result.stdout)["indexers"]
+
+
 @pytest.mark.parametrize(
     "defect", [None, "update-refused", "missing-runtime", "wrong-version", "foreign-machines",
                "readiness-refused", "diagnostic-refused", "diagnostic-custody",

@@ -12,6 +12,8 @@ import sys
 import time
 import tomllib
 
+import yaml
+
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "tools"))
@@ -97,7 +99,10 @@ def _roles(case, profile):
     (index / "config.yaml").write_text("role: host\n", encoding="utf-8")
     index_repo = project / ".copilot-extensions" / "agent-index" / "config.yaml"
     index_repo.parent.mkdir(parents=True)
-    suite._write(index_repo, {"indexers": [{"machine": name} for name in aliases]})
+    index_repo.write_text(
+        yaml.safe_dump({"indexers": [{"machine": name} for name in aliases]}),
+        encoding="utf-8",
+    )
     suite._write(project / ".agent-vault.json", {"enabled": True})
 
 

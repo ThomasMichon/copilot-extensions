@@ -1393,3 +1393,27 @@ covers the production behavior. Native tests above exercise Windows; the POSIX
 fixture counterpart is retained but is not claimed as executed on this host.
 The next existing disposable fresh run must still prove real Index/Vault
 configuration and complete Machines readiness before lifecycle acceptance.
+
+Run 42988759861 at `a9dd8eaa96675e9cd4240b8a666e70eaaa336d33`
+passed normal and repair, with successful fresh settlement and required CI.
+Vault now satisfies actual required readiness as `configuration-empty`; Index
+alone still refuses effective repository configuration. No complete fresh
+readiness or lifecycle acceptance is credited.
+
+A configuration-only reproduction isolates another fixture input: fresh
+`_roles` wrote JSON into Index's `config.yaml`. The dependency-free native reader
+does not support that JSON form. The exact JSON input returns
+`repository-config-invalid` with `expected a mapping entry`, without any runtime,
+service or configuration owner present. An earlier YAML-only cold check did not
+reproduce the fixture input and did not establish the cause. The fresh adapter
+now emits native YAML, retaining the same indexer aliases and role selection.
+The production parser and readiness judgments are unchanged.
+
+A focused regression calls the real native YAML reader against the actual
+`_roles` output under isolated `-I -S` Python and proves PyYAML is unavailable.
+It passes (one selected test, 51 unrelated deselected); changed-source lint and
+whitespace pass. Temporary tracing/preflight code used during diagnosis was
+removed rather than shipped after this smaller input correction was identified.
+This is fixture-only, with no additional runtime protocol or operator-document
+change. The next exact-head disposable run must still prove the installed-owner
+path and full readiness; local parser success alone is not that acceptance.
