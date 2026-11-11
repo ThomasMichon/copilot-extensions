@@ -516,6 +516,10 @@ authorizes critical main-path acceptance or a bounded administrative change.
   substitute only deterministic inference. Existing #11377/#3336/#7529 owners
   retain source and activation custody. Failed or incomplete exact-candidate
   evidence must block promotion, not merely report an informational check.
+  Installed-core action/continuity proof merged in #11864 at `fa93ea37c2`,
+  backed by exact-source native run 42892225611 and current-head approval.
+  Complete-suite construction/actual Machines readiness is now the active slice;
+  authentic-baseline update, mandatory enforcement and Main adoption remain open.
 - [ ] Complete the [test validation burndown](test-validation-burndown.md):
   measured promotion/PR CI history, reliable parallel unit suites, per-suite
   coverage baselines and conservative PR selection, full unit execution on

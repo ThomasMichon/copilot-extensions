@@ -1309,6 +1309,73 @@ jobs:
             $binaries[0].DirectoryName >> $env:GITHUB_PATH
           }
           "COPILOT_DRIVER_HEADED_MUX_E2E=1" >> $env:GITHUB_ENV
+      - name: Qualify real CLI acquisition of the complete frozen payload suite
+        id: suite-payloads
+        shell: python
+        env:
+          REQUESTED_SOURCE: ${{ inputs.source_sha }}
+        run: |
+          import json, os, re, sys
+          from pathlib import Path
+          from urllib.parse import urlsplit
+          import xml.etree.ElementTree as ET
+          sys.path.insert(0, "libs/agent-procutil/src")
+          from agent_procutil.owned_process import run_caller_owned
+
+          expected = os.environ["GITHUB_SHA"]
+          assert re.fullmatch(r"[0-9a-f]{40}", expected)
+          assert not os.environ.get("REQUESTED_SOURCE") or os.environ["REQUESTED_SOURCE"] == expected
+          reports = Path(os.environ["RUNNER_TEMP"]) / "manager-suite-payload-evidence"
+          result = run_caller_owned([
+              sys.executable, "tools/run-plugin-tests.py", "worktree-manager",
+              "--test-file", "tests/native/test_manager_installed_lifecycle.py",
+              "-k", "test_installed_suite_payload_closure_uses_the_real_cli",
+              "--allow-explicit-tiers", "--timeout", "900",
+              "--plugin-timeout", "900", "--test-timeout", "900",
+              "--junit-dir", str(reports),
+          ], timeout=1200, max_stdout_bytes=4*1024*1024, max_stderr_bytes=4*1024*1024)
+          print(result.stdout, end="", flush=True)
+          print(result.stderr, end="", file=sys.stderr, flush=True)
+          result.check_returncode()
+          cases, evidence = [], []
+          for report in reports.rglob("*.xml"):
+              assert not report.is_symlink() and report.stat().st_size <= 1024*1024
+              document = ET.parse(report)
+              cases.extend(document.iter("testcase"))
+              evidence.extend(item.attrib["value"] for item in document.iter("property")
+                              if item.get("name") == "installed-manager-suite-payloads")
+          assert len(cases) == len(evidence) == 1
+          assert cases[0].get("name") == "test_installed_suite_payload_closure_uses_the_real_cli"
+          assert not any(cases[0].find(name) is not None for name in ("failure", "error", "skipped"))
+          def unique(pairs):
+              result = {}
+              for key, value in pairs:
+                  assert key not in result, "duplicate payload receipt field"
+                  result[key] = value
+              return result
+
+          data = json.loads(evidence[0], object_pairs_hook=unique)
+          assert data["candidate_commit"] == data["identity"]["candidate_commit"] == expected
+          for key, value in (("run_id", "GITHUB_RUN_ID"), ("run_attempt", "GITHUB_RUN_ATTEMPT")):
+              assert type(data["identity"][key]) is int and data["identity"][key] == int(os.environ[value])
+          catalog = json.loads(Path(".github/plugin/marketplace.json").read_text())
+          inventory = {row["name"]: row["version"] for row in catalog["plugins"]}
+          assert set(data["payloads"]) == set(data["profile"]["inventory"]) == set(inventory)
+          assert data["profile"]["repository_config"]["require_application_readiness"] is True
+          assert data["runtime_installation"] == "not-observed"
+          transport = data["transport"]
+          url = urlsplit(transport["url"])
+          assert Path(transport["repository"]).is_absolute()
+          assert url.scheme == "http" and url.hostname == "127.0.0.1" and url.port
+          assert url.path == "/suite-transport.git" and not url.query and not url.fragment
+          assert url.username is None and url.password is None
+          for key in ("commit", "tree"):
+              assert re.fullmatch(r"[0-9a-f]{40}", transport[key])
+          assert re.fullmatch(r"[0-9a-f]{64}", data["copilot_sha256"])
+          for name, row in data["payloads"].items():
+              assert row["version"] == inventory[name]
+              assert re.fullmatch(r"[0-9a-f]{64}", row["manifest_sha256"])
+          print("Actual CLI payload closure qualified; runtime/readiness and upgrade are not yet observed.")
       - name: Qualify installed-core lifecycle at this exact source
         id: lifecycle
         shell: python
@@ -1395,7 +1462,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: manager-lifecycle-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/manager-lifecycle-evidence
+          path: |
+            ${{ runner.temp }}/manager-lifecycle-evidence
+            ${{ runner.temp }}/manager-suite-payload-evidence
           if-no-files-found: error
           retention-days: 2
 
