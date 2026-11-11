@@ -1181,7 +1181,7 @@ class LiveVerdict:
     Copilot forbids them even when mux absence is confirmed."""
 
 
-def verify_worktree_active(record) -> LiveVerdict:
+def verify_worktree_active(record, *, strict: bool = False) -> LiveVerdict:
     """Authoritatively verify whether ONE worktree has a live session right now.
 
     Unlike the batched populate scan, this pays for a precise single-worktree
@@ -1192,6 +1192,9 @@ def verify_worktree_active(record) -> LiveVerdict:
     still found as long as its session is registered on the record). Intended for
     the exact moments the operator acts on a worktree (Actions-menu open,
     Enter->Open/Resume), never the fleet-wide populate.
+
+    ``strict=True`` refuses unavailable registered lock/process observations
+    instead of interpreting them as absent bindings.
 
     Returns a :class:`LiveVerdict`. Best-effort and never raises: a mux or
     reclaim hiccup degrades to whichever signal succeeded.
@@ -1213,11 +1216,13 @@ def verify_worktree_active(record) -> LiveVerdict:
     live_ids: list[str] = []
     bare = False
     try:
+        binding_options = {"strict": True} if strict else {}
         bound = reclaim.resolve_bound_copilots(
             worktree_id=wt_id,
             session_ids=[
                 entry.session_id for entry in (getattr(record, "sessions", None) or ())
             ],
+            **binding_options,
         )
         live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
         bare = any(b.get("homing") == "bare" for b in bound)

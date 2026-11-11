@@ -98,15 +98,20 @@ def apply_session_conclude(args: dict) -> dict:
         session_ref = tracking.format_claim_ref(
             record.execution_machine, record.repo, record.worktree_id, session=session_id,
         )
+        matching_claims = [claim for claim in record.resources if claim.ref == session_ref]
         recover_claim = (
             state == "concluded" and not only_if_active and record.status == "finalized"
             and any(
-                claim.kind == "session" and claim.ref == session_ref and claim.is_at_rest
-                for claim in record.resources
+                claim.kind == "session" and claim.is_at_rest for claim in matching_claims
             )
         )
         if recover_claim:
-            verdict = sessions.verify_worktree_active(record)
+            if len(matching_claims) != 1:
+                return {
+                    "error": "lifecycle",
+                    "message": "Session claim recovery requires an unambiguous exact claim.",
+                }
+            verdict = sessions.verify_worktree_active(record, strict=True)
             if not verdict.probes_ok or verdict.active:
                 return {
                     "error": "lifecycle",
