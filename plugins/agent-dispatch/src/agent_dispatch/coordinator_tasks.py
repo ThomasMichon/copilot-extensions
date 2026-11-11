@@ -314,20 +314,15 @@ def register_task_routes(
         dedup_key: str | None = None,
         sweep: bool = False,
         limit: int | None = None,
+        standing_parent_id: str | None = None,
+        kind: str | None = None,
     ) -> list[dict]:
         if dedup_key is not None:
             selectors = {
-                "status": status,
-                "target_machine": target_machine,
-                "target_repo": target_repo,
-                "label": label,
-                "evaluator_ref": evaluator_ref,
-                "source": source,
-                "origin_ref": origin_ref,
-                "exclusive_key": exclusive_key,
-                "category": category,
-                "q": q,
-                "limit": limit,
+                "status": status, "target_machine": target_machine, "target_repo": target_repo,
+                "label": label, "evaluator_ref": evaluator_ref, "source": source,
+                "origin_ref": origin_ref, "exclusive_key": exclusive_key, "category": category,
+                "q": q, "limit": limit, "standing_parent_id": standing_parent_id, "kind": kind,
             }
             conflicts = [key for key, value in selectors.items() if value is not None]
             if sweep:
@@ -345,6 +340,12 @@ def register_task_routes(
                 raise HTTPException(status_code=400, detail=str(exc)) from exc
             return [] if task is None else [_task_with_spawn_dict(queue, task)]
         limit = 200 if limit is None else limit
+        if standing_parent_id is not None and (sweep or q is not None):
+            raise HTTPException(400, detail="standing_parent_id cannot combine with sweep or q")
+        if kind is not None and (sweep or q is not None):
+            raise HTTPException(400, detail="kind cannot combine with sweep or q")
+        if kind not in (None, "finite", "standing-charter"):
+            raise HTTPException(400, detail="kind must be 'finite' or 'standing-charter'")
         if sweep:
             return _bulk_tasks(queue.sweep(repo=repo, limit=limit, category=category))
         if q is not None:
@@ -354,17 +355,10 @@ def register_task_routes(
             parts = [s.strip() for s in status.split(",") if s.strip()]
             status_filter = parts[0] if len(parts) == 1 else parts
         tasks = queue.list(
-            repo=repo,
-            status=status_filter,
-            target_machine=target_machine,
-            target_repo=target_repo,
-            label=label,
-            evaluator_ref=evaluator_ref,
-            source=source,
-            origin_ref=origin_ref,
-            exclusive_key=exclusive_key,
-            category=category,
-            limit=limit,
+            repo=repo, status=status_filter, target_machine=target_machine,
+            target_repo=target_repo, label=label, evaluator_ref=evaluator_ref, source=source,
+            origin_ref=origin_ref, exclusive_key=exclusive_key, category=category, limit=limit,
+            standing_parent_id=standing_parent_id, kind=kind,
         )
         return _bulk_tasks(tasks)
 
@@ -414,9 +408,11 @@ def register_task_routes(
             "result": queue.read_result(task),
         }
 
+    from .coordinator_standing import register_standing_routes
     from .coordinator_task_relationships import register_task_relationship_routes
-    register_task_relationship_routes(
-        app, queue, control_token=control_token, emit_event=_emit_producer_event,
+    register_task_relationship_routes(app, queue, control_token=control_token, emit_event=_emit_producer_event)
+    register_standing_routes(
+        app, queue, control_token=control_token, emit_task=_emit, emit_event=_emit_producer_event,
     )
 
     @app.get("/tasks/{task_id}/events")

@@ -9,15 +9,7 @@
     "version": {"const": 1, "type": "integer"},
     "id": {"$ref": "#/$defs/text"},
     "revision": {"type": "integer", "minimum": 1},
-    "dispatcher": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["owner", "charter"],
-      "properties": {
-        "owner": {"$ref": "#/$defs/owner"},
-        "charter": {"$ref": "#/$defs/charter"}
-      }
-    },
+    "dispatcher": {"$ref": "#/$defs/dispatcher"},
     "observationMaxAgeSeconds": {"type": "integer", "minimum": 1, "maximum": 86400},
     "machines": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/machine"}},
     "roles": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/role"}},
@@ -38,7 +30,7 @@
           }
         },
         "dispatcher": {
-          "type": "object",
+          "type": ["object", "null"],
           "additionalProperties": false,
           "required": ["observedAt", "sourceRef", "owner", "custody"],
           "properties": {
@@ -49,11 +41,66 @@
           }
         },
         "machines": {"type": "array", "maxItems": 1000, "items": {"$ref": "#/$defs/machineObservation"}},
-        "owners": {"type": "array", "maxItems": 4000, "items": {"$ref": "#/$defs/ownerObservation"}}
+        "owners": {"type": "array", "maxItems": 4000, "items": {"$ref": "#/$defs/ownerObservation"}},
+        "dispatch": {
+          "type": "array",
+          "maxItems": 4000,
+          "description": "Optional. Present only when the adopter uses native Dispatch standing charters; then standing assignments with nativeTask take coverage and routes from this evidence alone.",
+          "items": {"$ref": "#/$defs/dispatchObservation"}
+        }
       }
     }
   },
   "$defs": {
+    "dispatcher": {
+      "type": ["object", "null"],
+      "description": "Null until a native dispatcher owner is appointed; placement, routes and effects then hold.",
+      "additionalProperties": false,
+      "required": ["owner", "charter"],
+      "properties": {
+        "owner": {"$ref": "#/$defs/owner"},
+        "charter": {"$ref": "#/$defs/charter"}
+      }
+    },
+    "materialization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema", "version", "source", "effective", "sourceRevision", "materializationRevision", "advisoryOnly", "effectAuthorityGranted"],
+      "properties": {
+        "schema": {"const": "agent-roles.charter-materialization", "type": "string"},
+        "version": {"const": 1, "type": "integer"},
+        "sourceRevision": {"$ref": "#/$defs/text"},
+        "materializationRevision": {"$ref": "#/$defs/text"},
+        "advisoryOnly": {"const": true, "type": "boolean"},
+        "effectAuthorityGranted": {"const": false, "type": "boolean"},
+        "source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["topology", "topologyRevision", "id", "requestId", "creationKey", "kind", "role", "machine"],
+          "properties": {
+            "topology": {"$ref": "#/$defs/text"},
+            "topologyRevision": {"type": "integer", "minimum": 1},
+            "id": {"$ref": "#/$defs/text"},
+            "requestId": {"$ref": "#/$defs/text"},
+            "creationKey": {"$ref": "#/$defs/text"},
+            "kind": {"enum": ["standing", "temporary"]},
+            "role": {"$ref": "#/$defs/text"},
+            "machine": {"$ref": "#/$defs/text"}
+          }
+        },
+        "effective": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["charter", "role", "machine", "dispatcher"],
+          "properties": {
+            "charter": {"$ref": "#/$defs/charter"},
+            "role": {"$ref": "#/$defs/role"},
+            "machine": {"$ref": "#/$defs/machine"},
+            "dispatcher": {"$ref": "#/$defs/dispatcher"}
+          }
+        }
+      }
+    },
     "text": {"type": "string", "minLength": 1, "maxLength": 32768},
     "texts": {"type": "array", "maxItems": 100, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
     "nullableText": {"type": ["string", "null"], "minLength": 1, "maxLength": 32768},
@@ -185,6 +232,7 @@
       "properties": {
         "owner": {"$ref": "#/$defs/owner"},
         "head": {"$ref": "#/$defs/nullableText"},
+        "headRevision": {"type": ["integer", "null"], "minimum": 0},
         "observedAt": {"$ref": "#/$defs/text"},
         "sourceRef": {"$ref": "#/$defs/text"},
         "state": {"enum": ["running", "idle", "waiting", "dormant", "completed", "unreachable", "unknown"]},
@@ -193,6 +241,110 @@
         "scope": {"$ref": "#/$defs/nullableText"},
         "acceptedCharterRevision": {"type": ["integer", "null"], "minimum": 1},
         "acceptanceRef": {"$ref": "#/$defs/nullableText"}
+      }
+    },
+    "dispatchObservation": {
+      "type": "object",
+      "description": "A dated read-only copy of one native standing-charter task and its original relationship. Native fields keep upstream names; other upstream task fields are retained but not interpreted.",
+      "additionalProperties": false,
+      "required": ["observedAt", "sourceRef", "task", "relationship"],
+      "properties": {
+        "observedAt": {"$ref": "#/$defs/text"},
+        "sourceRef": {"$ref": "#/$defs/text"},
+        "task": {"$ref": "#/$defs/nativeStandingTask"},
+        "relationship": {"$ref": "#/$defs/nativeRelationship"}
+      }
+    },
+    "nativeStandingTask": {
+      "type": "object",
+      "required": ["id", "kind", "status", "owner", "owner_session_id", "generation", "hold_reason", "standing_revision", "standing_charter"],
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "kind": {"const": "standing-charter", "type": "string"},
+        "status": {"$ref": "#/$defs/text"},
+        "owner": {"$ref": "#/$defs/nullableText"},
+        "owner_session_id": {"$ref": "#/$defs/nullableText"},
+        "generation": {"type": "integer", "minimum": 0},
+        "hold_reason": {"$ref": "#/$defs/nullableText"},
+        "standing_revision": {"type": "integer", "minimum": 0},
+        "standing_charter": {
+          "type": "object",
+          "required": ["version", "declaration", "declaration_generation", "lifecycle", "accepted_materialization"],
+          "properties": {
+            "version": {"const": 1, "type": "integer"},
+            "declaration": {
+              "type": "object",
+              "required": ["materialization_ref", "source_revision", "expected_materialization_revision"],
+              "properties": {
+                "materialization_ref": {"$ref": "#/$defs/text"},
+                "source_revision": {"$ref": "#/$defs/text"},
+                "expected_materialization_revision": {"$ref": "#/$defs/text"}
+              }
+            },
+            "declaration_generation": {"type": "integer", "minimum": 1},
+            "lifecycle": {"$ref": "#/$defs/text"},
+            "accepted_materialization": {"$ref": "#/$defs/nativeAcceptance"}
+          }
+        }
+      }
+    },
+    "nativeAcceptance": {
+      "type": ["object", "null"],
+      "required": ["version", "head", "request_id", "assignment_event_id", "relationship_ref", "materialization_ref", "source_revision", "materialization_revision", "expected_revision", "expected_generation", "assignment_generation", "generation"],
+      "properties": {
+        "version": {"const": 1, "type": "integer"},
+        "head": {
+          "type": "object",
+          "required": ["session_id", "revision"],
+          "properties": {
+            "session_id": {"$ref": "#/$defs/text"},
+            "revision": {"type": "integer", "minimum": 0},
+            "predecessor_session_id": {"$ref": "#/$defs/text"}
+          }
+        },
+        "request_id": {"$ref": "#/$defs/text"},
+        "assignment_event_id": {"type": "integer", "minimum": 1},
+        "relationship_ref": {"$ref": "#/$defs/text"},
+        "materialization_ref": {"$ref": "#/$defs/text"},
+        "source_revision": {"$ref": "#/$defs/text"},
+        "materialization_revision": {"$ref": "#/$defs/text"},
+        "expected_revision": {"type": "integer", "minimum": 0},
+        "expected_generation": {"type": "integer", "minimum": 0},
+        "assignment_generation": {"type": "integer", "minimum": 0},
+        "generation": {"type": "integer", "minimum": 0}
+      }
+    },
+    "nativeRelationship": {
+      "type": ["object", "null"],
+      "required": ["request", "state", "receipt"],
+      "properties": {
+        "request": {
+          "type": "object",
+          "required": ["request_id", "event_id", "task_id", "generation", "workspace"],
+          "properties": {
+            "request_id": {"$ref": "#/$defs/text"},
+            "event_id": {"type": "integer", "minimum": 1},
+            "task_id": {"$ref": "#/$defs/text"},
+            "generation": {"type": "integer", "minimum": 0},
+            "workspace": {
+              "type": "object",
+              "required": ["machine", "project", "worktree"],
+              "properties": {
+                "machine": {"$ref": "#/$defs/text"},
+                "project": {"$ref": "#/$defs/text"},
+                "worktree": {"$ref": "#/$defs/text"}
+              }
+            }
+          }
+        },
+        "state": {"$ref": "#/$defs/text"},
+        "receipt": {
+          "type": ["object", "null"],
+          "description": "Only the receipt reference; never copy native tokens.",
+          "additionalProperties": false,
+          "required": ["ref"],
+          "properties": {"ref": {"$ref": "#/$defs/text"}}
+        }
       }
     }
   }

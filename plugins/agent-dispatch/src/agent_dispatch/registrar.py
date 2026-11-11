@@ -637,6 +637,10 @@ def load_declaration(
     """
     if not isinstance(data, Mapping):
         raise RegistrarError(f"declaration: expected a mapping, got {type(data).__name__}")
+    if data.get("kind") == "standing-charter":
+        from .registrar_standing import load_standing_declaration
+
+        return load_standing_declaration(data)
     _reject_unknown(data, _KNOWN_KEYS, where="declaration")
 
     name = data.get("name")

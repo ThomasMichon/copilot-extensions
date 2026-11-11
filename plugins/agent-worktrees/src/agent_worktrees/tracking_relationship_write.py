@@ -25,7 +25,7 @@ def _input(operation: str, payload: object) -> dict:
     }
     if not isinstance(operation, str) or operation not in keys:
         raise ValueError("unsupported relationship operation")
-    optional = {"expected_creation_nonce", "expected_writer_identity"}
+    optional = {"expected_creation_nonce", "expected_writer_identity", "expected_head", "expected_conclusion"}
     if not isinstance(payload, dict) or set(payload) - optional not in keys[operation]:
         raise ValueError(f"{operation}: invalid relationship input fields")
     producer.canonical_json(payload)
@@ -39,6 +39,40 @@ def _input(operation: str, payload: object) -> dict:
         or "expected_creation_nonce" not in payload
     ):
         raise ValueError("relationship expected_writer_identity requires an installed build and expected_creation_nonce")
+    if "expected_head" in payload:
+        head = payload["expected_head"]
+        if (
+            operation != "inspect" or "expected_creation_nonce" not in payload
+            or "allow_missing" in payload or not isinstance(head, dict)
+            or set(head) not in (
+                {"session_id", "revision"}, {"session_id", "revision", "predecessor_session_id"},
+            )
+            or not isinstance(head["session_id"], str) or not head["session_id"].strip()
+            or type(head["revision"]) is not int or head["revision"] < 1
+            or ("predecessor_session_id" in head and (
+                not isinstance(head["predecessor_session_id"], str)
+                or not head["predecessor_session_id"].strip()
+                or head["predecessor_session_id"] == head["session_id"]
+            ))
+        ):
+            raise ValueError(
+                "expected_head requires inspect, expected_creation_nonce, a session_id and "
+                "positive revision; absence inspection is not supported"
+            )
+    if "expected_conclusion" in payload:
+        conclusion = payload["expected_conclusion"]
+        if (
+            operation != "inspect" or "expected_creation_nonce" not in payload
+            or "allow_missing" in payload or "expected_head" in payload
+            or not isinstance(conclusion, dict) or set(conclusion) != {"session_id", "revision"}
+            or not isinstance(conclusion["session_id"], str) or not conclusion["session_id"]
+            or conclusion["session_id"] != conclusion["session_id"].strip()
+            or type(conclusion["revision"]) is not int or conclusion["revision"] < 1
+        ):
+            raise ValueError(
+                "expected_conclusion requires inspect, expected_creation_nonce, a session_id "
+                "and positive revision; head and absence inspection are not supported"
+            )
     if "token" in payload and not producer.is_valid_token(payload["token"]):
         raise ValueError("invalid relationship token")
     if "request_id" in payload and not relationship.valid_request_id(payload["request_id"]):
@@ -102,6 +136,65 @@ def _matches(record, payload):
     return claim
 
 
+def _checked_head(record, claim, payload):
+    if "expected_head" not in payload:
+        return {}
+    _require_mutable_owner(record)
+    if (
+        claim.producer["phase"] != "bound" or claim.state not in {"", "active"}
+        or tracking.claim_handoff_reservation(record, claim)
+    ):
+        raise ValueError("head inspection requires an active bound relationship without a handoff")
+    head = record.resolved_head_session
+    entry = record.session_entry(head) if head else None
+    transition = record.replayed_head_transition
+    if (
+        transition is None or entry is None or entry.state != "active"
+        or record.pending_handoffs
+        or head != payload["expected_head"]["session_id"]
+        or transition.revision != payload["expected_head"]["revision"]
+    ):
+        raise ValueError("relationship owner does not have the expected active head revision")
+    checked = {"session_id": head, "revision": transition.revision}
+    if "predecessor_session_id" in payload["expected_head"]:
+        predecessor_id = payload["expected_head"]["predecessor_session_id"]
+        predecessor = record.session_entry(predecessor_id)
+        if (
+            predecessor is None or predecessor.state not in tracking._CONCLUDED_SESSION_STATES
+            or predecessor.successor != head or entry.predecessor != predecessor_id
+        ):
+            raise ValueError("relationship head has no confirmed native succession from the expected predecessor")
+        checked["predecessor_session_id"] = predecessor.session_id
+    return {"head": checked}
+
+
+def _checked_conclusion(record, claim, payload):
+    if "expected_conclusion" not in payload:
+        return {}
+    _require_mutable_owner(record)
+    if (
+        claim.producer["phase"] != "bound" or claim.state not in {"", "active"}
+        or tracking.claim_handoff_reservation(record, claim)
+    ):
+        raise ValueError("conclusion inspection requires an active bound relationship without a handoff")
+    expected = payload["expected_conclusion"]
+    entry = record.session_entry(expected["session_id"])
+    transition = record.replayed_head_transition
+    prior = None if transition is None else max(
+        (item for item in record.head_transitions or () if item.revision < transition.revision),
+        key=lambda item: item.revision, default=None,
+    )
+    if (
+        entry is None or entry.state != "concluded" or entry.successor is not None
+        or record.pending_handoffs or record.resolved_head_session is not None
+        or transition is None or transition.session_id is not None
+        or transition.reason != "concluded" or transition.revision != expected["revision"]
+        or prior is None or prior.session_id != expected["session_id"]
+    ):
+        raise ValueError("relationship owner does not have the expected settled session conclusion")
+    return {"conclusion": copy.deepcopy(expected)}
+
+
 def _response(record, claim, payload):
     return {
         "schema": relationship.SCHEMA, "version": relationship.VERSION, "ok": True,
@@ -109,6 +202,8 @@ def _response(record, claim, payload):
         **{key: claim.producer[key] for key in ("creator", "request_id", "token", "phase")},
         "ref": claim.ref, "producer": copy.deepcopy(claim.producer),
         **_incarnation(record, payload),
+        **_checked_head(record, claim, payload),
+        **_checked_conclusion(record, claim, payload),
     }
 
 
@@ -243,4 +338,4 @@ def apply_resource_relationship(args: dict) -> dict:
         }
 
 
-tracking_write.register_verb("resource_relationship", apply_resource_relationship, version=3)
+tracking_write.register_verb("resource_relationship", apply_resource_relationship, version=6)

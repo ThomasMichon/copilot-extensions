@@ -15,7 +15,10 @@ import pytest
 SKILL = Path(__file__).resolve().parents[1] / "skills" / "managing-agent-topology"
 sys.path.insert(0, str(SKILL / "scripts"))
 from topology import Topology  # noqa: E402
-from topology_contract import ContractError, MAX_BYTES, _shape, read_json, timestamp, validate  # noqa: E402
+from topology_contract import (  # noqa: E402
+    ContractError, MAX_BYTES, _shape, content_revision, read_json, timestamp,
+    validate, validate_materialization,
+)
 
 AT = "2026-01-01T00:01:00Z"
 pytestmark = [
@@ -102,6 +105,85 @@ def test_oversized_input_rejected_before_parsing(tmp_path: Path) -> None:
     path.write_bytes(b" " * (MAX_BYTES + 1))
     with pytest.raises(ContractError, match="exceeds 2 MiB"):
         read_json(path)
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+def test_materialization_exports_complete_charter_without_acceptance(
+    document: dict[str, Any], tmp_path: Path,
+) -> None:
+    assignment = document["assignments"][0]
+    assignment.update(state="proposed", nativeWorktree=None, effects=[])
+    document["observations"]["owners"] = []
+    code, materialized = invoke(tmp_path, document, "materialize", "--request", assignment["requestId"])
+    assert code == 0
+    assert materialized["effective"] == {
+        "charter": assignment["charter"], "role": document["roles"][0],
+        "machine": next(item for item in document["machines"] if item["id"] == assignment["machine"]),
+        "dispatcher": document["dispatcher"],
+    }
+    assert materialized["effectAuthorityGranted"] is False
+    assert "acceptedCharterRevision" not in materialized
+    code, inspected = invoke(tmp_path, materialized, "inspect-materialization")
+    assert code == 0
+    assert inspected == materialized
+    changed = report(document).materialize(assignment["requestId"])
+    changed["effective"]["charter"]["exclusions"] = "changed detached copy"
+    assert document["assignments"][0]["charter"]["exclusions"] != "changed detached copy"
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_materialization_drift_is_separate_from_observations_and_source_revision(
+    document: dict[str, Any],
+) -> None:
+    request = document["assignments"][0]["requestId"]
+    original = report(document).materialize(request)
+    document["observations"]["owners"][0]["head"] = "another-head"
+    document["assignments"][0]["effects"][1]["state"] = "unknown"
+    assert report(document).materialize(request) == original
+    document["revision"] += 1
+    newer_source = report(document).materialize(request)
+    assert newer_source["sourceRevision"] != original["sourceRevision"]
+    assert newer_source["materializationRevision"] == original["materializationRevision"]
+    document["assignments"][0]["charter"]["exclusions"] += " No new effects."
+    newer_effective = report(document).materialize(request)
+    assert newer_effective["materializationRevision"] != original["materializationRevision"]
+    assert newer_effective["sourceRevision"] != newer_source["sourceRevision"]
+    assert document["observations"]["owners"][0]["acceptedCharterRevision"] == 1
+
+
+@pytest.mark.portfolio_tier("T1")
+@pytest.mark.parametrize("mutate", [
+    lambda m: m.update(version=2),
+    lambda m: m.update(effectAuthorityGranted=True),
+    lambda m: m["effective"]["charter"].pop("exclusions"),
+    lambda m: m["effective"]["charter"].update(scope="another/repo"),
+    lambda m: m["effective"]["charter"].update(objective="changed content"),
+    lambda m: m["source"].update(id="another-assignment"),
+    lambda m: m["source"].update(role="another-role"),
+    lambda m: m.update(materializationRevision="floating-template"),
+])
+def test_materialization_inspection_rejects_incomplete_or_changed_content(
+    document: dict[str, Any], mutate: Callable[[dict[str, Any]], object],
+) -> None:
+    materialized = report(document).materialize(document["assignments"][0]["requestId"])
+    mutate(materialized)
+    with pytest.raises(ContractError):
+        validate_materialization(materialized)
+
+
+@pytest.mark.portfolio_tier("T1")
+def test_materialization_digest_is_order_independent_and_missing_assignments_refuse(
+    document: dict[str, Any],
+) -> None:
+    topology = report(document)
+    with pytest.raises(ContractError, match="nonterminal persisted assignment"):
+        topology.materialize("template-only")
+    document["assignments"][0]["state"] = "completed"
+    with pytest.raises(ContractError, match="nonterminal persisted assignment"):
+        report(document).materialize(document["assignments"][0]["requestId"])
+    charter = document["assignments"][0]["charter"]
+    assert content_revision(charter) == content_revision(dict(reversed(list(charter.items()))))
 
 
 @pytest.mark.portfolio_tier("T1")

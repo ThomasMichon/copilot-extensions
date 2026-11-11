@@ -160,6 +160,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 raise TaskError(f"task {task_id!r} ownership incarnation changed")
 
             from .queue_submission_consumer import complete, original_request
+            if task.kind == "standing-charter":
+                raise TaskError("standing charter cannot complete; use explicit retirement")
             request = original_request(
                 conn, task, worker_id, allowed=allowed, expected_status=expected_status,
             )
@@ -762,6 +764,8 @@ class QueueLifecycleMixin(QueueProgressMixin):
                 conn.execute("COMMIT")
                 raise TaskError(f"no such task {task_id!r}")
             from .queue_pool_placement import pool_assignment
+            if task.kind == "standing-charter":
+                raise TaskError("standing charter requires its fenced lifecycle operation")
             if require_pool_assignment and pool_assignment(conn, task_id) is None:
                 raise TaskError("explicit pool start requires an allocator-owned pool assignment")
             if (

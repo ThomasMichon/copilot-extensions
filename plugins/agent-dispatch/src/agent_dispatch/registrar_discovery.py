@@ -48,13 +48,17 @@ from .registrar_configuration import (
     write_pointer_registry,
 )
 from .registrar_document import expand_declaration_document  # noqa: F401 -- public validation seam
-from .registrar_document import qualify_supplier_context
+from .registrar_observations import (
+    ReadStatus, RegistrarObservationError, RegistrarSourceObservation, TrustedDiscovery,
+    observe_trusted, observed_repo_directories,
+)
 from .repository_resources import (
     RepositoryResourceSnapshot,
     is_repository_resource,
     registered_repository_root,
 )
 from .registrar_pointer import Pointer
+from .registrar_source_revision import DocumentReads, record_document_read
 from .registrar_lane_aliases import (  # noqa: F401 -- re-exported for existing call sites/tests
     ENFORCE_REGISTERED_REPOS_ENV,
     _derive_git_remote_alias,
@@ -461,6 +465,7 @@ def read_declaration_file_set(
     *,
     allow_plugin_companion: bool = False,
     repo_root: str | Path | None = None,
+    document_reads: DocumentReads | None = None,
 ) -> tuple[ProfileDeclaration, ...]:
     """Read one document and expand it into one or more runtime declarations.
 
@@ -482,7 +487,11 @@ def read_declaration_file_set(
         raise RegistrarIndeterminateError(
             f"{p}: declaration could not be read: {exc}"
         ) from exc
+    record_document_read(document_reads, p, text)
     data = dict(_decode(text, p.suffix, where=str(p)))
+    if document_reads is not None and "extends" in data:
+        # Recipe dependencies are not part of this directory's revision proof.
+        document_reads[p.resolve()] = None
     if data.get("kind") == "user-worker-instance":
         from .worker_instances import active_dir, validate_configuration
 
@@ -528,11 +537,17 @@ def read_declaration_file(
     return declarations[0]
 
 
-def _iter_declaration_files(location: Path) -> list[Path]:
+def _iter_declaration_files(
+    location: Path, *, directory_reads: dict[Path, ReadStatus] | None = None,
+) -> list[Path]:
     """Declaration documents directly under ``location`` (sorted, deterministic)."""
+    if directory_reads is not None:
+        directory_reads[location] = "error"
     try:
         root_info = location.lstat()
     except FileNotFoundError:
+        if directory_reads is not None:
+            directory_reads[location] = "missing"
         return []
     except OSError as exc:
         raise RegistrarIndeterminateError(
@@ -554,12 +569,14 @@ def _iter_declaration_files(location: Path) -> list[Path]:
         ) from exc
 
     accepted: list[Path] = []
+    status: ReadStatus = "complete"
     for entry in entries:
         if entry.suffix not in _DECL_SUFFIXES:
             continue
         try:
             info = entry.lstat()
         except FileNotFoundError:
+            status = "error"
             continue
         except OSError as exc:
             raise RegistrarIndeterminateError(
@@ -571,6 +588,8 @@ def _iter_declaration_files(location: Path) -> list[Path]:
             and not _is_reparse(info)
         ):
             accepted.append(entry)
+    if directory_reads is not None:
+        directory_reads[location] = status
     return accepted
 
 
@@ -579,6 +598,8 @@ def read_location(
     *,
     owner: str | None = None,
     repo_root: str | Path | None = None,
+    directory_reads: dict[Path, ReadStatus] | None = None,
+    document_reads: DocumentReads | None = None,
 ) -> list[ProfileDeclaration]:
     """Read every declaration document directly under ``location``.
 
@@ -590,14 +611,16 @@ def read_location(
     """
     loc = Path(location).expanduser()
     out: list[ProfileDeclaration] = []
-    for f in _iter_declaration_files(loc):
-        for decl in read_declaration_file_set(f, repo_root=repo_root):
+    for f in _iter_declaration_files(loc, directory_reads=directory_reads):
+        for decl in read_declaration_file_set(f, repo_root=repo_root, document_reads=document_reads):
             out.append(decl.with_owner(owner) if owner else decl)
     return out
 
 
 def read_repo_location_layers(
-    repo_root: str | Path, *, owner: str | None = None
+    repo_root: str | Path, *, owner: str | None = None,
+    directory_reads: dict[Path, ReadStatus] | None = None,
+    document_reads: DocumentReads | None = None,
 ) -> list[ProfileDeclaration]:
     """Read the effective declaration set for one repo root.
 
@@ -609,11 +632,21 @@ def read_repo_location_layers(
 
     report = configuration_report(Path(repo_root))
     if report is not None:
-        return read_registrar_layers(report, owner=owner)
+        return read_registrar_layers(
+            report, owner=owner, directory_reads=directory_reads, document_reads=document_reads,
+        )
     merged: dict[str, ProfileDeclaration] = {}
-    for location in repo_config.layered_repo_surface_dirs(repo_root, "registrar"):
+    locations = (
+        observed_repo_directories(Path(repo_root).expanduser())
+        if directory_reads is not None
+        else repo_config.layered_repo_surface_dirs(repo_root, "registrar")
+    )
+    for location in locations:
         layer: dict[str, ProfileDeclaration] = {}
-        for declaration in read_location(location, owner=owner, repo_root=repo_root):
+        for declaration in read_location(
+            location, owner=owner, repo_root=repo_root, directory_reads=directory_reads,
+            document_reads=document_reads,
+        ):
             if declaration.name in layer:
                 raise RegistrarError(
                     f"duplicate profile name {declaration.name!r}: declared more than once "
@@ -628,7 +661,7 @@ def discover_trusted(
     pointers: Iterable[Pointer] | None = None,
     *,
     base: Path | None = None,
-) -> tuple[ScanAuthority, list[ProfileDeclaration]]:
+) -> TrustedDiscovery:
     """Aggregate the declared profile set across all pointers.
 
     With no ``pointers`` the persisted registry is used. Declarations are returned
@@ -636,45 +669,7 @@ def discover_trusted(
     sources claiming the same unit) and is rejected -- the registry is one source of
     truth, so the ambiguity must be resolved at declaration time.
     """
-    if pointers is None:
-        authority, pts = _load_pointers_with_authority(base)
-    else:
-        authority, pts = ScanAuthority.COMPLETE, list(pointers)
-    by_name: dict[str, tuple[str, ProfileDeclaration]] = {}
-    for pointer in pts:
-        owner = pointer.effective_owner()
-        if pointer.kind == "repo":
-            snapshot = RepositoryResourceSnapshot(execution=False)
-            root = snapshot.root(pointer.repository) if pointer.repository else pointer.repo_root()
-            declarations = read_repo_location_layers(root, owner=owner)
-            if pointer.repository and snapshot.is_read_only(pointer.repository):
-                declarations = [
-                    qualify_supplier_context(declaration, pointer.repository, root)
-                    for declaration in declarations
-                ]
-        else:
-            location = pointer.resolved_location()
-            # A supported dir pointer may point directly at an in-repo
-            # registrar surface (e.g. `<repo>/.copilot-extensions/
-            # agent-dispatch/registrar`); derive that repo's root the same
-            # way the direct CLI declaration-read path does, so a
-            # repository-issue-loop declared there still resolves a
-            # repo-local worker_identity against the right repo rather than
-            # this process's own cwd or the generic built-in.
-            repo_root = repo_config.repo_root_from_surface_path(location, "registrar")
-            declarations = read_location(location, owner=owner, repo_root=repo_root)
-        for decl in declarations:
-            if decl.name in by_name:
-                prior_owner = by_name[decl.name][0]
-                raise RegistrarError(
-                    f"duplicate profile name {decl.name!r}: declared by both "
-                    f"{prior_owner!r} and {owner!r} -- names must be unique across the registry"
-                )
-            by_name[decl.name] = (owner, decl)
-    declarations = [
-        decl for _, decl in sorted(by_name.values(), key=lambda item: item[1].name)
-    ]
-    return authority, declarations
+    return observe_trusted(pointers, base=base)
 
 
 def discover(
@@ -835,6 +830,7 @@ class RegistrarDiscoveryReport:
     trusted_authority: ScanAuthority
     trusted_error: str | None
     combined: CombinedRegistrarReport
+    source_observations: tuple[RegistrarSourceObservation, ...] = ()
 
 
 class RegistrarSources:
@@ -924,8 +920,11 @@ class RegistrarSources:
         trusted_authority = ScanAuthority.COMPLETE
         trusted_error: str | None = None
         trusted_findings: list[Finding] = []
+        source_observations: tuple[RegistrarSourceObservation, ...] = ()
         try:
-            trusted_authority, trusted = discover_trusted(base=self.base)
+            discovery = discover_trusted(base=self.base)
+            trusted_authority, trusted = discovery
+            source_observations = getattr(discovery, "source_observations", ())
         except RegistrarIndeterminateError as exc:
             trusted = self._trusted
             trusted_authority = ScanAuthority.INDETERMINATE
@@ -937,8 +936,13 @@ class RegistrarSources:
             trusted = self._trusted
             trusted_authority = ScanAuthority.INDETERMINATE
             trusted_error = str(exc)
+            reason = "invalid-entry"
+            if isinstance(exc, RegistrarObservationError):
+                source_observations = exc.source_observations
+                if exc.indeterminate:
+                    reason = "registry-indeterminate"
             trusted_findings.append(
-                self._trusted_error_finding(exc, reason="invalid-entry")
+                self._trusted_error_finding(exc, reason=reason)
             )
         else:
             self._trusted = list(trusted)
@@ -954,6 +958,7 @@ class RegistrarSources:
             trusted_authority=trusted_authority,
             trusted_error=trusted_error,
             combined=combined,
+            source_observations=source_observations,
         )
         self.last_report = report
 

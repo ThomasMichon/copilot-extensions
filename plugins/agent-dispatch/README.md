@@ -104,6 +104,13 @@ compatible creation defaults, before-limit selection, independent Tasks and
 Maintenance tasks pivots, full evidence inspection and preview-first historical
 classification. Category separation never prunes task history.
 
+## Standing charters
+
+[Standing charters](docs/standing-charters.md) are durable, revision-fenced
+tasks for continuing lanes of responsibility. They are reconciled and governed
+only through control-authorized `agent-dispatch standing` commands, may parent
+ordinary finite tasks, and are never completed or launched by finite paths.
+
 ## Offline CI repair construction
 
 The optional [verified-failure emitter](docs/ci-repair.md) reuses the existing
