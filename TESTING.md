@@ -368,8 +368,12 @@ removed before native execution. The selected interpreter must load the incoming
 generation's fixture marker from that slot's installed package. Canonical GC
 with live-process and retention protection must retire the outgoing slot before the installed global
 launcher reuses the same native conversation without seed replay. A protected
-outgoing slot fails this proof rather than being force-deleted. The resume leg
-uses the incoming generation and temporarily withdraws/restores that slot during
+outgoing slot fails this proof rather than being force-deleted. The fixture then
+reconstructs the collected original slot from its retained unbuilt application
+artifact through that same installer, verifies generation 1 and both selectors,
+and collects the replacement. The global command must again reuse the original
+live conversation without seed replay, and another broker request must succeed.
+The resume leg uses the restored generation and temporarily withdraws/restores that slot during
 its broker prompt. No completed virtualenv is copied. Its fixture directory stays under the outer native
 owner until leased residents settle; existing packets retain immediate inner
 sandbox cleanup. This tests the selected application installer/generation
