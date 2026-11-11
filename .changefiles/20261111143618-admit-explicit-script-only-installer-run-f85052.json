@@ -1,0 +1,9 @@
+{
+  "comment": "Admit explicit script-only installer runtime ownership without weakening repair admission.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

@@ -225,6 +225,185 @@ def invoke(fixture, *, apply=False, digest=None, selection=("child",)):
     )
 
 
+def use_installer_runtime(payload):
+    (payload / "payload-invocation.json").unlink()
+    manifest_path = payload / "plugin.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["installerRuntime"] = "installer-runtime.json"
+    write_json(manifest_path, manifest)
+    write_json(payload / "installer-runtime.json", {
+        "schema": "copilot-extensions.installer-runtime", "version": 1,
+        "runtimeRoot": ".agent-example",
+        "noSelfProvisionEnv": "AGENT_EXAMPLE_NO_SELFPROVISION",
+    })
+
+
+def test_installer_runtime_optional_owner_preserves_required_census(repair_fixture, monkeypatch):
+    home, project, payload, _, _ = repair_fixture
+    add_repair_peer(repair_fixture, "agent-peer")
+    use_installer_runtime(payload)
+    path = payload / "installer-readiness.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    for module in data["modules"]:
+        module["classification"] = "optional"
+    write_json(path, data)
+    monkeypatch.setattr(repair_api, "_invoke", _ready_read)
+    plan = repair_api.repair(project, home=home, required=True)
+    assert plan["requiredSatisfied"]
+    assert all("::agent-peer/" in row["module"] for row in plan["outcomes"])
+    plan = invoke(repair_fixture)
+    assert all(row["observedBefore"]["state"] == "ready" for row in plan["outcomes"])
+    assert all("::agent-example/" in row["module"] for row in plan["outcomes"])
+    assert not list(home.glob("*.ready"))
+
+
+@pytest.mark.parametrize("change", [
+    {"schema": "unknown"}, {"version": True}, {"version": 2},
+    {"runtimeRoot": "../escape"}, {"noSelfProvisionEnv": "invalid-name"},
+    {"command": "invented"}, {"noSelfProvisionEnv": None},
+])
+def test_installer_runtime_invalid_contract_refuses_before_probes(
+    repair_fixture, monkeypatch, change,
+):
+    home, project, payload, _, _ = repair_fixture
+    use_installer_runtime(payload)
+    path = payload / "installer-runtime.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.update(change)
+    write_json(path, data)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("unadmitted probe"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True)
+    assert not list(home.glob("*.ready"))
+
+
+@pytest.mark.parametrize("reference", [None, "", "../outside.json", "/outside.json",
+                                       "C:outside.json", "sub\\owner.json", "\0invalid", "missing.json"])
+def test_installer_runtime_invalid_reference_refuses_before_probes(
+    repair_fixture, monkeypatch, reference,
+):
+    home, project, payload, _, _ = repair_fixture
+    use_installer_runtime(payload)
+    path = payload / "plugin.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["installerRuntime"] = reference
+    write_json(path, data)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("unadmitted probe"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True)
+
+
+@pytest.mark.parametrize("reparse", [False, True])
+def test_installer_runtime_refuses_linked_declaration_ancestor(
+    repair_fixture, monkeypatch, reparse,
+):
+    import stat
+    from types import SimpleNamespace
+
+    home, project, payload, _, _ = repair_fixture
+    use_installer_runtime(payload)
+    nested = payload / "metadata"
+    nested.mkdir()
+    (payload / "installer-runtime.json").rename(nested / "installer-runtime.json")
+    path = payload / "plugin.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["installerRuntime"] = "metadata/installer-runtime.json"
+    write_json(path, data)
+    original = Path.lstat
+
+    def lstat(path, *args, **kwargs):
+        info = original(path, *args, **kwargs)
+        if path == nested:
+            return SimpleNamespace(
+                st_mode=info.st_mode if reparse else stat.S_IFLNK,
+                st_file_attributes=0x400 if reparse else 0,
+            )
+        return info
+
+    monkeypatch.setattr(Path, "lstat", lstat)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("linked probe"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True, readiness_only=True)
+
+
+def test_installer_runtime_dual_protocol_refuses_before_probes(repair_fixture, monkeypatch):
+    home, project, payload, _, _ = repair_fixture
+    invocation = (payload / "payload-invocation.json").read_bytes()
+    use_installer_runtime(payload)
+    (payload / "payload-invocation.json").write_bytes(invocation)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("ambiguous probe"))
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True)
+
+
+@pytest.mark.parametrize("readiness_only", [False, True])
+def test_installer_runtime_changes_invalidate_plan(repair_fixture, monkeypatch, readiness_only):
+    home, project, payload, _, _ = repair_fixture
+    use_installer_runtime(payload)
+    monkeypatch.setattr(repair_api, "_invoke", _ready_read)
+    plan = repair_api.repair(project, home=home, required=True, readiness_only=readiness_only)
+    path = payload / "installer-runtime.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["noSelfProvisionEnv"] = "AGENT_EXAMPLE_OTHER_NO_SELFPROVISION"
+    write_json(path, data)
+    if readiness_only:
+        changed = repair_api.repair(project, home=home, required=True, readiness_only=True)
+        assert changed["planDigest"] != plan["planDigest"]
+        return
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("changed-plan probe"))
+    with pytest.raises(RepairAdmissionError, match="inputs changed"):
+        repair_api.repair(
+            project, home=home, required=True, apply=True,
+            expected_plan_digest=plan["planDigest"],
+        )
+
+
+@pytest.mark.parametrize("readiness_only", [False, True])
+def test_installer_runtime_claim_without_readiness_is_not_skipped(
+    repair_fixture, monkeypatch, readiness_only,
+):
+    home, project, payload, _, _ = repair_fixture
+    peer = add_repair_peer(repair_fixture, "agent-peer", shared_root=True)
+    use_installer_runtime(payload)
+    path = payload / "plugin.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data.pop("installerReadiness")
+    write_json(path, data)
+    host = admit_host(project, home=home, readiness_only=readiness_only)
+    owner = next(binding for binding in host.bindings.values()
+                 if binding.installation.payload_root == peer)
+    assert owner.refusal == "ordinary-legacy-writer-ambiguous"
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("duplicate-writer probe"))
+    if readiness_only:
+        result = repair_api.repair(project, home=home, required=True, readiness_only=True)
+        assert not result["requiredSatisfied"]
+        return
+    with pytest.raises(RepairAdmissionError, match="complete enabled-owner inventory"):
+        repair_api.repair(project, home=home, required=True)
+
+
+@pytest.mark.parametrize("mode", ["migration", "unready-core"])
+def test_installer_runtime_preserves_mode_refusal(repair_fixture, monkeypatch, mode):
+    home, _, payload, _, _ = repair_fixture
+    use_installer_runtime(payload)
+    original = admission_api.context.probe_legacy_entrypoint
+
+    def probe(**kwargs):
+        result = original(**kwargs)
+        result.update(
+            actualMode="namespaced" if mode == "unready-core" else "legacy",
+            desiredMode="namespaced", status="migration-required", allowMutation=True,
+        )
+        return result
+
+    monkeypatch.setattr(admission_api.context, "probe_legacy_entrypoint", probe)
+    monkeypatch.setattr(repair_api, "_invoke", lambda *a, **k: pytest.fail("unadmitted mode"))
+    plan = invoke(repair_fixture)
+    result = invoke(repair_fixture, apply=True, digest=plan["planDigest"])
+    assert not any(row["attempted"] for row in result["outcomes"])
+    assert not list(home.glob("*.ready"))
+
+
 def _ready_read(module, owner, platform, *, readonly, timeout):
     from agent_machines.installation_repair_process import ActionResult
 
@@ -1803,8 +1982,16 @@ def _assert_process_stopped(pid, *, timeout=5):
 
 
 @pytest.mark.parametrize("required", [False, True])
-def test_installation_repair_installed_cli_native_first_touch(repair_fixture, required):
-    home, project, _, _, identity = repair_fixture
+@pytest.mark.parametrize("protocol", ["payload-invocation", "installer-runtime"])
+@pytest.mark.timeout(45)
+def test_installation_repair_installed_cli_native_first_touch(repair_fixture, required, protocol):
+    home, project, payload, _, identity = repair_fixture
+    if protocol == "installer-runtime":
+        use_installer_runtime(payload)
+    path = payload / "installer-readiness.json"
+    declaration = json.loads(path.read_text(encoding="utf-8"))
+    declaration["modules"] = declaration["modules"][:1]
+    write_json(path, declaration)
     command = Path(sys.executable).parent / (
         "agent-machines.exe" if os.name == "nt" else "agent-machines"
     )
@@ -1812,7 +1999,7 @@ def test_installation_repair_installed_cli_native_first_touch(repair_fixture, re
     environment = ordinary_environment(os.environ, home=home, payload=project / ".ai")
     argv = [
         str(command), "installation-repair", "--project-root", str(project),
-        *(["--required"] if required else ["--module", identity + "::agent-example/child"]),
+        *(["--required"] if required else ["--module", identity + "::agent-example/base"]),
     ]
     plan = run_action(argv, cwd=project, environment=environment, timeout=15, readonly=True)
     assert plan.status == "exited" and plan.exit_code == 0

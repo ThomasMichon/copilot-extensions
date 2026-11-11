@@ -393,7 +393,12 @@ restart confirmation. Inspect interrupted/failed actions before attesting;
 their conservatively retained obligations must not be dismissed as a retry.
 
 Ordinary downstream owners need declared no-self-provision and legacy-root
-protocols; inherited core-cell control variables are cleared. Linked/reparse
+protocols, either the existing `payload-invocation.json` or a script-only
+[`installerRuntime` declaration](../../docs/patterns/installer-readiness-modules.md#script-only-runtime-ownership).
+The latter never creates a command or Python module and cannot coexist with
+the former. Older consumers refuse script-only owners before effects; do not
+remove them from the required census. Inherited core-cell control variables
+are cleared. Linked/reparse
 targets, ambiguous owners and migration/deactivation/maintenance states refuse
 repair rather than guessing an installer. A legacy runtime root must have one
 qualified plugin owner, even when the competing plugins share a marketplace.
