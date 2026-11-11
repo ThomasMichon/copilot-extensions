@@ -1,6 +1,7 @@
 # Phase 5 - Explicit personal private knowledge creation
 
-- **Status:** Proposal; review before implementation.
+- **Status:** Contract reviewed in #12004; receiver qualified in source,
+  native provider and consumer acceptance remain open.
 - **Parent:** [Configuration workbench](phase-5-configuration-workbench.md).
 - **Coordination:** #1419 Track 3 KO1/KO5/KO6; bounded source slice
   `shiny-actuator`.
@@ -169,11 +170,11 @@ admission remains with the existing New owner.
 
 ## Dependency-ordered delivery and validation
 
-- [ ] Review this proposal before runtime or consumer implementation.
+- [x] Review this proposal before runtime or consumer implementation; #12004.
 - [ ] Deliver the standalone native preview/apply owner, capability and honest
   complete/partial/unknown outcomes, including separately confirmed protection
   completion, without changing existing operations.
-- [ ] Expand the existing shared proposal reader for explicit version-2 remote
+- [x] Expand the existing shared proposal reader for explicit version-2 remote
   create/protect scope; retain the exact version-1 local baseline and prove
   unsupported versions refuse before apply rather than creating another modal.
 - [ ] Connect the optional real Configuration form through that selected owner;
@@ -214,3 +215,24 @@ runtime replacement, installation, deployment or retirement; those preserve
 [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 and their existing owners. No installer selections, user state or sessions are
 changed by this proposal.
+
+## Journal
+
+### 2026-11-10 - Shared remote-effect preview receiver
+
+The bounded reader prerequisite passes all 74 affected controls, including
+the production Textual form and actual synthetic owner CLI. Both remote
+operations render their real scope; default Cancel, unknown-version refusal,
+target/context freshness and the version-1 local set/reset baseline remain
+covered. The two new parser controls fail on the original reader.
+Fixture remote effects are local markers in the private test tree, not
+GitHub operations or protection enforcement.
+
+Scoped Python lint, all 13 install contracts, documentation consistency,
+local links and whitespace checks pass. The changed Manager project remains
+pending typing admission. The optional local enforced probe passes eight
+platform checks before an unrelated unprepared checker stops it; that is
+not a full typing pass. Required exact-head CI and review remain independent.
+No launch primitive changes, native desktop qualification, cold installation,
+installed-runtime observation, live provider effect or rollout is included.
+The native creation/protection owner and its real consumer sequence stay open.
