@@ -342,6 +342,26 @@ def test_standalone_authority_skips_controller_before_manager_enqueue(queued, mo
     assert "--no-project-controller" in seen["runner"].argv
 
 
+def test_public_submission_and_status_report_superseded_request(queued, monkeypatch, tmp_path, capsys):
+    import json
+    import update_driver
+    from update_driver import core
+
+    monkeypatch.setattr(core, "default_root", lambda: tmp_path / "queue")
+    monkeypatch.setattr(update_driver, "enqueue", core.enqueue)
+    monkeypatch.setattr(update_driver, "status", core.status)
+    assert driver.cmd_update_request(["--detach", "--json", "--force"]) == 0
+    first = json.loads(capsys.readouterr().out)["request_id"]
+    assert driver.cmd_update_request(["--detach", "--json", "--no-manager"]) == 0
+    second = json.loads(capsys.readouterr().out)["request_id"]
+    assert first != second
+    assert driver.cmd_update_request(["--request-status", first, "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "completed" and result["exit_code"] == 125
+    assert second in result["error"] and "nothing ran" in result["error"]
+    assert core.status(second).state == "pending"
+
+
 def test_downlevel_driver_refuses_cleanly_without_queueing(queued, monkeypatch, capsys):
     import update_driver
 
@@ -1180,6 +1200,8 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
     root = home / ".copilot-extensions" / "update-driver"
     requests = update_driver.status(root=root)
     assert len(requests) == 3
+    assert [request.state for request in requests] == ["completed", "completed", "pending"]
+    assert all(request.exit_code == 125 and request.started_at is None for request in requests[:-1])
     monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, "wrong-worker-provider")
     monkeypatch.setenv(budget_key, "180")
     result = run_owned(
@@ -1189,10 +1211,8 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
     assert result.returncode == 0, result.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]
     starts = [record for record in records if record["phase"] == "start"]
-    assert [record["provider"] for record in starts] == [
-        ["synthetic-first-provider"], ["synthetic-second-provider"], accepted,
-    ]
-    assert [record["acquisition_budget"] for record in starts] == ["600.0", "1200.0", None]
+    assert [record["provider"] for record in starts] == [accepted]
+    assert [record["acquisition_budget"] for record in starts] == [None]
 
 
 @pytest.mark.timeout(4 * _NATIVE_QUEUE_TIMEOUT)

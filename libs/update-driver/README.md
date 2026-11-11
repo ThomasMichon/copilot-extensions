@@ -129,8 +129,24 @@ creation, not an implicit permission migration or a read-only status side effect
   active arrivals. Fresh Manager bootstrap also keeps later active arrivals
   separate: its retained Manager/SDK inputs do not pin every marketplace target
   discovered by the following suite update.
-  Distinct inputs/options stay separate, and completed requests never debounce
-  a new attempt. This does not yet resolve a central desired target, order
+  Update requests (`manager`, `engine`, and software-enabled
+  `engine-launch-update`) retain at most one waiting selection per addressed
+  installation/project authority. A newer accepted request atomically
+  supersedes older never-started waiting updates in that scope, including a
+  different retained runner, source or explicit option selection. Manager
+  bootstrap and installed-CLI requests share their addressed Manager root.
+  The running request is unchanged; component provisioning, bootstrap install
+  recipes, reconciliation-only launch work and independent scopes remain
+  separate. Automatic requests cannot replace a waiting explicit update and
+  are refused before admission in that case.
+  Superseded records retain their original invocation and finish as
+  `completed`, exit code **125**, with an error naming the successor and
+  confirming nothing ran. This is terminal non-success, not installation
+  completion or proof that the successor succeeded. Existing readers and
+  waiters use the same schema and integer-result contract; an old submitting
+  runtime still has its original FIFO policy until updated.
+  Completed requests never debounce a new attempt.
+  This does not yet resolve a central desired target, order
   versions, or bound worker-launch fan-out. The opt-in changes no journal schema.
   Existing unsettled global fences refuse admission with `InterruptedError`;
   a detached caller cannot receive an apparently healthy receipt behind one.

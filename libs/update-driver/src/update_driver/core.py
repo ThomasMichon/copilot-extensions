@@ -437,6 +437,60 @@ current_authority = authority.current
 change_authority = authority.change
 
 
+def _update_scope(spec: RequestSpec) -> tuple[str, ...] | None:
+    if spec.backend not in {"manager", "engine", "engine-launch-update"}:
+        return None
+    if spec.backend == "engine-launch-update" and "--no-update" in spec.argv:
+        return None
+    context = dict(spec.context)
+
+    def path(value: str) -> str:
+        selected = Path(value).expanduser()
+        if not selected.is_absolute():
+            if not spec.cwd or not Path(spec.cwd).is_absolute():
+                raise InvalidRequestError("update scope requires an absolute request cwd")
+            selected = Path(spec.cwd) / selected
+        return os.path.normcase(os.path.normpath(str(selected)))
+
+    cell = context.get("COPILOT_EXTENSIONS_CONTEXT", "")
+    if cell:
+        receipt = Path(path(cell))
+        # Receipts from different plugins in one installation share its slot.
+        if receipt.name == "install.json" and receipt.parent.parent.name == "plugins":
+            cell = str(receipt.parent.parent.parent)
+        else:
+            cell = str(receipt)
+    home = path(context.get("AGENT_HOME", "").strip() or str(Path.home()))
+    manager = path(context.get("WORKTREE_MANAGER_ROOT") or str(Path.home() / ".worktree-manager"))
+    project = spec.project
+    if spec.backend == "manager" and project and Path(project).is_absolute() and path(project) == manager:
+        project = ""
+    return home, cell, manager, spec.authority, project
+
+
+def _supersede_waiting(db: sqlite3.Connection, root: Path, spec: RequestSpec, successor: str) -> None:
+    scope = _update_scope(spec)
+    if scope is None:
+        return
+    waiting = [
+        _request(row, root) for row in db.execute(
+            """SELECT * FROM requests WHERE state='pending' AND started_at IS NULL
+            AND finished_at IS NULL AND boot_id IS NULL AND id<>?""", (successor,),
+        )
+    ]
+    peers = [request for request in waiting if _update_scope(request.spec) == scope]
+    if "--auto" in spec.argv and any("--auto" not in request.spec.argv for request in peers):
+        raise StateError("explicit update already waiting; automatic request not admitted")
+    db.executemany(
+        """UPDATE requests SET state='completed',exit_code=125,error=?,finished_at=?
+        WHERE id=?""",
+        [
+            (f"superseded by update request {successor}; nothing ran", time.time(), request.id)
+            for request in peers
+        ],
+    )
+
+
 def enqueue(
     spec: RequestSpec, *, runner: TrustedRunner, root: Path | None = None,
     coalesce_running: bool = False,
@@ -480,11 +534,15 @@ def enqueue(
                 ).fetchone()
             if row is None:
                 identifier = uuid.uuid4().hex
+                _supersede_waiting(db, root, spec, identifier)
                 db.execute(
                     "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,?,?)",
                     (identifier, identity, spec_json, runner_json, "pending", time.time()),
                 )
                 row = db.execute("SELECT * FROM requests WHERE id=?", (identifier,)).fetchone()
+            elif row["state"] == "pending":
+                # Coalescing an existing selection also collapses legacy backlog.
+                _supersede_waiting(db, root, spec, row["id"])
             request = _request(row, root)
             db.commit()
             return request
