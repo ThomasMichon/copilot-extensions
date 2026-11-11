@@ -14,10 +14,11 @@ INDEX_NAME = "python-artifacts.json"
 INDEX_SCHEMA = "copilot-extensions.promotion-python-artifacts"
 INDEX_LIMIT = 1 << 20
 _ATTESTATION_TIMEOUT = 120
-_PUBLIC_GOOD_INIT_ERROR = (
+_VERIFIER_INIT_ERRORS = {
     "Error: failed to choose verifier based on provided bundle issuer: "
-    "public good verifier is not available (initialization may have failed)"
-)
+    "public good verifier is not available (initialization may have failed)",
+    "error creating Sigstore verifier: no valid Sigstore verifiers could be initialized",
+}
 
 
 def _gh(
@@ -65,13 +66,12 @@ def verify_attestation_subject(
     invoke = runner or _gh
     deadline = time.monotonic() + _ATTESTATION_TIMEOUT
     result = invoke(argv, verification=True)
-    if result.returncode == 1 and result.stderr.strip().splitlines()[-1:] == [
-        _PUBLIC_GOOD_INIT_ERROR,
-    ]:
+    error_lines = result.stderr.strip().splitlines()
+    if result.returncode == 1 and error_lines and error_lines[-1] in _VERIFIER_INIT_ERRORS:
         remaining = deadline - time.monotonic()
         if remaining > 0:
             print(
-                "gh attestation: Public Good verifier initialization unavailable; "
+                "gh attestation: Sigstore verifier initialization unavailable; "
                 "retrying once with unchanged policy and remaining deadline",
                 file=sys.stderr,
             )

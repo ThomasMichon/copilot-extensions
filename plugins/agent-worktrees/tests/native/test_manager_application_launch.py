@@ -115,6 +115,18 @@ def test_manager_no_mux_decision(monkeypatch):
         )
 
 
+@pytest.mark.skipif(not _NATIVE_COPILOT, reason="Select the isolated native Windows Copilot lane")
+@pytest.mark.timeout(300)
+def test_manager_mux_decision(monkeypatch):
+    from plugin_test_containment import TestSandbox
+
+    sandbox = Path(os.environ["COPILOT_EXTENSIONS_TEST_SANDBOX"])
+    with TestSandbox(prefix="m-", dir=sandbox) as directory:
+        _qualify_manager_application(
+            Path(directory), monkeypatch, "manager-mux", picker_decision=True,
+        )
+
+
 def _qualify_manager_application(
     tmp_path, monkeypatch, control, *, worktrees_python=None,
     worktrees_root=None, worktrees_environment=None, caller_jobs=False, replacement_slot=None,
@@ -122,7 +134,7 @@ def _qualify_manager_application(
 ):
     paired = worktrees_python is not None
     assert not paired or (control in {"embody", "copilot"} and worktrees_environment is not None)
-    assert not picker_decision or (not paired and control == "manager-no-mux")
+    assert not picker_decision or (not paired and control in {"manager-no-mux", "manager-mux"})
     monkeypatch.syspath_prepend(str(ROOT / "tools"))
     import build_python_artifacts as builder
     import local_install_profile as profiles
