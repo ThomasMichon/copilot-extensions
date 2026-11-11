@@ -37,6 +37,16 @@ Failure to resolve or prepare an ordinary writable cache is a cache miss:
 continue with `-B`, never write into the payload, runtime slot or source tree.
 Do not change the user's environment, Python installation or global settings.
 
+Bytecode is executable input: an owner record is not an OS access boundary.
+Before selecting a prefix, require current-user ownership and protection from
+other unprivileged users' writes or path substitution. Create new owned
+directories privately; validate existing directories and relevant ancestors,
+using native ownership/mode checks on POSIX and ownership/DACL checks on
+Windows. A shared writable override, foreign-owned pre-created namespace or
+unverifiable protection takes `-B` without reading that namespace's bytecode.
+Do not repair someone else's permissions or treat a matching record as trust.
+Apply the same protection checks before admitting collector metadata.
+
 The owned subtree is `copilot-extensions/python/v1/`. Its version is a cache
 layout version, not a package version or interoperability claim.
 Namespace identity includes the normalized absolute installation root, exact
@@ -192,6 +202,8 @@ No general-purpose arbitrary-path recursive remover is introduced.
 Focused source and contained native tests must cover:
 
 - platform roots, relative overrides, unwritable cache and no-write fallback;
+- pre-created foreign-owned or shared-writable cache/ancestor rejection before
+  any bytecode load, including an otherwise matching owner record;
 - installed reuse and interpreter/build/installation separation;
 - repeated unsealed invocation without namespace accumulation;
 - current/rollback/retention/construction/live-user protection;

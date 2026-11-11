@@ -128,6 +128,8 @@ nor reinterpret an ignored file or a directory name as disposal authority.
 
 - [ ] Valid installed reuse, development/unsealed behavior, interpreter/build
   separation and portable cache-root resolution.
+- [ ] Native current-user ownership/permission boundaries reject pre-created
+  foreign-owned or shared-writable caches before selecting executable bytecode.
 - [ ] Active/retained/rollback/construction owners, interrupted callers,
   stale ownership, concurrent allocation and cleanup races.
 - [ ] Strictly bounded discovery/work with persistent fair progress across
@@ -170,3 +172,8 @@ gates, not claims that the current code already provides them.
   outgoing retirement/cache cleanup must not veto incoming readiness and
   complete selection. Retired-source subtree cleanup is distinct from a
   whole-namespace liveness claim; unknown legacy content remains protected.
+- Cache trust requires a native current-user access boundary, not just
+  matching metadata: shared writable roots or foreign-owned pre-created
+  namespaces must never supply executable bytecode. The design includes
+  native ownership/permission and ancestor-substitution controls with a
+  no-write fallback, plus corresponding regression obligations.
