@@ -2,7 +2,7 @@
 
 [Canonical railroad effort](README.md#finite-full-title-source-lane-from-3581)
 
-- **Slice status:** Active (finite plan reviewed in #11952; parent scope is unchanged).
+- **Slice status:** Done (finite implementation merged in #11955; parent scope is unchanged).
 
 This is the bounded execution proposal for #3581's direct F1-F4/FV1-FV4
 lane inherited from #4413. The original issue explicitly permits independent
@@ -105,7 +105,7 @@ their authority.
   ordinary writers and full new-history retention without losing old data.
 - [x] I3: Qualify the actual current/prior receiver selection and legacy/new
   request behavior, including rollback and ambiguous-outcome no replay.
-- [ ] I4: Pass the affected consumer packet, required source guards and
+- [x] I4: Pass the affected consumer packet, required source guards and
   exact-head review/CI, merge and reconcile only the direct F/FV source lane.
 
 ## Validation Plan
@@ -129,7 +129,7 @@ their authority.
   data for ordinary status/title write and JSON/history readback. Disable
   resident activation and assert no operator records, bindings or services
   are touched. This proves first-use source behavior, not installation.
-- [ ] IV6: Run affected title/disposition/history/IPC and consumer regressions,
+- [x] IV6: Run affected title/disposition/history/IPC and consumer regressions,
   existing lint/install-contract/module/documentation guards and required CI.
   No exhaustive native/every-host matrix is added to required unit CI.
 
@@ -143,6 +143,32 @@ No native pane/session, real provider or productive title/binding operation is
 authorized by this plan; unavailable native rollout is not replaced by a fixture.
 
 ## Journal
+
+### 2026-11-11 - Finite source acceptance
+
+Implementation #11955 actually merged at 07:43:58 UTC as
+`d88eb80b58f511d8f96e627a0aeb680c6d092eb8`. The final head
+`1e757fd603c71175d50de1a672b87d2f20cd697f` received a genuine clean
+Comment review with no open findings; both High findings were explicitly
+resolved. The owner-authored clean-Comment policy applies, with the
+cross-version assessment recorded on the PR rather than claiming human review.
+Both review threads are resolved. Required CI runs `42980503565` and
+`42980549334` passed their guards, eligible units with coverage and PR gates;
+workflow-lockdown, source attribution and identifier checks also passed.
+
+The final affected source packet passes 347 cases, including YAML safe/C-safe
+loaders, prior-serializer sequential status writes, actual transport and
+fresh-profile CLI. The unchanged Manager projection consumer has 12 passing
+cases. Existing lint, install-contract, documentation, effort, module,
+changefile and whitespace guards passed. Only changed import-dependency
+digests were readmitted; the required packet's node/effect/coverage/budget
+contract was not expanded.
+
+This accepts only direct F1-F4/FV1-FV4. The parent stays Draft and #3581 stays
+Open: original binding/phase title rules, every current-slice/nudge clause,
+N/NV hosting, #3582 journal work and release/installed acceptance remain open
+with their existing owners. No installation or productive title/binding
+mutation was performed. Fixture CLI/transport proof is not native-host proof.
 
 ### 2026-11-11 - Whole-record compatibility on non-title saves
 
