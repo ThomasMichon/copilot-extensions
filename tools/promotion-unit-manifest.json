@@ -5357,7 +5357,7 @@
         "plugins/agent-worktrees/src/agent_worktrees/execution_spaces.py": "5c04fa80a2029b0d65e759950fe22a8eaff797913b677532b1a89dec9b743e6b",
         "plugins/agent-worktrees/src/agent_worktrees/git_errors.py": "caadfc46b1c7b8f52936f946c2cb9b7003a928c0defe7922f1371fdd4c926e6b",
         "plugins/agent-worktrees/src/agent_worktrees/checkout_data.py": "5c93382020d9f3e0f041d9aa599b1e877d2897c748634aa6b689a29d657db865",
-        "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": "71875cbee1f68675b43a2ff5aad3570c54777b4b511cc48bb01dfb777e7607ac",
+        "plugins/agent-worktrees/src/agent_worktrees/git_ops.py": "add5427dffc4f8251b1872d10e97d3763073172a97a3a3fe2543f247f82ceab3",
         "plugins/agent-worktrees/src/agent_worktrees/git_tree_diff.py": "e853a447a1daebe7ea5dd1ca43946269774b8866444145501f78ce01552a6020",
         "plugins/agent-worktrees/src/agent_worktrees/machine_instructions.py": "a0953814f08b643afba94887d527720421a7674e4522acab0916174af63e10ff",
         "plugins/agent-worktrees/src/agent_worktrees/obligations.py": "7ac1929a3543f98a50ed303bfb21d631346298eb202a33e3d0e0003b8dcc80ff",
