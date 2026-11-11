@@ -1,6 +1,7 @@
 """Exercise an already-built optional application; never install a runtime or SDK."""
 
 import asyncio
+from importlib.metadata import version
 import json
 import os
 from pathlib import Path
@@ -53,6 +54,7 @@ async def main():
     sdk_backend.require_sdk = lambda: (FixtureClient, RuntimeConnection)
     native_id = None
     facts = []
+    runtime_statuses = []
     permissions = []
     observations = []
     for incarnation in range(2 if mode == "plain" else 1):
@@ -81,6 +83,7 @@ async def main():
             await asyncio.gather(waiting, return_exceptions=True)
             state = json.loads(state_file.read_text(encoding="utf-8"))
             facts.append(state)
+            runtime_statuses.append((await clients[-1].get_status()).to_dict())
             (output / f"native-{incarnation}.json").write_text(json.dumps({
                 "pid": state["child_pid"], "helperPid": os.getpid(),
             }), encoding="utf-8")
@@ -263,6 +266,7 @@ async def main():
     assert len(clients) == len(sessions) == len(facts)
     (output / "result.json").write_text(json.dumps({
         "facts": facts, "sessionId": native_id, "permissions": permissions,
+        "runtimeStatuses": runtime_statuses, "sdkVersion": version("github-copilot-sdk"),
         "observations": observations,
     }), encoding="utf-8")
 
