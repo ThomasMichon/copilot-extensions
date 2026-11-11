@@ -247,7 +247,8 @@ def test_installed_cli_retains_inherited_source_anchor_separately_from_runner_cw
     tmp_path, monkeypatch,
 ):
     import update_driver
-    from worktree_manager import source_config
+    from update_driver.authority import UpdateAuthority
+    from worktree_manager import engine_client, source_config
 
     root, anchor, caller, worker = (tmp_path / name for name in (
         "manager", "source-anchor", "caller", "worker",
@@ -269,11 +270,13 @@ def test_installed_cli_retains_inherited_source_anchor_separately_from_runner_cw
         )
 
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: UpdateAuthority())
     monkeypatch.setattr(update_driver, "enqueue", enqueue)
     monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
         ("synthetic-python", "-m", module, *args), {},
     ))
     monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "")
     assert driver.cmd_update_request(["--detach"]) == 0
     spec, runner = seen["spec"], seen["runner"]
     assert spec.cwd == str(anchor) and runner.cwd == str(caller)

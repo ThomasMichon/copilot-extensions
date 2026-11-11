@@ -1,0 +1,9 @@
+{
+  "comment": "Isolate the inherited-source-anchor CLI regression from installed engine authority and controller discovery.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}
