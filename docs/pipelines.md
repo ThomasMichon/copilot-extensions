@@ -720,7 +720,8 @@ verification remain serial. Only the independent bundle attestations use up
 to four concurrent verifications, with the same pinned identities, read-only
 token and per-subject deadline. Every verification must pass and all workers
 are joined before the caller can publish or emit a success receipt.
-The CLI's exact Public Good verifier-initialization-unavailable error permits
+The CLI's exact Public Good verifier-initialization-unavailable error or
+`error creating Sigstore verifier: no valid Sigstore verifiers could be initialized` permits
 one explicitly logged retry with identical subject, identity constraints and
 read-only authority, sharing the original 120-second per-subject deadline.
 Signature, identity, policy and other failures are not retried; a second
