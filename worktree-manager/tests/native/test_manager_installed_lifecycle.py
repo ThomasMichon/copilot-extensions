@@ -378,6 +378,34 @@ def _events(path, owner):
     ]
 
 
+def _message_sequence(events):
+    labels = {
+        **{prompt: f"prompt-{index}" for index, prompt in enumerate(PROMPTS, 1)},
+        **{f"LIFECYCLE_REPLY_{index}": f"reply-{index}" for index in range(1, 5)},
+    }
+    messages = []
+    count = 0
+    for event in events:
+        if event["type"] not in ("user.message", "assistant.message"):
+            continue
+        count += 1
+        if len(messages) == 32:
+            continue
+        data = event["data"]
+        text = data.get("content")
+        encoded = text.encode("utf-8") if isinstance(text, str) else None
+        messages.append({
+            "type": event["type"], "fixture_label": labels.get(text) if encoded is not None else None,
+            "content_bytes": len(encoded) if encoded is not None else None,
+            "content_sha256": hashlib.sha256(encoded).hexdigest() if encoded is not None else None,
+            "context_handoff_prefix": isinstance(text, str) and text.startswith("[Context Handoff]"),
+            "system_reminder_envelope": isinstance(text, str) and text.startswith("<system_reminder>"),
+            "datetime_envelope": isinstance(text, str) and text.startswith("<current_datetime>"),
+            "source": data.get("source") if data.get("source") in ("user", "hook", "system", "cli") else None,
+        })
+    return {"messages": messages, "omitted": count - len(messages)}
+
+
 class _Witness:
     def __init__(
         self, root, env, manager_python, engine, copilot, budget, provider_requests=(),
@@ -1018,10 +1046,14 @@ print(json.dumps({"diagnostic":"failure-only-current-roster-before-teardown",
                     failure.add_note(f"Input diagnostic write: {write_error}")
             if self.turn_observation is not None:
                 try:
+                    if self.history is not None:
+                        self.turn_observation["message_sequence"] = _message_sequence(
+                            _events(self.history, Path(self.env["COPILOT_HOME"])),
+                        )
                     (self.root / "diagnostics" / "lifecycle-conversation.json").write_text(
                         json.dumps(self.turn_observation), encoding="utf-8",
                     )
-                except OSError as write_error:
+                except Exception as write_error:
                     if failure is None:
                         raise
                     failure.add_note(f"Conversation diagnostic write: {write_error}")
@@ -1620,6 +1652,28 @@ def test_fullsuite_launch_phase_preserves_core_turn_and_outer_deadlines(
         with pytest.raises(TimeoutError, match="Native conversation did not finish"):
             witness.turn(PROMPTS[0], 1, console)
     assert clock[0] == expected_clock
+
+
+@pytest.mark.parametrize("extra", ("private fixture text", "[Context Handoff] private fixture text"))
+def test_lifecycle_message_sequence_classifies_extras_without_retaining_content(extra):
+    events = [
+        {"type": "user.message", "data": {"content": PROMPTS[0]}},
+        {"type": "user.message", "data": {"content": extra, "source": "hook"}},
+        {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+        {"type": "assistant.message", "data": {"content": "LIFECYCLE_REPLY_1"}},
+    ]
+    projection = _message_sequence(events)
+    assert extra not in json.dumps(projection) and "private fixture text" not in json.dumps(projection)
+    assert [row["fixture_label"] for row in projection["messages"]] == [
+        "prompt-1", None, "reply-1", "reply-1",
+    ]
+    unknown = projection["messages"][1]
+    assert unknown["source"] == "hook"
+    assert unknown["content_bytes"] == len(extra.encode("utf-8"))
+    assert unknown["content_sha256"] == hashlib.sha256(extra.encode("utf-8")).hexdigest()
+    assert unknown["context_handoff_prefix"] is extra.startswith("[Context Handoff]")
+    bounded = _message_sequence(events * 10)
+    assert len(bounded["messages"]) == 32 and bounded["omitted"] == 8
 
 
 @pytest.mark.parametrize("rendered", [True, False])

@@ -1219,6 +1219,10 @@ escape sequences from a redraw stream is not itself a rendered-screen witness.
 Failure diagnostics retain bounded event-type counts and the private provider's
 request count, never inference request bodies. These distinguish an unfinished
 native turn from completed history whose reply has not rendered.
+The final message-sequence diagnostic retains at most 32 user/assistant labels,
+content sizes/hashes and fixed envelope/source classifications, not message
+text. Extra messages are diagnostic observations, not exemptions from the exact
+history-sequence assertions.
 Native-process observations retain pinned parent IDs, bounded option names,
 script basenames and the matching history's lock PIDs, never raw argument values.
 Failures retain the rendered Manager screen as well as the bounded stream tail.
@@ -10151,6 +10155,9 @@ has recorded readiness; constructor processes cannot consume the lifecycle
 record allowance. Scan failures retain at most eight exception types and
 HRESULTs and numeric CIM native/status codes, never exception messages or
 argument values, and still fail the lane.
+The census requests only its four consumed process properties. Scan-error
+samples also retain elapsed milliseconds and the record count at failure;
+query timeout, polling cadence and failure policy remain unchanged.
 The assembled Manager update retains a finite stderr allowance of 4 MiB per
 declared component plus Manager, rather than applying one component's 4 MiB
 capture to the entire suite. Other fixture calls and stdout keep their existing

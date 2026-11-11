@@ -194,7 +194,9 @@ def test_process_trace_scopes_birth_identity_and_omits_argument_values(tmp_path:
         "CreationDate=$birth;CommandLine=$line}};"
     ) if extra else ""
     prefix = (
-        "function Get-CimInstance {param($ClassName,$Filter,$OperationTimeoutSec);"
+        "function Get-CimInstance {param($ClassName,$Filter,$OperationTimeoutSec,$Property);"
+        "if(($Property -join ',') -ne 'ProcessId,ParentProcessId,CreationDate,CommandLine')"
+        "{throw 'Unexpected census projection'};"
         f"[IO.File]::WriteAllText('{str(stop).replace(chr(39), chr(39) * 2)}','stop');"
         "$birth=[DateTime]::Parse('2026-01-01T00:00:00Z');"
         f"$line='\"{str(interpreter).replace(chr(39), chr(39) * 2)}\" "
@@ -277,6 +279,8 @@ def test_process_trace_retains_sanitized_scan_failure_and_still_refuses(tmp_path
     assert trace["scan_errors"] == 1 and trace["stop_observed"]
     (failure,) = trace["scan_failures"]
     assert failure["type"] and isinstance(failure["hresult"], int)
+    assert isinstance(failure["elapsed_ms"], int) and failure["elapsed_ms"] >= 0
+    assert failure["records_at_failure"] == 0
     if cim:
         assert failure["type"] == "Microsoft.Management.Infrastructure.CimException"
         assert isinstance(failure["native_error_code"], int) and isinstance(failure["status_code"], int)

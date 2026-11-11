@@ -1608,3 +1608,40 @@ Documentation-impact review records the single shared Resume launch allowance
 and numeric diagnostics in TESTING.md. The next unchanged hosted matrix remains
 required for complete fresh actions, strict scan observation and settlement.
 No authentic upgrade, frozen enforcement, Main activation or rollout is claimed.
+
+### November 11 - Completed resumed turn, final sequence still refuses
+
+Required CI and exact-source run 43030233768's normal and repair cases pass at
+`4447ddb60cd5f1df26a9f05e7e0cfa4d00e89f89`. Fresh preparation and settlement
+pass. The shared Resume launch allowance now reaches the original conversation,
+replacement native owner and fourth provider-backed reply; its launch phase
+takes 32.7 seconds. The final exact sequence assertion still refuses acceptance.
+The history has seven user and five assistant messages, not four each, with
+five provider requests. Earlier rendered evidence contains a Context Handoff
+intervention and an extra first reply, but that does not establish the identity
+of every extra event. No event is ignored and no complete result is credited.
+
+Failure diagnostics now project at most 32 user/assistant events as fixture
+labels, content byte counts/hashes, fixed envelope flags and a closed source
+classification. They retain no message text and do not alter any sequence,
+owner or continuity assertion. Diagnostic-read errors preserve an already
+failing original exception. Focused controls retain duplicate reply labels,
+classify an unknown/known-prefix extra, omit its private text and bound output.
+
+The trace again fails, now with three CIM exceptions whose native and status
+codes are both generic failure (1). Its cause remains unproven. The census
+requests only the four process properties it consumes, reducing unnecessary
+provider serialization without filtering out any previously eligible process.
+Samples add elapsed milliseconds and record count at failure. The one-second
+query limit, 100-millisecond cadence, 512-record cap and fatal scan-error policy
+stay unchanged. Controls verify the exact requested projection, process-birth
+identity, bounded output and sanitized nonzero ordinary/CIM failure reports.
+
+All 16 focused diagnostic/deadline/trace controls and changed-source lint pass.
+Documentation-impact review updates TESTING.md's content-free sequence and scan
+diagnostics. The prior repair publication-proof refusal did not recur at this
+head; that alone does not establish its cause or repair, and its cooperative
+#11121 report remains open. The next exact-head hosted matrix must identify
+the extra history events and prove strict final sequence and scan success.
+Authentic upgrade, mandatory frozen enforcement and separate Main adoption
+remain open.
