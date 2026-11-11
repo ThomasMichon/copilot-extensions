@@ -1,15 +1,18 @@
 """Opt-in joined inventory reads in an actual native ACP session."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 from pathlib import Path
 import subprocess
+import threading
 import time
 
 import pytest
 
 from agent_procutil import no_window_kwargs
+from agent_procutil.owned_process import run_caller_owned
 from agent_remote_driver.session_host.osutil import pid_alive, process_start_time
 from test_headed_extension import _logs, offline_cli as offline_cli
 
@@ -121,61 +124,71 @@ writeFileSync(process.env.DRIVER_FIXTURE_OUTPUT, JSON.stringify({
     assert len(offline_cli.requests) == 1
 
 
-def test_native_public_sdk_headless_inventory(tmp_path, offline_cli):
+@pytest.mark.parametrize("timeout_helper", [False, True])
+def test_native_public_sdk_headless_inventory(tmp_path, offline_cli, timeout_helper):
     interpreter = os.environ.get("COPILOT_NATIVE_TEST_SDK_PYTHON")
     if not interpreter:
         pytest.skip("Select an isolated interpreter with a seasoned public Python SDK")
     assert Path(interpreter).is_absolute() and Path(interpreter).is_file()
     identity, pinned, output = (tmp_path / name for name in ("native.json", "pinned", "sdk.json"))
-    process = subprocess.Popen(
-        [
-            interpreter, str(Path(__file__).with_name("native_sdk_inventory_probe.py")),
-            offline_cli.executable, str(offline_cli.workspace), str(offline_cli.logs),
-            str(identity), str(pinned), str(output),
-        ],
-        cwd=offline_cli.workspace, env=offline_cli.env, stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE, text=True, encoding="utf-8", **no_window_kwargs(),
-    )
+    arguments = [
+        interpreter, str(Path(__file__).with_name("native_sdk_inventory_probe.py")),
+        offline_cli.executable, str(offline_cli.workspace), str(offline_cli.logs),
+        str(identity), str(pinned), str(output),
+    ]
+    settled = threading.Event()
+    if timeout_helper:
+        offline_cli.pause_response.set()
     identities = []
-    try:
-        birth = process_start_time(process.pid)
-        assert birth and pid_alive(process.pid)
-        identities.append((process.pid, birth))
-        deadline = time.monotonic() + 20
-        while time.monotonic() < deadline and process.poll() is None:
-            try:
-                native = json.loads(identity.read_text(encoding="utf-8"))
-                if native["helperPid"] != process.pid:
-                    birth = process_start_time(native["helperPid"])
-                    assert birth and pid_alive(native["helperPid"])
-                    identities.append((native["helperPid"], birth))
-                birth = process_start_time(native["pid"])
-                assert birth and pid_alive(native["pid"])
-                identities.append((native["pid"], birth))
-                pinned.write_text("pinned", encoding="utf-8")
-                break
-            except (FileNotFoundError, json.JSONDecodeError):
-                time.sleep(.025)
-        stdout, stderr = process.communicate(timeout=50)
-    finally:
-        if process.poll() is None:
-            process.terminate()
-            process.communicate(timeout=10)
-        deadline = time.monotonic() + 15
-        while time.monotonic() < deadline and any(
-            pid_alive(pid) and process_start_time(pid) == birth for pid, birth in identities
-        ):
-            time.sleep(.05)
-        assert all(
-            not pid_alive(pid) or (
-                (current := process_start_time(pid)) is not None and current != birth
-            ) for pid, birth in identities
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        execution = executor.submit(
+            run_caller_owned, arguments, timeout=20 if timeout_helper else 50,
+            max_stdout_bytes=128_000, max_stderr_bytes=128_000,
+            cwd=offline_cli.workspace, env=offline_cli.env, on_settled=settled.set,
         )
-    assert process.returncode == 0, stdout + stderr + _logs(offline_cli.logs)
+        try:
+            deadline = time.monotonic() + 20
+            while time.monotonic() < deadline and not execution.done():
+                try:
+                    native = json.loads(identity.read_text(encoding="utf-8"))
+                    for pid in (native["helperPid"], native["pid"]):
+                        birth = process_start_time(pid)
+                        assert birth and pid_alive(pid)
+                        identities.append((pid, birth))
+                    pinned.write_text("pinned", encoding="utf-8")
+                    break
+                except (FileNotFoundError, json.JSONDecodeError):
+                    time.sleep(.025)
+            if timeout_helper:
+                assert offline_cli.response_started.wait(10), "SDK model request did not begin"
+                with pytest.raises(subprocess.TimeoutExpired):
+                    execution.result(timeout=60)
+            else:
+                result = execution.result(timeout=65)
+        finally:
+            offline_cli.release_response.set()
+            try:
+                execution.result(timeout=65)
+            except subprocess.TimeoutExpired:
+                pass
+            assert settled.is_set(), "The owned native process scope did not settle"
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline and any(
+                pid_alive(pid) and process_start_time(pid) == birth for pid, birth in identities
+            ):
+                time.sleep(.05)
+            assert all(
+                not pid_alive(pid) or (
+                    (current := process_start_time(pid)) is not None and current != birth
+                ) for pid, birth in identities
+            )
+    assert len(identities) == 2 and identities[0][0] != identities[1][0]
+    assert len(offline_cli.requests) == 1
+    if timeout_helper:
+        assert not output.exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr + _logs(offline_cli.logs)
     observed = json.loads(output.read_text(encoding="utf-8"))
-    assert len({pid for pid, _ in identities}) == len(identities)
-    assert native["helperPid"] != native["pid"]
-    assert {native["helperPid"], native["pid"]}.issubset({pid for pid, _ in identities})
     assert observed["beforeTasks"]["tasks"] == observed["afterTasks"]["tasks"] == []
     assert observed["beforeSchedules"]["entries"] == observed["afterSchedules"]["entries"] == []
     assert observed["responseType"] == "assistant.message"

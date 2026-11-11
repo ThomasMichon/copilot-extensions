@@ -3115,6 +3115,10 @@ and schedules before and after the real model turn, checks the returned reply,
 then disconnects and retires the exact helper/native process births. No SDK
 private connection or process field is read. The SDK's Python requirement does
 not change Driver's runtime Python floor.
+Both successful and model-response-stalled runs use the existing caller-owned
+execution scope. The stalled case must time out, independently retire the
+helper and native child, and confirm whole-scope settlement without relying on
+the helper's shutdown code.
 
 These controls do not migrate Session Host from native ACP to an SDK adapter,
 qualify nonempty headless tasks/schedules or complete pending snapshots, enable
