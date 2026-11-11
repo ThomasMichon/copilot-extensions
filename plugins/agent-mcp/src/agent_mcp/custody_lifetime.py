@@ -63,8 +63,9 @@ class SessionOwner:
     """
 
     def __init__(self, pid: int, birth: str):
+        maximum_pid = (1 << (32 if os.name == "nt" else 31)) - 1
         if (
-            type(pid) is not int or pid <= 0 or not isinstance(birth, str)
+            type(pid) is not int or not 0 < pid <= maximum_pid or not isinstance(birth, str)
             or not birth or len(birth) > 256 or any(ord(char) < 33 for char in birth)
         ):
             raise ValueError("MCP session ownership requires an explicit PID and native birth")

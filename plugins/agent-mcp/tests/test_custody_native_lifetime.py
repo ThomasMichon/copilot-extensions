@@ -145,6 +145,8 @@ async def test_native_caller_jobs_and_session_owner_lifetime(
 
             home, fixed, config, env = await venue("survival")
             old_pid = await backend("old", home, fixed, config, env)
+            await fixture.check_owner_capabilities(slots["old"], root, env, home, selected=True)
+            await fixture.check_owner_capabilities(slots["new"], root, env, home, selected=False)
             setup, caller_job = caller("setup", home, fixed, config, env, breakaway=True)
             setup_record = await record(home / "setup.json")
             control = pin(setup_record["control"], setup_record["control_birth"])
@@ -220,6 +222,8 @@ async def test_native_caller_jobs_and_session_owner_lifetime(
             await asyncio.to_thread(shim_control.wait, 5)
             assert conduit.poll() is None and original_owner.poll() is None
             new_pid = await backend("new", home, fixed, config, env)
+            await fixture.check_owner_capabilities(slots["new"], root, env, home, selected=True)
+            await fixture.check_owner_capabilities(slots["old"], root, env, home, selected=False)
             sequence = 10
 
             async def inspect():

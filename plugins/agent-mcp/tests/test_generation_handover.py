@@ -113,6 +113,12 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
             try:
                 old, old_handle, old_pid = await backend("old")
                 old_birth = birth_identity(old_pid)
+                await fixture.check_owner_capabilities(
+                    slots["old"], root, environment, home, selected=True,
+                )
+                await fixture.check_owner_capabilities(
+                    slots["new"], root, environment, home, selected=False,
+                )
                 if keeper_start == "explicit":
                     await start("old", "keeper", keeper)
                     await fixture.eventually(lambda: request_via_socket(keeper, {"op": "ping"}))
@@ -135,6 +141,12 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 assert (await fixture.receive(held))["id"] == "server-approval"
                 incoming, new_handle, new_pid = await backend("new")
                 assert old_pid != new_pid
+                await fixture.check_owner_capabilities(
+                    slots["new"], root, environment, home, selected=True,
+                )
+                await fixture.check_owner_capabilities(
+                    slots["old"], root, environment, home, selected=False,
+                )
                 fresh, fresh_initialization = await client("new")
                 physical(fresh_initialization, "new", new_pid)
                 assert fresh_initialization["pid"] != initialization["pid"]
@@ -177,6 +189,12 @@ async def test_native_slots_reattach_original_conduit_without_reinitializing(
                 assert identity_state(keeper_pid, keeper_birth) == "matching"
                 assert incoming.returncode is None
                 rollback, rollback_handle, rollback_pid = await backend("old")
+                await fixture.check_owner_capabilities(
+                    slots["old"], root, environment, home, selected=True,
+                )
+                await fixture.check_owner_capabilities(
+                    slots["new"], root, environment, home, selected=False,
+                )
                 rolled_back = await fixture.eventually(
                     inspect, lambda value: value["pipeline_code"] == "old",
                 )

@@ -1,0 +1,9 @@
+{
+  "comment": "Expose read-only owner capability discovery from the selected physical runtime and reject non-native owner PIDs",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
