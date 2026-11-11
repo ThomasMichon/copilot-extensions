@@ -219,6 +219,12 @@ def validate(document: Any) -> dict[str, Any]:
     for observation in observations["owners"]:
         if observation["owner"]["machine"] not in machines:
             raise ContractError("owner observation references an unknown machine")
+        progress = observation.get("progress")
+        if progress is not None:
+            observed = timestamp(progress["observedAt"])
+            advanced = progress["lastAdvancedAt"]
+            if advanced is not None and timestamp(advanced) > observed:
+                raise ContractError("progress cannot advance after it was observed")
         assignment_id = observation["assignmentId"]
         if assignment_id is not None:
             assignment = assignments.get(assignment_id)

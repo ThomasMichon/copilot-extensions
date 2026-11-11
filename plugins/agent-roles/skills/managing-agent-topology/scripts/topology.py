@@ -7,6 +7,7 @@ import argparse
 import copy
 import json
 import sys
+from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -153,11 +154,39 @@ class Topology:
             "advisoryOnly": True, "nativeAdmissionRequired": True,
         }
 
+    def signals(self, observation: dict[str, Any] | None) -> dict[str, Any]:
+        """Report presence and progress beside coverage; neither qualifies a lane."""
+        liveness: dict[str, Any] = {"state": "unobserved", "fresh": False, "observedAt": None, "sourceRef": None}
+        progress: dict[str, Any] = {
+            "state": "unknown", "workRef": None, "blockingOwner": None, "observedAt": None,
+            "sourceRef": None, "sinceAdvancedSeconds": None, "reasons": [],
+        }
+        if observation is not None:
+            liveness.update(
+                state=observation["state"], fresh=self.fresh(observation),
+                observedAt=observation["observedAt"], sourceRef=observation["sourceRef"],
+            )
+        evidence = observation.get("progress") if observation is not None else None
+        if evidence is None:
+            progress["reasons"].append("progress-evidence-missing")
+        else:
+            progress.update({key: evidence[key] for key in ("workRef", "blockingOwner", "observedAt", "sourceRef")})
+            if not self.fresh(evidence):
+                progress["reasons"].append("progress-evidence-stale-or-future")
+            else:
+                progress["state"] = evidence["state"]
+                if evidence["lastAdvancedAt"] is not None:
+                    progress["sinceAdvancedSeconds"] = int(
+                        (self.at - timestamp(evidence["lastAdvancedAt"])).total_seconds()
+                    )
+        return {"liveness": liveness, "progress": progress}
+
     def coverage(self, role: dict[str, Any]) -> dict[str, Any]:
         qualified = []
         unqualified = []
         counted = set()
         native_counts: dict[str, int] = {}
+        progress_counts: Counter[str] = Counter()
         retaining_count = 0
         for assignment in self.assignments:
             if assignment["role"] != role["id"] or assignment["state"] in {"completed", "released"}:
@@ -165,6 +194,8 @@ class Topology:
             if linked(assignment, self.observations):
                 native = self.native_lane(assignment)
                 owner = native["owner"]
+                signals = self.signals(self.owners.get(owner_key(owner)) if owner else None)
+                progress_counts[signals["progress"]["state"]] += 1
                 if owner and owner_key(owner) in counted:
                     native["reasons"].append("owner-already-counted")
                     if native["status"] == "accepted":
@@ -177,13 +208,13 @@ class Topology:
                     qualified.append({
                         "assignment": assignment["id"], "owner": owner, "head": native["head"],
                         "headRevision": native["headRevision"], "nativeTask": native["nativeTask"],
-                        "nativeStatus": status,
+                        "nativeStatus": status, **signals,
                     })
                 else:
                     unqualified.append({
                         "assignment": assignment["id"], "reasons": native["reasons"],
                         "nativeTask": native["nativeTask"], "nativeStatus": status,
-                        "retainedOwner": owner, "holdReason": native["holdReason"],
+                        "retainedOwner": owner, "holdReason": native["holdReason"], **signals,
                     })
                 continue
             reasons = self.policy_reasons(self.machines[assignment["machine"]], role, assignment["kind"])
@@ -191,6 +222,8 @@ class Topology:
                 reasons.append("assignment-not-active")
             owner = assignment["nativeWorktree"]
             observation = self.owners.get(owner_key(owner)) if owner else None
+            signals = self.signals(observation)
+            progress_counts[signals["progress"]["state"]] += 1
             if not self.fresh(observation):
                 reasons.append("owner-evidence-stale-missing-or-future")
             if observation is None or observation["state"] not in LIVE_STATES or not observation["head"]:
@@ -210,17 +243,20 @@ class Topology:
             if owner and owner_key(owner) in counted:
                 reasons.append("owner-already-counted")
             if reasons:
-                unqualified.append({"assignment": assignment["id"], "reasons": reasons})
+                unqualified.append({"assignment": assignment["id"], "reasons": reasons, **signals})
             else:
                 assert observation is not None
                 counted.add(owner_key(owner))
-                qualified.append({"assignment": assignment["id"], "owner": owner, "head": observation["head"]})
+                qualified.append({
+                    "assignment": assignment["id"], "owner": owner, "head": observation["head"], **signals,
+                })
         return {
             "role": role["id"], "meaning": role["meaning"], "scope": role["scope"],
             "minimum": role["minimum"], "qualifiedCount": len(qualified),
             "shortfall": max(0, role["minimum"] - len(qualified)),
             "qualified": qualified, "unqualified": unqualified,
             "nativeStatusCounts": native_counts, "ownerRetainingCount": retaining_count,
+            "progressCounts": dict(progress_counts),
         }
 
     def overview(self) -> dict[str, Any]:
