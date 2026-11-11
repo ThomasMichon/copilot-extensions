@@ -26,7 +26,9 @@ behavior = sys.argv[3] if len(sys.argv) > 3 else "normal"
 def diagnostics():
     sys.stderr.write("x" * count)
     sys.stderr.flush()
-if behavior != "after" and not (behavior == "unsupported" and "--stream" not in sys.argv):
+if behavior not in ("after", "held-overflow") and not (
+    behavior == "unsupported" and "--stream" not in sys.argv
+):
     diagnostics()
 if behavior == "hang":
     time.sleep(30)
@@ -39,7 +41,7 @@ if behavior == "unsupported" and "--stream" in sys.argv:
 if behavior == "unsupported":
     print(json.dumps([{"id": "legacy"}]), flush=True)
     sys.exit(0)
-if behavior == "descendant":
+if behavior in ("descendant", "held-overflow"):
     subprocess.Popen(
         [sys.executable, "-c",
          "import sys,time; from pathlib import Path\n"
@@ -53,20 +55,33 @@ if kind == "list":
     print(json.dumps({"type": "row", "entry": {"id": "one"}}), flush=True)
 else:
     print(json.dumps({"type": "progress", "pct": 50, "msg": "half"}), flush=True)
+if behavior == "held-overflow":
+    from pathlib import Path
+    for _ in range(3000):
+        if Path(sys.argv[5]).exists():
+            break
+        time.sleep(.01)
+    diagnostics()
+    for _ in range(5):
+        print(json.dumps({"type": "delta", "entry": {"id": "one", "state": "late"}}), flush=True)
+        time.sleep(.05)
 print(json.dumps({"type": "done", "message": "finished"}), flush=True)
 if behavior == "after":
     diagnostics()
 '''
 
 
-def _runtime(tmp_path, kind, count, behavior="normal"):
+def _runtime(tmp_path, kind, count, behavior="normal", *, subscribe=False):
     script = tmp_path / "provider.py"
     script.write_text(_PROVIDER, encoding="utf-8")
     argv = [sys.executable, str(script), kind, str(count), behavior]
-    if behavior == "descendant":
+    if behavior in ("descendant", "held-overflow"):
         argv.append(str(tmp_path / "descendant-release"))
+    if behavior == "held-overflow":
+        argv.append(str(tmp_path / "overflow-trigger"))
     pivot = pivots.parse_manifest(
-        {"label": "Fixture", "list": argv, "entry": {"id": "id"}, "stream": True},
+        {"label": "Fixture", "list": argv, "entry": {"id": "id"},
+         "stream": True, "subscribe": subscribe},
         name="fixture", source_path=str(script),
     )
     runtime = tasks.RegisteredPivotRuntime(pivot)
@@ -351,3 +366,71 @@ def test_exited_provider_retains_stdout_reader_custody_until_actual_settlement(
         monkeypatch.setattr(tasks, "_kill_proc_tree", retire)
         runtime.close()
     _assert_settled(runtime)
+
+
+def test_stderr_failure_invalidates_only_its_read_before_blocked_stdout_settles(
+    tmp_path, monkeypatch,
+):
+    import time
+
+    runtime, _ = _runtime(
+        tmp_path, "list", stream_stderr.STDERR_LIMIT + 1,
+        "held-overflow", subscribe=True,
+    )
+    retire = tasks._kill_proc_tree
+    monkeypatch.setattr(tasks, "_kill_proc_tree", lambda _process: None)
+
+    def wait_for(predicate):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            if predicate():
+                return
+            time.sleep(.01)
+        assert predicate()
+
+    try:
+        runtime.ensure("captured")
+        wait_for(lambda: runtime.actions_ready(["captured"]))
+        with runtime._lock:
+            runtime._cache["other"] = ("ready", [{"id": "other"}], "")
+        (tmp_path / "overflow-trigger").touch()
+        wait_for(lambda: bool(runtime.fixture_children[0]._picker_stderr.error))
+        wait_for(lambda: runtime.get("captured")[0] == "error")
+        time.sleep(.4)
+        state, rows, error = runtime.get("captured")
+        assert state == "error" and "stderr output exceeded" in error
+        assert rows == [{"id": "one"}]
+        assert not runtime.actions_ready(["captured"])
+        assert runtime.actions_ready(["other"])
+        assert runtime._procs and "captured" in runtime._inflight
+        drain = runtime.fixture_children[0]._picker_stderr
+        with runtime._lock:
+            runtime._scope_generations["captured"] = 1
+            runtime._cache["captured"] = ("ready", [{"id": "replacement"}], "")
+        drain._on_failure("late failure from the retired generation")
+        assert runtime.get("captured") == ("ready", [{"id": "replacement"}], "")
+        assert runtime.actions_ready(["other"])
+    finally:
+        (tmp_path / "descendant-release").touch()
+        (tmp_path / "overflow-trigger").touch()
+        monkeypatch.setattr(tasks, "_kill_proc_tree", retire)
+        runtime.close()
+    _assert_settled(runtime)
+
+
+def test_stderr_failure_before_handler_registration_is_not_lost():
+    import io
+
+    retired, messages = [], []
+    process = SimpleNamespace(
+        stderr=io.BytesIO(b"x" * (stream_stderr.STDERR_LIMIT + 1)),
+    )
+    drain = stream_stderr.StreamStderr(process, lambda: retired.append(True))
+    drain.start()
+    drain.thread.join(timeout=2)
+    try:
+        assert retired and drain.error
+        drain.on_failure(messages.append)
+        assert len(messages) == 1 and "stderr output exceeded" in messages[0]
+    finally:
+        assert drain.finish()

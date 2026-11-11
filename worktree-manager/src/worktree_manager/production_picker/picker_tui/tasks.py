@@ -47,7 +47,7 @@ from .configuration_context import run_list
 from .pivots import RegisteredPivot, format_template, parse_list_payload as parse_list_payload
 from .pivot_requests import PivotRequestsMixin
 from .registered_scopes import action_scopes
-from .stream_stderr import StreamStderr, close_streams, settle_stream
+from .stream_stderr import StreamStderr, close_streams, settle_stream, watch_list_failure
 
 #: Hard cap on how long a pivot's ``list``/action command may run.
 LIST_TIMEOUT = 20.0
@@ -448,16 +448,9 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
         arrive so the render loop paints progressively and (with ``subscribe``)
         live-updates.
 
-        Envelope (line-delimited, one JSON object per flushed line):
-
-        * ``begin`` -- optional roster hint (``count``); no cache effect.
-        * ``row`` / ``entry`` -- an entry object (under ``entry``/``row``/``wt``
-          or inline); accumulated by the pivot's ``id_field``. The first row
-          flips the cache to ``ready``.
-        * ``summary`` -- the D1 header-line substitution source.
-        * ``delta`` -- an entry to add/replace in place (keyed by ``id_field``).
-        * ``removed`` -- drop the entry named by ``id`` (or the entry's id).
-        * ``done`` -- terminal success. ``error`` -- terminal failure (``message``).
+        Flushed ``row``/``entry``/``delta`` frames accumulate by ``id_field``;
+        ``removed`` deletes an entry and ``summary`` supplies substitutions.
+        ``begin`` is only a hint; ``done``/``error`` carry terminal status.
 
         Falls back to the one-shot :meth:`_exec_list` when the provider's
         argparse rejects ``--stream`` (an older CLI) or emits a plain JSON array
@@ -496,6 +489,9 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
             self._subscribe_live[machine] = False
             self._finish(machine, ("error", [], str(exc)[:200]), {})
             return
+        watch_list_failure(
+            self, proc, machine, getattr(self._request_context, "generation", None),
+        )
 
         by_id: dict[str, dict] = {}
         order: list[str] = []
@@ -519,7 +515,11 @@ class RegisteredPivotRuntime(PivotRequestsMixin):
                     return
                 with self._lock:
                     generation = getattr(self._request_context, "generation", None)
-                    if not self._generation_matches(machine, generation):
+                    drain = getattr(proc, "_picker_stderr", None)
+                    if (
+                        drain is not None and drain.failed.is_set()
+                        or not self._generation_matches(machine, generation)
+                    ):
                         return
                     self._cache[machine] = ("ready", [by_id[i] for i in order], "")
                     self._summaries[machine] = dict(summary)

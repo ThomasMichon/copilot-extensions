@@ -121,6 +121,11 @@ An unsettled child, stdout pipe or reader remains tracked rather
 than being reported as successfully cleaned up. Older consumers can still block
 on a pipe-filling diagnostic burst; unchanged provider frames alone cannot fix
 that consumer defect.
+An observed diagnostic failure immediately marks only its captured read scope
+and generation failed, retaining rows for inspection and blocking actions before
+cleanup can wait on stdout. Later frames cannot republish that failed read as
+ready, and a late failure from a superseded generation cannot poison its
+replacement. Child and reader custody remain with the original cleanup owner.
 View-wide executable actions remain unavailable until the consumer has a successful current
 read with no replacement pending. Confirmation and final command dispatch
 recheck the captured scopes, including queued synchronous, progress, Configuration

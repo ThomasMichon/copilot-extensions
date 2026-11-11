@@ -89,6 +89,24 @@ healthy or that a productive configuration was changed.
 
 ## Journal
 
+### 2026-11-11 - Review correction: invalidate failed reads before cleanup
+
+The next review accepts the stdout-custody correction and identifies a second
+valid High finding: a held read that already published rows can remain ready
+after stderr overflow while stdout prevents final cleanup from returning.
+A real held-provider/descendant control fails first on the missing immediate
+error transition.
+
+The list consumer now registers a captured-scope/generation failure callback,
+including replay when diagnostics failed before registration. Notification
+precedes potentially blocking retirement. It retains inspection rows but marks
+the current read failed immediately, and a failure fence prevents queued frames
+from restoring ready state. Superseded-generation failures and unrelated scopes
+remain inert. Native process/reader custody stays retained until cleanup.
+All 127 affected cases pass, including late frames, generation skew, fast
+reader failure and retained cleanup. The corrected thread, fresh final review
+and exact-head CI remain the publication gates.
+
 ### 2026-11-11 - Review correction: retain stdout-reader custody
 
 Review #12141 identified a valid High finding: an exited provider and settled

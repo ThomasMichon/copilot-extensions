@@ -13,6 +13,9 @@ class StreamStderr:
         self.output = bytearray()
         self.error = ""
         self.started = False
+        self.failed = threading.Event()
+        self._failure_lock = threading.Lock()
+        self._on_failure = None
         self.consumer_finished = threading.Event()
         self.settle_lock = threading.Lock()
         self.thread = threading.Thread(
@@ -29,11 +32,26 @@ class StreamStderr:
             self._fail(f"stderr reader could not start: {exc}")
 
     def _fail(self, message):
-        self.error = message
+        with self._failure_lock:
+            self.error = message
+            self.failed.set()
+            handler = self._on_failure
+        if handler is not None:
+            try:
+                handler(message)
+            except Exception as exc:
+                self.error += f"; failure notification failed: {exc}"
         try:
             self.retire()
         except Exception as exc:
             self.error += f"; child retirement failed: {exc}"
+
+    def on_failure(self, handler):
+        with self._failure_lock:
+            self._on_failure = handler
+            error = self.error
+        if error:
+            handler(error)
 
     def _read(self):
         try:
@@ -143,3 +161,19 @@ def _stdout_closed(process):
         (pipe is None or pipe.closed)
         and (reader is None or not reader.is_alive())
     )
+
+
+def watch_list_failure(runtime, process, machine, generation):
+    drain = getattr(process, "_picker_stderr", None)
+    if drain is None:
+        return
+
+    def failed(message):
+        with runtime._lock:
+            if runtime._closed.is_set() or not runtime._generation_matches(machine, generation):
+                return
+            rows = runtime._cache.get(machine, ("idle", [], ""))[1]
+            runtime._cache[machine] = ("error", rows, message[:200])
+            runtime._subscribe_live[machine] = False
+
+    drain.on_failure(failed)
