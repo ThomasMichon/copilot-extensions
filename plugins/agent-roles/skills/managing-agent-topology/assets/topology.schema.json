@@ -240,7 +240,22 @@
         "role": {"$ref": "#/$defs/nullableText"},
         "scope": {"$ref": "#/$defs/nullableText"},
         "acceptedCharterRevision": {"type": ["integer", "null"], "minimum": 1},
-        "acceptanceRef": {"$ref": "#/$defs/nullableText"}
+        "acceptanceRef": {"$ref": "#/$defs/nullableText"},
+        "progress": {"$ref": "#/$defs/progressObservation"}
+      }
+    },
+    "progressObservation": {
+      "type": ["object", "null"],
+      "description": "Optional dated evidence of the owner's current work, separate from presence and acceptance. It is reported beside coverage and never qualifies, routes or grants anything.",
+      "additionalProperties": false,
+      "required": ["observedAt", "sourceRef", "state", "workRef", "lastAdvancedAt", "blockingOwner"],
+      "properties": {
+        "observedAt": {"$ref": "#/$defs/text"},
+        "sourceRef": {"$ref": "#/$defs/text"},
+        "state": {"enum": ["advancing", "waiting", "blocked", "complete", "unknown"]},
+        "workRef": {"$ref": "#/$defs/nullableText"},
+        "lastAdvancedAt": {"$ref": "#/$defs/nullableText"},
+        "blockingOwner": {"$ref": "#/$defs/nullableText"}
       }
     },
     "dispatchObservation": {

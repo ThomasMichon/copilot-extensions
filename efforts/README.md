@@ -19,6 +19,7 @@ rewriting historical journal evidence or treating a source merge as rollout.
 
 | Effort | Status | Coordination |
 |--------|--------|--------------|
+| [Topology Dispatcher Integration](active/topology-dispatcher-integration/README.md) | Active; Phase 1 liveness/progress evidence in review; native standing join, assignment flow, routing, reconciliation and admission open | #12009; Worktrees, Bridge and Dispatch custody retained; source-only, no fleet activation |
 | [Latest Waiting Update](active/latest-waiting-update/README.md) | Draft; latest-wins admission proposal before code | #11985 under #7758; existing execution, component provisioning and maintenance owners retained; no rollout |
 | [Launch Observation Regressions](active/launch-observation-regressions/README.md) | Active; legacy mux caller corrections and readiness-only scope proposal | #11722; preserves #11564/#11718 mux owners, admission and operational holds; no rollout |
 | [Derived Disk Hygiene](active/derived-disk-hygiene/README.md) | Active; bytecode, scratch and claim-engine slices merged; guided cleanup delivery, producer/lock integration and rollout observation remain | #10968/#10965/#10966/#10967; independent per-track PRs, no automatic finalize deletion or unapproved cleanup/rollout |

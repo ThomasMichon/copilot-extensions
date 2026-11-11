@@ -104,6 +104,9 @@ they are unlimited.
    A successful launch receipt alone does not establish that. For a Dispatch-linked
    standing assignment, use its native accepted materialization and original
    relationship instead of copying acceptance into assignment fields.
+   Every coverage entry also reports owner `liveness` and dated `progress`
+   evidence (see [owner progress evidence](references/adapters-and-recovery.md#owner-progress-evidence));
+   neither qualifies, counts nor routes a lane.
 
 ## Relay adjustments and inquiries
 

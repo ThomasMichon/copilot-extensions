@@ -92,6 +92,27 @@ materialization. A null dispatcher or missing dispatcher custody holds placement
 and routes; it does not erase valid observed coverage. Without the optional array,
 legacy assignments continue using their existing acceptance evidence.
 
+## Owner progress evidence
+
+An owner observation may carry an optional saved `progress` read: `observedAt`,
+`sourceRef`, `state` (`advancing`, `waiting`, `blocked`, `complete` or `unknown`),
+`workRef`, `lastAdvancedAt` and `blockingOwner`. It comes from the adopter's
+existing native readers or an assigned `monitor-agent-fleet` analysis, never a
+new poller. `lastAdvancedAt` cannot follow its own `observedAt`.
+
+Each qualified and unqualified coverage entry reports `liveness` (the owner
+observation's state, freshness, time and source, or `unobserved`) beside
+`progress`, and each role reports `progressCounts`. Missing, stale or
+future-dated progress is `unknown` with an explicit reason, retaining any
+last-known work and blocking-owner references for reconciliation.
+`sinceAdvancedSeconds` is derived only from fresh evidence.
+
+Presence, acceptance and progress stay separate. Advancing progress does not
+qualify a reserved, held or unreachable lane, and blocked or stalled progress does
+not unqualify an accepted one or authorize replacement. Use these fields to
+report material progress and the blocking owner, then observe or escalate
+through the rightful owner.
+
 ## State and effect protocol
 
 Persist intent under the existing native single writer, using the adopter's
