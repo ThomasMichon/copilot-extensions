@@ -514,11 +514,27 @@ JSON object with exactly these fields:
 }
 ```
 
-`version` must be integer 1, `token` a nonempty string, `summary` a string,
+`version` must be integer 1 or 2, `token` a nonempty string, `summary` a string,
 `effects` an array of strings, and `findings` an array of code/severity/message
 string records. Findings use `error`, `warning`, or `info`. The returned target
-must equal the row target, scope must be `machine-local`, and operation must
-be `set` or `reset`. Malformed/unsupported output, a target mismatch, nonzero
+must equal the row target. Version 1 retains `scope: "machine-local"` and
+operation `set` or `reset`. Version 2 uses the same exact fields with
+`scope: "remote-repository"` and operation `create` or `protect-default`.
+These pairs cannot be mixed; the confirmation renders the actual scope and
+operation rather than labeling remote effects as machine-local. The outer form
+manifest remains version 1. This receiver support does not itself expose a
+remote action, implement a provider transaction or grant creation/policy authority.
+
+Providers must qualify their own executing runtime's operation support before
+offering new syntax. A Manager predating preview version 2 rejects that proposal
+before Apply; it cannot safely receive a version-1 proposal mislabeled local as
+a fallback. New Managers preserve version-1 local providers. Missing or
+rolled-back provider support leaves only the optional operation unavailable,
+without replaying an effectful command or disabling existing local forms.
+The [private knowledge-creation plan](../../efforts/active/worktree-manager-control-plane/phase-5-private-knowledge-creation.md)
+retains the separate native provider, protection-completion and consumer work.
+
+Malformed/unsupported output, a target mismatch, nonzero
 exit, timeout, or error finding blocks Apply. Failure is visible and retryable.
 Warnings, target, effects, and collected non-secret values are displayed before
 consent; Cancel is focused initially. Edit preserves in-memory values but
@@ -536,9 +552,12 @@ The token is a stale-proposal check, not a credential. Under its shared mutation
 serialization, the provider must revalidate authority, exact target, operation,
 normalized values and all relevant source/local baselines before writing.
 Conflicts require fresh preview and consent, never an automatic broadened retry.
-Reset removes the supported local override and restores current inheritance;
+Version-1 reset removes the supported local override and restores current inheritance;
 it never persists a copy of an inherited value. Provider code owns these writes,
-not the Manager. Browse, refresh, preview, edit and cancel must not create state,
+not the Manager. Version-2 providers retain their own remote target/account,
+confirmation, partial-effect and unknown-outcome recovery contract. A preview
+token never authorizes replay after uncertain remote acceptance.
+Browse, refresh, preview, edit and cancel must not create state,
 ensure a daemon, reserve work or launch agents. The provider must redact secrets
 before emitting rows, fields, previews, diagnostics, receipts, or argv values;
 this is not a secret editor. Apply uses the existing full stdout/stderr/exit

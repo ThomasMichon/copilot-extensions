@@ -74,6 +74,7 @@ class ConfigurationPreview:
     summary: str
     effects: tuple[str, ...]
     findings: tuple[PreviewFinding, ...]
+    scope: str = "machine-local"
 
     @property
     def blocked(self) -> bool:
@@ -81,7 +82,7 @@ class ConfigurationPreview:
 
     def describe(self) -> str:
         lines = [
-            self.summary, "", f"Operation: {self.operation}", "Scope: machine-local",
+            self.summary, "", f"Operation: {self.operation}", f"Scope: {self.scope}",
             *(f"{key}: {value}" for key, value in self.target.items()),
             "", "Effects:", *self.effects,
         ]
@@ -105,8 +106,8 @@ def parse_configuration_preview(output: str, expected_target: object) -> Configu
     data = json.loads(output, object_pairs_hook=pairs)
     keys = {"version", "token", "target", "scope", "operation", "summary", "effects", "findings"}
     if not isinstance(data, dict) or set(data) != keys:
-        raise ValueError("Preview must be a version-1 JSON object with the exact contract fields")
-    if type(data["version"]) is not int or data["version"] != 1:
+        raise ValueError("Preview must be a JSON object with the exact contract fields")
+    if type(data["version"]) is not int or data["version"] not in (1, 2):
         raise ValueError("Unsupported Configuration preview version")
     token = data["token"]
     if not isinstance(token, str) or not token.strip():
@@ -114,8 +115,12 @@ def parse_configuration_preview(output: str, expected_target: object) -> Configu
     target = configuration_target(data["target"])
     if target != configuration_target(expected_target):
         raise ValueError("Preview target differs from the selected Configuration row")
-    if data["scope"] != "machine-local" or data["operation"] not in ("set", "reset"):
-        raise ValueError("Preview requires machine-local scope and a set/reset operation")
+    scope, operations = (
+        ("machine-local", ("set", "reset")) if data["version"] == 1 else
+        ("remote-repository", ("create", "protect-default"))
+    )
+    if data["scope"] != scope or data["operation"] not in operations:
+        raise ValueError("Preview scope and operation do not match its contract version")
     if not isinstance(data["summary"], str):
         raise ValueError("Preview summary must be a string")
     effects = data["effects"]
@@ -136,5 +141,5 @@ def parse_configuration_preview(output: str, expected_target: object) -> Configu
             raise ValueError("Malformed Configuration preview finding")
         parsed.append(PreviewFinding(**finding))
     return ConfigurationPreview(
-        token, target, data["operation"], data["summary"], tuple(effects), tuple(parsed),
+        token, target, data["operation"], data["summary"], tuple(effects), tuple(parsed), scope,
     )
