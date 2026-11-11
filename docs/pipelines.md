@@ -2005,7 +2005,9 @@ declared copies. Explicit receiver bumps are retained rather than applied
 twice; self-references and cycles do not repeat a bump. Without a new bump
 intent, merely carrying a consumed changefile into another promotion does
 not trigger this propagation. This keeps changed bundled release metadata
-from silently reusing the receiver's immutable runtime version.
+from silently reusing the receiver's immutable runtime version. Receiver
+metadata and asset declarations retain the existing contained,
+non-indirect version-path guard before allocation.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

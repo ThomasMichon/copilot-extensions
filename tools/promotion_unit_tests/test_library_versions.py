@@ -123,6 +123,24 @@ def test_packaged_manifest_bumps_close_cycles_and_reach_standalone(library):
     assert acc.compute({}) == {}
 
 
+@pytest.mark.parametrize("kind", ["root", "version", "assets"])
+def test_indirect_packaged_version_receiver_refuses(library, monkeypatch, kind):
+    _packaged_projects(library)
+    receiver = library / "plugins/receiver"
+    assets = receiver / "packaged-assets.json"
+    assets.write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "plugins", "payloadDir": "src/bundle",
+        "files": ["producer/plugin.json"],
+    }), encoding="utf-8")
+    linked = {"root": receiver, "version": receiver / "plugin.json", "assets": assets}[kind]
+    original = type(linked).is_symlink
+    monkeypatch.setattr(type(linked), "is_symlink", lambda path: path == linked or original(path))
+
+    with pytest.raises(acc.VersionError, match="unsafe library version"):
+        acc.compute({"producer": ["patch"]})
+
+
 def test_library_apply_failure_is_not_accepted(library):
     copy = library / "plugins/example/libs/agent-procutil/pyproject.toml"
     copy.write_text("[project]\nname='agent-procutil'\n", encoding="utf-8")

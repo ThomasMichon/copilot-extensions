@@ -386,6 +386,9 @@ def _include_packaged_version_receivers(result: dict[str, tuple[str, str]]) -> N
         if (path / "plugin.json").is_file()
     } if PLUGINS_DIR.is_dir() else {}
     roots.update({name: REPO / name for name in iter_standalone_consumer_names()})
+    for root in roots.values():
+        for filename in ("plugin.json", "pyproject.toml", *assets.MANIFEST_NAMES):
+            _check_library_path(root / filename)
     version_sources = {
         (root / filename).relative_to(REPO).as_posix(): name
         for name, root in roots.items()
