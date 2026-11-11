@@ -10,7 +10,7 @@ queued installer code.
 - **Repo:** copilot-extensions
 - **Branch(es):** independent proposal and implementation PRs against `dev`
 - **Created:** 2026-11-10
-- **Status:** Active
+- **Status:** Done
 - **Vision:** [single installation execution owner](../../../visions/installer/README.md#single-installation-execution-owner);
   [authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #11985
@@ -86,7 +86,7 @@ The following implementation decomposition is agent-recommended.
   callers must terminate honestly, including across restart and version skew.
   Prefer the existing terminal nonzero result contract over a new schema/CLI
   when it expresses the outcome completely.
-- [ ] Update owning API/consumer documentation, release metadata and this
+- [x] Update owning API/consumer documentation, release metadata and this
   journal; pass review and required CI and confirm release publication.
 
 ## Validation Plan
@@ -105,7 +105,7 @@ These controls are agent-recommended and must exercise the actual owner.
 - [x] Exercise the real supported submission/observation consumer seam and
   focused clean-room/native fixtures where applicable, documenting unavailable
   tiers explicitly. No production host mutation as a test side effect.
-- [ ] Record reviewed source merge and actual promoted release separately;
+- [x] Record reviewed source merge and actual promoted release separately;
   close this bounded effort only when its source/contract gates are resolved.
   Host rollout and installed incoming-readiness/current-selection proof remain
   with each explicitly authorized adopter, not implicitly granted by this plan.
@@ -118,6 +118,34 @@ or CLI change. No daemon, scheduler, credential path, global auth change or
 expansion of required CI is introduced.
 
 ## Journal
+
+### 2026-11-11 - Actual release verified; bounded source effort complete
+
+- Automatic promotion run42946279514 completed successfully, including frozen
+  candidate installed-TTY and Windows startup qualification, source-unit
+  coverage, attestation, publication/readback and exact-head merge.
+- Its generated #12018 merged to `main` as
+  `3c6449997a8afc18ddd1d9b9043cd3c82e033759`. The recorded Dev source
+  `ed944e3bfe7efaf0690ac7b78349a56a8599a07d` contains #11997's merge.
+  The released canonical queue core, pending-selection helper, engine adapter
+  and Manager adapter blobs exactly match the reviewed implementation.
+- All Plan and Validation Plan items for this bounded source behavior are
+  resolved. Installation, host pending-request disposition and incoming
+  readiness/current-selection acceptance remain separately authorized adopter
+  obligations; this source effort performed none of those host effects.
+
+### 2026-11-11 - Reviewed source merged; release pending
+
+- #11997 merged as `2a9679b4c1b48bf4600340f9d8413525909aaa3b` after
+  current-head Copilot approval, resolved review threads and green required CI.
+- Exact reviewed head `033b346556ca0b6c1338f53550937a78ec07c1d0` passed hosted
+  native run42944828014: Windows 83 passed/three platform skips and Linux
+  84 passed/two platform skips, including latest-wins/caller-loss and original
+  coalescing/independent-project controls. Declared source-retention checks
+  passed on both platforms. Local adapter packets passed 238 cases; the
+  expanded two-directory borrowed re-entry control also passed separately.
+- Actual promotion to `main` remains open; source merge is not release or
+  adopter installation. No host queue or installation was changed.
 
 ### 2026-11-10 - Reviewed proposal and implementation
 
