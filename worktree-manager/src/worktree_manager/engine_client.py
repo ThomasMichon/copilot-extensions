@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import shlex
 import subprocess
 import sys
@@ -196,37 +195,6 @@ def engine_available() -> bool:
         return False
 
 
-def _legacy_controller_error(project: str | None, proc) -> EngineError | None:
-    """Recognize only fixed downlevel diagnostics, never arbitrary stdout."""
-    if proc.returncode != 1:
-        return None
-    stdout, stderr = (proc.stdout or "").strip(), (proc.stderr or "").strip()
-    if stdout and stderr:
-        return None
-    detail = _error_from_envelope(stdout) or stdout or stderr
-    if len(detail) > 4096:
-        return None
-    detail = re.sub(r"\x1b\[[0-9;]*m", "", detail).strip()
-    if detail.startswith("\u2717 "):
-        detail = detail[2:].lstrip()
-    if detail in {
-        "Unknown key: 'update-controller'",
-        "Unknown key: 'update-controller'. Use 'get keys' to list available keys.",
-    }:
-        return EngineFeatureUnavailable(
-            "the selected engine cannot determine the project update controller; "
-            "use the configured source's supported engine setup or recovery, then retry"
-        )
-    if project is None and detail in {
-        "Could not resolve a project for 'get'.",
-        "Cannot load config: No active project could be resolved. agent-worktrees discovers "
-        "its context from the current directory (like git); run from inside a managed repo or "
-        "worktree, or pass --project <name>.",
-    }:
-        return EngineError("No active project could be resolved")
-    return None
-
-
 def _run(
     project: str | None,
     args: list[str],
@@ -290,7 +258,8 @@ def _run(
     except OSError as e:
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
     if args == ["get", "update-controller"]:
-        legacy_error = _legacy_controller_error(project, proc)
+        from .project_update_controller import legacy_controller_error
+        legacy_error = legacy_controller_error(project, proc)
         if legacy_error is not None:
             raise legacy_error
     if preserve_failure_detail and allow_nonzero:
