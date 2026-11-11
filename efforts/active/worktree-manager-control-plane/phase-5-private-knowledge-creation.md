@@ -271,3 +271,10 @@ installation/project/repository identity while previews retain runtime
 freshness. Repair remains incomplete until safeguards are reverified, and
 inspection failures preserve original creation evidence plus any available
 current metadata. These fix concrete recovery failures, not just review shape.
+
+The final identity controls compare inspection with the confirmed original
+repository ID/default branch and normalize repository slugs without folding
+branch names. The complete provider, credential and native-owner selection
+passes 91 cases, including case-equivalent protection repair and paginated
+policy reads. Original creation and current observations remain distinct when
+the provider identity or default branch drifts.

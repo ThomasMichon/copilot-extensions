@@ -46,6 +46,7 @@ def selected(native, monkeypatch):
         if state["failure"] == "credential":
             return SimpleNamespace(returncode=9, stdout="", stderr=SECRET)
         route = next(argument for argument in args if argument.startswith("https://"))
+        route = route.replace("/repos/Selected/Knowledge", "/repos/selected/knowledge")
         status, body = 200, {}
         if route.endswith("/user"):
             body = {"login": state["login"]}
@@ -87,10 +88,10 @@ def selected(native, monkeypatch):
     return state
 
 
-def worker(mode, *, operation="create", token=None, receipt=""):
+def worker(mode, *, operation="create", token=None, receipt="", url=URL):
     budget = OwnedExecutionBudget.from_timeout(30, cleanup_reserve=2)
     return creation._worker({
-        "project": "sample", "url": URL, "operation": operation, "mode": mode,
+        "project": "sample", "url": url, "operation": operation, "mode": mode,
         "token": token, "receipt": receipt, "deadline": budget.deadline, "cleanup_reserve": 2,
     })
 
@@ -405,6 +406,37 @@ def test_read_only_inspection_distinguishes_prior_success_from_current_missing_p
     assert observed["observed_safeguards"]["status"] == "missing"
     assert receipts.read("sample", completed["receipt"])["status"] == "created"
     assert tree(native) == before and len(mutations(selected)) == 2
+
+
+@pytest.mark.parametrize("drift", ["id", "default_branch"])
+def test_read_only_inspection_retains_original_identity_when_current_repository_drifts(native, selected, monkeypatch, drift):
+    completed = worker("apply", token=worker("preview")["token"])
+    original = creation.provider.repository
+
+    def changed(*args, **kwargs):
+        return {**original(*args, **kwargs), drift: 999 if drift == "id" else "new-default"}
+
+    monkeypatch.setattr(creation.provider, "repository", changed)
+    before = tree(native)
+    result = worker("preview", operation="inspect", receipt=completed["receipt"])
+    assert result["status"] == "incomplete" and result["prior_status"] == "created"
+    assert result["repository"] == completed["repository"]
+    assert result["observed_repository"][drift] != result["repository"][drift]
+    assert result["observation_failure"]["code"] == "creation-target-changed"
+    assert tree(native) == before and len(mutations(selected)) == 2
+
+
+def test_equivalent_github_url_casing_remains_inspectable_and_repairable(native, selected):
+    completed = worker("apply", token=worker("preview")["token"])
+    selected["protected"] = False
+    alternate = "https://github.com/Selected/Knowledge"
+    reference = completed["receipt"]
+    inspected = worker("preview", operation="inspect", receipt=reference, url=alternate)
+    assert inspected["observed_repository"] == completed["repository"]
+    proposed = worker("preview", operation="protect-default", receipt=reference, url=alternate)
+    result = worker("apply", operation="protect-default", receipt=reference, url=alternate, token=proposed["token"])
+    assert result["status"] == "protected" and result["receipt"] == reference
+    assert result["repository"] == completed["repository"] and len(mutations(selected)) == 3
 
 
 def test_actual_worker_timeout_reaps_console_descendant_and_never_replays(native, monkeypatch):

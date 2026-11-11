@@ -165,8 +165,10 @@ def test_policy_drift_and_repository_replacement_are_refused(account):
         provider.safeguards(selected, expected)
 
 
-def test_complete_policy_pages_are_read_without_following_arbitrary_links(account):
+@pytest.mark.parametrize("slug", ["selected/knowledge", "Selected/Knowledge"])
+def test_complete_policy_pages_are_read_without_following_arbitrary_links(account, slug):
     selected, state = account
+    selected.repository = slug
     ruleset(state)
     rules = state["rules"]
     state["pages"] = {

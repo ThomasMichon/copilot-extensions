@@ -229,6 +229,10 @@ current observation failures. They report incomplete inspection without
 changing the stored original outcome. Protection repair starts incomplete even
 from a formerly successful receipt, including the record saved before its
 POST, and becomes successful only after final verified safeguards.
+Inspection also compares current metadata with a confirmed creation's original
+repository ID and default branch; drift is incomplete, not another protected
+creation. Repository slugs use GitHub's case-insensitive identity in stored and
+observed metadata, while IDs and default-branch names remain exact.
 
 Preview/inspection and apply use aggregate 18/26-second budgets with a
 two-second cleanup reserve, enclosing provider children, all policy pages and

@@ -141,6 +141,8 @@ def _inspect(selected, prior, budget, checkpoint, revalidate) -> dict:
         )
         account.verify()
         result["observed_repository"] = provider.repository(account)
+        if prior["creation"] == "confirmed" and result["observed_repository"] != prior["repository"]:
+            raise CredentialObservationError("repository", "creation-target-changed")
         result["observed_safeguards"] = provider.safeguards(account, result["observed_repository"])
         revalidate()
         result["observation_status"] = "observed"

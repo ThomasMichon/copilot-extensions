@@ -33,7 +33,7 @@ def repository(selected, value: dict | None = None) -> dict:
     ):
         raise CredentialObservationError("repository", "private-personal-identity-unconfirmed")
     return {
-        "id": value["id"], "repository": selected.repository, "default_branch": branch,
+        "id": value["id"], "repository": value["full_name"].casefold(), "default_branch": branch,
         "private": True, "owner_kind": "user",
     }
 
@@ -115,7 +115,7 @@ def _policy(selected, expected: dict) -> tuple[dict, dict]:
         for line in re.findall(r"(?im)^link:\s*(.+)$", header):
             for link in line.strip().split(","):
                 match = re.fullmatch(
-                    r'<https://api\.github\.com/repos/' + re.escape(selected.repository)
+                    r'<https://api\.github\.com/repos/(?i:' + re.escape(selected.repository) + ')'
                     + r'/rules/branches/' + re.escape(branch)
                     + r'\?per_page=100&page=([1-9][0-9]*)>;\s*rel="(next|prev|first|last)"',
                     link.strip(),
