@@ -13,6 +13,14 @@ lifetime distinctions and exact child cleanup. This does not substitute a
 current compatibility alias for an older implementation, and does not qualify
 an old installed Host, historical binary rollback or an SDK runtime.
 
+The corpus also retains that release's exact Host source. A reverse control
+uses the current frontend with the unmodified historical Host and a real
+test-owned Python ACP child. It proves literal framing, cursor-preserving
+reattachment, explicit termination and historical idle-detach shutdown.
+The test owner independently settles its listener, frontend handlers and child;
+this is source compatibility, not modern lifetime/authentication support,
+historical binary rollback or native SDK evidence.
+
 ## Current HTTP-52 owner-membership evidence
 
 The optional `live_delivery_observation: 1` expansion retains HTTP generation
