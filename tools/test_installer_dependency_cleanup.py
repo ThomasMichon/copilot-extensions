@@ -1,8 +1,12 @@
 """Retained-input cleanup must not replace the installation's primary failure."""
 from __future__ import annotations
 
+import gc
 import importlib.util
+import json
+import os
 import subprocess
+import sys
 from contextlib import ExitStack, contextmanager
 from pathlib import Path
 from types import SimpleNamespace
@@ -15,6 +19,46 @@ policy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(policy)
 
 
+def test_abandoned_temporary_inputs_survive_collection(tmp_path):
+    retained = ExitStack()
+    root = Path(retained.enter_context(policy._temporary_inputs(tmp_path)))
+    marker = root / "held-input"
+    marker.write_bytes(b"retained")
+    del retained
+    gc.collect()
+    assert marker.read_bytes() == b"retained"
+
+
+def test_live_temporary_inputs_survive_interpreter_shutdown(tmp_path):
+    script = (
+        "import importlib.util, json, sys\n"
+        "from contextlib import ExitStack\n"
+        "from pathlib import Path\n"
+        "spec = importlib.util.spec_from_file_location('retained_policy', sys.argv[1])\n"
+        "policy = importlib.util.module_from_spec(spec)\n"
+        "spec.loader.exec_module(policy)\n"
+        "retained = ExitStack()\n"
+        "root = Path(retained.enter_context(policy._temporary_inputs(sys.argv[2])))\n"
+        "(root / 'held-input').write_bytes(b'retained')\n"
+        "print(json.dumps(str(root)))\n"
+    )
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", script, str(PATH), str(tmp_path)],
+        capture_output=True, text=True, encoding="utf-8", check=True, timeout=30,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    root = Path(json.loads(result.stdout))
+    assert root.parent == tmp_path
+    assert (root / "held-input").read_bytes() == b"retained"
+
+
+def test_explicit_temporary_input_exit_removes_contents(tmp_path):
+    with ExitStack() as retained:
+        root = Path(retained.enter_context(policy._temporary_inputs(tmp_path)))
+        (root / "held-input").write_bytes(b"retained")
+    assert not root.exists()
+
+
 @pytest.fixture
 def cleanup_failure(monkeypatch, tmp_path):
     error = PermissionError("retained inputs remain locked")
@@ -22,6 +66,7 @@ def cleanup_failure(monkeypatch, tmp_path):
 
     class TemporaryInputs:
         name = str(tmp_path / "retained")
+        _finalizer = SimpleNamespace(detach=lambda: None)
 
         def __init__(self, **kwargs):
             pass
@@ -135,6 +180,7 @@ def test_normal_cleanup_preserves_success(monkeypatch, tmp_path, capsys):
 
     class TemporaryInputs:
         name = str(tmp_path / "retained")
+        _finalizer = SimpleNamespace(detach=lambda: None)
 
         def __init__(self, **kwargs):
             pass

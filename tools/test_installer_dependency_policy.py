@@ -1653,6 +1653,7 @@ def test_real_retained_graph_preserves_primary_failure_on_cleanup(tmp_path, monk
         def __init__(self, **kwargs):
             self.temporary = temporary_directory(**kwargs)
             self.name = self.temporary.name
+            self._finalizer = self.temporary._finalizer
             allocations.append(Path(self.name))
 
         def cleanup(self):

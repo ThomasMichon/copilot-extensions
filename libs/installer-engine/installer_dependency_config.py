@@ -302,21 +302,28 @@ def retain_closed_wheels(
 def temporary_inputs(parent):
     prefix = "uv-" if parent is not None else "seasoned-uv-"
     temporary = tempfile.TemporaryDirectory(prefix=prefix, dir=parent)
+    # Retaining owners, not collection or interpreter shutdown, retire inputs.
+    temporary._finalizer.detach()
     failed = False
+    abandoned = False
     try:
         yield temporary.name
+    except GeneratorExit:
+        abandoned = True
+        raise
     except BaseException:
         failed = True
         raise
     finally:
-        temporary.name = native_retained_path(temporary.name)
-        try:
-            temporary.cleanup()
-        except OSError as exc:
-            if failed:
-                report_cleanup_error(exc)
-            else:
-                raise RetainedInputCleanupError(str(exc)) from exc
+        if not abandoned:
+            temporary.name = native_retained_path(temporary.name)
+            try:
+                temporary.cleanup()
+            except OSError as exc:
+                if failed:
+                    report_cleanup_error(exc)
+                else:
+                    raise RetainedInputCleanupError(str(exc)) from exc
 
 
 @contextmanager

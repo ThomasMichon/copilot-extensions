@@ -4204,6 +4204,11 @@ directories. A resource may be a package subdirectory of another admitted
 project; its presence must not make that parent look fully copied while its
 `pyproject.toml` and other build inputs are still missing.
 
+Retained temporary inputs have an explicit lifetime. Garbage collection and
+interpreter shutdown do not retire them; their retaining owner must exit the
+contexts after owned children settle. An abandoned context leaves its inputs
+intact rather than treating finalization as proof that deletion is safe.
+
 Retained-input cleanup preserves an active exception or a nonzero UV child
 result, including captured output and the original exit status. A secondary
 filesystem cleanup failure is reported independently as `retained-input-cleanup`,
