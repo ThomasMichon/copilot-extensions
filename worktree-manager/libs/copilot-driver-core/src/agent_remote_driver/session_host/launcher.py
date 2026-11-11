@@ -2,13 +2,10 @@
 
 The Session Host must **outlive the agent-bridge frontend**. Two seams:
 
-* **Spawning the host so it survives the front** -- :func:`host_spawn_kwargs`
-  returns the ``subprocess`` kwargs the frontend uses to launch the host
-  *outside* its own teardown domain: on Windows ``CREATE_BREAKAWAY_FROM_JOB``
-  (escaping the daemon's kill-on-close job, which now permits breakaway -- see
-  ``winjob``); on POSIX ``start_new_session=True`` (own session, immune to the
-  front's process-group teardown). The shared contained-test policy suppresses
-  both forms so the repository test supervisor retains ownership.
+* **Spawning the host so it survives the front** -- canonical daemon admission
+  verifies escape from every declared caller-owned Windows cleanup Job before
+  resuming the Host. POSIX uses the same primitive's session/cgroup admission.
+  The shared contained-test policy retains repository test-supervisor ownership.
 * **The host hardening itself once running** -- :func:`apply_host_survival`
   re-asserts session/job isolation from inside the host process (idempotent),
   and arms the host's *own* kill-on-close job on Windows so the child dies with
@@ -23,7 +20,7 @@ remain outside the core.
 from __future__ import annotations
 
 from agent_procutil.daemon_instances import (
-    DaemonInstanceSpec, daemon_entrypoint, spawn_instance,
+    daemon_entrypoint,
 )
 
 import argparse
@@ -147,12 +144,7 @@ class _CrashTailCapture:
 
 
 def host_spawn_kwargs() -> dict[str, Any]:
-    """``subprocess`` kwargs for the FRONTEND to spawn the host so it survives.
-
-    On Windows the host must break away from the daemon's kill-on-close job
-    (permitted because that job now carries ``JOB_OBJECT_LIMIT_BREAKAWAY_OK``);
-    on POSIX it gets its own session.
-    """
+    """Compatibility flags only; canonical admission owns lifetime verification."""
     return windowless_daemon_kwargs(breakaway=True)
 
 
@@ -161,7 +153,7 @@ def _kill_host_process_tree(
 ) -> None:
     """Kill a spawned-but-never-ready host, reaching its whole tree on POSIX.
 
-    :func:`host_spawn_kwargs` gives the host ``start_new_session=True`` (its
+    Canonical daemon admission gives the host ``start_new_session=True`` (its
     own process group, ``proc.pid`` doubling as the group id) -- except
     under :func:`contained_test_mode`, where that is suppressed so the
     repository test supervisor retains ownership of the process group, and
@@ -235,8 +227,8 @@ def launch_session_host(
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
-    The host is launched with :func:`host_spawn_kwargs` so it outlives this
-    frontend (Windows job-breakaway / POSIX new-session). It serves a loopback
+    The host uses canonical daemon admission so it outlives this
+    frontend (verified Windows Job escape / POSIX lifetime admission). It serves a loopback
     reattach endpoint and writes a ``pid``/``child_pid``/``port`` state file,
     which this call waits for. The child inherits ``env`` (so worktree/plan env
     vars reach copilot). Raises ``TimeoutError`` if the host never reports ready.
@@ -302,7 +294,8 @@ def _launch_in(
     phase: dict[str, bool],
 ) -> HostHandle:
     from agent_procutil._daemon_instance_store import _root
-    from .launcher_scratch import observe_exit, tracked_creation
+    from .launcher_scratch import observe_exit
+    from .launcher_spawn import spawn_host
 
     _root(sd, create=True)
     state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
@@ -387,24 +380,13 @@ def _launch_in(
         )
         child_env[_STARTUP_ENV] = startup.context
 
-    spawn_options = host_spawn_kwargs()
-
     try:
         if acquisition_launch is not None:
             acquisition_launch.begin_host()
-        proc = spawn_instance(
-            host_argv,
-            popen=tracked_creation(phase),
-            instance=DaemonInstanceSpec(
-                "agent-bridge-session-host", sd, Path(__file__).resolve(),
-            ),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=child_env,
-            cwd=cwd or None,
-            **spawn_options,
+        proc, startup_output = spawn_host(
+            host_argv, cwd=cwd, environment=child_env, state_dir=sd, phase=phase,
         )
+        crash_tail = _CrashTailCapture(startup_output)
         if acquisition_launch is not None:
             acquisition_launch.retain_process(proc, str(state_file), nonce)
         if startup is not None:
@@ -413,7 +395,6 @@ def _launch_in(
         if startup is not None:
             startup.close()
         raise
-    crash_tail = _CrashTailCapture(proc.stdout)
     expected_identity: str | None = None
     if sys.platform != "win32" and not contained_test_mode():
         # Captured immediately after spawn, before any reaping could occur
