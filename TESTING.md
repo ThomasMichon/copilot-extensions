@@ -884,11 +884,41 @@ The existing manual `installation-context-full.yml` workflow accepts
 `portfolio=manager-lifecycle` for this installed-core case on a fresh
 GitHub-hosted Windows VM. Dispatch the published source branch and optionally
 provide its same exact commit as `source_sha`; a mismatched request fails.
+Before the unchanged core case, a separate preflight constructs the installed
+engine, builds the canonical commit-bound whole-tree artifact, and acquires
+every declared payload with the actual pinned CLI. Installed engine discovery
+and complete payload-byte comparison must succeed in the private HOME, with
+the required-readiness profile enabled. A private bare Git repository serializes
+the verified materialized bytes with a packed `git fast-import` stream. A
+context-owned loopback HTTP server invokes the real `git http-backend` for
+read-only advertisement/upload-pack requests against that repository, and the
+CLI registers its HTTP Git URL with `plugin marketplace add`. The pinned CLI
+does not recognize `file:` as a Git transport. A directory marketplace would load live and
+copy nothing, leaving the installed engine's cache-only discovery empty.
+The transport commit/tree are recorded and rechecked separately from the source
+commit; they are not a release, supported upgrade baseline or admission receipt.
+The Git HTTP thread/listener must stop before success. No remote repository,
+host service, persistent daemon or promotion transaction is created. Its separate
+`installed-manager-suite-payloads` receipt explicitly reports runtime
+installation as unobserved: payload delivery is not runtime construction,
+actual Machines readiness, an authentic update or lifecycle acceptance.
+The small transport check uses the CLI's actual `git clone --depth 1 --progress`
+contract; a static/dumb HTTP clone cannot satisfy shallow acquisition. Backend
+processes use the existing bounded command owner, and unresolved backend
+custody fails the case rather than being hidden by a recovered client request.
+The fixture's private Git template disables text conversion in cloned
+`.git/info/attributes`, preserving frozen materialized bytes even when source
+attributes request CRLF checkout. This applies only to the fixture's acquisition
+environment; it changes neither source attributes nor the exact-byte assertion.
+The real shallow-clone control includes LF `.cmd`/`.ps1` blobs with declared
+CRLF attributes. This transport evidence is not an ordinary platform-checkout
+or admitted-upgrade qualification.
 The job reuses the bounded pinned downloader and the existing Copilot 1.0.105 /
 PSMux 3.3.8 prerequisite pins, verifies checkout identity, and preserves the
 900-second runner and 720-second case limits. Its 30-minute job envelope also
 covers checkout, tooling, prerequisite acquisition and artifact retention.
-This changes no existing portfolio, schedule, required PR CI or release gate.
+The preflight shares that job envelope; it adds no schedule, required PR CI
+or release gate.
 The evidence checker rejects absent, skipped, failed, duplicate, stale,
 TTY-only and incomplete lifecycle results. Passing this development lane still
 does not establish complete-suite, actual Machines, authentic ordinary-update
