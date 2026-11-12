@@ -213,6 +213,27 @@ def collect(args: argparse.Namespace, report: Report) -> None:
             report.read(maintenance, "maintenance.json")
 
 
+def requested_timeout(argv: list[str]) -> float:
+    """Find the smallest valid explicit deadline before strict parsing can fail."""
+    seconds = MAX_SECONDS
+    for index, argument in enumerate(argv):
+        if argument == "--":
+            break
+        if argument.startswith("--timeout="):
+            value = argument.partition("=")[2]
+        elif argument == "--timeout" and index + 1 < len(argv):
+            value = argv[index + 1]
+        else:
+            continue
+        try:
+            candidate = float(value)
+        except ValueError:
+            continue
+        if 0.001 <= candidate <= MAX_SECONDS:
+            seconds = min(seconds, candidate)
+    return seconds
+
+
 def main(argv: list[str] | None = None) -> int:
     """Run a bounded read; exit 0 selected scope, 2 gap/refusal, 124 deadline."""
     started = time.monotonic()
@@ -226,6 +247,12 @@ def main(argv: list[str] | None = None) -> int:
         argv = sys.argv[1:] if argv is None else argv
         if len(argv) > 32 or sum(len(a) for a in argv) > 8192:
             raise Refusal("argument-budget")
+        remaining = requested_timeout(argv) - (time.monotonic() - started)
+        if remaining <= 0:
+            os._exit(124)
+        shorter = threading.Timer(remaining, os._exit, args=(124,))
+        shorter.daemon = True
+        shorter.start()
         parser = Parser(description=__doc__, allow_abbrev=False)
         parser.add_argument("--session-state-root", required=True)
         parser.add_argument("--session-id", required=True)
@@ -235,12 +262,6 @@ def main(argv: list[str] | None = None) -> int:
         args = parser.parse_args(argv)
         if not 0.001 <= args.timeout <= MAX_SECONDS:
             raise Refusal("invalid-timeout")
-        remaining = args.timeout - (time.monotonic() - started)
-        if remaining <= 0:
-            os._exit(124)
-        shorter = threading.Timer(remaining, os._exit, args=(124,))
-        shorter.daemon = True
-        shorter.start()
         if not SESSION.fullmatch(args.session_id):
             raise Refusal("invalid-session-id")
         if len(args.guidance) > MAX_PROVIDERS or any(

@@ -255,6 +255,7 @@ def test_invalid_cli_is_bounded_and_sanitized(selected: Selected, extra: list[st
 @pytest.mark.parametrize("boundary,timeout", [
     ("filesystem", "0.1"), ("stdout", "0.1"), ("filesystem", None),
     ("session-refusal-stdout", "0.1"), ("provider-refusal-stdout", "0.1"),
+    ("parser-refusal-stdout", "0.1"), ("missing-refusal-stdout", "=0.1"),
 ])
 def test_native_deadline_exits_the_only_collector(
     selected: Selected, boundary: str, timeout: str | None,
@@ -270,13 +271,20 @@ def test_native_deadline_exits_the_only_collector(
     else:
         code += "sys.stdout=type('Blocked',(),{'write':lambda *a:time.sleep(30)})();"
     code += "raise SystemExit(m.main(sys.argv[2:]))"
+    arguments = ["--session-state-root", str(root)]
+    if boundary != "missing-refusal-stdout":
+        arguments += ["--session-id", "invalid" if boundary == "session-refusal-stdout" else SESSION]
+    if boundary == "provider-refusal-stdout":
+        arguments += ["--guidance", "../escape"]
+    if boundary == "parser-refusal-stdout":
+        arguments += ["--unknown"]
+    if timeout:
+        arguments += ["--timeout" + timeout] if timeout.startswith("=") else ["--timeout", timeout]
+    if boundary == "parser-refusal-stdout":
+        arguments += ["--timeout", "5"]
     started = time.monotonic()
     result = subprocess.run(
-        [sys.executable, "-I", "-c", code, str(SCRIPT),
-         "--session-state-root", str(root), "--session-id",
-         "invalid" if boundary == "session-refusal-stdout" else SESSION,
-         *(["--guidance", "../escape"] if boundary == "provider-refusal-stdout" else []),
-         *(["--timeout", timeout] if timeout else [])],
+        [sys.executable, "-I", "-c", code, str(SCRIPT), *arguments],
         capture_output=True, timeout=10,
     )
     assert time.monotonic() - started < (3 if timeout else 8)

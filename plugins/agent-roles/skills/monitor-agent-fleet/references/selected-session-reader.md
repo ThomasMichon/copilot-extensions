@@ -73,6 +73,12 @@ and OS scheduling/uninterruptible kernel delays are not real-time guarantees.
 An outer caller/SSH deadline is useful transport protection, never a
 replacement for this host-local bound.
 
+After the argument count/size admission, valid explicit `--timeout` values
+(separate or `=` form) shorten the watchdog **before** strict parsing, including
+unknown-option, missing-argument and identifier refusals. If repeated, the
+smallest valid timeout is the safety bound. Invalid syntax/values still refuse;
+deadline extraction never makes an invalid request acceptable.
+
 ## Consumer contract
 
 Contract `agent-roles.selected-session-guidance/v1` emits only JSON primitives
