@@ -261,7 +261,17 @@ async def test_actual_native_client_rediscovers_through_replacement_and_rollback
                     if client.returncode is None:
                         client.terminate()
                     await asyncio.wait_for(client.wait(), 10)
-                    await asyncio.wait_for(stderr, 5)
+                    diagnostic = await asyncio.wait_for(stderr, 5)
+                    if sys.exc_info()[0] is not None:
+                        print("Native client stderr:", diagnostic.decode("utf-8", "replace")[-8000:])
+                        for path in [
+                            observations, observations.with_suffix(".owner.json"),
+                            *(tmp_path / "logs").glob("**/*.log"),
+                        ]:
+                            if path.is_file():
+                                print(path.name + ":", path.read_text(
+                                    encoding="utf-8", errors="replace",
+                                )[-8000:])
                 for handle in handles:
                     with contextlib.suppress(OSError):
                         await fixture.shutdown(handle)
