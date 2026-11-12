@@ -134,7 +134,7 @@ refuse before effect and never fall back to a broader sweep or process waiter.
 
 - [x] Land this contract/vision amendment through normal independent review and
   required CI before runtime implementation.
-- [ ] Add the bounded expression parser, canonical immutable definition
+- [x] Add the bounded expression parser, canonical immutable definition
   resolution, capability validation and three-valued driver evaluation.
 - [ ] Extend the existing native provider seam with bounded selected-population
   acquisition and initial ADO semantics; preserve read credential ownership and
@@ -180,6 +180,37 @@ separately authorized acceptance; no synthetic fixture passes those gates.
 The canonical parent remains Active until its own full Plan/Validation resolves.
 
 ## Journal
+
+### 2026-11-11 - Native population merged; service qualification in progress
+
+#12184 merged the native ADO population driver after clean current-head review
+and successful required CI. Groups and activity age remain explicitly
+unsupported by that driver. The service slice composes generation-three
+ReplayStore demand, independent membership/delivery, startup sponsorship and
+the explicit local `population-*` client. It is not yet a merged service or
+an installed/live acceptance claim.
+
+The Windows standalone service suite passed in a combined compatibility run;
+one retained-review control then exposed a wrapped-lock compatibility issue.
+After preserving context-manager acquisition, all 52 retained-review controls
+and the exact installed workspace regression pass. Transaction-custody waits
+are bounded by current request authority and never replay a provider read or
+an entered operation. Strict service typechecks pass on Linux and Windows.
+Actual Linux foreground qualification, source-composed native verification and
+the service PR's independent review/required CI remain open.
+
+### 2026-11-11 - Shared expression foundation merged
+
+#12166 merged after current-head independent review, resolved findings and
+refreshed successful required CI. The managed merge used the existing Maintainer
+review-rule exception, not a CI bypass. The canonical contained library runner
+passes 33 tests; strict Python 3.10 Linux/Windows typechecks pass. Three focused
+materialized-snapshot and cell dependency controls pass; native child installs
+are intercepted, so real first-provision/install acceptance remains unclaimed.
+The fixes include strict UTF-8 bytes, read-only mappings, cell dependency closure
+and numeric overflow containment. The native population slice now proceeds
+through its own normal publication gates; filtered storage, observer, sponsorship
+and supported host/CLI qualification remain open here.
 
 ### 2026-11-11 - Contract accepted; shared semantics first
 

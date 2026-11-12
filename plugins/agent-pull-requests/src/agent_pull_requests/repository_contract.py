@@ -31,7 +31,7 @@ class RepositoryIdentity:
     repo: str
 
     def __post_init__(self) -> None:
-        if self.provider not in ("github", "gitea"):
+        if self.provider not in ("github", "gitea", "azure-devops"):
             raise ValueError("repository cache provider unsupported")
         if any(not isinstance(value, str) or not re.fullmatch(
             r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", value,

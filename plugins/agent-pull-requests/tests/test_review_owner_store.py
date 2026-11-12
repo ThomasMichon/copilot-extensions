@@ -50,6 +50,63 @@ def store(tmp_path):
     return result
 
 
+@pytest.mark.parametrize("withdraw", [False, True])
+def test_review_transaction_waits_for_custody_without_repeating_operation(store, withdraw):
+    waiting, withdrawn = threading.Event(), threading.Event()
+    calls, failures = [], []
+    checkpoints = 0
+
+    def checkpoint():
+        nonlocal checkpoints
+        checkpoints += 1
+        if checkpoints >= 3:
+            waiting.set()
+        if withdrawn.is_set():
+            raise RuntimeError("caller withdrawn")
+
+    def operation(_document):
+        calls.append("once")
+        return "complete"
+
+    def request():
+        try:
+            assert store._review_transaction(
+                operation, expires_at=expires(), checkpoint=checkpoint, persist=False,
+            ) == "complete"
+        except Exception as error:
+            failures.append(error)
+
+    with store._lock():
+        worker = threading.Thread(target=request)
+        worker.start()
+        assert waiting.wait(5)
+        assert not calls
+        if withdraw:
+            withdrawn.set()
+            worker.join(5)
+            assert not worker.is_alive()
+    worker.join(5)
+    assert not worker.is_alive()
+    assert calls == ([] if withdraw else ["once"])
+    assert [str(error) for error in failures] == (["caller withdrawn"] if withdraw else [])
+
+
+def test_review_transaction_never_retries_contention_from_inside_the_operation(store):
+    from single_instance_lease import OperationLockedError
+
+    calls = []
+    before = store.path.read_bytes()
+
+    def operation(_document):
+        calls.append("once")
+        raise OperationLockedError("separate operation unavailable")
+
+    with pytest.raises(OperationLockedError, match="separate operation"):
+        store._review_transaction(operation, expires_at=expires())
+    assert calls == ["once"]
+    assert store.path.read_bytes() == before
+
+
 @pytest.fixture
 def prepared_intent(monkeypatch: pytest.MonkeyPatch) -> dict:
     root = Path(__file__).resolve().parents[3]

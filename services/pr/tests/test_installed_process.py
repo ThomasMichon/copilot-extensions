@@ -459,13 +459,24 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     from agent_pull_requests.workspace_client import WorkspaceClient
                     from agent_pull_requests.workspace_tools import WorkspaceTools
                     from fleet_manager.gateway_service_caller import ServiceCaller
+                    responses: list[dict[str, Any]] = []
+
+                    class DiagnosticCaller(ServiceCaller):
+                        async def request(self, *args: Any, **kwargs: Any) -> Any:
+                            response = await super().request(*args, **kwargs)
+                            if response.status != 200:
+                                responses.append({
+                                    "status": response.status,
+                                    "body": response.body[:4096].decode("utf-8", errors="replace"),
+                                })
+                            return response
 
                     async def caller_access() -> str:
                         rig.h.clock.value = int(time.time())
                         return cast(str, rig.access("caller-a", 3))
 
                     client = WorkspaceClient(
-                        ServiceCaller(
+                        DiagnosticCaller(
                             gateway_origin=rig.origin, gateway_ca=rig.ca,
                             access_token_callback=caller_access,
                             proof_key=rig.h.keys[3].get_op_key("sign"),
@@ -500,7 +511,7 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                             # Retry only effect-free reads, never load/sync/allocation.
                             await asyncio.sleep(0.05)
                             continue
-                        raise AssertionError((output.out, output.err, workspace_errors))
+                        raise AssertionError((output.out, output.err, workspace_errors, responses[-5:]))
                     raise AssertionError(f"{operation} remained unavailable")
 
                 original = {
@@ -514,7 +525,11 @@ def test_installed_host_process_register_observe_reconnect_restart_and_ack(
                     if pending["events"]:
                         break
                     await asyncio.sleep(0.05)
-                assert len(pending["events"]) == 1
+                assert len(pending["events"]) == 1, json.dumps({
+                    "native_calls": calls.read_text() if calls.exists() else None,
+                    "service_status": json.loads(status.read_text()) if status.exists() else None,
+                    "pending": pending,
+                })
                 event = pending["events"][0]
                 assert event["registration_id"] == receipt["registration_id"]
                 assert not event["timed_out"]
