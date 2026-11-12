@@ -167,7 +167,9 @@ def test_selected_client_rejects_a_provider_that_drops_the_selection():
             client.fence_legacy_history(before=2000.0, reservation_keys=["selected"])
 
 
-@pytest.mark.parametrize("malformed", ["missing_selection", "invalid_sample"])
+@pytest.mark.parametrize("malformed", [
+    "missing_selection", "invalid_sample", "undecodable", "transport_failure", "server_failure",
+])
 def test_malformed_apply_response_preserves_the_unknown_committed_outcome(queue, monkeypatch, malformed):
     monkeypatch.setattr("agent_dispatch.acquisition_receipts.verify_recovery_bridge", lambda: None)
     _, selected = _legacy(queue, "selected")
@@ -185,8 +187,14 @@ def test_malformed_apply_response_preserves_the_unknown_committed_outcome(queue,
             assert response.status_code == 200 and body["fenced"] == 1
             if malformed == "missing_selection":
                 body.pop("selection")
-            else:
+            elif malformed == "invalid_sample":
                 body["sample"] = None
+            elif malformed == "undecodable":
+                return httpx.Response(200, content=b"not-json")
+            elif malformed == "transport_failure":
+                raise httpx.ReadError("synthetic response lost", request=request)
+            else:
+                return httpx.Response(500, json={"detail": "synthetic response failed"})
         return httpx.Response(response.status_code, json=body)
 
     with DispatchClient(

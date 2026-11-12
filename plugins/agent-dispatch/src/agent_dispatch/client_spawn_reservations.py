@@ -206,12 +206,13 @@ class SpawnReservationClientMixin:
         confirmed_no_live_holder: bool = False, reason: str = "",
         reservation_keys: list[str] | None = None, expected_preview: str | None = None,
     ) -> dict:
+        from .client_errors import DispatchError
+
         body: dict[str, Any] = {
             "before": before, "apply": apply, "permitted": permitted,
             "confirmed_no_live_holder": confirmed_no_live_holder, "reason": reason,
         }
         if reservation_keys is not None or expected_preview is not None:
-            from .client_errors import DispatchError
             if (
                 not isinstance(reservation_keys, list) or not reservation_keys
                 or any(not isinstance(key, str) or not key or key.strip() != key for key in reservation_keys)
@@ -223,11 +224,25 @@ class SpawnReservationClientMixin:
             if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
                 raise DispatchError(426, "coordinator lacks selected-legacy-history/v1")
             body.update({"reservation_keys": reservation_keys, "expected_preview": expected_preview})
-        result = self._unwrap(self._http.post(
-            "/spawn-reservations/history/fence",
-            headers=self._control_headers(),
-            json=body,
-        ))
+        headers = self._control_headers()
+        try:
+            result = self._unwrap(self._http.post(
+                "/spawn-reservations/history/fence", headers=headers, json=body,
+            ))
+        except (ValueError, httpx.HTTPError) as exc:
+            if reservation_keys is not None and apply:
+                raise DispatchError(
+                    502, "selected legacy history apply outcome is unknown: response unavailable or undecodable; "
+                    "inspect the original reservations and audit before retrying",
+                ) from exc
+            raise
+        except DispatchError as exc:
+            if reservation_keys is not None and apply and exc.status_code >= 500:
+                raise DispatchError(
+                    502, "selected legacy history apply outcome is unknown: provider response failed; "
+                    "inspect the original reservations and audit before retrying",
+                ) from exc
+            raise
         if reservation_keys is not None:
             selection = result.get("selection") if isinstance(result, dict) else None
             sample = result.get("sample") if isinstance(result, dict) else None
