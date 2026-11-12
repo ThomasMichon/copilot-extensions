@@ -389,8 +389,9 @@ def spawn_brokered_daemon(
                     or hello.get("pid") != pid
                 ):
                     raise OSError("daemon broker identity mismatch")
-                if not _outside_job(bootstrap):
-                    raise OSError("daemon broker bootstrap still belongs to a Job")
+                # WMI may place the bootstrap in its provider host's quota Job
+                # (never a caller Job). Only the resident child, created with
+                # breakaway, must be outside every Job; that is checked below.
                 stage = "child-staging"
                 handles = (
                     None if stdio_handles is None

@@ -264,6 +264,10 @@ def _spawn_daemon(
             raise failure from error
         process.instance_receipt = receipt
         return process
+    # A contained-test child environment keeps the launch contained even when
+    # the launcher itself is not in contained test mode.
+    if child_env.get("COPILOT_EXTENSIONS_TEST_CONTAINED") == "1":
+        breakaway = False
     kwargs = pu._daemon_popen_kwargs(
         console_children=console_children,
         breakaway=breakaway,

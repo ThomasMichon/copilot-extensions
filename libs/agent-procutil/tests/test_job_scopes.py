@@ -93,6 +93,8 @@ def native_admission(monkeypatch, declared_mock_daemon):
     process = Mock(pid=123, _handle=456)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(pu, "contained_test_mode", lambda: False)
+    # The child environment's contained marker also selects containment.
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(identity, "created_process_identity", lambda child: (child.pid, "windows:1234"))
     monkeypatch.setattr(store, "finish_failed_launch", lambda *args, **kwargs: True)
     monkeypatch.setattr(subprocess, "Popen", Mock(return_value=process))

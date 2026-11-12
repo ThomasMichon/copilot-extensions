@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
 import subprocess
 import sys
@@ -281,7 +282,23 @@ def test_containment_never_uses_the_broker(monkeypatch, tmp_path, contained):
     durable.assert_not_called()
 
 
-def test_broker_errors_are_sanitized_in_both_logs(monkeypatch, tmp_path):
+@pytest.mark.parametrize("route", ["env", "env_overrides"])
+def test_contained_child_environment_never_uses_wmi(monkeypatch, tmp_path, route):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    monkeypatch.setattr(pu, "contained_test_mode", lambda: False)
+    popen = Mock(return_value=Mock(pid=4321))
+    monkeypatch.setattr(subprocess, "Popen", popen)
+    _, durable = _durable_launch(monkeypatch)
+    marker = {"COPILOT_EXTENSIONS_TEST_CONTAINED": "1"}
+    extra = (
+        {"env": {**os.environ, **marker}} if route == "env" else {"env_overrides": marker}
+    )
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "out.log", **extra)
+    durable.assert_not_called()
+    popen.assert_called_once()
+    flags = popen.call_args.kwargs.get("creationflags", 0)
+    assert not flags & pu._CREATE_BREAKAWAY_FROM_JOB
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     monkeypatch.setattr(subprocess, "Popen", Mock(side_effect=_denied()))
@@ -452,16 +469,19 @@ def test_broker_preserves_resident_creation_flags(
     assert spec["creationflags"] == pu._CREATE_NO_WINDOW
 
 
+@pytest.mark.parametrize("bootstrap_in_provider_job", [False, True])
 @pytest.mark.parametrize("child_outside_any_job", [False, True])
 def test_bounded_provider_job_bootstrap_does_not_replace_child_lifetime_check(
-    monkeypatch, broker_channel, tmp_path, child_outside_any_job,
+    monkeypatch, broker_channel, tmp_path, child_outside_any_job, bootstrap_in_provider_job,
 ):
     processes, _ = broker_channel
     checked = []
 
     def outside_job(process):
         checked.append(process.pid)
-        return child_outside_any_job if process.pid == 200 else True
+        if process.pid == 200:
+            return child_outside_any_job
+        return not bootstrap_in_provider_job
 
     monkeypatch.setattr(broker, "_outside_job", outside_job)
     if child_outside_any_job:
@@ -472,7 +492,7 @@ def test_bounded_provider_job_bootstrap_does_not_replace_child_lifetime_check(
             _launch(tmp_path)
         assert all(call.args[1] != {"start": 200} for call in broker._send.call_args_list)
         processes[200].terminate.assert_called_once()
-    assert checked == [100, 200], "bootstrap and resident must both escape every Job"
+    assert checked == [200], "a provider-Job bootstrap is allowed; only the resident must escape"
 
 
 @pytest.mark.parametrize("hello", [
