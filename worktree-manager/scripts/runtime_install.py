@@ -206,7 +206,8 @@ def candidate(
             arguments["application"] = application
         current = runtime.current_version(root)
         if (
-            not reuse_only and identity is not None and current and current.startswith(generation + ".repair.")
+            not reuse_only and (identity is not None or native_wheel_inputs is not None) and current
+            and re.fullmatch(re.escape(generation) + r"(?:[.+]repair\.[0-9a-f]{32})?", current)
             and runtime.is_complete(root, current)
         ):
             generation = current

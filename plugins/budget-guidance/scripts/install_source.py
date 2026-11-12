@@ -278,33 +278,62 @@ def wheel_selection(payload: Path, component: str, inputs: engine.WheelInstallIn
 
 
 def native_current(root: Path, payload: Path, component: str) -> bool:
-    """Recognize the owner's completed closed-wheel selection without rebuilding."""
-    version = sources.payload_package_version(payload, component)
-    if sources.read_source_identity(payload, version, plugin=component) is not None:
-        return False
+    """Read generation-qualified readiness; installation owns content admission."""
     try:
+        version = sources.payload_package_version(payload, component)
+        if os.path.lexists(payload / sources.SOURCE_FILE):
+            return False
         current = engine.runtime.current_version(root)
         if not current:
             return False
         slot = Path(engine._native_retained_path(engine.runtime.version_dir(root, current)))
-        receipt = _read(slot / ".runtime-input-origins.json")["wheel_inputs"]
+        record = _read(slot / ".runtime-input-origins.json")
+        if (
+            record.get("schema") != "installer-engine.frozen-input-origins"
+            or type(record.get("version")) is not int or record["version"] != 2
+        ):
+            return False
         inputs = WheelReuseInputs(
-            current, json.dumps(receipt, sort_keys=True, separators=(",", ":"), allow_nan=False),
+            current, json.dumps(record["wheel_inputs"], sort_keys=True, separators=(",", ":"), allow_nan=False),
             time.monotonic() + 60,
         )
-        selection = _wheel_selection(payload, version, inputs)
+        receipt = inputs.receipt()
+        name = engine._package_name(payload)
+        profile_wheels = receipt["binding"]["wheels"]
+        if (
+            name not in receipt["distributions"]
+            or not isinstance(profile_wheels, list) or not 0 < len(profile_wheels) <= 256
+            or receipt["distributions"] != {
+                row["name"]: {key: row[key] for key in ("version", "filename", "sha256")}
+                for row in profile_wheels
+            }
+            or len(profile_wheels) != len(receipt["distributions"])
+            or name not in record.get("local_packages", [])
+            or record.get("extras", []) != list(engine._selected_extras(
+                payload, tuple(next(row["selected_extras"] for row in profile_wheels if row["name"] == name)),
+            ))
+        ):
+            return False
         if re.fullmatch(
-            re.escape(selection["runtime_version"]) + r"(?:\.repair\.[0-9a-f]{32})?", current,
+            re.escape(version + ".profile." + receipt["lock_id"][7:23])
+            + r"(?:[.+]repair\.[0-9a-f]{32})?", current,
         ) is None:
             return False
         manifest = _read(root / "deploy-manifest.json")
+        source = manifest.get("source", {})
+        if not isinstance(source, dict):
+            return False
+        fingerprint = source.get("content_hash")
         if (
-            manifest.get("source", {}).get("version") != version
+            source.get("version") != version or source.get("plugin") != component
+            or not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None
             or manifest.get("runtime_version") != current or manifest.get("runtime_source")
         ):
             return False
+        # Selectors, payload identity, profile, manifest and completion are read
+        # afresh. Do not turn this startup hint into a second integrity scanner.
         return engine.runtime.is_complete(
-            root, current, expect_hash=selection["payload_hash"],
+            root, current, expect_hash=fingerprint,
         ) and engine.runtime.slot_python(root, current) is not None
     except (OSError, KeyError, TypeError, ValueError):
         return False

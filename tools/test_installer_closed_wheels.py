@@ -314,6 +314,92 @@ def test_native_wheel_receiver_accepts_admitted_compatible_patch_target(tmp_path
         assert selection["runtime_version"].startswith("1.0.profile.")
 
 
+@pytest.fixture
+def native_readiness(tmp_path, engine, plugin):
+    import install_source
+
+    with snapshot(tmp_path) as retained:
+        inputs = inspected(retained)
+        selection = install_source.wheel_selection(plugin, "demo-pkg", inputs)
+        receipt = inputs.receipt()
+    root = tmp_path / "runtime"
+    generation = selection["runtime_version"] + ".repair." + "a" * 32
+    slot = root / "versions" / generation
+    python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    proof = slot / ".runtime-input-origins.json"
+    proof.write_text(json.dumps({
+        "schema": "installer-engine.frozen-input-origins", "version": 2,
+        "wheel_inputs": receipt, "local_packages": selection["local_packages"],
+    }), encoding="utf-8")
+    engine.runtime.mark_complete(root, generation, payload_hash=selection["payload_hash"])
+    (root / "current-version").write_text(generation, encoding="utf-8")
+    manifest = root / "deploy-manifest.json"
+    manifest.write_text(json.dumps({
+        "source": {"version": "1.0", "plugin": "demo-pkg", "content_hash": selection["payload_hash"]},
+        "runtime_version": generation,
+    }), encoding="utf-8")
+    return install_source, root, plugin, slot, proof, manifest
+
+
+def test_native_readiness_reuses_existing_generation_without_repeating_tree_work(
+    native_readiness, monkeypatch,
+):
+    source, root, plugin, *_ = native_readiness
+
+    def scan(*_args, **_options):
+        pytest.fail("unchanged startup must not enumerate or hash construction trees")
+
+    for name in ("_source_files", "_construction_hash", "_package_roots"):
+        monkeypatch.setattr(source.engine, name, scan)
+    for _ in range(3):
+        assert source.native_current(root, plugin, "demo-pkg")
+
+
+@pytest.mark.parametrize("changed", [
+    "selector", "package", "profile", "closure", "extras", "manifest", "manifest-shape", "application",
+    "completion", "interpreter", "source",
+])
+def test_native_readiness_invalidates_changed_generation_inputs(native_readiness, changed):
+    source, root, plugin, slot, proof, manifest = native_readiness
+    if changed == "selector":
+        (root / "current-version").write_text("another-generation", encoding="utf-8")
+    elif changed == "package":
+        path = plugin / "pyproject.toml"
+        path.write_text(path.read_text().replace('version="1.0"', 'version="2.0"'))
+    elif changed in ("profile", "closure", "extras", "application"):
+        record = json.loads(proof.read_text())
+        if changed == "profile":
+            record["wheel_inputs"]["binding"]["backend"] = "changed"
+        elif changed == "closure":
+            record["wheel_inputs"]["distributions"]["demo-pkg"]["sha256"] = "sha256:" + "0" * 64
+        elif changed == "extras":
+            record["extras"] = ["bootstrap"]
+        else:
+            receipt = record["wheel_inputs"]
+            receipt["distributions"]["foreign"] = receipt["distributions"].pop("demo-pkg")
+            receipt["binding"]["wheels"][0]["name"] = "foreign"
+            receipt["lock_id"] = "sha256:" + hashlib.sha256(json.dumps(
+                receipt["binding"], sort_keys=True, separators=(",", ":"),
+            ).encode()).hexdigest()
+        proof.write_text(json.dumps(record))
+    elif changed in ("manifest", "manifest-shape"):
+        record = json.loads(manifest.read_text())
+        if changed == "manifest":
+            record["source"]["content_hash"] = "0" * 64
+        else:
+            record["source"] = None
+        manifest.write_text(json.dumps(record))
+    elif changed == "completion":
+        (slot / ".install-complete.json").unlink()
+    elif changed == "interpreter":
+        source.engine.runtime.slot_python(root, slot.name).unlink()
+    else:
+        (plugin / source.sources.SOURCE_FILE).write_text("{}")
+    assert not source.native_current(root, plugin, "demo-pkg")
+
+
 def test_native_driver_binds_and_rechecks_actual_closed_profile(tmp_path, engine, plugin, monkeypatch):
     from types import SimpleNamespace
     import installer_driver

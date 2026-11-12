@@ -476,15 +476,8 @@ def install(
             with governance.held(timeout=wait_timeout):
                 if source_identity is not None:
                     plugin = runtime_source.publish_source_snapshot(plugin, root, source_identity)
-                    if previous and previous.startswith(version + ".repair."):
-                        manifest = governance.helper.read_deployment_manifest(root / "deploy-manifest.json")
-                        if (
-                            manifest.get("runtime_source") == source_identity.document()
-                            and manifest.get("runtime_version") == previous
-                            and isinstance(manifest.get("venv"), str)
-                            and Path(manifest["venv"]) == runtime.version_dir(root, previous)
-                        ):
-                            version = previous
+                if source_identity is not None or native_wheel_inputs is not None:
+                    version = install_driver.selected_repair(root, version, previous, source_identity, governance)
                 candidate = custody.enter_context(engine.numbered_candidate(
                     root, version, plugin=plugin, uv=uv, base_python=base_python,
                     health_module="agent_worktrees.runtime_candidate", health_callable="verify_runtime_candidate",
@@ -849,7 +842,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--construction-provenance", type=json.loads, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
     if arguments.input_timeout is not None and not (arguments.install_source or arguments.wheel_profile):
-        parser.error("--input-timeout requires an explicit installation input")
+        parser.error("--input-timeout requires --install-source or --wheel-profile")
     required = ("root", "plugin") if (
         arguments.inspect_helper_publication or arguments.complete_helper_publication
     ) else ("root", "plugin", "payload", "uv", "base_python", "result")

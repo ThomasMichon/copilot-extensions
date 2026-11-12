@@ -18,7 +18,7 @@ RUNTIME_RESOURCES = {
 APPLICATION_RESOURCES = {
     "worktree_manager": (
         "scripts/installer*.py", "scripts/runtime*.py", "scripts/versioned_runtime*.py",
-        "scripts/versioned_runtime_native.ps1", "scripts/source_acquisition.py",
+        "scripts/versioned_runtime_native.ps1", "scripts/source_acquisition.py", "scripts/install_source.py",
         "scripts/repair_recovery.py", "scripts/update_entry.py",
         "scripts/bootstrap-killswitch-guard.*", "scripts/killswitch_mutation.py",
         "scripts/daemon_instances.*", "scripts/daemon_instance_runtime.pyz",

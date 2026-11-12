@@ -42,6 +42,27 @@ def native_construction_options(plugin: Path, inputs) -> tuple[str, dict]:
     }
 
 
+def selected_repair(root: Path, version: str, previous: str | None, source_identity, governance) -> str:
+    """Choose the selected repair; the constructor still admits its exact inputs."""
+    import re
+    import installer_engine as engine
+
+    if not previous or re.fullmatch(
+        re.escape(version) + r"(?:[.+]repair\.[0-9a-f]{32})?", previous,
+    ) is None:
+        return version
+    manifest = governance.helper.read_deployment_manifest(root / "deploy-manifest.json")
+    if (
+        manifest.get("runtime_source") == (source_identity.document() if source_identity is not None else None)
+        and manifest.get("runtime_version") == previous
+        and isinstance(manifest.get("venv"), str)
+        and Path(manifest["venv"]) == engine.runtime.version_dir(root, previous)
+        and engine.runtime.is_complete(root, previous)
+    ):
+        return previous
+    return version
+
+
 def positive_input_timeout(value: str) -> float:
     seconds = float(value)
     if not math.isfinite(seconds) or seconds <= 0:

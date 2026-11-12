@@ -139,6 +139,16 @@ mistaking it for package-version drift. Package comparisons strip the generated
 profile suffix; recovery still requires an exact current/last-known-good
 selection instead of choosing a dependency profile by hash order.
 
+Unchanged startup reads the existing selector, bounded constructor receipt,
+deployment manifest, completion marker and interpreter presence. The package
+identity, exact profile/closure, selected extras and manifest construction hash
+must agree with that completed generation. Each observation rereads this evidence:
+changed or missing evidence, package/profile changes and Source-qualified payloads
+invalidate the hint. It does not enumerate or hash payload/dependency trees, prove
+serving health, or admit construction from a receipt. Explicit installation still
+checks the actual retained payload/wheel bytes and installed health, including when
+reusing the selected healthy `.repair` or `+repair` generation.
+
 Unsupported native capability/dependency profiles may use only the caller's
 permitted ordinary fallback. A failed native installation or changed retained
 input is an actual failure, not permission to hide it with a source rebuild.
