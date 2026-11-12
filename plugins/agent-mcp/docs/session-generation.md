@@ -471,6 +471,12 @@ handling and bind any successful report to their actual selected command before
 supplying mandatory ownership arguments. Missing or stale discovery is not
 permission to replay a possibly accepted session.
 
+The explicit native pair is supported on Windows and Linux. The optional
+physical receiver is Linux-only and is advertised only on Linux; the Windows
+query does not claim that its pair support also implements the optional
+bootstrap/receiver path. Windows controlled-launcher capture and optional-entry
+expansion remain separate work.
+
 ### Hosted originating-owner qualification
 
 The explicit `mcp-caller-lifetime` hosted Windows qualification packet uses the

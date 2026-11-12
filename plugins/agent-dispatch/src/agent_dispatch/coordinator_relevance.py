@@ -1,4 +1,4 @@
-"""Provider-first, control-authorized relevance for local direct emitters."""
+"""Provider-first, control-authorized relevance for effective local sources."""
 
 from __future__ import annotations
 
@@ -26,6 +26,7 @@ class RelevanceBody(BaseModel):
     version: int = Field(strict=True, ge=1, le=1)
     registration_id: str = Field(min_length=1, max_length=4096)
     registration_revision: int = Field(strict=True, ge=0, le=2**63 - 1)
+    effective_revision: str | None = Field(default=None, min_length=1, max_length=4096)
     request_id: str = Field(min_length=1, max_length=4096)
     expected_generation: int = Field(strict=True, ge=0, le=2**63 - 1)
     expected_revision: int = Field(strict=True, ge=0, le=2**63 - 1)
@@ -81,7 +82,7 @@ def register_relevance_routes(
                 result = queue.relevance_snapshot(
                     task_id, registration=RelevanceRegistration(registration_id, machine, env),
                     disabled_ids=disabled,
-                    registration_admission=source.require_effective_direct,
+                    registration_admission=source.resolve,
                 )
         except (TaskError, OSError, ValueError, TimeoutError) as exc:
             raise HTTPException(409, detail=str(exc)) from exc
@@ -99,13 +100,14 @@ def register_relevance_routes(
                         task_id, request_id=body.request_id,
                         scope=RelevanceRegistration(
                             body.registration_id, machine, env, body.registration_revision,
+                            body.effective_revision,
                         ),
                         expected_generation=body.expected_generation,
                         expected_revision=body.expected_revision, verdict=body.verdict,
                         reason=body.reason, observation_ref=body.observation_ref,
                         reporter=f"registration:{body.registration_id}", disabled_ids=disabled,
                         on_transition=transition,
-                        registration_admission=source.require_effective_direct,
+                        registration_admission=source.resolve,
                     )
         except (TaskError, OSError, ValueError, TimeoutError) as exc:
             raise HTTPException(409, detail=str(exc)) from exc

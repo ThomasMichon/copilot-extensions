@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import json
 import sqlite3
 
 import pytest
@@ -66,6 +67,24 @@ def test_registered_source_abandons_once_and_recovers_after_registration_removal
     with pytest.raises(TaskError, match="different registration"):
         q.relevance_receipt(t.id, values["request_id"], registration_id="source-b")
     assert q.steer_log(t.id) == q.list_wakes(t.id) == []
+
+
+def test_prior_receiver_acceptance_remains_replayable_without_extended_scope_field(q) -> None:
+    emitter(q)
+    t = emitted(q)
+    values = report(q, t.id)
+    accepted = q.reconcile_task_relevance(t.id, **values)
+    with q._connect() as conn:
+        prior = json.loads(conn.execute(
+            "SELECT request_json FROM task_relevance_requests WHERE task_id=?", (t.id,),
+        ).fetchone()["request_json"])
+        prior["scope"].pop("effective_revision", None)
+        conn.execute(
+            "UPDATE task_relevance_requests SET request_json=? WHERE task_id=?",
+            (json.dumps(prior, sort_keys=True, separators=(",", ":")), t.id),
+        )
+    q.remove_registration("source-a")
+    assert q.reconcile_task_relevance(t.id, **values) == accepted
 
 
 @pytest.mark.parametrize("change", ["spec", "pause", "remove", "remove_recreate"])
