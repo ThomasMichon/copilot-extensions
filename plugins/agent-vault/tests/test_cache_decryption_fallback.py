@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+import io
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
 import pytest
 
-from agent_vault import authenticated_curl, cache, cli, config, credential_reads, kek
+from agent_vault import authenticated_curl, batch_reads, cache, cli, config, credential_reads, kek
 from agent_vault.cache_dpapi import MAGIC, CacheProtectionError
 
 
@@ -164,4 +166,38 @@ def test_explicit_refresh_still_requires_authoritative_cache_reconciliation(
     )
     result = credential_reads.read_credential(_arguments(refresh=True))
     assert result.code == 2 and result.value is None
+    _assert_preserved(persistent, before)
+
+
+@pytest.mark.parametrize("succeeds", [False, True])
+def test_batch_fallback_preserves_results_and_separates_safe_diagnostics(
+    protected_cache, monkeypatch: pytest.MonkeyPatch, capsys, succeeds: bool,
+) -> None:
+    persistent, before = protected_cache
+    requests = []
+    monkeypatch.setattr(cli, "ensure_service", lambda: True)
+    monkeypatch.setattr(sys, "stdin", io.StringIO('[{"entry":"entry"}]'))
+
+    def read(request: dict, timeout: object = None) -> dict:
+        requests.append(request)
+        assert request == {"action": "get", "entry": "entry", "field": "password", "refresh": False}
+        return (
+            {"ok": True, "value": "fixture-live-value"} if succeeds
+            else {"ok": False, "error": "fixture-service-refused"}
+        )
+
+    monkeypatch.setattr(cli, "send_command", read)
+    assert batch_reads.cmd_batch_get(SimpleNamespace(refresh=False)) == (0 if succeeds else 1)
+    captured = capsys.readouterr()
+    expected = {
+        "entry": "entry", "field": "password", "value": "fixture-live-value" if succeeds else None,
+        "ok": succeeds, "source": "service",
+    }
+    if not succeeds:
+        expected["error"] = "fixture-service-refused"
+    assert json.loads(captured.out) == {"results": [expected]}
+    assert captured.err == f"Warning: {credential_reads.CACHE_DECRYPTION_WARNING}\n"
+    assert "private DPAPI diagnostic" not in captured.err
+    assert "fixture-live-value" not in captured.err
+    assert len(requests) == 1
     _assert_preserved(persistent, before)
