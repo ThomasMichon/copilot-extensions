@@ -347,6 +347,55 @@ def test_recordless_normalized_shell_rejects_execution_directory_override(tmp_pa
     assert not list(tmp_path.rglob("headed.json"))
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Native POSIX umask and ownership required")
+@pytest.mark.parametrize("unsafe_parent", [False, True])
+def test_recordless_private_storage_survives_permissive_umask(tmp_path, unsafe_parent):
+    # Keep process-wide umask changes inside a dedicated, bounded fixture process.
+    script = r'''
+import os, stat, sys
+from pathlib import Path
+os.umask(0o002)
+from agent_worktrees import normalized_backend as backend
+from agent_remote_driver.headed import caller, launcher
+root = Path(sys.argv[1]) / "installation"
+root.mkdir(mode=0o755)
+backend.config.install_dir = lambda: root
+backend.agent_policy.require = lambda _cwd: None
+unsafe = sys.argv[2] == "True"
+if unsafe:
+    (root / "launch-attempts").mkdir()
+    assert stat.S_IMODE((root / "launch-attempts").stat().st_mode) == 0o775
+def execute(argv, **kwargs):
+    assert not unsafe, "unsafe existing storage reached core execution"
+    attempt = kwargs["attempt_directory"]
+    for path in (attempt.parent, attempt, attempt / "runtime"):
+        assert stat.S_IMODE(path.stat().st_mode) == 0o700, path
+        assert path.stat().st_uid == os.getuid()
+    command = launcher.prepare_headed_command(
+        argv, session_id=kwargs["session_id"], attempt_directory=attempt,
+        state_file=kwargs["state_file"], cwd=kwargs["cwd"],
+    )
+    assert Path(command[3]).is_file()
+    return 0, True
+caller.execute = execute
+try:
+    result = backend.launch(["copilot", "--resume=selected"])
+except ValueError as error:
+    assert unsafe and "storage is not private" in str(error), error
+    assert not list((root / "launch-attempts").glob("*/runtime"))
+else:
+    assert not unsafe and result == 0
+assert stat.S_IMODE(root.stat().st_mode) == 0o755
+print("recordless-private-storage-pass")
+'''
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", "-c", script, str(tmp_path), str(unsafe_parent)],
+        cwd=tmp_path, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "recordless-private-storage-pass"
+
+
 @pytest.mark.parametrize("interruption", [None, "seed-claimed", "process-spawned", "finish"])
 def test_real_daemon_and_backend_keep_two_exact_handoffs_separate(tmp_path, interruption):
     script = textwrap.dedent(_SETUP + """

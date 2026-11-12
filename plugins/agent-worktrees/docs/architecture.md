@@ -847,6 +847,9 @@ so historical session metadata cannot restore a different workspace.
 The installation's `launch-attempts/<operation>/` retains the copied runtime
 and native receipt without inventing a worktree record or using the anchor
 claim ledger as launch authority. This path adds no recovery or auth admission.
+The existing private-directory primitives create caller-owned attempt parents,
+attempts and runtime directories before bundle construction, independent of umask;
+unsafe existing paths refuse instead of being chmod-repaired or reused.
 A missing/incompatible selected runtime or uncertain native receipt never
 replays the original command through a raw-backend fallback. Legacy direct
 script use with no Worktrees runtime selection retains its existing behavior;

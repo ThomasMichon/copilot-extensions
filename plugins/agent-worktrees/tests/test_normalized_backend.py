@@ -30,7 +30,7 @@ def test_recordless_handoff_preserves_argv_and_rechecks_policy(tmp_path, monkeyp
         attempt = kwargs["attempt_directory"]
         assert attempt.parent == tmp_path / "launch-attempts"
         assert kwargs["state_file"] == attempt / "headed.json"
-        assert not attempt.exists()
+        assert (attempt / "runtime").is_dir()
         kwargs["admit"]()
         kwargs["spawned"](123, "native-birth")
         return 7, True
@@ -38,7 +38,16 @@ def test_recordless_handoff_preserves_argv_and_rechecks_policy(tmp_path, monkeyp
     monkeypatch.setattr(caller, "execute", execute)
     assert backend.launch(command) == 7
     assert observed == [str(Path.cwd()), str(Path.cwd())]
-    assert not list(tmp_path.iterdir())
+    assert not list(tmp_path.rglob("*.yaml"))
+
+
+def test_recordless_refuses_an_existing_non_directory_storage_parent(tmp_path, monkeypatch):
+    (tmp_path / "launch-attempts").write_text("not a directory", encoding="utf-8")
+    monkeypatch.setattr(backend.config, "install_dir", lambda: tmp_path)
+    monkeypatch.setattr(backend.agent_policy, "require", lambda _: None)
+    monkeypatch.setattr(caller, "execute", lambda *_a, **_kw: pytest.fail("unsafe storage execution"))
+    with pytest.raises(ValueError, match="storage is not private"):
+        backend.launch(["copilot"])
 
 
 @pytest.mark.parametrize("arguments", [

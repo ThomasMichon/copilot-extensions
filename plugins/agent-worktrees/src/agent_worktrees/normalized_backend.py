@@ -9,11 +9,32 @@ import sys
 from uuid import uuid4
 
 from agent_procutil import no_window_kwargs
+from agent_procutil._daemon_instance_owner import mkdir_private
+from agent_procutil import python_cache_permissions as directory_permissions
 
 from . import agent_policy, config, launch_execution
 from .launch_seed_exec import _interactive_console
 from .launch_seed_native import _headed_command
 from .process_launcher import bind_execution_directory
+
+
+def _attempt_directory() -> Path:
+    root = config.install_dir()
+    try:
+        directory_permissions.check_ancestors(root)
+        mkdir_private(root, exist_ok=True)
+        directory_permissions.check(root)
+        parent = root / "launch-attempts"
+        mkdir_private(parent, exist_ok=True)
+        directory_permissions.check(parent, private=True)
+        attempt = parent / uuid4().hex
+        mkdir_private(attempt)
+        directory_permissions.check(attempt, private=True)
+        mkdir_private(attempt / "runtime")
+        directory_permissions.check(attempt / "runtime", private=True)
+        return attempt
+    except (OSError, ValueError) as exc:
+        raise ValueError(f"Recordless launch storage is not private: {exc}") from exc
 
 
 def launch(command: list[str]) -> int:
@@ -37,7 +58,7 @@ def launch(command: list[str]) -> int:
     agent_policy.require(cwd)
     argv, session_id = selected
     argv = bind_execution_directory(argv, cwd, ValueError)
-    attempt = config.install_dir() / "launch-attempts" / uuid4().hex
+    attempt = _attempt_directory()
     environment = os.environ.copy()
     environment.pop(launch_execution.NATIVE_HINT_ENV, None)
     code, certain = execute(
