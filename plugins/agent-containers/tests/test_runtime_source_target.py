@@ -129,12 +129,47 @@ def test_native_wheel_cli_passes_inputs_to_the_existing_provision_owner(
     assert calls[0]["wheel_directory"] == tmp_path / "wheels"
 
 
+@pytest.mark.parametrize("isolated", [False, True], ids=["safe-path", "isolated"])
+def test_staged_native_wheels_load_owned_helpers_before_input_admission(tmp_path, isolated):
+    payload = tmp_path / "payload"
+    scripts = payload / "scripts"
+    scripts.mkdir(parents=True)
+    for helper in SCRIPTS.glob("*.py"):
+        shutil.copyfile(helper, scripts / helper.name)
+    (payload / "pyproject.toml").write_text('version = "1.0.0"\n', encoding="utf-8")
+    profile = tmp_path / "profile.json"
+    profile.write_text('{"wheels":[]}\n', encoding="utf-8")
+    wheels = tmp_path / "wheels"
+    wheels.mkdir()
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    for name in ("install_source", "installer_engine"):
+        (foreign / f"{name}.py").write_text(
+            "raise AssertionError('loaded an ambient wheel helper')\n", encoding="utf-8",
+        )
+    root = tmp_path / "runtime"
+    result = subprocess.run(
+        [sys.executable, *(["-I"] if isolated else []), "-B", str(scripts / "runtime_profile.py"),
+         "--root", str(root), "--payload", str(payload), "--python", sys.executable,
+         "--uv", str(tmp_path / "uv"), "--wheel-profile", str(profile),
+         "--wheel-directory", str(wheels)],
+        cwd=foreign, env={**os.environ, "PYTHONSAFEPATH": "1", "PYTHONPATH": str(foreign)},
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode != 0
+    assert "project requires a complete bounded wheel profile" in result.stderr, result.stderr
+    assert "ModuleNotFoundError" not in result.stderr
+    assert "ambient wheel helper" not in result.stderr
+    assert not root.exists()
+
+
 @pytest.mark.parametrize("reused", [False, True])
 @pytest.mark.parametrize("profile", ["base", "provider-exec"])
 def test_native_wheel_profile_health_gates_completion(
     profiles, tmp_path, monkeypatch, reused, profile,
 ):
-    import install_source
+    install_source = profiles.runtime._runtime_component("install_source")
 
     root, payload = tmp_path / "runtime", tmp_path / "payload"
     slot = root / "versions" / "1.0.profile.fixture"
@@ -167,7 +202,7 @@ def test_native_wheel_profile_health_gates_completion(
         "extras": ["provider-exec"] if profile == "provider-exec" else [],
         "runtime_version": slot.name, "payload_hash": "fixture", "local_packages": [],
     })
-    monkeypatch.setitem(sys.modules, "installer_engine", SimpleNamespace(numbered_candidate=candidate))
+    monkeypatch.setattr(install_source.engine, "numbered_candidate", candidate)
 
     def reject(*_a, **_kw):
         raise RuntimeError("profile health failed")
@@ -186,7 +221,7 @@ def test_native_wheel_profile_health_gates_completion(
 def test_native_wheel_provision_selects_and_retains_its_exact_profile(
     profiles, tmp_path, monkeypatch, profile,
 ):
-    import install_source
+    install_source = profiles.runtime._runtime_component("install_source")
 
     root, payload = tmp_path / "r", tmp_path / "p"
     extras = ["provider-exec"] if profile == "provider-exec" else []
@@ -229,7 +264,7 @@ def test_native_wheel_provision_selects_and_retains_its_exact_profile(
         "extras": extras, "runtime_version": generation,
         "payload_hash": fingerprint, "local_packages": ["agent-containers"],
     })
-    monkeypatch.setitem(sys.modules, "installer_engine", SimpleNamespace(numbered_candidate=candidate))
+    monkeypatch.setattr(install_source.engine, "numbered_candidate", candidate)
     monkeypatch.setattr(profiles, "_health", lambda *_a, **_kw: None)
     result = profiles.provision(
         root, payload, python=sys.executable, uv="fixture",
