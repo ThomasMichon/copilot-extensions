@@ -159,7 +159,11 @@ def iter_library_consumer_names() -> list[str]:
 
 
 def _check_library_path(path: Path) -> None:
-    if not path.resolve().is_relative_to(REPO.resolve()):
+    try:
+        contained = path.resolve().is_relative_to(REPO.resolve())
+    except OSError as error:
+        raise VersionError(f"unsafe library version path: {path}") from error
+    if not contained:
         raise VersionError(f"unsafe library version path: {path}")
     for part in (path, *path.parents):
         if part.is_symlink() or getattr(part, "is_junction", lambda: False)():
@@ -497,7 +501,10 @@ def apply(result: dict[str, tuple[str, str]]) -> list[str]:
 def _validate_version_destinations(result: dict[str, tuple[str, str]]) -> None:
     """Admit all destinations before the first version write, including seeding."""
     for consumer in result:
-        libraries = library_roots(consumer)
+        try:
+            libraries = library_roots(consumer)
+        except OSError as error:
+            raise VersionError(f"unsafe library version destinations: {consumer}") from error
         roots = libraries or [_consumer_root(consumer)]
         if not libraries and not is_standalone_consumer(consumer):
             _check_library_path(MARKETPLACE)

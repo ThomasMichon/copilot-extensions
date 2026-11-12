@@ -5537,7 +5537,7 @@
         "tools/typecheck_source_views.py": "e587064b9824bafcf7d219d93cac3e8e502942f8bf60d205867bd452600119f6",
         "tools/promotion_unit_tests/test_typecheck.py": "8ce4a807734345fd4665a15a75cfb6087a85878d445b958317fb42dcf5c431fe",
         "tools/promotion_unit_tests/test_typecheck_emitted.py": "3a92fd3fed6c7db24c133e29c20578c6fa9f806f9ea55786f5e69fa16a0452bd",
-        "tools/accumulate_bumps.py": "eb025f263ef20c0aa23114df25315ff320ee2fb39e257e0765ccfab37c145471",
+        "tools/accumulate_bumps.py": "dde78170a5af9fb10a4fa46cffa4d5272cacd45379aa51be222e52e477d997c3",
         "tools/artifact_builder_cli.py": "876bab23db79c4bd7f0fb0a1feb02b573f9549d156d9d783eed9daa9c819a909",
         "tools/artifact_attestation.py": "5c273bf9f33b1102fa8be739ce7fa0de32c148eff67be0fd9e96d3f3b219a88a",
         "tools/artifact_source_build.py": "04e0efb1589a10c05420eafae02e4dcaf1a02ed5186d4660009f7712238c034f",
