@@ -209,6 +209,14 @@ def build_runtimes(
                 f"    Path({str(observations.with_suffix('.capabilities'))!r}).write_text(json.dumps(result))\n"
                 + needle,
             ), encoding="utf-8")
+            host = payload / "src" / "agent_mcp" / "custody_host.py"
+            body = host.read_text(encoding="utf-8")
+            needle = "execution_context.config_failure(exc)"
+            assert body.count(needle) == 2
+            host.write_text(body.replace(
+                needle, "(print('fixture custody refusal:', repr(exc), flush=True) or "
+                + needle + ")",
+            ), encoding="utf-8")
         package = source.payload_package_version(payload, "agent-mcp")
         digest = source.assembly_hash(payload)
         identity = source.SourceIdentity(
