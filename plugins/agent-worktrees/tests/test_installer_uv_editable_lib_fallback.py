@@ -15,6 +15,7 @@ import subprocess
 from pathlib import Path
 
 import pytest
+from agent_procutil import no_window_kwargs
 
 
 PLUGIN = Path(__file__).resolve().parents[1]
@@ -45,6 +46,10 @@ _BLOCKS = {
     ),
     "update-telemetry": (
         "# Vendored update-telemetry lib (agent-update-telemetry / module",
+        "# Shared PR filter semantics must resolve locally, never from an index.",
+    ),
+    "pr-filters": (
+        "# Shared PR filter semantics must resolve locally, never from an index.",
         "$installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees'",
     ),
 }
@@ -55,6 +60,7 @@ _LIBS = (
     "remote-login-shell",
     "machine-transport",
     "update-telemetry",
+    "pr-filters",
 )
 
 
@@ -86,6 +92,7 @@ $prevEAP = $ErrorActionPreference
         encoding="utf-8",
         env={**os.environ},
         timeout=30,
+        **no_window_kwargs(),
     )
 
 
@@ -124,7 +131,7 @@ def test_lib_falls_back_to_repo_root_canonical_when_absent(lib: str, tmp_path: P
     assert os.path.realpath(proc.stdout) == os.path.realpath(canonical_lib)
 
 
-@pytest.mark.parametrize("lib", _LIBS)
+@pytest.mark.parametrize("lib", [lib for lib in _LIBS if lib != "pr-filters"])
 def test_lib_is_a_noop_when_neither_copy_exists(lib: str, tmp_path: Path):
     pwsh = shutil.which("pwsh") or shutil.which("powershell")
     if not pwsh:
@@ -136,6 +143,17 @@ def test_lib_is_a_noop_when_neither_copy_exists(lib: str, tmp_path: Path):
     proc = _run_block(pwsh, lib, plugin_dir)
     assert proc.returncode == 0, proc.stderr
     assert proc.stdout == ""
+
+
+def test_missing_required_filter_library_refuses_without_index_fallback(tmp_path):
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    plugin_dir = tmp_path / "plugins" / "agent-worktrees"
+    plugin_dir.mkdir(parents=True)
+    result = _run_block(pwsh, "pr-filters", plugin_dir)
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip() == "False"
 
 
 def test_plugin_activation_block_runs_after_its_own_transitive_deps():

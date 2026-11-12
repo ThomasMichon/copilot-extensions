@@ -11,7 +11,7 @@ import yaml
 def scoped_read_dispatch(dispatch):
     @wraps(dispatch)
     def scoped(argv):
-        if argv[:1] and argv[0] in ("snapshot", "status", "threads", "diff", "inventory"):
+        if argv[:1] and argv[0] in ("snapshot", "status", "threads", "diff", "inventory", "population"):
             from .config_cache import ConfigCacheSession
             from .inrepo_config_source import resolution_budget
 
@@ -19,6 +19,9 @@ def scoped_read_dispatch(dispatch):
                 if argv[0] == "inventory":
                     from .pr_inventory_cli import dispatch as inventory_dispatch
                     return inventory_dispatch(argv[1:])
+                if argv[0] == "population":
+                    from .pr_population_cli import dispatch as population_dispatch
+                    return population_dispatch(argv[1:])
                 return dispatch(argv)
         return dispatch(argv)
 

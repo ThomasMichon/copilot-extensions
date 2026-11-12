@@ -39,7 +39,7 @@ def test_runtime_dependencies_do_not_install_ui_stack() -> None:
 
 
 @pytest.mark.guard
-@pytest.mark.parametrize("library", ["plugin-resolve", "dropin-registry", "plugin-activation"])
+@pytest.mark.parametrize("library", ["plugin-resolve", "dropin-registry", "plugin-activation", "pr-filters"])
 def test_activation_dependencies_match_their_delivery_form(library: str) -> None:
     project = tomllib.loads((PLUGIN_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     source = project["tool"]["uv"]["sources"][f"agent-{library}"]
