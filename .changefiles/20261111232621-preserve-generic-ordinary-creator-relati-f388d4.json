@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve generic ordinary creator relationships during read-only relocation admission and bound reference discovery to known metadata names",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}
