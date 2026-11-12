@@ -29,6 +29,26 @@ for name, wheel in (source_wheels or {}).items():
             f"{name} installed content differs from its source wheel: {member}"
 """
 
+_PREPARE_INSTALLED_CHECK = """
+import hashlib, importlib, importlib.metadata, json, pathlib, sys
+slot = pathlib.Path(sys.argv[1]).resolve()
+native_slot = pathlib.Path(sys.argv[6]).resolve()
+def resolved(path):
+    physical = pathlib.Path(path).resolve()
+    if physical.is_relative_to(native_slot):
+        return slot / physical.relative_to(native_slot)
+    return physical
+source_wheels = json.loads((pathlib.Path(sys.argv[6]) / ".runtime-input-origins.json").read_text()).get("source_wheels")
+if sys.argv[5]:
+    assert hashlib.sha256(json.dumps(source_wheels, sort_keys=True, separators=(",", ":")).encode()).hexdigest() \
+        == sys.argv[5], "source wheel evidence differs before preparation"
+""" + _SOURCE_WHEEL_CONTENT_CHECK + """
+module = importlib.import_module(sys.argv[2])
+assert module.__file__ and resolved(module.__file__).is_relative_to(slot), \
+    "construction module is outside the candidate runtime"
+getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
+"""
+
 class HealthRepairRequired(RuntimeError):
     """Published health needs a distinct generation, never an in-place rebuild."""
 

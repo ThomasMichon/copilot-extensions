@@ -1,8 +1,10 @@
 """A retained native-wheel runtime remains a valid dev-mode control owner."""
 from contextlib import ExitStack
 import hashlib
+import importlib.util
 import json
 import os
+from pathlib import Path
 import subprocess
 from types import SimpleNamespace
 
@@ -12,11 +14,18 @@ from test_python_runtime_modes import modes as modes
 
 
 @pytest.mark.parametrize("corrupt", [None, "binding", "version", "extra"])
+@pytest.mark.parametrize("loader", ["package", "standalone"])
 def test_native_wheel_runtime_can_enter_modes_without_source_receipt_reinterpretation(
-    modes, tmp_path, monkeypatch, corrupt,
+    modes, tmp_path, monkeypatch, corrupt, loader,
 ):
     from agent_worktrees import runtime_candidate, runtime_dev_cli
 
+    if loader == "standalone":
+        spec = importlib.util.spec_from_file_location(
+            "_retained_origin_health", Path(runtime_candidate.__file__).resolve(),
+        )
+        runtime_candidate = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(runtime_candidate)
     runtime = modes.lifecycle.runtime
     generation = "1.0.0.profile." + "a" * 16
     slot = runtime.slot(tmp_path, generation)

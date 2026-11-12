@@ -51,6 +51,31 @@ def test_source_wheel_content_accepts_native_paths(tmp_path):
         exec(_SOURCE_WHEEL_CONTENT_CHECK, namespace)
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows native construction paths")
+def test_installed_preparation_normalizes_containment_but_rejects_outside_modules(tmp_path, monkeypatch):
+    import importlib
+    from installer_engine_health import _PREPARE_INSTALLED_CHECK
+
+    installed = tmp_path / "fixture_app.py"
+    installed.write_bytes(b"fixture module")
+    (tmp_path / ".runtime-input-origins.json").write_text("{}")
+    called = []
+    module = SimpleNamespace(
+        __file__="\\\\?\\" + str(installed), prepare=lambda data: called.append(data),
+    )
+    monkeypatch.setattr(importlib, "import_module", lambda _name: module)
+    monkeypatch.setattr(sys, "argv", [
+        "probe", str(tmp_path), "fixture_app", "prepare", '{"selected":true}', "",
+        "\\\\?\\" + str(tmp_path),
+    ])
+    exec(_PREPARE_INSTALLED_CHECK, {})
+    assert called == [{"selected": True}]
+    module.__file__ = "\\\\?\\" + str(tmp_path.parent / "outside.py")
+    with pytest.raises(AssertionError, match="construction module is outside"):
+        exec(_PREPARE_INSTALLED_CHECK, {})
+    assert len(called) == 1
+
+
 def test_source_phase_allowances_are_independent_and_report_the_expired_phase(monkeypatch, capsys):
     import installer_wheel_inputs as wheels
 

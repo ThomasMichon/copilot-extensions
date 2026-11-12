@@ -47,7 +47,7 @@ from installer_source_build import (
 
 from installer_engine_health import (
     HealthRepairRequired as HealthRepairRequired,
-    _SOURCE_WHEEL_CONTENT_CHECK,
+    _PREPARE_INSTALLED_CHECK,
     verify_installed_inputs as verify_installed_inputs,
     verify_application_wheels as verify_application_wheels,
 )
@@ -636,24 +636,11 @@ def _prepare_installed(
     module, separator, function = callable_name.partition(":")
     if not separator or not module or not function:
         raise ValueError("Construction callable must be an installed module:function")
-    probe = """
-import hashlib, importlib, importlib.metadata, json, pathlib, sys
-slot = pathlib.Path(sys.argv[1]).resolve()
-source_wheels = json.loads((slot / ".runtime-input-origins.json").read_text()).get("source_wheels")
-if sys.argv[5]:
-    assert hashlib.sha256(json.dumps(source_wheels, sort_keys=True, separators=(",", ":")).encode()).hexdigest() \
-        == sys.argv[5], "source wheel evidence differs before preparation"
-""" + _SOURCE_WHEEL_CONTENT_CHECK + """
-module = importlib.import_module(sys.argv[2])
-assert module.__file__ and pathlib.Path(module.__file__).resolve().is_relative_to(slot), \
-    "construction module is outside the candidate runtime"
-getattr(module, sys.argv[3])(json.loads(sys.argv[4]))
-"""
     _child(
-        [str(python), "-I", "-B", "-c", probe, str(slot), module, function,
+        [str(python), "-I", "-B", "-c", _PREPARE_INSTALLED_CHECK, str(slot), module, function,
          json.dumps({**data, "frozen_plugin": str(payload.plugin)}),
          hashlib.sha256(inputs.source_wheels.canonical).hexdigest()
-         if inputs.source_wheels is not None else ""],
+         if inputs.source_wheels is not None else "", str(_native_retained_path(slot))],
         inputs=inputs, descriptor=descriptor, timeout=timeout, candidate=slot,
     )
 

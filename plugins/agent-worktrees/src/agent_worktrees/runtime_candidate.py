@@ -179,7 +179,7 @@ def verify_installed_origins() -> None:
     if closed:
         if source_wheels is not None:
             raise RuntimeError("Closed wheel evidence cannot replace Source wheel evidence")
-        from .runtime_dev_cli import _lifecycle
+        from agent_worktrees.runtime_dev_cli import _lifecycle
 
         inputs = _lifecycle().engine.WheelReuseInputs(
             slot.name, json.dumps(receipt.get("wheel_inputs"), sort_keys=True, separators=(",", ":"), allow_nan=False),
