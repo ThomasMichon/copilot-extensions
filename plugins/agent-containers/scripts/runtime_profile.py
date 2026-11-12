@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.metadata
 import importlib.util
 import json
@@ -72,6 +73,7 @@ def _unique_object(pairs: list[tuple[str, object]]) -> dict:
 
 
 def _read_json(path: Path) -> dict:
+    path = runtime._leases._native_path(path)
     if path.is_symlink() or not path.is_file():
         raise RuntimeError(f"Profile must be an ordinary JSON file: {path}")
     value = json.loads(
@@ -83,6 +85,7 @@ def _read_json(path: Path) -> dict:
 
 
 def _write_json(path: Path, value: dict) -> None:
+    path = runtime._leases._native_path(path)
     if path.exists():
         if _read_json(path) == value:
             return
@@ -139,6 +142,35 @@ def select_execution(root: Path) -> ExecutionSelection:
     return _read_execution(root, python)
 
 
+def _check_wheel_execution_profile(slot: Path, value: dict) -> None:
+    try:
+        receipt = _read_json(slot / ".runtime-input-origins.json")
+        wheels = receipt["wheel_inputs"]
+        binding = wheels["binding"]
+        lock = "sha256:" + hashlib.sha256(json.dumps(
+            binding, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ).encode("ascii")).hexdigest()
+        extras = ["provider-exec"] if value["profile"] == "provider-exec" else []
+        applications = [row for row in binding["wheels"] if row["name"] == "agent-containers"]
+        if (
+            receipt.get("schema") != "installer-engine.frozen-input-origins"
+            or type(receipt.get("version")) is not int or receipt["version"] != 2
+            or receipt.get("source_wheels") is not None
+            or wheels["construction"] != "closed-wheels" or wheels["lock_id"] != lock
+            or receipt.get("extras", []) != extras or len(applications) != 1
+            or applications[0]["selected_extras"] != extras
+            or set(receipt["packages"]) != set(wheels["distributions"])
+            or "agent-containers" not in wheels["distributions"]
+            or re.fullmatch(
+                re.escape(value["packageVersion"] + ".profile." + lock[7:23])
+                + r"(?:[.+]repair\.[0-9a-f]{32})?", slot.name,
+            ) is None
+        ):
+            raise ValueError("conflicting wheel profile")
+    except (KeyError, TypeError, ValueError) as error:
+        raise RuntimeError("Selected Containers wheel receipt conflicts with its profile") from error
+
+
 def _read_execution(root: Path, python: Path) -> ExecutionSelection:
     slot = python.parent.parent
     if slot.parent != root / "versions" or slot.name.casefold() == runtime.DEV_VERSION:
@@ -164,6 +196,9 @@ def _read_execution(root: Path, python: Path) -> ExecutionSelection:
         raise RuntimeError("Invalid selected Containers slot profile")
     version = value["packageVersion"]
     profile_version = f"{version}{'.' if '+' in version else '+'}{value['profile']}"
+    if slot.name.startswith(version + ".profile."):
+        _check_wheel_execution_profile(slot, value)
+        profile_version = version
     if source.package_version(slot.name) != profile_version:
         raise RuntimeError("Selected Containers slot identity conflicts with its profile")
     retained = _validate_execution_contract(value["executionContract"])
@@ -423,6 +458,8 @@ def provision(
     requested: str | None = None,
     expected_source_version: str | None = None,
     expected_source_identity: str | None = None,
+    wheel_profile: Path | None = None,
+    wheel_directory: Path | None = None,
 ) -> dict:
     """Called under the installer's installation-wide transaction lock."""
     if not uv:
@@ -434,6 +471,61 @@ def provision(
     )
     version, identity = target.package_version, target.identity
     profile, runtime_version = target.profile, target.runtime_version
+    if wheel_profile is not None or wheel_directory is not None:
+        if wheel_profile is None or wheel_directory is None or identity is not None:
+            raise RuntimeError("Containers closed wheels require a complete non-Source input")
+        import installer_engine as engine
+        from install_source import wheel_inputs, wheel_selection
+
+        with wheel_inputs(wheel_profile, wheel_directory) as inputs:
+            selection = wheel_selection(payload, "agent-containers", inputs)
+            extras = tuple(selection["extras"])
+            if ("provider-exec" in extras) != (profile == "provider-exec"):
+                raise RuntimeError("Containers wheel closure differs from its selected dependency profile")
+            runtime_version = selection["runtime_version"]
+            fingerprint = selection["payload_hash"]
+            expected = {
+                "packageVersion": version, "profile": profile, "payloadHash": fingerprint,
+                "executionContract": _execution_contract(),
+            }
+
+            def validate(slot):
+                evidence = slot / PROFILE_FILE
+                if evidence.exists():
+                    if _read_json(evidence) != expected:
+                        raise RuntimeError("Completed Containers slot has a conflicting profile")
+                elif runtime.is_complete(root, slot.name):
+                    raise RuntimeError("Completed Containers slot lacks its profile evidence")
+                else:
+                    _write_json(evidence, expected)
+                _health(
+                    slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python"),
+                    profile, cwd=payload,
+                )
+
+            with engine.numbered_candidate(
+                root, runtime_version, plugin=payload, uv=Path(uv), base_python=Path(python),
+                health_module="agent_containers", wheel_inputs=inputs, extras=extras,
+                local_packages=tuple(selection["local_packages"]),
+                validate_candidate=validate, process_retention=True,
+                expected_source_identity={},
+            ) as ready:
+                venv_python = ready.slot / (
+                    "Scripts/python.exe" if os.name == "nt" else "bin/python"
+                )
+                inputs.verify()
+                _write_json(root / PROFILE_FILE, {
+                    "schema": PROFILE_SCHEMA, "version": 1, "profile": profile,
+                })
+                runtime.activate(
+                    root, ready.slot.name, link_name=".venv", replace_nonlink=True, link_free=True,
+                )
+                return {
+                    "profile": profile, "runtimeVersion": ready.slot.name,
+                    "payloadHash": ready.payload_hash,
+                    "venv": str(ready.slot), "python": str(venv_python),
+                    "reused": ready.reused, "runtimeSource": None,
+                }
     if identity is not None and source.SOURCE_PIN_ENV in os.environ and TARGET_ENV not in os.environ:
         raise RuntimeError(
             "Prepared-source transaction requires a frozen source target; "
@@ -562,6 +654,8 @@ def main() -> int:
     parser.add_argument("--tsv", action="store_true")
     parser.add_argument("--expected-source-version")
     parser.add_argument("--expected-source-identity")
+    parser.add_argument("--wheel-profile", type=Path)
+    parser.add_argument("--wheel-directory", type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--stamp-source", action="store_true")
     mode.add_argument("--plan-source", action="store_true")
@@ -571,6 +665,7 @@ def main() -> int:
             if (
                 not args.expected_source_version or not args.expected_source_identity
                 or args.python or args.uv or args.profile or args.tsv
+                or args.wheel_profile or args.wheel_directory
             ):
                 raise RuntimeError("Source target planning requires only the exact source selection")
             print(json.dumps(plan_source(
@@ -595,6 +690,7 @@ def main() -> int:
             args.root, args.payload, python=args.python, uv=args.uv, requested=args.profile,
             expected_source_version=args.expected_source_version,
             expected_source_identity=args.expected_source_identity,
+            wheel_profile=args.wheel_profile, wheel_directory=args.wheel_directory,
         )
     except (OSError, ValueError, RuntimeError) as exc:
         print(f"[agent-containers] {exc}", file=sys.stderr)

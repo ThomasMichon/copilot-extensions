@@ -132,7 +132,7 @@ def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
     source, candidate = tmp_path / "source", tmp_path / "candidate"
     contract = materializer.mie.ier
     owners = ("agent-containers", "agent-machines", "budget-guidance")
-    names = set(contract.SUPPORT_FILES)
+    names = set((*contract.PYTHON_FILES, *contract.SUPPORT_FILES, *contract.STANDALONE_NATIVE_FILES))
     for owner in owners:
         names.update(contract.native_files(source / "plugins" / owner, source))
     for name in names:
@@ -145,11 +145,14 @@ def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
     log = materializer.mie.materialize_derived_files(candidate, canonical_root=source)
     assert log and not any(line.startswith("SKIP") for line in log), log
     for owner in owners:
-        for name in contract.native_files(source / "plugins" / owner, source):
+        expected_names = set(contract.native_files(source / "plugins" / owner, source))
+        if owner in contract.PYTHON_ADOPTERS:
+            expected_names.update(contract.PYTHON_FILES)
+        for name in expected_names:
             assert (candidate / "plugins" / owner / "scripts" / name).read_bytes() == (
                 source / "libs/installer-engine" / name
             ).read_bytes()
-        if owner != "agent-machines":
+        if "runtime_launcher.py" not in expected_names:
             assert (candidate / "plugins" / owner / "scripts/runtime_launcher.py").read_bytes() == (
                 original[Path("plugins") / owner / "scripts/runtime_launcher.py"]
             )

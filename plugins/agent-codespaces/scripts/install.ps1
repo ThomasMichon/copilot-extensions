@@ -32,7 +32,11 @@ param(
 
     # Preview mode for uninstall/task-retire: print what WOULD be removed
     # without touching the filesystem, scheduled task, or SSH connections.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version Latest
@@ -44,6 +48,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
@@ -83,7 +96,8 @@ if ($env:OS -eq 'Windows_NT' -and
         }
     }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
-        -Plugin 'agent-codespaces' -Action $Action -Options $driverOptions
+        -Plugin 'agent-codespaces' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
@@ -511,6 +525,7 @@ function Remove-ConsoleTrampolines {
 # anything else (a git checkout) => local.
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
+    if ($WheelProfile) { return $WheelPython }
     <# A python to run the stdlib-only versioned_runtime.py helper (#935).
        Prefers a real base Python via the `py` launcher or PATH -- avoiding the
        Windows Store alias stub -- before considering a completed active slot.
@@ -568,6 +583,12 @@ function Invoke-VersionedRuntime {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-codespaces' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
     try {
@@ -625,9 +646,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-codespaces' `
+        -Uv $WheelUv -HealthModule 'agent_codespaces' -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     Assert-SourceRuntime
     return $true
 }
@@ -722,6 +749,10 @@ BUILD_INFO: dict[str, str] = {
 }
 
 function Assert-Uv {
+    if ($WheelProfile) {
+        $script:UvCommand = (Get-Command $WheelUv -CommandType Application -ErrorAction Stop).Source
+        return
+    }
     $script:UvCommand = Ensure-Uv -InstallRoot $InstallDir
     if (-not $script:UvCommand) {
         throw "uv is required but acquisition failed. Install uv and retry."
@@ -1762,6 +1793,11 @@ try {
     }
     if ($Action -in @('install', 'update', 'provision', 'stamp', 'dev')) {
         Initialize-SourceRuntime
+        if ($WheelProfile) {
+            Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+                -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-codespaces' -Root $InstallDir
+            $script:SourceVersion = $SrcVersion
+        }
         if ($Action -eq 'dev' -and $script:SourceRuntimeIdentity) {
             throw 'A source-qualified payload cannot select a mutable development slot'
         }

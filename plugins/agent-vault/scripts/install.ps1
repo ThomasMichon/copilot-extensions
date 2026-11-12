@@ -47,7 +47,11 @@ param(
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the filesystem or scheduled task.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -59,6 +63,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 if (-not $Profile -and $env:AGENT_VAULT_INSTALL_PROFILE) {
     if ($env:AGENT_VAULT_INSTALL_PROFILE -cnotin @('base', 'ssh')) {
@@ -153,7 +166,8 @@ if ($env:OS -eq 'Windows_NT' -and
         }
     }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
-        -Plugin 'agent-vault' -Action $Action -Options $driverOptions
+        -Plugin 'agent-vault' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
@@ -628,6 +642,7 @@ function Test-VaultRuntimeProfilePresent {
 }
 
 function Get-BootstrapPython {
+    if ($WheelProfile) { return $WheelPython }
     if ($script:RuntimeProfilePython) { return $script:RuntimeProfilePython }
     <# Construction supervision must run outside the candidate being built.
        Probe a native launcher, then real PATH interpreters (not Store aliases). #>
@@ -644,6 +659,12 @@ function Get-BootstrapPython {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-vault' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     if ($script:RuntimeProfile) {
         $py = Get-BootstrapPython
         $result = Invoke-Hidden -FilePath $py -ArgList @(
@@ -685,9 +706,15 @@ function Invoke-VersionedSlotClean {
         Invoke-Expression $helpers
     }
     if ($script:RuntimeProfile) { $vr = Get-RuntimeProfileHelper }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-vault' `
+        -Uv $WheelUv -HealthModule 'agent_vault' -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     Assert-SourceRuntime
 }
 
@@ -989,8 +1016,8 @@ function Install-Runtime {
     }
     Write-Ok "Python: $pythonCmd"
 
-    Ensure-UvIndex
-    $uvPath = Ensure-Uv -InstallRoot $InstallDir
+    if (-not $WheelProfile) { Ensure-UvIndex }
+    $uvPath = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
     if (-not $uvPath) {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1
@@ -1958,6 +1985,19 @@ if ($Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or 
     if (-not $RuntimeProfilePython) { throw 'Vault dependency profiles require an existing Python 3.11+ bootstrap interpreter' }
 }
 if ($Action -in @('install', 'update', 'provision', 'stamp')) { Initialize-SourceRuntime }
+if ($WheelProfile) {
+    Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-vault' -Root $InstallDir
+    if ($Profile -or $profilePresent) {
+        $profileArguments = @('-I', '-B', (Join-Path $ScriptDir 'runtime_profile.py'),
+            '--root', $InstallDir, 'select')
+        if ($Profile) { $profileArguments += @('--profile', $Profile) }
+        $selectedProfile = Invoke-Hidden -FilePath $WheelPython -ArgList $profileArguments
+        if ($LASTEXITCODE -ne 0 -or ($selectedProfile | ConvertFrom-Json).profile -cne 'base') {
+            throw 'This closed-wheel input does not replace the selected Vault dependency profile'
+        }
+    }
+}
 $needsInstallLock = ($Action -in @('install', 'update', 'stamp', 'provision', 'schedule')) -or
     ($Action -eq 'uninstall' -and -not $DryRun)
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
@@ -1976,7 +2016,7 @@ try {
     if ($Action -in @('install', 'update', 'provision', 'stamp')) {
         $profilePresent = Test-VaultRuntimeProfilePresent
     }
-    if ($Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
+    if (-not $WheelProfile -and $Action -in @('install', 'update', 'provision', 'stamp') -and ($Profile -or $profilePresent)) {
         if (-not $RuntimeProfilePython) {
             $RuntimeProfilePython = Resolve-NativeBootstrapPython -MinimumMinor 11 -Action $Action -Root $InstallDir
         }

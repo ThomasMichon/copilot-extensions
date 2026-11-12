@@ -99,7 +99,11 @@ param(
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the filesystem, scheduled task, autostart, or firewall.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -111,6 +115,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 # Resolve selectors before the driver or marketplace self-stage changes CWD.
 if ($InstallationConfig) {
@@ -218,6 +231,7 @@ if ($env:OS -eq 'Windows_NT' -and
     }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
         -Plugin 'agent-dispatch' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv `
         -RetainedRuntime $RetainedRuntime -RetainedRuntimeSha256 $RetainedRuntimeSha256
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
@@ -859,6 +873,7 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
+    if ($WheelProfile) { return $WheelPython }
     # A valid signed 3.10 runtime selection need not support the 3.11
     # source/construction helpers; keep those choices independent.
     $probe = @'
@@ -1017,6 +1032,12 @@ function Assert-InstallActions {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-dispatch' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
         Assert-SourceRuntime
         $sha = [Security.Cryptography.SHA256]::Create()
@@ -1057,9 +1078,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-dispatch' `
+        -Uv $WheelUv -HealthModule 'agent_dispatch' -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     Assert-SourceRuntime
 }
 
@@ -1937,7 +1964,7 @@ function Install-Runtime {
     }
     if ($RetainedRuntime) { Install-RetainedRuntime; return }
     Assert-SourceRuntime
-    $selectedBasePython = Resolve-DispatchBasePython
+    $selectedBasePython = if ($WheelProfile) { $WheelPython } else { Resolve-DispatchBasePython }
     if (-not (Test-Path $PkgSrcDir)) {
         Write-Fail "Package source not found at $PkgSrcDir"
         exit 1
@@ -1989,7 +2016,7 @@ function Install-Runtime {
     }
     Write-Ok "Python: $pythonCmd"
 
-    $UvCommand = Ensure-Uv -InstallRoot $InstallDir
+    $UvCommand = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
     if (-not $UvCommand) {
         Write-Warn 'uv acquisition failed -- using Python venv/pip fallback'
     }
@@ -2454,6 +2481,7 @@ function Write-Manifest {
     $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
     $gitInfo = { param($Path) Get-GitInfo -Path (Split-Path -Parent $Path) }
     $extra = @{}
+    if ($NativeWheelSelection) { $extra['runtime_version'] = $SrcVersion }
     if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
         $PluginDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
         $ScriptDir = Join-Path $PluginDir 'scripts'
@@ -4928,6 +4956,10 @@ if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 Assert-InstallActions
 if ($Action -in @('install', 'update', 'provision', 'stamp', 'prepare')) {
     Initialize-SourceRuntime
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-dispatch' -Root $InstallDir
+    }
     Assert-SourceRuntime
 }
 if ($Action -in @('install', 'update', 'provision') -and -not $PreserveSupervisors) {

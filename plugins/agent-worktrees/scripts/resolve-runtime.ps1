@@ -224,8 +224,9 @@ if (-not $AwPy) {
 # Tier 3: true first-run -> newest complete installed slot.
 if (-not $AwPy) {
   $_awSlots = @(Get-ChildItem (Join-Path $_awr 'versions') -Directory -ErrorAction SilentlyContinue)
-  if (@($_awSlots | Where-Object { $_.Name -cmatch '[+.]source\.' }).Count) {
-    [Console]::Error.WriteLine('Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback')
+  if (@($_awSlots | Where-Object { $_.Name -cmatch '[+.]source\.|\.profile\.[0-9a-f]{16}(?:[.+]repair\.[0-9a-f]{32})?$' }).Count) {
+    $_awKind = if (@($_awSlots | Where-Object { $_.Name -cmatch '[+.]source\.' }).Count) { 'source' } else { 'profile' }
+    [Console]::Error.WriteLine("Qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered $_awKind fallback")
   } else {
     $AwPy = $_awSlots |
       Sort-Object { _Aw-VersionKey $_.Name } |
