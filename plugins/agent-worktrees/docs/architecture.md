@@ -693,9 +693,13 @@ original-owner/provider integration gates.
 `launch_recovery_admission.RecoveryAdmissionInspector` adds passive inspection
 over that store and the actual original launch-execution journal. Its caller
 supplies an independently retained `RecoveryBinding`: exact descriptor, launch
-correlation/operation, approved source-selection references and opaque native
-owner handle. Construction retains canonical worktree intent and incarnation;
-inspection checks them again, matches all request/current binding fields,
+correlation/operation, approved source-selection references, original
+`OwnerIntent` snapshot and opaque native owner handle. The snapshot is captured
+at the original launch, not recaptured when an inspector is constructed or
+reopened. Construction and inspection compare it with canonical owner state;
+closed owners, including `orphaned`, and opaque/unsupported provider bindings
+are refused. Provider snapshots are immutable serialized values, not mutable
+dataclass references. Inspection matches all request/current binding fields,
 requires the exact durable intent/revision, and rereads owner/journal/store
 state after checking the supplied lease's conservative remaining lifetime.
 Restoration candidates additionally need the recorded newer authority revision

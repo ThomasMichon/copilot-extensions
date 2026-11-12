@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
+import json
 import math
 from pathlib import Path
 from typing import Protocol
@@ -10,6 +11,46 @@ from typing import Protocol
 from agent_remote_driver.headed.recovery import RecoveryDescriptor
 
 from . import launch_attempt, launch_execution, launch_recovery_store
+
+_CLOSED = frozenset({"finalizing", "complete", "completed", "finalized", "archived", "orphaned"})
+
+
+@dataclass(frozen=True)
+class OwnerIntent:
+    """Immutable original-launch snapshot, retained separately from the request."""
+
+    creation_nonce: str
+    status: str
+    head_session: str | None
+    lifecycle_revision: int
+    head_revision: int
+    execution_machine: str
+    repo: str
+    worktree_id: str
+    worktree_path: str
+    execution_leg: str | None = field(repr=False)
+    session_backend: str | None = field(repr=False)
+
+    @classmethod
+    def capture(cls, record_path: Path) -> OwnerIntent:
+        record, _ = launch_recovery_store._binding(record_path)
+        if record.status in _CLOSED:
+            raise ValueError("Original owner intent is closed")
+        return cls._from_record(record)
+
+    @classmethod
+    def _from_record(cls, record) -> OwnerIntent:
+        if record.execution_leg_opaque or record.session_backend_opaque:
+            raise ValueError("Opaque provider state cannot establish original owner intent")
+        return cls(
+            record.creation_nonce, record.status, record.resolved_head_session,
+            record.lifecycle_revision, record.head_revision, record.execution_machine,
+            record.repo, record.worktree_id, record.worktree_path,
+            json.dumps(record.execution_leg.to_dict(), sort_keys=True, allow_nan=False)
+            if record.execution_leg is not None else None,
+            json.dumps(record.session_backend.to_dict(), sort_keys=True, allow_nan=False)
+            if record.session_backend is not None else None,
+        )
 
 
 @dataclass(frozen=True)
@@ -38,13 +79,15 @@ class RecoveryBinding:
     correlation: launch_execution.Correlation
     launch_operation_id: str
     source: SourceSelection
+    owner_intent: OwnerIntent
     native_owner: object = field(repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if (
             type(self.descriptor) is not RecoveryDescriptor
             or type(self.correlation) is not launch_execution.Correlation
-            or type(self.source) is not SourceSelection or self.native_owner is None
+            or type(self.source) is not SourceSelection
+            or type(self.owner_intent) is not OwnerIntent or self.native_owner is None
         ):
             raise ValueError("An independently retained original launch binding is required")
         launch_attempt.identity(self.launch_operation_id)
@@ -85,18 +128,13 @@ class RecoveryAdmissionInspector:
             raise ValueError("An exact original recovery operation is required")
         record, owner = launch_recovery_store._binding(record_path)
         launch_recovery_store._descriptor(binding.descriptor, owner, record.worktree_id)
+        if OwnerIntent._from_record(record) != binding.owner_intent:
+            raise ValueError("Original owner intent changed")
+        if record.status in _CLOSED:
+            raise ValueError("Original owner intent is closed")
         self._path, self._binding, self._operation = record_path, binding, operation_id
-        self._owner_state = self._owner(record)
+        self._owner_state = binding.owner_intent
         self._store = launch_recovery_store.WorktreeRecoveryStore(record_path)
-
-    @staticmethod
-    def _owner(record) -> tuple:
-        return (
-            record.creation_nonce, record.status, record.resolved_head_session,
-            record.lifecycle_revision, record.head_revision,
-            record.execution_machine, record.repo, record.worktree_id, record.worktree_path,
-            record.execution_leg, record.session_backend,
-        )
 
     def _launch(self) -> dict:
         binding = self._binding
@@ -106,7 +144,7 @@ class RecoveryAdmissionInspector:
         if (
             value["resolution_id"] != binding.correlation.resolution_id
             or value["parent_id"] != binding.correlation.parent_id
-            or value["creation_nonce"] != self._owner_state[0]
+            or value["creation_nonce"] != self._owner_state.creation_nonce
             or value["worktree_id"] != binding.descriptor.worktree_ref
         ):
             raise ValueError("The original launch correlation changed")
@@ -140,9 +178,9 @@ class RecoveryAdmissionInspector:
             return result("held", "invalid-intent-request")
         try:
             owner, _ = launch_recovery_store._binding(self._path)
-            if self._owner(owner) != self._owner_state:
+            if OwnerIntent._from_record(owner) != self._owner_state:
                 return result("held", "owner-state-changed")
-            if owner.status in {"finalizing", "complete", "completed", "finalized", "archived"}:
+            if owner.status in _CLOSED:
                 return result("held", "owner-intent-closed")
             launch = self._launch()
             record = self._store.load(descriptor)
@@ -187,7 +225,7 @@ class RecoveryAdmissionInspector:
                 return result("unknown", "scope-settlement-unconfirmed")
             owner, _ = launch_recovery_store._binding(self._path)
             if (
-                self._owner(owner) != self._owner_state or self._launch() != launch
+                OwnerIntent._from_record(owner) != self._owner_state or self._launch() != launch
                 or self._store.load(descriptor) != record
             ):
                 return result("reconcile", "owner-or-intent-changed")

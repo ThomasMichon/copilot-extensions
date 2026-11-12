@@ -50,7 +50,8 @@ path, raw, launch_id = sys.argv[1:]
 record = decode_recovery_record(raw.encode("utf-8"))
 binding = admission.RecoveryBinding(
     record.descriptor, launch_execution.Correlation("a" * 32, "b" * 32), launch_id,
-    admission.SourceSelection("target", "account", "recipient", "route", "controller-1"), object(),
+    admission.SourceSelection("target", "account", "recipient", "route", "controller-1"),
+    admission.OwnerIntent.capture(Path(path)), object(),
 )
 class Lease:
     def remaining_seconds(self):

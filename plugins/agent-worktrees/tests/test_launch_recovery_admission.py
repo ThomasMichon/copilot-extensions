@@ -46,7 +46,7 @@ def owner(tmp_path, monkeypatch):
     binding = admission.RecoveryBinding(
         descriptor, correlation, execution.subject["operation_id"],
         admission.SourceSelection("target", "account", "recipient", "route", "controller-1"),
-        object(),
+        admission.OwnerIntent.capture(record.yaml_path), object(),
     )
     store = launch_recovery_store.WorktreeRecoveryStore(record.yaml_path)
     step = RecoveryStep("retire_intent", "intent", ("unknown-external-work",))
@@ -189,16 +189,17 @@ def test_invalid_intent_request_is_passive_refusal(owner, changes):
     assert owner[1].lease.calls == 0
 
 
-def test_new_inspector_cannot_reopen_closed_owner_intent(owner):
+@pytest.mark.parametrize("status", ["complete", "finalized", "orphaned"])
+def test_new_inspector_cannot_reopen_closed_owner_intent(owner, status):
     _, observation, _, path = owner
     path.write_text(
-        path.read_text(encoding="utf-8").replace("status: active", "status: complete"),
+        path.read_text(encoding="utf-8").replace("status: active", f"status: {status}"),
         encoding="utf-8",
     )
-    reopened = admission.RecoveryAdmissionInspector(path, observation.binding, "recovery-operation")
-    assert reopened.inspect(
-        observation.binding.descriptor, "recovery-operation", "retire_intent", 1, observation,
-    )["reason"] == "owner-intent-closed"
+    with pytest.raises(ValueError, match="intent changed"):
+        admission.RecoveryAdmissionInspector(path, observation.binding, "recovery-operation")
+    with pytest.raises(ValueError, match="intent is closed"):
+        admission.OwnerIntent.capture(path)
 
 
 def test_same_operation_reopen_preserves_holds_without_dispatch(owner):
@@ -279,3 +280,44 @@ def test_unknown_source_response_is_static_and_does_not_retry(owner):
     assert result["classification"] == "unknown"
     assert "private-provider-response" not in json.dumps(result)
     assert lease.calls == 1
+
+
+@pytest.mark.parametrize("revision", ["head_revision", "lifecycle_revision"])
+def test_original_intent_is_not_recaptured_before_construction_or_on_reopen(owner, revision):
+    _, observation, _, path = owner
+    path.write_text(
+        path.read_text(encoding="utf-8") + f"\n{revision}: 10\n", encoding="utf-8",
+    )
+    for _ in range(2):
+        with pytest.raises(ValueError, match="intent changed"):
+            admission.RecoveryAdmissionInspector(path, observation.binding, "recovery-operation")
+    assert inspect(owner)["reason"] == "owner-state-changed"
+
+
+@pytest.mark.parametrize("name", ["execution_leg", "session_backend"])
+@pytest.mark.parametrize("when", ["before-inspection", "during-lease"])
+def test_opaque_provider_state_cannot_disappear_into_absence(owner, name, when):
+    _, observation, _, path = owner
+
+    def change():
+        path.write_text(
+            path.read_text(encoding="utf-8") + f"\n{name}:\n  version: 999\n",
+            encoding="utf-8",
+        )
+
+    if when == "before-inspection":
+        change()
+        with pytest.raises(ValueError, match="Opaque provider state"):
+            admission.OwnerIntent.capture(path)
+        with pytest.raises(ValueError, match="Opaque provider state"):
+            admission.RecoveryAdmissionInspector(path, observation.binding, "recovery-operation")
+        result = inspect(owner)
+    else:
+        class ChangingLease:
+            def remaining_seconds(self):
+                change()
+                return 30
+
+        result = inspect(owner, observation=replace(observation, lease=ChangingLease()))
+    assert result["classification"] == "unknown"
+    assert result["reason"] == "owner-evidence-unavailable"
