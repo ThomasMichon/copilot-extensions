@@ -86,7 +86,7 @@ class _SchemaMixin:
                 if recorded is not None and recorded["version"] >= 39:
                     validate_exact_live_schema(conn)
                 if recorded is not None and recorded["version"] >= 41:
-                    validate_creation_writer_schema(conn)
+                    validate_creation_writer_schema(conn, require_recovery=recorded["version"] >= 45)
                 if recorded is not None and recorded["version"] >= 43:
                     validate_mux_question_schema(conn)
                 if recorded is not None and recorded["version"] >= 44:
@@ -926,3 +926,12 @@ class _SchemaMixin:
             conn.execute("UPDATE schema_version SET version=?", (44,))
             conn.commit()
             log.info("Schema migrated to version 44: bounded host status feed")
+
+        if from_version < 45:
+            from .creation_writer_schema import ensure_schema, validate_schema
+
+            with conn:
+                ensure_schema(conn)
+                validate_schema(conn)
+                conn.execute("UPDATE schema_version SET version=?", (45,))
+            log.info("Schema migrated to version 45: retained native recovery journals")

@@ -28,6 +28,7 @@ def batch_evidence(monkeypatch):
     monkeypatch.setattr(module, "_OBJECT_TYPES", {})
     monkeypatch.setattr(module, "_BLOB_HASHES", {})
     monkeypatch.setattr(module, "_SOURCE_BLOBS", {})
+    monkeypatch.setattr(module, "_SOURCE_CONTENTS", {})
     monkeypatch.setattr(module, "require_local_object_reads", lambda: None)
     module.blob_sha256.cache_clear()
     module.git_file_sha256.cache_clear()
@@ -71,19 +72,15 @@ def test_local_evidence_batch_keeps_actual_commit_path_bindings(batch_evidence, 
     def run(argv, **kwargs):
         calls.append(argv)
         assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
-        if "--batch" in argv:
-            output = b""
-            for oid in kwargs["input"].decode().splitlines():
-                kind, data = ("commit", b"commit") if oid == commit else ("blob", oid.encode())
-                output += f"{oid} {kind} {len(data)}\n".encode() + data + b"\n"
-        else:
-            assert "--literal-pathspecs" in argv and "ls-tree" in argv
-            paths = argv[argv.index("--") + 1:]
-            assert len(paths) <= 64
-            output = b"".join(
-                f"100644 blob {actual}\t{path}\0".encode()
-                for path in paths if path != "missing.py"
-            )
+        assert argv[-2:] == ["cat-file", "--batch"]
+        output = b""
+        for query in kwargs["input"].decode().splitlines():
+            if query == commit + ":missing.py":
+                output += (query + " missing\n").encode()
+                continue
+            oid = actual if ":" in query else query
+            kind, data = ("commit", b"commit") if oid == commit else ("blob", oid.encode())
+            output += f"{oid} {kind} {len(data)}\n".encode() + data + b"\n"
         return subprocess.CompletedProcess(argv, 0, output, b"")
 
     monkeypatch.setattr(batch_evidence.subprocess, "run", run)
@@ -93,7 +90,7 @@ def test_local_evidence_batch_keeps_actual_commit_path_bindings(batch_evidence, 
     assert batch_evidence.git_blob(commit, "path-1.py") == actual
     assert batch_evidence.git_blob(commit, "missing.py") is None
     assert batch_evidence.git_file_sha256(commit, "path-1.py") == hashlib.sha256(actual.encode()).hexdigest()
-    assert len(calls) == 4
+    assert len(calls) == 2
 
 
 @pytest.mark.parametrize("packet", [
@@ -105,7 +102,7 @@ def test_local_evidence_batch_refuses_malformed_framing(batch_evidence, monkeypa
         batch_evidence.subprocess, "run",
         lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, packet, b""),
     )
-    with pytest.raises(RuntimeError, match="local Git object batch"):
+    with pytest.raises(RuntimeError, match="(?i)local Git object batch"):
         batch_evidence.prefetch_objects(["a" * 40])
     assert batch_evidence._OBJECT_TYPES == {}
     assert batch_evidence._BLOB_HASHES == {}
@@ -192,6 +189,11 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
     import agent_bridge_contract_registry as registry_codec
     registry_snapshot = registry_codec.load(snapshot)
     registry = registry_snapshot.materialized
+    relocated = {
+        row["path"]: row["current_path"]
+        for owner in registry["contracts"] for row in owner["source_paths"]
+        if "current_path" in row
+    }
     fixture_paths = {
         fixture["path"]
         for contract in registry["contracts"] for fixture in contract["fixtures"]
@@ -199,10 +201,11 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
     before = {path: (snapshot / path).read_bytes() for path in fixture_paths}
     for contract in registry["contracts"]:
         for record in contract["source_paths"]:
-            destination = snapshot / record["path"]
+            current_path = record.get("current_path", record["path"])
+            destination = snapshot / current_path
             if not destination.exists():
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(REPO / record["path"], destination)
+                shutil.copy2(REPO / current_path, destination)
     for deferred in registry["deferred_contracts"]:
         if "reference_path" in deferred:
             destination = snapshot / deferred["reference_path"]
@@ -217,24 +220,42 @@ def test_flow_update_leaves_golden_corpus_unchanged(tmp_path):
             continue
         closure = json.loads(source.read_text(encoding="utf-8"))["execution_closure"]
         for relative in closure:
-            destination = snapshot / relative
+            current_path = relocated.get(relative, relative)
+            destination = snapshot / current_path
             if not destination.exists():
                 destination.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy2(REPO / relative, destination)
+                source_path = REPO / current_path
+                if source_path.is_file():
+                    shutil.copy2(source_path, destination)
+                else:
+                    historical = subprocess.run(
+                        ["git", "-C", str(REPO), "cat-file", "blob", closure[relative]["blob"]],
+                        capture_output=True, check=True, timeout=10, env=environment,
+                        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    ).stdout
+                    canonical = historical.replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+                    assert hashlib.sha256(canonical).hexdigest() == closure[relative]["sha256"]
+                    destination.write_bytes(historical)
     for name in ("check-agent-bridge-contracts.py", "agent_bridge_contract_git.py",
                  "bridge_http45_evidence.py", "bridge_http47_evidence.py",
                  "bridge_http47_validation.py", "bridge_http48_evidence.py",
                  "bridge_http49_evidence.py", "bridge_http_retained_evidence.py",
                  "bridge_http50_evidence.py",
+                 "bridge_http51_evidence.py", "bridge_http52_evidence.py",
+                 "bridge_capture_metadata.py", "bridge_http47_runtime.py",
                  "bridge_http48_installation.py",
                  "agent_bridge_contract_registry.py",
-                 "agent_bridge_contract_paths.py", "agent_bridge_contract_publication.py"):
+                 "agent_bridge_contract_paths.py", "agent_bridge_contract_publication.py",
+                 "agent_bridge_contract_families.py"):
         destination = snapshot / "tools" / name
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(REPO / "tools" / name, destination)
-    shutil.copy2(REPO / PLUGIN / "plugin.json", snapshot / PLUGIN / "plugin.json")
+    for name in ("plugin.json", "packaged-assets.json", "launch-wrapper-assets.json"):
+        shutil.copy2(REPO / PLUGIN / name, snapshot / PLUGIN / name)
     (snapshot / CONSUMERS).parent.mkdir(parents=True, exist_ok=True)
-    for path in (CONSUMERS, PLUGIN / "tests/conftest.py"):
+    for path in (
+        CONSUMERS, PLUGIN / "tests/conftest.py", PLUGIN / "tests/http47_binding_validation.py",
+    ):
         shutil.copy2(REPO / path, snapshot / path)
 
     def run(arguments):

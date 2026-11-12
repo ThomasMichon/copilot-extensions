@@ -13,11 +13,13 @@ from .acp_diagnostics import capture_acp_parse_errors, describe_truncated_child
 from .connect import ConnectError, ConnectStage
 from .models import SessionStatus
 from .session_manager import Session, _AcpLaunchTiming, _default_cwd, log
+from .session_host_launch_custody import _SessionHostLaunchCustodyMixin
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
     from .local_launch_owner import LocalLaunchOwner
     from .local_launch_preparation import PreparedLocalLaunch
+    from .retained_session_recovery import RetainedRecovery
 from .transport import SpawnTarget
 from .session_preferences import client_preferences
 from .startup_progress import step
@@ -29,7 +31,7 @@ def _core() -> Any:
     return core
 
 
-class _SessionHostConnectionMixin:
+class _SessionHostConnectionMixin(_SessionHostLaunchCustodyMixin):
     """Session Host connection, relay, and reap helpers."""
 
     async def _connect_via_session_host(
@@ -50,6 +52,7 @@ class _SessionHostConnectionMixin:
         parity_fault_result: dict[str, Any] | None = None,
         prepared_local_launch: PreparedLocalLaunch | None = None,
         acquisition_launch: LocalLaunchOwner | None = None,
+        recovery_operation: RetainedRecovery | None = None,
     ) -> tuple[AcpClient, str]:
         """Spawn a child inside a survivable Session Host and drive ACP over the
         reattachable loopback endpoint (Session-Host mode).
@@ -79,6 +82,16 @@ class _SessionHostConnectionMixin:
             if type(spawner) is not LocalSpawner or remote_child_argv is not None:
                 raise ValueError("Original acquisition requires the actual local Host spawner")
             acquisition_launch.bind(self, self.get_session(session_id), target)
+        if recovery_operation is not None:
+            if (
+                type(spawner) is not LocalSpawner or remote_child_argv is not None
+                or acquisition_launch is not None
+                or recovery_operation.manager is not self
+                or recovery_operation.session.session_id != session_id
+                or load_session_id != recovery_operation.request.native_session_id
+            ):
+                raise ValueError("Retained recovery requires its original local Host and native session")
+            recovery_operation.require_current()
 
         timing = _AcpLaunchTiming(
             session_id=session_id,
@@ -161,9 +174,12 @@ class _SessionHostConnectionMixin:
                 require_path_hosting(work_dir)
             else:
                 await require_target_hosting(target)
+            if recovery_operation is not None:
+                recovery_operation.require_current()
             spawned = await step("session-host-start", spawner.spawn(
                 args, cwd=work_dir, env=child_env, session_id=session_id,
                 **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
+                **({"recovery_operation": recovery_operation} if recovery_operation is not None else {}),
             ))
             timing.add("host_spawn", time.monotonic() - step_started)
             # Retain a remote-boundary forward so reattach can refresh it and
@@ -183,6 +199,8 @@ class _SessionHostConnectionMixin:
             )
             if acquisition_launch is not None:
                 acquisition_launch._socket = sock
+            if recovery_operation is not None:
+                recovery_operation.socket = sock
             timing.add("host_connect", time.monotonic() - step_started)
             step_started = time.monotonic()
             hello = await step("session-host-attach", sock.attach(0, nonce=spawned.nonce.encode()))
@@ -191,6 +209,8 @@ class _SessionHostConnectionMixin:
             streams = await step("session-host-streams", open_acp_streams(sock))
             if acquisition_launch is not None:
                 acquisition_launch._streams = streams
+            if recovery_operation is not None:
+                recovery_operation.streams = streams
             timing.add("host_streams", time.monotonic() - step_started)
 
             async def _closer() -> None:
@@ -215,7 +235,11 @@ class _SessionHostConnectionMixin:
             client.session_host_client = sock
             if acquisition_launch is not None:
                 acquisition_launch.retain_client(client)
-            if permission_callback:
+            if recovery_operation is not None:
+                recovery_operation.session.client = client
+            from .retained_session_recovery import permission_held
+
+            if permission_callback or recovery_operation is not None or permission_held(self._db, target):
                 client.auto_approve = False
             with capture_acp_parse_errors() as parse_errors:
                 try:
@@ -242,6 +266,8 @@ class _SessionHostConnectionMixin:
                         acquisition_launch.attach_transport(client, spawned)
                     if load_session_id:
                         step_started = time.monotonic()
+                        if recovery_operation is not None:
+                            recovery_operation.require_current()
                         await step("native-session-load", asyncio.wait_for(
                             client.load_session(
                                 cwd=session_cwd,
@@ -249,6 +275,7 @@ class _SessionHostConnectionMixin:
                                 mcp_servers=mcp_servers,
                                 timing_callback=timing.add,
                                 **({"acquisition_launch": acquisition_launch} if acquisition_launch is not None else {}),
+                                **({"recovery_operation": recovery_operation} if recovery_operation is not None else {}),
                             ),
                             timeout=self._timeouts.session_new,
                         ))
@@ -281,6 +308,12 @@ class _SessionHostConnectionMixin:
                             "timing_ms": timing.step_map_ms(),
                         })
                     log.warning("ACP launch timing: result=timeout %s", timing.summary())
+                    if recovery_operation is not None:
+                        raise ConnectError(
+                            ConnectStage.LAUNCH_ACP, "Retained native recovery timed out; "
+                            "Host and child custody remain held, inspect without replay",
+                            retryable=False, cause=exc,
+                        ) from exc
                     if acquisition_launch is not None:
                         acquisition_launch.retain_failed_start()
                         raise ConnectError(
@@ -323,8 +356,9 @@ class _SessionHostConnectionMixin:
                         type(exc).__name__,
                         timing.summary(),
                     )
-                    if acquisition_launch is not None:
-                        acquisition_launch.retain_failed_start()
+                    if acquisition_launch is not None or recovery_operation is not None:
+                        if acquisition_launch is not None:
+                            acquisition_launch.retain_failed_start()
                         raise
                     cleanup_confirmed = await self._rollback_failed_host_launch(
                         spawner,
@@ -355,6 +389,7 @@ class _SessionHostConnectionMixin:
 
         record = (
             acquisition_launch._host_record if acquisition_launch is not None
+            else recovery_operation.host_record if recovery_operation is not None
             else self._register_host_launch(spawned, session_id)
         )
         if record is not None:
@@ -372,77 +407,6 @@ class _SessionHostConnectionMixin:
                 await bridge_lock.write(
                     session_id, target.worktree_id, spawned.child_pid)
         return client, acp_sid
-
-    def _register_host_launch(self, spawned: Any, session_id: str) -> Any:
-        from . import __version__
-        from .session_host.host_index import HostRecord
-
-        if self._host_index is not None:
-            record = HostRecord(
-                session_id=session_id,
-                port=spawned.local_port,
-                host_pid=spawned.host_pid,
-                child_pid=spawned.child_pid,
-                host_version=__version__,
-                protocol_version=spawned.protocol_version,
-                state_file=spawned.state_file,
-                created_at=time.time(),
-                nonce=spawned.nonce,
-                boundary=spawned.boundary,
-                endpoint=getattr(spawned, "endpoint", {}) or {},
-                # Stamp this generation's own ownership at spawn time (PR #4543
-                # review): a newly-spawned host must never look "never claimed"
-                # -- that reads as freely recoverable by another generation's
-                # reattach scan -- while this generation is actively driving it.
-                owner_generation=getattr(self, "_generation_id", "") or "",
-                owner_pid=os.getpid(),
-                extra={
-                    "remote_authority_v2": spawned.boundary != "local",
-                },
-            )
-            self._host_index.register(record)
-            return record
-        return None
-
-    async def _rollback_failed_host_launch(
-        self,
-        spawner: Any,
-        spawned: Any,
-        sock: Any,
-        streams: Any,
-        session_id: str,
-        result: dict[str, Any] | None,
-    ) -> bool:
-        """Reap a failed Host launch and remove every local holder."""
-        with contextlib.suppress(Exception):
-            await sock.terminate()
-        with contextlib.suppress(Exception):
-            await streams.aclose()
-        with contextlib.suppress(Exception):
-            await sock.close()
-
-        remote = getattr(spawned, "boundary", "local") != "local"
-        confirmed = not remote
-        if remote:
-            abort = getattr(spawner, "abort_spawned", None)
-            if callable(abort):
-                try:
-                    confirmed = bool(await abort(spawned, session_id))
-                except Exception:
-                    confirmed = False
-        with contextlib.suppress(Exception):
-            await spawned.aclose()
-        self._forwards.pop(session_id, None)
-        self._relays.pop(session_id, None)
-        if result is not None:
-            result.update({
-                "host_process_removed": confirmed,
-                "child_process_removed": confirmed,
-                "remote_authority_removed": confirmed,
-                "forward_removed": session_id not in self._forwards,
-                "relay_removed": session_id not in self._relays,
-            })
-        return confirmed
 
     async def _ensure_forward(
         self,
@@ -740,6 +704,10 @@ class _SessionHostConnectionMixin:
                 effort_override=session.effort_override,
                 **client_preferences(session.target, self._db, rec.session_id),
             )
+            from .retained_session_recovery import permission_held
+
+            if permission_held(self._db, session.target):
+                client.auto_approve = False
             streams.on_transport_lost = client.mark_transport_lost
             streams.on_child_exit = client.mark_host_child_exited
             # Retain the host control channel so the manager can push STATUS

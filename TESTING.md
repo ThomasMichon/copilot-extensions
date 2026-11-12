@@ -9814,10 +9814,24 @@ may remain owned by unresolved processes; it is not ordinary failed-test debris.
 Run `python -m pytest -q tools/test_run_plugin_tests.py -k manager_acceptance_`
 through the bounded test supervisor for the focused wrapper controls. They inject
 the unsettled-process error without creating a genuinely unreaped process.
-Fixtures are constructed before pytest's unchanged 30-second item checks;
+The runtime contract overlaps its seven independent entrypoint/progress controls
+with genuine fixture construction inside that same contained group. It waits
+for both before running the remaining installed-runtime consumers serially;
+the selections are complementary and use separate pytest temporary directories.
+Fresh construction and archived-release repair run in separate processes with
+distinct fixture roots and output files. Both must succeed before the final
+rollback preparation reads their results; no shared-root mutation runs in parallel.
+Construction failure settles the input-control process, and a failed control
+cannot admit the installed-runtime consumers. The group and resource limits
+are unchanged. Fixtures are constructed before their consumers' unchanged
+30-second item checks;
 no constructor, dependency policy, package health or failed-selection assertion
-is mocked. The assertions run through `run-plugin-tests.py` with explicit
-`tests/native/test_manager_runtime_install.py` selection. The ordinary Manager
+is mocked. The native owner prepares the test interpreter through
+`run-plugin-tests.py` and retains its admission lease. Assertions use that same
+interpreter with the portfolio/command guard, isolated state roots and explicit
+native-file selection under the existing process-tree supervisor; they do not
+rebuild a second test-tool environment inside the timed product-construction
+group. The ordinary Manager
 suite does not recurse into that prepared native lane. Report both ordinary
 orchestration/assembly units and this cold native acceptance before publishing
 a Manager installation change; neither is a substitute for the other.

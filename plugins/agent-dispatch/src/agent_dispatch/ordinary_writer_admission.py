@@ -6,7 +6,7 @@ import copy
 import json
 import re
 
-from .ordinary_agent_facts import identity
+from .ordinary_agent_facts import AgentIdentity, identity
 from .queue_records import TaskError
 from .queue_task_relationships import valid_record_writer
 
@@ -182,6 +182,32 @@ class OrdinaryWriterAdmission:
     def inspect_session(self, run, info: dict) -> dict:
         """Requalify only the exact session's retained journal, never a new selection."""
         actual = identity(info)
+        return self._inspect_identity(run, actual)
+
+    def inspect_workspace(self, run, *, native_session_id: str) -> dict:
+        """Discover an existing handle, then qualify its exact original native journal."""
+        if not isinstance(native_session_id, str) or not native_session_id.strip():
+            raise TaskError("existing Bridge writer requires its exact native session")
+        response = self._read(run, ["status", native_session_id, "--full"])
+        if (
+            not all(isinstance(response.get(key), str) and response[key] for key in (
+                "session_id", "acp_session_id", "durable_session_id",
+                "worktree_id", "project", "target_dir",
+            ))
+            or response["durable_session_id"] != response["acp_session_id"]
+            or response["acp_session_id"] != native_session_id
+            or any(response.get(key) != value for key, value in {
+                "worktree_id": self.workspace["worktree_id"],
+                "project": self.workspace["project"], "target_dir": self.workspace["worktree_path"],
+            }.items())
+        ):
+            raise TaskError("existing Bridge native workspace identity is unconfirmed")
+        return self._inspect_identity(run, AgentIdentity(
+            response["session_id"], response["acp_session_id"], response["worktree_id"],
+            response["project"], response["target_dir"],
+        ))
+
+    def _inspect_identity(self, run, actual: AgentIdentity) -> dict:
         health = self._health(run)
         response = self._read(run, ["status", actual.bridge, "--full", "--worktree-writer"])
         observed = response.get("worktree_writer_observation")

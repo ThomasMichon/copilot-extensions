@@ -153,11 +153,12 @@ def test_lock_identity_mismatch_refuses_and_releases(tmp_path, monkeypatch, mism
     alternate_stat = alternate.stat()
     assert alternate_stat.st_ino != lock.stat().st_ino
     original_lstat = vr.os.lstat
+    lookup_lock = Path(vr._leases._native_path(lock)) if os.name == "nt" else lock
     checks = 0
 
     def changed_identity(path, *args, **kwargs):
         nonlocal checks
-        if Path(path) == lock:
+        if Path(path) == lookup_lock:
             checks += 1
             if checks == mismatch_check:
                 return alternate_stat

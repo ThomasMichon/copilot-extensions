@@ -38,6 +38,7 @@ LAUNCH_NATIVE_RESUME_SESSION=""
 LAUNCH_ATTEMPT_ID=""
 LAUNCH_RESOLUTION_ID=""
 LAUNCH_PARENT_ID=""
+# Bash 3.2 needs guarded expansion of empty arrays under nounset.
 COPILOT_ARGS=()
 native_value_option() {
     case "$1" in
@@ -87,7 +88,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 if [[ -n "$EXECUTION_DIRECTORY" ]]; then
-    COPILOT_ARGS=(-C "$EXECUTION_DIRECTORY" "${COPILOT_ARGS[@]}")
+    COPILOT_ARGS=(-C "$EXECUTION_DIRECTORY" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"})
 fi
 
 # In --stdio (ACP) mode, stdout is the JSON-RPC channel; keep all human-facing
@@ -254,7 +255,7 @@ _exec_copilot_backend() {
         case $- in *x*) set +x ;; esac
         set +a
         local code=0
-        aw_native_setup_backend "$@" "${COPILOT_ARGS[@]}" || code=$?
+        aw_native_setup_backend "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"} || code=$?
         exit "$code"
     fi
     if [[ -n "$LAUNCH_SEED_RECORD" ]]; then
@@ -275,7 +276,7 @@ _exec_copilot_backend() {
         fi
         exec "$LAUNCH_SEED_RUNTIME_PYTHON" -I -m agent_worktrees.launch_seed_exec \
             --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" \
-            "${attempt_args[@]}" -- "$@" "${COPILOT_ARGS[@]}"
+            ${attempt_args[@]+"${attempt_args[@]}"} -- "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"}
     fi
     if [[ $# -eq 1 && -n "$_AW_PY${AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT:-}" &&
           ( "${1##*/}" == copilot || "${1##*/}" == copilot.exe ) ]]; then
@@ -283,9 +284,9 @@ _exec_copilot_backend() {
             printf 'Normalized Copilot runtime is unavailable; no backend started.\n' >&2
             exit 3
         fi
-        exec "$_AW_PY" -I -m agent_worktrees.normalized_backend -- "$@" "${COPILOT_ARGS[@]}"
+        exec "$_AW_PY" -I -m agent_worktrees.normalized_backend -- "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"}
     fi
-    exec "$@" "${COPILOT_ARGS[@]}"
+    exec "$@" ${COPILOT_ARGS[@]+"${COPILOT_ARGS[@]}"}
 }
 
 if [[ -n "$COPILOT_PATH_OVERRIDE" ]]; then

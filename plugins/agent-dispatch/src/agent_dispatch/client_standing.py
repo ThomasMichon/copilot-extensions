@@ -154,3 +154,49 @@ class StandingClientMixin:
         return self._standing_post(
             f"/tasks/{task_id}/standing/{action}", {"expected_revision": expected_revision},
         )
+
+    def _require_standing_recovery_grants(self, *, attachment: bool = False) -> None:
+        support = self.require_standing_charters(attachment=attachment)
+        if type(support.get("recovery_grants")) is not int or support["recovery_grants"] != 1:
+            raise DispatchUpgradeRequired("coordinator lacks standing pairing recovery grants")
+
+    def grant_standing_recovery(
+        self, task_id: str, workspace: dict[str, str], *, expected_revision: int,
+        expected_generation: int, owner_session_id: str, grant_id: str,
+        authority_ref: str, expires_at: float, max_attempts: int,
+    ) -> dict:
+        self._require_standing_recovery_grants(attachment=True)
+        return self._unwrap(self._http.post(
+            f"/tasks/{task_id}/standing/recovery-grant", json={
+                "workspace": workspace, "expected_revision": expected_revision,
+                "expected_generation": expected_generation, "owner_session_id": owner_session_id,
+                "grant_id": grant_id, "authority_ref": authority_ref,
+                "expires_at": expires_at, "max_attempts": max_attempts,
+            }, headers=self._control_headers(),
+        ))
+
+    def revoke_standing_recovery(
+        self, task_id: str, *, grant_id: str, expected_revision: int,
+    ) -> dict:
+        # Revocation must remain possible when native attachment admission is down.
+        self._require_standing_recovery_grants()
+        return self._unwrap(self._http.post(
+            f"/tasks/{task_id}/standing/recovery-revoke",
+            json={"grant_id": grant_id, "expected_revision": expected_revision},
+            headers=self._control_headers(),
+        ))
+
+    def recover_standing_batch(
+        self, *, cursor: str | None = None, limit: int = 1, deadline: float | None = None,
+    ) -> dict | None:
+        support = self.require_standing_charters(deadline=deadline)
+        if (
+            type(support.get("retained_pairing_recovery")) is not int
+            or support["retained_pairing_recovery"] != 1
+        ):
+            return None
+        return self._unwrap(self._http.post(
+            "/standing/recovery/reconcile", json={"cursor": cursor, "limit": limit},
+            headers=self._control_headers(),
+            **_deadline_options(deadline),
+        ))
