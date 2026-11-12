@@ -98,6 +98,18 @@ resolution, policy-checked directory pinning and private execution storage are
 covered by source/synthetic consumer controls. This does not complete the
 caller/mode matrix or native, installed and all-platform receiving acceptance.
 
+The [finite caller census and #12220 acceptance](journal/2026/11.12%20private%20mux%20creation%20convergence.md)
+close selected-entrypoint source migration. Manager and Worktrees select the
+canonical creation/execution owners; Bridge local and portable headless paths
+consume the common Host; portable headed receiving now uses the copied core
+for private-socket creation as well as pane execution. Original attempt,
+admission, socket identity and no-replay custody remain with their callers.
+This does not retire supported older-runtime adapters or close the separate
+fresh/resume/reuse and attached/detached/new-window/no-mux validation matrix.
+The remaining duplicate-implementation boundary must be evaluated against the
+actual selected runtimes and supported rollback window, not removed merely to
+close a checklist item.
+
 ## Lifetime and activity evidence
 
 Interactive execution stays alive until Copilot is closed by the user or an
@@ -419,6 +431,12 @@ Only after that contract and provider expansion clear review may an effectful
 consumer be proposed and separately qualified through the real routed
 source/controller and native provider. Source-only fixtures do not complete
 the parent's native recovery, lifetime, receiving or rollout gates.
+
+The passive inspector landed in #12207. It reads the actual Worktrees store
+and launch journal, retains original owner intent across reopen and refuses
+opaque provider state without wiring effects. Its matching candidate is not
+current-source verification, a native settlement receipt or final admission.
+The source/provider expansion and effectful consumer gates above remain open.
 
 ## Evidence before each functional promotion
 
