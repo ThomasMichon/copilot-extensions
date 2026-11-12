@@ -1,0 +1,9 @@
+{
+  "comment": "Add provider-only bounded Windows native-owner section with read-only retention and strict identity checks",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}
