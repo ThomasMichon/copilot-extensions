@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import subprocess
 import sys
@@ -57,6 +59,154 @@ os._exit(23)
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+def test_native_leases_share_ownership_under_a_long_ordinary_root(tmp_path, long_root):
+    base = str(tmp_path)
+    if base.startswith("\\\\?\\UNC\\"):
+        base = "\\\\" + base[8:]
+    elif base.startswith("\\\\?\\"):
+        base = base[4:]
+    root = Path(base) / "runtime"
+    while (
+        len(str(root)) <= 270 if long_root
+        else len(str(root / ".construction-leases" / ("0" * 64 + ".lock"))) <= 260
+    ):
+        root /= "d" * 32
+    value = str(root)
+    native_root = Path("\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value)
+    native_root.mkdir(parents=True)
+    try:
+        with runtime.construction_lease(root, "Candidate", timeout=1):
+            code = """
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+try:
+    with runtime.construction_lease(Path(sys.argv[2]), 'candidate', timeout=0):
+        raise SystemExit(9)
+except runtime.ConstructionTimeout:
+    print('blocked')
+"""
+            result = subprocess.run(
+                [sys.executable, "-I", "-S", "-B", "-c", code, str(LIBRARY), str(native_root)],
+                capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+            )
+            assert result.returncode == 0, result.stderr
+            assert result.stdout.strip() == "blocked"
+        with runtime.construction_lease(native_root, "candidate", timeout=1):
+            pass
+        with runtime._leases.reference_transaction_custody(root, timeout=1):
+            pass
+        observed = []
+
+        def open_lock(directory, name):
+            observed.append(directory)
+            return runtime._leases._windows_private_lease_file(root, directory, name)
+
+        publication = runtime._runtime_component("versioned_runtime_publication")
+        with publication.leases(root, ["fixture"], open_lock=open_lock):
+            assert observed == [root / ".publication-leases"]
+        slot = native_root / "versions" / "candidate"
+        slot.mkdir(parents=True)
+        with runtime.retention_lease(root, "candidate", require_installed=False):
+            pass
+        assert len(list((native_root / ".construction-leases").glob("*.lock"))) == 1
+    finally:
+        shutil.rmtree(native_root)
+
+
+def _deep_reference_root(tmp_path, *, long_root=False):
+    base = str(tmp_path)
+    if base.startswith("\\\\?\\UNC\\"):
+        base = "\\\\" + base[8:]
+    elif base.startswith("\\\\?\\"):
+        base = base[4:]
+    root = Path(base) / "runtime"
+    temporary = "runtime-references.json." + "0" * 32 + ".tmp"
+    while len(str(root)) <= 270 if long_root else len(str(root / temporary)) <= 260:
+        root /= "d" * 16
+    native = runtime._leases._native_path(root)
+    for version in ("old", "new"):
+        (native / "versions" / version).mkdir(parents=True)
+    return root, native
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+def test_native_reference_publication_preserves_compare_and_transaction_guards(tmp_path, long_root):
+    root, native = _deep_reference_root(tmp_path, long_root=long_root)
+    leases = runtime._leases
+    owner = "fixture/component"
+    try:
+        replace(root, ["old"])
+        expected = {owner: ["old"]}
+        assert leases.read_runtime_references(root) == leases.read_runtime_references(native) == expected
+        original = (native / "runtime-references.json").read_bytes()
+        with pytest.raises(RuntimeError, match="changed"):
+            replace(root, ["new"], expected=[])
+        assert (native / "runtime-references.json").read_bytes() == original
+        with leases.reference_transaction_custody(root, timeout=1):
+            ticket = leases.begin_runtime_reference_transaction(root, owner, timeout=1)
+            assert ticket["owners"] == expected
+            with pytest.raises(ValueError, match="pending"):
+                leases.read_runtime_references(root)
+            leases.commit_runtime_reference_transaction(
+                root, owner, ticket["token"], {owner: ["new"]}, expected=expected,
+            )
+        assert leases.read_runtime_references(root) == {owner: ["new"]}
+        replace(root, [], expected=["new"])
+        assert leases.read_runtime_references(native) == {}
+        assert not list(native.glob("runtime-references.json.*.tmp"))
+    finally:
+        shutil.rmtree(native)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("pending", [False, True])
+def test_native_reference_reader_does_not_hide_existing_deep_evidence(tmp_path, pending):
+    root, native = _deep_reference_root(tmp_path, long_root=True)
+    leases = runtime._leases
+    try:
+        replace(native, ["old"])
+        if pending:
+            with leases.reference_transaction_custody(native, timeout=1):
+                leases.begin_runtime_reference_transaction(native, "fixture/component", timeout=1)
+            with pytest.raises(ValueError, match="pending"):
+                leases.read_runtime_references(root)
+        else:
+            assert leases.read_runtime_references(root) == {"fixture/component": ["old"]}
+    finally:
+        shutil.rmtree(native)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+def test_native_reference_recovery_retains_deep_generations(tmp_path, long_root):
+    root, native = _deep_reference_root(tmp_path, long_root=long_root)
+    leases = runtime._leases
+    deep = "1.0.0+repair." + "a" * 160
+    (native / "versions" / deep).mkdir()
+    try:
+        with leases.reference_transaction_custody(native, timeout=1):
+            leases.begin_runtime_reference_transaction(native, "fixture/prior", timeout=1)
+        with leases.reference_transaction_custody(root, timeout=1):
+            ticket = leases.begin_runtime_reference_transaction(
+                root, "fixture/next", timeout=1, recover_foreign=True,
+            )
+            prefix = leases.reference_recovery_prefix("fixture/prior")
+            recovered = {key: values for key, values in ticket["owners"].items() if key.startswith(prefix)}
+            assert set().union(*map(set, recovered.values())) == {"old", "new", deep}
+            leases.commit_runtime_reference_transaction(
+                root, "fixture/next", ticket["token"], {"fixture/next": ["new"]},
+                expected={"fixture/next": []},
+            )
+        assert leases.read_runtime_references(root) == {**recovered, "fixture/next": ["new"]}
+    finally:
+        shutil.rmtree(native)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
 @pytest.mark.parametrize("operation", ["discard", "gc"])
 @pytest.mark.parametrize("extended_root", [False, True])
 def test_owned_cleanup_removes_long_descendants(tmp_path, operation, extended_root):
@@ -81,6 +231,99 @@ def test_owned_cleanup_removes_long_descendants(tmp_path, operation, extended_ro
     finally:
         if native_slot.exists():
             shutil.rmtree(native_slot)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+@pytest.mark.parametrize("native_process_path", [False, True])
+def test_gc_inventory_and_protection_use_equivalent_windows_paths(
+    tmp_path, monkeypatch, long_root, native_process_path,
+):
+    base = str(tmp_path)
+    if base.startswith("\\\\?\\UNC\\"):
+        base = "\\\\" + base[8:]
+    elif base.startswith("\\\\?\\"):
+        base = base[4:]
+    root = Path(base) / "runtime"
+    names = {
+        role: f"{index}.0.0+repair." + "a" * 32
+        for index, role in enumerate(
+            ("current", "previous", "referenced", "kept", "constructing", "retained", "live", "spare"), 1,
+        )
+    }
+    names["live"] = names["live"][:-32] + "A" * 32
+    while (
+        len(str(root)) <= 270 if long_root
+        else len(str(root / "versions" / names["spare"])) <= 260
+    ):
+        root /= "d" * 16
+    native_root = runtime._leases._native_path(root)
+    native_root.mkdir(parents=True)
+    try:
+        for version in names.values():
+            slot = native_root / "versions" / version
+            (slot / "Scripts").mkdir(parents=True)
+            (slot / "Scripts" / "python.exe").write_bytes(b"fixture")
+            runtime.mark_complete(native_root, version)
+        (native_root / "current-version").write_text(names["current"], encoding="utf-8")
+        (native_root / "last-known-good").write_text(names["previous"], encoding="utf-8")
+        replace(native_root, [names["referenced"]])
+        references = (native_root / "runtime-references.json").read_bytes()
+        image = root / "versions" / names["live"] / "Scripts" / "python.exe"
+        if native_process_path:
+            image = runtime._leases._native_path(image)
+        monkeypatch.setattr(runtime, "_iter_all_pids", lambda: [123])
+        monkeypatch.setattr(runtime, "_pid_cmdline_argv0", lambda _pid: None)
+        monkeypatch.setattr(runtime, "_pid_image_path", lambda _pid: str(image))
+        assert set(runtime.list_versions(root)) == set(names.values())
+        assert runtime.gc(root, protect_pids=True, min_age_days=1) == []
+        with runtime.construction_lease(root, names["constructing"], timeout=1), runtime.retention_lease(
+            native_root, names["retained"], timeout=1,
+        ):
+            assert runtime.gc(root, keep=[names["kept"]], protect_pids=True, min_age_days=0) == [names["spare"]]
+        assert set(runtime.gc(root, keep=[names["kept"]], protect_pids=True, min_age_days=0)) == {
+            names["constructing"], names["retained"],
+        }
+        assert set(runtime.list_versions(root)) == {
+            names[role] for role in ("current", "previous", "referenced", "kept", "live")
+        }
+        assert (native_root / "runtime-references.json").read_bytes() == references
+        assert (native_root / "current-version").read_text(encoding="utf-8") == names["current"]
+        assert (native_root / "last-known-good").read_text(encoding="utf-8") == names["previous"]
+    finally:
+        shutil.rmtree(native_root)
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+@pytest.mark.parametrize("long_root", [False, True])
+def test_gc_toss_preserves_completed_deep_slots(tmp_path, monkeypatch, capsys, long_root):
+    base = str(tmp_path)
+    if base.startswith("\\\\?\\UNC\\"):
+        base = "\\\\" + base[8:]
+    elif base.startswith("\\\\?\\"):
+        base = base[4:]
+    root = Path(base) / "runtime"
+    complete = "1.0.0+repair." + "a" * 32
+    incomplete = "2.0.0+repair." + "b" * 32
+    while len(str(root)) <= 270 if long_root else len(str(root / "versions" / complete)) <= 260:
+        root /= "d" * 16
+    native_root = runtime._leases._native_path(root)
+    for version in (complete, incomplete):
+        (native_root / "versions" / version).mkdir(parents=True)
+    try:
+        runtime.mark_complete(native_root, complete)
+        marker = runtime.marker_path(native_root, complete)
+        before = marker.read_bytes()
+        monkeypatch.setattr(runtime, "_iter_all_pids", lambda: [])
+        assert runtime.main([
+            "--root", str(root), "--json", "gc", "--min-age-days", "1", "--toss-incomplete",
+        ]) == 0
+        output = capsys.readouterr()
+        assert json.loads(output.out) == {"removed": [incomplete]}
+        assert marker.read_bytes() == before
+        assert not (native_root / "versions" / incomplete).exists()
+    finally:
+        shutil.rmtree(native_root)
 
 
 def test_update_is_owner_scoped_and_compare_bound(tmp_path):
@@ -148,6 +391,331 @@ def test_failed_reference_publication_preserves_previous_evidence(tmp_path, monk
         replace(root, ["new", "old"], expected=["old"])
     assert json.loads((root / "runtime-references.json").read_bytes()) == before
     assert not list(root.glob("runtime-references.json.*.tmp"))
+
+
+def test_reference_transaction_survives_owner_exit_and_blocks_gc_until_commit(tmp_path):
+    root = case(tmp_path)
+    replace(root, ["old"])
+    code = """
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+runtime._leases.begin_runtime_reference_transaction(pathlib.Path(sys.argv[2]), 'fixture/component')
+os._exit(23)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(LIBRARY), str(root)],
+        timeout=15, capture_output=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 23, result.stderr
+    with pytest.raises(ValueError):
+        runtime.gc(root, min_age_days=0)
+    assert set(runtime.list_versions(root)) == {"old", "new", "spare"}
+
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
+    assert ticket["owners"] == {"fixture/component": ["old"]}
+    runtime._leases.commit_runtime_reference_transaction(
+        root, "fixture/component", ticket["token"],
+        {"fixture/component": ["old", "new"], "fixture/component/cohort": ["spare"]},
+        expected={"fixture/component": ["old"], "fixture/component/cohort": []},
+    )
+    assert runtime._leases.read_runtime_references(root) == {
+        "fixture/component": ["new", "old"], "fixture/component/cohort": ["spare"],
+    }
+    assert runtime.gc(root, min_age_days=0) == []
+
+
+def test_reference_transaction_refuses_foreign_owner_and_stale_token(tmp_path):
+    root = case(tmp_path)
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
+    path = root / "runtime-references.json"
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError):
+        runtime._leases.begin_runtime_reference_transaction(root, "other/component")
+    with pytest.raises(RuntimeError):
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/component", "0" * 64,
+            {"fixture/component": ["old"]}, expected={"fixture/component": []},
+        )
+    with pytest.raises(ValueError):
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/component", ticket["token"],
+            {"other/component": ["old"]}, expected={"other/component": []},
+        )
+    with pytest.raises(ValueError):
+        replace(root, ["old"])
+    assert path.read_bytes() == before
+    assert runtime._leases.begin_runtime_reference_transaction(root, "fixture/component") == ticket
+
+
+def test_reference_transaction_commit_is_atomic_and_retryable(tmp_path, monkeypatch):
+    root = case(tmp_path)
+    replace(root, ["old"])
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
+    path = runtime._leases._native_path(root / "runtime-references.json")
+    before = path.read_bytes()
+    original = Path.replace
+
+    def fail(source, target):
+        if Path(target) == path:
+            raise OSError("injected reference publication failure")
+        return original(source, target)
+
+    updates = {"fixture/component": ["old", "new"], "fixture/component/cohort": ["spare"]}
+    expected = {"fixture/component": ["old"], "fixture/component/cohort": []}
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail)
+        with pytest.raises(OSError, match="publication failure"):
+            runtime._leases.commit_runtime_reference_transaction(
+                root, "fixture/component", ticket["token"], updates, expected=expected,
+            )
+    assert path.read_bytes() == before
+    with pytest.raises(ValueError):
+        runtime.gc(root, min_age_days=0)
+    assert set(runtime.list_versions(root)) == {"old", "new", "spare"}
+    runtime._leases.commit_runtime_reference_transaction(
+        root, "fixture/component", ticket["token"], updates, expected=expected,
+    )
+    assert runtime._leases.read_runtime_references(root) == {
+        "fixture/component": ["new", "old"], "fixture/component/cohort": ["spare"],
+    }
+
+
+def test_reference_transaction_preserves_fence_on_compare_or_target_failure(tmp_path):
+    root = case(tmp_path)
+    replace(root, ["old"])
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/component")
+    path = root / "runtime-references.json"
+    before = path.read_bytes()
+    with pytest.raises(RuntimeError, match="changed before publication"):
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/component", ticket["token"],
+            {"fixture/component": ["new"]}, expected={"fixture/component": ["spare"]},
+        )
+    with pytest.raises(FileNotFoundError):
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/component", ticket["token"],
+            {"fixture/component": ["missing"]}, expected={"fixture/component": ["old"]},
+        )
+    assert path.read_bytes() == before
+    with pytest.raises(ValueError):
+        runtime.gc(root, min_age_days=0)
+
+
+def test_reference_transactions_wait_for_other_owner_to_settle(tmp_path):
+    root = case(tmp_path)
+    ticket = runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    started = threading.Event()
+
+    def begin_other():
+        started.set()
+        return runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", timeout=5,
+        )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(begin_other)
+        assert started.wait(2)
+        assert not future.done()
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/first", ticket["token"],
+            {"fixture/first": ["old"]}, expected={"fixture/first": []},
+        )
+        other = future.result(timeout=5)
+    runtime._leases.commit_runtime_reference_transaction(
+        root, "fixture/second", other["token"],
+        {"fixture/second": ["new"]}, expected={"fixture/second": []},
+    )
+    assert runtime._leases.read_runtime_references(root) == {
+        "fixture/first": ["old"], "fixture/second": ["new"],
+    }
+
+
+def test_reference_transaction_custody_serializes_post_commit_work(tmp_path):
+    root = case(tmp_path)
+    started = threading.Event()
+
+    def acquire():
+        started.set()
+        with runtime._leases.reference_transaction_custody(root, timeout=5):
+            return True
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        with runtime._leases.reference_transaction_custody(root):
+            future = pool.submit(acquire)
+            assert started.wait(2)
+            assert not future.done()
+        assert future.result(timeout=5) is True
+
+
+def test_foreign_abandoned_transaction_recovers_all_slots_before_continuing(tmp_path):
+    root = tmp_path / "runtime"
+    names = [f"slot-{number:03d}" for number in range(68)]
+    for name in names:
+        (root / "versions" / name).mkdir(parents=True)
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+
+    with runtime._leases.reference_transaction_custody(root):
+        ticket = runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+        prefix = runtime._leases.reference_recovery_prefix("fixture/first")
+        recovered = {
+            key: values for key, values in ticket["owners"].items() if key.startswith(prefix)
+        }
+        assert len(recovered) == 2
+        assert set().union(*recovered.values()) == set(names)
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/second", ticket["token"],
+            {"fixture/second": [names[0]]}, expected={"fixture/second": []},
+        )
+    assert runtime.gc(root, min_age_days=0) == []
+
+
+def test_fresh_root_fence_can_be_recovered_by_another_owner(tmp_path):
+    root = tmp_path / "fresh"
+    code = """
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+runtime._leases.begin_runtime_reference_transaction(pathlib.Path(sys.argv[2]), 'fixture/first')
+os._exit(23)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(LIBRARY), str(root)],
+        timeout=15, capture_output=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 23, result.stderr
+    assert (root / "versions").is_dir()
+    with runtime._leases.reference_transaction_custody(root):
+        ticket = runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+        assert ticket["owners"] == {}
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/second", ticket["token"],
+            {"fixture/second": []}, expected={"fixture/second": []},
+        )
+    assert runtime._leases.read_runtime_references(root) == {}
+
+
+def test_recovery_does_not_recreate_a_missing_fenced_inventory(tmp_path):
+    root = case(tmp_path)
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    shutil.rmtree(root / "versions")
+    with runtime._leases.reference_transaction_custody(root), pytest.raises(FileNotFoundError):
+        runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+    assert not (root / "versions").exists()
+    with pytest.raises(ValueError):
+        runtime._leases.read_runtime_references(root)
+
+
+def test_fresh_fence_refuses_a_non_directory_inventory(tmp_path):
+    root = tmp_path / "runtime"
+    root.mkdir()
+    (root / "versions").write_text("foreign", encoding="utf-8")
+    with pytest.raises(ValueError, match="ordinary directory"):
+        runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    assert not (root / "runtime-references.json").exists()
+
+
+def test_foreign_recovery_failure_keeps_fence_and_existing_references(tmp_path, monkeypatch):
+    root = case(tmp_path)
+    replace(root, ["old"], owner="unrelated/component")
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    path = runtime._leases._native_path(root / "runtime-references.json")
+    before = path.read_bytes()
+    original = Path.replace
+
+    def fail(source, target):
+        if Path(target) == path:
+            raise OSError("injected recovery failure")
+        return original(source, target)
+
+    with runtime._leases.reference_transaction_custody(root), monkeypatch.context() as patch:
+        patch.setattr(Path, "replace", fail)
+        with pytest.raises(OSError, match="recovery failure"):
+            runtime._leases.begin_runtime_reference_transaction(
+                root, "fixture/second", recover_foreign=True,
+            )
+    assert path.read_bytes() == before
+    with pytest.raises(ValueError):
+        runtime.gc(root, min_age_days=0)
+
+    with runtime._leases.reference_transaction_custody(root):
+        ticket = runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+        assert ticket["owners"]["unrelated/component"] == ["old"]
+        runtime._leases.commit_runtime_reference_transaction(
+            root, "fixture/second", ticket["token"],
+            {"fixture/second": ["new"]}, expected={"fixture/second": []},
+        )
+    assert runtime.gc(root, min_age_days=0) == []
+
+
+def test_foreign_recovery_refuses_an_ambiguous_inventory(tmp_path):
+    root = case(tmp_path)
+    (root / "versions" / "not-a-directory").write_text("fixture", encoding="utf-8")
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    with runtime._leases.reference_transaction_custody(root), pytest.raises(ValueError):
+        runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", recover_foreign=True,
+        )
+    with pytest.raises(ValueError):
+        runtime._leases.read_runtime_references(root)
+
+
+def test_foreign_recovery_does_not_retry_forever_after_ownership_changes(tmp_path, monkeypatch):
+    root = case(tmp_path)
+    runtime._leases.begin_runtime_reference_transaction(root, "fixture/first")
+    attempts = []
+
+    def unchanged(_root):
+        attempts.append(None)
+        if len(attempts) > 2:
+            raise AssertionError("recovery retried without a bound")
+
+    monkeypatch.setattr(runtime._leases, "_recover_runtime_reference_transaction", unchanged)
+    with runtime._leases.reference_transaction_custody(root), pytest.raises(RuntimeError):
+        runtime._leases.begin_runtime_reference_transaction(
+            root, "fixture/second", timeout=0, recover_foreign=True,
+        )
+    assert len(attempts) == 1
+
+
+def test_reference_transaction_commits_multiple_bounded_groups_before_owner_exit(tmp_path):
+    root = tmp_path / "runtime"
+    names = [f"slot-{number:03d}" for number in range(68)]
+    for name in names:
+        (root / "versions" / name).mkdir(parents=True)
+    code = """
+import os, pathlib, sys
+sys.path.insert(0, sys.argv[1])
+import versioned_runtime as runtime
+root = pathlib.Path(sys.argv[2])
+ticket = runtime._leases.begin_runtime_reference_transaction(root, 'fixture/component')
+names = [f'slot-{number:03d}' for number in range(68)]
+runtime._leases.commit_runtime_reference_transaction(
+    root, 'fixture/component', ticket['token'],
+    {'fixture/component/first': names[:64], 'fixture/component/second': names[64:]},
+    expected={'fixture/component/first': [], 'fixture/component/second': []},
+)
+os._exit(23)
+"""
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c", code, str(LIBRARY), str(root)],
+        timeout=30, capture_output=True,
+        **({"creationflags": subprocess.CREATE_NO_WINDOW} if os.name == "nt" else {}),
+    )
+    assert result.returncode == 23, result.stderr
+    owners = runtime._leases.read_runtime_references(root)
+    assert set().union(*owners.values()) == set(names)
+    assert runtime.gc(root, min_age_days=0) == []
 
 
 def test_publication_holds_retention_before_selector_custody(tmp_path, monkeypatch):

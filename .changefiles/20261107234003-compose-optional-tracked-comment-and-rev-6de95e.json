@@ -1,0 +1,13 @@
+{
+  "comment": "Compose optional tracked comment and review consumers with the existing selected workspace owner; preserve legacy defaults and exact recovery.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

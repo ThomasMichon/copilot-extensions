@@ -1,0 +1,9 @@
+{
+  "comment": "Bind explicit point-refresh reconciliation and receipts to the full selected record; refuse unreadable or empty selections.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

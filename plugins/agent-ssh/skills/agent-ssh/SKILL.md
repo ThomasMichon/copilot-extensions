@@ -67,6 +67,13 @@ plugins and register against the same contract.
 - **Mesh status** (`<catalog argv[0]> mesh-status`) -- render the calling repo's SSH
   machine mesh from its `machines.yaml` (per-host role, reachability, aliases).
   Config-driven and read-only; no probe.
+- **Driver setup/status** (`<catalog argv[0]> setup [--apply] [--interactive]`,
+  `<catalog argv[0]> status`, both with `[--machine K] [--machines P] [--module M]
+  [--json]`) -- run the local machine's `ssh.driver` transport setup (plan by
+  default) or read-only status. Non-interactive runs never prompt; operator steps
+  come back as `auth_requests` (the input to an operator auth queue). Exit `0`
+  ready/planned/applied, `2` operator action required, `1` failed. Contract:
+  `docs/transport-provider-contract.md` § *Driver setup and status*.
 - **Static fleet driver** (`<catalog argv[0]> fleet-targets`) -- describe only
   explicitly selected normalized registry records, with source revision and
   qualified provider identity. No probe, tunnel, enrollment or lifecycle action.
@@ -252,7 +259,7 @@ repo ships none, so one repo's mesh never leaks into another. **Read-only** — 
 parses config, it does not probe; `ssh.ready` is the operator's declared state,
 so use `<catalog argv[0]> verify <alias>` to probe a host live.
 
-Run it (or `refresh-mesh`) through agent-worktrees' `<repo> ssh …` front door
+Run it (or `refresh-mesh`, `setup`, `status`) through agent-worktrees' `<repo> ssh …` front door
 (`<repo> ssh mesh-status`) to pin "the calling repo" to the named `<repo>`'s own
 checkout regardless of the invoking shell's cwd -- agent-worktrees resolves and
 chdirs there itself before launching agent-ssh, and fails the invocation closed

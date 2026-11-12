@@ -97,9 +97,10 @@ def test_native_async_installer_falls_forward_only_after_successor_serves(
         monkeypatch.setattr(control.ControlClient, "_request", bounded_request)
         with native.start_provider(tmp_path / "candidate", new_mode) as candidate:
             new_data, new_route = candidate_spawn(monkeypatch, root, candidate)
-            result = control.activate_after_update(
+            summary = control.activate_after_update(
                 health_timeout=2, drain_timeout=2, asynchronous_retirement=True,
-            )["result"]
+            )
+            result = summary["result"]
             if new_mode == "candidate-legacy":
                 assert not result["ok"] and not result["committed"]
                 assert "predecessor_cleanup" not in result
@@ -134,7 +135,8 @@ def test_native_async_installer_falls_forward_only_after_successor_serves(
                 health = control.ControlClient(new_route.base_url, token=data["token"]).health()
                 assert health["published"] and health["worktrees"]["status"] == "ready"
                 assert health["repositories"]["admitting"] is True
-            assert effects == ["reap"]
+            assert summary["passive_reap"] == {"deferred": True}
+            assert effects == []
 
 
 @pytest.mark.parametrize("provider", ["normal", "untyped-reply", "lost-reply"], indirect=True)

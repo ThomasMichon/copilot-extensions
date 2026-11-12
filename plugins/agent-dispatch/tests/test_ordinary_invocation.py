@@ -37,6 +37,27 @@ def test_ready_and_frozen_invocation_commit_and_read_back_together(intent):
     assert queue.get_reservation(reservation.key).agent_info == written.agent_info
 
 
+@pytest.mark.parametrize("creation, expected", [
+    ({"status": "complete", "replayed": False}, ("created", "host-a")),
+    ({"status": "complete", "replayed": True}, ("targeted", None)),
+    ({"status": "pending", "replayed": False}, ("targeted", None)),
+    ({}, ("targeted", None)),
+])
+def test_bridge_created_worktree_records_created_ownership(intent, creation, expected):
+    queue, task, reservation, info, prompt, _ = intent
+    info = {**info, "creation": {**creation, "worktree": {
+        "id": "worktree-a", "creation_nonce": "original-nonce", "execution_machine": "Host-A",
+    }}}
+    invocation = prepare(asdict(task), asdict(reservation), info, prompt)
+    written = record_created_agent(queue, reservation.key, task_generation=task.generation,
+                                   agent_info=info, startup_invocation=invocation)
+    assert (written.worktree_ownership, written.creating_host) == expected
+    from agent_dispatch.supervisor import _bridge_creation_nonce
+    retained = asdict(queue.get_reservation(reservation.key))
+    assert _bridge_creation_nonce(retained) == "original-nonce"
+    assert _bridge_creation_nonce({**retained, "worktree": "other"}) is None
+
+
 def test_trace_distinguishes_local_bytes_from_sorted_retained_values(intent, tmp_path, monkeypatch):
     import hashlib
     from agent_dispatch import launch_debug

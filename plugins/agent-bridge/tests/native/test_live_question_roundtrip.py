@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import http.server
 import json
 import os
@@ -194,17 +195,21 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
                 from agent_bridge.mux_question_backend import LocalMux
                 from plugin_test_command_safety import validate_private_mux_args
 
+                captures = []
+
                 class PrivateBackend(LocalMux):
                     def run(self, argv):
                         validate_private_mux_args(mux.mux_args, sandbox=mux.sandbox, cwd=mux.root)
                         assert argv[1] in {"capture-pane", "send-keys"}
-                        assert argv[argv.index("-t") + 1] == self.pane
+                        assert argv[argv.index("-t") + 1] == self.target
                         completed = subprocess.run(
                             [mux.binary, *mux.mux_args, *argv[1:]], env=mux.environment,
                             cwd=mux.root, capture_output=True, text=True, encoding="utf-8",
                             timeout=5, **no_window_kwargs(),
                         )
                         assert completed.returncode == 0, completed.stderr
+                        if argv[1] == "capture-pane":
+                            captures.append(completed.stdout)
                         return completed.stdout
 
                     def binding(self, session_id, row):
@@ -212,18 +217,23 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
                         # session-binding is separately exercised by backend controls.
                         identity = mux.query(
                             "display-message", "-p", "-t", mux.target,
-                            "#{pane_id}|#{pane_pid}|#{session_id}:#{session_created}",
+                            "#{pane_id}|#{pane_pid}|#{session_id}:#{session_created}|#{window_id}|#{pane_index}",
                         )
                         assert identity.returncode == 0, identity.stderr
-                        self.pane, pid, incarnation = identity.stdout.strip().split("|")
-                        return {"binary": mux.binary, "pane_id": self.pane, "pid": pid,
+                        self.pane, pid, incarnation, window, index = identity.stdout.strip().split("|")
+                        self.target = f"{mux.target}:{window}.{index}"
+                        return {"binary": mux.binary, "mux_session": mux.target,
+                                "pane_id": self.pane, "pid": pid, "target": self.target,
                                 "incarnation": incarnation, "session_id": session_id}
 
                 app.state.mux_questions.backend = PrivateBackend()
                 monkeypatch.setattr(app.state.live_questions, "current", lambda *_: None)
+                # Exercise the native completion's elapsed-time annotation.
+                time.sleep(6)
                 inspection = client.get(base + "/mux")
                 assert inspection.status_code == 200, panel.stdout + "\n" + inspection.text
                 selected = inspection.json()
+                time.sleep(1.2)
                 choice = next(
                     item["number"] for item in selected["options"] if item["label"] == "blue"
                 )
@@ -234,6 +244,9 @@ def test_real_interactive_question_resumes_without_prompt_or_abort(tmp_path, tmp
             assert result.status_code == 200, result.text
             assert result.json()["accepted"] is True, (
                 result.text + "\n" + mux.query("capture-pane", "-p", "-t", mux.target).stdout
+                + ("\n".join(difflib.unified_diff(
+                    captures[0].splitlines(), captures[1].splitlines(),
+                )) if transport != "native" and len(captures) > 1 else "")
             )
             while time.monotonic() < deadline:
                 path = cli_home / "session-state" / native_id / "events.jsonl"

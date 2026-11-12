@@ -170,6 +170,14 @@ this built-in connector control may remain unclassified. These request-purpose
 measurements do not infer exclusive body contents from listing payloads or
 qualify transports outside the shared HTTP session.
 
+The same existing rounds also require explicit per-source parsed-record counts,
+separate from those request purposes. Overlap returns two listing identities,
+four item bodies (listing plus targeted retrieval) and two comment bodies;
+resume returns only one newly fetched item body, with no relisting or replayed
+comment bodies. Truncated listing records remain observed without admitting a
+delta, while foreign-account refusal has no parser observation. The unchanged
+cross-size count comparison includes these optional acquisition counters.
+
 Qualify both a standalone single-model engine and a generic injected two-model
 consumer. A downstream adopts only a reviewed/published compatible engine
 revision, records its consumed provenance, and repeats the same count assertions

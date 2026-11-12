@@ -153,6 +153,46 @@ callers keep the unchanged baseline, while a provider rollback cannot satisfy
 an incarnation-required assignment. These facts constrain assignment admission,
 not authorized installer replacement or unrelated legacy operations.
 
+### Head-qualified relationship inspection
+
+`head_inspect: 1` advertises an optional `expected_head` object on `inspect`,
+containing exactly `session_id` (nonempty string) and `revision` (positive
+integer). It requires `expected_creation_nonce` and cannot be combined with
+`allow_missing` or mutation operations. The existing record lock covers the
+claim and head check together: the relationship must be actively bound, the
+owner must not be frozen, and the authoritative transition ledger must name
+that exact active session and revision with no pending handoff. A legacy
+head fallback without a transition ledger cannot satisfy the requirement.
+Success adds `head` with the checked session and revision, without changing
+the record, claim metadata or ordinary inspection response.
+
+Negotiate the executing CLI capability before sending this strict new field.
+Resident-only inspection additionally selects `resource_relationship` verb
+version 4 and verifies the returned head. A version-3 resident continues to
+serve prior inspections but refuses this requirement before transport; no
+unguarded or direct-writer fallback is equivalent. This is provider-first
+expansion with no retirement of the earlier forms.
+
+`succession_inspect: 1` additionally permits `predecessor_session_id` in
+`expected_head`. The predecessor must be a different tracked session, explicitly
+concluded or handed off, whose successor link points at the current active head;
+the head's predecessor link must agree. Success includes that checked predecessor
+in `head`, retaining the original relationship. A different active head, elapsed
+time or stopped process alone is not succession. This inspection neither performs
+a handover nor proves process retirement.
+
+The extended form requires resident verb version 5. A version-4 resident still
+serves ordinary head-qualified inspection, but cannot prove succession. Select
+the new capability and resident version before sending this form; a rollback
+must retain the assignment and report unsupported succession, not drop the
+predecessor requirement or retry an unguarded read.
+
+The result is an observation, **not a lease, session acceptance or permission**.
+The record lock ends with the inspection; consumers must not imply it spans
+their later transactions. Coverage derived from this observation is valid only
+for the same native head revision. Later handoff, conclusion or drift invalidates
+coverage without proving the retained relationship vacant or retired.
+
 ### Qualified executing-session writes
 
 The executing CLI advertises `retained_session_writes: 1` alongside its existing
@@ -183,6 +223,23 @@ required operation without dropping its scope or retrying through a resident.
 This capability does not qualify unrelated participating writers or authorize
 installer inhibition.
 
+### Retained native process creation
+
+The same executing-owner capability response advertises
+`retained_native_resume: 1`. A qualified local Bridge recovery supplies the
+version-1 `AGENT_WORKTREES_RETAINED_NATIVE_RESUME` environment envelope:
+`operation_id`, the original qualified `writer` scope above, and
+`head: {session_id, revision}`. This is a restriction on the existing exact
+native-resume path, not launch authority or a new allocator.
+
+Inside the existing process-creation admission fence, Worktrees checks the
+executing writer, project, workspace path/ID, creation nonce, native session
+and head revision. Ordinary native cold-stop, pending handoff/seed, hosting
+and liveness checks still apply. Missing metadata from an older owner does
+not establish this capability. An invalid or changed envelope refuses before
+process creation instead of dropping the restriction; ordinary invocations
+without the envelope retain their previous behavior.
+
 ## Replay and obligation
 
 Reserve persists pending responsibility before returning. Exact request-ID
@@ -210,8 +267,9 @@ metadata stays raw and blocking, with an explicit invalid-metadata wire view.
 The registered `resource_relationship` transaction uses the existing logged
 direct RMW path and required sidecar locks, with provider I/O outside the lock
 and exact revalidation afterward. Its version-1 baseline remains supported;
-version 2 additionally checks the optional expected incarnation, and version 3
-checks the optional executing-writer requirement. Existing generic claim verb version 3
+version 2 additionally checks the optional expected incarnation, version 3
+checks the optional executing-writer requirement, and version 4 adds read-only
+head-qualified inspection. Existing generic claim verb version 3
 already preserves/refuses all explicitly present producer metadata; its wire
 shape is unchanged. This is not qualification of arbitrary old full-record
 writers: upgrade/qualify every participating writer before activating retained

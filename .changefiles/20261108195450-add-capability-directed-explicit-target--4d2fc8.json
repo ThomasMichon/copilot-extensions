@@ -1,0 +1,13 @@
+{
+  "comment": "Add capability-directed explicit-target native draft readiness with verified draft-only effects and honest uncertain outcomes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

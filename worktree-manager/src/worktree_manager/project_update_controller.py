@@ -2,8 +2,46 @@
 
 from __future__ import annotations
 
+import re
+
 from . import engine_client
+from .engine_progress import error_from_envelope
 from .update_orchestration import extract_project
+
+
+class _NoProjectResolved(engine_client.EngineError):
+    """The fixed diagnostic confirms that no project was selected."""
+
+
+def legacy_controller_error(project: str | None, proc) -> engine_client.EngineError | None:
+    """Recognize only fixed downlevel diagnostics, never arbitrary stdout."""
+    if proc.returncode != 1:
+        return None
+    stdout, stderr = (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    if stdout and stderr:
+        return None
+    detail = error_from_envelope(stdout) or stdout or stderr
+    if len(detail) > 4096:
+        return None
+    detail = re.sub(r"\x1b\[[0-9;]*m", "", detail).strip()
+    if detail.startswith("\u2717 "):
+        detail = detail[2:].lstrip()
+    if detail in {
+        "Unknown key: 'update-controller'",
+        "Unknown key: 'update-controller'. Use 'get keys' to list available keys.",
+    }:
+        return engine_client.EngineFeatureUnavailable(
+            "the selected engine cannot determine the project update controller; "
+            "use the configured source's supported engine setup or recovery, then retry"
+        )
+    if project is None and detail in {
+        "Could not resolve a project for 'get'.",
+        "Cannot load config: No active project could be resolved. agent-worktrees discovers "
+        "its context from the current directory (like git); run from inside a managed repo or "
+        "worktree, or pass --project <name>.",
+    }:
+        return _NoProjectResolved("No active project could be resolved")
+    return None
 
 
 def handoff(
@@ -35,13 +73,9 @@ def handoff(
     except engine_client.EngineError as error:
         if managed:
             raise ValueError("selected project update controller is unavailable") from error
-        detail = str(error)
-        if error.install_hint or "Unknown key: 'update-controller'" in detail:
+        if error.install_hint:
             return None
-        if project is None and (
-            "No active project could be resolved" in detail
-            or "Could not resolve a project for 'get'." in detail
-        ):
+        if project is None and isinstance(error, _NoProjectResolved):
             return None
         raise
     if not selected:

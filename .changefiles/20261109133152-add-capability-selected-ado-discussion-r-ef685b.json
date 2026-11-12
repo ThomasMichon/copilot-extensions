@@ -1,0 +1,13 @@
+{
+  "comment": "Add capability-selected ADO discussion reopening with consumed-key read-only recovery",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

@@ -66,10 +66,11 @@ def allocate_selection(
     workspace: WorkspaceOperations, payload: dict, scope: dict, cache: GenerationCache,
     *, expires_at: int, checkpoint: Callable[[], None],
     validate_intent: Callable[[dict], None] | None = None,
+    deadline: float | None = None,
 ) -> dict:
     from .workspace_operations import WorkspaceUnavailable
 
-    if workspace.prepared_reviews is not True or workspace.selection_preparer is None or workspace.write_context is None:
+    if workspace.prepared_reviews is not True or workspace.selection_preparer is None:
         raise WorkspaceUnavailable("pre-approval selection receiver unavailable")
     original = review_intent.intent(payload["intent"])
     if original["scope"] != scope:
@@ -98,7 +99,10 @@ def allocate_selection(
             _check_selected_ownership(action, baseline, scope["principal_id"])
         # Resolve policy/profile/origin outside the replay transaction; only pure
         # synchronous composition runs while the existing storage owner is locked.
-        compose = workspace.selection_preparer(copy.deepcopy(generation), checkpoint=checkpoint)
+        compose = workspace.selection_preparer(
+            copy.deepcopy(generation), checkpoint=checkpoint,
+            **({"deadline": deadline} if workspace.selection_preparer_deadline else {}),
+        )
         checkpoint()
         retained = selections.allocate(
             original, compose=compose, expires_at=expires_at, checkpoint=checkpoint,

@@ -43,6 +43,50 @@ def fake_repo(tmp_path):
     return repo
 
 
+@pytest.fixture()
+def offline_session_mode_command(tmp_path, config_home):
+    import os
+    import subprocess
+    import sys
+    import time
+
+    from agent_procutil import no_window_kwargs
+
+    def command(*args):
+        started = time.monotonic()
+        print(f"offline CLI begin: {args!r}", flush=True)
+        result = subprocess.run(
+            [sys.executable, "-m", "agent_bridge", "config", "session-mode", *args, "--json"],
+            cwd=tmp_path, env=os.environ.copy(), capture_output=True, text=True,
+            timeout=30, **no_window_kwargs(),
+        )
+        print(
+            f"offline CLI finished: {args!r}, exit={result.returncode}, "
+            f"elapsed={time.monotonic() - started:.3f}s",
+            flush=True,
+        )
+        return result
+
+    return command
+
+
+@pytest.mark.parametrize("policy", ["preserve", "enabled", "absent"])
+def test_native_scheduling_selection_survives_config_rewrites(config_home, policy):
+    (config_home / "config.yaml").write_text(
+        yaml.safe_dump({"windows_scheduled_task": policy}), encoding="utf-8",
+    )
+    cfg = load_config(strict=True)
+    save_config(cfg)
+    assert load_config(strict=True).windows_scheduled_task == policy
+
+
+@pytest.mark.parametrize("strict", [False, True])
+def test_invalid_native_scheduling_selection_refuses_fallback(config_home, strict):
+    (config_home / "config.yaml").write_text("windows_scheduled_task: false\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid .*configuration"):
+        load_config(strict=strict)
+
+
 class TestSessionModes:
     @staticmethod
     def policy(root, modes, *, legacy=False, **extra):
@@ -338,43 +382,49 @@ else:
             write_session_mode(**args)
         assert not (config_home / "config.yaml").exists()
 
-    def test_actual_offline_command_fresh_set_read_and_error(self, tmp_path, config_home):
-        import os
-        import subprocess
-        import sys
-
-        from agent_procutil import no_window_kwargs
-
-        def command(*args):
-            return subprocess.run(
-                [sys.executable, "-m", "agent_bridge", "config", "session-mode", *args, "--json"],
-                cwd=tmp_path, env=os.environ.copy(), capture_output=True, text=True,
-                timeout=30, **no_window_kwargs(),
-            )
-
-        fresh = command()
+    def test_actual_offline_command_fresh_default(self, offline_session_mode_command):
+        fresh = offline_session_mode_command()
         assert fresh.returncode == 0, fresh.stderr
         assert json.loads(fresh.stdout) == {"mode": "acp", "source": "default"}
-        help_result = command("--help")
+
+    def test_actual_offline_command_help(self, offline_session_mode_command):
+        help_result = offline_session_mode_command("--help")
         assert help_result.returncode == 0, help_result.stderr
         assert "agent-bridge.session-mode/v1" in help_result.stdout
+
+    def test_actual_offline_command_machine_local_set(self, offline_session_mode_command):
         save_config(ServiceConfig())
-        local = command("--machine-local", "--set", "cli")
+        local = offline_session_mode_command("--machine-local", "--set", "cli")
         assert local.returncode == 0, local.stderr
         assert json.loads(local.stdout)["mode"] == "cli"
-        operator = tmp_path / "operator"
-        operator.mkdir()
-        denied = command("--set", "cli")
+
+    def test_actual_offline_command_requires_write_destination(self, offline_session_mode_command):
+        denied = offline_session_mode_command("--set", "cli")
         assert denied.returncode == 1
         assert "exactly one" in denied.stderr
-        set_result = command("--operator-repo", str(operator), "--venue", "container", "--set", "cli")
+
+    def test_actual_offline_command_operator_set_and_read(self, tmp_path, offline_session_mode_command):
+        operator = tmp_path / "operator"
+        operator.mkdir()
+        save_config(ServiceConfig())
+        set_result = offline_session_mode_command(
+            "--operator-repo", str(operator), "--venue", "container", "--set", "cli",
+        )
         assert set_result.returncode == 0, set_result.stderr
         assert json.loads(set_result.stdout)["written"]["source"].endswith("session_modes.venues.container")
-        read_result = command("--operator-repo", str(operator), "--repo", "example", "--venue", "container")
+        read_result = offline_session_mode_command(
+            "--operator-repo", str(operator), "--repo", "example", "--venue", "container",
+        )
         assert read_result.returncode == 0, read_result.stderr
         assert json.loads(read_result.stdout)["mode"] == "cli"
+
+    def test_actual_offline_command_invalid_operator_refuses_fallback(
+        self, tmp_path, offline_session_mode_command,
+    ):
+        operator = tmp_path / "operator"
+        operator.mkdir()
         self.policy(operator, {"default": "invalid"})
-        invalid = command("--operator-repo", str(operator))
+        invalid = offline_session_mode_command("--operator-repo", str(operator))
         assert invalid.returncode == 1
         assert "refusing authority fallback" in invalid.stderr
 
@@ -488,6 +538,142 @@ class TestMigrateConfig:
         save_config(ServiceConfig(idle_reap_ttl_seconds=300))
         migrated = migrate_config(load_config())
         assert migrated.idle_reap_ttl_seconds == 300
+
+    @pytest.mark.parametrize(("latest_ttl", "expected_ttl"), [(0, 600), (300, 300)])
+    def test_migration_uses_latest_config(self, config_home, latest_ttl, expected_ttl):
+        from agent_bridge.config import migrate_config
+
+        save_config(ServiceConfig(port=1234, idle_reap_ttl_seconds=0))
+        stale = load_config()
+        latest = load_config()
+        latest.port = 2345
+        latest.idle_reap_ttl_seconds = latest_ttl
+        save_config(latest)
+
+        migrated = migrate_config(stale)
+        assert migrated.port == load_config().port == 2345
+        assert migrated.idle_reap_ttl_seconds == load_config().idle_reap_ttl_seconds == expected_ttl
+
+    def test_completed_migration_uses_latest_config(self, config_home):
+        from agent_bridge.config import migrate_config
+
+        marker = config_home / ".migrations" / "idle_reap_default_on"
+        marker.parent.mkdir()
+        marker.write_text("applied\n", encoding="utf-8")
+        save_config(ServiceConfig(port=1234, idle_reap_ttl_seconds=0))
+        stale = load_config()
+        latest = load_config()
+        latest.port = 2345
+        save_config(latest)
+        migrated = migrate_config(stale)
+        assert migrated.port == 2345
+        assert migrated.idle_reap_ttl_seconds == 0
+
+    def test_migration_preserves_unrecognized_settings(self, config_home):
+        from agent_bridge.config import migrate_config
+
+        path = config_home / "config.yaml"
+        path.write_text(yaml.safe_dump({
+            "idle_reap_ttl_seconds": 0,
+            "other_setting": {"value": "keep"},
+        }), encoding="utf-8")
+        migrate_config(load_config())
+        actual = yaml.safe_load(path.read_text(encoding="utf-8"))
+        assert actual["idle_reap_ttl_seconds"] == 600
+        assert actual["other_setting"] == {"value": "keep"}
+
+    def test_migration_does_not_mark_failed_write_as_applied(self, config_home, monkeypatch):
+        from agent_bridge import config
+
+        save_config(ServiceConfig(idle_reap_ttl_seconds=0))
+        cfg = load_config()
+        write = config.atomic_write_config
+
+        def fail_write(*args, **kwargs):
+            raise OSError("write failed")
+
+        monkeypatch.setattr(config, "atomic_write_config", fail_write)
+        with pytest.raises(OSError, match="write failed"):
+            config.migrate_config(cfg)
+        assert load_config().idle_reap_ttl_seconds == 0
+        assert not (config_home / ".migrations" / "idle_reap_default_on").exists()
+        monkeypatch.setattr(config, "atomic_write_config", write)
+        assert config.migrate_config(load_config()).idle_reap_ttl_seconds == 600
+
+    def test_migration_refuses_a_changed_config_snapshot(self, config_home, monkeypatch):
+        from agent_bridge import config
+
+        save_config(ServiceConfig(port=1234, idle_reap_ttl_seconds=0))
+        stale = load_config()
+        original_load = config.load_config
+        path = config_home / "config.yaml"
+
+        def load_then_change():
+            result = original_load()
+            data = yaml.safe_load(path.read_text(encoding="utf-8"))
+            data["port"] = 2345
+            path.write_text(yaml.safe_dump(data), encoding="utf-8")
+            return result
+
+        monkeypatch.setattr(config, "load_config", load_then_change)
+        with pytest.raises(ValueError, match="configuration changed during migration"):
+            config.migrate_config(stale)
+        assert original_load().port == 2345
+        assert original_load().idle_reap_ttl_seconds == 0
+        assert not (config_home / ".migrations" / "idle_reap_default_on").exists()
+
+    def test_migration_serializes_with_another_process(self, tmp_path, config_home):
+        import subprocess
+        import sys
+        import time
+
+        from agent_procutil import no_window_kwargs
+        from agent_bridge import config
+        from agent_bridge.config_write import config_file_lock
+
+        save_config(ServiceConfig(port=1234, idle_reap_ttl_seconds=0))
+        waiting = tmp_path / "migration-waiting"
+        script = """
+import sys
+from pathlib import Path
+from agent_bridge import config, config_write
+assert Path(config.__file__).resolve() == Path(sys.argv[2]).resolve()
+cfg = config.load_config()
+sleep = config_write.time.sleep
+def contended(delay):
+    Path(sys.argv[1]).touch()
+    sleep(delay)
+config_write.time.sleep = contended
+config.migrate_config(cfg)
+"""
+        process = None
+        try:
+            with config_file_lock(config_home / "config.yaml"):
+                process = subprocess.Popen(
+                    [sys.executable, "-c", script, str(waiting), config.__file__],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                    **no_window_kwargs(),
+                )
+                deadline = time.monotonic() + 15
+                while not waiting.exists():
+                    if process.poll() is not None:
+                        _, error = process.communicate()
+                        pytest.fail(f"migration process exited early: {error}")
+                    if time.monotonic() >= deadline:
+                        pytest.fail("migration process did not wait for the config owner")
+                    time.sleep(0.02)
+                latest = load_config()
+                latest.port = 2345
+                save_config(latest)
+            _, error = process.communicate(timeout=10)
+            assert process.returncode == 0, error
+        finally:
+            if process is not None:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=10)
+        assert load_config().port == 2345
+        assert load_config().idle_reap_ttl_seconds == 600
 
 
 class TestAdoptTopology:

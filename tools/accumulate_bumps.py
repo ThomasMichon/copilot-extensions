@@ -378,6 +378,47 @@ def _write_marketplace_entry(plugin: str, new_version: str, *, also_metadata: bo
     return True
 
 
+def _include_packaged_version_receivers(result: dict[str, tuple[str, str]]) -> None:
+    import launch_wrapper_assets_ref as assets
+
+    roots = {
+        path.name: path for path in PLUGINS_DIR.iterdir()
+        if (path / "plugin.json").is_file()
+    } if PLUGINS_DIR.is_dir() else {}
+    roots.update({name: REPO / name for name in iter_standalone_consumer_names()})
+    for root in roots.values():
+        for filename in ("plugin.json", "pyproject.toml", *assets.MANIFEST_NAMES):
+            _check_library_path(root / filename)
+    version_sources = {
+        (root / filename).relative_to(REPO).as_posix(): name
+        for name, root in roots.items()
+        for filename in ("plugin.json", "pyproject.toml")
+        if (root / filename).is_file()
+    }
+    version_sources.update({
+        f"{name}/pyproject.toml": name for name in iter_library_consumer_names()
+    })
+    receivers: dict[str, set[str]] = {}
+    for consumer, root in roots.items():
+        for manifest_name in assets.MANIFEST_NAMES:
+            for group in assets.load_manifest_groups(root, manifest_name=manifest_name):
+                for filename in group.files:
+                    source = (Path(group.canonical_dir_raw) / filename).as_posix()
+                    producer = version_sources.get(source)
+                    if producer is not None:
+                        receivers.setdefault(producer, set()).add(consumer)
+    pending = list(result)
+    for producer in pending:
+        for consumer in sorted(receivers.get(producer, ())):
+            if consumer in result:
+                continue
+            current = read_consumer_version(consumer)
+            if current is None:
+                raise VersionError(f"packaged version receiver {consumer} has no valid version")
+            result[consumer] = (current, bump_version(current, "patch"))
+            pending.append(consumer)
+
+
 def compute(grouped: dict[str, list[str]]) -> dict[str, tuple[str, str]]:
     """Map ``consumer -> (old_version, new_version)`` for every pending
     consumer -- an ordinary ``plugins/*`` plugin or a standalone,
@@ -395,11 +436,15 @@ def compute(grouped: dict[str, list[str]]) -> dict[str, tuple[str, str]]:
             continue
         new_version = bump_version(current, highest_bump(types))
         result[consumer] = (current, new_version)
+    if result:
+        # Promotion copies these newly stamped manifests after allocating versions.
+        _include_packaged_version_receivers(result)
     return result
 
 
 def apply(result: dict[str, tuple[str, str]]) -> list[str]:
     """Write the computed versions; return the list of successfully-applied consumers."""
+    _validate_version_destinations(result)
     applied: list[str] = []
     for consumer, (old, new_version) in result.items():
         if roots := library_roots(consumer):
@@ -449,6 +494,33 @@ def apply(result: dict[str, tuple[str, str]]) -> list[str]:
     return applied
 
 
+def _validate_version_destinations(result: dict[str, tuple[str, str]]) -> None:
+    """Admit all destinations before the first version write, including seeding."""
+    for consumer in result:
+        libraries = library_roots(consumer)
+        roots = libraries or [_consumer_root(consumer)]
+        if not libraries and not is_standalone_consumer(consumer):
+            _check_library_path(MARKETPLACE)
+        for root in roots:
+            for name in ("plugin.json", "pyproject.toml", "src", "instruction-projections.json"):
+                _check_library_path(root / name)
+            source = root / "src"
+            if source.is_dir():
+                for package in source.iterdir():
+                    _check_library_path(package)
+                    if package.is_dir():
+                        for name in ("__init__.py", "_build_info.py"):
+                            _check_library_path(package / name)
+            declaration = root / "instruction-projections.json"
+            if declaration.is_file():
+                try:
+                    entries = json.loads(declaration.read_text(encoding="utf-8")).get("projections", [])
+                except (OSError, json.JSONDecodeError):
+                    continue
+                if isinstance(entries, list):
+                    for entry in entries:
+                        if isinstance(entry, dict) and isinstance(entry.get("template"), str):
+                            _check_library_path(root / entry["template"])
 # --- --from-diff: derive the required bumps from the branch itself ----------
 
 def _version_bump_guard():

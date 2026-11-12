@@ -634,9 +634,19 @@ def _provider_plugin_id(provider: ClaimProviderManifest) -> str:
     return root_name or provider.plugin
 
 
+def _note_failure(failure: dict | None, detail: object) -> None:
+    """Record a bounded, non-authoritative explanation of a callback failure."""
+    if failure is None or not isinstance(detail, str):
+        return
+    lines = detail.strip().splitlines()
+    if lines:
+        failure["callback_error"] = lines[-1][:512]
+
+
 def _run_legacy_command(
     command: tuple[str, ...], *, timeout: float, cwd: str | None = None,
     no_self_provision_env: str | None = None,
+    failure: dict | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     env = peer_env()
     if no_self_provision_env is not None:
@@ -654,7 +664,8 @@ def _run_legacy_command(
             cwd=cwd,
             **no_window_kwargs(),
         )
-    except (subprocess.SubprocessError, OSError, ValueError):
+    except (subprocess.SubprocessError, OSError, ValueError) as error:
+        _note_failure(failure, f"provider launch failed: {type(error).__name__}: {error}")
         return None
 
 
@@ -666,29 +677,38 @@ def _run_provider_process(
     timeout: float,
     cwd: str | None = None,
     kind: str = "status",
+    failure: dict | None = None,
 ) -> subprocess.CompletedProcess[str] | None:
     if kind not in ("status", "reclaim"):
         raise ValueError("provider callback kind must be status or reclaim")
     command = provider.status_command if kind == "status" else provider.reclaim_command
     if command is None:
+        _note_failure(failure, f"provider declares no {kind} command")
         return None
     plugin_id = _provider_plugin_id(provider)
     if peer_launch_adapter.explicit_context():
         if plugin_id not in PEERS:
+            _note_failure(failure, f"{plugin_id} is not a same-cell peer")
             return None
         # Peer launch executes the primary module, not arbitrary payload shims.
         if _pure_path_name(command[0]) not in (plugin_id, f"{plugin_id}.cmd"):
             log.debug("Claim provider command has no same-cell module route: %s", command[0])
+            _note_failure(failure, f"{plugin_id} command has no same-cell module route")
             return None
         try:
-            return peer_launch_adapter.run(
+            proc = peer_launch_adapter.run(
                 plugin_id, *command[1:], *callback_args, timeout=timeout, cwd=cwd,
             )
-        except peer_launch_adapter.ContextRefused:
+        except peer_launch_adapter.ContextRefused as error:
+            _note_failure(failure, str(error) or "same-cell peer context refused")
             return None
+        if proc is None:
+            _note_failure(failure, f"{plugin_id} is absent from this cell")
+        return proc
     return _run_legacy_command(
         legacy_command, timeout=timeout, cwd=cwd,
         no_self_provision_env=provider.no_self_provision_env,
+        failure=failure,
     )
 
 
@@ -701,6 +721,7 @@ def _run_callback(
     required_bool_field: str,
     cwd: str | None = None,
     kind: str = "status",
+    failure: dict | None = None,
 ) -> dict | None:
     proc = _run_provider_process(
         provider,
@@ -709,10 +730,14 @@ def _run_callback(
         timeout=timeout,
         cwd=cwd,
         kind=kind,
+        failure=failure,
     )
     if proc is None:
         return None
     if proc.returncode != 0:
+        stderr = getattr(proc, "stderr", None)
+        stderr = stderr.strip() if isinstance(stderr, str) else ""
+        _note_failure(failure, stderr or f"provider exited {proc.returncode}")
         return None
     try:
         data = json.loads(proc.stdout)
@@ -807,15 +832,20 @@ def resolve_claim_status(
     )
     if legacy_command is None:
         return {"available": False, "reason": f"{provider.plugin} claim-status callback failed"}
+    failure: dict = {}
     result = _run_callback(
         provider,
         callback_args=callback_args,
         legacy_command=legacy_command,
         timeout=timeout,
         required_bool_field="exists",
+        failure=failure,
     )
     if result is None:
-        return {"available": False, "reason": f"{provider.plugin} claim-status callback failed"}
+        return {
+            "available": False, "reason": f"{provider.plugin} claim-status callback failed",
+            **failure,
+        }
     # "available" is the envelope's own key, set here (never sourced from
     # the callback) -- a provider that happens to emit its own "available"
     # key in ``result`` must never be able to shadow it.

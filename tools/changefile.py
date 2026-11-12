@@ -23,6 +23,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor
 import json
 import re
+import stat
 import sys
 import time
 import uuid
@@ -40,6 +41,7 @@ def _slugify(text: str) -> str:
 
 
 def write_changefile(changes: list[dict], comment: str) -> Path:
+    _check_changefile_path(CHANGEFILES_DIR)
     CHANGEFILES_DIR.mkdir(parents=True, exist_ok=True)
     stamp = time.strftime("%Y%m%d%H%M%S")
     name = f"{stamp}-{_slugify(comment)}-{uuid.uuid4().hex[:6]}.json"
@@ -47,6 +49,20 @@ def write_changefile(changes: list[dict], comment: str) -> Path:
     payload = {"comment": comment, "changes": changes}
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
     return path
+
+
+def _check_changefile_path(path: Path) -> None:
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        return
+    if (
+        stat.S_ISLNK(info.st_mode)
+        or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+        or (not stat.S_ISDIR(info.st_mode) if path == CHANGEFILES_DIR
+            else not stat.S_ISREG(info.st_mode))
+    ):
+        raise ValueError(f"unsafe changefile path: {path}")
 
 
 def _read_changefile(path: Path) -> tuple[Path, dict | None, str | None]:
@@ -57,9 +73,12 @@ def _read_changefile(path: Path) -> tuple[Path, dict | None, str | None]:
 
 
 def read_changefiles(*, parallel: bool = False) -> list[tuple[Path, dict]]:
+    _check_changefile_path(CHANGEFILES_DIR)
     if not CHANGEFILES_DIR.is_dir():
         return []
     paths = sorted(CHANGEFILES_DIR.glob("*.json"))
+    for path in paths:
+        _check_changefile_path(path)
 
     def collect(records):
         out = []

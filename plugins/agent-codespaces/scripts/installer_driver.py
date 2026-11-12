@@ -15,6 +15,11 @@ SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPTS))
 NATIVE_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALLER"
 SOURCE_SELECTION_ENV = "COPILOT_EXTENSIONS_NATIVE_INSTALL_SOURCE_SELECTION"
+WHEEL_SELECTION_ENV = "COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION"
+WHEEL_FIELDS = (
+    ("wheel_profile", "-WheelProfile"), ("wheel_directory", "-WheelDirectory"),
+    ("wheel_python", "-WheelPython"), ("wheel_uv", "-WheelUv"),
+)
 RECIPES = {
     "agent-bridge": frozenset({"Repair", "RequireGracefulCutover", "NonInteractive", "ZeroDowntime", "Purge", "DryRun"}),
     "agent-codespaces": frozenset({"Force", "DryRun", "Repair"}),
@@ -57,22 +62,98 @@ CONTEXT_KEYS = (
     "BUDGET_GUIDANCE_HOME",
     "AGENT_DISPATCH_ALLOW_DOWNGRADE", "AGENT_DISPATCH_INSTALL_DEADLINE_SEC",
     "AGENT_DISPATCH_BASE_PYTHON", "AGENT_DISPATCH_RUN_DIR", "AGENT_DISPATCH_ROUTING_DIR",
+    "AGENT_DISPATCH_INSTALLATION_CONFIG",
     "AGENT_DISPATCH_SUPERVISE_MACHINE", "AGENT_PULL_REQUESTS_INSTALL_DEADLINE_SEC",
     "AGENT_VAULT_HOME", "AGENT_VAULT_INSTALLATION_ID", "AGENT_VAULT_ALLOW_DOWNGRADE",
-    "AGENT_VAULT_CONFIG", "APPDATA", "XDG_CONFIG_HOME", "AGENT_CONFIGURATION_CONTEXT",
+    "AGENT_VAULT_CONFIG", "AGENT_VAULT_INSTALL_PROFILE",
+    "APPDATA", "XDG_CONFIG_HOME", "AGENT_CONFIGURATION_CONTEXT",
     "AGENT_MCP_HOME", "AGENT_MCP_INSTALL_DEADLINE_SEC",
     "AGENT_MCP_SERVE_SOCKET", "AGENT_MCP_NO_CUTOVER",
     "AGENT_MCP_CUTOVER_HEALTH_TIMEOUT", "AGENT_MCP_CUTOVER_DRAIN_TIMEOUT",
     "AGENT_INDEX_INSTALL_DEADLINE_SEC", "AGENT_INDEX_ALLOW_DOWNGRADE", "AGENT_INDEX_ROLE",
     "AGENT_INDEX_CONFIG", "AGENT_INDEX_REPO", "AGENT_INDEX_MACHINE", "AGENT_INDEX_ENGINE_HOME",
+    "AGENT_INDEX_INSTALLATION_CONFIG", "AGENT_INDEX_CONFIG_ROOT",
     "AGENT_INDEX_ENGINE_HOST", "AGENT_INDEX_ENGINE_PORT", "AGENT_INDEX_ALLOW_TASK_ELEVATION",
     "CE_UPDATE_AUTH",
+    "COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET",
     SOURCE_SELECTION_ENV,
+    WHEEL_SELECTION_ENV,
 )
 TRANSIENT_KEYS = (
     NATIVE_ENV, "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_PLUGIN_INSTALL_STAGED",
     "COPILOT_PLUGIN_STAGED_FROM", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION",
 )
+INSTALLATION_SELECTORS = {
+    "agent-dispatch": "AGENT_DISPATCH_INSTALLATION_CONFIG",
+    "agent-index": "AGENT_INDEX_INSTALLATION_CONFIG",
+}
+SELECTOR_KEYS = (*INSTALLATION_SELECTORS.values(), "AGENT_INDEX_CONFIG_ROOT")
+
+
+def selector_context(args, environment, *, cwd: Path | None = None) -> dict[str, str]:
+    """Resolve explicit selectors before staging; never replace one with defaults."""
+    selected = {}
+    base = Path.cwd() if cwd is None else cwd
+    for name, value in environment.items():
+        if any(name.startswith(key + "_") for key in SELECTOR_KEYS):
+            raise ValueError(f"Unsupported native installation selector: {name}")
+        if name not in SELECTOR_KEYS:
+            continue
+        if not isinstance(value, str) or not value.strip() or any(char in value for char in "\0\r\n"):
+            raise ValueError(f"Invalid native installation selector: {name}")
+        path = Path(value).expanduser()
+        if not path.is_absolute():
+            path = base / path
+        if name == INSTALLATION_SELECTORS.get(args.plugin) or (
+            args.plugin == "agent-index" and name == "AGENT_INDEX_CONFIG_ROOT"
+        ):
+            for member in (path, *path.parents):
+                try:
+                    info = member.lstat()
+                except FileNotFoundError:
+                    continue
+                if member.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise ValueError(f"Linked native installation selector: {name}")
+        path = Path(os.path.abspath(path))
+        selected[name] = str(path)
+    if args.plugin == "agent-index" and "AGENT_INDEX_CONFIG_ROOT" in selected:
+        directory = Path(selected["AGENT_INDEX_CONFIG_ROOT"])
+        for member in (directory, *directory.parents):
+            try:
+                info = member.lstat()
+            except FileNotFoundError:
+                continue
+            if member.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise ValueError("Linked native installation selector: AGENT_INDEX_CONFIG_ROOT")
+        if directory.exists() and not directory.is_dir():
+            raise ValueError("AGENT_INDEX_CONFIG_ROOT must select a directory")
+    name = INSTALLATION_SELECTORS.get(args.plugin)
+    if name not in selected:
+        return selected
+    path = Path(selected[name])
+    for member in (path, *path.parents):
+        try:
+            info = member.lstat()
+        except FileNotFoundError:
+            continue
+        if member.is_symlink() or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError(f"Linked native installation selector: {name}")
+    info = path.stat()
+    if not path.is_file() or info.st_size > 65536:
+        raise ValueError(f"Native installation selector is not a bounded file: {name}")
+    with path.open("rb") as stream:
+        content = stream.read(65537)
+    if len(content) > 65536:
+        raise ValueError(f"Native installation selector exceeds its bound: {name}")
+    document = json.loads(content)
+    installation = document.get("installation") if isinstance(document, dict) else None
+    root = installation.get("root") if isinstance(installation, dict) else None
+    if (
+        not isinstance(root, str) or not Path(root).is_absolute()
+        or os.path.normcase(os.path.abspath(root)) != os.path.normcase(str(args.root.resolve()))
+    ):
+        raise ValueError(f"Native installation selector belongs to a foreign root: {name}")
+    return selected
 
 
 def bootstrap(payload: Path):
@@ -145,6 +226,30 @@ def native_arguments(args) -> list[str]:
         *("-" + option for option in sorted(options)),
     ]
     install_source = getattr(args, "install_source", None)
+    wheel_values = [getattr(args, name, None) for name, _flag in WHEEL_FIELDS]
+    if any(value is not None for value in wheel_values):
+        if (
+            install_source is not None or not all(wheel_values)
+            or args.action not in {"install", "update", "init", "provision"}
+            or any(not Path(value).is_absolute() for value in wheel_values)
+            or Path(args.wheel_python).resolve(strict=True) != Path(sys.executable).resolve(strict=True)
+        ):
+            raise ValueError("Closed wheels require one complete native input and its selected interpreter")
+        from install_source import wheel_inputs, wheel_selection
+
+        with wheel_inputs(args.wheel_profile, args.wheel_directory) as inputs:
+            selection = json.dumps(
+                wheel_selection(args.payload, args.plugin, inputs),
+                sort_keys=True, separators=(",", ":"),
+            )
+        previous = getattr(args, "wheel_selection", None) or os.environ.get(WHEEL_SELECTION_ENV)
+        if previous is not None and previous != selection:
+            raise ValueError("Native wheel selection changed after driver admission")
+        args.wheel_selection = selection
+        for name, flag in WHEEL_FIELDS:
+            arguments.extend([flag, str(getattr(args, name))])
+    elif os.environ.get(WHEEL_SELECTION_ENV):
+        raise ValueError("Native wheel selection requires its explicit installation input")
     if "Repair" in options and install_source is None:
         raise ValueError("Native repair requires its explicit installation source")
     if "Serve" in options and install_source is None:
@@ -210,6 +315,7 @@ def cell_arguments(args) -> list[str]:
             "snapshot-prepare", "snapshot-stamp", "slot-provision", "slot-complete",
         }
         or args.options or getattr(args, "retained_runtime", None)
+        or any(getattr(args, name, None) is not None for name, _flag in WHEEL_FIELDS)
         or getattr(args, "install_source", None) is not None
         or getattr(args, "retained_runtime_sha256", None)
         or Path(args.cell_context).absolute() != args.root / "install.json"
@@ -244,13 +350,14 @@ def _settle(wait):
             continue
 
 
-def admit_broker_removal(args) -> None:
+def admit_broker_removal(args, *, controller_custody=None) -> None:
     from installer_engine_uninstall import cleanup
 
     profile = args.payload / "scripts" / "uninstall-profile.json"
     cleanup(
         args.payload, args.plugin, args.root, str(args.shell),
         profile=profile if profile.is_file() else None, check_consumers=True,
+        **({"controller_custody": controller_custody} if args.plugin == "agent-vault" else {}),
     )
 
 
@@ -262,6 +369,8 @@ def execute(args) -> int:
             raise RuntimeError("Native installer participant requires live driver custody")
         request = core.status(owner.request_id, root=owner.root)
         arguments = native_arguments(args)
+        environment = {**os.environ, **participant_environment()}
+        selectors = selector_context(args, environment)
         if request.state != "running":
             raise RuntimeError("Native installer has no running execution owner")
         if request.spec.backend == "plugin-native-install":
@@ -271,6 +380,11 @@ def execute(args) -> int:
                 or request.spec.project != str(args.root.resolve())
             ):
                 raise RuntimeError("Native installation changed after driver admission")
+            admitted = {
+                key: value for key, value in request.spec.context if key in SELECTOR_KEYS
+            }
+            if admitted != selectors:
+                raise RuntimeError("Native installation selectors changed after driver admission")
         elif request.spec.backend not in {
             "manager", "engine", "engine-stage-update", "engine-reconcile-plugins",
             "engine-launch-update", "owning-plugin-provision",
@@ -284,15 +398,18 @@ def execute(args) -> int:
                 raise ValueError("Broker removal requires the owning uninstall action")
             from update_driver.windows_broker import remove
 
-            admit_broker_removal(args)
+            admit_broker_removal(args, controller_custody=owner)
             owner.assert_owned()
             remove(args.root)
             return 0
         if args.check_native:
             return 0
-        environment = {**os.environ, **participant_environment(), NATIVE_ENV: args.plugin}
+        environment.update(selectors)
+        environment[NATIVE_ENV] = args.plugin
         if getattr(args, "source_selection", None) is not None:
             environment[SOURCE_SELECTION_ENV] = args.source_selection
+        if getattr(args, "wheel_selection", None) is not None:
+            environment[WHEEL_SELECTION_ENV] = args.wheel_selection
         if getattr(args, "cell_context", None) is not None:
             command = [sys.executable, "-I", "-B", str(args.payload / "scripts" / "cell_install.py"), *arguments]
         else:
@@ -332,6 +449,7 @@ def foreground(args, driver) -> int:
     )):
         raise RuntimeError("Native driver admission must precede publication custody")
     native_arguments(args)
+    selectors = selector_context(args, os.environ)
     command = [
         sys.executable, "-I", "-S", "-B", "-X", "utf8", str(SCRIPTS / "installer_driver.py"),
         "--payload", str(args.payload), "--root", str(args.root), "--shell", str(args.shell),
@@ -339,6 +457,10 @@ def foreground(args, driver) -> int:
     ]
     if getattr(args, "install_source", None) is not None:
         command.extend(["--install-source", str(args.install_source)])
+    for name, _flag in WHEEL_FIELDS:
+        value = getattr(args, name, None)
+        if value is not None:
+            command.extend(["--" + name.replace("_", "-"), str(value)])
     for option in args.options:
         command.extend(["--option", option])
     for name, flag in CELL_FIELDS:
@@ -351,8 +473,11 @@ def foreground(args, driver) -> int:
             "--retained-runtime-sha256", args.retained_runtime_sha256,
         ])
     context = {key: os.environ[key] for key in CONTEXT_KEYS if key in os.environ}
+    context.update(selectors)
     if getattr(args, "source_selection", None) is not None:
         context[SOURCE_SELECTION_ENV] = args.source_selection
+    if getattr(args, "wheel_selection", None) is not None:
+        context[WHEEL_SELECTION_ENV] = args.wheel_selection
     request = driver.enqueue(
         driver.RequestSpec(
             "plugin-native-install", request_arguments(args), project=str(args.root.resolve()),
@@ -386,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--retained-runtime", type=Path)
     parser.add_argument("--retained-runtime-sha256")
     parser.add_argument("--install-source", type=Path)
+    for name, _flag in WHEEL_FIELDS:
+        parser.add_argument("--" + name.replace("_", "-"), type=Path)
     for name, _flag in CELL_FIELDS:
         parser.add_argument(
             "--" + name.replace("_", "-"),

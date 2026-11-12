@@ -68,107 +68,44 @@ class CredentialObservationError(RuntimeError):
 
 def inspect_github_account(host: str, login: str, repository: str) -> dict:
     """Observe the selected gh store and API, never acquisition or ambient auth."""
-    import json
-    import os
-    import re
-    import shutil
-    import subprocess
-
     from agent_procutil.owned_budget import OwnedExecutionBudget
-    from agent_procutil.owned_process import (
-        OwnedCleanupError, OutputLimitExceeded, run_caller_owned,
-    )
 
-    from .repos_configuration_sources import identity
+    from .github_account_observation import SelectedGitHubAccount
 
-    if host != "github.com" or identity(login) != login or not re.fullmatch(
-        r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", repository,
-    ):
-        raise CredentialObservationError("selection", "unsupported-target")
-    executable = shutil.which("gh")
-    if executable is None:
-        raise CredentialObservationError("credential", "missing-command")
-    environment = {
-        key: value for key, value in os.environ.items()
-        if key.upper() not in {
-            "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
-            "GH_HOST", "GH_REPO", "GH_DEBUG", "GH_FORCE_TTY", "GH_HTTP_UNIX_SOCKET",
-        }
-    }
-    environment["GH_PROMPT_DISABLED"] = "1"
-    environment["GH_PAGER"] = "cat"
     budget = OwnedExecutionBudget.from_timeout(18, cleanup_reserve=2)
+    selected = SelectedGitHubAccount(
+        host, login, repository, budget=budget, checkpoint=lambda: None,
+    )
     observations = {
         "credential": {"status": "not-observed"},
         "identity": {"status": "not-observed"},
         "repository_access": {"status": "not-observed"},
     }
 
-    def capture(stage, arguments):
-        try:
-            result = run_caller_owned(
-                [executable, *arguments], timeout=18, budget=budget, env=dict(environment),
-                max_stdout_bytes=256 * 1024, max_stderr_bytes=64 * 1024,
-            )
-        except OwnedCleanupError:
-            raise
-        except subprocess.TimeoutExpired:
-            raise CredentialObservationError(stage, "timeout") from None
-        except OutputLimitExceeded:
-            raise CredentialObservationError(stage, "output-limit") from None
-        except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-            raise CredentialObservationError(stage, "capture-failed") from None
-        if result.returncode:
-            status = re.match(r"HTTP/\S+ ([1-5][0-9]{2})(?:\s|$)", result.stdout)
-            raise CredentialObservationError(
-                stage, "credential-unavailable" if stage == "credential" else "access-unconfirmed",
-                exit_code=result.returncode,
-                http_status=int(status[1]) if status is not None and stage != "credential" else None,
-            )
-        return result.stdout
-
-    def api(stage, path):
-        raw = capture(stage, ["api", "--hostname", host, "--include", "https://api.github.com" + path])
-        try:
-            header, body = re.split(r"\r?\n\r?\n", raw, maxsplit=1)
-            status = re.match(r"HTTP/\S+ ([0-9]{3})(?:\s|$)", header)
-            value = json.loads(body)
-            if status is None or status[1] != "200" or not isinstance(value, dict):
-                raise ValueError
-            return value
-        except (ValueError, TypeError, RecursionError):
-            raise CredentialObservationError(stage, "invalid-response") from None
-
     try:
-        token = capture("credential", ["auth", "token", "--hostname", host, "--user", login]).strip()
-        if (
-            not token or len(token) > 16384 or not token.isascii()
-            or any(character.isspace() or not character.isprintable() for character in token)
-        ):
-            raise CredentialObservationError("credential", "invalid-response")
+        selected.verify()
         observations["credential"] = {"status": "available", "owner": "github-cli"}
-        environment["GH_TOKEN"] = token
-        value = api("identity", "/user")
-        observed_login = value.get("login")
-        try:
-            valid_login = identity(observed_login) == observed_login
-        except ValueError:
-            valid_login = False
-        if not valid_login:
-            raise CredentialObservationError("identity", "invalid-response")
-        if observed_login.casefold() != login.casefold():
-            observations["identity"] = {"status": "mismatch"}
-            return {**observations, "status": "unavailable"}
         observations["identity"] = {"status": "verified"}
-        value = api("repository", "/repos/" + repository)
+        value = selected.json("repository", "/repos/" + repository)
         observed_repository = value.get("full_name")
         if (
             not isinstance(observed_repository, str)
             or observed_repository.casefold() != repository.casefold()
         ):
             raise CredentialObservationError("repository", "target-mismatch")
+        owner = value.get("owner")
+        kind = owner.get("type") if isinstance(owner, dict) else None
         observations["repository_access"] = {"status": "verified", "capability": "repository-metadata-read"}
+        if kind in ("User", "Organization"):
+            observations["repository_access"]["owner_kind"] = (
+                "user" if kind == "User" else "organization"
+            )
     except CredentialObservationError as exc:
+        if exc.stage != "credential":
+            observations["credential"] = {"status": "available", "owner": "github-cli"}
+        if exc.code == "account-mismatch":
+            observations["identity"] = {"status": "mismatch"}
+            return {**observations, "status": "unavailable"}
         failure = {"stage": exc.stage, "code": exc.code}
         if exc.exit_code is not None:
             failure["exit_code"] = exc.exit_code

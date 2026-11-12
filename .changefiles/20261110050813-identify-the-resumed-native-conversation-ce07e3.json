@@ -1,0 +1,9 @@
+{
+  "comment": "Identify the resumed native conversation owner after its completed endpoint-backed turn",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

@@ -61,10 +61,10 @@ from pathlib import Path
 
 from codespaces_test_profile import validate_profile
 from seasoned_uv import run_uv_install
-from standalone_consumers import standalone_build_resources
+from standalone_consumers import standalone_build_resources as standalone_build_resources
 from plugin_test_cache import (
     clear_cache_contents, declared_test_requirements, dependency_fingerprint, has_dev_extra,
-    ordinary_cache_root, source_resolution_arguments,
+    ordinary_cache_root, retained_build_resources, source_resolution_arguments,
 )
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 # Preserve the runner's existing public map as an explicit re-export.
@@ -359,6 +359,8 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
             cmd.extend([spec] if name == "worktree-manager" else ["-e", spec])
             if name == "agent-index":
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
+            if name == "agent-worktrees":
+                cmd.extend(["-e", str(REPO / "fleet-manager") + "[auth]"])
             if name == "agent-dispatch":
                 cmd.extend(["-e", str(REPO / "plugins" / "agent-pull-requests") + "[fleet]"])
                 cmd.extend(["-e", str(REPO / "fleet-manager") + "[service-gateway]"])
@@ -380,10 +382,7 @@ def _prepare_venv(name: str, uv: str, *, reinstall: bool, environment: dict[str,
             run_uv_install(
                 uv, cmd[3:], env=environment, cwd=_plugin_dir(name), trusted_source_roots=(REPO,), check=True,
                 **({"non_editable": True} if name == "worktree-manager" else {}),
-                retained_resource_roots=(
-                    standalone_build_resources("fleet-manager", source_root=REPO)
-                    if name in {"agent-index", "agent-pull-requests", "agent-dispatch", "agent-ssh"} else ()
-                ),
+                retained_resource_roots=retained_build_resources(name, REPO),
             )
             if name == "worktree-manager":
                 # Materialized consumers have separate copies of shared libraries;

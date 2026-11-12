@@ -9,6 +9,8 @@ win over the agent's own env.
 
 from __future__ import annotations
 
+import contextlib
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -25,6 +27,9 @@ class _CapturingMgr:
 
     def __init__(self) -> None:
         self.target: SpawnTarget | None = None
+
+    def start_admission(self):
+        return contextlib.nullcontext()
 
     def list_sessions(self, status=None):  # noqa: ANN001, ARG002
         return []
@@ -74,7 +79,7 @@ def test_per_session_env_overrides_resolved_agent_env(client, monkeypatch):
     # A resolver returns a target carrying an agent-declared env; the
     # per-session env wins on key collision and adds new keys.
     class _Resolver:
-        async def resolve_async(self, agent, sender_repo=None):  # noqa: ANN001, ARG002
+        async def resolve_async(self, agent, sender_repo=None, activate=True):  # noqa: ANN001, ARG002
             return SpawnTarget(
                 type="local",
                 cwd=".",

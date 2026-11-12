@@ -56,6 +56,9 @@ def create_restored_app(runtime: RestoredRuntime) -> FastAPI:
             app.state.candidate_ready = True
             yield
         finally:
+            status_runtime = getattr(app.state, "status_runtime", None)
+            if status_runtime is not None:
+                await status_runtime.close()
             app.state.candidate_ready = False
             app.state.ready = False
             app.state.credential_relay_ready = False

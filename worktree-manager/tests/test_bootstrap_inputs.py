@@ -287,32 +287,52 @@ def test_grouped_preparation_assets_retain_each_declared_root(preparation_assets
     assert helper.retain(payload, driver)[0] != retained
 
 
-def test_manager_assets_materialize_for_pre_upgrade_group_reader(tmp_path, monkeypatch):
+def _manager_asset_groups():
+    consumer = Path(__file__).resolve().parents[1]
+    groups = []
+    for name in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        declaration = json.loads((consumer / name).read_text(encoding="utf-8"))
+        groups.extend((name, group) for group in declaration.get("groups", [declaration]))
+    return groups
+
+
+@pytest.fixture(scope="module")
+def materialized_manager_assets(tmp_path_factory):
     root = Path(__file__).resolve().parents[2]
-    monkeypatch.syspath_prepend(str(root / "tools"))
-    assets = importlib.import_module("launch_wrapper_assets_ref")
-    materializer = importlib.import_module("materialize_main")
-    consumer = root / "worktree-manager"
-    manifest = consumer / assets.PACKAGED_MANIFEST_NAME
-    declaration = json.loads(manifest.read_text(encoding="utf-8"))
-    expected = {}
-    for group in declaration["groups"]:
-        # A running pre-upgrade consumer has the original relative-root grammar.
-        assets._manifest_group(manifest, group, manifest_name=assets.PACKAGED_MANIFEST_NAME)
-        for name in group["files"]:
-            destination = Path(group["payloadDir"]) / name
-            expected[destination] = (root / group["canonicalDir"] / name).read_bytes()
-    destination = tmp_path / "worktree-manager"
-    destination.mkdir()
-    report = materializer.materialize_launch_wrapper_assets_into(
-        source_consumer_dir=consumer, dest_consumer_dir=destination, canonical_root=root,
-    )
-    assert report and all(line.startswith("OK ") for line in report), report
-    actual = {
-        path.relative_to(destination): path.read_bytes()
-        for path in destination.rglob("*") if path.is_file()
-    }
-    assert actual == expected
+    with pytest.MonkeyPatch.context() as monkeypatch:
+        monkeypatch.syspath_prepend(str(root / "tools"))
+        assets = importlib.import_module("launch_wrapper_assets_ref")
+        materializer = importlib.import_module("materialize_main")
+        consumer = root / "worktree-manager"
+        expected = []
+        for manifest_name, group in _manager_asset_groups():
+            # A running pre-upgrade consumer has the original relative-root grammar.
+            assets._manifest_group(consumer / manifest_name, group, manifest_name=manifest_name)
+            expected.append({
+                Path(group["payloadDir"]) / name: root / group["canonicalDir"] / name
+                for name in group["files"]
+            })
+        destination = tmp_path_factory.mktemp("manager-assets") / "worktree-manager"
+        destination.mkdir()
+        report = materializer.materialize_launch_wrapper_assets_into(
+            source_consumer_dir=consumer, dest_consumer_dir=destination, canonical_root=root,
+        )
+        assert report and all(line.startswith("OK ") for line in report), report
+        actual = {
+            path.relative_to(destination)
+            for path in destination.rglob("*") if path.is_file()
+        }
+        assert actual == {path for group in expected for path in group}
+        yield destination, expected
+
+
+@pytest.mark.parametrize("group_index", range(len(_manager_asset_groups())))
+def test_manager_assets_materialize_for_pre_upgrade_group_reader(
+    materialized_manager_assets, group_index,
+):
+    destination, groups = materialized_manager_assets
+    for path, source in groups[group_index].items():
+        assert (destination / path).read_bytes() == source.read_bytes(), path
 
 
 @pytest.mark.parametrize("failure", [
@@ -340,6 +360,53 @@ def test_grouped_preparation_assets_refuse_unsafe_or_overlapping_targets(
         "schema": "copilot-extensions.packaged-assets", "version": 2, "groups": groups,
     }), encoding="utf-8")
     with pytest.raises(ValueError, match="Invalid|Duplicate"):
+        helper.retain(payload, driver)
+    assert not driver.exists()
+
+
+def test_invocation_tooling_is_retained_and_rechecked_with_preparer(preparation_assets):
+    helper, payload, driver, _tool = preparation_assets
+    tooling = payload.parent / "libs/payload-invocation"
+    tooling.mkdir(parents=True)
+    names = ("generate.py", "runtime_admission.py")
+    for name in names:
+        (tooling / name).write_text("# pinned " + name + "\n", encoding="utf-8")
+    (payload / "launch-wrapper-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.launch-wrapper-assets", "version": 1,
+        "canonicalDir": "libs/payload-invocation", "payloadDir": "scripts/libs/payload-invocation",
+        "files": list(names),
+    }), encoding="utf-8")
+    retained, _share = helper.retain(payload, driver)
+    for name in names:
+        assert (retained / "scripts/libs/payload-invocation" / name).read_bytes() == (
+            tooling / name
+        ).read_bytes()
+    (retained / "scripts/libs/payload-invocation/generate.py").write_text("damaged\n")
+    with pytest.raises(RuntimeError, match="preparation assets differ"):
+        helper.retain(payload, driver)
+
+
+@pytest.mark.parametrize("materialized", [False, True])
+def test_preparation_assets_refuse_shared_targets_across_manifests(preparation_assets, materialized):
+    helper, payload, driver, tool = preparation_assets
+    directory = "scripts/libs/payload-invocation"
+    library = payload.parent / "libs/payload-invocation" / tool.name
+    library.parent.mkdir(parents=True)
+    library.write_text("VALUE = 2\n", encoding="utf-8")
+    (payload / "packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 2, "groups": [{
+            "canonicalDir": "tools", "payloadDir": directory, "files": [tool.name],
+        }],
+    }), encoding="utf-8")
+    (payload / "launch-wrapper-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.launch-wrapper-assets", "version": 1,
+        "canonicalDir": "libs/payload-invocation", "payloadDir": directory, "files": [tool.name],
+    }), encoding="utf-8")
+    if materialized:
+        target = payload / directory / tool.name
+        target.parent.mkdir(parents=True)
+        target.write_text("VALUE = 1\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Duplicate"):
         helper.retain(payload, driver)
     assert not driver.exists()
 

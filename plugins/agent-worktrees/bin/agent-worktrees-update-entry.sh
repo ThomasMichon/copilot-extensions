@@ -35,8 +35,14 @@ _aw_project_controller_selected() (
     if [ ! -f "$_probe_payload/plugin.json" ]; then
         _probe_payload="$(cat "$_runtime_root/payload-dir" 2>/dev/null)" || _probe_payload=""
     fi
-    _probe_worker="$_probe_payload/scripts/update_controller_probe.py"
-    [ -n "$_probe_payload" ] && [ -f "$_probe_worker" ] || return 1
+    _probe_worker=""
+    if [ -n "$_probe_payload" ]; then
+        _probe_worker="$_probe_payload/scripts/update_controller_probe.py"
+    fi
+    if [ "${_aw_update_payload:-0}" != 1 ] && [ ! -f "$_probe_worker" ]; then
+        _probe_worker="$_runtime_root/bin/update_controller_probe.py"
+    fi
+    [ -f "$_probe_worker" ] || return 1
     _probe_python=""
     for _candidate in python3 python; do
         _candidate="$(command -v "$_candidate" 2>/dev/null)" || continue
@@ -124,7 +130,7 @@ _aw_update_entry() (
     shift
     for _arg do
         case "$_arg" in
-            --phase|--phase=*|--plugin|--plugin=*|--inventory|--target|--target=*|--no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
+            --phase|--phase=*|--plugin|--plugin=*|--inventory|--target|--target=*|--runtime-backend|--runtime-backend=*|--no-manager|--auth-report|--help|-h|--request-status|--request-status=*|--recovery-status|--recover-after-restart|--recover-for-repair)
                 return 0 ;;
         esac
     done
@@ -248,7 +254,7 @@ case "${1-}:${3-}" in
             _aw_bypass=0
             for _aw_arg do
                 case "$_aw_arg" in
-                    --phase|--phase=*|--plugin|--plugin=*|--inventory|--target|--target=*)
+                    --phase|--phase=*|--plugin|--plugin=*|--inventory|--target|--target=*|--runtime-backend|--runtime-backend=*)
                         _aw_bypass=1
                         _aw_update_diagnostic=1 ;;
                     --no-manager)

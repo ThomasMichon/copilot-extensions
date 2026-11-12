@@ -1,0 +1,9 @@
+{
+  "comment": "Retain dangling POSIX socket custody and reserve its target during incoming publication",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

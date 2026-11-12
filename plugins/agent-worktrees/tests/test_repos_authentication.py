@@ -45,7 +45,7 @@ def api(value, code=200, exit_code=0):
 
 @pytest.fixture
 def provider(monkeypatch):
-    from agent_procutil import owned_process
+    from agent_worktrees import github_account_observation
 
     calls = []
     responses = [
@@ -61,7 +61,7 @@ def provider(monkeypatch):
             raise value
         return value
 
-    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    monkeypatch.setattr(github_account_observation, "run_caller_owned", run)
     monkeypatch.setattr("shutil.which", lambda name: "/qualified/gh" if name == "gh" else None)
     return calls, responses
 
@@ -136,6 +136,34 @@ def test_owner_account_mapping_uses_same_strict_snapshot(registry, provider, mon
     assert result["selection"]["account_source"] == "account-map"
     assert result["identity"]["status"] == "verified"
     assert reads == [{"strict": True}]
+
+
+def test_preferred_account_is_observed_without_claiming_an_owner_mapping(registry, provider):
+    registry.write_text(
+        registry.read_text(encoding="utf-8").replace("    account: selected-user\n", "")
+        + "account_map:\n  'github.com:*': selected-user\n", encoding="utf-8",
+    )
+    result = inspect()
+    assert result["selection"]["account"] == "selected-user"
+    assert result["selection"]["account_source"] == "default-account"
+    assert result["identity"]["status"] == "verified"
+
+
+@pytest.mark.parametrize("kind, expected", [
+    ("User", "user"), ("Organization", "organization"), (None, "unknown"),
+])
+def test_repository_owner_kind_comes_from_metadata_not_the_selected_login(
+    registry, provider, kind, expected,
+):
+    calls, responses = provider
+    responses[2] = api({
+        "full_name": "example/sample", "owner": {"type": kind, "private": "sentinel"},
+    })
+    result = inspect()
+    assert result["repository_access"].get("owner_kind", "unknown") == expected
+    assert result["selection"]["account"] == "selected-user"
+    assert len(calls) == 3
+    assert "sentinel" not in json.dumps(result)
 
 
 @pytest.mark.parametrize("stage", ["credential", "identity", "repository"])
@@ -329,6 +357,7 @@ def test_real_capture_composes_synthetic_provider_and_aggregate_deadline(
 ):
     from agent_procutil import owned_process
     from agent_procutil.owned_budget import OwnedExecutionBudget
+    from agent_worktrees import github_account_observation
 
     script = tmp_path / "synthetic_provider.py"
     script.write_text(
@@ -349,7 +378,7 @@ def test_real_capture_composes_synthetic_provider_and_aggregate_deadline(
         calls.append(argv)
         return original_run([sys.executable, "-B", str(script), *argv[1:]], **kwargs)
 
-    monkeypatch.setattr(owned_process, "run_caller_owned", run)
+    monkeypatch.setattr(github_account_observation, "run_caller_owned", run)
     monkeypatch.setattr("shutil.which", lambda name: "/qualified/gh" if name == "gh" else None)
     if expire:
         monkeypatch.setattr(

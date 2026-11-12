@@ -250,8 +250,21 @@ run_daemon_instance() {
     exec "$python" -I -S -B "$target" supervise "$__daemon_instance_record" "${admission[@]}" -- "$@"
 }
 
+_di_cursor_path() {
+    local root="$1" runtime_root="${2:-}" digest
+    if [[ -z "$runtime_root" ]]; then
+        printf '%s' "$root/.reconcile.cursor"
+        return
+    fi
+    digest="$(printf '%s' "$runtime_root" | sha256sum)" || return 1
+    digest="${digest%% *}"
+    [[ "$digest" =~ ^[a-f0-9]{64}$ ]] || return 1
+    printf '%s' "$root/.reconcile.$digest.cursor"
+}
+
 _di_read_cursor() {
-    local path="$1/.reconcile.cursor" header key extra size
+    local path header key extra size
+    path="$(_di_cursor_path "$1" "${2:-}")" || return 1
     [[ -e "$path" || -L "$path" ]] || return 0
     _di_plain "$path" || return 1
     size="$(stat -c '%s' -- "$path")" || return 1
@@ -266,7 +279,8 @@ _di_read_cursor() {
 }
 
 _di_write_cursor() {
-    local root="$1" key="$2" path="$1/.reconcile.cursor" pending
+    local root="$1" key="$2" path pending
+    path="$(_di_cursor_path "$root" "${3:-}")" || return 1
     if [[ -e "$path" || -L "$path" ]]; then _di_plain "$path" || return 1; fi
     pending="$root/.reconcile.$(tr -d '-' </proc/sys/kernel/random/uuid).pending"
     (umask 077; set -o noclobber; printf 'copilot-daemon-reconcile-v1\n%s\n' "$key" >"$pending") || return 1
@@ -276,15 +290,26 @@ _di_write_cursor() {
     mv -fT -- "$pending" "$path"
 }
 
+daemon_instance_reconcile_contract() {
+    printf '%s\n' 'copilot-daemon-reconcile-v1'
+}
+
 reconcile_daemon_instances() (
-    local limit="${1:-128}" seconds="${2:-5}" root="${3:-}"
+    local limit="${1:-128}" seconds="${2:-5}" root="${3:-}" runtime_root="${4:-}" terminate="${5:-false}"
     local path id start now count=0 lockfd reason birth status
     local LC_ALL=C cursor visited='' collector_fd
+    local python='' target='' binding_state=unknown
     local -a after=() before=()
     local -A record
     read -r start _ </proc/uptime || return 1
     [[ "$limit" =~ ^[0-9]+$ && "$limit" -ge 1 && "$limit" -le 4096 ]] || return 1
     awk -v n="$seconds" 'BEGIN { exit !(n>0 && n<1e9) }' || return 1
+    [[ "$terminate" == false || "$terminate" == true ]] || return 1
+    if [[ -n "$runtime_root" && ( "$runtime_root" != /* ||
+        "$(readlink -m -- "$runtime_root")" != "$runtime_root" ) ]]; then
+        printf '%s\n' 'daemon reconciliation runtime scope unsafe' >&2
+        return 1
+    fi
     root="$(daemon_instance_root "$root")" || return 1
     if [[ "$root" != /* || -L "$root" || "$(readlink -m -- "$root")" != "$root" ]]; then
         printf '%s\n' 'daemon instance inventory path unsafe' >&2
@@ -308,7 +333,7 @@ reconcile_daemon_instances() (
         printf '%s\n' 'daemon instance inventory unreadable' >&2
         return 1
     fi
-    cursor="$(_di_read_cursor "$root")" || {
+    cursor="$(_di_read_cursor "$root" "$runtime_root")" || {
         printf '%s\n' 'daemon instance inventory cursor invalid or unavailable' >&2; return 1;
     }
     for path in "$root"/*.instance; do
@@ -329,7 +354,7 @@ reconcile_daemon_instances() (
         printf '%s\n' 'daemon instance inventory collection already owned' >&2; return 1;
     }
     [[ "$(stat -c '%d:%i' -- "$collector")" == "$(stat -Lc '%d:%i' -- "/proc/self/fd/$collector_fd")" ]] || return 1
-    cursor="$(_di_read_cursor "$root")" || {
+    cursor="$(_di_read_cursor "$root" "$runtime_root")" || {
         printf '%s\n' 'daemon instance inventory cursor invalid or unavailable' >&2; return 1;
     }
     local -a candidates=("${after[@]}")
@@ -345,20 +370,34 @@ reconcile_daemon_instances() (
         count=$((count+1)); id="$(basename -- "$path" .instance)"; reason=invalid-record; status=held
         visited="$id"
         if [[ "$id" =~ ^[a-f0-9]{32}$ ]] && _di_read "$path" record; then
+            [[ -z "$runtime_root" || "${record[runtime_root]:-}" == "$runtime_root" ]] || continue
             if [[ "${record[purpose]:-}" == production ]]; then
                 [[ "${record[lifecycle]:-resident}" == finite-worker ]] || continue
             fi
-            local python target remaining
-            if ! python="$(_di_python)" || ! target="$(_di_lifecycle_source)"; then
-                printf 'held\tlifecycle-binding-unavailable\t%s\n' "$id"
-                printf 'daemon instance held: %s lifecycle-binding-unavailable\n' "$id" >&2
+            local remaining
+            if [[ "$binding_state" == unknown ]]; then
+                binding_state=lifecycle-binding-unavailable
+                if python="$(_di_python)" && target="$(_di_lifecycle_source)"; then
+                    binding_state=lifecycle-contract-unavailable
+                    if [[ "$("$python" -I -S -B "$target" reconcile-contract)" == \
+                        'copilot-daemon-reconcile-v1 termination-policy runtime-scope' ]]; then
+                        binding_state=ready
+                    fi
+                fi
+            fi
+            if [[ "$binding_state" != ready ]]; then
+                printf 'held\t%s\t%s\n' "$binding_state" "$id"
+                printf 'daemon instance held: %s %s\n' "$id" "$binding_state" >&2
                 continue
             fi
             read -r now _ </proc/uptime || return 1
             remaining="$(awk -v a="$start" -v b="$now" -v limit="$seconds" \
                 'BEGIN { printf "%.6f", limit-(b-a) }')"
             awk -v n="$remaining" 'BEGIN { exit !(n>0) }' || break
-            "$python" -I -S -B "$target" cleanup "$path" "$remaining" || {
+            local -a options=()
+            [[ "$terminate" == true ]] || options+=(--no-terminate)
+            [[ -z "$runtime_root" ]] || options+=(--runtime-root "$runtime_root")
+            "$python" -I -S -B "$target" cleanup "$path" "$remaining" "${options[@]}" || {
                 printf 'daemon instance reconciliation unavailable: %s\n' "$id" >&2
             }
             continue
@@ -367,7 +406,7 @@ reconcile_daemon_instances() (
         printf '%s\t%s\t%s\n' "$status" "$reason" "$id"
     done
     if [[ -n "$visited" && "$visited" != "$cursor" ]]; then
-        _di_write_cursor "$root" "$visited" || {
+        _di_write_cursor "$root" "$visited" "$runtime_root" || {
             printf '%s\n' 'daemon instance inventory cursor publication unconfirmed' >&2; return 1;
         }
     fi

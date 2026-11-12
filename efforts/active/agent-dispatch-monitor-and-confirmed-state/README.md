@@ -96,7 +96,12 @@ The fresh isolated whole-stack synthetic review loop now passes: three guarded
 submissions, two independent rejections and confirmation retain the same task,
 native and protected relationship. This qualifies the bounded live-process
 simulation, not real-model/forge use or production cohort admission.
-Next qualify post-stop same-native rejection/recovery and the remaining lifecycle.
+Post-stop same-native rejection/recovery passes in the isolated lab (#11419).
+A Dispatch-allocated worker's decline now passes in the same lab: it requeues
+the task unbound and QUEUED, settles only the exact task claim through the
+existing relationship owner after the commit, and closes the relationship.
+This qualifies bounded decline only. Permanent finalization, real-model/forge
+use, mixed callers and production cohort admission remain open.
 No deployment or cleanup permission is implied.
 
 ## Context

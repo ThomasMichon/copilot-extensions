@@ -179,6 +179,7 @@ def test_facade_retains_original_process_handle_and_guard_close_is_idempotent(tm
         "'enter' { return [pscustomobject]@{instance_id=('a'*32);registry_root='fixture';"
         "record_path='fixture';guard_token=('b'*32);job_scopes=$null} } "
         "'read' { return [pscustomobject]@{purpose='production'} } "
+        "'reconcile-contract' { return [pscustomobject]@{version=1;termination_policy=$true;runtime_scope=$true} } "
         "'reconcile' { return [pscustomobject]@{instance_id=('a'*32);status='held';reason='invalid-record'} } "
         "default { return $null } } }; "
         f"$root={_literal(tmp_path)}; $source={_literal(HELPER)}; "
@@ -201,7 +202,7 @@ def test_facade_retains_original_process_handle_and_guard_close_is_idempotent(tm
     value = json.loads(result.stdout)
     requests = value["requests"]
     assert [request["command"] for request in requests] == [
-        "reserve", "enter", "read", "bind", "exit", "reconcile",
+        "reserve", "enter", "read", "bind", "exit", "reconcile-contract", "reconcile",
     ]
     assert requests[3]["process"]["pid"] == value["pid"]
     assert requests[3]["process"]["birth"].startswith("windows:")
@@ -210,6 +211,23 @@ def test_facade_retains_original_process_handle_and_guard_close_is_idempotent(tm
     assert set(requests[3]["receipt"]) == {"instance_id", "registry_root"}
     assert requests[4]["guard_token"] == "b" * 32
     assert set(requests[4]["receipt"]) == {"instance_id", "registry_root"}
+    assert requests[6]["parameters"]["terminate"] is False
+
+
+def test_reconcile_refuses_legacy_provider_before_any_effectful_request():
+    result = _run(
+        "$ErrorActionPreference='Stop'; "
+        f". {_literal(HELPER)}; "
+        "function Invoke-DaemonInstanceRequest { param([hashtable]$Request) "
+        "if ($Request.command -ne 'reconcile-contract') { throw 'effectful request reached' }; "
+        "return [pscustomobject]@{version=0;termination_policy=$false;runtime_scope=$false} }; "
+        "$refusal=$null; try { $null=Invoke-DaemonInstanceReconcile } "
+        "catch { $refusal=$_.Exception.Message }; "
+        "if ($refusal -notlike '*reconciliation was not submitted*') { throw 'legacy provider not refused' }; "
+        "[Console]::Out.Write('refused')"
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout == "refused"
 
 
 @pytest.mark.parametrize("kind", ["maximum-batch", "removed-paths"])

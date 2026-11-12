@@ -124,22 +124,98 @@ and service starts execute in that complete runtime, preserving original
 arguments and exit codes. A missing host runtime is reported explicitly rather
 than falling back to a client environment.
 
-Explicit native Windows `install`/`update`/`provision` adopts the primary CLI
-installation's finite launch broker after retained slot completion and before
-selection or lifecycle callbacks. `-NoService`, contained tests and POSIX do not
-register it. A completed slot without retained runtime helpers is not modified:
-select a distinct fresh generation instead. Owning uninstall removes the primary
-broker before deleting runtimes. Start/ensure and daemon spawn never provision
-this prerequisite. Normal installer engine ensure and the user-mode
+Native Windows activation uses the existing direct process/custody owner, not
+implicit Scheduled Task or registry-logon registration. Normal installer engine
+ensure and the user-mode
 `engine-update` restart use the active primary CLI to manage the separate durable
 engine. An engine-only installation cannot perform that user-mode restart until
 the primary runtime is explicitly installed; refusal occurs before stopping the
 engine and never auto-installs a manager. Engine interpreter selection remains
-engine-owned. The generated task/logon engine launcher uses the engine-local
+engine-owned. The generated opt-in task engine launcher uses the engine-local
 CLI only for foreground `engine run`: it waits on the engine rather than
 requesting a detached launch, so it needs no engine-local broker. Direct
 engine-interpreter `engine start` is not this supported management path and
 does not gain broker adoption from the primary runtime.
+
+### Windows scheduling is installation-local and optional
+
+Without policy, native install/update/provision preserve existing task
+registrations and enablement, leave missing tasks absent, and never write an
+HKCU Run replacement. Existing custom deployments, including independent
+registry-logon entries, are not automatically removed or normalized. Index
+remains inert without its existing explicit host configuration; scheduling
+policy neither configures a host nor provisions the heavy engine.
+
+The optional `<InstallDir>\installation.json` is installer-owned, separate from
+runtime YAML models (including older models), with this shape:
+
+```json
+{
+  "version": 1,
+  "installation": {
+    "root": "<absolute installation root>",
+    "local": {
+      "windows_scheduled_task": "preserve",
+      "start_service": true,
+      "start_engine": true
+    }
+  }
+}
+```
+
+`preserve` is the default. `enabled` explicitly registers the known service and
+already-provisioned engine launchers; it never re-enables a disabled task.
+`absent` removes only provably owned `\agent-index` and
+`\agent-index-engine` registrations. Neither task absence nor retirement
+disables the capability: normal install/update/provision still require incoming
+service readiness and reconcile an independently provisioned, enabled engine.
+The existing host role, `-NoService`, durable start flags and disabled tasks
+remain independent activation holds. Set the corresponding durable `start_*`
+flag to `false` **before** retiring a disabled task, so retirement cannot erase
+that hold.
+
+For registration-only or retirement-only maintenance:
+
+```powershell
+.\scripts\install.ps1 register-tasks -InstallDir <root>
+.\scripts\install.ps1 task-retire -InstallDir <root>
+# Optionally narrow retirement to one exact family name:
+.\scripts\install.ps1 task-retire -InstallDir <root> -ScheduledTaskNames agent-index
+```
+
+Task-only actions use the existing transaction lock and return before source
+selection, build, daemon start/stop, cutover or state deletion. They do not
+execute launchers or change registry-logon entries. Retirement requires explicit
+`absent` policy; registration is itself an explicit scheduling request and
+refuses contradictory `absent` policy. Registration can retain the existing
+`-AllowTaskElevation` opt-in for its task-only child; ordinary installation never
+requests elevation.
+
+`-InstallationConfig` (or process-local `AGENT_INDEX_INSTALLATION_CONFIG`) selects
+an alternate policy file for task-only actions. Relative selectors are resolved
+against the original filesystem CWD before staging. Native install/update/
+provision refuse an alternate selector if the existing execution driver cannot
+carry it; use the default root policy instead of silently losing the selection.
+Default reads use inbox `schtasks.exe`, not the optional ScheduledTasks
+PowerShell module. Query/identity ambiguity, foreign action operands or
+principals, removal errors and unconfirmed deletion refuse explicitly. Explicit
+task creation uses the ScheduledTasks module. No Scheduler registration, local
+service account or administrator setup is needed for the default on-demand path.
+
+This implements scheduling selection under
+[authoritative runtime replacement](../../visions/installer/README.md#authoritative-runtime-replacement)
+without changing process lifetime owners or claiming live installation,
+non-administrator deployment or external-venue qualification.
+
+The contained Windows fixture packet is explicit T3, not required unit CI:
+`python tools/run-plugin-tests.py agent-index --test-file tests/test_windows_scheduling_policy.py --allow-explicit-tiers`.
+It executes native PowerShell 5.1/7 policy/dispatch consumers with isolated
+task adapters and lifecycle traps. It does not install a real service or
+qualify survival after caller cleanup. The policy and task-only verbs belong
+to this native installer; older installers do not enforce this policy.
+Adoption must select a provider that declares `task-retire` in its actual
+`Action` parameter, rather than send new syntax to an arbitrary older snapshot
+or infer enforcement from a newer payload's package version.
 
 The legacy `agent-index mcp` stdio adapter is an HTTP client, not part of the
 host's `[store,server]` profile. It requires the explicit `[stdio-mcp]` extra

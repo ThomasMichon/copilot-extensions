@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 from dataclasses import asdict
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -365,6 +366,30 @@ def test_receipt_retirement_does_not_drop_unsettled_transport_accountability(q: 
     assert q.get_reservation(released.key).state == SpawnState.FAILED
     with pytest.raises(TaskError, match="capacity"):
         place(q, task(q))
+
+
+def test_claim_held_sweep_transport_failure_does_not_block_release(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import supervisor as supervisor_module
+
+    t, released = bound_handleless_release(q, ownership="created", disposition="settled")
+    sweeps = []
+
+    def unreachable(_supervisor):
+        sweeps.append(_supervisor)
+        raise httpx.ConnectTimeout("coordinator timed out")
+
+    monkeypatch.setattr(supervisor_module, "rearm_claim_held_cleanup", unreachable)
+    supervisor = Supervisor(
+        QueueBackedClient(q), machine="host-a", spawn_fn=lambda _: pytest.fail("no spawn"),
+        verdict_fn=lambda *args: tracking.GONE,
+        attempt_conclusion_fn=lambda *args: {"action": "primed"},
+    )
+    assert supervisor.release_requested_bodies(now=100) == 1
+    assert len(sweeps) == 1
+    retired = q.get_reservation(released.key)
+    assert retired.state == "settled" and retired.conclusion_state == "pending"
 
 
 @pytest.mark.parametrize("disposition", ["failed", "settled"])

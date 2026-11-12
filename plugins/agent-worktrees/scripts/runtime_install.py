@@ -138,6 +138,8 @@ def _publish_helpers(
         "bash", "bash.exe", "pwsh", "pwsh.exe", "powershell.exe", "powershell",
     ):
         raise InstallationRefused("Helper publisher requires an exact native shell")
+    if os.name == "nt" and frontend["shell"] == "ps1" and executable.name.lower() in ("pwsh", "pwsh.exe"):
+        content = Path(engine._native_retained_path(content))
     identity = _installed_identity(slot)
     source = json.loads(identity["build_info"]["deployment_source"])
     pin = {key: source[key] for key in ("runtime_version", "runtime_source") if key in source}
@@ -183,7 +185,14 @@ def _publish_helpers(
         # Windows st_dev differs across Python versions; callbacks use the
         # plan owner's interpreter without weakening its file identity check.
         if frontend["shell"] == "ps1":
-            argv = [str(executable), "-NoProfile", "-NonInteractive", "-File", str(entry),
+            entry_name = str(entry)
+            if os.name == "nt" and executable.name.lower() in ("pwsh", "pwsh.exe"):
+                if entry_name[:8].lower() == "\\\\?\\unc\\":
+                    entry_name = "\\\\?\\UNC\\" + entry_name[8:]
+                entry_name = runtime._normalize_windows_extended_path(entry_name)
+                if not Path(entry_name).is_absolute():
+                    raise InstallationRefused("PowerShell helper source is not an ordinary absolute path")
+            argv = [str(executable), "-NoProfile", "-NonInteractive", "-File", entry_name,
                     "publish-runtime-helpers", "-InstallDir", str(governance.root),
                     "-BootstrapPython", sys._base_executable,
                     "-RuntimePublicationPlan", str(plan_path), "-RuntimePublicationDigest", digest]
@@ -197,7 +206,7 @@ def _publish_helpers(
                 "-RuntimeSourceDescriptor" if frontend["shell"] == "ps1" else "--runtime-source-descriptor",
                 json.dumps(governance.source_descriptor, sort_keys=True),
             ])
-        environment = dict(os.environ)
+        environment = governance.publication_environment()
         environment["COPILOT_PLUGIN_STAGED_FROM"] = str(governance.payload)
         environment["COPILOT_PLUGIN_INSTALL_STAGED"] = (
             "context-install" if governance.context else "1"
@@ -411,6 +420,7 @@ def install(
     frontend: dict | None = None,
     recover_adopted_manager: bool = False,
     wheel_inputs: engine.WheelInstallInputs | None = None,
+    native_wheel_inputs: engine.WheelInstallInputs | None = None,
     repair: bool = False,
     source_descriptor: dict | None = None,
 ) -> dict:
@@ -433,6 +443,10 @@ def install(
         raise InstallationRefused("Source identity changed after frontend runtime selection")
     version = source_identity.runtime_version if source_identity is not None else package_version
     wheel_options = {}
+    if native_wheel_inputs is not None:
+        if wheel_inputs is not None or source_identity is not None:
+            raise InstallationRefused("Native release wheels cannot replace a Source association")
+        version, wheel_options = install_driver.native_construction_options(plugin, native_wheel_inputs)
     if wheel_inputs is not None:
         if source_identity is None or not isinstance(wheel_inputs, engine.WheelInstallInputs):
             raise InstallationRefused("Closed source wheels require an attributed retained source selection")
@@ -453,7 +467,7 @@ def install(
             )),
         }
     if repair:
-        if wheel_inputs is None:
+        if wheel_inputs is None and native_wheel_inputs is None:
             raise InstallationRefused("Direct source repair requires complete wheel inputs")
         version += ".repair." + uuid.uuid4().hex
     provenance = _source_provenance(governance.payload, package_version, source_identity)
@@ -466,22 +480,15 @@ def install(
             with governance.held(timeout=wait_timeout):
                 if source_identity is not None:
                     plugin = runtime_source.publish_source_snapshot(plugin, root, source_identity)
-                    if previous and previous.startswith(version + ".repair."):
-                        manifest = governance.helper.read_deployment_manifest(root / "deploy-manifest.json")
-                        if (
-                            manifest.get("runtime_source") == source_identity.document()
-                            and manifest.get("runtime_version") == previous
-                            and isinstance(manifest.get("venv"), str)
-                            and Path(manifest["venv"]) == runtime.version_dir(root, previous)
-                        ):
-                            version = previous
+                if source_identity is not None or native_wheel_inputs is not None:
+                    version = install_driver.selected_repair(root, version, previous, source_identity, governance)
                 candidate = custody.enter_context(engine.numbered_candidate(
                     root, version, plugin=plugin, uv=uv, base_python=base_python,
                     health_module="agent_worktrees.runtime_candidate", health_callable="verify_runtime_candidate",
                     construction_callable="agent_worktrees.runtime_candidate:prepare_runtime_candidate",
                     construction_data=provenance,
                     process_retention=True,
-                    reuse_generations=source_identity is None,
+                    reuse_generations=source_identity is None and not wheel_options,
                     expected_source_identity=runtime_source.manifest_fields(source_identity),
                     wait_timeout=wait_timeout, child_timeout=child_timeout,
                     **wheel_options,
@@ -624,33 +631,41 @@ def settle_candidate(
                 custody.enter_context(runtime.retention_lease(root, selected, timeout=wait_timeout))
             snapshot = _selector_snapshot(root)
             manifest_snapshot = deployment.read_manifest(root)
+            outgoing_deferred = False
             if monitor_scope:
-                from agent_worktrees.runtime_monitor_abort import recover_abandoned
-                from zdd.cutover_lock import CutoverLock
+                from agent_worktrees import runtime_monitor_replacement as replacement
+                from zdd import breadcrumb
 
-                with CutoverLock(root / "status-monitor-routing"):
-                    recover_abandoned(root)
+                replacement.active(root)
+                outgoing_deferred = replacement.recover(root, runtime=runtime)
+                if breadcrumb.breadcrumb_path(root / "status-monitor-routing").exists():
+                    outgoing_deferred = replacement.retain(root, runtime=runtime) or outgoing_deferred
             try:
                 predecessor = _monitor_identity(root) if monitor_scope else None
             except AsyncRetirementUnsupported as error:
                 predecessor = error.identity[:2]
+            except InstallationRefused:
+                replacement.retain(root, runtime=runtime)
+                outgoing_deferred = True
+                predecessor = None
             serving_slot = None
             if predecessor is not None:
-                serving_slot = _monitor_slot(root, predecessor)
+                try:
+                    serving_slot = _monitor_slot(root, predecessor)
+                except InstallationRefused:
+                    replacement.retain(root, runtime=runtime, predecessor={
+                        "pid": predecessor[0], "start": predecessor[1],
+                    })
+                    outgoing_deferred = True
                 if serving_slot is not None and serving_slot not in (version, previous, selected):
                     custody.enter_context(runtime.retention_lease(root, serving_slot, timeout=wait_timeout))
-            if monitor_scope:
-                from zdd import breadcrumb
-
-                refusal = breadcrumb.recovery_refusal(
-                    cutover.routing_dir(), breadcrumb.read_breadcrumb(cutover.routing_dir()),
+            try:
+                already_serving = (
+                    monitor_scope and not force_monitor_transition
+                    and _candidate_serving(root, candidate_slot)
                 )
-                if refusal is not None:
-                    raise InstallationRefused(f"Monitor recovery refused before publication: {refusal}")
-            already_serving = (
-                monitor_scope and not force_monitor_transition
-                and _candidate_serving(root, candidate_slot)
-            )
+            except (OSError, ValueError, ConnectionError):
+                already_serving = False
             print(
                 f"Runtime {version}: monitor scope={monitor_scope} "
                 f"predecessor={predecessor} already-serving={already_serving}", flush=True,
@@ -678,6 +693,15 @@ def settle_candidate(
                     "release_claim": release_dev_claim if retiring_dev else None,
                 } if predecessor is not None and not already_serving else None
             )
+            deferred_release = release_dev_claim is not None and not retiring_dev and (
+                outgoing_deferred or predecessor is not None and not already_serving
+            )
+            if deferred_release:
+                replacement.retain(
+                    root, runtime=runtime, release_claim=release_dev_claim,
+                    predecessor=retirement_predecessor,
+                )
+                outgoing_deferred = True
             try:
                 if retirement_predecessor is not None:
                     from agent_worktrees import runtime_monitor_retirements as retirements
@@ -700,6 +724,8 @@ def settle_candidate(
                         retirement_predecessor=retirement_predecessor,
                     )
                     summary["self_retirement"] = True
+                    if outgoing_deferred:
+                        summary.setdefault("result", {})["retirement_pending"] = True
                     print(
                         f"Runtime {version}: monitor transition action={summary.get('action')} "
                         f"reason={summary.get('reason')} result={summary.get('result')}", flush=True,
@@ -711,12 +737,16 @@ def settle_candidate(
                     raise InstallationRefused(
                         f"Monitor activation failed after settlement: {(summary.get('result') or {}).get('error')}"
                     )
+                if deferred_release:
+                    replacement.settle_release(root, release_dev_claim, committed=True)
                 deployment.publish(root, manifest)
             except PublicationOutcomePending:
                 if helpers is not None:
                     helpers.keep()
                 raise
             except BaseException:
+                if summary.get("action") == "interrupted" and not handles:
+                    summary["action"] = "preparing"
                 announced = False
                 while True:
                     try:
@@ -732,11 +762,15 @@ def settle_candidate(
                                 from agent_worktrees import runtime_monitor_retirements as retirements
 
                                 retirements.cancel(root, retirement_predecessor, runtime=runtime)
+                            if deferred_release:
+                                replacement.settle_release(root, release_dev_claim, committed=False)
                         elif any(content not in (
                             (version + "\n").encode("utf-8"), (version + "\r\n").encode("utf-8"),
                         ) for content in _selector_snapshot(root).values()):
                             runtime.activate(root, version, link_free=True, dev_owner=dev_owner)
                         if committed:
+                            if deferred_release:
+                                replacement.settle_release(root, release_dev_claim, committed=True)
                             deployment.publish(root, manifest)
                         break
                     except PublicationOutcomePending:
@@ -767,10 +801,10 @@ def settle_candidate(
             "runtime_generation": identity["build_info"].get("runtime_generation"),
             "deployment_manifest_published": True,
             "helpers_published": helpers is not None,
-            "retirement_pending": (summary.get("result") or {}).get("retirement_pending") is True,
+            "retirement_pending": outgoing_deferred or (summary.get("result") or {}).get("retirement_pending") is True,
             "dev_claim_release_pending": (
-                release_dev_claim is not None and retiring_dev
-                and (summary.get("result") or {}).get("retirement_pending") is True
+                release_dev_claim is not None and (retiring_dev or outgoing_deferred)
+                and (outgoing_deferred or (summary.get("result") or {}).get("retirement_pending") is True)
             ),
             "runtime_python": str(runtime.slot_python(root, version)),
             "payload_hash": payload_hash,
@@ -806,17 +840,42 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--mode-owner", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument("--install-source", type=Path)
+    parser.add_argument("--wheel-profile", type=Path)
+    parser.add_argument("--wheel-directory", type=Path)
     parser.add_argument("--input-timeout", type=install_driver.positive_input_timeout)
     parser.add_argument("--construction-provenance", type=json.loads, help=argparse.SUPPRESS)
     arguments = parser.parse_args(argv)
-    if arguments.input_timeout is not None and not arguments.install_source:
-        parser.error("--input-timeout requires --install-source")
+    if arguments.input_timeout is not None and not (arguments.install_source or arguments.wheel_profile):
+        parser.error("--input-timeout requires --install-source or --wheel-profile")
     required = ("root", "plugin") if (
         arguments.inspect_helper_publication or arguments.complete_helper_publication
     ) else ("root", "plugin", "payload", "uv", "base_python", "result")
     if any(getattr(arguments, name) is None for name in required):
         parser.error("required arguments: " + ", ".join("--" + name.replace("_", "-") for name in required))
-    if arguments.install_source:
+    if arguments.wheel_profile is not None or arguments.wheel_directory is not None:
+        if (
+            arguments.wheel_profile is None or arguments.wheel_directory is None
+            or arguments.install_source is not None or arguments.mode not in ("ordinary", "repair")
+            or any((arguments.mode_owner, arguments.settle_slot,
+                    arguments.inspect_helper_publication, arguments.complete_helper_publication))
+        ):
+            parser.error("closed wheels require a complete independent ordinary installation input")
+        from install_source import wheel_inputs
+
+        with wheel_inputs(
+            arguments.wheel_profile, arguments.wheel_directory,
+            deadline=time.monotonic() + (arguments.input_timeout or 600),
+        ) as wheels:
+            result = install(
+                arguments.root, arguments.plugin, payload=arguments.payload,
+                uv=arguments.uv, base_python=arguments.base_python,
+                wait_timeout=arguments.wait_timeout, child_timeout=arguments.child_timeout,
+                expected_source_identity=arguments.expected_source_identity,
+                frontend=arguments.frontend,
+                recover_adopted_manager=arguments.recover_adopted_manager,
+                native_wheel_inputs=wheels, repair=arguments.mode == "repair",
+            )
+    elif arguments.install_source:
         if arguments.mode not in ("ordinary", "repair") or any((
             arguments.mode_owner, arguments.settle_slot,
             arguments.inspect_helper_publication, arguments.complete_helper_publication,
@@ -849,7 +908,14 @@ def main(argv: list[str] | None = None) -> int:
         plan = helper_publication_plan(path, arguments.publication_digest)
         if Path(plan["root"]).resolve() != arguments.root.resolve():
             raise InstallationRefused("Helper publication runtime root differs from its invocation")
-        if Path(plan["content"]).resolve() != arguments.plugin.resolve():
+        try:
+            same_content = os.path.samefile(
+                engine._native_retained_path(plan["content"]),
+                engine._native_retained_path(arguments.plugin),
+            )
+        except OSError as error:
+            raise InstallationRefused("Helper publication content root is unavailable") from error
+        if not same_content:
             raise InstallationRefused("Helper publication content root differs from its invocation")
         if arguments.inspect_helper_publication:
             print(json.dumps(plan))

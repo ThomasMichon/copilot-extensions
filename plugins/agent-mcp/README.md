@@ -1,6 +1,7 @@
 # agent-mcp
 
-[Configuration reference](docs/configuration.md)
+[Configuration reference](docs/configuration.md) |
+[Session-generation implementation boundary](docs/session-generation.md)
 
 A reusable **MCP bridge**: wrap an upstream MCP server as a local **stdio** MCP
 server and inject host credentials. One config file describes one bridge.
@@ -69,9 +70,11 @@ accepted as process identity.
 
 agent-mcp is the **standalone** MCP-wrapper path: it is launched directly from a
 Copilot agent's `mcp-servers` entry, imports no agent-bridge code, uses no
-worktree/repo resolver, and needs no resident daemon. The optional `serve`
-command only warms repeated shell `call`/materialized-stub usage; it is not part
-of normal agent wiring.
+worktree/repo resolver, and needs no resident daemon. The optional `serve` host
+can warm repeated shell `call`/materialized-stub usage and stdio sessions.
+Pre-attach contention with another selected-generation startup takes the normal
+in-process bridge fallback after rechecking physical selection. It does not
+steal the cutover lease or replay an already-attached session.
 
 Windows setup probes optional Python-launcher versions quietly when choosing a
 signed base interpreter. Unavailable candidates are verbose diagnostics; actual
@@ -113,6 +116,12 @@ mcp-servers:
 
 For setup steps use the bundled **`agent-mcp`** skill; for per-machine tuning of
 an existing bridge use **`customizing-bridges`**.
+
+The explicit Linux `exec-client` command can bind selected, already configured
+MCP entries to the native client's own exec identity. It is not enabled by
+installation or ordinary bridge startup. See the
+[eligible caller and qualification limits](docs/session-generation.md#explicit-linux-client-exec)
+before opting in.
 
 The literal `mcp-servers.command` above is deliberate. Copilot starts the stdio
 server from repository-committed, machine-portable frontmatter that has no
@@ -497,6 +506,20 @@ path can't work — the named-bridge search is what makes a plugin's MCP resolve
 with **zero** setup. Override the search roots with `AGENT_MCP_PLUGIN_ROOTS`
 (path-separated); a name that appears in two plugins raises an ambiguity error.
 
+Incoming publication and `installer-readiness` exclude cached providers whose
+`<plugin>@<marketplace>` is explicitly false in effective `enabledPlugins`.
+User `settings.json`/`settings.local.json` are followed by the nearest workspace's
+Claude settings and Copilot settings, with local overrides last within each
+convention. Staged installers use their selected
+`COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT`; otherwise workspace discovery starts
+at CWD. Settings accept string-safe `//` comments. Missing entries remain
+candidates; malformed or unreadable selection fails readiness.
+Explicit `AGENT_MCP_MARKETPLACE_ROOT` ownership retains its
+existing scoped inventory. Active/unknown-provider collisions, user bridge
+collisions and invalid selected content still fail. This does not delete cached
+payloads, change raw `status` inventory or alter explicit-path/named lookup for
+retained consumers.
+
 ## Protocol versions (MCP 2.x / dual-era)
 
 agent-mcp speaks **both** eras of the MCP wire protocol and bridges between them
@@ -530,6 +553,14 @@ Both **directions** of the bridge are dual-era:
   (`ttlMs`/`cacheScope`), and rejects an unsupported modern version with the
   standard error. A proxying (`http`/`stdio`) bridge is a transparent pass-through:
   the client's own negotiation flows end-to-end to the upstream.
+
+One-shot sessions, including each request-routed target, prepare a copy of the
+outgoing request for their own negotiated upstream era. Legacy targets remove
+the modern protocol-version, client-info and client-capabilities metadata;
+modern targets stamp the upstream's selected version and bridge identity.
+Downstream metadata cannot override that selection. Unrelated metadata such as
+progress tokens and tracing fields remains intact, without modifying the
+caller's original request or changing credential injection.
 
 Set the era per bridge with **`server.protocol`**:
 

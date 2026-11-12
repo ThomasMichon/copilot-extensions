@@ -106,7 +106,8 @@ def review(number):
 def github_transport(monkeypatch):
     calls = []
 
-    def run(argv, *, env):
+    def run(argv, *, env, max_stdout_bytes):
+        assert max_stdout_bytes == 1_048_576
         calls.append((argv, env))
         endpoint = argv[-1]
         if endpoint.endswith("/pulls/7"):
@@ -313,7 +314,7 @@ def test_selected_ado_auth_loss_is_retryable_and_sanitized(monkeypatch):
     assert error.value.__cause__ is None
 
 
-@pytest.mark.parametrize("provider", ["github", "azure-devops"])
+@pytest.mark.parametrize("provider", ["github", "gitea", "azure-devops"])
 def test_selected_fetch_never_resolves_configured_or_ambient_account(monkeypatch, provider):
     source = Source()
     captured = []
@@ -333,14 +334,49 @@ def test_selected_fetch_never_resolves_configured_or_ambient_account(monkeypatch
 
 def test_unsupported_provider_and_explicit_token_conflicts_refuse_before_effects():
     with pytest.raises(ProviderError):
-        pr_watch.build_fetch(config.PRConfig(provider="gitea"), "owner/repository", 7,
+        pr_watch.build_fetch(config.PRConfig(provider="unsupported"), "owner/repository", 7,
                              credential_source=Source())
     with pytest.raises(ProviderError):
         pr_watch.build_fetch(config.PRConfig(provider="github"), "owner/repository", 7,
                              token="explicit", credential_source=Source())
     with pytest.raises(ProviderError):
-        configured_snapshot(SimpleNamespace(name="gitea"), "owner/repository", 7,
+        configured_snapshot(SimpleNamespace(name="unsupported"), "owner/repository", 7,
                             prcfg=config.PRConfig(), credential_source=Source())
+
+
+@pytest.mark.parametrize("kind,page_size", [("github", 100), ("gitea", 50)])
+def test_typed_snapshot_request_budget_bounds_nonterminating_review_pages(monkeypatch, kind, page_size):
+    from agent_worktrees.providers import gitea
+    from agent_worktrees.providers.observation_credentials import MAX_SNAPSHOT_REQUESTS
+    endpoint = "https://api.github.com" if kind == "github" else "https://forge.example"
+    source = Source(Binding(provider=kind, api_base=endpoint))
+    calls = []
+    def run(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["max_stdout_bytes"] <= 1_048_584
+        url = next(part for part in argv if part.startswith("https://"))
+        if "/reviews?" in url:
+            body = [review(number) for number in range(1, page_size + 1)]
+        elif "/check-runs?" in url:
+            body = {"total_count": 0, "check_runs": []}
+        elif url.endswith("/status"):
+            body = {"total_count": 0, "statuses": []}
+        else:
+            body = {"state": "open", "head": {"sha": "head"}, "base": {"ref": "dev"},
+                    "title": "Synthetic", "mergeable": None}
+        return subprocess.CompletedProcess(
+            argv, 0, json.dumps(body) + ("\n200" if kind == "gitea" else ""), "",
+        )
+    module = github if kind == "github" else gitea
+    monkeypatch.setattr(module, "run_cli", run)
+    provider = github.GitHubProvider() if kind == "github" else gitea.GiteaProvider()
+    with pytest.raises(ObservationCredentialError, match="request budget"):
+        provider.get_snapshot(
+            "owner/repository", 7,
+            api_base="https://github.com" if kind == "github" else endpoint,
+            credential_source=source,
+        )
+    assert len(calls) == source.calls == MAX_SNAPSHOT_REQUESTS
 
 
 def test_disabled_native_ado_cannot_fall_back_to_ambient_az(monkeypatch):
@@ -351,6 +387,18 @@ def test_disabled_native_ado_cannot_fall_back_to_ambient_az(monkeypatch):
             "project/repository", 7, api_base="https://dev.azure.test/example",
             observation=ObservationConfig(enabled=False), credential_source=Source(ado_binding()),
         )
+
+
+def test_gitea_observation_requires_the_credential_owners_bearer_profile():
+    source = Source(Binding(
+        provider="gitea", api_base="https://gitea.example.test", authentication="basic",
+    ))
+    selected = ObservationCredentials(
+        source, provider="gitea", api_base="https://gitea.example.test",
+        repository="owner/repository",
+    )
+    with pytest.raises(ObservationCredentialError, match="binding mismatch"):
+        selected.acquire()
 
 
 def test_configured_native_ado_carries_the_source_to_the_actual_request(monkeypatch):

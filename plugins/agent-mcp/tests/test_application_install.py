@@ -75,6 +75,92 @@ def test_darwin_data_owner_identifies_actual_listener(tmp_path, monkeypatch):
     assert cutover.source_data_owner(fixed) is None
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX socket links")
+@pytest.mark.parametrize("target_kind", ["missing", "socket", "file", "foreign-missing", "foreign-socket"])
+def test_source_socket_link_retains_missing_target_and_refuses_foreign_types(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target_kind: str,
+) -> None:
+    home = tmp_path.resolve() / ("long-native-socket-" + "x" * 110)
+    home.mkdir()
+    monkeypatch.chdir(home)
+    monkeypatch.setattr(serve, "_HAS_AF_UNIX", True)
+    fixed = home / "serve.sock"
+    target = home / "serve-g1.sock"
+    if target_kind.startswith("foreign"):
+        target = home / "foreign" / target.name
+        target.parent.mkdir()
+    with contextlib.ExitStack() as resources:
+        if target_kind.endswith("socket"):
+            listener = resources.enter_context(
+                cutover._socket.socket(cutover._socket.AF_UNIX, cutover._socket.SOCK_STREAM),
+            )
+            listener.bind(str(target.relative_to(home)))
+        elif target_kind == "file":
+            target.write_text("not a socket", encoding="utf-8")
+        fixed.symlink_to(target.relative_to(home))
+        before = fixed.lstat()
+        if target_kind in {"missing", "socket"}:
+            state = cutover.source_handle_state(fixed)
+            assert state == (
+                "present", before.st_dev, before.st_ino, before.st_mtime_ns, target.name,
+            )
+            assert os.readlink(fixed) == target.name
+            if target_kind == "missing":
+                assert cutover.source_data_owner(Path(fixed.name)) is None
+                assert not target.exists()
+        else:
+            with pytest.raises(cutover.ControlError, match="foreign socket target"):
+                cutover.source_handle_state(fixed)
+        assert fixed.lstat().st_ino == before.st_ino
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX socket links")
+def test_source_socket_link_change_during_target_read_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path.resolve()
+    monkeypatch.setattr(serve, "_HAS_AF_UNIX", True)
+    fixed = home / "serve.sock"
+    fixed.symlink_to("serve-g1.sock")
+    readlink = os.readlink
+    changed = False
+
+    def replace_link(path: str | Path, *args, **kwargs) -> str:
+        nonlocal changed
+        value = readlink(path, *args, **kwargs)
+        if Path(path) == fixed and not changed:
+            changed = True
+            fixed.unlink()
+            fixed.symlink_to("serve-g2.sock")
+        return value
+
+    monkeypatch.setattr(cutover.os, "readlink", replace_link)
+    with pytest.raises(cutover.ControlError, match="changed during admission"):
+        cutover.source_handle_state(fixed)
+    assert readlink(fixed) == "serve-g2.sock"
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX socket links")
+def test_source_socket_target_io_failure_is_not_treated_as_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    home = tmp_path.resolve()
+    monkeypatch.setattr(serve, "_HAS_AF_UNIX", True)
+    fixed = home / "serve.sock"
+    target = home / "serve-g1.sock"
+    fixed.symlink_to(target.name)
+    path_stat = Path.stat
+
+    def denied(path: Path, *args, **kwargs):
+        if path == target:
+            raise PermissionError("target inspection denied")
+        return path_stat(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "stat", denied)
+    with pytest.raises(PermissionError, match="target inspection denied"):
+        cutover.source_handle_state(fixed)
+
+
 def _installed_callback(tmp_path, monkeypatch, layout):
     package = "1.2.3"
     generation = package
@@ -103,7 +189,7 @@ def _installed_callback(tmp_path, monkeypatch, layout):
     monkeypatch.setenv("AGENT_MCP_HOME", str(bridges.parent))
     monkeypatch.setenv("AGENT_MCP_INSTALL_DIR", str(root))
     monkeypatch.setattr(config, "BRIDGES_DIR", bridges)
-    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda: [])
+    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda **_: [])
     for name in ("AGENT_MCP_NO_SERVE", "AGENT_MCP_NO_CUTOVER"):
         monkeypatch.delenv(name, raising=False)
     return module, root, slot, generation, bridges
@@ -509,6 +595,70 @@ def _published_incumbent(tmp_path, monkeypatch, *, incumbent=True, same_generati
         module=module, root=root, slot=slot, generation=generation, home=home, fixed=fixed,
         actors=actors, requests=requests, births=births, control=control,
     )
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="requires POSIX socket links")
+@pytest.mark.parametrize("changed", [False, True])
+def test_incoming_publication_replaces_retained_missing_socket_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, changed: bool,
+) -> None:
+    from zdd import routing
+
+    fixture = _published_incumbent(tmp_path.resolve(), monkeypatch, incumbent=False)
+    monkeypatch.chdir(fixture.home)
+    monkeypatch.setattr(serve, "_HAS_AF_UNIX", True)
+    fixture.fixed.symlink_to("serve-g1.sock")
+    before = fixture.module.source_handle_state(fixture.fixed)
+    spawn = fixture.module.spawn_passive_daemon
+
+    with contextlib.ExitStack() as resources:
+        def spawn_socket(context, port):
+            assert fixture.fixed.resolve(strict=False) != context.new_socket_path
+            actor = spawn(context, port)
+            listener = resources.enter_context(
+                cutover._socket.socket(cutover._socket.AF_UNIX, cutover._socket.SOCK_STREAM),
+            )
+            listener.bind(context.new_socket_path.name)
+            assert not fixture.fixed.exists()
+            return actor
+
+        def data_owner(path: Path) -> int | None:
+            target = path.resolve(strict=False)
+            return next((
+                actor.pid for actor in fixture.actors if actor.context.new_socket_path == target
+            ), None)
+
+        monkeypatch.setattr(fixture.module, "spawn_passive_daemon", spawn_socket)
+        monkeypatch.setattr(fixture.module, "source_data_owner", data_owner)
+        control = fixture.control
+
+        def guarded_control(host, port, token, request, **kwargs):
+            reply = control(host, port, token, request, **kwargs)
+            if changed and request["op"] == "ping":
+                fixture.fixed.unlink()
+                fixture.fixed.symlink_to("racing.sock")
+            return reply
+
+        monkeypatch.setattr(fixture.module, "control_request", guarded_control)
+        if changed:
+            with pytest.raises(fixture.module.ControlError, match="ambiguous"):
+                fixture.module.source_start()
+            assert os.readlink(fixture.fixed) == "racing.sock"
+            assert routing.read_table(fixture.home, strict=True) is None
+            assert not (fixture.home / "serve-g1.sock").exists()
+            return
+        result = fixture.module.source_start()
+        assert result["ok"]
+        assert len(fixture.actors) == 1
+        actor = fixture.actors[0]
+        assert result["pid"] == actor.pid
+        assert fixture.fixed.resolve(strict=True) == actor.context.new_socket_path
+        assert fixture.module.source_handle_state(fixture.fixed) != before
+        assert not (fixture.home / "serve-g1.sock").exists()
+        active = routing.read_active_endpoint(
+            fixture.home, verify_listener=False,
+        )
+        assert active.pid == actor.pid and active.generation == 2
 
 
 @pytest.mark.parametrize("identity", ["other", "missing", "invalid"])

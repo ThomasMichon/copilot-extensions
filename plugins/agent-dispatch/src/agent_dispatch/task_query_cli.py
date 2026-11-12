@@ -137,6 +137,7 @@ def register_list_command(
     p.add_argument("--target-repo")
     p.add_argument("--label")
     p.add_argument("--evaluator-ref")
+    p.add_argument("--standing-parent", help="only finite children linked to this standing charter")
     p.add_argument("--limit", type=int, default=200)
     p.add_argument(
         "--machine",
@@ -166,6 +167,7 @@ def _cmd_list(args: argparse.Namespace) -> int:
             label=args.label,
             evaluator_ref=args.evaluator_ref,
             category=getattr(args, "category", None),
+            standing_parent_id=getattr(args, "standing_parent", None),
             limit=args.limit,
         )
     from . import tracking

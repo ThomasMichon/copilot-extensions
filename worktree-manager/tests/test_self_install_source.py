@@ -35,8 +35,8 @@ def _payload(directory: Path, commit: str, version: str = "1.2.3") -> tuple[Path
 
 
 @pytest.fixture
-def selection(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
-    root = tmp_path / "root"
+def selection(tmp_path: Path, tmp_path_factory, monkeypatch: pytest.MonkeyPatch):
+    root = Path(si._runtime_installer().engine._native_retained_path(tmp_path_factory.mktemp("manager") / "root"))
     monkeypatch.setattr(si, "local_bin", lambda: tmp_path / "bin")
     monkeypatch.setattr(si, "control_plane_providers_dir", lambda: tmp_path / "providers")
     return root
@@ -156,6 +156,63 @@ def test_explicit_profile_plan_does_not_reuse_another_selected_profile(selection
         assert result.slot == str(si.version_slot(expected, selection))
         assert result.marker is None
     assert _bytes(selection) == before
+
+
+@pytest.mark.parametrize("separator", [".", "+"])
+@pytest.mark.parametrize("same_profile", [False, True])
+def test_native_wheel_candidate_reuses_selected_repair_without_skipping_health(
+    tmp_path, monkeypatch, separator, same_profile,
+):
+    from packaging.markers import default_environment
+    from installer_wheel_snapshot import retain_wheel_inputs
+
+    adapter = si._runtime_installer()
+    payload, identity = _payload(tmp_path / "payload", "a" * 40)
+    (payload / adapter.runtime_source.SOURCE_FILE).unlink()
+    uv = tmp_path / "uv"
+    uv.touch()
+    monkeypatch.setattr(adapter.engine, "_select_uv_executable", lambda _value: str(uv))
+    archive = tmp_path / "copilot_extensions_worktree_manager-1.2.3-py3-none-any.whl"
+    archive.write_bytes(b"retained already-inspected native fixture")
+    digest = "sha256:" + hashlib.sha256(archive.read_bytes()).hexdigest()
+    name = "copilot-extensions-worktree-manager"
+    binding = json.dumps({
+        "wheels": [{"name": name, "selected_extras": []}],
+        "target": {"environment": default_environment()},
+    }, sort_keys=True, separators=(",", ":"))
+    root = tmp_path / "runtime"
+    with retain_wheel_inputs(
+        {archive.name: archive}, {archive.name: digest},
+        max_wheels=1, max_archive_bytes=1024, max_total_bytes=1024,
+        max_snapshot_bytes=2048, deadline=time.monotonic() + 30,
+    ) as retained:
+        wheels = adapter.engine.WheelInstallInputs(
+            retained, binding, ((name, "1.2.3", archive.name, digest),),
+        )
+        generation = identity.package_version + ".profile." + wheels.receipt()["lock_id"][7:23]
+        previous = generation if same_profile else identity.package_version + ".profile." + "0" * 16
+        previous += separator + "repair." + "d" * 32
+        (root / "versions" / previous).mkdir(parents=True)
+        adapter.runtime.mark_complete(root, previous, payload_hash="a" * 64)
+        si._write_marker(root, previous)
+
+        class CandidateAdmissionReached(Exception):
+            pass
+
+        def candidate(requested, version, **arguments):
+            assert requested == root
+            assert version == (previous if same_profile else generation)
+            assert arguments["wheel_inputs"] is wheels
+            assert arguments["reuse_generations"] is False
+            assert arguments["health_callable"] == "verify_runtime_candidate"
+            raise CandidateAdmissionReached
+
+        monkeypatch.setattr(adapter.engine, "numbered_candidate", candidate)
+        with pytest.raises(CandidateAdmissionReached):
+            with adapter.candidate(
+                payload, root, assemble=shutil.copytree, uv=uv, native_wheel_inputs=wheels,
+            ):
+                pytest.fail("candidate admission was bypassed")
 
 
 @pytest.mark.parametrize("fault", ["binding", "locals", "completion-hash", "encoding", "record"])

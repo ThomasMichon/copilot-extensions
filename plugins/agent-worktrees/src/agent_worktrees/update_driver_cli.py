@@ -17,6 +17,7 @@ _CONTEXT_KEYS = (
     "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "WORKTREE_MANAGER_ROOT",
     "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_ENGINE_CMD", "CE_UPDATE_AUTH",
 )
+RUNTIME_BACKEND_INTENT_CAPABILITY = update_cli.update_options.RUNTIME_BACKEND_INTENT_CAPABILITY
 
 
 def _context() -> tuple[tuple[str, str], ...]:
@@ -38,6 +39,8 @@ def _invocation_cwd() -> Path:
 
 def _request_context(*, controller: bool = False, cwd: Path | None = None) -> tuple[tuple[str, str], ...]:
     context = dict(_context())
+    if context.get("AGENT_HOME", "").strip():
+        context["AGENT_HOME"] = str(cfg._home())
     selected = update_cli._invocation_update_context()
     if selected is not None:
         context["AGENT_WORKTREES_UPDATE_CONTEXT"] = str(selected)
@@ -233,7 +236,7 @@ def cmd_update_request(args: argparse.Namespace) -> int:
                             del args._controller_authority
                         else:
                             args._controller_authority = previous_authority
-        from .project_update_controller import probe_for_submission
+        from .project_update_controller import probe_for_submission, supports_runtime_backend
 
         cwd = _invocation_cwd()
         selected = _current_authority(
@@ -259,8 +262,15 @@ def cmd_update_request(args: argparse.Namespace) -> int:
             controller = True
             request_authority = "project"
         else:
-            selection = True if controller else probe_for_submission(args, cwd=cwd)
+            selection = (
+                True if controller and not getattr(args, "runtime_backend", None)
+                else probe_for_submission(args, cwd=cwd)
+            )
             controller = selection is True
+        if getattr(args, "runtime_backend", None) and (
+            not controller or not supports_runtime_backend(project)
+        ):
+            raise driver.StateError("--runtime-backend requires a capable project update controller")
         flags = _flags(args)
         bypass = ["--no-manager"] if getattr(args, "no_manager", False) else []
         spec = driver.RequestSpec(

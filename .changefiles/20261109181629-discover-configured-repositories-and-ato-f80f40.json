@@ -1,0 +1,9 @@
+{
+  "comment": "Discover configured repositories and atomically project current facts and events",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

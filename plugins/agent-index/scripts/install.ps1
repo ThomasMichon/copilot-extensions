@@ -6,9 +6,11 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'ensure', 'uninstall', 'engine', 'engine-update', 'register-tasks', 'stamp', 'provision', 'cell-provision', 'cell-recover', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
+    [ValidateSet('install', 'update', 'status', 'start', 'stop', 'ensure', 'uninstall', 'engine', 'engine-update', 'register-tasks', 'task-retire', 'stamp', 'provision', 'cell-provision', 'cell-recover', 'slot-provision', 'slot-validate', 'slot-complete', 'slot-completion-validate', 'slot-cutover')]
     [string]$Action = 'install',
     [string]$InstallDir,
+    [string]$InstallationConfig,
+    [string[]]$ScheduledTaskNames,
     [string]$Context,
     [string]$ExpectedMarketplaceId,
     [string]$DurableHome,
@@ -41,7 +43,11 @@ param(
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the filesystem, scheduled tasks, or services.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -53,6 +59,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision') -or $Context) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
@@ -147,10 +162,43 @@ function Invoke-IndexFiniteUninstall {
 }
 
 . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+# Capture caller-relative selectors before driver entry or self-staging changes CWD.
+$originalFileSystemCwd = $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath
+if ($InstallDir) {
+    if ($Action -eq 'uninstall' -and ($InstallDir -split '[/\\]') -contains '..') {
+        throw 'Index uninstall refuses parent-traversal components'
+    }
+    if (-not [IO.Path]::IsPathRooted($InstallDir)) { $InstallDir = Join-Path $originalFileSystemCwd $InstallDir }
+    $InstallDir = [IO.Path]::GetFullPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+foreach ($selector in @('AGENT_INDEX_CONFIG', 'AGENT_INDEX_CONFIG_ROOT', 'AGENT_INDEX_REPO', 'AGENT_INDEX_ENGINE_HOME')) {
+    $value = [Environment]::GetEnvironmentVariable($selector, 'Process')
+    if ($value) {
+        $value = $value -replace '^~(?=[\\/]|$)', $env:USERPROFILE
+        if (-not [IO.Path]::IsPathRooted($value)) { $value = Join-Path $originalFileSystemCwd $value }
+        [Environment]::SetEnvironmentVariable($selector, [IO.Path]::GetFullPath($value), 'Process')
+    }
+}
+$policySelector = if ($InstallationConfig) { $InstallationConfig } else { $env:AGENT_INDEX_INSTALLATION_CONFIG }
+if ($policySelector) {
+    if (-not [IO.Path]::IsPathRooted($policySelector)) { $policySelector = Join-Path $originalFileSystemCwd $policySelector }
+    $env:AGENT_INDEX_INSTALLATION_CONFIG = [IO.Path]::GetFullPath($policySelector)
+    if ($InstallationConfig) { $PSBoundParameters['InstallationConfig'] = $env:AGENT_INDEX_INSTALLATION_CONFIG }
+}
+if ($ScheduledTaskNames -and $Action -ne 'task-retire') { throw '-ScheduledTaskNames is only supported by task-retire' }
 if ($env:OS -eq 'Windows_NT' -and
     $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
     $Action -in @('install', 'update', 'provision', 'uninstall') -and
     -not ($Action -eq 'uninstall' -and $DryRun)) {
+    $driverSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'installer_driver.py'))
+    $driverContext = [regex]::Match($driverSource, '(?ms)^CONTEXT_KEYS = \((.*?)^\)').Groups[1].Value
+    foreach ($selector in @('AGENT_INDEX_INSTALLATION_CONFIG', 'AGENT_INDEX_CONFIG_ROOT')) {
+        if ([Environment]::GetEnvironmentVariable($selector, 'Process') -and
+            $driverContext -notmatch ('"' + $selector + '"')) {
+            throw "Native Index driver cannot retain $selector; use the installation-root default or update the driver"
+        }
+    }
     $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
     $driverRoot = if ($InstallDir) { [IO.Path]::GetFullPath($InstallDir) }
         else { Join-Path $env:USERPROFILE '.agent-index' }
@@ -161,21 +209,12 @@ if ($env:OS -eq 'Windows_NT' -and
         }
     }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
-        -Plugin 'agent-index' -Action $Action -Options $driverOptions
+        -Plugin 'agent-index' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
     $script:IndexBootstrapPython = $driverPython
-}
-
-if ($InstallDir) {
-    if ($Action -eq 'uninstall' -and ($InstallDir -split '[/\\]') -contains '..') {
-        throw 'Index uninstall refuses parent-traversal components'
-    }
-    $providerRoot = $ExecutionContext.SessionState.Path.CurrentFileSystemLocation.ProviderPath
-    if (-not [IO.Path]::IsPathRooted($InstallDir)) { $InstallDir = Join-Path $providerRoot $InstallDir }
-    $InstallDir = [IO.Path]::GetFullPath($InstallDir)
-    $PSBoundParameters['InstallDir'] = $InstallDir
 }
 
 # Preserve the invoking repository across the install-contract self-stage,
@@ -253,6 +292,8 @@ if ($cellSlotAction) {
 }
 $skipSelfStage = $Action -in @(
     'status',
+    'task-retire',
+    'register-tasks',
     'cell-provision',
     'cell-recover',
     'slot-provision',
@@ -485,6 +526,7 @@ $EngineTaskName   = 'agent-index-engine'
 $EngineEnvFile    = Join-Path $EngineHome 'engine.env'
 $EngineLauncher   = Join-Path $EngineHome 'engine.ps1'
 # === end engine-daemon ======================================================
+. (Join-Path $PSScriptRoot 'scheduling-policy.ps1')
 
 # === install-contract:v3 versioned-venv (agent-index: .venv-as-junction) ===
 # Build each version into versions/<version> and make the historical `.venv`
@@ -762,6 +804,7 @@ function Invoke-VersionedGc {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
+    if ($WheelProfile) { return $WheelPython }
     # Source/construction helpers require 3.11; the signed runtime retains
     # its separate package floor. Construction must not depend on its slot.
     $probe = @'
@@ -853,6 +896,12 @@ function Get-PayloadHash(
     [long]$MaxPathBytes = 4096,
     [long]$MaxContentBytes = 4294967296
 ) {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-index' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
         Assert-SourceRuntime
         $sha = [Security.Cryptography.SHA256]::Create()
@@ -1161,9 +1210,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-index' `
+        -Uv $WheelUv -HealthModule 'agent_index' -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     Assert-SourceRuntime
 
 }
@@ -1841,6 +1896,7 @@ function Write-Manifest {
     $sourcePath = $env:COPILOT_PLUGIN_STAGED_FROM
     $gitInfo = { param($path) Get-GitInfo -Path (Split-Path $path) }
     $extra = @{}
+    if ($NativeWheelSelection) { $extra['runtime_version'] = $SrcVersion }
     if ($script:SourceRuntimeIdentity) {
         if (-not $sourcePath) { $sourcePath = $PluginDir }
         $PluginDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
@@ -1870,7 +1926,8 @@ function Get-MachineRole {
             $env:AGENT_INDEX_CONFIG
         )
     } else {
-        Join-Path $InstallDir 'config.yaml'
+        if ($env:AGENT_INDEX_CONFIG_ROOT) { Join-Path $env:AGENT_INDEX_CONFIG_ROOT 'config.yaml' }
+        else { Join-Path $InstallDir 'config.yaml' }
     }
     if (Test-Path $cfg) {
         $rm = Select-String -Path $cfg -Pattern '^\s*(?:role|engine)\s*:\s*"?([A-Za-z]+)"?' -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -2114,18 +2171,28 @@ function Install-Engine {
 }
 
 function Get-IndexPythonCacheArgs {
-    param([Parameter(Mandatory)][string]$Root)
+    param([Parameter(Mandatory)][string]$Root, [string]$Python)
     if (-not [IO.Path]::IsPathRooted($Root) -or
         ($env:OS -eq 'Windows_NT' -and
          $Root -notmatch '^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/][^\\/]+(?:[\\/]|$))')) {
         throw 'Python cache requires an absolute owned runtime root'
     }
-    # Without inspecting installed completion/RECORD evidence, never reuse a namespace.
+    # Reuse installed-<digest> only when the runtime itself validates its
+    # completion/RECORD evidence; otherwise never reuse a namespace.
     $cacheId = [Guid]::NewGuid().ToString('N')
     $prefix = [IO.Path]::GetFullPath((Join-Path $Root "cache\python\unsealed-$cacheId"))
     if ($env:OS -eq 'Windows_NT' -and -not $prefix.StartsWith('\\?\')) {
         $prefix = if ($prefix.StartsWith('\\')) { '\\?\UNC\' + $prefix.Substring(2) }
             else { '\\?\' + $prefix }
+    }
+    if ($Python) {
+        try {
+            $selected = & $Python -I -B -X ('pycache_prefix=' + $prefix) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" $Root 2>$null
+            if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) {
+                $selected = [string]($selected | ConvertFrom-Json)
+                if ($selected) { $prefix = $selected }
+            }
+        } catch {}
     }
     return @('-X', ('pycache_prefix=' + $prefix))
 }
@@ -2135,12 +2202,17 @@ function Restart-EngineDaemon {
     # is the ONE place a restart is intended -- the explicit engine-runtime update
     # path, decoupled from the service `update` (which must never bounce the engine).
     if ($NoService) { Write-Skip 'Engine daemon restart skipped (-NoService)'; return }
+    if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return }
     # If the operator opted into the advanced task tier, bounce the task; otherwise
     # restart the detached engine user-mode (NO scheduled task, NO elevation).
-    if (Get-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue) {
-        Stop-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
+    if ($null -ne $script:IndexObservedTasks[$EngineTaskName]) {
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
+        Assert-IndexTaskOwned -Name $EngineTaskName -Observed $script:IndexObservedTasks[$EngineTaskName]
+        Stop-ScheduledTask -TaskPath '\' -TaskName $EngineTaskName -ErrorAction Stop
         Start-Sleep -Seconds 1
-        Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
+        Assert-IndexTaskOwned -Name $EngineTaskName -Observed $script:IndexObservedTasks[$EngineTaskName]
+        Start-ScheduledTask -TaskPath '\' -TaskName $EngineTaskName -ErrorAction Stop
         Write-Ok "Engine daemon restarted via task: $EngineTaskName"
     } elseif (Test-Path $EngineVenvPython) {
         # As in ensure, the current primary CLI manages the independently
@@ -2149,10 +2221,12 @@ function Restart-EngineDaemon {
         if (-not (Test-Path $managePy)) {
             throw 'Primary index runtime not installed -- explicitly install it before restarting the engine; engine runtime preserved'
         }
-        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir)
+        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir -Python $managePy)
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
         & $managePy -I @cacheArgs -X utf8 -m agent_index engine stop 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to stop the engine' }
         Start-Sleep -Seconds 1
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine restart is held'; return }
         & $managePy -I @cacheArgs -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         if ($LASTEXITCODE -ne 0) { throw 'Primary index runtime failed to restart the engine' }
         Write-Ok 'Engine daemon restarted (user-mode, new engine runtime loaded)'
@@ -2239,68 +2313,12 @@ function Invoke-WithEnvFile {
     }
 }
 
-function Install-LogonAutostartEntry {
-    param(
-        [Parameter(Mandatory)][string]$Name,
-        [Parameter(Mandatory)][string]$LauncherPath,
-        [Parameter(Mandatory)][string]$Kind,
-        [Parameter(Mandatory)][scriptblock]$IsHealthy,
-        [Parameter(Mandatory)][scriptblock]$Ensure,
-        [Parameter(Mandatory)][string]$ScheduledTaskName
-    )
-    if (Get-ScheduledTask -TaskName $ScheduledTaskName -ErrorAction SilentlyContinue) {
-        Remove-LogonAutostart -Name $Name
-        Write-Skip "$Kind logon auto-start skipped -- scheduled task '$ScheduledTaskName' is the explicit machine-local supervisor"
-        return
-    }
-    # Start now through the user-mode ensure path (agent_procutil.spawn_daemon:
-    # Job breakaway, durable cwd, its own log), never a PowerShell process
-    # launch, which would leave the daemon inside the installer's Job. A failed
-    # start-now must not cost the logon registration below.
-    if (-not (& $IsHealthy)) {
-        try { & $Ensure }
-        catch { Write-Warn "Could not start $Kind now: $($_.Exception.Message) -- it starts at the next logon" }
-    } else {
-        Write-Skip "$Kind already running -- not starting a second instance"
-    }
-    $taskArgs = "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$LauncherPath`""
-    try {
-        if (-not (Test-Path $RunKey)) { New-Item -Path $RunKey -Force | Out-Null }
-        New-ItemProperty -Path $RunKey -Name $Name -Value "conhost.exe $taskArgs" `
-            -PropertyType String -Force | Out-Null
-        Write-Ok "Logon auto-start registered (HKCU Run '$Name') -- durable without elevation"
-    } catch {
-        Write-Warn "Could not register logon auto-start '$Name' (HKCU Run): $($_.Exception.Message)"
-    }
-}
-
-function Install-LogonAutostart {
-    # Default durable tier: zero-elevation interactive-logon auto-start for the
-    # service and durable engine. Scheduled tasks remain an explicit opt-in
-    # upgrade and supersede the matching HKCU Run entry when present.
-    if ($NoService) { Write-Skip 'Logon auto-start skipped (-NoService)'; return }
-    if ((Get-ActivationRole) -ne 'host') {
-        Write-Skip 'Logon auto-start skipped (role is not host)'
-        return
-    }
-    Write-ServiceFiles
-    Install-LogonAutostartEntry -Name $TaskName -LauncherPath $Launcher -Kind 'Service' `
-        -IsHealthy { Test-ServiceHealthy } -Ensure { Ensure-ServiceRunning } -ScheduledTaskName $TaskName
-    if (-not (Test-Path $EngineVenvPython)) {
-        Remove-LogonAutostart -Name $EngineTaskName
-        Write-Skip 'Engine logon auto-start skipped -- durable engine runtime not provisioned'
-        return
-    }
-    Write-EngineFiles
-    Install-LogonAutostartEntry -Name $EngineTaskName -LauncherPath $EngineLauncher -Kind 'Engine daemon' `
-        -IsHealthy { Test-EnginePort } -Ensure { Ensure-EngineRunning } -ScheduledTaskName $EngineTaskName
-}
-
 # ── Scheduled-task registration: OPT-IN ADVANCED TIER ONLY (never the default) ─
 #    The DEFAULT lifecycle is user-mode: the daemon runs as a plain user process,
 #    started/kept-alive by `Ensure-Running` (install/update/start) and the
 #    explicit `ensure` action -- NO scheduled task, NO elevation. Scheduled
-#    tasks are reachable ONLY via the explicit `register-tasks` action, for boxes
+#    tasks are reachable via explicit enabled installation policy or the
+#    `register-tasks` action, for boxes
 #    that want OS-level AtLogon persistence independent of a Copilot session.
 #    (see docs/install-contract.md § Hard rules).
 # The installer process is never elevated. When the opt-in task tier IS used,
@@ -2357,8 +2375,8 @@ function New-TaskSpec {
 function Test-TaskCurrent {
     # True when an existing task already matches the desired user-mode shape, so
     # registration can be skipped entirely (no churn, no elevation).
-    param([string]$TaskName, $Spec)
-    $t = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    param($Task, $Spec)
+    $t = $Task
     if (-not $t) { return $false }
     $haveLogon = @($t.Triggers | Where-Object { $_.CimClass.CimClassName -eq 'MSFT_TaskLogonTrigger' }).Count -gt 0
     if (-not $haveLogon) { return $false }
@@ -2380,30 +2398,44 @@ function Register-UserModeTask {
       Idempotent, user-mode task registration that never elevates the installer.
       Returns $true when the task ends up in the desired state, else $false.
     #>
-    param([string]$TaskName, $Spec, [string]$Kind = 'service')
-    if (Test-TaskCurrent -TaskName $TaskName -Spec $Spec) {
-        Write-Skip "$Kind task already current -- not re-registering: $TaskName"
-        return $true
-    }
+    param([Alias('TaskName')][string]$Name, $Spec, [string]$Kind = 'service')
+    Initialize-IndexSchedulingPolicy
+    if ($script:IndexTaskPolicy -eq 'absent') { throw 'Index task scheduling policy changed to absent' }
+    $observed = $script:IndexObservedTasks[$Name]
     # Update an existing task in place (no admin needed for a task the user owns).
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    if ($null -ne $observed) {
+        Assert-IndexTaskOwned -Name $Name -Observed $observed
+        if (-not $observed.Enabled -or -not (Test-IndexStartAllowed -Name $Name)) {
+            Write-Skip "Disabled or held task retained without changes: $Name"
+            return $true
+        }
+        $existing = Get-ScheduledTask -TaskPath '\' -TaskName $Name -ErrorAction Stop
+        if ("$($existing.State)" -eq 'Disabled') {
+            Write-Skip "Disabled task retained without changes: $Name"
+            return $true
+        }
+        if (Test-TaskCurrent -Task $existing -Spec $Spec) {
+            Write-Skip "$Kind task already current -- not re-registering: $Name"
+            return $true
+        }
         try {
-            Set-ScheduledTask -TaskName $TaskName -Action $Spec.Action -Trigger $Spec.Trigger -Settings $Spec.Settings -Principal $Spec.Principal -ErrorAction Stop | Out-Null
-            Write-Ok "$Kind task updated in place: $TaskName"
+            Set-ScheduledTask -TaskPath '\' -TaskName $Name -Action $Spec.Action -Trigger $Spec.Trigger -Settings $Spec.Settings -Principal $Spec.Principal -ErrorAction Stop | Out-Null
+            Write-Ok "$Kind task updated in place: $Name"
             return $true
         } catch {
-            if (-not (Test-AccessDenied $_)) { Write-Warn "Could not update $Kind task '$TaskName': $($_.Exception.Message)"; return $false }
-            # else fall through to create/elevation handling
+            Write-Warn "Could not update $Kind task '$Name': $($_.Exception.Message)"
+            return $false
         }
     }
+    if (-not (Test-IndexStartAllowed -Name $Name)) { return $true }
     # Create a missing task (may be refused without admin on locked-down boxes).
     try {
-        Register-ScheduledTask -TaskName $TaskName -Action $Spec.Action -Trigger $Spec.Trigger -Settings $Spec.Settings -Principal $Spec.Principal -Force -ErrorAction Stop | Out-Null
-        Write-Ok "$Kind task registered: $TaskName"
+        Register-ScheduledTask -TaskPath '\' -TaskName $Name -Action $Spec.Action -Trigger $Spec.Trigger -Settings $Spec.Settings -Principal $Spec.Principal -ErrorAction Stop | Out-Null
+        Write-Ok "$Kind task registered: $Name"
         return $true
     } catch {
-        if (-not (Test-AccessDenied $_)) { Write-Warn "Could not register $Kind task '$TaskName': $($_.Exception.Message)"; return $false }
-        Write-Warn ("$Kind task '$TaskName' needs creation but this machine refuses scheduled-task creation without elevation. " +
+        if (-not (Test-AccessDenied $_)) { Write-Warn "Could not register $Kind task '$Name': $($_.Exception.Message)"; return $false }
+        Write-Warn ("$Kind task '$Name' needs creation but this machine refuses scheduled-task creation without elevation. " +
             "Per policy the installer stays user-mode and does NOT elevate; any existing task keeps running. " +
             "To create/normalize it: run  agent-index-install register-tasks -AllowTaskElevation  (elevates ONLY the task step).")
         return $false
@@ -2415,9 +2447,15 @@ function Invoke-ScopedElevation {
     param([string]$ElevAction)
     $childArgs = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, $ElevAction, '-AllowTaskElevation')
     if ($InstallDir) { $childArgs += @('-InstallDir', $InstallDir) }
+    if ($env:AGENT_INDEX_INSTALLATION_CONFIG) {
+        $childArgs += @('-InstallationConfig', $env:AGENT_INDEX_INSTALLATION_CONFIG)
+    }
+    $quotedArgs = ($childArgs | ForEach-Object {
+        '"' + [regex]::Replace([regex]::Replace($_, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
+    }) -join ' '
     try {
         Write-Host '  ...    Requesting elevation for the task-scheduling step ONLY (UAC)...'
-        $p = Start-Process pwsh -Verb RunAs -ArgumentList $childArgs -PassThru -Wait -ErrorAction Stop
+        $p = Start-Process pwsh -Verb RunAs -ArgumentList $quotedArgs -PassThru -Wait -ErrorAction Stop
         if ($p.ExitCode -eq 0) { Write-Ok 'Task-scheduling step completed (elevated).'; return $true }
         Write-Warn "Elevated task-scheduling step exited with code $($p.ExitCode)."
         return $false
@@ -2430,38 +2468,18 @@ function Invoke-ScopedElevation {
 function Invoke-RegisterTasks {
     # The ONLY task-scheduling entry point that may elevate -- and it elevates
     # ONLY itself (task registration), never a full install/update. This is an
-    # explicit per-machine upgrade from the default HKCU Run tier to Windows
-    # Scheduled Tasks for boxes that want pre-login start / restart policy /
+    # explicit per-machine upgrade from on-demand user mode to Windows
+    # Scheduled Tasks for boxes that want logon activation / restart policy /
     # missed-trigger recovery. Opt-in via -AllowTaskElevation /
     # AGENT_INDEX_ALLOW_TASK_ELEVATION=1.
+    if ($NoService) { Write-Skip 'Task scheduling skipped (-NoService)'; return }
     if ((Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
         if (-not (Invoke-ScopedElevation -ElevAction 'register-tasks')) {
             throw 'Task-scheduling elevation did not complete; tasks were not registered'
         }
         return
     }
-    Remove-LogonAutostart -Name $TaskName
-    Remove-LogonAutostart -Name $EngineTaskName
-    Register-EngineDaemon
-    Install-Service
-}
-
-function Register-EngineDaemon {
-    # Register the persistent, platform-native daemon task that runs the warm
-    # engine from the durable venv. A warm engine is left untouched (never
-    # restarted) when it is already serving.
-    if ($NoService) { Write-Skip 'Engine daemon task skipped (-NoService)'; return }
-    if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- daemon task not registered'; return }
-    Write-EngineFiles
-    $spec = New-TaskSpec -LauncherPath $EngineLauncher
-    if (Register-UserModeTask -TaskName $EngineTaskName -Spec $spec -Kind 'engine daemon') {
-        if (Test-EnginePort) {
-            Write-Skip "Engine daemon already serving -- leaving the warm engine untouched: $EngineTaskName"
-        } else {
-            Start-ScheduledTask -TaskName $EngineTaskName -ErrorAction SilentlyContinue
-            Write-Ok "Engine daemon task active: $EngineTaskName"
-        }
-    }
+    Invoke-IndexTaskScheduling
 }
 
 function Write-ServiceFiles {
@@ -2498,15 +2516,6 @@ if (-not `$_py) { [Console]::Error.WriteLine('[agent-index] no complete, importa
 exit `$LASTEXITCODE
 "@
     [System.IO.File]::WriteAllText($Launcher, $launcherContent, $utf8NoBom)
-}
-
-function Install-Service {
-    if ($NoService) { Write-Skip 'Service skipped (-NoService)'; return }
-    Write-ServiceFiles
-    $spec = New-TaskSpec -LauncherPath $Launcher
-    if (Register-UserModeTask -TaskName $TaskName -Spec $spec -Kind 'service') {
-        Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    }
 }
 
 # ── DEFAULT lifecycle: user-mode auto-run (NO scheduled task, NO elevation) ────
@@ -2597,6 +2606,7 @@ function Ensure-ServiceRunning {
     # primitive (`agent-index deploy`), which spawns a DETACHED user-mode daemon
     # and flips routing -- robust to a stale/dead active.json. Never a task.
     if ($NoService) { Write-Skip 'Service ensure skipped (-NoService)'; return }
+    if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return }
     # A client runs NO local indexer daemon: its MCP/CLI reach the designated
     # host's service over the trusted SSH transport (config.client_url ->
     # configured endpoint). Only a host runs a local service. This mirrors the
@@ -2619,18 +2629,23 @@ function Ensure-ServiceRunning {
     # 5.1 from turning the command's stderr (progress, warnings) into a
     # terminating error under this script's 'Stop', and ends with the body.
     $code = Invoke-WithEnvFile -Path $EnvFile -Body {
+        if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return 'held' }
         $ErrorActionPreference = 'Continue'
         & $activePy -I -X utf8 -m agent_index deploy 2>&1 | Out-Host
         $LASTEXITCODE
     }
+    if ($code -eq 'held') { return }
     if (Test-ServiceHealthy) { Write-Ok 'Service ensured (user-mode daemon)' }
     else { Write-Warn "Service ensure attempted (deploy exit $code) -- endpoint not yet healthy (it may still be starting)" }
 }
 
 function Ensure-EngineRunning {
+    param([switch]$RequireReady)
     # Host-side durable embedding engine, user-mode (NO scheduled task). Left warm
     # if already serving; else started detached from the durable venv.
     if ($NoService) { Write-Skip 'Engine ensure skipped (-NoService)'; return }
+    if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return }
+    if ((Get-RequiredRuntimeRole) -ne 'host') { Write-Skip 'Engine ensure skipped (not a configured host)'; return }
     if (-not (Test-Path $EngineVenvPython)) { Write-Skip 'Engine runtime not provisioned -- engine not ensured'; return }
     # Manage the engine from the active (updated) index runtime: the durable
     # engine runtime is preserved across updates, so its own CLI may predate
@@ -2641,13 +2656,16 @@ function Ensure-EngineRunning {
     Write-EngineFiles
     # As in Ensure-ServiceRunning, 'Continue' is scoped to the body.
     $code = Invoke-WithEnvFile -Path $EngineEnvFile -Extra @{ AGENT_INDEX_ENGINE_HOME = $EngineHome } -Body {
-        if (Test-EnginePort) { return 'serving' }
+        if (-not (Test-IndexStartAllowed -Name $EngineTaskName -Refresh)) { Write-Skip 'Engine start is held'; return 'held' }
+        if (-not $RequireReady -and (Test-EnginePort)) { return 'serving' }
         $ErrorActionPreference = 'Continue'
         & $managePy -I -X utf8 -m agent_index engine start --strict 2>&1 | Out-Host
         $LASTEXITCODE
     }
+    if ($code -eq 'held') { return }
     if ($code -eq 'serving') { Write-Skip 'Engine already serving -- leaving the warm engine untouched' }
     elseif ($code -eq 0) { Write-Ok 'Engine ensured (user-mode durable daemon)' }
+    elseif ($RequireReady) { throw "Engine start exited $code -- the required durable engine is not serving" }
     else { Write-Warn "Engine start exited $code -- the durable engine is not serving" }
 }
 
@@ -2669,6 +2687,7 @@ function Invoke-ServiceCutover {
     # routing, drains, and retires the old -- so activation moves the service to the
     # new version with no operator step (invariant #1). No live service -> start one.
     if ($NoService) { Write-Skip 'Service cutover skipped (-NoService)'; return }
+    if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return }
     if (-not (Test-IndexPublicationFresh -Version $SrcVersion -AllowDowngrade $Force)) {
         Write-Skip 'Newer runtime or stamp superseded service deployment'
         return
@@ -2676,16 +2695,16 @@ function Invoke-ServiceCutover {
     $role = Get-ActivationRole
     $maintainExistingHost = (
         $role -ne 'host' -and
-        (Get-MachineRole) -eq 'host' -and
-        (Test-ServiceHealthy)
+        (Get-MachineRole) -eq 'host'
     )
     if ($role -ne 'host' -and -not $maintainExistingHost) {
-        Write-Skip "Service cutover skipped (role: $role) -- only an explicitly configured host or an already-running host service is updated"
+        Write-Skip "Service cutover skipped (role: $role) -- only a repository or machine configured host is updated"
         return
     }
     if (-not (Test-Path $LinkPython)) { throw 'Required service runtime is unavailable; service was not updated' }
     Write-ServiceFiles
     Invoke-WithEnvFile -Path $EnvFile -Body {
+        if (-not (Test-IndexStartAllowed -Name $TaskName -Refresh)) { Write-Skip 'Service start is held'; return }
         Write-Step 'Deploying the selected service runtime through its native owner...'
         $previousPreference = $ErrorActionPreference
         try {
@@ -2768,6 +2787,7 @@ function Enter-IndexBuildLock {
 }
 
 function Get-IndexUv {
+    if ($WheelProfile) { return (Get-Command $WheelUv -CommandType Application -ErrorAction Stop).Source }
     $mutex = Enter-IndexStampLock -Scope 'Uv' -LockRoot $InstallDir -TimeoutSeconds 180
     try {
         return (Ensure-Uv -InstallRoot $InstallDir)
@@ -2943,7 +2963,7 @@ function Invoke-Stop {
         }
     }
     if ($stopPython -and (Test-Path -LiteralPath $stopPython)) {
-        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir)
+        $cacheArgs = @(Get-IndexPythonCacheArgs -Root $InstallDir -Python $stopPython)
         & $stopPython -I @cacheArgs -X utf8 -m agent_index stop | Out-Host
         # The durable engine daemon is a SEPARATE detached process from the
         # light service stopped above (daemon.py, launched by 'engine start' /
@@ -3022,9 +3042,11 @@ function Invoke-Uninstall {
 
 $transactionMutex = $null
 try {
-if ($Action -eq 'register-tasks' -and (Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
+if ($Action -eq 'register-tasks' -and -not $NoService -and (Test-TaskElevationOptIn) -and -not (Test-Elevated)) {
     # The elevated child owns admission; its waiting parent must not hold the mutex.
-    Invoke-RegisterTasks
+    if (-not (Invoke-ScopedElevation -ElevAction 'register-tasks')) {
+        throw 'Task-scheduling elevation did not complete'
+    }
     return
 }
 if ($Action -ne 'status' -and
@@ -3039,12 +3061,26 @@ if ($Action -ne 'status' -and
     }
     $transactionMutex = Enter-IndexStampLock -Scope 'Transaction' -TimeoutSeconds $transactionTimeout
 }
+if ($Action -in @('install', 'update', 'provision', 'ensure', 'start', 'engine', 'engine-update', 'register-tasks', 'task-retire')) {
+    Initialize-IndexSchedulingPolicy
+    if ($Action -eq 'task-retire') {
+        if ($ScheduledTaskNames) { Remove-IndexScheduledTasks -Names $ScheduledTaskNames }
+        else { Remove-IndexScheduledTasks }
+        return
+    }
+    if ($Action -eq 'register-tasks') { Invoke-RegisterTasks; return }
+    if ($script:IndexTaskPolicy -eq 'absent') { Remove-IndexScheduledTasks }
+}
 $ScriptDir = $PSScriptRoot
 . (Join-Path $PSScriptRoot 'source-runtime.ps1')
 $PackageVersion = $SrcVersion
 $script:SourceRuntimeIdentity = $null
 if ($Action -in @('install', 'update', 'provision', 'stamp')) {
     Initialize-SourceRuntime
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-index' -Root $InstallDir
+    }
     Assert-SourceRuntime
 }
 if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and
@@ -3061,20 +3097,26 @@ if ($Action -notin @('uninstall', 'stamp', 'engine', 'engine-update') -and
 try {
 if ($Action -in @('install', 'update', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 switch ($Action) {
     'install' {
         Install-Runtime
         Invoke-ServiceCutover
-        Install-LogonAutostart
+        Ensure-EngineRunning -RequireReady
+        if ($script:IndexTaskPolicy -eq 'enabled' -and -not $NoService -and (Get-RequiredRuntimeRole) -eq 'host') {
+            Invoke-IndexTaskScheduling
+        }
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
     'update' {
         Invoke-DowngradeGuard
         Install-Runtime
         Invoke-ServiceCutover
-        Install-LogonAutostart
+        Ensure-EngineRunning -RequireReady
+        if ($script:IndexTaskPolicy -eq 'enabled' -and -not $NoService -and (Get-RequiredRuntimeRole) -eq 'host') {
+            Invoke-IndexTaskScheduling
+        }
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
     'ensure' {
@@ -3087,9 +3129,7 @@ switch ($Action) {
             Deploy-SetupGatedBinstub
         }
         Ensure-Running
-        Install-LogonAutostart
     }
-    'register-tasks' { Invoke-RegisterTasks }  # OPT-IN advanced tier (scheduled tasks) -- the sole action that may (opt-in) self-elevate that ONE step
     'engine' { if (-not (Install-Engine)) { throw 'Engine runtime installation failed' }; Ensure-EngineRunning }
     'engine-update' { if (-not (Install-Engine -Upgrade)) { throw 'Engine runtime update failed' }; Restart-EngineDaemon }
     'status' { Invoke-Status }
@@ -3100,6 +3140,10 @@ switch ($Action) {
     'provision' {
         Install-Runtime
         Invoke-ServiceCutover
+        Ensure-EngineRunning -RequireReady
+        if ($script:IndexTaskPolicy -eq 'enabled' -and -not $NoService -and (Get-RequiredRuntimeRole) -eq 'host') {
+            Invoke-IndexTaskScheduling
+        }
         Write-Skip 'Durable engine runtime unchanged; use engine / engine-update for the heavy stack'
     }
 }

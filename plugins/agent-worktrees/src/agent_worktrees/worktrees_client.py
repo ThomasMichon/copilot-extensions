@@ -128,7 +128,10 @@ def validate_result(result: dict, request: dict, *, quality: str = "current") ->
                 selection["platform_filter"] is not None
                 and row.get("platform") != selection["platform_filter"]
             )
-            or (not selection["include_missing"] and row.get("checkout_present") is not True)
+            or (
+                not selection["include_missing"]
+                and (row.get("checkout_present") is not True or row.get("status") == "archived")
+            )
             or (selection["codename"] is not None and row.get("codename") != selection["codename"])
             or (
                 selection["worktree_id"] is not None
@@ -146,6 +149,16 @@ def validate_result(result: dict, request: dict, *, quality: str = "current") ->
         and len(rows) != count
     ):
         raise ProjectionUnavailable("incomplete resident current roster")
+    if "refresh_id" in request:
+        from .worktrees_refresh import receipt_matches
+
+        receipt = result.get("point_refresh")
+        if (
+            not isinstance(receipt, dict)
+            or receipt.get("request_id") != request["refresh_id"]
+            or not receipt_matches(receipt, result)
+        ):
+            raise ProjectionUnavailable("resident did not prove the requested point refresh")
     return result
 
 
@@ -199,7 +212,7 @@ def saved_result(request: dict, reason: str, *, db_path=None) -> dict:
     )
     if request["contract_version"] == observations.VERSION:
         result["project"] = project
-    return result
+    return validate_result(result, request, quality="advisory")
 
 
 def _wait_current(request: dict, *, recover: bool) -> dict:
@@ -228,9 +241,9 @@ def _wait_current(request: dict, *, recover: bool) -> dict:
 
 
 def read_current(request: dict, *, recover: bool = True, wait: bool = False) -> dict:
-    if wait:
+    if wait or "refresh_id" in request:
         return _wait_current(request, recover=recover)
-    project, selection = request_selection(request)
+    request_selection(request)
     unavailable = None
     recovery_pending = False
     try:
@@ -282,21 +295,13 @@ def read_current(request: dict, *, recover: bool = True, wait: bool = False) -> 
     from . import status_monitor_runtime as monitor
 
     try:
-        result = read_advisory(
-            monitor._aw_runtime_home() / "worktrees-current.sqlite3",
-            project,
-            **selection,
-            contract_version=request["contract_version"],
+        return saved_result(
+            request, unavailable or "Resident unavailable; showing saved worktrees",
+            db_path=monitor._aw_runtime_home() / "worktrees-current.sqlite3",
         )
     except (ProjectionError, ProjectionUnavailable) as exc:
         failure = ResidentRecoveryPending if recovery_pending else ProjectionUnavailable
         raise failure(f"{unavailable}; no usable advisory roster: {exc}") from exc
-    result["availability"] = {"status": "advisory", "reason": unavailable}
-    result["contract_version"] = request["contract_version"]
-    if request["contract_version"] == observations.VERSION:
-        result["project"] = project
-    result["ok"] = True
-    return result
 
 
 def emit_current(args) -> int:
@@ -310,6 +315,8 @@ def emit_current(args) -> int:
     passive = bool(getattr(args, "passive", False))
     if passive and any(getattr(args, flag, False) for flag in ("follow", "glance", "refresh")):
         return output._json_error("--passive cannot be combined with --follow, --glance or --refresh")
+    if getattr(args, "refresh", False) and getattr(args, "follow", False):
+        return output._json_error("--refresh cannot be combined with --follow")
     request = {
         "contract_version": CONTRACT_VERSION,
         "project": cfg.project_name(),
@@ -327,6 +334,21 @@ def emit_current(args) -> int:
     }
     if passive:
         request["passive"] = True
+    if getattr(args, "refresh", False):
+        import uuid
+
+        from .worktrees_refresh import CAPABILITY as REFRESH_CAPABILITY
+
+        try:
+            health = read_health()
+            capabilities = health.get("capabilities") if isinstance(health, dict) else None
+            if not isinstance(capabilities, list) or REFRESH_CAPABILITY not in capabilities:
+                raise ProjectionUnavailable(
+                    f"selected resident lacks {REFRESH_CAPABILITY}; update the engine and retry"
+                )
+        except (OSError, ValueError, RecursionError, ProjectionUnavailable) as exc:
+            return output._json_error(str(exc))
+        request["refresh_id"] = uuid.uuid4().hex
     key = list_cache.cache_key(
         args, project=request["project"], tracking_status=args.tracking_status
     )

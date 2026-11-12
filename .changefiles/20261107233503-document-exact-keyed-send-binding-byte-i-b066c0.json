@@ -1,0 +1,9 @@
+{
+  "comment": "Document exact keyed-send binding (byte-identical body), binding conflicts as caller mismatch, and AGENT_BRIDGE_NO_ENSURE for passive observers",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

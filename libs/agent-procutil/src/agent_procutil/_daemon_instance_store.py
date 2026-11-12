@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import errno
+import hashlib
 import math
 import logging
 import os
@@ -587,7 +588,11 @@ def test_lifecycle(
                 if cleanup_results is not None:
                     cleanup_results.append(outcome)
                 if outcome.status == "held":
-                    _log.warning("daemon instance cleanup held: %s %s", receipt.instance_id, outcome.reason)
+                    _log.warning(
+                        "daemon instance cleanup held: %s %s state=%s pid=%s runtime=%s",
+                        receipt.instance_id, outcome.reason, current.get("state"),
+                        current.get("pid"), current.get("runtime_root"),
+                    )
             except (OSError, ValueError, KeyError) as error:
                 # Preserve the exact original entry for explicit reconciliation.
                 _log.warning(
@@ -769,7 +774,9 @@ def inspect(root=None):
     return results
 
 
-def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None, deadline=None):
+def cleanup(
+    receipt, *, terminate=True, stop_timeout=5, _caller_pid=None, deadline=None, runtime_root=None,
+):
     removed = []
 
     def result(status, reason):
@@ -786,6 +793,10 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None, deadli
                 record = _read(path)
             except FileNotFoundError:
                 return result("missing", "record-absent")
+            if runtime_root is not None and (
+                _runtime_scope_key(record["runtime_root"]) != _runtime_scope_key(runtime_root)
+            ):
+                return result("held", "runtime-scope-mismatch")
             if record["state"] not in ("reserved", "bound", "running", "finished", "cleaning"):
                 return result("held", "unknown-state")
             if "pid" not in record:
@@ -903,11 +914,23 @@ def cleanup(receipt, *, terminate=True, stop_timeout=5, _caller_pid=None, deadli
             # The canonical lock entry stays: unlinking a lock permits split custody.
             return result("settled", "process-exit-observed")
     except (OSError, ValueError, KeyError, RuntimeError, subprocess.SubprocessError) as error:
+        _log.warning("daemon instance cleanup failed: %s", receipt.instance_id, exc_info=True)
         return result("held", type(error).__name__)
 
 
-def _read_cursor(root):
-    path = root / ".reconcile.cursor"
+def _runtime_scope_key(runtime_root):
+    return os.fsencode(os.path.normcase(os.fspath(Path(runtime_root))))
+
+
+def _cursor_path(root, runtime_root=None):
+    if runtime_root is None:
+        return root / ".reconcile.cursor"
+    scope = _runtime_scope_key(runtime_root)
+    return root / (".reconcile." + hashlib.sha256(scope).hexdigest() + ".cursor")
+
+
+def _read_cursor(root, runtime_root=None):
+    path = _cursor_path(root, runtime_root)
     try:
         info = _plain(path)
     except FileNotFoundError:
@@ -924,8 +947,8 @@ def _read_cursor(root):
     return key
 
 
-def _write_cursor(root, key):
-    path = root / ".reconcile.cursor"
+def _write_cursor(root, key, runtime_root=None):
+    path = _cursor_path(root, runtime_root)
     if os.path.lexists(path):
         _plain(path)
     pending = root / (".reconcile." + uuid.uuid4().hex + ".pending")
@@ -943,58 +966,12 @@ def _write_cursor(root, key):
             pending.unlink()
 
 
-def reconcile(root, limit, max_seconds=5, *, _caller_pid=None):
-    started = _monotonic_clock()
-    if type(limit) is not int or not 1 <= limit <= 4096:
-        raise ValueError("daemon reconciliation limit must be between 1 and 4096")
-    if isinstance(max_seconds, bool) or not math.isfinite(max_seconds) or max_seconds <= 0:
-        raise ValueError("daemon reconciliation deadline must be finite and positive")
-    root = Path(root) if root is not None else registry_root()
-    if not _inventory_exists(root):
-        return []
-    _root(root)
-    paths = sorted(_inventory_paths(root))
-    # A bad marker remains a visible error even when there is no work.
-    cursor = _read_cursor(root)
-    if not paths:
-        return []
-    if any(not _ID.fullmatch(path.stem) for path in paths):
-        raise ValueError("noncanonical inventory instance key")
-    results = []
-    deadline = started + max_seconds
-    with _file_lock(
-        root / ".reconcile.lock", guard=_cursor_guard, nonblocking=True,
-    ):
-        cursor = _read_cursor(root)
-        ordered = [path for path in paths if path.stem > cursor]
-        ordered += [path for path in paths if path.stem <= cursor]
-        visited = None
-        try:
-            for count, path in enumerate(ordered):
-                if count >= limit:
-                    break
-                remaining = deadline - _monotonic_clock()
-                if remaining <= 0:
-                    break
-                visited = path.stem
-                try:
-                    candidate = _read(path)
-                    finite_production = (
-                        candidate["purpose"] == "production"
-                        and candidate.get("lifecycle") == "finite-worker"
-                    )
-                    if not finite_production and (
-                        candidate["purpose"] == "production" or not _expire(candidate, _wall_clock())
-                    ):
-                        continue
-                except (OSError, ValueError, KeyError):
-                    results.append(InstanceCleanupResult(path.stem, "held", "invalid-record"))
-                    continue
-                options = {"stop_timeout": min(5, remaining)}
-                if _caller_pid is not None:
-                    options["_caller_pid"] = _caller_pid
-                results.append(cleanup(DaemonInstanceReceipt(path.stem, root), **options))
-        finally:
-            if visited is not None and visited != cursor:
-                _write_cursor(root, visited)
-    return results
+def reconcile(
+    root, limit, max_seconds=5, *, _caller_pid=None, terminate=False, runtime_root=None,
+):
+    from ._daemon_instance_reconcile import reconcile as collect
+
+    return collect(
+        sys.modules[__name__], root, limit, max_seconds,
+        _caller_pid=_caller_pid, terminate=terminate, runtime_root=runtime_root,
+    )

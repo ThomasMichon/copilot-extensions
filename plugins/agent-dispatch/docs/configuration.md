@@ -35,7 +35,33 @@ Explicit CLI/environment selection remains outside composition. No config read
 starts the coordinator, fetches a token, activates producer scope or grants
 network bind permission. Wildcard bind still requires token admission.
 
-### Conditional relationship admission
+### Native local standing admission
+
+With both relationship selectors absent, ordinary coordinator construction
+supplies native local standing admission. It is assembled on demand, without
+a user factory or another enable flag; construction does not discover sources,
+start siblings, reserve a task or launch an agent. The finite-task relationship
+writer and authority remain unset, preserving ordinary finite claims and pools.
+Attachment capability describes the available assembly, not current readiness
+of a particular workspace or sibling.
+
+An explicit standing reservation must match one enabled declaration from a
+complete trusted registrar source. The actual host must match the workspace.
+The assembly checks the original queue event, selected Worktrees CLI and actual
+resident, exact workspace incarnation and Bridge's original keyed writer
+journal. Missing/changed participants, unqualified historical agents and
+unsupported siblings retain the original request rather than receiving
+permissive callbacks or a replacement worker.
+
+For acceptance, `materialization_ref` is a file path relative to the trusted
+source root. Absolute, traversing and root-escaping paths refuse. The current
+enabled `agent-roles` payload supplies its existing materialization inspector;
+host-local `OVERRIDES` policy and native head/conclusion checks remain mandatory.
+The original native journal identity is retained on the assignment event, not
+in a second registry. Source withdrawal closes new admission, but cancellation
+and exact-conclusion release still settle through those original owners.
+
+### Explicit alternate relationship admission
 
 The ordinary `serve` construction accepts an explicitly configured, trusted
 zero-argument admission factory. It must return
@@ -54,20 +80,20 @@ reads do not import the factory; only coordinator construction does. Incomplete
 selection, a bad factory, unavailable selected writer or construction failure
 refuses startup before socket/routing publication, without a legacy/no-writer
 fallback. The ordinary `serve` CLI forwards both selectors unchanged.
-With both selectors absent,
-ordinary construction remains unchanged and supplies no relationship writer.
+With both selectors absent, the native standing assembly above is used; it
+does not opt finite tasks into governed relationship allocation.
 Source startup's configuration identity includes both selectors, so it cannot
 adopt a same-build incumbent with a different admission selection.
 
-No permissive built-in admission policy is provided. A consuming owner's actual
+An explicitly selected factory replaces the native standing assembly. Its actual
 callbacks must independently qualify the original workspace, Bridge's future
 keyed creation or original continuation journal, and every participating ledger
 writer. Missing, changed or unaccounted participants must refuse before effects.
 An installed CLI/resident observation alone does not close that cohort.
 The factory does not enable pool allocation, invent an ordinary writer
 requirement, retrofit a historical agent or replace the existing custody owners.
-Complete admission assembly and ordinary running acceptance remain separate
-gates; do not install a no-op callback to get past them.
+Ordinary running acceptance remains separate from installing this source
+capability; do not install a no-op callback to get past an unavailable owner.
 
 ## Human-authored registrar and identity sources
 
@@ -157,3 +183,9 @@ effects and reload timing. Portable documents exclude secrets, tokens, queue
 state, pointers/indexes, overrides, endpoints, active worker instances, claim
 receipts and installed runtime generations. Migration/relocation uses existing
 owner commands only, never a read-time rewrite.
+## Windows installation controls
+
+The optional installation-root `installation.json` separates scheduling
+(`preserve`, `enabled`, `absent`) from coordinator/supervisor start intent.
+See [Windows scheduling and readiness](windows-scheduling.md) for its bounded
+schema, task-only retirement and downlevel support limits.

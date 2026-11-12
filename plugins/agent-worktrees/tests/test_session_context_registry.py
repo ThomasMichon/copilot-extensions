@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from agent_worktrees import related
 from agent_worktrees import session_context
 from agent_worktrees import state_root
@@ -435,3 +437,126 @@ def test_context_truncates_to_checkout_and_state_under_path_pressure(
 
     assert len(context.encode("utf-8")) <= session_context.MAX_TOPOLOGY_BYTES
     assert "[agent-worktrees context truncated]" in context
+
+
+def _agenda_setup(monkeypatch, tmp_path: Path, policy: str, placements=()):
+    from agent_worktrees import config as cfg
+    from agent_worktrees import worktree_data_store
+
+    monkeypatch.setattr(cfg, "active_project", lambda: "control")
+    inventory = SimpleNamespace(placements=list(placements))
+    monkeypatch.setattr(
+        worktree_data_store, "read_worktree_data", lambda project, wid: inventory,
+    )
+    roots = [tmp_path / "runtime", tmp_path / "legacy"]
+    monkeypatch.setattr(session_context, "_agenda_policy_roots", lambda: roots)
+    return SimpleNamespace(agenda_default=policy), _record(tmp_path)
+
+
+def test_agenda_guidance_absent_when_policy_off(monkeypatch, tmp_path: Path):
+    config, record = _agenda_setup(monkeypatch, tmp_path, "off")
+
+    assert session_context.render_agenda_guidance(config, record, session_id="s1") == ""
+    assert session_context.with_agenda_guidance("msg", config, record) == "msg"
+
+
+def test_agenda_guidance_expected_without_lane(monkeypatch, tmp_path: Path):
+    config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
+
+    text = session_context.render_agenda_guidance(config, record, session_id="s1")
+
+    assert text.startswith("Agenda: expected for this session")
+    assert "lane=absent" in text
+    assert "agenda_outline.py from-effort" in text
+    assert "agenda_backfill.py preview ~/.copilot/session-state/s1" in text
+    assert "adoption is never automatic" in text
+    assert "Agenda:" in session_context.with_agenda_guidance("msg", config, record)
+
+
+def test_agenda_guidance_detects_existing_lane(monkeypatch, tmp_path: Path):
+    (tmp_path / ".effort-agenda" / "main").mkdir(parents=True)
+    config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
+
+    text = session_context.render_agenda_guidance(config, record)
+
+    assert "lane=present" in text
+    assert "from-effort" not in text
+
+
+def test_agenda_guidance_unknown_on_inventory_failure(monkeypatch, tmp_path: Path):
+    from agent_worktrees import worktree_data_store
+
+    config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
+
+    def boom(project, wid):
+        raise OSError("unreadable")
+
+    monkeypatch.setattr(worktree_data_store, "read_worktree_data", boom)
+    text = session_context.render_agenda_guidance(config, record)
+
+    assert "lane=unknown" in text
+    assert "worktree-data-read --inventory --json" in text
+
+
+@pytest.mark.parametrize("policy", ["off", "expected", "bogus"])
+def test_session_start_publishes_agenda_policy_for_hooks(monkeypatch, tmp_path: Path, policy):
+    import importlib.util
+    import json
+
+    config, record = _agenda_setup(monkeypatch, tmp_path, policy)
+    spec = importlib.util.spec_from_file_location(
+        "nudge_status_reader", Path(__file__).resolve().parents[1] / "scripts" / "nudge_status.py",
+    )
+    nudge = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(nudge)
+
+    session_context.with_agenda_guidance("msg", config, record)
+
+    expected = "expected" if policy == "expected" else "off"
+    for root in (tmp_path / "runtime", tmp_path / "legacy"):
+        path = root / "nudge-state" / f"{record.worktree_id}{nudge.AGENDA_POLICY_SUFFIX}"
+        assert json.loads(path.read_text("utf-8"))["policy"] == expected
+        assert nudge.read_agenda_policy(root, record.worktree_id) == expected
+        assert not list(path.parent.glob("*.tmp"))
+
+
+def test_agenda_policy_publication_rejects_unsafe_worktree_ids(monkeypatch, tmp_path: Path):
+    config, _ = _agenda_setup(monkeypatch, tmp_path, "expected")
+
+    for unsafe in ("..", "a/b", ""):
+        session_context.publish_agenda_policy(config, SimpleNamespace(worktree_id=unsafe))
+
+    assert not (tmp_path / "runtime").exists()
+    assert not (tmp_path / "legacy").exists()
+
+
+def test_agenda_policy_roots_honor_agent_home(monkeypatch, tmp_path: Path):
+    sandbox = tmp_path / "sandbox"
+    monkeypatch.setenv("AGENT_HOME", str(sandbox))
+    monkeypatch.setenv("HOME", str(tmp_path / "real-home"))
+
+    roots = session_context._agenda_policy_roots()
+
+    assert roots
+    assert all(Path(root).is_relative_to(sandbox) for root in roots)
+
+
+def test_session_message_agenda_guidance_uses_payload_session_not_process_env(
+    monkeypatch, tmp_path: Path,
+):
+    from agent_worktrees import related_briefing
+
+    config, record = _agenda_setup(monkeypatch, tmp_path, "expected")
+    monkeypatch.setattr(related_briefing, "write_related_briefings", lambda *_a, **_k: [])
+    monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "foreign")
+
+    def augment(session_id):
+        return related_briefing.augment_session_message(
+            "ctx", config, record, cwd=str(tmp_path), session_id=session_id,
+        )
+
+    bound, unbound = augment("mine"), augment(None)
+
+    assert "session-state/mine" in bound
+    assert "foreign" not in bound + unbound
+    assert "<session-folder>" in unbound

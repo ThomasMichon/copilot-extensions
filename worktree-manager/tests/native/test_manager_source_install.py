@@ -8,6 +8,8 @@ import io
 import json
 import os
 from pathlib import Path
+import runpy
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -56,7 +58,6 @@ def runner(argv,*args,**options):
 driver.TrustedRunner=runner
 raise SystemExit(installer.main(arguments))
 """
-
 
 def _fixture_command(
     argv: list[str | Path], env: dict[str, str], cwd: Path,
@@ -110,6 +111,22 @@ def _selected_snapshot() -> Iterator[list[Path]]:
         yield snapshots
 
 
+def _copy_source_preparation_inputs(repo):
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        declaration = json.loads((SOURCE / filename).read_text())
+        for group in declaration.get("groups", [declaration]):
+            for name in group["files"]:
+                relative = Path(group["canonicalDir"]) / name
+                target = repo / relative
+                target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(SOURCE.parent / relative, target)
+    shutil.copytree(
+        SOURCE.parent / "libs/installer-engine", repo / "libs/installer-engine",
+        ignore=shutil.ignore_patterns("tests", "docs", "__pycache__", "*.pyc"),
+        dirs_exist_ok=True,
+    )
+
+
 def _repository(directory: Path, env: dict[str, str], constructed: dict[str, Any]) -> Path:
     repo = directory / "upstream"
     repo.mkdir()
@@ -145,10 +162,55 @@ def _repository(directory: Path, env: dict[str, str], constructed: dict[str, Any
     return repo
 
 
+def test_source_repository_canonical_inputs_materialize_without_runtime_install(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(SOURCE.parent / "tools"))
+    import prepare_runtime_source
+
+    repo, destination = tmp_path / "source", tmp_path / "prepared"
+    consumer = repo / "worktree-manager"
+    consumer.mkdir(parents=True)
+    (consumer / "pyproject.toml").write_text(
+        '[project]\nname="copilot-extensions-worktree-manager"\nversion="1.0.0"\n',
+        encoding="utf-8",
+    )
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        shutil.copy2(SOURCE / filename, consumer / filename)
+    _copy_source_preparation_inputs(repo)
+    before = {path.relative_to(repo): path.read_bytes()
+              for path in repo.rglob("*") if path.is_file()}
+    prepare_runtime_source._materialize(repo, "worktree-manager", destination)
+    for filename in ("packaged-assets.json", "launch-wrapper-assets.json"):
+        declaration = json.loads((consumer / filename).read_text())
+        for group in declaration.get("groups", [declaration]):
+            for name in group["files"]:
+                assert (destination / group["payloadDir"] / name).read_bytes() == (
+                    SOURCE.parent / group["canonicalDir"] / name
+                ).read_bytes()
+    import materialize_installer_engine
+
+    pairs = materialize_installer_engine.derived_file_pairs(
+        repo, destination, copied_consumer=(consumer, destination),
+    )
+    assert pairs
+    for canonical, emitted in pairs:
+        assert emitted.read_bytes() == canonical.read_bytes()
+    assert before == {path.relative_to(repo): path.read_bytes()
+                      for path in repo.rglob("*") if path.is_file()}
+
+
+def _retained_runtime_identity(slot: Path) -> str:
+    launcher = runpy.run_path(str(slot / ".runtime-bootstrap" / "runtime_launcher.py"))
+    return launcher["runtime_identity"](slot)
+
+
 def _prepare_release(directory: Path) -> dict[str, Any]:
     with pytest.MonkeyPatch.context() as patch:
         patch.setattr(release_fixture, "_prepare_command", _fixture_command)
-        return _prepare_initial_construction(directory, default_data_root=True)
+        constructed = _prepare_initial_construction(directory, default_data_root=True)
+    return {
+        **constructed,
+        "runtime_identity": _retained_runtime_identity(Path(constructed["slot"])),
+    }
 
 
 def _prepare_source_qualified(constructed: dict[str, Any]) -> dict[str, Any]:
@@ -165,6 +227,8 @@ def _prepare_source_qualified(constructed: dict[str, Any]) -> dict[str, Any]:
         assert installed.returncode == 0, installed.stdout + installed.stderr
         target = si.version_slot(si.current_version(root), root)
         assert target != previous and (target / "application.json").is_file()
+        assert _retained_runtime_identity(previous) == constructed["runtime_identity"]
+        assert _retained_runtime_identity(target) != constructed["runtime_identity"]
         si._runtime_installer().activate(root, previous.name, expected=target.name)
     return {**constructed, "target": str(target), "repo": str(repo)}
 
@@ -222,6 +286,8 @@ def _prepare_source_candidate(directory, constructed):
         target = si.version_slot(si.current_version(root), root)
         assert target.name.startswith(identity.runtime_version + ".profile.")
         assert (target / "application.json").is_file()
+        runtime_identity = _retained_runtime_identity(target)
+        assert runtime_identity != constructed["runtime_identity"]
         initial = si.self_update(root=root, dry_run=True)
         assert initial.action == "already-current", initial
         python = si._runtime_installer().runtime.slot_python(root, target.name)
@@ -236,6 +302,7 @@ def _prepare_source_candidate(directory, constructed):
         )}
     return {
         "repo": str(repo), "snapshot": str(snapshot), "target": str(target),
+        "runtime_identity": runtime_identity,
         "acquired_commit": identity.source_commit,
         "before": {str(path): [content.hex(), device, inode]
                    for path, (content, device, inode) in before.items()},
@@ -261,8 +328,23 @@ def _prepare_source_repair(directory, constructed, prepared):
         assert "controlled installed Manager health failure" in diagnostics.getvalue()
         repair = si.version_slot(si.current_version(root), root)
         assert repair.name.startswith(target.name + ".repair.") and repair != target
+        assert _retained_runtime_identity(target) == prepared["runtime_identity"]
+        repair_identity = _retained_runtime_identity(repair)
+        assert len({
+            constructed["runtime_identity"], prepared["runtime_identity"], repair_identity,
+        }) == 3
+        completion = {
+            path: (path.read_bytes(), path.stat().st_mtime_ns)
+            for path in (
+                repair / ".install-complete.json", repair / ".runtime-input-origins.json",
+                repair / ".runtime-bootstrap" / "runtime-generation",
+            )
+        }
         again = si.self_update(root=root, dry_run=False)
         assert again.action == "already-current" and si.current_version(root) == repair.name, again
+        assert _retained_runtime_identity(repair) == repair_identity
+        assert all((path.read_bytes(), path.stat().st_mtime_ns) == record
+                   for path, record in completion.items())
         assert repaired.cutover == {"action": "fixture", "slot": str(repair)}
         checkout, = (root / "manager-source/runtime-sources").glob("*/checkout")
         assert _run(["git", "-C", checkout, "rev-parse", "HEAD"], env, directory).stdout == _run([
@@ -279,6 +361,9 @@ def _prepare_source_repair(directory, constructed, prepared):
         exact = _bootstrap(root, env, directory, snapshot=snapshot)
         assert exact.returncode == 0, exact.stdout + exact.stderr
         assert si.current_version(root) == repair.name
+        assert _retained_runtime_identity(repair) == repair_identity
+        assert all((path.read_bytes(), path.stat().st_mtime_ns) == record
+                   for path, record in completion.items())
         with si._runtime_installer().prepared_manager_inputs(snapshot) as (selected, options):
             plan = si.self_install(
                 selected.payload, root=root, dry_run=True,
@@ -313,6 +398,13 @@ def _prepare_source_repair(directory, constructed, prepared):
         assert commands and all(path.read_bytes() == content for path, content in commands.items())
     return {
         "repair": str(repair), "target": str(target), "previous": str(previous),
+        "runtime_identities": [
+            constructed["runtime_identity"], prepared["runtime_identity"], repair_identity,
+        ],
+        "exact_completion_reused": all(
+            (path.read_bytes(), path.stat().st_mtime_ns) == record
+            for path, record in completion.items()
+        ),
         "acquired_commit": prepared["acquired_commit"], "acquisition_refused": refused.action == "error",
         "reused": again.action == "already-current", "selection": si.current_version(root),
         "retained": all(path.read_bytes() == content for path, content in retained.items()),
@@ -324,6 +416,8 @@ def _prepare_source_repair(directory, constructed, prepared):
 def test_source_generation_repair_reuses_exact_selection_and_preserves_default_data():
     result = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["source_repair"]
     assert result["reused"] and result["retained"] and result["data_preserved"]
+    assert len(set(result["runtime_identities"])) == 3
+    assert result["exact_completion_reused"]
     assert result["acquisition_refused"] and len(result["acquired_commit"]) == 40
     assert result["selection"] == Path(result["previous"]).name
     assert Path(result["repair"]).name.startswith(Path(result["target"]).name + ".repair.")

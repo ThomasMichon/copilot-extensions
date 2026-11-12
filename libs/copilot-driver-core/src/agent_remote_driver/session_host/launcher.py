@@ -2,13 +2,10 @@
 
 The Session Host must **outlive the agent-bridge frontend**. Two seams:
 
-* **Spawning the host so it survives the front** -- :func:`host_spawn_kwargs`
-  returns the ``subprocess`` kwargs the frontend uses to launch the host
-  *outside* its own teardown domain: on Windows ``CREATE_BREAKAWAY_FROM_JOB``
-  (escaping the daemon's kill-on-close job, which now permits breakaway -- see
-  ``winjob``); on POSIX ``start_new_session=True`` (own session, immune to the
-  front's process-group teardown). The shared contained-test policy suppresses
-  both forms so the repository test supervisor retains ownership.
+* **Spawning the host so it survives the front** -- canonical daemon admission
+  verifies escape from every declared caller-owned Windows cleanup Job before
+  resuming the Host. POSIX uses the same primitive's session/cgroup admission.
+  The shared contained-test policy retains repository test-supervisor ownership.
 * **The host hardening itself once running** -- :func:`apply_host_survival`
   re-asserts session/job isolation from inside the host process (idempotent),
   and arms the host's *own* kill-on-close job on Windows so the child dies with
@@ -23,7 +20,7 @@ remain outside the core.
 from __future__ import annotations
 
 from agent_procutil.daemon_instances import (
-    DaemonInstanceSpec, daemon_entrypoint, spawn_instance,
+    daemon_entrypoint,
 )
 
 import argparse
@@ -35,7 +32,6 @@ import shutil
 import signal
 import subprocess
 import sys
-import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
@@ -52,6 +48,7 @@ from .. import winjob
 from ..session_preferences import execution_receipt
 from . import protocol as proto
 from .host import SessionHost
+from .host_state import write_host_state as _write_host_state
 from .osutil import child_preexec, process_start_time
 from .startup_admission import CONTEXT_ENV as _STARTUP_ENV, StartupAdmissionClient, StartupAdmissionServer
 
@@ -147,12 +144,7 @@ class _CrashTailCapture:
 
 
 def host_spawn_kwargs() -> dict[str, Any]:
-    """``subprocess`` kwargs for the FRONTEND to spawn the host so it survives.
-
-    On Windows the host must break away from the daemon's kill-on-close job
-    (permitted because that job now carries ``JOB_OBJECT_LIMIT_BREAKAWAY_OK``);
-    on POSIX it gets its own session.
-    """
+    """Compatibility flags only; canonical admission owns lifetime verification."""
     return windowless_daemon_kwargs(breakaway=True)
 
 
@@ -161,7 +153,7 @@ def _kill_host_process_tree(
 ) -> None:
     """Kill a spawned-but-never-ready host, reaching its whole tree on POSIX.
 
-    :func:`host_spawn_kwargs` gives the host ``start_new_session=True`` (its
+    Canonical daemon admission gives the host ``start_new_session=True`` (its
     own process group, ``proc.pid`` doubling as the group id) -- except
     under :func:`contained_test_mode`, where that is suppressed so the
     repository test supervisor retains ownership of the process group, and
@@ -235,8 +227,8 @@ def launch_session_host(
 ) -> HostHandle:
     """Spawn a **survivable** Session Host process that owns ``child_argv``.
 
-    The host is launched with :func:`host_spawn_kwargs` so it outlives this
-    frontend (Windows job-breakaway / POSIX new-session). It serves a loopback
+    The host uses canonical daemon admission so it outlives this
+    frontend (verified Windows Job escape / POSIX lifetime admission). It serves a loopback
     reattach endpoint and writes a ``pid``/``child_pid``/``port`` state file,
     which this call waits for. The child inherits ``env`` (so worktree/plan env
     vars reach copilot). Raises ``TimeoutError`` if the host never reports ready.
@@ -262,12 +254,48 @@ def launch_session_host(
     own stdout/stderr to ``os.devnull`` once ready
     (``_detach_stdio_from_frontend``), so output after that point is never
     coupled to this frontend process's lifetime.
+
+    Without ``state_dir`` the host's records live in a labeled scratch
+    directory (``scratch-owner.json`` breadcrumb). A launch that fails before
+    spawning, or whose host is confirmed to have exited, removes that
+    directory; any other outcome keeps it because a live host or a later
+    authority read may still need it.
     """
-    sd = (
-        Path(os.path.abspath(state_dir))
-        if state_dir else Path(tempfile.mkdtemp(prefix="agbridge-host-"))
-    )
+    # Frontend-only helper; the compact host archive does not carry it.
+    from .launcher_scratch import launch_state
+
+    with launch_state(state_dir, session_id, acquisition_launch) as (sd, phase):
+        return _launch_in(
+            sd, child_argv, cwd=cwd, env=env, ready_timeout=ready_timeout, nonce=nonce,
+            session_id=session_id, host_version=host_version,
+            unexpected_reap_seconds=unexpected_reap_seconds,
+            active_reap_seconds=active_reap_seconds, acquisition_launch=acquisition_launch,
+            host_entrypoint=host_entrypoint, policy_context=policy_context,
+            lifetime_policy=lifetime_policy, phase=phase,
+        )
+
+
+def _launch_in(
+    sd: Path,
+    child_argv: list[str],
+    *,
+    cwd: str | None,
+    env: dict[str, str] | None,
+    ready_timeout: float,
+    nonce: str,
+    session_id: str,
+    host_version: str,
+    unexpected_reap_seconds: float,
+    active_reap_seconds: float,
+    acquisition_launch: LaunchOwner | None,
+    host_entrypoint: str,
+    policy_context: str | None,
+    lifetime_policy: str,
+    phase: dict[str, bool],
+) -> HostHandle:
     from agent_procutil._daemon_instance_store import _root
+    from .launcher_scratch import observe_exit
+    from .launcher_spawn import spawn_host
 
     _root(sd, create=True)
     state_file = sd / f"host-{os.getpid()}-{int(time.time()*1000)}.json"
@@ -352,22 +380,13 @@ def launch_session_host(
         )
         child_env[_STARTUP_ENV] = startup.context
 
-    spawn_options = host_spawn_kwargs()
     try:
         if acquisition_launch is not None:
             acquisition_launch.begin_host()
-        proc = spawn_instance(
-            host_argv,
-            instance=DaemonInstanceSpec(
-                "agent-bridge-session-host", sd, Path(__file__).resolve(),
-            ),
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            env=child_env,
-            cwd=cwd or None,
-            **spawn_options,
+        proc, startup_output = spawn_host(
+            host_argv, cwd=cwd, environment=child_env, state_dir=sd, phase=phase,
         )
+        crash_tail = _CrashTailCapture(startup_output)
         if acquisition_launch is not None:
             acquisition_launch.retain_process(proc, str(state_file), nonce)
         if startup is not None:
@@ -376,7 +395,6 @@ def launch_session_host(
         if startup is not None:
             startup.close()
         raise
-    crash_tail = _CrashTailCapture(proc.stdout)
     expected_identity: str | None = None
     if sys.platform != "win32" and not contained_test_mode():
         # Captured immediately after spawn, before any reaping could occur
@@ -387,6 +405,7 @@ def launch_session_host(
     deadline = time.time() + ready_timeout
     while True:
         if proc.poll() is not None:
+            observe_exit(phase, proc)
             if startup is not None:
                 startup.close()
             # The process has exited, but the OS pipe may still hold bytes
@@ -577,6 +596,7 @@ async def run_host(
     before_exec: Callable[[], None] | None = None,
     lifetime_policy: str = "acp",
     ws_port: int | None = None,
+    backend: str = "native-acp",
 ) -> None:
     """Spawn the child, serve the reattachable endpoint, run until closed.
 
@@ -591,7 +611,17 @@ async def run_host(
     """
     if lifetime_policy not in {"acp", "legacy"}:
         raise ValueError("Unsupported Session Host lifetime policy")
+    if backend not in {"native-acp", "sdk"} or backend == "sdk" and lifetime_policy != "acp":
+        raise ValueError("Unsupported Session Host backend or lifetime policy")
     _require_receiving_policy(cwd, policy_context)
+    sdk_token = ""
+    if backend == "sdk":
+        from .sdk_backend import connect_owner, require_sdk, validate_child_argv
+
+        require_sdk()
+        validate_child_argv(child_argv)
+        sdk_token = secrets.token_hex(32)
+        env = {**(env or {}), "COPILOT_CONNECTION_TOKEN": sdk_token}
     if ws_port is not None and (lifetime_policy != "acp" or not 0 <= ws_port <= 65535):
         raise ValueError("WebSocket requires ACP lifetime and a valid loopback port")
     # Resolve optional receiving support before creating a child. The compact
@@ -640,6 +670,19 @@ async def run_host(
     finally:
         if startup is not None:
             startup.close()
+    native_child = child
+    sdk_child = None
+    if backend == "sdk":
+        try:
+            sdk_child = await connect_owner(
+                native_child, token=sdk_token, cwd=cwd or os.getcwd(), session_id=session_id,
+            )
+            child = sdk_child
+        except BaseException:
+            if native_child.returncode is None:
+                native_child.kill()
+            await native_child.wait()
+            raise
     state_path = Path(state_file) if state_file is not None else None
     state: dict[str, Any] = {}
 
@@ -681,6 +724,7 @@ async def run_host(
             "port": bound_port,
             "protocol_version": proto.PROTOCOL_VERSION,
             "lifetime_policy": lifetime_policy,
+            "backend": backend,
             "automatic_idle_retirement": (
                 "legacy-disconnect" if lifetime_policy == "legacy" else "unavailable"
             ),
@@ -723,7 +767,10 @@ async def run_host(
         if child_task is not None:
             tasks.append(child_task)
         if child_task is None:
-            await server_task
+            # Server.close() cancels serve_forever; owner cancellation must still propagate.
+            await asyncio.wait((server_task,))
+            if not server_task.cancelled() or not host.closing:
+                await server_task
         else:
             done, _pending = await asyncio.wait(
                 (server_task, child_task), return_when=asyncio.FIRST_COMPLETED,
@@ -733,7 +780,6 @@ async def run_host(
     finally:
         for task in tasks:
             task.cancel()
-        await asyncio.gather(*tasks, return_exceptions=True)
         try:
             if websocket is not None:
                 await websocket.close(drain=True)
@@ -741,16 +787,24 @@ async def run_host(
             try:
                 await host.close()
             finally:
-                # Reap within the loop, even if a transport failed to close.
-                if child.returncode is None:
+                try:
+                    # The server task may await clients that only host.close() releases.
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                finally:
+                    # Reap within the loop, even if a transport failed to close.
                     try:
-                        child.kill()
-                    except ProcessLookupError:
-                        pass
-                    try:
-                        await child.wait()
-                    except ProcessLookupError:
-                        pass
+                        if sdk_child is not None:
+                            await sdk_child.close()
+                    finally:
+                        if native_child.returncode is None:
+                            try:
+                                native_child.kill()
+                            except ProcessLookupError:
+                                pass
+                            try:
+                                await native_child.wait()
+                            except ProcessLookupError:
+                                pass
 
 
 def _boot_id() -> str:
@@ -769,35 +823,6 @@ def _process_start_ticks(pid: int) -> str:
         except (OSError, IndexError):
             pass
     return ""
-
-
-def _write_host_state(
-    path: Path,
-    payload: dict,
-) -> bool:
-    """Atomically publish one mode-0600 Session Host authority record."""
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if os.name != "nt":
-        path.parent.chmod(0o700)
-        stat = path.parent.stat()
-        if stat.st_uid != os.geteuid() or stat.st_mode & 0o777 != 0o700:
-            raise PermissionError(
-                f"unsafe Session Host catalogue directory: {path.parent}"
-            )
-    fd, temp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
-    try:
-        if hasattr(os, "fchmod"):
-            try:
-                os.fchmod(fd, 0o600)
-            except OSError:
-                pass
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(payload, handle)
-        os.replace(temp, path)
-        return True
-    finally:
-        if os.path.exists(temp):
-            os.unlink(temp)
 
 
 def _require_receiving_policy(cwd: str | None, context: str | None) -> None:
@@ -823,6 +848,11 @@ def main(
         ("acp", "legacy", "cli") if headed_available else ("acp", "legacy")
     )
     if argv == ["--support-json"]:
+        sdk_available = False
+        if not legacy and find_spec("agent_remote_driver.session_host.sdk_backend") is not None:
+            from .sdk_backend import available
+
+            sdk_available = available()
         websocket_available = (
             not legacy
             and find_spec("agent_remote_driver.session_host.ws_transport") is not None
@@ -832,6 +862,7 @@ def main(
             "contract": "agent-remote-driver.session-host",
             "version": 1,
             "modes": ["headless"] + (["headed"] if headed_available else []),
+            "headless_backends": ["native-acp"] + (["sdk"] if sdk_available else []),
             "transports": ["tcp-frame"] + (["acp.v1"] if websocket_available else []),
             "protocol_version": proto.PROTOCOL_VERSION,
             "lifetime_policies": list(lifetime_policies),
@@ -866,6 +897,8 @@ def main(
     ap.add_argument("--repository-policy-context", default=None)
     ap.add_argument("--mode", choices=("headless", "headed") if headed_available else ("headless",),
                     default="headless")
+    ap.add_argument("--backend", choices=("native-acp",) if legacy else ("native-acp", "sdk"),
+                    default="native-acp")
     ap.add_argument("--attempt-directory", default=None)
     ap.add_argument(
         "--lifetime-policy", choices=lifetime_policies,
@@ -886,6 +919,8 @@ def main(
         "cli" if args.mode == "headed" else "legacy" if legacy else "acp"
     )
     if args.mode == "headed":
+        if args.backend != "native-acp":
+            ap.error("SDK backend selection is supported only for headless execution")
         if (
             lifetime_policy != "cli" or not args.attempt_directory
             or not args.state_file or not args.session_id
@@ -934,6 +969,7 @@ def main(
             policy_context=args.repository_policy_context,
             lifetime_policy=lifetime_policy,
             ws_port=args.ws_port,
+            **({"backend": args.backend} if args.backend != "native-acp" else {}),
         ))
     except KeyboardInterrupt:
         return 0

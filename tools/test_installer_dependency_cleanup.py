@@ -22,12 +22,13 @@ def cleanup_failure(monkeypatch, tmp_path):
 
     class TemporaryInputs:
         name = str(tmp_path / "retained")
+        _finalizer = SimpleNamespace(detach=lambda: None)
 
         def __init__(self, **kwargs):
             pass
 
-        def cleanup(self):
-            attempts.append(self.name)
+        def _rmtree(self, name, **_kwargs):
+            attempts.append(name)
             raise error
 
     monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", TemporaryInputs)
@@ -135,12 +136,13 @@ def test_normal_cleanup_preserves_success(monkeypatch, tmp_path, capsys):
 
     class TemporaryInputs:
         name = str(tmp_path / "retained")
+        _finalizer = SimpleNamespace(detach=lambda: None)
 
         def __init__(self, **kwargs):
             pass
 
-        def cleanup(self):
-            attempts.append(self.name)
+        def _rmtree(self, name, **_kwargs):
+            attempts.append(name)
 
     monkeypatch.setattr(policy.tempfile, "TemporaryDirectory", TemporaryInputs)
     install_transaction(monkeypatch)

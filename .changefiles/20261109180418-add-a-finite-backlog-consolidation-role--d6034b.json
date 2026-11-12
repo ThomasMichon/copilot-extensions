@@ -1,0 +1,9 @@
+{
+  "comment": "Add a finite backlog-consolidation role with explicit targets, requirement-preserving canonical receiving and retained authority boundaries",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

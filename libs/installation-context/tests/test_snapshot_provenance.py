@@ -14,7 +14,7 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from threading import Event
+from threading import Barrier, Event, Lock
 from types import SimpleNamespace
 from typing import Any, Literal, TypedDict, cast
 
@@ -4154,6 +4154,98 @@ def test_snapshot_content_digest_is_exact_and_cross_runner_deterministic(
     assert published["receipt"]["build"]["payloadSha256"] == expected
 
 
+def test_snapshot_path_hash_overlaps_bounded_file_reads_without_changing_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "snapshot"
+    root.mkdir()
+    for index in range(16):
+        (root / f"{index:02}.txt").write_bytes(f"payload {index}\n".encode())
+    expected = _snapshot_content_digest(root)
+    module = _load_python_module()
+    monkeypatch.setattr(module.os, "supports_dir_fd", set())
+    original_open, original_close = os.open, os.close
+    rendezvous, lock = Barrier(2, timeout=5), Lock()
+    opened: set[int] = set()
+    peak = 0
+
+    def overlapping_open(
+        path: str | os.PathLike[str], flags: int, *args: Any, **kwargs: Any,
+    ) -> int:
+        nonlocal peak
+        assert module._POWERSHELL_PATHS.get() is True
+        descriptor = original_open(path, flags, *args, **kwargs)
+        if Path(path).parent == root:
+            with lock:
+                opened.add(descriptor)
+                peak = max(peak, len(opened))
+            try:
+                rendezvous.wait()
+            except BaseException:
+                original_close(descriptor)
+                with lock:
+                    opened.remove(descriptor)
+                raise
+        return descriptor
+
+    def tracked_close(descriptor: int) -> None:
+        with lock:
+            original_close(descriptor)
+            opened.discard(descriptor)
+
+    monkeypatch.setattr(module.os, "open", overlapping_open)
+    monkeypatch.setattr(module.os, "close", tracked_close)
+    token = module._POWERSHELL_PATHS.set(True)
+    try:
+        assert module._snapshot_content_sha256(root) == expected
+    finally:
+        module._POWERSHELL_PATHS.reset(token)
+    assert 2 <= peak <= 8
+    assert not opened
+
+
+def test_snapshot_path_hash_joins_failed_file_reads_and_closes_descriptors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "snapshot"
+    root.mkdir()
+    for index in range(8):
+        (root / f"{index}.txt").write_bytes(b"payload\n")
+    module = _load_python_module()
+    monkeypatch.setattr(module.os, "supports_dir_fd", set())
+    original_open, original_close, original_read = os.open, os.close, os.read
+    opened: dict[int, Path] = {}
+    lock = Lock()
+
+    def tracked_open(
+        path: str | os.PathLike[str], flags: int, *args: Any, **kwargs: Any,
+    ) -> int:
+        descriptor = original_open(path, flags, *args, **kwargs)
+        if Path(path).parent == root:
+            with lock:
+                opened[descriptor] = Path(path)
+        return descriptor
+
+    def failing_read(descriptor: int, size: int) -> bytes:
+        with lock:
+            path = opened.get(descriptor)
+        if path == root / "0.txt":
+            raise OSError("test-owned snapshot read failure")
+        return original_read(descriptor, size)
+
+    def tracked_close(descriptor: int) -> None:
+        with lock:
+            original_close(descriptor)
+            opened.pop(descriptor, None)
+
+    monkeypatch.setattr(module.os, "open", tracked_open)
+    monkeypatch.setattr(module.os, "read", failing_read)
+    monkeypatch.setattr(module.os, "close", tracked_close)
+    with pytest.raises(module.InstallationContextError, match="test-owned snapshot read failure"):
+        module._snapshot_content_sha256(root)
+    assert not opened
+
+
 @pytest.mark.parametrize("runner", RUNNERS, ids=lambda runner: runner[0])
 def test_snapshot_content_mutation_invalidates_completion(
     runner: Runner,
@@ -4181,6 +4273,44 @@ def test_snapshot_content_mutation_invalidates_completion(
     assert replayed.returncode != 0
     assert "validated snapshot" in validated.stderr.lower()
     assert marker.read_bytes() == marker_bytes
+
+
+@pytest.mark.parametrize("target,observation", [("root", 1), ("root", 2), ("file", 1), ("file", 2)])
+def test_snapshot_path_hash_rejects_reparse_attributes_at_each_boundary(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, target: str, observation: int,
+) -> None:
+    root = tmp_path / "snapshot"
+    root.mkdir()
+    payload = root / "payload.txt"
+    payload.write_bytes(b"payload\n")
+    selected = root if target == "root" else payload
+    module = _load_python_module()
+    monkeypatch.setattr(module.os, "supports_dir_fd", set())
+    original_lstat = os.lstat
+    seen = 0
+
+    def reparse_stat(
+        path: str | os.PathLike[str], *args: Any, **kwargs: Any,
+    ) -> os.stat_result:
+        nonlocal seen
+        observed = original_lstat(path, *args, **kwargs)
+        if Path(path) != selected:
+            return observed
+        seen += 1
+        if seen != observation:
+            return observed
+        fields = {
+            name: getattr(observed, name) for name in (
+                "st_mode", "st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns",
+            )
+        }
+        fields["st_file_attributes"] = getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0x400)
+        return cast(os.stat_result, SimpleNamespace(**fields))
+
+    monkeypatch.setattr(module.os, "lstat", reparse_stat)
+    with pytest.raises(module.InstallationContextError):
+        module._snapshot_content_sha256(root)
+    assert seen >= observation
 
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX special-file behavior")

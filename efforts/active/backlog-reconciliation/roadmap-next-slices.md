@@ -12,6 +12,11 @@ confirmed missing patches, implementation assignments or an exhaustive
 execution order. The original issue, all refinements, canonical effort and
 actual custodian retain authority over each selected slice.
 
+**Continuing routing:** The [2026-11-09 correction](roadmap-current-qualification.md#2026-11-09-tracking-route-correction)
+routes historical #9323 to OPEN #9295 and historical #3002 to OPEN #2879.
+Both are tracking consolidations, not completed fixes or new hard prerequisites.
+The pinned twelve-row nomination below remains historical.
+
 **Reviewed publication:** #9408 merged on 2026-10-28 at 17:36:32 UTC
 (10:36:32 PDT) as `86a0145e35df097d1749dfc141fcee3b608d3dec`, after
 current-head approval and required green checks. Its framing-boundary

@@ -1,0 +1,9 @@
+{
+  "comment": "Add the portable topology-dispatcher skill, versioned assignment contract and offline coverage, placement and same-owner routing helper without fleet activation",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

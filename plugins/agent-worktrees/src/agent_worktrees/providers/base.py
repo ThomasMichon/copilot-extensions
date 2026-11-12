@@ -499,7 +499,8 @@ class PRProvider(Protocol):
         ...
 
     def get_diff(
-        self, repo: str, number: int, *, api_base: str = "", token: str | None = None
+        self, repo: str, number: int, *, api_base: str = "", token: str | None = None,
+        preserve_line_endings: bool = False,
     ) -> PRDiff:
         """Return the PR's current unified diff (the reviewer-side "read the
         current diff and surrounding context" primitive).
@@ -507,6 +508,8 @@ class PRProvider(Protocol):
         ``PRDiff.supported`` is False when a provider cannot produce a unified
         diff text -- callers treat that as "no diff available", never as "the
         PR has no changes".
+        ``preserve_line_endings`` selects strict UTF-8 byte-preserving capture
+        for explicit reads; its default retains legacy CLI text normalization.
         """
         ...
 
@@ -731,11 +734,16 @@ def run_cli(
     env: dict[str, str] | None = None,
     input_text: str | None = None,
     timeout: int = 120,
+    preserve_line_endings: bool = False,
+    max_stdout_bytes: int | None = None,
+    max_stderr_bytes: int = 8192,
 ) -> subprocess.CompletedProcess[str]:
     """Run a provider CLI, returning the completed process (never raises).
 
     Centralized so providers share one subprocess shape and tests can patch a
     single seam.  The caller inspects ``returncode``/``stdout``/``stderr``.
+    Explicit diff reads may select strict UTF-8 capture without newline
+    normalization; invalid UTF-8 then becomes a sanitized failure result.
 
     Three guards keep the "never raises" contract:
 
@@ -756,17 +764,22 @@ def run_cli(
     exe = shutil.which(args[0], path=full_env.get("PATH")) or args[0]
     resolved = [exe, *args[1:]]
     sanitized = _sanitize_cli_args(resolved)
+    if max_stdout_bytes is not None:
+        from .bounded_read_cli import run_bounded
+        return run_bounded(
+            resolved, sanitized, env=full_env, input_text=input_text, timeout=timeout,
+            max_stdout_bytes=max_stdout_bytes, max_stderr_bytes=max_stderr_bytes,
+        )
     try:
+        capture = (
+            {"input": input_text.encode("utf-8") if input_text is not None else None}
+            if preserve_line_endings else
+            {"text": True, "encoding": "utf-8", "errors": "replace", "input": input_text}
+        )
         result = subprocess.run(
             resolved,
             capture_output=True,
-            text=True,
-            # Provider CLIs speak UTF-8 (review bodies carry emoji); the locale
-            # code page (cp1252 on Windows) would fail to decode them and mangle
-            # a piped body. An undecodable byte is replaced, never fatal.
-            encoding="utf-8",
-            errors="replace",
-            input=input_text,
+            **capture,
             env=full_env,
             timeout=timeout,
             check=False,
@@ -774,8 +787,13 @@ def run_cli(
         return subprocess.CompletedProcess(
             args=sanitized,
             returncode=result.returncode,
-            stdout=result.stdout,
-            stderr=result.stderr,
+            stdout=result.stdout.decode("utf-8") if preserve_line_endings else result.stdout,
+            stderr=result.stderr.decode("utf-8", errors="replace") if preserve_line_endings else result.stderr,
+        )
+    except UnicodeError:
+        return subprocess.CompletedProcess(
+            args=sanitized, returncode=1, stdout="",
+            stderr="provider command returned invalid UTF-8 data",
         )
     except subprocess.TimeoutExpired:
         return subprocess.CompletedProcess(

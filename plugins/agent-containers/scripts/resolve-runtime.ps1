@@ -149,6 +149,27 @@ if ($_rtRoot) {
     return $null
   }
 
+  function _Rt-ReadSelector([string]$path) {
+    if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
+      try { return ([IO.File]::ReadAllText($path)).Trim() } catch { return '' }
+    }
+    $stream = $null
+    $reader = $null
+    try {
+      $share = [IO.FileShare]([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+      $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+      $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+      return $reader.ReadToEnd().Trim()
+    } catch {
+      $cause = $_.Exception
+      while ($cause.InnerException) { $cause = $cause.InnerException }
+      if ($cause -is [IO.FileNotFoundException] -or $cause -is [IO.DirectoryNotFoundException]) { return '' }
+      throw
+    } finally {
+      if ($reader) { $reader.Dispose() } elseif ($stream) { $stream.Dispose() }
+    }
+  }
+
   function _Rt-VersionKey([string]$ver) {
     $packageVersion = $ver -creplace '[+.]repair\.[0-9a-f]{32}$', ''
     if ($packageVersion -cmatch '^(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?(?:\+([A-Za-z0-9][A-Za-z0-9._-]*))?$') {
@@ -171,8 +192,7 @@ if ($_rtRoot) {
 
   # Tier 1: the `current-version` marker (source of truth; atomically written).
   _Rt-WriteBootTrace 'resolver-marker-start' 'current-version'
-  $_rtVer = ''
-  try { $_rtVer = ([IO.File]::ReadAllText((Join-Path $_rtRoot 'current-version'))).Trim() } catch {}
+  $_rtVer = _Rt-ReadSelector (Join-Path $_rtRoot 'current-version')
   if ($_rtVer) { $AgentRtPy = _Rt-TrySlot $_rtVer }
   if ($AgentRtPy) {
     $_rtTraceSource = 'current-version'
@@ -185,8 +205,7 @@ if ($_rtRoot) {
   # Tier 2: marker absent/stale -> the last version the installer activated.
   if (-not $AgentRtPy) {
     _Rt-WriteBootTrace 'resolver-marker-start' 'last-known-good'
-    $_rtLkg = ''
-    try { $_rtLkg = ([IO.File]::ReadAllText((Join-Path $_rtRoot 'last-known-good'))).Trim() } catch {}
+    $_rtLkg = _Rt-ReadSelector (Join-Path $_rtRoot 'last-known-good')
     if ($_rtLkg) { $AgentRtPy = _Rt-TrySlot $_rtLkg }
     if ($AgentRtPy) {
       $_rtTraceSource = 'last-known-good'
@@ -202,9 +221,12 @@ if ($_rtRoot) {
   # numeric run zero-padded so 0.1.0-dev185 > 0.1.0-dev50, not lexicographic).
   if (-not $AgentRtPy) {
     $_rtSlots = @(Get-ChildItem (Join-Path $_rtRoot 'versions') -Directory -ErrorAction SilentlyContinue)
-    $_rtSourceSlots = @($_rtSlots | Where-Object { $_.Name -cmatch '[+.]source\.' })
+    $_rtSourceSlots = @($_rtSlots | Where-Object {
+      $_.Name -cmatch '[+.]source\.|\.profile\.[0-9a-f]{16}(?:[.+]repair\.[0-9a-f]{32})?$'
+    })
     if ($_rtSourceSlots.Count) {
-      [Console]::Error.WriteLine('Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback')
+      $_rtKind = if (@($_rtSourceSlots | Where-Object { $_.Name -cmatch '[+.]source\.' }).Count) { 'source' } else { 'profile' }
+      [Console]::Error.WriteLine("Qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered $_rtKind fallback")
     } else {
         foreach ($_rtSlot in ($_rtSlots | Sort-Object { _Rt-VersionKey $_.Name })) {
           $p = _Rt-TrySlot $_rtSlot.Name

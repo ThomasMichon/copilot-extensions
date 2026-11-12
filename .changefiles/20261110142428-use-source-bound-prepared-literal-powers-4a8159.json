@@ -1,0 +1,9 @@
+{
+  "comment": "Use source-bound prepared literal PowerShell reads without a policy worker",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Separate pure relocation-plan refusal from strict action preflight without recovering original proof or invoking backend probes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

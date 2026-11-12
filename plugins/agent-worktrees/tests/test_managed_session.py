@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
 import io
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -16,6 +18,537 @@ import pytest
 from agent_procutil import no_window_kwargs
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
+WRITE_ALIASES = (
+    "str_replace", "str_replace_editor", "str_replace_based_edit_tool",
+    "write", "write_file", "insert", "new_file", "multi_edit",
+)
+PATCH_NATIVE_CASES = (
+    "patch-input", "patch-patch", "patch-command", "patch-json", "patch-freeform",
+    "patch-crlf", "patch-headers", "patch-union", "patch-batch", "patch-duplicates",
+    "patch-limit", "patch-field-bound", "patch-real-policy",
+)
+PATCH_PROTECTED_CASES = (
+    "patch-protected-input", "patch-protected-patch", "patch-protected-command",
+    "patch-protected-move", "patch-protected-direct", "patch-protected-structured",
+    "patch-protected-batch", "patch-protected-freeform", "patch-protected-commented-json",
+)
+NATIVE_WRITE_PHASES = {
+    "command-entry", "helper-loaded", "input-complete", "output-complete",
+    "script-entry", "membership-start", "membership-complete",
+    "native-proof-start", "policy-start", "prepared-event-json", "prepared-paths",
+    "prepared-marker-opened", "prepared-marker-json", "prepared-marker-decoded",
+    "json-entry", "json-utility-load", "json-utility-ready", "json-web-load",
+    "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize", "json-deserialized",
+    "command-complete", "admission-start", "admission-complete", "read-proof-start",
+    "read-proof-complete", "source-proof-start", "source-proof-complete", "policy-complete",
+    "runtime-start", "runtime-complete",
+}
+NATIVE_WRITE_PHASE_WRITER = (
+    "function Write-NativeWriteFixturePhase([string]$Name) { "
+    "[Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' + "
+    "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString("
+    "[Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name) }; "
+    "Write-NativeWriteFixturePhase 'command-entry'; "
+)
+NATIVE_WRITE_LOAD_WRITER = """
+function Write-NativeWriteFixtureCpuPhase([string]$Name) {
+    $process = [Diagnostics.Process]::GetCurrentProcess()
+    try { $cpu = $process.TotalProcessorTime.Ticks }
+    finally { $process.Dispose() }
+    [Console]::Error.WriteLine('NATIVE_WRITE_FIXTURE_PHASE ' +
+        [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds().ToString(
+            [Globalization.CultureInfo]::InvariantCulture) + ' ' + $Name +
+        ' cpu_ticks=' + $cpu.ToString([Globalization.CultureInfo]::InvariantCulture))
+}
+"""
+# Prior reader retained to exercise additive-declaration compatibility.
+NATIVE_READ_V1 = r"""
+function Test-NativePreToolSources([bool]$WriteProof = $false) {
+    try {
+        $policy = Read-PreToolJson ([IO.Path]::Combine($PSScriptRoot, 'hook-read-policy.json')) 4096
+        if ($policy.schema -isnot [string] -or $policy.schema -cne 'agent-worktrees.native-read-policy' -or
+            ($policy.version -isnot [int] -and $policy.version -isnot [long]) -or $policy.version -ne 1 -or
+            $policy.guards -isnot [Collections.IDictionary]) { return $false }
+        $names = @('statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'pr_supersede_guard.py')
+        if ($policy.guards.Count -ne $names.Count) { return $false }
+        $sources = $policy.guards
+        if ($WriteProof) {
+            $dependencies = $policy.nativeWriteDependencies
+            $extra = @('tool_call_forms.py', 'guarded_anchor_map.py')
+            if ($dependencies -isnot [Collections.IDictionary] -or $dependencies.Count -ne $extra.Count) {
+                return $false
+            }
+            $sources = @{}
+            foreach ($guard in $names) { $sources[$guard] = $policy.guards[$guard] }
+            foreach ($dependency in $extra) { $sources[$dependency] = $dependencies[$dependency] }
+            $names += $extra
+        }
+        foreach ($guard in $names) {
+            $expected = $sources[$guard]
+            if ($expected -isnot [string] -or $expected -cnotmatch '^[0-9a-f]{64}$') { return $false }
+            $path = [IO.Path]::Combine($PSScriptRoot, $guard)
+            $info = [IO.FileInfo]::new($path)
+            if (-not $info.Exists -or $info.Length -gt 131072 -or
+                ($info.Attributes -band [IO.FileAttributes]::ReparsePoint)) { return $false }
+            $text = [IO.File]::ReadAllText($path, $utf8).Replace("`r`n", "`n")
+            $hasher = [Security.Cryptography.SHA256]::Create()
+            try {
+                $actual = ([BitConverter]::ToString($hasher.ComputeHash($utf8.GetBytes($text)))).Replace('-', '').ToLowerInvariant()
+            } finally { $hasher.Dispose() }
+            if ($actual -cne $expected) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
+    if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
+        $Payload -isnot [Collections.IDictionary]) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) {
+        if (-not $PreparedMembership) { return $false }
+        $calls = Get-NativePreToolBatch $Payload['toolCalls']
+        if ($null -eq $calls) { return $false }
+        foreach ($call in $calls) {
+            if ($call['name'] -cnotin @('view', 'rg', 'glob')) { return $false }
+        }
+        return Test-NativePreToolSources -WriteProof $true
+    }
+    $name = $Payload.toolName
+    if (-not $name) { $name = $Payload.tool_name }
+    if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
+    return Test-NativePreToolSources
+}
+"""
+
+
+NATIVE_SHELL_READ_V1 = r"""
+function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
+    if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
+        $Payload -isnot [Collections.IDictionary]) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) {
+        if (-not $PreparedMembership) { return $false }
+        $calls = Get-NativePreToolBatch $Payload['toolCalls']
+        if ($null -eq $calls) { return $false }
+        foreach ($call in $calls) {
+            if ($call['name'] -cnotin @('view', 'rg', 'glob')) { return $false }
+        }
+        return Test-NativePreToolSources -WriteProof $true
+    }
+    $name = $Payload.toolName
+    if (-not $name) { $name = $Payload.tool_name }
+    if ($name -isnot [string]) { return $false }
+    if ($name -cin @('view', 'rg', 'glob')) { return Test-NativePreToolSources }
+    if (-not $PreparedMembership -or $name -cnotin @('powershell', 'pwsh')) { return $false }
+    if ($Payload.ContainsKey('toolArgs')) {
+        $args = $Payload['toolArgs']
+    } else {
+        $args = $Payload['tool_input']
+    }
+    $command = $args
+    if ($args -is [Collections.IDictionary]) { $command = $args['command'] }
+    if ($command -isnot [string] -or -not $command) {
+        return $false
+    }
+    return Test-NativePreToolSources -ShellCommand $command
+}
+"""
+
+
+def native_write_fixture_stderr(stderr):
+    phases, errors = [], []
+    for line in stderr.splitlines(keepends=True):
+        match = re.fullmatch(
+            rb"NATIVE_WRITE_FIXTURE_PHASE ([0-9]{1,20}) ([a-z-]+)"
+            rb"( cpu_ticks=[0-9]{1,20}( utility=[01] web=[01])?)?\r?\n", line,
+        )
+        if (
+            match and match[2].decode("ascii") in NATIVE_WRITE_PHASES
+            and (
+                not match[3]
+                or match[4] and match[2] in {b"json-web-load", b"json-resolver-type"}
+                or not match[4] and match[2] in {
+                    b"json-web-load", b"json-resolver-type", b"json-resolver-create",
+                    b"json-serializer-create", b"json-deserialize", b"json-deserialized",
+                }
+            )
+        ):
+            phases.append(
+                f"{match[1].decode('ascii')} {match[2].decode('ascii')}"
+                + (match[3].decode("ascii") if match[3] else "")
+            )
+        else:
+            errors.append(line)
+    return "\n".join(phases), b"".join(errors)
+
+
+def instrument_prepared_admission(source):
+    prepared_function = "function Test-PreparedManagedWorktreesSession {"
+    prefix, prepared = source.split(prepared_function, 1)
+    opened = "        $openedLength = $stream.Length"
+    assert prepared.count(opened) == 1
+    prepared = prepared.replace(
+        opened, "Write-NativeWriteFixturePhase 'prepared-marker-opened'\n" + opened, 1,
+    )
+    source = prefix + prepared_function + prepared
+    for boundary, statement in (
+        ("prepared-event-json", "        $event = ConvertFrom-ManagedWorktreesJson $Raw"),
+        ("json-entry", "    if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }"),
+        ("json-utility-load", "    if (-not $script:managedWorktreesUtilityAssembly) {"),
+        ("json-utility-ready", "    if ($PSVersionTable.PSVersion.Major -ge 6) {"),
+        ("json-web-load", "        [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')"),
+        ("json-resolver-type", "        $resolverType = $script:managedWorktreesUtilityAssembly.GetType("),
+        ("json-resolver-create", "        $resolver = [Activator]::CreateInstance($resolverType, $true)"),
+        ("json-serializer-create", "        $script:managedWorktreesJson = [System.Web.Script.Serialization.JavaScriptSerializer]::new($resolver)"),
+        ("json-deserialize", "    return ,($script:managedWorktreesJson.DeserializeObject($Text))"),
+        ("prepared-paths", "        $workspace = Get-PreparedWorktreesPath $cwd"),
+        ("prepared-marker-json", "        $value = ConvertFrom-ManagedWorktreesJson $text.TrimStart([char]0xfeff)"),
+        ("prepared-marker-decoded", "        $scope = $value['scope']"),
+    ):
+        assert statement in source
+        writer = (
+            "Write-NativeWriteFixtureCpuPhase"
+            if boundary in {
+                "json-web-load", "json-resolver-type", "json-resolver-create", "json-serializer-create", "json-deserialize",
+            } else
+            "Write-NativeWriteFixturePhase"
+        )
+        source = source.replace(statement, f"{writer} '{boundary}'\n" + statement, 1)
+    source = source.replace(
+        "    return ,($script:managedWorktreesJson.DeserializeObject($Text))",
+        "    $fixtureDecoded = $script:managedWorktreesJson.DeserializeObject($Text)\n"
+        "    Write-NativeWriteFixtureCpuPhase 'json-deserialized'\n"
+        "    return ,$fixtureDecoded", 1,
+    )
+    return NATIVE_WRITE_LOAD_WRITER + source
+
+
+def qualify_complete_native_entry(
+    scripts, entry, executable, event, env, workspace, capsys, *, literal_read=False,
+    command_key="command", literal_batch=False, argument_read=False,
+):
+    entry_started = time.monotonic()
+    shell_event = "toolCalls" not in event and event.get("toolName") == "powershell"
+    shell_proof = shell_event or literal_batch
+    source_names = (
+        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+        "pr_supersede_guard.py", "tool_call_forms.py", "guarded_anchor_map.py",
+    )
+    if shell_proof:
+        source_names += (
+            "hook_policy_process.py", "hook_client.py", "hook_pre_policy.py", "hook_pre_relevance.py",
+        )
+        for name in source_names:
+            if name not in {"pre-tool-hook.ps1", "managed-session.ps1"}:
+                assert (scripts / name).read_bytes() == (SCRIPTS / name).read_bytes()
+    source_digests = {
+        name: hashlib.sha256((SCRIPTS / name).read_bytes()).hexdigest() for name in source_names
+    }
+    original = {
+        name: (scripts / name).read_bytes() for name in ("pre-tool-hook.ps1", "managed-session.ps1")
+    }
+    contract = (scripts / "hook-read-policy.json").read_bytes()
+    assert contract == (SCRIPTS / "hook-read-policy.json").read_bytes()
+    instrumented = {name: content.decode("utf-8") for name, content in original.items()}
+    for filename, name, parameters, phase in (
+        ("managed-session.ps1", "Test-ManagedWorktreesSession",
+         "[Parameter(Mandatory = $true)][AllowEmptyString()][string]$Raw, [ref]$Prepared, [ref]$Facts",
+         "admission"),
+        ("pre-tool-hook.ps1", "Test-NativePreToolRead",
+         "[object]$Payload, [bool]$PreparedMembership = $false", "read-proof"),
+        ("pre-tool-hook.ps1", "Test-NativePreToolSources",
+         "[bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments, [object[]]$ShellBatch",
+         "source-proof"),
+        ("pre-tool-hook.ps1", "Invoke-PreToolPolicy",
+         "[string]$Python, [string]$Payload, [ref]$Diagnostic", "policy"),
+    ):
+        declaration = f"function {name}"
+        assert instrumented[filename].count(declaration) == 1
+        wrapper = (
+            f"function {name} {{\n    param({parameters})\n"
+            f"    Write-NativeWriteFixturePhase '{phase}-start'\n"
+            f"    try {{ return FixtureOriginal{name} @PSBoundParameters }}\n"
+            f"    finally {{ Write-NativeWriteFixturePhase '{phase}-complete' }}\n}}\n"
+        )
+        instrumented[filename] = instrumented[filename].replace(
+            declaration, wrapper + f"function FixtureOriginal{name}", 1,
+        )
+    script_entry = "$ErrorActionPreference = 'Stop'"
+    assert instrumented["pre-tool-hook.ps1"].count(script_entry) == 1
+    instrumented["pre-tool-hook.ps1"] = instrumented["pre-tool-hook.ps1"].replace(
+        script_entry, script_entry + "\nWrite-NativeWriteFixturePhase 'script-entry'", 1,
+    )
+    if shell_proof:
+        for phase, statement in (
+            ("runtime-start", "    try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }"),
+            ("runtime-complete", "    $script:preToolBoundary = 'policy worker execution'"),
+        ):
+            assert instrumented["pre-tool-hook.ps1"].count(statement) == 1
+            instrumented["pre-tool-hook.ps1"] = instrumented["pre-tool-hook.ps1"].replace(
+                statement, f"Write-NativeWriteFixturePhase '{phase}'\n" + statement, 1,
+            )
+    if literal_batch or argument_read:
+        source = instrumented["pre-tool-hook.ps1"]
+        declaration = "function Read-PreToolJson"
+        assert source.count(declaration) == 1
+        source = source.replace(declaration, """$global:batchPolicyReads = 0
+$global:batchSourceReads = 0
+function Read-PreToolJson([string]$Path, [int]$Limit) {
+    if ([IO.Path]::GetFileName($Path) -ceq 'hook-read-policy.json') { $global:batchPolicyReads++ }
+    return FixtureOriginalReadPreToolJson $Path $Limit
+}
+function FixtureOriginalReadPreToolJson""", 1)
+        statement = '            $text = [IO.File]::ReadAllText($path, $utf8).Replace("`r`n", "`n")'
+        assert source.count(statement) == 1
+        instrumented["pre-tool-hook.ps1"] = source.replace(
+            statement, "            $global:batchSourceReads++\n" + statement, 1,
+        )
+    writer = "$global:nativeEntryClock=[Diagnostics.Stopwatch]::StartNew(); " + NATIVE_WRITE_PHASE_WRITER.replace(
+        "[DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()", "$global:nativeEntryClock.ElapsedMilliseconds",
+    )
+    samples = []
+    target = workspace / "efforts" / "private.md"
+    carrier = None
+    if shell_event:
+        carrier = "toolArgs" if "toolArgs" in event else "tool_input"
+        command = f'Set-Content "{target}" -Value "leak"'
+        protected = {**event, carrier: command if isinstance(event[carrier], str) else {"command": command}}
+        if command_key != "command":
+            protected[carrier] = {**event[carrier], command_key: command}
+    else:
+        protected = {**event, "toolCalls": [
+            *event["toolCalls"], (
+                {"name": "powershell", "args": {"command": f'Set-Content "{target}" -Value "leak"'}}
+                if literal_batch else {"name": "edit", "args": {"path": "efforts/private.md"}}
+            ),
+        ]}
+
+    def report_progress(variant, state):
+        with capsys.disabled():
+            print(json.dumps({"complete_native_entry_progress": {
+                "shell": str(executable), "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
+                "argument_carrier": (
+                    carrier + (":raw" if isinstance(event[carrier], str) else ":object")
+                    if carrier else None
+                ),
+                "variant": variant, "state": state,
+                "command_key": command_key if shell_event else None,
+                "helper_seconds": time.monotonic() - entry_started,
+            }}), flush=True)
+
+    assert not target.exists()
+    try:
+        for variant, payload in (
+            ("phase-free-before", event), ("attributed-read", event),
+            ("phase-free-after", event), ("attributed-protected", protected),
+        ):
+            attributed = variant.startswith("attributed-")
+            native_literal = literal_read and variant == "attributed-read"
+            selected_contract = contract
+            if shell_proof and variant != "attributed-protected" and not native_literal:
+                prior = json.loads(contract)
+                if argument_read:
+                    prior.pop("nativeShellReadArguments", None)
+                    selected_contract = (json.dumps(prior, indent=2) + "\n").encode("utf-8")
+                elif any(key in prior for key in ("nativeShellReadCommands", "nativeShellReadDependencies")):
+                    prior.pop("nativeShellReadCommands", None)
+                    prior.pop("nativeShellReadDependencies", None)
+                    selected_contract = (json.dumps(prior, indent=2) + "\n").encode("utf-8")
+            (scripts / "hook-read-policy.json").write_bytes(selected_contract)
+            for name, content in original.items():
+                (scripts / name).write_bytes(
+                    instrumented[name].encode("utf-8") if attributed else content,
+                )
+            tail = (
+                "Write-NativeWriteFixturePhase 'command-complete'; " if attributed else ""
+            ) + (
+                "[Console]::Error.WriteLine('NATIVE_BATCH_PROOF_READS policy=' + $global:batchPolicyReads "
+                "+ ' sources=' + $global:batchSourceReads); " if (literal_batch or argument_read) and attributed else ""
+            ) + (
+                "[Console]::Error.WriteLine('NATIVE_ENTRY_BUILD ' + $PSVersionTable.PSVersion.ToString()); "
+                "[Console]::Error.WriteLine('NATIVE_ENTRY_MANAGEMENT ' + "
+                "[int][bool](Get-Module -Name Microsoft.PowerShell.Management))"
+            )
+            command_entry = entry
+            if attributed:
+                command_entry = entry.replace(
+                    "catch { [Console]::Error.WriteLine($e) }",
+                    "catch { [Console]::Error.WriteLine($_.ToString()); [Console]::Error.WriteLine($e) }",
+                )
+            command = (writer if attributed else "") + "try { " + command_entry + " } finally { " + tail + " }"
+            report_progress(variant, "command-start")
+            started = time.monotonic()
+            try:
+                result = subprocess.run(
+                    [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+                    input=json.dumps(payload, ensure_ascii=False, indent=2).encode("utf-8"),
+                    capture_output=True, timeout=10, cwd=workspace, env=env, **no_window_kwargs(),
+                )
+            except subprocess.TimeoutExpired as error:
+                raise AssertionError(
+                    f"{variant} exceeded the unchanged 10s child limit; "
+                    f"stdout={error.stdout!r}; stderr={error.stderr!r}"
+                ) from error
+            elapsed = time.monotonic() - started
+            builds, management, stderr, proof_reads = [], [], [], []
+            for line in result.stderr.splitlines(keepends=True):
+                match = re.fullmatch(rb"NATIVE_ENTRY_BUILD ([0-9][0-9A-Za-z.+-]{0,127})\r?\n", line)
+                module = re.fullmatch(rb"NATIVE_ENTRY_MANAGEMENT ([01])\r?\n", line)
+                reads = re.fullmatch(rb"NATIVE_BATCH_PROOF_READS policy=([0-9]+) sources=([0-9]+)\r?\n", line)
+                if match:
+                    builds.append(match[1].decode("ascii"))
+                elif module:
+                    management.append(int(module[1]))
+                elif reads:
+                    proof_reads.append({"policy": int(reads[1]), "sources": int(reads[2])})
+                else:
+                    stderr.append(line)
+            progress, errors = native_write_fixture_stderr(b"".join(stderr))
+            phases = [(int(tick), name) for tick, name in (line.split(" ", 1) for line in progress.splitlines())]
+            sample = {
+                "variant": variant, "outer_seconds": elapsed,
+                "shell_version": builds[0] if len(builds) == 1 else None,
+                "management_module_loaded": bool(management[0]) if len(management) == 1 else None,
+                "contract_sha256": hashlib.sha256(selected_contract).hexdigest(),
+                "literal_proof_present": "nativeShellReadCommands" in json.loads(selected_contract),
+                "argument_proof_present": "nativeShellReadArguments" in json.loads(selected_contract),
+                "batch_proof_reads": proof_reads,
+                "phases_monotonic_ms": phases,
+                "stdout": result.stdout.decode("utf-8", errors="backslashreplace"), "validated": False,
+            }
+            samples.append(sample)
+            assert result.returncode == 0 and not errors, (variant, result.stdout, result.stderr)
+            assert len(builds) == 1, (variant, builds, result.stderr)
+            assert len(management) == 1, (variant, management, result.stderr)
+            assert bool(management[0]) is (
+                shell_proof and not native_literal or variant == "attributed-protected"
+            ), (variant, sample)
+            assert [tick for tick, _ in phases] == sorted(tick for tick, _ in phases), phases
+            names = [name for _, name in phases]
+            if attributed:
+                required = [
+                    "command-entry", "script-entry", "admission-start", "admission-complete",
+                    "read-proof-start",
+                ]
+                if shell_proof and not native_literal:
+                    required += ["source-proof-start", "source-proof-complete"]
+                    required += [
+                        "read-proof-complete",
+                        "runtime-start", "runtime-complete",
+                        "policy-start", "policy-complete",
+                    ]
+                elif variant == "attributed-read":
+                    required += ["source-proof-start", "source-proof-complete", "read-proof-complete"]
+                else:
+                    required += [
+                        "read-proof-complete", "source-proof-start", "source-proof-complete",
+                        "policy-start", "policy-complete",
+                    ]
+                required += ["command-complete"]
+                assert names == required, (variant, phases)
+            else:
+                assert not phases, (variant, phases)
+            if (literal_batch or argument_read) and attributed:
+                declaration = json.loads(contract)
+                source_count = sum(len(declaration[field]) for field in (
+                    "guards", "nativeShellReadDependencies",
+                ))
+                if literal_batch:
+                    source_count += len(declaration["nativeWriteDependencies"])
+                assert proof_reads == [{
+                    "policy": 1, "sources": source_count if native_literal else 0,
+                }], (variant, proof_reads)
+            else:
+                assert not proof_reads
+            if variant == "attributed-protected":
+                assert json.loads(result.stdout)["permissionDecision"] == "deny", result.stdout
+            elif shell_proof and not native_literal:
+                assert json.loads(result.stdout) == {}, result.stdout
+            else:
+                assert result.stdout == b"", result.stdout
+            assert not target.exists()
+            assert (scripts / "hook-read-policy.json").read_bytes() == selected_contract
+            sample["validated"] = True
+            report_progress(variant, "validated")
+    finally:
+        for name, content in original.items():
+            (scripts / name).write_bytes(content)
+        (scripts / "hook-read-policy.json").write_bytes(contract)
+        with capsys.disabled():
+            print(json.dumps({"complete_native_entry": {
+                "shell": str(executable),
+                "executable_sha256": hashlib.sha256(Path(executable).read_bytes()).hexdigest(),
+                "registered_command_sha256": hashlib.sha256(entry.encode("utf-8")).hexdigest(),
+                "source_sha256": source_digests, "cell": bool(env.get("COPILOT_EXTENSIONS_CONTEXT")),
+                "event_kind": (
+                    "argument-shell-batch" if argument_read and literal_batch else
+                    "argument-shell-read" if argument_read else
+                    "literal-shell-batch" if literal_batch else
+                    "literal-shell-read" if literal_read else "shell-policy" if shell_event else "native-read"
+                ),
+                "command_key": command_key if shell_event else None,
+                "argument_carrier": (
+                    carrier + (":raw" if isinstance(event[carrier], str) else ":object")
+                    if carrier else None
+                ),
+                "samples": samples, "complete": len(samples) == 4 and all(sample["validated"] for sample in samples),
+                "limits": "Fixture timing only; phases include instrumentation. Outer-minus-last-phase includes startup/exit and marker/module-observer overhead, not isolated startup. Ordered controls are not subtractive attribution or a latency distribution.",
+            }}))
+
+
+@pytest.mark.parametrize("newline", [b"\n", b"\r\n"])
+def test_native_write_fixture_stderr_preserves_errors(newline):
+    phase = b"NATIVE_WRITE_FIXTURE_PHASE 123 command-entry" + newline
+    before = b"NATIVE_WRITE_FIXTURE_PHASE 124 json-web-load cpu_ticks=250000 utility=1 web=0" + newline
+    after = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-resolver-type cpu_ticks=500000 utility=1 web=1" + newline
+    minimal = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-web-load cpu_ticks=500000" + newline
+    deserialize = b"NATIVE_WRITE_FIXTURE_PHASE 126 json-deserialize cpu_ticks=625000" + newline
+    decoded = b"NATIVE_WRITE_FIXTURE_PHASE 127 json-deserialized cpu_ticks=750000" + newline
+    errors = (
+        newline + b"real error\xff" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 124 unknown-stage" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE invalid json-entry" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 127 json-web-load cpu_ticks=NaN utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 128 command-entry cpu_ticks=1 utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 129 json-web-load cpu_ticks=1 utility=1 web=2" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 130 json-web-load cpu_ticks=" + b"1" * 21 + b" utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 131 json-deserialize cpu_ticks=1 utility=1 web=0" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 132 command-entry cpu_ticks=1" + newline
+        + b"NATIVE_WRITE_FIXTURE_PHASE 125 json-entry"
+    )
+    assert native_write_fixture_stderr(phase + before + after + minimal + deserialize + decoded + errors) == (
+        "123 command-entry\n124 json-web-load cpu_ticks=250000 utility=1 web=0\n"
+        "126 json-resolver-type cpu_ticks=500000 utility=1 web=1\n"
+        "126 json-web-load cpu_ticks=500000\n"
+        "126 json-deserialize cpu_ticks=625000\n127 json-deserialized cpu_ticks=750000", errors,
+    )
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows timeout diagnostics")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+def test_native_write_fixture_stderr_survives_timeout(tmp_path, shell):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    command = (
+        NATIVE_WRITE_PHASE_WRITER + NATIVE_WRITE_LOAD_WRITER
+        + "Write-NativeWriteFixtureCpuPhase 'json-web-load'; "
+        + "Write-NativeWriteFixtureCpuPhase 'json-deserialize'; "
+        + "[Console]::Error.WriteLine('real fixture error'); [Threading.Thread]::Sleep(60000)"
+    )
+    with pytest.raises(subprocess.TimeoutExpired) as captured:
+        subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+            input=b"", capture_output=True, timeout=10, cwd=tmp_path, **no_window_kwargs(),
+        )
+    progress, errors = native_write_fixture_stderr(captured.value.stderr)
+    assert re.fullmatch(
+        r"[0-9]+ command-entry\n[0-9]+ json-web-load cpu_ticks=[0-9]+\n"
+        r"[0-9]+ json-deserialize cpu_ticks=[0-9]+", progress,
+    ), progress
+    assert errors == b"real fixture error\r\n"
+    assert captured.value.stdout == b""
 
 
 def load(name):
@@ -632,7 +1165,7 @@ def environment(home, anchor):
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared membership")
 @pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
 @pytest.mark.parametrize("linked", [False, True])
-def test_prepared_native_membership_reuses_original_association(tmp_path, monkeypatch, shell, linked):
+def test_prepared_native_membership_reuses_original_association(tmp_path, monkeypatch, capsys, shell, linked):
     executable = shutil.which(shell)
     if not executable:
         if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
@@ -648,21 +1181,1139 @@ def test_prepared_native_membership_reuses_original_association(tmp_path, monkey
     session.mkdir(parents=True)
     payload = {"sessionId": "prepared", "cwd": str(workspace), "toolName": "view"}
     assert module.admitted(payload, home=tmp_path)
+    admission = tmp_path / "managed-session.ps1"
+    admission.write_text(
+        instrument_prepared_admission((SCRIPTS / "managed-session.ps1").read_text(encoding="utf-8")),
+        encoding="utf-8",
+    )
     command = (
-        ". $env:PREPARED_MEMBERSHIP_SCRIPT; "
+        NATIVE_WRITE_PHASE_WRITER
+        + ". $env:PREPARED_MEMBERSHIP_SCRIPT; Write-NativeWriteFixturePhase 'helper-loaded'; "
         "function Get-ManagedWorktreesPython { throw 'interpreter lookup is forbidden' }; "
-        "$raw = [Console]::In.ReadToEnd(); "
-        "[Console]::Out.Write((Test-ManagedWorktreesSession -Raw $raw).ToString())"
+        "$raw = [Console]::In.ReadToEnd(); Write-NativeWriteFixturePhase 'input-complete'; "
+        "$admitted = Test-ManagedWorktreesSession -Raw $raw; Write-NativeWriteFixturePhase 'admission-complete'; "
+        "[Console]::Out.Write($admitted.ToString()); Write-NativeWriteFixturePhase 'output-complete'"
     )
     env = environment(tmp_path, workspace)
-    env["PREPARED_MEMBERSHIP_SCRIPT"] = str(SCRIPTS / "managed-session.ps1")
+    env["PREPARED_MEMBERSHIP_SCRIPT"] = str(admission)
+    started_ms = time.time_ns() // 1_000_000
+    try:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", command],
+            input=json.dumps(payload).encode("utf-8"), capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        progress, diagnostic = native_write_fixture_stderr(error.stderr or b"")
+        raise AssertionError(
+            f"{shell} membership exceeded the original 10s child limit; start_ms={started_ms}; "
+            f"phases={progress or 'no command entry'!r}; "
+            f"stdout={repr(error.stdout)[:512]}; stderr={repr(diagnostic)[:512]}"
+        ) from error
+    progress, result.stderr = native_write_fixture_stderr(result.stderr)
+    assert result.returncode == 0, result.stderr
+    assert not result.stderr, result.stderr
+    assert result.stdout == b"True", result.stdout + result.stderr
+    phase_names = [line.split(" ", 1)[1] for line in progress.splitlines()]
+    assert "prepared-marker-opened" in phase_names and "prepared-marker-json" in phase_names, progress
+    assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress
+    with capsys.disabled():
+        print(json.dumps({
+            "shell": shell, "linked": linked, "start_ms": started_ms,
+            "phases": progress.splitlines(),
+        }))
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered pre-tool consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["read", "write", "revoked", "cold-read", "cold-write", "read-batch"])
+def test_registered_pre_tool_entry_reuses_prepared_membership(tmp_path, monkeypatch, shell, case):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    module = load("managed_session")
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    anchor, registry = fixture_project(tmp_path)
+    workspace = fixture_linked_worktree(tmp_path, anchor)[0]
+    session = tmp_path / ".copilot" / "session-state" / "pre-tool"
+    session.mkdir(parents=True)
+    payload = {
+        "sessionId": "pre-tool", "cwd": str(workspace),
+        "toolName": "view" if case in {"read", "cold-read", "read-batch"} else "edit",
+        "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
+    }
+    if case == "read-batch":
+        payload["toolCalls"] = [{"name": "edit", "args": payload["toolArgs"]}]
+    if not case.startswith("cold-"):
+        assert module.admitted(payload, home=tmp_path)
+    plugin = tmp_path / "payload"
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True)
+    if case.startswith("cold-"):
+        shutil.copytree(SCRIPTS, scripts, dirs_exist_ok=True)
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+        "pr_supersede_guard.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    observed = tmp_path / "policy-input"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n",
+        encoding="utf-8",
+    )
+    shutil.copyfile(SCRIPTS / "hook_policy_process.py", scripts / "hook_policy_process_original.py")
+    (scripts / "hook_policy_process.py").write_text(
+        "import base64,json,sys\nfrom pathlib import Path\n"
+        + "# Re-export the real admission helper's caller-lifetime watcher without executing policy on import.\n"
+        + "from hook_policy_process_original import _watch_caller\n"
+        + "if __name__ == '__main__':\n"
+        + f"    with Path({str(observed)!r}).open('xb') as output: output.write(base64.b64decode(sys.stdin.readline()))\n"
+        + "    print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+        encoding="utf-8",
+    )
+    if case == "revoked":
+        (registry / "projects.yaml").write_text("projects: {}\n", encoding="utf-8")
+    env = environment(tmp_path, workspace)
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin)
+    env.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    raw = json.dumps(payload, ensure_ascii=False, indent=2)
+    if case.startswith("cold-"):
+        assert not (registry / "cache").exists()
     result = subprocess.run(
-        [executable, "-NoProfile", "-NonInteractive", "-Command", command],
-        input=json.dumps(payload), text=True, capture_output=True, timeout=10,
+        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+        input=raw.encode("utf-8"), capture_output=True, timeout=10,
         cwd=workspace, env=env, **no_window_kwargs(),
     )
     assert result.returncode == 0, result.stderr
-    assert result.stdout == "True", result.stdout + result.stderr
+    assert result.stderr == b""
+    if case.startswith("cold-"):
+        assert (session / "agent-worktrees" / "managed-session.json").is_file()
+    if case in {"write", "cold-write", "read-batch"}:
+        assert observed.read_bytes() == raw.encode("utf-8")
+        assert json.loads(result.stdout) == {
+            "permissionDecision": "deny", "permissionDecisionReason": "fixture policy",
+        }
+    else:
+        assert not observed.exists()
+        assert result.stdout == b""
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered prepared-cell pre-tool consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", ["view", "rg", "glob", "guard-drift", "incomplete", "receipt", "write", "read-batch"])
+def test_registered_prepared_cell_membership_read_requires_complete_native_proof(tmp_path, monkeypatch, shell, case):
+    from types import SimpleNamespace
+    import test_registry_paths as fixtures
+
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
+        pytest.skip(f"{shell} is unavailable")
+    native_run = subprocess.run
+    monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+        run=lambda *args, **kwargs: native_run(
+            *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
+        ),
+    ))
+    anchor, legacy = fixture_project(tmp_path)
+    workspace = fixture_linked_worktree(tmp_path, anchor)[0]
+    plugin = fixtures._payload(tmp_path, "selected")
+    scripts = plugin / "scripts"
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "managed_session.py",
+        "execution_platform.py", "managed_project_identity.py", "remote_identity.py",
+        "guarded_anchor_map.py", "hook_policy_process.py", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py", "pr_supersede_guard.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    context, registry = fixtures._stamp(
+        tmp_path / "durable", plugin, marketplace="selected", repository="example/selected",
+    )
+    for name in ("projects.yaml", "repos.yaml"):
+        (registry / name).write_text((legacy / name).read_text())
+    fixtures._select(monkeypatch, context, plugin)
+    session = tmp_path / ".copilot" / "session-state" / "pre-cell"
+    session.mkdir(parents=True)
+    event = {
+        "sessionId": "pre-cell", "cwd": str(workspace),
+        "toolName": case if case in {"view", "rg", "glob"} else "edit" if case == "write" else "view",
+        "toolArgs": {"path": "non-ascii-\u00e9.txt", "text": "quote'\"\\\n\t"},
+    }
+    if case == "read-batch":
+        event["toolCalls"] = [{"name": "edit", "args": event["toolArgs"]}]
+    assert load("managed_session").admitted(event, home=tmp_path)
+    marker = session / "agent-worktrees" / "managed-session.json"
+    if case == "incomplete":
+        value = json.loads(marker.read_text())
+        value.pop("installation")
+        marker.write_text(json.dumps(value))
+    elif case == "receipt":
+        context.write_text(context.read_text() + "\n")
+    elif case == "guard-drift":
+        with (scripts / "anchor_write_guard.py").open("a", encoding="utf-8") as output:
+            output.write("\n# changed guard implementation\n")
+    membership = tmp_path / "membership-interpreter"
+    validation = tmp_path / "context-validator"
+    policy = tmp_path / "policy-input"
+    with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+        output.write(
+            "\nfunction Get-ManagedWorktreesPython { "
+            + "[IO.File]::WriteAllText('" + str(membership).replace("'", "''") + "', 'called'); "
+            + "return '" + sys.executable.replace("'", "''") + "' }\n"
+        )
+    (scripts / "installation-context" / "installation-context.ps1").write_text(
+        "[IO.File]::WriteAllText('" + str(validation).replace("'", "''") + "', 'called')\n"
+        + "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
+        + "$global:LASTEXITCODE = 0\n",
+        encoding="utf-8",
+    )
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    shutil.copyfile(scripts / "hook_policy_process.py", scripts / "hook_policy_process_original.py")
+    (scripts / "hook_policy_process.py").write_text(
+        "import base64,json,sys\nfrom pathlib import Path\n"
+        + "from hook_policy_process_original import _watch_caller\n"
+        + "if __name__ == '__main__':\n"
+        + f"    Path({str(policy)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
+        + "    print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+        encoding="utf-8",
+    )
+    flag = tmp_path / "default-stop.json"
+    flag.write_text('{"active":true}', encoding="utf-8")
+    env = environment(tmp_path, workspace)
+    env.update(
+        COPILOT_EXTENSIONS_CONTEXT=str(context), COPILOT_PLUGIN_ROOT=str(plugin),
+        AGENT_WORKTREES_PAYLOAD_ROOT=str(plugin), PRETOOL_KILLSWITCH_STATE_FILE=str(flag),
+    )
+    env.pop("AGENT_WORKTREES_PRE_TOOL_IMPLEMENTATION", None)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
+    result = native_run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command", entry["powershell"]],
+        input=raw, capture_output=True, timeout=10,
+        cwd=workspace, env=env, **no_window_kwargs(),
+    )
+    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    assert membership.exists() is (case in {"incomplete", "receipt"})
+    policy_required = case not in {"view", "rg", "glob"}
+    assert validation.exists() is policy_required, (result.stdout, result.stderr)
+    assert policy.exists() is policy_required
+    if policy_required:
+        assert policy.read_bytes() == raw
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    else:
+        assert result.stdout == b""
+    assert not (legacy / "cache").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows registered file-local write consumer")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "ordinary", "create", "path-alias", "json-args", "personal-state", "anchor-cwd",
+    "anchor-target", "foreign", "nested", "batch", "structured", "drive-relative",
+    "missing-map", "partial-map", "wrong-scope", "array-schema", "oversized-config",
+    "guard-drift", "reader-drift", "forms-drift", "missing-dependencies", "git-pointer-aba",
+    "delegated", "invalid-elevation", "noncanonical-map", "dot-segment-map", "real-policy", "old-admission",
+    "cell-ordinary", "cell-create", "cell-personal-state", "cell-guard-drift",
+    "personal-state-cr", "personal-state-crlf", "personal-state-dot-prefix",
+    "personal-state-dot-file", "personal-state-dot-assignments",
+    "personal-state-control-space", "ordinary-nested-dot-file",
+    "ordinary-unrelated-inventory",
+    "batch-mixed", "batch-json-args", "batch-protected", "batch-foreign",
+    "batch-multiple-targets", "batch-structured", "batch-missing-args",
+    "batch-null-args", "batch-extra-key", "batch-unknown", "batch-empty",
+    "batch-not-list", "batch-limit", "batch-oversized", "batch-read-only",
+    "batch-working-directory", "batch-real-policy", "batch-malformed",
+    "batch-shadowed-keys",
+    "batch-read-only-mixed", "cell-batch-read-only",
+    "batch-read-only-limit", "batch-read-only-overflow", "batch-read-only-protected",
+    "batch-read-only-unknown", "batch-read-only-shell", "batch-read-only-malformed",
+    "batch-read-only-extra-key", "batch-read-only-missing-dependencies",
+    "batch-read-only-forms-drift", "batch-read-only-old-admission",
+    "batch-read-only-working-directory", "batch-read-only-real-policy",
+    "cell-batch-read-only-real-policy",
+    "batch-read-only-attribution", "cell-batch-read-only-attribution",
+    "shell-entry-attribution", "cell-shell-entry-attribution",
+    "literal-shell-entry-attribution", "cell-literal-shell-entry-attribution",
+    "literal-shell-head", "cell-literal-shell-head",
+    "literal-shell-args", "literal-shell-json", "literal-shell-ordinal",
+    "literal-shell-old-proof", "cell-literal-shell-old-proof",
+    "literal-shell-invalid-proof", "literal-shell-relevance-drift",
+    "literal-shell-unprepared", "literal-shell-batch", "literal-shell-prior-reader",
+    "literal-shell-key-command", "literal-shell-key-name",
+    "literal-shell-key-args", "literal-shell-key-collision",
+    "literal-shell-carrier-raw-attribution", "cell-literal-shell-carrier-raw-attribution",
+    "literal-shell-carrier-input-attribution", "cell-literal-shell-carrier-input-attribution",
+    "literal-shell-carrier-input-raw-attribution", "cell-literal-shell-carrier-input-raw-attribution",
+    "literal-shell-carrier-primary-null", "literal-shell-carrier-primary-invalid",
+    "literal-shell-carrier-primary-empty", "literal-shell-carrier-primary-safe",
+    "literal-shell-carrier-primary-protected", "literal-shell-carrier-input-json",
+    "literal-shell-carrier-input-batch",
+    "literal-shell-selection-cmd-attribution", "cell-literal-shell-selection-cmd-attribution",
+    "literal-shell-selection-input-attribution", "cell-literal-shell-selection-input-attribution",
+    "literal-shell-selection-script", "literal-shell-selection-commandLine",
+    "literal-shell-selection-commandline", "literal-shell-selection-skip-null",
+    "literal-shell-selection-skip-invalid", "literal-shell-selection-protected-first",
+    "literal-shell-selection-whitespace-first", "literal-shell-selection-shadowed-members",
+    "literal-shell-selection-case", "literal-shell-selection-json", "literal-shell-selection-batch",
+    "literal-shell-selection-old-proof", "literal-shell-selection-old-proof-command",
+    "literal-shell-selection-invalid-empty", "literal-shell-selection-invalid-type",
+    "literal-shell-selection-invalid-member", "literal-shell-selection-invalid-duplicate",
+    "literal-shell-selection-invalid-overflow",
+    "literal-shell-selection-prior-reader", "literal-shell-selection-prior-reader-command",
+    "literal-batch-all-shell", "cell-literal-batch-all-shell",
+    "literal-batch-mixed", "cell-literal-batch-mixed",
+    "literal-batch-single", "literal-batch-limit", "literal-batch-shadowed-members",
+    "literal-batch-protected-first", "literal-batch-protected-middle", "literal-batch-protected-last",
+    "literal-batch-args", "literal-batch-json", "literal-batch-missing-args",
+    "literal-batch-null-args", "literal-batch-invalid-args", "literal-batch-whitespace",
+    "literal-batch-case", "literal-batch-ordinal", "literal-batch-extra-key",
+    "literal-batch-shadowed-keys", "literal-batch-unknown", "literal-batch-name-case",
+    "literal-batch-empty", "literal-batch-overflow", "literal-batch-not-list",
+    "literal-batch-malformed", "literal-batch-prior-reader",
+    "literal-batch-old-proof", "literal-batch-old-proof-command",
+    "literal-batch-invalid-proof", "literal-batch-missing-dependencies",
+    "literal-batch-guard-drift", "literal-batch-forms-drift", "literal-batch-relevance-drift",
+    "literal-batch-unprepared",
+    "argument-shell-attribution", "cell-argument-shell-attribution",
+    "argument-batch-attribution", "cell-argument-batch-attribution",
+    "cell-batch-mixed", "cell-batch-protected",
+    "structured-files", "structured-changes", "structured-only", "structured-json",
+    "structured-aliases", "structured-duplicates", "structured-limit",
+    "structured-protected", "structured-foreign", "structured-nested",
+    "structured-oversized", "structured-target-overflow", "structured-incomplete",
+    "structured-invalid-list", "structured-nested-entries", "structured-patch",
+    "batch-structured-safe", "cell-structured", "cell-batch-structured-safe",
+    "structured-real-policy", "cell-structured-real-policy",
+    "batch-target-limit", "batch-target-overflow",
+    *[f"write-name-{name}" for name in WRITE_ALIASES],
+    *[f"protected-write-name-{name}" for name in WRITE_ALIASES],
+    "write-name-json", "write-name-structured", "write-name-batch",
+    "protected-write-name-batch", "write-name-real-policy",
+    "cell-write-name-real-policy", "cell-write-name-structured",
+    "cell-protected-write-name-multi_edit",
+    *PATCH_NATIVE_CASES, *PATCH_PROTECTED_CASES,
+    "patch-invalid-field", "patch-targetless", "patch-fragment", "patch-malformed-json",
+    "patch-unknown-header", "patch-overflow", "patch-foreign", "patch-nested", "patch-anchor",
+    "patch-field-oversized", "patch-union-overflow", "patch-json-nonobject",
+    "cell-patch-union", "cell-patch-protected-move", "cell-patch-real-policy",
+])
+def test_registered_file_local_write_reuses_original_guard_facts(tmp_path, monkeypatch, capsys, shell, case):
+    from agent_worktrees import guarded_anchors
+
+    cell = case.startswith("cell-")
+    if cell:
+        case = case.removeprefix("cell-")
+    real_policy = case in {
+        "real-policy", "batch-real-policy", "structured-real-policy", "write-name-real-policy",
+        "patch-real-policy", "batch-read-only-real-policy",
+        "batch-read-only-attribution",
+        "shell-entry-attribution", "literal-shell-entry-attribution",
+        "literal-batch-all-shell", "literal-batch-mixed",
+        "argument-shell-attribution", "argument-batch-attribution",
+    } or case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
+    executable = shutil.which(shell)
+    if not executable:
+        if os.environ.get("AGENT_WORKTREES_REQUIRE_NATIVE_MEMBERSHIP") == "1":
+            pytest.fail(f"{shell} is required")
+        pytest.skip(f"{shell} is unavailable")
+    anchor, registry = fixture_project(tmp_path)
+    workspace, admin = fixture_linked_worktree(tmp_path, anchor)
+    if case == "anchor-cwd":
+        workspace = anchor
+    config = workspace / ".agent-worktrees" / "config.yaml"
+    config.parent.mkdir()
+    config.write_text("stateless: false\n" if case == "anchor-cwd" else "stateless: true\n", encoding="utf-8")
+    if case in {"personal-state-cr", "personal-state-crlf"}:
+        newline = "\r" if case == "personal-state-cr" else "\r\n"
+        config.write_bytes(f"default_branch: main{newline}stateless: true{newline}".encode("utf-8"))
+    session = tmp_path / ".copilot" / "session-state" / "pre-write"
+    session.mkdir(parents=True)
+    event = {
+        "sessionId": "pre-write", "cwd": str(workspace), "toolName": "edit",
+        "toolArgs": {
+            "path": {
+                "personal-state-dot-prefix": ".efforts/private.md",
+                "personal-state-dot-file": ".ownership.yml",
+                "personal-state-dot-assignments": "..dev-assignments.yml",
+                "ordinary-nested-dot-file": "source/.ownership.yml",
+            }.get(case, "efforts/private.md" if case.startswith("personal-state") else "source-\u00e9.py"),
+            "text": "quote'\"\\\n\t",
+        },
+    }
+    if case == "create":
+        event["toolName"] = "create"
+    elif case == "path-alias":
+        event["toolArgs"]["file_path"] = event["toolArgs"].pop("path")
+    elif case == "json-args":
+        event["toolArgs"] = json.dumps(event["toolArgs"])
+    elif case == "anchor-target":
+        event["toolArgs"]["path"] = str(anchor / "source.py")
+    elif case == "foreign":
+        event["toolArgs"]["path"] = str(fixture_checkout(tmp_path / "foreign") / "source.py")
+    elif case == "nested":
+        event["toolArgs"]["path"] = str(fixture_checkout(workspace / "nested") / "source.py")
+    elif case == "batch":
+        event["toolCalls"] = [{"name": "edit", "args": event["toolArgs"]}]
+    elif case == "structured":
+        event["toolArgs"]["edits"] = [{"path": "other.py"}]
+    elif case.startswith("structured-"):
+        args = event["toolArgs"]
+        args["edits"] = [{"path": "other.py"}]
+        if case in {"structured-files", "structured-changes"}:
+            args[case.removeprefix("structured-")] = args.pop("edits")
+        elif case == "structured-only":
+            args.pop("path")
+        elif case == "structured-json":
+            event["toolArgs"] = json.dumps(args)
+        elif case == "structured-aliases":
+            args["edits"] = [{"file_path": "one.py", "targetFile": "two.py"}]
+            args["files"] = [{"fileName": "three.py"}]
+            args["changes"] = [{"filename": "four.py", "target_file": "five.py"}]
+        elif case == "structured-duplicates":
+            args["edits"] = [{"path": "other.py"}] * 128
+        elif case == "structured-limit":
+            args["edits"] = [{"path": f"other-{index}.py"} for index in range(127)]
+        elif case == "structured-protected":
+            args["edits"].append({"filePath": "efforts/private.md"})
+        elif case == "structured-foreign":
+            args["edits"].append({"path": str(fixture_checkout(tmp_path / "foreign") / "source.py")})
+        elif case == "structured-nested":
+            args["edits"].append({"path": str(fixture_checkout(workspace / "nested") / "source.py")})
+        elif case in {"structured-oversized", "structured-target-overflow"}:
+            args["edits"] = [
+                {"path": f"other-{index}.py"}
+                for index in range(129 if case == "structured-oversized" else 128)
+            ]
+        elif case == "structured-incomplete":
+            args["edits"].append({})
+        elif case == "structured-invalid-list":
+            args["edits"] = {"path": "efforts/private.md"}
+        elif case == "structured-nested-entries":
+            args["edits"].append({"path": "last.py", "files": [{"path": "efforts/private.md"}]})
+        elif case == "structured-patch":
+            event["toolName"] = "apply_patch"
+            args["input"] = "*** Update File: other.py\n*** Move to: final.py\n"
+    elif case == "drive-relative":
+        event["toolArgs"]["path"] = workspace.drive + "source.py"
+    if "write-name-" in case:
+        alias = case.removeprefix("protected-").removeprefix("write-name-")
+        event["toolName"] = alias if alias in WRITE_ALIASES else "multi_edit"
+        if case.startswith("protected-"):
+            event["toolArgs"]["path"] = "efforts/private.md"
+        if alias == "json":
+            event["toolArgs"] = json.dumps(event["toolArgs"])
+        elif alias in {"structured", "real-policy"}:
+            event["toolArgs"] = {"files": [{"filePath": "one.py"}, {"targetFile": "two.py"}]}
+        elif alias == "batch":
+            event["toolName"] = "view"
+            event["toolCalls"] = [
+                {"name": "write", "args": {"path": "one.py"}},
+                {"name": "rg", "args": {"pattern": "read"}},
+                {"name": "multi_edit", "args": {"changes": [{"file_path": "two.py"}]}},
+                {"name": "str_replace", "args": json.dumps(event["toolArgs"])},
+            ]
+    if case.startswith("patch-"):
+        event["toolName"] = "apply_patch"
+
+        def patch(*headers):
+            return "*** Begin Patch\n" + "".join(f"*** {header}\n" for header in headers) + "*** End Patch\n"
+
+        args = {"input": patch("Update File: source-\u00e9.py")}
+        event["toolArgs"] = args
+        if case in {"patch-patch", "patch-command"}:
+            args[case.removeprefix("patch-")] = args.pop("input")
+        elif case == "patch-json":
+            event["toolArgs"] = json.dumps(args)
+        elif case == "patch-json-nonobject":
+            event["toolArgs"] = json.dumps(["not an argument object"])
+        elif case == "patch-freeform":
+            event["toolArgs"] = args["input"]
+        elif case == "patch-crlf":
+            args["input"] = args["input"].replace("\n", "\r\n")
+        elif case == "patch-headers":
+            args["input"] = patch("Add File: one.py", "Update File: two.py", "Move to: three.py", "Delete File: four.py")
+        elif case in {"patch-union", "patch-real-policy"}:
+            args.update(
+                patch=patch("Add File: two.py"), command=patch("Delete File: three.py"),
+                path="four.py", edits=[{"file_path": "five.py"}],
+                files=[{"targetFile": "six.py"}], changes=[{"filename": "seven.py"}],
+            )
+        elif case in {"patch-batch", "patch-protected-batch"}:
+            event.update(toolName="view", toolArgs={"path": "ignored.py"}, toolCalls=[
+                {"name": "write", "args": {"path": "one.py"}},
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "apply_patch", "args": args},
+                {"name": "apply_patch", "args": patch(
+                    "Add File: efforts/private.md" if case == "patch-protected-batch" else "Add File: last.py",
+                )},
+            ])
+        elif case.startswith("patch-protected-"):
+            field = case.removeprefix("patch-protected-")
+            if field in {"input", "patch", "command"}:
+                args[field] = patch("Update File: safe.py", "Delete File: efforts/private.md")
+            elif field == "move":
+                args["input"] = patch("Update File: safe.py", "Move to: efforts/private.md")
+            elif field == "direct":
+                args["targetFile"] = "efforts/private.md"
+            elif field == "freeform":
+                event["toolArgs"] = patch("Update File: safe.py", "Move to: efforts/private.md")
+            elif field == "commented-json":
+                event["toolArgs"] = (
+                    '{/*\n*** Delete File: efforts/private.md\n*/"input":'
+                    + json.dumps(args["input"]) + "}"
+                )
+            else:
+                args["changes"] = [{"filePath": "safe.py"}, {"path": "efforts/private.md"}]
+        elif case == "patch-duplicates":
+            args["input"] = patch(*(["Add File: same.py"] * 129))
+        elif case in {"patch-limit", "patch-overflow"}:
+            args["input"] = patch(*(
+                f"Add File: source-{index}.py" for index in range(129 if case == "patch-overflow" else 128)
+            ))
+        elif case == "patch-union-overflow":
+            args["input"] = patch(*(f"Add File: source-{index}.py" for index in range(127)))
+            args.update(path="direct.py", changes=[{"path": "structured.py"}])
+        elif case in {"patch-field-bound", "patch-field-oversized"}:
+            size = 131073 if case == "patch-field-oversized" else 131072
+            prefix = "*** Begin Patch\n*** Update File: safe.py\n+"
+            suffix = "\n*** End Patch\n"
+            args["input"] = prefix + "x" * (size - len(prefix) - len(suffix)) + suffix
+        elif case == "patch-invalid-field":
+            args["patch"] = ["*** Delete File: efforts/private.md"]
+        elif case == "patch-targetless":
+            args["input"] = "*** Begin Patch\n*** End Patch\n"
+        elif case == "patch-fragment":
+            args["input"] = "*** Update File: source.py\n"
+        elif case == "patch-malformed-json":
+            event["toolArgs"] = '{"input":'
+        elif case == "patch-unknown-header":
+            args["input"] = "*** Begin Patch\n*** Rename File: source.py\n*** End Patch\n"
+        elif case == "patch-foreign":
+            args["input"] = patch(f"Update File: {fixture_checkout(tmp_path / 'foreign') / 'source.py'}")
+        elif case == "patch-nested":
+            args["input"] = patch(f"Update File: {fixture_checkout(workspace / 'nested') / 'source.py'}")
+        elif case == "patch-anchor":
+            args["input"] = patch(f"Update File: {anchor / 'source.py'}")
+    if case.startswith("batch-"):
+        first = {"name": "create", "args": event["toolArgs"]}
+        last = {"name": "edit", "args": {"path": "second.py"}}
+        event["toolCalls"] = [first, {"name": "view", "args": {"path": "read.txt"}}, last]
+        # A top-level read must not hide a later write or supply its arguments.
+        event["toolName"] = "view"
+        event["toolArgs"] = {"path": "ignored.py"}
+        event["tool_input"] = {"path": "efforts/ignored.md"}
+        if case == "batch-json-args":
+            last["args"] = json.dumps(last["args"])
+        elif case == "batch-protected":
+            last["args"]["path"] = "efforts/private.md"
+        elif case == "batch-foreign":
+            last["args"]["path"] = str(fixture_checkout(tmp_path / "foreign") / "source.py")
+        elif case == "batch-multiple-targets":
+            last["args"]["file_path"] = "efforts/private.md"
+        elif case == "batch-structured":
+            last["args"]["edits"] = [{"path": "efforts/private.md"}]
+        elif case == "batch-structured-safe":
+            last["args"] = {"files": [{"path": "second.py"}, {"target_file": "third.py"}]}
+        elif case in {"batch-target-limit", "batch-target-overflow"}:
+            last["args"] = {"files": [
+                {"path": f"other-{index}.py"}
+                for index in range(127 if case == "batch-target-limit" else 128)
+            ]}
+        elif case == "batch-missing-args":
+            last.pop("args")
+        elif case == "batch-null-args":
+            last["args"] = None
+        elif case == "batch-extra-key":
+            last["cwd"] = str(workspace)
+        elif case == "batch-shadowed-keys":
+            last.update(Keys=[], cwd=str(workspace))
+        elif case == "batch-unknown":
+            last["name"] = "unknown"
+        elif case == "batch-malformed":
+            event["toolCalls"][-1] = None
+        elif case == "batch-empty":
+            event["toolCalls"] = []
+        elif case == "batch-not-list":
+            event["toolCalls"] = {"name": "edit", "args": {"path": "source.py"}}
+        elif case in {"batch-limit", "batch-oversized"}:
+            event["toolCalls"] = [first] * (128 if case == "batch-limit" else 129)
+        elif case == "batch-read-only":
+            event["toolCalls"] = [{"name": "view", "args": {}}]
+        elif case == "batch-working-directory":
+            event["workingDirectory"] = event.pop("cwd")
+        if case.startswith("batch-read-only-"):
+            event["toolName"] = "powershell"
+            event["toolArgs"] = {"command": "Set-Content efforts/private.md fixture"}
+            event["toolCalls"] = [
+                {"name": "view", "args": {"path": "efforts/private.md", "command": "write-looking data"}},
+                {"name": "rg", "args": json.dumps({"pattern": "quoted'\"\\text"})},
+                {"name": "glob", "args": None},
+            ]
+            if case in {"batch-read-only-limit", "batch-read-only-overflow"}:
+                event["toolCalls"] = [event["toolCalls"][0]] * (
+                    129 if case == "batch-read-only-overflow" else 128
+                )
+            elif case == "batch-read-only-protected":
+                event["toolCalls"].append({"name": "edit", "args": {"path": "efforts/private.md"}})
+            elif case == "batch-read-only-unknown":
+                event["toolCalls"][-1]["name"] = "unknown"
+            elif case == "batch-read-only-shell":
+                event["toolCalls"][-1] = {
+                    "name": "powershell", "args": {"command": "Get-Content 'source.py'"},
+                }
+            elif case == "batch-read-only-malformed":
+                event["toolCalls"][-1] = None
+            elif case == "batch-read-only-extra-key":
+                event["toolCalls"][-1].update(Keys=[], cwd=str(workspace))
+            elif case == "batch-read-only-working-directory":
+                event["workingDirectory"] = event.pop("cwd")
+    if case.startswith("literal-batch-"):
+        event.update(toolName="powershell", toolArgs={"command": "Set-Content ignored"})
+        event["toolCalls"] = [
+            {"name": "powershell", "args": {"command": "", "cmd": "Get-Location", "input": "Set-Content ignored"}},
+            {"name": "pwsh", "args": "pwd"},
+        ]
+        if case == "literal-batch-mixed":
+            event["toolCalls"].insert(1, {"name": "view", "args": {"path": "read.txt"}})
+        first = event["toolCalls"][0]
+        if case.startswith("literal-batch-protected-"):
+            index = {"first": 0, "middle": 1, "last": 2}[case.removeprefix("literal-batch-protected-")]
+            event["toolCalls"].insert(index, {
+                "name": "powershell",
+                "args": {"command": f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'},
+            })
+        elif case == "literal-batch-single":
+            event["toolCalls"] = [event["toolCalls"][-1]]
+        elif case in {"literal-batch-limit", "literal-batch-overflow"}:
+            event["toolCalls"] = [first] * (129 if case.endswith("-overflow") else 128)
+        elif case == "literal-batch-shadowed-members":
+            first["args"].update(Keys=[], Count=0, Values=[], get_Item="ignored")
+        elif case in {"literal-batch-args", "literal-batch-whitespace", "literal-batch-ordinal"}:
+            first["args"]["cmd"] += {"args": " .", "whitespace": " ", "ordinal": "\u00ad"}[case.rsplit("-", 1)[1]]
+        elif case == "literal-batch-json":
+            first["args"] = json.dumps(first["args"])
+        elif case == "literal-batch-missing-args":
+            first.pop("args")
+        elif case in {"literal-batch-null-args", "literal-batch-invalid-args"}:
+            first["args"] = None if case == "literal-batch-null-args" else False
+        elif case == "literal-batch-case":
+            first["args"] = {"Command": "Get-Location"}
+        elif case == "literal-batch-name-case":
+            first["name"] = "PowerShell"
+        elif case in {"literal-batch-extra-key", "literal-batch-shadowed-keys"}:
+            first.update(cwd=str(workspace))
+            if case == "literal-batch-shadowed-keys":
+                first["Keys"] = []
+        elif case == "literal-batch-unknown":
+            first["name"] = "unknown"
+        elif case == "literal-batch-empty":
+            event["toolCalls"] = []
+        elif case == "literal-batch-not-list":
+            event["toolCalls"] = first
+        elif case == "literal-batch-malformed":
+            event["toolCalls"].append(None)
+        elif case == "literal-batch-old-proof-command":
+            first["args"]["command"] = "Get-Location"
+    if case in {"argument-shell-attribution", "argument-batch-attribution"}:
+        event.update(toolName="powershell", toolArgs={"command": " Get-Content .\\read.txt -Tail 1\t"})
+        if case == "argument-batch-attribution":
+            event["toolCalls"] = [
+                {"name": "powershell", "args": event["toolArgs"]},
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "pwsh", "args": {"input": "ls . -Name"}},
+                {"name": "powershell", "args": {"command": "Get-Location"}},
+            ]
+    elif case in {"shell-entry-attribution", "literal-shell-entry-attribution"} or (
+        case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
+    ):
+        event.update(toolName="powershell", toolArgs={"command": "Get-Location"})
+        if case != "shell-entry-attribution":
+            event["toolArgs"]["description"] = "Read the current fixture location"
+        if case == "literal-shell-carrier-raw-attribution":
+            event["toolArgs"] = "Get-Location"
+        elif case == "literal-shell-carrier-input-attribution":
+            event["tool_input"] = event.pop("toolArgs")
+        elif case == "literal-shell-carrier-input-raw-attribution":
+            event.pop("toolArgs")
+            event["tool_input"] = "Get-Location"
+        elif case == "literal-shell-selection-cmd-attribution":
+            event["toolArgs"] = {"command": "", "cmd": "Get-Location", "input": "Set-Content ignored"}
+        elif case == "literal-shell-selection-input-attribution":
+            event.pop("toolArgs")
+            event["tool_input"] = {
+                "command": None, "cmd": False, "script": [], "commandLine": 0,
+                "commandline": "", "input": "Get-Location", "description": "Fixture read",
+            }
+    elif case.startswith("literal-shell-"):
+        event.update(toolName="powershell", toolArgs={"command": "Get-Location", "description": "Fixture read"})
+        protected_command = f'Set-Content "{workspace / "efforts" / "private.md"}" -Value fixture'
+        if case == "literal-shell-head":
+            event.update(toolName="pwsh", toolArgs={
+                "command": "pwd", "description": "Fixture location",
+                "cmd": protected_command,
+            })
+        elif case == "literal-shell-args":
+            event["toolArgs"]["command"] += " ."
+        elif case == "literal-shell-json":
+            event["toolArgs"] = json.dumps(event["toolArgs"])
+        elif case == "literal-shell-ordinal":
+            event["toolArgs"]["command"] += "\u00ad"
+        elif case == "literal-shell-batch":
+            event["toolCalls"] = [
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "powershell", "args": {"command": protected_command}},
+            ]
+        elif case == "literal-shell-key-command":
+            event["toolArgs"] = {"Command": "Get-Location", "cmd": protected_command}
+        elif case == "literal-shell-key-name":
+            event.pop("toolName")
+            event.update(ToolName="powershell", tool_name="edit")
+            event["toolArgs"]["path"] = "efforts/private.md"
+        elif case == "literal-shell-key-args":
+            event["ToolArgs"] = event.pop("toolArgs")
+            event["tool_input"] = {"command": protected_command}
+        elif case == "literal-shell-key-collision":
+            event["toolArgs"] = {"command": protected_command, "Command": "Get-Location"}
+        elif case.startswith("literal-shell-carrier-primary-"):
+            event["tool_input"] = {"command": protected_command}
+            if case == "literal-shell-carrier-primary-null":
+                event["toolArgs"] = None
+            elif case == "literal-shell-carrier-primary-invalid":
+                event["toolArgs"] = False
+            elif case == "literal-shell-carrier-primary-empty":
+                event["toolArgs"] = ""
+            elif case == "literal-shell-carrier-primary-protected":
+                event["toolArgs"] = protected_command
+                event["tool_input"] = {"command": "Get-Location"}
+        elif case == "literal-shell-carrier-input-json":
+            event["tool_input"] = json.dumps(event.pop("toolArgs"))
+        elif case == "literal-shell-carrier-input-batch":
+            event.pop("toolArgs")
+            event["tool_input"] = "Get-Location"
+            event["toolCalls"] = [
+                {"name": "view", "args": {"path": "read.txt"}},
+                {"name": "powershell", "args": {"command": protected_command}},
+            ]
+        elif case.startswith("literal-shell-selection-"):
+            event["toolArgs"] = {"cmd": "Get-Location", "description": "Fixture read"}
+            if case in {
+                "literal-shell-selection-script", "literal-shell-selection-commandLine",
+                "literal-shell-selection-commandline",
+            }:
+                key = case.removeprefix("literal-shell-selection-")
+                event["toolArgs"] = {key: "Get-Location"}
+            elif case == "literal-shell-selection-skip-null":
+                event["toolArgs"]["command"] = None
+            elif case == "literal-shell-selection-skip-invalid":
+                event["toolArgs"]["command"] = {"command": protected_command}
+            elif case == "literal-shell-selection-protected-first":
+                event["toolArgs"]["command"] = protected_command
+            elif case == "literal-shell-selection-whitespace-first":
+                event["toolArgs"]["command"] = " "
+            elif case == "literal-shell-selection-shadowed-members":
+                event["toolArgs"].update(Count=0, Keys=[], ContainsKey=False, get_Keys=None)
+            elif case == "literal-shell-selection-case":
+                event["toolArgs"] = {"CommandLine": "Get-Location", "cmd": protected_command}
+            elif case == "literal-shell-selection-json":
+                event["toolArgs"] = json.dumps(event["toolArgs"])
+            elif case == "literal-shell-selection-batch":
+                event["toolCalls"] = [
+                    {"name": "view", "args": {"path": "read.txt"}},
+                    {"name": "powershell", "args": {"command": protected_command}},
+                ]
+            elif case in {
+                "literal-shell-selection-old-proof-command", "literal-shell-selection-prior-reader-command",
+            }:
+                event["toolArgs"] = {"command": "Get-Location", "cmd": protected_command}
+    env = environment(tmp_path, workspace)
+    for key in ("COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "AGENT_WORKTREES_PAYLOAD_ROOT"):
+        monkeypatch.delenv(key, raising=False)
+    for key in ("HOME", "USERPROFILE", "AGENT_HOME"):
+        monkeypatch.setenv(key, str(tmp_path))
+    payload_label = "payload-\u00e9 space'root" if case == "batch-read-only-attribution" else "payload"
+    plugin = tmp_path / payload_label
+    if cell:
+        from types import SimpleNamespace
+        import test_registry_paths as fixtures
+
+        native_run = subprocess.run
+        monkeypatch.setattr(fixtures, "subprocess", SimpleNamespace(
+            run=lambda *args, **kwargs: native_run(
+                *args, **(kwargs | no_window_kwargs() | {"timeout": 10}),
+            ),
+        ))
+        plugin = fixtures._payload(
+            tmp_path, payload_label if case == "batch-read-only-attribution" else "selected",
+        )
+        with (registry / "repos.yaml").open("a", encoding="utf-8") as output:
+            output.write('    remote: "https://github.com/example/project.git"\n')
+        context, selected_registry = fixtures._stamp(
+            tmp_path / "durable", plugin, marketplace="selected", repository="example/selected",
+        )
+        for name in ("projects.yaml", "repos.yaml"):
+            (selected_registry / name).write_bytes((registry / name).read_bytes())
+        registry = selected_registry
+        fixtures._select(monkeypatch, context, plugin)
+        from agent_worktrees import project_state
+
+        project_state.ensure_project_state("example")
+        env.update(
+            COPILOT_EXTENSIONS_CONTEXT=str(context), AGENT_WORKTREES_PAYLOAD_ROOT=str(plugin),
+            COPILOT_PLUGIN_ROOT=str(plugin),
+        )
+    if case == "delegated":
+        from agent_worktrees import related
+
+        related.write_related(workspace, related.RelatedConfig(
+            related={"example": related.RelatedEntry(name="example", delegate="agent-bridge")},
+        ))
+    assert guarded_anchors.refresh([workspace], registry_root=registry)["published"] == 1
+    reader = load("guarded_anchor_map")
+    facts = reader.read_map(workspace, registry)
+    assert facts.status == "ready" and not facts.posture_errors
+    if case == "personal-state-control-space":
+        config.write_bytes(b"default_branch: main\n\x1cstateless: true\n")
+    assert load("managed_session").admitted(event, home=tmp_path)
+    try:
+        guard_events = load("tool_call_forms").tool_events(event)
+    except ValueError:
+        guard_events = []
+    if case in {"structured-oversized", "structured-target-overflow", "patch-overflow", "patch-union-overflow"}:
+        with pytest.raises(ValueError):
+            load("tool_call_forms").write_targets(event["toolName"], event["toolArgs"])
+        guard_events = []
+    decisions = [
+        load(name).decide(guard_event, env=env, home=tmp_path)
+        for guard_event in guard_events
+        for name in ("statelessness_guard", "cross_repo_guard", "anchor_write_guard", "pr_supersede_guard")
+    ]
+    assert any(value and value.get("permissionDecision") == "deny" for value in decisions) is (
+        case.startswith(("personal-state", "protected-write-name-", "literal-batch-protected-")) or case in PATCH_PROTECTED_CASES or case in {
+            "anchor-cwd", "anchor-target", "delegated", "patch-anchor",
+            "batch-protected", "batch-multiple-targets", "batch-structured",
+            "structured-protected", "batch-read-only-protected", "literal-shell-batch",
+            "literal-shell-key-command", "literal-shell-key-name",
+            "literal-shell-key-args", "literal-shell-key-collision",
+            "literal-shell-carrier-primary-protected", "literal-shell-carrier-input-batch",
+            "literal-shell-selection-protected-first", "literal-shell-selection-case",
+            "literal-shell-selection-batch",
+        }
+    ), decisions
+    map_path = reader.map_path(workspace, registry)
+    if case == "ordinary-unrelated-inventory":
+        value = json.loads(map_path.read_text(encoding="utf-8"))
+        for index in range(128):
+            root = f"z:\\inventory-{index}"
+            value["postures"].append({
+                "name": f"inventory-{index}", "delegate": "none", "path": root,
+                "posture": "worktree", "elevated": False,
+                "identity": {"root": root, "git_dir": root + "\\.git", "common_dir": root + "\\.git"},
+            })
+        map_path.write_text(json.dumps(value), encoding="utf-8")
+        assert reader.read_map(workspace, registry).status == "ready"
+        assert load("cross_repo_guard").decide(event, env=env, home=tmp_path) is None
+    elif case == "missing-map":
+        map_path.unlink()
+    elif case in {
+        "partial-map", "wrong-scope", "array-schema", "invalid-elevation", "noncanonical-map", "dot-segment-map",
+    }:
+        value = json.loads(map_path.read_text(encoding="utf-8"))
+        if case == "partial-map":
+            value["posture_authority"] = "partial"
+        elif case == "wrong-scope":
+            value["source_root"] = str(anchor)
+        elif case == "array-schema":
+            value["schema"] = [value["schema"]]
+        elif case == "invalid-elevation":
+            value["postures"][0]["elevated"] = 0
+        elif case == "noncanonical-map":
+            value["postures"][0]["identity"]["common_dir"] = str(anchor / ".git").upper()
+        else:
+            value["postures"][0]["identity"]["common_dir"] += "\\."
+        map_path.write_text(json.dumps(value), encoding="utf-8")
+    elif case == "oversized-config":
+        config.write_text("#" * 16385, encoding="utf-8")
+    elif case == "git-pointer-aba":
+        alternate = admin.with_name("example-worktrex")
+        shutil.copytree(admin, alternate)
+        marker = workspace / ".git"
+        before = marker.stat()
+        text = marker.read_text(encoding="utf-8")
+        marker.write_text(text.replace("example-worktree", "example-worktrex"), encoding="utf-8")
+        os.utime(marker, ns=(before.st_atime_ns, before.st_mtime_ns))
+
+    scripts = plugin / "scripts"
+    scripts.mkdir(parents=True, exist_ok=True)
+    if real_policy:
+        for path in SCRIPTS.glob("*.py"):
+            shutil.copyfile(path, scripts / path.name)
+    for name in (
+        "pre-tool-hook.ps1", "managed-session.ps1", "hook-read-policy.json",
+        "statelessness_guard.py", "cross_repo_guard.py", "anchor_write_guard.py",
+        "pr_supersede_guard.py", "guarded_anchor_map.py", "tool_call_forms.py",
+        "hook_pre_relevance.py",
+    ):
+        shutil.copyfile(SCRIPTS / name, scripts / name)
+    drift = {
+        "guard-drift": "anchor_write_guard.py", "reader-drift": "guarded_anchor_map.py",
+        "forms-drift": "tool_call_forms.py", "batch-read-only-forms-drift": "tool_call_forms.py",
+        "literal-shell-relevance-drift": "hook_pre_relevance.py",
+        "literal-batch-guard-drift": "anchor_write_guard.py",
+        "literal-batch-forms-drift": "tool_call_forms.py",
+        "literal-batch-relevance-drift": "hook_pre_relevance.py",
+    }.get(case)
+    if drift:
+        with (scripts / drift).open("a", encoding="utf-8") as output:
+            output.write("\n# changed source\n")
+    elif case in {"missing-dependencies", "batch-read-only-missing-dependencies", "literal-batch-missing-dependencies"}:
+        policy = scripts / "hook-read-policy.json"
+        value = json.loads(policy.read_text(encoding="utf-8"))
+        value.pop("nativeWriteDependencies", None)
+        policy.write_text(json.dumps(value), encoding="utf-8")
+    elif case in {"literal-shell-old-proof", "literal-shell-invalid-proof", "literal-batch-invalid-proof"}:
+        policy = scripts / "hook-read-policy.json"
+        value = json.loads(policy.read_text(encoding="utf-8"))
+        if case == "literal-shell-old-proof":
+            value.pop("nativeShellReadCommands")
+            value.pop("nativeShellReadDependencies")
+        else:
+            value["nativeShellReadCommands"].append(False)
+        policy.write_text(json.dumps(value), encoding="utf-8")
+    elif case.startswith(("literal-shell-selection-old-proof", "literal-shell-selection-invalid-", "literal-batch-old-proof")):
+        policy = scripts / "hook-read-policy.json"
+        value = json.loads(policy.read_text(encoding="utf-8"))
+        if case.startswith(("literal-shell-selection-old-proof", "literal-batch-old-proof")):
+            value.pop("nativeShellReadCommandKeys")
+        else:
+            value["nativeShellReadCommandKeys"] = {
+                "empty": [], "type": "cmd", "member": ["command", False],
+                "duplicate": ["cmd", "cmd"], "overflow": [f"key-{index}" for index in range(129)],
+            }[case.removeprefix("literal-shell-selection-invalid-")]
+        policy.write_text(json.dumps(value), encoding="utf-8")
+    observed = tmp_path / "policy-input"
+    (scripts / "resolve-runtime.ps1").write_text(
+        "$AwPy='" + sys.executable.replace("'", "''") + "'\n", encoding="utf-8",
+    )
+    if cell:
+        (scripts / "installation-context" / "installation-context.ps1").write_text(
+            "Write-Output '" + json.dumps({"pluginRoot": str(registry)}).replace("'", "''") + "'\n"
+            + "$global:LASTEXITCODE = 0\n", encoding="utf-8",
+        )
+    if not real_policy:
+        (scripts / "hook_policy_process.py").write_text(
+            "import base64,json,sys\nfrom pathlib import Path\n"
+            + f"Path({str(observed)!r}).write_bytes(base64.b64decode(sys.stdin.readline()))\n"
+            + "print(json.dumps({'permissionDecision':'deny','permissionDecisionReason':'fixture policy'}))\n",
+            encoding="utf-8",
+        )
+    membership = tmp_path / "membership-interpreter"
+    inventory_probe = tmp_path / "inventory-probe"
+    native_membership = tmp_path / "native-membership"
+    if case == "ordinary-unrelated-inventory":
+        admission = scripts / "managed-session.ps1"
+        admission.write_text(admission.read_text(encoding="utf-8").replace(
+            "return $hasGitMarker",
+            "[IO.File]::WriteAllText('" + str(native_membership).replace("'", "''")
+            + "', $hasGitMarker.ToString()); return $hasGitMarker",
+        ), encoding="utf-8")
+        with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+            output.write(
+                "\n$script:originalPreparedPath = ${function:Get-PreparedWorktreesPath}\n"
+                "function Get-PreparedWorktreesPath {\n    param([object]$Path)\n"
+                "    if ($Path -is [string] -and $Path.StartsWith('z:\\inventory-')) {\n"
+                + "        [IO.File]::WriteAllText('" + str(inventory_probe).replace("'", "''") + "', 'called')\n"
+                "        throw 'Unexpected inventory filesystem probe'\n    }\n"
+                "    return & $script:originalPreparedPath $Path\n}\n",
+            )
+    if case in {"old-admission", "batch-read-only-old-admission", "literal-shell-unprepared", "literal-batch-unprepared"}:
+        admission = scripts / "managed-session.ps1"
+        admission.write_text(
+            admission.read_text(encoding="utf-8").replace(
+                "function Test-ManagedWorktreesSession {", "function Test-OriginalManagedWorktreesSession {",
+            )
+            + "\nfunction Test-ManagedWorktreesSession {\n"
+            "    param([Parameter(Mandatory = $true)][string]$Raw, [ref]$Prepared)\n"
+            + (
+                "    return Test-OriginalManagedWorktreesSession -Raw $Raw -Prepared $Prepared\n"
+                if case == "old-admission" else
+                "    $admitted = Test-OriginalManagedWorktreesSession -Raw $Raw\n"
+                "    if ($null -ne $Prepared) { $Prepared.Value = $false }\n"
+                "    return $admitted\n"
+            ) + "}\n",
+            encoding="utf-8",
+        )
+    with (scripts / "managed-session.ps1").open("a", encoding="utf-8") as output:
+        output.write(
+            "\nfunction Get-ManagedWorktreesPython { "
+            + "[IO.File]::WriteAllText('" + str(membership).replace("'", "''") + "', 'called'); "
+            + "return '" + sys.executable.replace("'", "''") + "' }\n"
+        )
+    env["COPILOT_PLUGIN_ROOT"] = str(plugin)
+    entry = json.loads((SCRIPTS.parent / "hooks.json").read_text(encoding="utf-8"))["hooks"]["preToolUse"][0]
+    if case in {"argument-shell-attribution", "argument-batch-attribution"}:
+        qualify_complete_native_entry(
+            scripts, entry["powershell"], executable, event, env, workspace, capsys,
+            literal_read=True, literal_batch=case == "argument-batch-attribution", argument_read=True,
+        )
+        assert not membership.exists()
+        return
+    if case in {"literal-batch-all-shell", "literal-batch-mixed"}:
+        qualify_complete_native_entry(
+            scripts, entry["powershell"], executable, event, env, workspace, capsys,
+            literal_read=True, literal_batch=True,
+        )
+        assert not membership.exists()
+        return
+    if case in {"batch-read-only-attribution", "shell-entry-attribution", "literal-shell-entry-attribution"} or (
+        case.startswith(("literal-shell-carrier-", "literal-shell-selection-")) and case.endswith("-attribution")
+    ):
+        qualify_complete_native_entry(
+            scripts, entry["powershell"], executable, event, env, workspace, capsys,
+            literal_read=case.startswith("literal-shell-"),
+            command_key=(
+                "cmd" if case == "literal-shell-selection-cmd-attribution" else
+                "input" if case == "literal-shell-selection-input-attribution" else "command"
+            ),
+        )
+        assert not membership.exists()
+        return
+    native_entry = scripts / "pre-tool-hook.ps1"
+    if case in {"literal-shell-prior-reader", "literal-batch-prior-reader"} or case.startswith("literal-shell-selection-prior-reader"):
+        source = native_entry.read_text(encoding="utf-8")
+        boundary = "\ntry {\n    $reader = [IO.StreamReader]"
+        assert source.count(boundary) == 1
+        reader = NATIVE_READ_V1 if case == "literal-shell-prior-reader" else NATIVE_SHELL_READ_V1
+        native_entry.write_text(source.replace(boundary, "\n" + reader + boundary, 1), encoding="utf-8")
+    # Fixture-only markers classify a timeout without retrying or extending the child.
+    instrumented = native_entry.read_text(encoding="utf-8")
+    for boundary, source in (
+        ("script-entry", "$ErrorActionPreference = 'Stop'"),
+        ("membership-start", "    $admitted = if ($supportsFacts) {"),
+        ("membership-complete", "    if (-not $admitted) { exit 0 }"),
+        ("native-proof-start", "function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {"),
+        ("policy-start", "function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnostic) {"),
+    ):
+        assert instrumented.count(source) == 1
+        marker = f"Write-NativeWriteFixturePhase '{boundary}'"
+        instrumented = instrumented.replace(
+            source, source + "\n" + marker if source.endswith("{") else marker + "\n" + source,
+        )
+    native_entry.write_text(instrumented, encoding="utf-8")
+    admission = scripts / "managed-session.ps1"
+    admission.write_text(
+        instrument_prepared_admission(admission.read_text(encoding="utf-8")), encoding="utf-8",
+    )
+    raw = json.dumps(event, ensure_ascii=False, indent=2).encode("utf-8")
+    started = time.monotonic()
+    started_ms = time.time_ns() // 1_000_000
+    try:
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
+            input=raw, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+    except subprocess.TimeoutExpired as error:
+        progress, diagnostic = native_write_fixture_stderr(error.stderr or b"")
+        raise AssertionError(
+            f"{shell} native write exceeded the original 10s child limit; start_ms={started_ms}; "
+            f"phases={progress or 'no command entry'!r}; stdout={error.stdout!r}; stderr={diagnostic!r}"
+        ) from error
+    native_seconds = time.monotonic() - started
+    progress, result.stderr = native_write_fixture_stderr(result.stderr)
+    assert " command-entry" in progress, result.stderr
+    phase_names = [line.split(" ", 1)[1] for line in progress.splitlines()]
+    if "prepared-marker-json" in phase_names:
+        assert "prepared-marker-opened" in phase_names, progress
+        assert phase_names.index("prepared-marker-opened") < phase_names.index("prepared-marker-json"), progress
+    assert result.returncode == 0 and not result.stderr, result.stdout + result.stderr
+    assert not membership.exists()
+    if case == "ordinary-unrelated-inventory":
+        assert native_membership.read_text() == "True"
+    assert not inventory_probe.exists()
+    policy_required = not (case.startswith(("ordinary", "write-name-")) or case in PATCH_NATIVE_CASES or case in {
+        "create", "path-alias", "json-args", "real-policy", "batch",
+        "batch-mixed", "batch-json-args", "batch-limit", "batch-working-directory", "batch-real-policy",
+        "structured", "structured-files", "structured-changes", "structured-only", "structured-json",
+        "structured-aliases", "structured-duplicates", "structured-limit", "batch-structured-safe",
+        "structured-real-policy",
+        "batch-target-limit",
+        "batch-read-only", "batch-read-only-mixed", "batch-read-only-limit",
+        "batch-read-only-working-directory", "batch-read-only-real-policy",
+        "literal-shell-head",
+        "literal-shell-args", "literal-batch-args",
+        "literal-shell-carrier-primary-safe",
+        "literal-shell-selection-script", "literal-shell-selection-commandLine",
+        "literal-shell-selection-commandline", "literal-shell-selection-skip-null",
+        "literal-shell-selection-skip-invalid", "literal-shell-selection-shadowed-members",
+        "literal-shell-selection-old-proof-command", "literal-shell-selection-prior-reader-command",
+        "literal-batch-all-shell", "literal-batch-mixed",
+        "literal-batch-single", "literal-batch-limit", "literal-batch-shadowed-members",
+        "literal-batch-old-proof-command",
+    })
+    assert observed.exists() is policy_required, result.stdout
+    if policy_required:
+        assert observed.read_bytes() == raw
+        assert json.loads(result.stdout)["permissionDecision"] == "deny"
+    else:
+        assert result.stdout == b""
+    if case == "literal-shell-prior-reader":
+        observed.unlink()
+        read_event = {**event, "toolName": "view", "toolArgs": {"path": "read.txt"}}
+        prior_read = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
+            input=json.dumps(read_event).encode("utf-8"), capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+        _, prior_read.stderr = native_write_fixture_stderr(prior_read.stderr)
+        assert prior_read.returncode == 0 and not prior_read.stderr and prior_read.stdout == b""
+        assert not observed.exists()
+    if case in {"patch-protected-input", "personal-state"}:
+        with capsys.disabled():
+            print(json.dumps({
+                "shell": shell, "case": case, "start_ms": started_ms,
+                "native_entry_seconds": native_seconds, "phases": progress.splitlines(),
+            }))
+    if real_policy:
+        contract = scripts / "hook-read-policy.json"
+        value = json.loads(contract.read_text(encoding="utf-8"))
+        value.pop("nativeWriteDependencies")
+        contract.write_text(json.dumps(value), encoding="utf-8")
+        started = time.monotonic()
+        fallback = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
+            input=raw, capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+        fallback_seconds = time.monotonic() - started
+        _, fallback.stderr = native_write_fixture_stderr(fallback.stderr)
+        assert fallback.returncode == 0 and not fallback.stderr, fallback.stdout + fallback.stderr
+        assert json.loads(fallback.stdout) == {}
+        protected = {**event, "toolArgs": {"path": "efforts/private.md"}}
+        if case == "patch-real-policy":
+            protected["toolArgs"] = {"input": patch("Update File: safe.py", "Move to: efforts/private.md")}
+        if case in {"batch-real-policy", "batch-read-only-real-policy"} or case.startswith("literal-batch-"):
+            protected["toolCalls"] = [
+                *event["toolCalls"][:-1],
+                {"name": "edit", "args": {"path": "efforts/private.md"}},
+            ]
+        denied = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", NATIVE_WRITE_PHASE_WRITER + entry["powershell"]],
+            input=json.dumps(protected).encode("utf-8"), capture_output=True, timeout=10,
+            cwd=workspace, env=env, **no_window_kwargs(),
+        )
+        _, denied.stderr = native_write_fixture_stderr(denied.stderr)
+        assert denied.returncode == 0 and not denied.stderr, denied.stdout + denied.stderr
+        assert json.loads(denied.stdout)["permissionDecision"] == "deny"
+        assert not membership.exists()
+        print(json.dumps({
+            "shell": shell, "same_fixture": True, "native_entry_seconds": native_seconds,
+            "real_policy_entry_seconds": fallback_seconds,
+        }))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows prepared cell membership")
@@ -1236,6 +2887,127 @@ def test_real_admission_accepts_opaque_json_keys(tmp_path, shell, opaque):
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout.strip() == "True", result.stdout + result.stderr
     assert not result.stderr
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows admission serialization")
+@pytest.mark.parametrize("shell,old_engine", [
+    ("pwsh", False), ("pwsh", True), ("powershell.exe", False),
+])
+def test_admission_query_serialization_cold_fallback(tmp_path, shell, old_engine, capsys):
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.skip(f"{shell} is unavailable")
+    samples = []
+    for index, variant in enumerate(("cmdlet", "native", "cmdlet")):
+        home = tmp_path / str(index)
+        home.mkdir()
+        anchor, registry = fixture_project(home)
+        session = home / ".copilot" / "session-state" / "query"
+        session.mkdir(parents=True)
+        scripts = home / "payload" / "scripts"
+        shutil.copytree(SCRIPTS, scripts)
+        managed = scripts / "managed-session.ps1"
+        managed.write_bytes(managed.read_bytes().replace(b"\r\n", b"\n").replace(b"\n", b"\r\n"))
+        source = managed.read_text(encoding="utf-8").replace("\r\n", "\n")
+        original = "$frame = ConvertTo-Json -InputObject $query -Compress"
+        candidate = (
+            "$frame = if ($PSVersionTable.PSVersion.Major -ge 6) {\n"
+            "            ConvertTo-PreparedWorktreesJson -InputObject $query -Depth 2\n"
+            "        } else { ConvertTo-Json -InputObject $query -Compress }"
+        )
+        assert source.count(candidate) == 1
+        if variant == "cmdlet":
+            source = source.replace(candidate, original)
+        for token in ("        $frame =", "        $python = Get-ManagedWorktreesPython"):
+            assert source.count(token) == 1
+        source = source.replace(
+            "        $frame =",
+            "        $script:serializationClock = [Diagnostics.Stopwatch]::StartNew()\n        $frame =",
+        )
+        source = source.replace(
+            "        $python = Get-ManagedWorktreesPython",
+            "        $script:serializationClock.Stop()\n"
+            "        $script:queryFrame = $frame\n        $python = Get-ManagedWorktreesPython",
+        )
+        if old_engine:
+            source = source.replace(
+                "'Microsoft.PowerShell.Commands.JsonObject+ConvertToJsonContext'",
+                "'UnavailablePreparedJsonContext'",
+            )
+        (scripts / "managed-session.ps1").write_text(source, encoding="utf-8")
+        query = {"sessionId": "query", "cwd": str(anchor), "workingDirectory": str(home)}
+        event = {
+            **query, "CWD": str(home),
+            "toolName": "edit", "toolArgs": {"text": "quote'\"\\\n\t\u00e9\U0001f680"},
+            "__type": "opaque", "Keys": [], "": {"discard": True},
+        }
+        driver = home / "admission-comparison.ps1"
+        driver.write_text(
+            "$ErrorActionPreference='Stop'\n"
+            "[Console]::OutputEncoding=[Text.UTF8Encoding]::new($false,$true)\n"
+            ". $env:PREPARED_MEMBERSHIP_SCRIPT\n"
+            "$script:jsonCalls=0; $script:pythonCalls=0\n"
+            + r"""
+function ConvertTo-Json {
+    param([object]$InputObject, [switch]$Compress, [int]$Depth=2)
+    $script:jsonCalls++
+    & ($ExecutionContext.InvokeCommand.GetCommand('ConvertTo-Json',
+        [Management.Automation.CommandTypes]::Cmdlet)) @PSBoundParameters
+}
+$script:originalPython=(Get-Command Get-ManagedWorktreesPython).ScriptBlock
+function Get-ManagedWorktreesPython {
+    $script:pythonCalls++
+    & $script:originalPython
+}
+$raw=[Console]::In.ReadToEnd()
+$clock=[Diagnostics.Stopwatch]::StartNew()
+if (-not (Test-ManagedWorktreesSession $raw)) { throw 'Cold admission failed' }
+$clock.Stop()
+[Console]::Error.WriteLine(('admission_seconds='+$clock.Elapsed.TotalSeconds))
+[Console]::Error.WriteLine(('serialization_seconds='+$script:serializationClock.Elapsed.TotalSeconds))
+if ($script:pythonCalls -ne 1) { throw 'Cold admission did not use the real helper' }
+if ($script:jsonCalls -ne [int]$env:EXPECTED_JSON_CALLS) { throw 'Unexpected JSON cmdlet count' }
+if ($script:queryFrame.Contains("`r") -or $script:queryFrame.Contains("`n")) { throw 'Query framing is not compact' }
+[Console]::Out.WriteLine($script:queryFrame)
+$script:queryFrame=$null
+if (-not (Test-ManagedWorktreesSession $raw)) { throw 'Warm admission failed' }
+if ($script:pythonCalls -ne 1) { throw 'Warm admission rediscovered membership' }
+if ($null -ne $script:queryFrame) { throw 'Warm admission serialized another query' }
+""",
+            encoding="utf-8",
+        )
+        env = environment(home, anchor)
+        env.update(
+            COPILOT_PLUGIN_ROOT=str(scripts.parent),
+            PREPARED_MEMBERSHIP_SCRIPT=str(scripts / "managed-session.ps1"),
+            AGENT_WORKTREES_RESIDENT_PRE_TOOL_PYTHON=sys.executable,
+            EXPECTED_JSON_CALLS=str(int(variant == "cmdlet" or old_engine or shell == "powershell.exe")),
+        )
+        assert not (registry / "cache").exists()
+        started = time.perf_counter()
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-File", str(driver)],
+            input=json.dumps(event), capture_output=True, text=True, encoding="utf-8",
+            timeout=10, cwd=anchor, env=env, **no_window_kwargs(),
+        )
+        elapsed = time.perf_counter() - started
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout) == query
+        assert (registry / "cache" / "managed-sessions").is_dir()
+        assert result.stderr.startswith("admission_seconds="), result.stderr
+        timings = dict(line.split("=") for line in result.stderr.splitlines())
+        assert set(timings) == {"admission_seconds", "serialization_seconds"}
+        samples.append({
+            "variant": variant, "process_seconds": elapsed,
+            **{key: float(value) for key, value in timings.items()},
+        })
+    with capsys.disabled():
+        print(json.dumps({"admission_query_serialization": {
+            "shell": shell, "old_engine": old_engine, "samples": samples,
+        }}))
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows runtime-only interpreter discovery")

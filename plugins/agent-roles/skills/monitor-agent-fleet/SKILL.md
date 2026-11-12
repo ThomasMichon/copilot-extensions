@@ -147,6 +147,12 @@ If sources conflict, preserve the conflict and mark inferred purpose with
 confidence. Missing/rewound agenda data does not erase confirmed external work.
 Never fix an observed worker's plan to make it match the analyst's inference.
 
+For an exceptional selected-session instruction/guidance diagnosis, use the
+[bounded toolbox reader](references/selected-session-reader.md). It lists before
+reading explicit providers, enforces input/output/enumeration/deadline limits,
+and reports missed data as coverage gaps. Do not reconstruct shell collectors
+or read guidance bodies on every monitoring cycle.
+
 When a correction repeats existing guidance or a long-running owner may have
 missed a relevant change, assess the [guidance delta](references/guidance-delta.md).
 Separate semantic guidance lag from unrelated Git commits, installed payloads
@@ -254,6 +260,11 @@ cadences, not per-agent minute pollers, and observe early on the
 watchdog checks' early triggers. Each cycle begins with the roster refresh
 above. Healthy agents get one log line, not a message. Preserve an explicit next observation and reason,
 batch unchanged waits, and stop the owned watch when its assignment ends.
+When the charter grants adaptive cadence, use the active cadence while any
+target needs help (stuck, an early trigger, or a steer awaiting its revisit)
+and the parked cadence while all run smoothly or wait on required events.
+Change cadence by replacing the one owned schedule, stopping it before
+creating its successor, and record the reason; never run two.
 No daemon, cron entry, automatic joining, or background service is supplied.
 
 Keep the supervisory note compact: targets, root pointers, coverage cursor,

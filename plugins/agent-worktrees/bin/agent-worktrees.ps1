@@ -116,7 +116,11 @@ if ($_awUpdateDiagnostic) {
 if ($env:AGENT_WORKTREES_NO_SELFPROVISION) { Invoke-AwTerminalPython 'python' (@('-m', 'agent_worktrees') + $args) @('-I', '-B', '-m', 'agent_worktrees', '--version'); exit $LASTEXITCODE }
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
-$_inst = if ($_snap) { Join-Path $_snap 'scripts\install.ps1' } else { '' }
+$_inst = if ($_snap) {
+    Join-Path $_snap 'scripts\install.ps1'
+} elseif (Test-Path -LiteralPath (Join-Path $_awPayloadRoot 'plugin.json') -PathType Leaf) {
+    Join-Path $_awPayloadRoot 'scripts\install.ps1'
+} else { '' }
 if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) {
     $_inst = Get-ChildItem (Join-Path $env:USERPROFILE '.copilot\installed-plugins') -Recurse -Filter 'install.ps1' -ErrorAction SilentlyContinue |
         Where-Object { $_.FullName -match '[\\/]agent-worktrees[\\/]scripts[\\/]install\.ps1$' } |
@@ -142,15 +146,92 @@ if (-not ($_inst -and (Test-Path -LiteralPath $_inst))) { [Console]::Error.Write
 $_pwsh = Get-Command pwsh -ErrorAction SilentlyContinue
 $_exe = if ($_pwsh) { $_pwsh.Source } else { 'powershell.exe' }
 $mutex = [System.Threading.Mutex]::new($false, 'Local\Copilot.AgentWorktrees.Provision')
-$held = $false
+$retryDeadline = [DateTime]::UtcNow.AddSeconds(120)
+$reportedBusy = $false
 try {
-    try { $held = $mutex.WaitOne() } catch [System.Threading.AbandonedMutexException] { $held = $true }
-    $_py = _resolve_aw_py
-    if (-not $_py) {
-        & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 | ForEach-Object { [Console]::Error.WriteLine($_) }
+    while ($true) {
+        $held = $false
+        $retry = $false
+        try {
+            try { $held = $mutex.WaitOne() } catch [System.Threading.AbandonedMutexException] { $held = $true }
+            $_py = _resolve_aw_py
+            if (-not $_py) {
+                $_latestSnapshot = ''
+                try { $_latestSnapshot = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
+                if ($_latestSnapshot) {
+                    $_latestInstaller = Join-Path $_latestSnapshot 'scripts\install.ps1'
+                    if (-not (Test-Path -LiteralPath $_latestInstaller -PathType Leaf)) {
+                        [Console]::Error.WriteLine('[agent-worktrees] selected snapshot installer is unavailable; run an explicit install or repair.')
+                        exit 126
+                    }
+                    $_inst = $_latestInstaller
+                    $_snap = $_latestSnapshot
+                } elseif ($_snap) {
+                    [Console]::Error.WriteLine('[agent-worktrees] selected snapshot changed while waiting; retry.')
+                    exit 126
+                } elseif (Test-Path -LiteralPath (Join-Path $_root 'payload-dir')) {
+                    [Console]::Error.WriteLine('[agent-worktrees] selected snapshot is unreadable; run an explicit install or repair.')
+                    exit 126
+                }
+                if (-not ([IO.File]::ReadAllText($_inst).Contains('# agent-worktrees:first-use-driver-nonblocking-v1'))) {
+                    [Console]::Error.WriteLine('[agent-worktrees] selected installer lacks safe first-use admission; run an explicit install or repair.')
+                    exit 126
+                }
+                $previousNoWait = [Environment]::GetEnvironmentVariable('AGENT_WORKTREES_FIRST_USE_NO_WAIT', 'Process')
+                $previousSnapshot = [Environment]::GetEnvironmentVariable('AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT', 'Process')
+                $previousEap = $ErrorActionPreference
+                $env:AGENT_WORKTREES_FIRST_USE_NO_WAIT = '1'
+                if ($_latestSnapshot) {
+                    $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT = $_latestSnapshot
+                } else {
+                    $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT = '::absent::'
+                }
+                $ErrorActionPreference = 'Continue'
+                $script:worktreesDriverBusy = $false
+                $script:worktreesDriverReselect = $false
+                try {
+                    & $_exe -NoProfile -ExecutionPolicy Bypass -File $_inst provision 2>&1 |
+                        ForEach-Object {
+                            if ([string]$_ -ceq '::agent-worktrees-driver-busy::') {
+                                $script:worktreesDriverBusy = $true
+                            } elseif ([string]$_ -ceq '::agent-worktrees-driver-reselect::') {
+                                $script:worktreesDriverReselect = $true
+                            } elseif ($_ -is [System.Management.Automation.ErrorRecord]) {
+                                [Console]::Error.WriteLine($_.Exception.Message)
+                            } else {
+                                [Console]::Error.WriteLine($_)
+                            }
+                        }
+                    $retry = $LASTEXITCODE -eq 75 -and ($script:worktreesDriverBusy -or $script:worktreesDriverReselect)
+                } finally {
+                    $ErrorActionPreference = $previousEap
+                    if ($null -eq $previousNoWait) {
+                        Remove-Item Env:AGENT_WORKTREES_FIRST_USE_NO_WAIT -ErrorAction SilentlyContinue
+                    } else {
+                        $env:AGENT_WORKTREES_FIRST_USE_NO_WAIT = $previousNoWait
+                    }
+                    if ($null -eq $previousSnapshot) {
+                        Remove-Item Env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT -ErrorAction SilentlyContinue
+                    } else {
+                        $env:AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT = $previousSnapshot
+                    }
+                }
+            }
+        } finally {
+            if ($held) { try { $mutex.ReleaseMutex() } catch {} }
+        }
+        if (-not $retry) { break }
+        if (-not $reportedBusy) {
+            [Console]::Error.WriteLine('[agent-worktrees] update driver is busy or snapshot selection changed; releasing the provision lock before retry.')
+            $reportedBusy = $true
+        }
+        if ([DateTime]::UtcNow -ge $retryDeadline) {
+            [Console]::Error.WriteLine('[agent-worktrees] update driver remained busy; retry after the active update finishes.')
+            exit 75
+        }
+        Start-Sleep -Milliseconds 200
     }
 } finally {
-    if ($held) { try { $mutex.ReleaseMutex() } catch {} }
     $mutex.Dispose()
 }
 $_py = _resolve_aw_py

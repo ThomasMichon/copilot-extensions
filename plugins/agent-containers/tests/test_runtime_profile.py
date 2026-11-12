@@ -902,7 +902,8 @@ def test_docker_preflight_preserves_native_diagnostics_and_outcome(
     setup_end = source.index("\n. (Join-Path $PSScriptRoot 'legacy-transaction.ps1')", setup_start)
     harness = tmp_path / "docker-preflight.ps1"
     harness.write_text(
-        "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
+        source[source.index("[CmdletBinding()]"):setup_start]
+        + "[Console]::OutputEncoding = [Text.Encoding]::GetEncoding(1252)\n"
         "$OutputEncoding = [Text.ASCIIEncoding]::new()\n"
         + source[setup_start:setup_end] + "\n"
         + helpers + "\n"

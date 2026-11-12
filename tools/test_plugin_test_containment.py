@@ -284,6 +284,17 @@ def test_native_application_retains_runner_lease_limits_and_cleanup(
     teardown_error = OSError("cleanup could not inspect the daemon registry")
 
     @contextmanager
+    def pins(*_args):
+        events.append("pins")
+        try:
+            yield SimpleNamespace(
+                bind=lambda _environment: events.append("bind"),
+                observe=lambda: events.append("observe"),
+            )
+        finally:
+            events.append("close-pins")
+
+    @contextmanager
     def lifecycle(**kwargs):
         events.append("lease")
         try:
@@ -298,11 +309,13 @@ def test_native_application_retains_runner_lease_limits_and_cleanup(
         assert kwargs["limits"] is limits and kwargs["native_application"] is True
         assert kwargs["env"] == {"KEEP": "yes", "LEASE": "owned"}
         events.append("run")
+        kwargs["native_observer"]()
         if controller_failure:
             raise original
         return 0
 
     monkeypatch.setattr(plugin_test_containment, "daemon_test_lifecycle", lifecycle)
+    monkeypatch.setattr(plugin_test_lifecycle, "_native_instance_pins", pins)
     monkeypatch.setattr(plugin_test_containment, "_run_contained_process", run)
     monkeypatch.setattr(plugin_test_containment, "_read_registry_environment", lambda: None)
     monkeypatch.setattr(plugin_test_containment, "_registry_environment_drift", lambda _: [])
@@ -329,8 +342,128 @@ def test_native_application_retains_runner_lease_limits_and_cleanup(
             ["unused"], cwd=tmp_path, env=environment, sandbox=tmp_path,
             limits=limits, native_application=True,
         ) == 0
-    assert events == ["lease", "run", "cleanup"]
+    assert events == ["pins", "lease", "bind", "run", "observe", "cleanup", "close-pins"]
     assert environment[plugin_test_containment.CONTAINED_ENV] == "1"
+
+
+@pytest.mark.parametrize("birth_matches", [False, True])
+def test_native_instance_pins_retain_only_exact_owned_births_until_cleanup(
+    tmp_path, monkeypatch, birth_matches,
+):
+    from unittest.mock import Mock
+    from tools import plugin_test_lifecycle
+    from agent_procutil import _daemon_instance_identity as identity, daemon_instances
+
+    record = {
+        "instance_id": "a" * 32, "run_id": "owned", "pid": "99", "birth": "expected",
+    }
+    observed = []
+
+    def open_process(pid):
+        assert pid == 99
+        process = Mock(_handle=123)
+        observed.append(process)
+        return process
+
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda _root: [
+        {**record, "instance_id": "b" * 32, "run_id": "foreign"}, record,
+    ])
+    monkeypatch.setattr(identity, "_windows_handle", open_process)
+    monkeypatch.setattr(identity, "_windows_birth", lambda _handle: "expected" if birth_matches else "reused")
+    pins = plugin_test_lifecycle._NativeInstancePins(tmp_path, 2)
+    pins.run_id = "owned"
+    pins.observe()
+    pins.observe()
+    assert len(observed) == (1 if birth_matches else 2)
+    if birth_matches:
+        observed[0].close.assert_not_called()
+    pins.close()
+    assert pins.processes == {}
+    for process in observed:
+        process.close.assert_called_once_with()
+        process.kill.assert_not_called()
+        process.terminate.assert_not_called()
+
+
+def test_native_instance_handle_budget_refuses_without_releasing_prior_custody(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    from tools import plugin_test_lifecycle
+    from agent_procutil import _daemon_instance_identity as identity, daemon_instances
+
+    process = Mock(_handle=123)
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda _root: [
+        {"instance_id": key * 32, "run_id": "owned", "pid": "99", "birth": "expected"}
+        for key in ("a", "b")
+    ])
+    monkeypatch.setattr(identity, "_windows_handle", lambda _pid: process)
+    monkeypatch.setattr(identity, "_windows_birth", lambda _handle: "expected")
+    pins = plugin_test_lifecycle._NativeInstancePins(tmp_path, 1)
+    pins.run_id = "owned"
+    with pytest.raises(RuntimeError, match="existing process budget"):
+        pins.observe()
+    process.close.assert_not_called()
+    pins.close()
+    process.close.assert_called_once_with()
+    process.kill.assert_not_called()
+
+
+def test_native_instance_inventory_is_bounded_before_decoding_records(tmp_path, monkeypatch):
+    from unittest.mock import Mock
+    from tools import plugin_test_lifecycle
+    from agent_procutil import daemon_instances
+
+    for index in range(9):
+        (tmp_path / f"entry-{index}").touch()
+    inspect = Mock(side_effect=AssertionError("oversized inventory must not be decoded"))
+    monkeypatch.setattr(daemon_instances, "inspect_instances", inspect)
+    pins = plugin_test_lifecycle._NativeInstancePins(tmp_path, 2)
+    pins.run_id = "owned"
+    with pytest.raises(RuntimeError, match="inventory exceeded"):
+        pins.observe()
+    assert pins.processes == {}
+    inspect.assert_not_called()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="actual Windows process-object retention")
+def test_native_instance_pin_keeps_original_object_after_caller_handles_close(tmp_path):
+    import agent_procutil as pu
+    from agent_procutil._daemon_instance_identity import _windows_birth
+    from agent_procutil.daemon_instances import (
+        DaemonInstanceSpec, bind_instance, cleanup_instance, daemon_test_lifecycle, reserve_instance,
+    )
+    from tools import plugin_test_lifecycle
+
+    registry = tmp_path / "registry"
+    pins = plugin_test_lifecycle._NativeInstancePins(registry, 2)
+    with daemon_test_lifecycle(owner="native-pin-fixture", registry_root=registry) as environment:
+        pins.bind(environment)
+        receipt = reserve_instance(DaemonInstanceSpec(
+            "native-pin-fixture", tmp_path, Path(__file__).resolve(),
+        ), environment=environment)
+        process, job = pu.spawn_sync_in_kill_on_close_job(
+            [sys.executable, "-c", "import sys; sys.stdin.buffer.read(1)"],
+            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            require_job=True,
+            **pu.no_window_kwargs(),
+        )
+        try:
+            bind_instance(receipt, process.pid)
+            pins.observe()
+            retained = pins.processes[receipt.instance_id]
+            birth = _windows_birth(retained._handle)
+            process.communicate(b"x", timeout=10)
+            process._handle.Close()
+            job.close()
+            job = None
+            assert _windows_birth(retained._handle) == birth
+            assert cleanup_instance(receipt).status == "settled"
+        finally:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=10)
+            if job is not None:
+                job.close()
+            pins.close()
 
 
 @pytest.mark.parametrize("failure", [None, "missing", "foreign", "ordinary"])

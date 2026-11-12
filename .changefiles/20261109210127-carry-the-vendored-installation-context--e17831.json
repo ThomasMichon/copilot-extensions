@@ -1,0 +1,9 @@
+{
+  "comment": "Carry the vendored installation-context lifetime diagnostics into WSL setup payloads",
+  "changes": [
+    {
+      "plugin": "wsl-setup",
+      "type": "patch"
+    }
+  ]
+}

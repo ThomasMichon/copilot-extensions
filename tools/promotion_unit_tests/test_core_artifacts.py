@@ -208,7 +208,10 @@ def test_artifact_wheel_epoch_is_stable_and_scoped(tmp_path, monkeypatch):
 
     def build_child(command, environment, deadline):
         seen.append(environment["SOURCE_DATE_EPOCH"])
-        wheel = Path(command[command.index("-o") + 1]) / "sample-1.0-py3-none-any.whl"
+        staging = command[command.index("-o") + 1]
+        # UV's per-source setuptools lock stays in the disposable staging dir.
+        assert {environment[name] for name in ("TMP", "TEMP", "TMPDIR")} == {staging}
+        wheel = Path(staging) / "sample-1.0-py3-none-any.whl"
         with zipfile.ZipFile(wheel, "w") as archive:
             archive.writestr("sample-1.0.dist-info/WHEEL", "Generator: setuptools (84.0)\n")
         return subprocess.CompletedProcess(command, 0, stdout="", stderr="")

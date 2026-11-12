@@ -330,7 +330,32 @@ def _cmd_reservations(args: argparse.Namespace) -> int:
                 expected_generation=args.expected_generation, permitted=args.permit,
                 confirmed_no_live_holder=args.confirm_no_live_holder, reason=args.reason,
             ))
+        if args.reservations_command == "fence-history":
+            return _emit(c.fence_legacy_history(
+                before=_history_cutoff(args.before), apply=args.apply, permitted=args.permit,
+                confirmed_no_live_holder=args.confirm_no_live_holder, reason=args.reason or "",
+                reservation_keys=getattr(args, "reservation_keys", None),
+                expected_preview=getattr(args, "expected_preview", None),
+            ))
+        if args.reservations_command == "adopt-legacy":
+            return _emit(c.adopt_legacy_capacity(
+                apply=args.apply, permitted=args.permit, reason=args.reason or "",
+            ))
     return 2
+
+
+def _history_cutoff(value: str) -> float:
+    """Accept epoch seconds or an ISO-8601 timestamp with an explicit offset."""
+    import datetime
+
+    try:
+        return float(value)
+    except ValueError:
+        pass
+    parsed = datetime.datetime.fromisoformat(value)
+    if parsed.tzinfo is None:
+        raise SystemExit("--before ISO timestamps require an explicit UTC offset")
+    return parsed.timestamp()
 
 
 def register_producer_commands(subparsers: Any) -> None:
@@ -506,6 +531,29 @@ def register_reservations_command(subparsers: Any) -> None:
     rp.add_argument("--permit", action="store_true")
     rp.add_argument("--confirm-no-live-holder", action="store_true")
     rp.add_argument("--reason", required=True)
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "fence-history",
+        help="preview (default) or apply operator-attested reconciliation of terminal, "
+        "unbound legacy reservations created before a cutoff; preserves history",
+    )
+    rp.add_argument("--before", required=True, help="epoch seconds or ISO-8601 with offset")
+    rp.add_argument("--reservation-key", dest="reservation_keys", action="append",
+                    help="select a reservation; repeat for a verified subset")
+    rp.add_argument("--expected-preview", help="selected preview revision required for --apply")
+    rp.add_argument("--apply", action="store_true")
+    rp.add_argument("--permit", action="store_true")
+    rp.add_argument("--confirm-no-live-holder", action="store_true")
+    rp.add_argument("--reason")
+    rp.set_defaults(func=_cmd_reservations)
+    rp = res_sub.add_parser(
+        "adopt-legacy",
+        help="preview (default) or apply binding of still-accountable unbound reservations "
+        "to the single pool instance their task can use; ambiguous rows are only reported",
+    )
+    rp.add_argument("--apply", action="store_true")
+    rp.add_argument("--permit", action="store_true")
+    rp.add_argument("--reason")
     rp.set_defaults(func=_cmd_reservations)
     rp = res_sub.add_parser(
         "fail", help="mark a reservation failed (releases the task for a fresh attempt)"

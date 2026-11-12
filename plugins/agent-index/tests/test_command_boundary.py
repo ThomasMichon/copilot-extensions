@@ -87,7 +87,7 @@ def test_restart_delegates_to_graceful_deploy(monkeypatch):
     assert calls == [(60.0, 300.0, False, False, False)]
 
 
-def test_installers_are_base_only_and_never_implicitly_start_engine():
+def test_installers_are_base_only_and_never_implicitly_provision_engine():
     """The [store] extra (numpy/pyarrow/lancedb/tree-sitter*) is the light,
     torch-free vector-store stack a HOST's own versioned service runtime
     needs to search/index locally, and [server] is the FastAPI/uvicorn/
@@ -95,8 +95,8 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
     durable, heavy [engine] (torch) extra, which is provisioned exclusively
     by the `engine`/`engine-update` verbs (durable-vs-versioned-runtime.md).
     The installers may select [store,server] for a host role, but must never
-    pull in [engine] or implicitly start the engine daemon as a side effect
-    of a routine install/update.
+    pull in [engine]. Windows reconciles an independently provisioned engine's
+    readiness without provisioning it or selecting a scheduling tier.
     """
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
@@ -118,7 +118,8 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
             f"{following}", 1
         )[0]
         assert "Invoke-ServiceCutover" in ps_branch
-        assert "Install-LogonAutostart" in ps_branch
+        assert "Ensure-EngineRunning -RequireReady" in ps_branch
+        assert "Install-LogonAutostart" not in ps_branch
         assert "Install-Engine" not in ps_branch
         assert "_service_cutover || exit $?" in sh_branch
         assert "_install_logon_autostart" in sh_branch
@@ -132,11 +133,11 @@ def test_installers_are_base_only_and_never_implicitly_start_engine():
     # only health-checked/(re)started an already-installed service and never
     # stamped anything, so a genuinely fresh machine's first session left the
     # CLI entirely absent (nothing to health-check).
-    ps_ensure = ps_actions.split("'ensure' {", 1)[1].split("'register-tasks'", 1)[0]
+    ps_ensure = ps_actions.split("'ensure' {", 1)[1].split("'engine'", 1)[0]
     sh_ensure = sh_actions.split("ensure)", 1)[1].split("stamp)", 1)[0]
     assert "Deploy-SetupGatedBinstub" in ps_ensure
     assert "Ensure-Running" in ps_ensure
-    assert "Install-LogonAutostart" in ps_ensure
+    assert "Install-LogonAutostart" not in ps_ensure
     assert "Install-Runtime" not in ps_ensure
     assert "Install-Engine" not in ps_ensure
     assert "deploy_binstub" in sh_ensure
@@ -223,34 +224,21 @@ def test_stop_and_uninstall_also_stop_the_durable_engine_daemon():
     assert "-m agent_index engine stop" in sh_stop
 
 
-def test_default_durable_autostart_stays_unprivileged_and_tasks_remain_opt_in():
+def test_windows_on_demand_default_never_substitutes_registry_autostart():
     ps = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8")
     sh = (PLUGIN / "scripts" / "install.sh").read_text(encoding="utf-8")
 
-    autostart_fn = ps.split("function Install-LogonAutostartEntry {", 1)[1].split(
-        "\nfunction Install-LogonAutostart {", 1
-    )[0]
-    assert "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Run" in ps
-    # Start-now goes through the user-mode ensure path (spawn_daemon), never a
-    # PowerShell process launch that would stay inside the installer's Job.
+    assert "function Install-LogonAutostartEntry" not in ps
+    assert "New-ItemProperty" not in ps
+    assert "Install-LogonAutostart" not in ps
     assert "function Start-LauncherDetached" not in ps
-    assert "& $Ensure" in autostart_fn
-    assert "Start-Process" not in autostart_fn
-    assert "-Ensure { Ensure-ServiceRunning }" in ps
-    assert "-Ensure { Ensure-EngineRunning }" in ps
-    assert "Invoke-ScopedElevation" not in autostart_fn
-    assert "Get-ScheduledTask -TaskName $ScheduledTaskName" in autostart_fn
-    assert "Remove-LogonAutostart -Name $Name" in autostart_fn
-
     register_tasks = ps.split("function Invoke-RegisterTasks {", 1)[1].split(
-        "\nfunction Register-EngineDaemon {", 1
+        "\nfunction Write-ServiceFiles {", 1
     )[0]
     assert "Invoke-ScopedElevation -ElevAction 'register-tasks'" in register_tasks
-    assert "Remove-LogonAutostart -Name $TaskName" in register_tasks
-    assert "Remove-LogonAutostart -Name $EngineTaskName" in register_tasks
-    assert "Register-EngineDaemon" in register_tasks
-    assert "Install-Service" in register_tasks
-    assert "Install-LogonAutostart" not in register_tasks
+    assert "Invoke-IndexTaskScheduling" in register_tasks
+    assert "Start-ScheduledTask" not in register_tasks
+    assert "Ensure-" not in register_tasks
 
     assert 'SERVICE_LAUNCHER="$INSTALL_DIR/service.sh"' in sh
     assert 'ENGINE_LAUNCHER="$ENGINE_HOME/engine.sh"' in sh

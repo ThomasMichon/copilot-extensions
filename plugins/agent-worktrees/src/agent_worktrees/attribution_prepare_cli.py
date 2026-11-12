@@ -23,11 +23,18 @@ def resolve_comment_origin(
     root = source_root.resolve(strict=True)
     if not root.is_dir():
         raise ValueError("an explicit managed producer root is required")
-    tracking_path = cfg.tracking_dir(config.repo_name)
+    project = config.repo_name
+    if not project:
+        if len(config.repos) != 1:
+            raise ValueError("selected producer requires one unambiguous configured project")
+        project = next(iter(config.repos))
+    if project not in config.repos:
+        raise ValueError("selected producer project policy is unavailable")
+    tracking_path = cfg.tracking_dir(project)
     matches = [
         record.worktree_id
         for record in tracking.list_records(
-            tracking_path, repo_filter=config.repo_name, copy_records=False,
+            tracking_path, repo_filter=project, copy_records=False,
         )
         if record.worktree_path and Path(record.worktree_path).resolve() == root
     ]
@@ -37,7 +44,7 @@ def resolve_comment_origin(
         matches[0], tracking_path=tracking_path,
     ) if matches else None
     if (
-        record is None or record.repo != config.repo_name or not record.worktree_path
+        record is None or record.repo != project or not record.worktree_path
         or Path(record.worktree_path).resolve(strict=True) != root
     ):
         raise ValueError("selected producer differs from its managed source")
@@ -56,6 +63,8 @@ def add_parsers(sub) -> None:
     parser.add_argument("--config")
     parser.add_argument("--comment-origin", action="store_true", help="Emit compact comment-origin JSON, not a PR marker")
     parser.add_argument("--visibility", choices=("public", "internal"), help="Comment destination visibility (default: public)")
+    parser.add_argument("--source-root", type=Path, help="Exact managed producer root; requires comment-origin mode and absolute --config")
+    parser.add_argument("--capabilities", action="store_true", help="Discover comment-origin support without resolving source or configuration")
 
 
 def prepare_comment_origin(
@@ -136,10 +145,51 @@ def cmd_attribution_prepare(args: argparse.Namespace) -> int:
     try:
         comment_origin = getattr(args, "comment_origin", False)
         visibility = getattr(args, "visibility", None)
+        source_root = getattr(args, "source_root", None)
+        capabilities = getattr(args, "capabilities", False)
         if comment_origin and (args.body_file or args.tag or args.omit_source):
             raise ValueError("comment origin cannot compose a PR body, tag or omission override")
         if not comment_origin and visibility is not None:
             raise ValueError("visibility requires comment-origin mode")
+        if (source_root is not None or capabilities) and not comment_origin:
+            raise ValueError("source-root and capabilities require comment-origin mode")
+        if capabilities:
+            if source_root is not None or args.config is not None or visibility is not None:
+                raise ValueError("comment-origin discovery cannot select source, config or visibility")
+            print(json.dumps({
+                "schema": "agent-worktrees.comment-origin-capabilities", "version": 1,
+                "origin_protocol": COMMENT_ORIGIN_PROTOCOL,
+                "capabilities": ["explicit_source_root"], "effects": "none",
+            }))
+            return 0
+        if source_root is not None:
+            config_path = Path(args.config) if args.config else None
+            if config_path is None or not config_path.is_absolute() or not config_path.is_file():
+                raise ValueError("explicit comment origin requires an existing absolute config")
+            settings = cfg._load_yaml_safe(config_path)
+            project = settings.get("repo_name")
+            if project in (None, ""):
+                repositories = settings.get("repos")
+                if (
+                    not isinstance(repositories, dict) or len(repositories) != 1
+                    or not isinstance(next(iter(repositories.values())), dict)
+                ):
+                    raise ValueError("explicit comment origin requires one configured project")
+                project = next(iter(repositories))
+            if not isinstance(project, str) or not project.strip():
+                raise ValueError("explicit comment origin requires a configured project name")
+            with cfg.config_acquisition.capture_config_observations() as observations:
+                config = cfg.load_config(config_path, project=project)
+            if any(
+                finding.reason in {"unreadable-source", "invalid-shape", "invalid-yaml", "invalid-entry"}
+                for observation in observations for finding in observation.findings
+            ):
+                raise ValueError("explicit comment origin configuration policy is unavailable")
+            result = resolve_comment_origin(
+                source_root, config, visibility=visibility or "public",
+            )
+            print(json.dumps(result))
+            return 0
         config = cfg.load_config(Path(args.config) if args.config else None)
         cwd = Path.cwd()
         worktree_id = tracking.find_worktree_id_by_cwd(str(cwd), project=config.repo_name)

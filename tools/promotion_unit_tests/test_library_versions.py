@@ -1,5 +1,6 @@
-"""Library changefiles share promotion's shipped-version allocation owner."""
+"""Changefiles share promotion's shipped-version allocation owner."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -58,6 +59,87 @@ def test_library_seed_preserves_shipped_version_without_reapplying_old_change(li
     }
 
 
+def _packaged_projects(root):
+    for name, version in (("producer", "0.1.0-dev1"), ("receiver", "0.4.0-dev1")):
+        directory = root / "plugins" / name
+        directory.mkdir()
+        (directory / "plugin.json").write_text(json.dumps({
+            "name": name, "version": version,
+        }), encoding="utf-8")
+        (directory / "pyproject.toml").write_text(
+            f'[project]\nname = "{name}"\nversion = "{version}"\n', encoding="utf-8",
+        )
+
+
+@pytest.mark.parametrize("receiver_bump", [None, "dev"])
+def test_compute_bumps_packaged_manifest_receiver(library, receiver_bump):
+    _packaged_projects(library)
+    (library / "plugins/receiver/packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets",
+        "version": 1,
+        "canonicalDir": "plugins",
+        "payloadDir": "src/bundle",
+        "files": ["producer/plugin.json"],
+    }), encoding="utf-8")
+    grouped = {"producer": ["patch"]}
+    if receiver_bump:
+        grouped["receiver"] = [receiver_bump]
+
+    assert acc.compute(grouped) == {
+        "producer": ("0.1.0-dev1", "0.1.1-dev1"),
+        "receiver": ("0.4.0-dev1", "0.4.0-dev2" if receiver_bump else "0.4.1-dev1"),
+    }
+    assert grouped == {
+        "producer": ["patch"],
+        **({"receiver": ["dev"]} if receiver_bump else {}),
+    }
+
+
+def test_packaged_manifest_bumps_close_cycles_and_reach_standalone(library):
+    _packaged_projects(library)
+    manager = library / "worktree-manager"
+    manager.mkdir()
+    (manager / "pyproject.toml").write_text(
+        '[project]\nname = "manager"\nversion = "0.7.0-dev1"\n', encoding="utf-8",
+    )
+    for consumer, files in (
+        ("plugins/producer", ["receiver/plugin.json"]),
+        ("plugins/receiver", ["producer/pyproject.toml", "receiver/plugin.json"]),
+        ("worktree-manager", ["receiver/plugin.json"]),
+    ):
+        (library / consumer / "packaged-assets.json").write_text(json.dumps({
+            "schema": "copilot-extensions.packaged-assets", "version": 2,
+            "groups": [{
+                "canonicalDir": "plugins", "payloadDir": "src/bundle", "files": files,
+            }],
+        }), encoding="utf-8")
+
+    assert acc.compute({"producer": ["patch"]}) == {
+        "producer": ("0.1.0-dev1", "0.1.1-dev1"),
+        "receiver": ("0.4.0-dev1", "0.4.1-dev1"),
+        "worktree-manager": ("0.7.0-dev1", "0.7.1-dev1"),
+    }
+    assert acc.compute({}) == {}
+
+
+@pytest.mark.parametrize("kind", ["root", "version", "assets"])
+def test_indirect_packaged_version_receiver_refuses(library, monkeypatch, kind):
+    _packaged_projects(library)
+    receiver = library / "plugins/receiver"
+    assets = receiver / "packaged-assets.json"
+    assets.write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets", "version": 1,
+        "canonicalDir": "plugins", "payloadDir": "src/bundle",
+        "files": ["producer/plugin.json"],
+    }), encoding="utf-8")
+    linked = {"root": receiver, "version": receiver / "plugin.json", "assets": assets}[kind]
+    original = type(linked).is_symlink
+    monkeypatch.setattr(type(linked), "is_symlink", lambda path: path == linked or original(path))
+
+    with pytest.raises(acc.VersionError, match="unsafe library version"):
+        acc.compute({"producer": ["patch"]})
+
+
 def test_library_apply_failure_is_not_accepted(library):
     copy = library / "plugins/example/libs/agent-procutil/pyproject.toml"
     copy.write_text("[project]\nname='agent-procutil'\n", encoding="utf-8")
@@ -75,6 +157,45 @@ def test_shipped_version_seed_failure_refuses(monkeypatch, tmp_path):
     )
     with pytest.raises(promotion.PromotionError, match="cannot seed shipped versions"):
         promotion._seed_versions_from_main(tmp_path, "shipped", acc=fake, repo=tmp_path)
+
+
+@pytest.mark.parametrize("target", [
+    "plugin.json", "pyproject.toml", "src", "src/package",
+    "src/package/__init__.py", "src/package/_build_info.py",
+    "instruction-projections.json", "template.md", "marketplace.json",
+])
+def test_all_version_write_targets_are_admitted_before_any_change(library, monkeypatch, target):
+    _packaged_projects(library)
+    marketplace = library / ".github/plugin/marketplace.json"
+    marketplace.parent.mkdir(parents=True)
+    marketplace.write_text(json.dumps({"plugins": [
+        {"name": name, "version": version}
+        for name, version in (("producer", "0.1.0-dev1"), ("receiver", "0.4.0-dev1"))
+    ]}), encoding="utf-8")
+    monkeypatch.setattr(acc, "MARKETPLACE", marketplace)
+    root = library / "plugins/receiver"
+    (root / "src/package").mkdir(parents=True)
+    (root / "src/package/__init__.py").write_text(
+        '__version__ = "0.4.0-dev1"\n', encoding="utf-8",
+    )
+    (root / "instruction-projections.json").write_text(json.dumps({
+        "projections": [{"template": "template.md"}],
+    }), encoding="utf-8")
+    (root / "template.md").write_text("[owner: receiver@0.4.0-dev1]\n", encoding="utf-8")
+    linked = marketplace if target == "marketplace.json" else root / target
+    before = {path.relative_to(library): path.read_bytes()
+              for path in library.rglob("*") if path.is_file()}
+    original = type(linked).is_symlink
+    monkeypatch.setattr(type(linked), "is_symlink", lambda path: path == linked or original(path))
+
+    with pytest.raises(acc.VersionError, match="unsafe library version"):
+        acc.apply({
+            "producer": ("0.1.0-dev1", "0.1.1-dev1"),
+            "receiver": ("0.4.0-dev1", "0.4.1-dev1"),
+        })
+
+    assert {path.relative_to(library): path.read_bytes()
+            for path in library.rglob("*") if path.is_file()} == before
 
 
 @pytest.mark.parametrize("kind", ["manifest", "ancestor", "source-directory", "fallback"])

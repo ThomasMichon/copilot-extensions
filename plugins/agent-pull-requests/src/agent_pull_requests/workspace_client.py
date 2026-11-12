@@ -12,11 +12,15 @@ from .watch_replay_binding import ReplayBinding
 from .watch_replay_client import ReplayClient, ReplayClientError
 from .watch_replay_store import json_object
 from .workspace_selection import needs_owned_edits, selection_contract, supports_owned_edits, supports_selection
+from .review_comment_observation import contract as comment_observation_contract, supports as supports_comment_observation
+from .workspace_comment_mapping import supports as supports_mapping, valid_result as valid_mapping_result
 from .workspace_operations import (
     CHUNK_BYTES, MAX_GENERATION_BYTES, PROTOCOL, NativeWorkspaceClient, encoded, materialize,
     needs_prepared_review, prepared_review_contract, supports_prepared_review,
     _stock_preparation,
 )
+from .workspace_terminal_read import PROTOCOL as TERMINAL_PROTOCOL, supports as supports_terminal
+from . import workspace_terminal_mapping as terminal_mapping
 
 
 class WorkspaceClientError(ReplayClientError):
@@ -48,7 +52,15 @@ class WorkspaceClient:
         self._read_admission = read_admission
 
     async def _exchange(self, operation, payload, *, checkpoint=None):
-        data = encoded({"binding": self._binding.document(), "request": payload})
+        terminal = self._capabilities is not None and self._capabilities["protocol"] == TERMINAL_PROTOCOL
+        selection = self._capabilities["terminal_read_contract"]["protocol"] if terminal else None
+        if operation == "retained-comment" and terminal_mapping.selected(self._capabilities):
+            selection = terminal_mapping.SELECTION
+        data = encoded({
+            "binding": self._binding.document(), "request": payload,
+            **({"workspace_contract": selection}
+               if terminal and operation != "capabilities" else {}),
+        })
         if len(data) > BODY_BYTES:
             raise WorkspaceClientError("workspace_request_limit", outcome_unknown=False)
         try:
@@ -80,7 +92,10 @@ class WorkspaceClient:
             if len(types) != 1 or types[0].split(";")[0].strip().lower() != "application/json":
                 raise ValueError
             value = json_object(response.body)
-            if value.get("binding") != self._binding.document() or value.get("protocol") != PROTOCOL:
+            protocols = (PROTOCOL, TERMINAL_PROTOCOL) if operation == "capabilities" else (
+                TERMINAL_PROTOCOL if terminal else PROTOCOL,
+            )
+            if value.get("binding") != self._binding.document() or value.get("protocol") not in protocols:
                 raise ValueError
             value.pop("binding")
             return value
@@ -95,15 +110,17 @@ class WorkspaceClient:
         self._capabilities = None
         value = await self._exchange("capabilities", {}, **(
             {"checkpoint": checkpoint} if checkpoint is not None else {}))
+        terminal = value.get("protocol") == TERMINAL_PROTOCOL
         if (
-            value.get("generation_versions") != [1] or value.get("owner_store_versions") != [2]
+            value.get("generation_versions") != [1]
+            or (not supports_terminal(value) if terminal else value.get("owner_store_versions") != [2])
             or value.get("chunk_bytes") != CHUNK_BYTES
             or value.get("max_generation_bytes") != MAX_GENERATION_BYTES
             or not isinstance(value.get("operations"), list)
             or any(not isinstance(name, str) for name in value["operations"])
         ):
             raise WorkspaceClientError("unsupported_workspace_contract")
-        if "events" in value["operations"]:
+        if "events" in value["operations"] and not terminal:
             from .conversation_journal import PROTOCOL as CONVERSATION_PROTOCOL
             if value.get("conversation_contract") != {
                 "protocol": CONVERSATION_PROTOCOL, "owner_store_versions": [3],
@@ -124,6 +141,26 @@ class WorkspaceClient:
             value["unavailable_operations"] = {
                 **(unavailable if isinstance(unavailable, dict) else {}),
                 "allocate": "unsupported_selection_contract",
+            }
+        if "observe-comment" in value["operations"] and (
+            not supports_comment_observation(value.get("comment_observation_contract"))
+            or not supports_prepared_review(value.get("prepared_review_contract"))
+        ):
+            value["operations"] = [name for name in value["operations"] if name != "observe-comment"]
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "observe-comment": "unsupported_comment_observation_contract",
+            }
+        if not terminal and "retained-comment" in value["operations"] and (
+            not supports_mapping(value.get("comment_mapping_contract"))
+            or not supports_prepared_review(value.get("prepared_review_contract"))
+        ):
+            value["operations"] = [name for name in value["operations"] if name != "retained-comment"]
+            unavailable = value.get("unavailable_operations")
+            value["unavailable_operations"] = {
+                **(unavailable if isinstance(unavailable, dict) else {}),
+                "retained-comment": "unsupported_comment_mapping_contract",
             }
         if epoch != self._discovery_epoch:
             raise WorkspaceClientError("workspace_discovery_superseded")
@@ -147,13 +184,24 @@ class WorkspaceClient:
             if payload != {}:
                 raise WorkspaceClientError("invalid_workspace_capability_request")
             return await self.capabilities(**({"checkpoint": checkpoint} if checkpoint is not None else {}))
-        if self._capabilities is None or operation not in self._capabilities["operations"]:
+        compact_mapping = operation == "retained-comment" and terminal_mapping.selected(self._capabilities)
+        if self._capabilities is None or (
+            operation not in self._capabilities["operations"] and not compact_mapping
+        ):
             raise WorkspaceClientError("workspace_capability_required", outcome_unknown=False)
-        if needs_prepared_review(operation, payload):
+        if needs_prepared_review(operation, payload) and not compact_mapping:
             if checkpoint is not None:
                 checkpoint()
             if not supports_prepared_review(self._capabilities.get("prepared_review_contract")):
                 raise WorkspaceClientError("prepared_review_contract_required", outcome_unknown=False)
+        if operation == "observe-comment" and not supports_comment_observation(
+            self._capabilities.get("comment_observation_contract"),
+        ):
+            raise WorkspaceClientError("comment_observation_contract_required", outcome_unknown=False)
+        if operation == "retained-comment" and not compact_mapping and not supports_mapping(
+            self._capabilities.get("comment_mapping_contract"),
+        ):
+            raise WorkspaceClientError("comment_mapping_contract_required", outcome_unknown=False)
         if operation == "allocate" and not supports_selection(self._capabilities.get("selection_contract")):
             raise WorkspaceClientError("selection_contract_required", outcome_unknown=False)
         if needs_owned_edits(operation, payload) and not supports_owned_edits(
@@ -176,6 +224,21 @@ class WorkspaceClient:
             or value["result"].get("action_id") != payload.get("action_id")
         ):
             raise WorkspaceClientError("invalid_prepared_receipt_response", outcome_unknown=False)
+        if operation == "observe-comment" and (
+            value["result"].get("protocol") != comment_observation_contract()["result_protocol"]
+            or value["result"].get("scope") != value["scope"]
+            or any(value["result"].get(name) != payload.get(name)
+                   for name in ("operation_id", "action_id", "generation_id"))
+            or value["result"].get("effects") != "none"
+            or value["result"].get("original_version_proven") is not False
+            or value["result"].get("feedback_progress") is not False
+            or value["result"].get("fresh_native_read") is not False
+        ):
+            raise WorkspaceClientError("invalid_comment_observation_response", outcome_unknown=False)
+        if operation == "retained-comment" and not (
+            terminal_mapping.valid_result(value, payload) if compact_mapping else valid_mapping_result(value, payload)
+        ):
+            raise WorkspaceClientError("invalid_retained_comment_response", outcome_unknown=False)
         if operation == "allocate":
             from .review_selection_store import ReviewSelectionStore
             try:

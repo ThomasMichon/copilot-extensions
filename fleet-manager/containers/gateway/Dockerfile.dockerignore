@@ -44,6 +44,7 @@ libs/agent-procutil/src/agent_procutil/**
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_linux.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_native.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_owner.py
+!libs/agent-procutil/src/agent_procutil/_daemon_instance_reconcile.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_records.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_shell.py
 !libs/agent-procutil/src/agent_procutil/_daemon_instance_shell_windows.py

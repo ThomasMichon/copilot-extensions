@@ -38,6 +38,7 @@ import os
 import shlex
 import subprocess
 import sys
+import time
 
 from agent_procutil import no_window_kwargs
 
@@ -46,6 +47,16 @@ from . import config as cfg
 #: Default per-host SSH timeout (seconds). Kept short -- an unreachable host
 #: must degrade the fleet call to a partial result, never stall it.
 DEFAULT_TIMEOUT = 15.0
+
+#: Process-local monotonic time a host's probe started. A resident measured
+#: ``refreshed_age_s`` no earlier, so its age plus the time elapsed since this
+#: stamp bounds the roster's age now. Never serialized (:func:`public_host_rows`).
+PROBE_STARTED_KEY = "_probe_started_monotonic"
+
+
+def public_host_rows(rows: list[dict]) -> list[dict]:
+    """Fleet host rows without the process-local probe clock."""
+    return [{key: value for key, value in row.items() if key != PROBE_STARTED_KEY} for row in rows]
 
 
 def _fleet_targets(config):
@@ -211,6 +222,7 @@ def _probe_host(
     # stdin is closed so neither child can read (or block on) the caller's
     # stdin. A local timeout ends only the local client: some SSH servers
     # keep the remote command running after the client disconnects.
+    started = time.monotonic()
     try:
         if is_local:
             cmd = [*_local_project_argv(project), "list", "--json", *extra_args]
@@ -241,6 +253,7 @@ def _probe_host(
         row["error"] = "unparseable or unexpected `list --json` output"
         return row
     row["reachable"] = True
+    row[PROBE_STARTED_KEY] = started
     row["worktrees"] = envelope["worktrees"]
     # Provenance stays with the rows: `availability` is set (status
     # "advisory") when the host served its saved roster instead of a
@@ -268,7 +281,9 @@ def run_fleet(argv: list[str]) -> int:
         "attempt that never starts, waits for or wakes a host's status-monitor, "
         "otherwise that host's "
         "saved roster labeled by the row's `availability` (status advisory) "
-        "and `projection.observed_at`; a host without a saved roster, or whose "
+        "and `projection.observed_at`; a resident roster not republished "
+        "within the resident's freshness bound (`projection.freshness`) is "
+        "labeled `availability` status stale; a host without a saved roster, or whose "
         "older runtime rejects `--passive`, is a partial row. Registration is "
         "not checked per host: confirm a host's empty list against that "
         "host's `repos list --strict --json`. Rows carry both the lifecycle "
@@ -337,7 +352,7 @@ def run_fleet(argv: list[str]) -> int:
     delegate_cli.annotate_fleet_hosts(rows)
 
     if args.json:
-        print(json.dumps({"version": 1, "hosts": rows}, default=str))
+        print(json.dumps({"version": 1, "hosts": public_host_rows(rows)}, default=str))
         return 0
 
     total = 0
@@ -348,7 +363,14 @@ def run_fleet(argv: list[str]) -> int:
             continue
         n = len(row.get("worktrees", []))
         total += n
-        saved = " (saved roster)" if row.get("availability") else ""
+        availability = row.get("availability")
+        status = availability.get("status") if isinstance(availability, dict) else None
+        # Anything not provably current (including an older resident's
+        # unlabeled reply) is qualified, never shown as a plain count.
+        saved = (
+            "" if delegate_cli.host_roster_is_current(row)
+            else " (saved roster)" if status == "advisory" else " (stale roster)"
+        )
         print(f"  {label:30} {n} worktree(s){saved}")
     print(f"\n{total} worktree(s) across {len(rows)} host(s).")
     return 0

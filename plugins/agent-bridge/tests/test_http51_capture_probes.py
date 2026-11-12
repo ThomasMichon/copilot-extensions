@@ -10,12 +10,110 @@ from unittest.mock import AsyncMock, Mock
 from urllib.parse import urlsplit
 
 import pytest
+import test_host_status as host_status
+import test_host_status_remote as host_status_remote
+import test_live_questions as live_question_controls
+import test_runtime_serving as serving_controls
+import test_live_inbox_runtime as inbox_controls
+import test_native_send_admission as native_controls
+import test_gc as gc_controls
 from fastapi.testclient import TestClient
+
+host_status_api = host_status.api
+host_status_provider = host_status_remote.provider
+api = live_question_controls.api
+captured = serving_controls.captured
+installation = inbox_controls.installation
+serving = inbox_controls.serving
+native_send = native_controls.native_send
+
+
+@pytest.mark.parametrize("status", ["stopped", "ended"])
+@pytest.mark.parametrize("state", [
+    "preparing", "invoking", "unknown", "complete", "not-started", "malformed", "gate-only",
+])
+def test_retained_recovery_gc_preserves_original_inspection_handles(tmp_db, status, state):
+    gc_controls.TestDbGcPrimitives().test_retained_recovery_survives_selection_deletion_startup_and_periodic_gc(
+        tmp_db, status, state,
+    )
+
+
+@pytest.mark.parametrize("state", ["preparing", "unknown"])
+def test_successor_recovery_journal_retains_original_handle(tmp_db, tmp_path, state):
+    gc_controls.TestDbGcPrimitives().test_successor_recovery_journal_retains_original_handle(
+        tmp_db, tmp_path, state,
+    )
+
+
+@pytest.mark.parametrize("query", ["retained", "eligible"])
+@pytest.mark.parametrize("pending", [False, True])
+def test_retention_query_work_scales_with_history(tmp_db, query, pending):
+    gc_controls.TestDbGcPrimitives().test_retention_query_work_scales_with_history(tmp_db, query, pending)
+
+
+@pytest.mark.parametrize("state", ["complete", "not-started"])
+@pytest.mark.parametrize("malformed", [
+    "missing-request", "extra-field", "invalid-request", "different-operation",
+])
+def test_malformed_terminal_recovery_retains_original_and_successor(tmp_db, state, malformed):
+    gc_controls.TestDbGcPrimitives().test_malformed_terminal_recovery_retains_original_and_successor(
+        tmp_db, state, malformed,
+    )
+
+
+def test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(tmp_db):
+    gc_controls.TestDbGcPrimitives().test_existing_v44_database_prepares_retained_recovery_without_rewriting_guards(
+        tmp_db,
+    )
+
+
+def test_host_status_coalesced_flow(host_status_api, tmp_db):
+    host_status.test_real_http_inbox_consumer_gets_one_notice_and_consumption_is_not_ack(host_status_api, tmp_db)
+
+
+def test_host_status_shared_host_stream(tmp_db):
+    host_status_remote.test_two_watchers_and_two_aliases_share_one_stream_and_resume_after_restart(tmp_db)
+
+
+def test_host_status_prior_and_rollback_refusal(host_status_provider):
+    for capability in (None, False, 0, 2, "1"):
+        host_status_remote.test_prior_missing_invalid_and_rollback_provider_refuse_before_stream(
+            host_status_provider, capability,
+        )
+
+
+def test_host_status_legacy_timeout_compatibility(host_status_api, monkeypatch):
+    host_status.test_status_runtime_handles_distinct_legacy_asyncio_timeout(host_status_api, monkeypatch)
 
 import bridge_http52_evidence as evidence
 from bridge_http_retained_probes import capture_request, record_observations
 from http51_receipt_probes import observe as observe_receipt
 from http51_live_cli_probes import observe as observe_live_cli
+from test_live_delivery_state import (
+    delivery_api as delivery_api,
+    test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row
+    as test_accepted_behind_question_is_explicit_not_failed_and_keyed_retry_is_one_row,
+    test_consumption_releases_wait_without_turn_end_or_reply
+    as test_consumption_releases_wait_without_turn_end_or_reply,
+    test_missing_partial_stale_or_reincarnated_observer_is_unknown
+    as test_missing_partial_stale_or_reincarnated_observer_is_unknown,
+    test_receipt_loss_after_admission_cannot_be_reported_as_refused
+    as test_receipt_loss_after_admission_cannot_be_reported_as_refused,
+    test_invalid_wait_refuses_before_admission as test_invalid_wait_refuses_before_admission,
+    test_combined_reply_or_startup_wait_is_refused_before_admission
+    as test_combined_reply_or_startup_wait_is_refused_before_admission,
+    test_current_client_refuses_unsupported_provider_before_send
+    as test_current_client_refuses_unsupported_provider_before_send,
+    test_invalid_cli_timeout_is_parser_error_before_client_creation
+    as test_invalid_cli_timeout_is_parser_error_before_client_creation,
+    test_observation_rejects_duplicate_categories as test_observation_rejects_duplicate_categories,
+    test_real_cli_parser_send_and_existing_receipt_share_one_http_ledger
+    as test_real_cli_parser_send_and_existing_receipt_share_one_http_ledger,
+    test_module_cli_observes_over_loopback_without_starting_service
+    as test_module_cli_observes_over_loopback_without_starting_service,
+    test_extension_pending_snapshot_and_capability_wire
+    as test_extension_pending_snapshot_and_capability_wire,
+)
 from test_mux_questions import (
     mux_api as mux_api,
     test_http_choice_and_freeform_are_verified_audited_and_single_use
@@ -40,6 +138,12 @@ from test_mux_questions import (
     as test_ambiguous_rendering_never_parses_as_an_answerable_form,
     test_completion_requires_a_new_exact_answer_echo_not_old_history
     as test_completion_requires_a_new_exact_answer_echo_not_old_history,
+    test_completion_accepts_only_right_aligned_native_duration_annotations
+    as test_completion_accepts_only_right_aligned_native_duration_annotations,
+    test_only_known_native_decorations_are_volatile
+    as test_only_known_native_decorations_are_volatile,
+    test_http_clock_ticks_preserve_the_same_one_use_inspected_screen
+    as test_http_clock_ticks_preserve_the_same_one_use_inspected_screen,
 )
 from test_mux_question_client import (
     test_backend_uses_selected_owner_and_exact_confirmed_native_pane
@@ -54,12 +158,10 @@ from test_db_adoption import (
     as test_mux_storage_requires_writable_preparation_before_passive_adoption,
 )
 from test_runtime_serving import (
-    captured as captured,
     test_foreground_serves_real_authenticated_routes_only_after_fenced_commit
     as test_foreground_serves_real_authenticated_routes_only_after_fenced_commit,
 )
 from test_live_questions import (
-    api as api,
     test_live_question_provider_advertises_actual_capability
     as test_live_question_provider_advertises_actual_capability,
     test_passive_native_correlation_is_exact_and_charged_to_its_budget
@@ -92,10 +194,7 @@ from agent_bridge.client import BridgeClient
 from agent_bridge.events import EventLog
 from agent_bridge.session_manager import Session
 from agent_bridge.transport import SpawnTarget
-from test_live_inbox_runtime import (
-    installation as installation, serving as serving,
-)
-from test_native_send_admission import _command, native_send as native_send
+from test_native_send_admission import _command
 from test_native_send_admission import (
     test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race
     as test_concurrent_stopped_retries_reconcile_after_actual_resume_state_race,
@@ -188,6 +287,8 @@ from test_plugin_readiness import (
 from test_portable_mux_joined import (
     test_bridge_provider_receiver_and_extensions_share_one_conversation
     as test_bridge_provider_receiver_and_extensions_share_one_conversation,
+    test_carrier_failures_settle_owned_tree_and_streams
+    as test_carrier_failures_settle_owned_tree_and_streams,
 )
 from test_receiving_bundle import (
     test_provider_owner_uses_the_actual_client_interface
@@ -246,6 +347,22 @@ from test_full_session_status_cli import (
     as test_writer_status_uses_negotiated_original_observation,
 )
 from test_creation_worktree_writer import (
+    test_ordinary_resume_preserves_completed_recovery_permission_hold
+    as test_ordinary_resume_preserves_completed_recovery_permission_hold,
+    test_retained_recovery_resumes_same_native_once_without_prompt_drain
+    as test_retained_recovery_resumes_same_native_once_without_prompt_drain,
+    test_uncertain_retained_recovery_never_relaunches_or_falls_back
+    as test_uncertain_retained_recovery_never_relaunches_or_falls_back,
+    test_retained_recovery_round_trips_through_actual_http_native_owner
+    as test_retained_recovery_round_trips_through_actual_http_native_owner,
+    test_native_stop_race_retains_hold_and_records_no_native_entry
+    as test_native_stop_race_retains_hold_and_records_no_native_entry,
+    test_retained_recovery_denies_unconfirmed_native_owners_before_invocation
+    as test_retained_recovery_denies_unconfirmed_native_owners_before_invocation,
+    test_retained_recovery_cli_negotiates_and_never_replays_native_request
+    as test_retained_recovery_cli_negotiates_and_never_replays_native_request,
+    test_terminal_creation_writer_remains_inspectable_without_reopening
+    as test_terminal_creation_writer_remains_inspectable_without_reopening,
     test_required_creation_resume_refuses_changed_custody_before_effect
     as test_required_creation_resume_refuses_changed_custody_before_effect,
     test_required_creation_writer_cli_carries_requirement_to_actual_client
@@ -287,6 +404,12 @@ from test_creation_worktree_writer import (
     as test_keyed_creation_registration_failure_retains_native_and_dormancy,
     test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim
     as test_keyed_creation_uses_actual_retained_serializer_and_preserves_claim,
+)
+from test_retained_host_recovery import (
+    test_real_host_boundary_retains_stop_and_uncertain_custody
+    as test_real_host_boundary_retains_stop_and_uncertain_custody,
+    test_retained_recovery_cannot_enter_while_exact_session_end_is_active
+    as test_retained_recovery_cannot_enter_while_exact_session_end_is_active,
 )
 
 from test_creation_writer_resume import (
@@ -371,6 +494,7 @@ def test_http51_capture_actual_observations(
     observed["retained_workspace_creation_writer_inspection"] = (
         health["capabilities"]["retained_workspace_creation_writer_inspection"]
     )
+    observed["retained_native_session_recovery"] = health["capabilities"]["retained_native_session_recovery"]
     assert set(health["worktree_record_writer"]) == {"installation_root", "runtime_generation"}
     args, _ = _command(native_send, monkeypatch, api=api)
     args.func(args)

@@ -5,10 +5,12 @@ from __future__ import annotations
 from copy import deepcopy
 from datetime import datetime, timedelta, timezone
 import importlib
+import importlib.util
 import json
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -51,6 +53,62 @@ def lane(tmp_path: Path) -> Path:
               "baseline_context": context({"content": "initial"}), "resource_caps": CAPS}
     STORE.mutate(tmp_path, v2(change, 0, "init"), session="fixture-head")
     return tmp_path
+
+
+def test_managed_root_tracks_external_canonical_goal_without_ledger_rewrite(tmp_path: Path) -> None:
+    effort = tmp_path / "canonical.md"
+    effort.write_text("# Work\n\n## Goal\n\nInitial mission.\n\n## Plan\n\nWork.")
+    home = tmp_path / "detached-lane"
+    home.mkdir()
+    source = board()
+    source["source"] = {"kind": "effort", "ref": str(effort)}
+    STORE.mutate(home, v2({"operation": "init", "worktree": "fixture-lane", "board": source,
+        "baseline_context": context("input"), "resource_caps": CAPS}, 0, "init"))
+    before = STORE.read(home)
+    accepted = STORE.delivery_record(home)[1]
+    assert "Initial mission." in before["snapshot"]["root"]
+    effort.write_text("# Work\n\n## Goal\n\nAmended mission with current limits.\n")
+    after = STORE.read(home)
+    assert "Amended mission with current limits." in after["snapshot"]["root"]
+    assert after["revision"] == before["revision"]
+    assert after["records"] == before["records"]
+    assert after["documents"] == before["documents"]
+    assert STORE.delivery_record(home)[1] == accepted
+    assert accepted["snapshot"]["root"] == f"effort:{effort}"
+    exporter = importlib.import_module("agenda_export")
+    assert exporter._delivery_matches(accepted, after, accepted["source"], exporter._Budget())
+
+@pytest.mark.parametrize("heading", ["Goal", "Guiding Intent"])
+def test_goal_projection_respects_actual_receiver_text_bound(tmp_path: Path, heading: str) -> None:
+    contract_path = (
+        SKILL.parents[2] / "agent-worktrees" / "src" / "agent_worktrees" / "agenda_contract.py"
+    )
+    spec = importlib.util.spec_from_file_location("goal_receiver_contract", contract_path)
+    assert spec and spec.loader
+    receiver = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(receiver)
+    effort = tmp_path / "canonical.md"
+    home = tmp_path / "lane"
+    home.mkdir()
+    effort.write_text(f"# Work\n\n## {heading}\n\nShort objective.\n")
+    source = board()
+    source["source"] = {"kind": "effort", "ref": str(effort)}
+    STORE.mutate(home, v2({"operation": "init", "worktree": "fixture-lane", "board": source,
+        "baseline_context": context("input"), "resource_caps": CAPS}, 0, "init"))
+    accepted = STORE.delivery_record(home)[1]
+    suffix = STORE.read(home)["snapshot"]["root"].removeprefix("Short objective.")
+    # The receiver bounds the entire UTF-8 string, including its source label.
+    exact = "é" * 1800 + "x" * (4096 - len(suffix.encode()) - 3600)
+    effort.write_text(f"# Work\n\n## {heading}\n\n{exact}\n")
+    projected = STORE.read(home)
+    assert len(projected["snapshot"]["root"].encode()) == 4096
+    receiver.encode(projected["snapshot"])
+    effort.write_text(f"# Work\n\n## {heading}\n\n{exact}x\n")
+    fallback = STORE.read(home)
+    assert "exceeds display budget" in fallback["snapshot"]["root"]
+    assert str(effort) in fallback["snapshot"]["root"]
+    receiver.encode(fallback["snapshot"])
+    assert STORE.delivery_record(home)[1] == accepted
 
 
 def current(home: Path) -> tuple[str, str, str]:
@@ -536,8 +594,8 @@ def test_v2_actual_committed_publisher_adapter_preserves_original_result(
     wrapper = package_root / "selected-python"
     wrapper.write_text(f"#!{sys.executable}\nimport sys\n"
         f"sys.path.insert(0,{str(package_root)!r})\n"
-        "assert sys.argv[1:4]==['-I','-B','-c']\n"
-        "code=sys.argv[4]; sys.argv=['-c',*sys.argv[5:]]\nexec(compile(code,'<selected-provider>','exec'))\n")
+        "assert sys.argv[1:6]==['-I','-X','utf8','-B','-c']\n"
+        "code=sys.argv[6]; sys.argv=['-c',*sys.argv[7:]]\nexec(compile(code,'<selected-provider>','exec'))\n")
     wrapper.chmod(0o700)
     if unsupported:
         health = json.loads(provider_fixture["health"].read_text())
@@ -896,8 +954,9 @@ def test_v2_oversized_publish_with_documented_provider_options_keeps_original_re
     assert STORE.mutate(lane, req, session="fixture-head", publisher_configured=True) == (accepted, False)
 
 
+@pytest.mark.parametrize("unsupported", [False, True])
 def test_v2_actual_publisher_outer_adapter_is_isolated_from_shadow_cwd(
-    lane: Path, monkeypatch: pytest.MonkeyPatch
+    lane: Path, monkeypatch: pytest.MonkeyPatch, unsupported: bool,
 ) -> None:
     import venv
 
@@ -912,6 +971,11 @@ def test_v2_actual_publisher_outer_adapter_is_isolated_from_shadow_cwd(
         creationflags=subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0)
     assert purelib.returncode == 0, purelib.stderr
     library = Path(purelib.stdout.strip())
+    # Reproduce Windows redirected stdio on every host unless the child selects UTF-8.
+    (library / "sitecustomize.py").write_text(
+        "import sys\n"
+        "if not sys.flags.utf8_mode:\n"
+        " sys.stdout.reconfigure(encoding='cp1252')\n", encoding="utf-8")
     package = library / "agent_worktrees"
     package.mkdir()
     (package / "__init__.py").write_text("")
@@ -926,6 +990,8 @@ def test_v2_actual_publisher_outer_adapter_is_isolated_from_shadow_cwd(
         "'worktrees':{'status':'ready','generation':'a'*32}}\n"
         "class Client:\n"
         " def _request(self, action, payload, **kw):\n"
+        f"  if {unsupported!r}: return {{'ok':False,'contract_version':2,"
+        "'error':{'code':'unsupported','message':'fixture \\u2026 \\u6f22\\U0001f642'}}\n"
         "  body=payload['observation']; source=body['source']\n"
         "  return {'ok':True,'contract_version':2,'generation':payload['expected_generation'],"
         "'sequence':3,'project':payload['project'],'worktree_id':source['worktree'],"
@@ -942,10 +1008,25 @@ def test_v2_actual_publisher_outer_adapter_is_isolated_from_shadow_cwd(
     (fake_package / "__init__.py").write_text(malicious)
     monkeypatch.chdir(shadow)
     monkeypatch.setenv("PYTHONPATH", str(shadow))
+    monkeypatch.setenv("PYTHONUTF8", "0")
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+    monkeypatch.setattr(PUBLISH, "sys", SimpleNamespace(executable=str(interpreter)))
+    frame, item, _ = current(lane)
+    req = v2({"operation": "wait", "frame_id": frame, "item_id": item,
+        "reason_kind": "external", "reason_ref": "fixture",
+        "next_action": "Observe \u2026 \u6f22\U0001f642", "evidence": proof()}, 1, "unicode-publish")
+    accepted, _ = STORE.mutate(lane, req, session="fixture-head", publisher_configured=True)
+    committed = STORE.delivery_record(lane)
     result = PUBLISH.publish(lane, [], provider_python=str(interpreter), provider_project="fixture-project")
-    assert result["state"] == "delivered"
+    assert result["state"] == ("pending" if unsupported else "delivered"), result
+    if unsupported:
+        assert result["error"] == {"code": "unsupported", "message": "fixture \u2026 \u6f22\U0001f642"}
+    else:
+        assert result["reply"]["observation"]["snapshot"]["next_action"] == "Observe \u2026 \u6f22\U0001f642"
     assert not touched.exists()
-    assert STORE.read(lane)["revision"] == 1
+    assert STORE.read(lane)["revision"] == 2
+    assert STORE.delivery_record(lane) == committed
+    assert STORE.history(lane)[0] == accepted
 
 
 @pytest.mark.parametrize(("initial", "replacement"), [

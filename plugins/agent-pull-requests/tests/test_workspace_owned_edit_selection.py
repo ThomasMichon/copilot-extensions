@@ -61,6 +61,30 @@ def select_edit(environment: tuple, prepared_workspace: tuple, draft: dict, *, c
 
 
 @pytest.mark.parametrize("transport", ["native", "gateway"])
+def test_preparation_only_owned_edit_uses_exact_baseline_without_enabling_submit(
+    environment: tuple, prepared_workspace: tuple, owned_workspace: tuple,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], transport: str,
+) -> None:
+    store, _, _, attachment, backend, _ = environment
+    gateway, client, native, _, _, _ = prepared_workspace
+    draft, _ = owned_workspace
+    select_edit(environment, prepared_workspace, draft, content="Original legacy note.")
+    native.operations.write_context = None
+    host = WorkspaceTools(native if transport == "native" else client)
+    capabilities = asyncio.run(host.capabilities())
+    assert "allocate" in capabilities["operations"] and "submit" not in capabilities["operations"]
+    request = {"number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60}
+    code, preview = invoke_cli(host, "allocate", request, monkeypatch, capsys)
+    assert code == 0 and preview["result"]["intent"]["actions"][0]["kind"] == "edit_owned_comment", preview
+    before = store.path.read_bytes()
+    code, retry = invoke_cli(host, "allocate", request, monkeypatch, capsys)
+    assert code == 0 and retry == preview
+    code, _ = invoke_cli(host, "submit", {**request, "intent": preview["result"]["intent"]}, monkeypatch, capsys)
+    assert code != 0 and store.path.read_bytes() == before and backend.calls == []
+    asyncio.run(gateway.drain(timeout=2))
+
+
+@pytest.mark.parametrize("transport", ["native", "gateway"])
 @pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize("lost", [False, True])
 def test_actual_cli_edit_preview_recovery_submission_and_original_receipts(

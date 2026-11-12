@@ -850,7 +850,8 @@ class TestDetachedSessionsExcluded:
         assert norm not in ctx.active_sessions
         assert norm not in ctx.session_count
 
-    def test_backfill_skips_detached(self, tmp_session_state_dir: Path):
+    @pytest.mark.parametrize("strict", [False, True])
+    def test_backfill_skips_detached(self, tmp_session_state_dir: Path, strict):
         """Backfill must not register a detached session against a worktree."""
         wt_path = "/tmp/wt-backfill-detached"
         make_session_dir(
@@ -867,9 +868,62 @@ class TestDetachedSessionsExcluded:
             "agent_worktrees.sessions._session_state_dir",
             return_value=tmp_session_state_dir,
         ):
-            discovered = backfill_sessions([rec])
+            discovered = backfill_sessions([rec], strict=strict)
 
         assert discovered.get("backfill-wt") == ["real-sess"]
+
+
+@pytest.mark.parametrize("strict", [False, True])
+@pytest.mark.parametrize(("worktree", "cwd", "matches"), [
+    (r"C:\Work\Task", "c:/work/task", True),
+    (r"C:\Work\Task\\", r"c:/WORK/task\src", True),
+    (r"C:\Work\Task", "c:/work/task-other", False),
+    (r"C:\Work\Task", "d:/work/task", False),
+    (r"\\Host\Share\Task", "//host/share/task/src", True),
+    ("/work/Task", "/work/Task/src", True),
+    ("/work/Task", "/work/task/src", False),
+    ("/work/Task", "/work/Task-other", False),
+])
+def test_backfill_matches_workspace_path_semantics(
+    tmp_session_state_dir: Path, strict, worktree, cwd, matches,
+):
+    make_session_dir(tmp_session_state_dir, "legacy-path", cwd)
+    record = _make_record("backfill-wt", worktree, sessions=None)
+    with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        assert backfill_sessions([record], strict=strict) == (
+            {"backfill-wt": ["legacy-path"]} if matches else {}
+        )
+
+
+@pytest.mark.parametrize("workspace", [
+    "complete", "missing", "malformed", "relative", "record-missing", "record-relative",
+])
+def test_strict_backfill_requires_complete_attributable_workspace_data(
+    tmp_session_state_dir: Path, workspace,
+):
+    from agent_worktrees.push_timeout import ObservationUnavailable
+
+    wt_path = "/tmp/wt-strict-backfill"
+    entry = make_session_dir(tmp_session_state_dir, "legacy", wt_path)
+    path = entry / "workspace.yaml"
+    if workspace == "missing":
+        path.unlink()
+    elif workspace == "malformed":
+        path.write_text("cwd: [", encoding="utf-8")
+    elif workspace == "relative":
+        path.write_text("cwd: relative-worktree\n", encoding="utf-8")
+    record = _make_record("backfill-wt", wt_path, sessions=None)
+    if workspace == "record-missing":
+        record.worktree_path = ""
+    elif workspace == "record-relative":
+        record.worktree_path = "relative-worktree"
+    with patch("agent_worktrees.sessions._session_state_dir", return_value=tmp_session_state_dir):
+        if workspace == "complete":
+            assert backfill_sessions([record], strict=True) == {"backfill-wt": ["legacy"]}
+        else:
+            with pytest.raises(ObservationUnavailable):
+                backfill_sessions([record], strict=True)
+            assert backfill_sessions([record]) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -2133,21 +2187,22 @@ def test_session_state_sweep_confined_to_backfill():
     import ast
 
     import agent_worktrees.sessions as sessions_mod
+    import agent_worktrees.session_backfill as backfill_mod
 
-    src = Path(sessions_mod.__file__).read_text(encoding="utf-8")
-    tree = ast.parse(src)
     sweep_attrs = {"iterdir", "scandir", "listdir"}
     offenders: list[str] = []
-    for node in ast.walk(tree):
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-        if node.name == "backfill_sessions":
-            continue
-        for sub in ast.walk(node):
-            if (isinstance(sub, ast.Call)
-                    and isinstance(sub.func, ast.Attribute)
-                    and sub.func.attr in sweep_attrs):
-                offenders.append(f"{node.name}:{sub.func.attr}")
+    for module in (sessions_mod, backfill_mod):
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if node.name == "backfill_sessions":
+                continue
+            for sub in ast.walk(node):
+                if (isinstance(sub, ast.Call)
+                        and isinstance(sub.func, ast.Attribute)
+                        and sub.func.attr in sweep_attrs):
+                    offenders.append(f"{node.name}:{sub.func.attr}")
     assert not offenders, (
         "session-state sweep found outside backfill_sessions -- resolve by "
         f"exact session id instead: {sorted(set(offenders))}"

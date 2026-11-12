@@ -366,10 +366,18 @@ def source_handle_state(fixed: Path) -> tuple:
         return ("absent",)
     if serve._HAS_AF_UNIX:
         if stat.S_ISLNK(info.st_mode):
-            target = path.resolve(strict=True)
-            if target.parent != fixed.parent or not stat.S_ISSOCK(target.stat().st_mode):
-                raise ControlError("MCP data handle has a foreign socket target")
             content = os.readlink(path)
+            target = path.resolve(strict=False)
+            if target.parent != fixed.parent:
+                raise ControlError("MCP data handle has a foreign socket target")
+            try:
+                target_info = target.stat()
+            except FileNotFoundError:
+                target_info = None
+            if target_info is not None and not stat.S_ISSOCK(target_info.st_mode):
+                raise ControlError("MCP data handle has a foreign socket target")
+            if os.readlink(path) != content:
+                raise ControlError("MCP data handle changed during admission")
         elif stat.S_ISSOCK(info.st_mode):
             content = None
         else:
@@ -540,18 +548,9 @@ def _installed_slot(*, require_selected: bool = True) -> tuple:
 
 
 def _configured_readiness() -> dict:
-    from . import config
-    from .installer_readiness import evaluate
+    from .installer_readiness import configured_readiness
 
-    candidates = []
-    if config.BRIDGES_DIR.is_dir():
-        candidates.extend(
-            (config.normalize_bridge_name(path.name), path)
-            for path in sorted(config.BRIDGES_DIR.iterdir())
-            if path.suffix.lower() in {".yaml", ".yml", ".json"}
-        )
-    candidates.extend(config.discover_plugin_bridge_candidates())
-    return evaluate(candidates)
+    return configured_readiness()
 
 
 def _intent_path(layout: tuple) -> Path:
@@ -694,11 +693,16 @@ def _run_slot_startup(
              if (endpoint := routing.Endpoint.from_dict(table.get(role, {}))) is not None),
             default=0,
         ) + 1
+        retained_socket = (
+            (home / handle[4]).resolve(strict=False)
+            if serve._HAS_AF_UNIX and handle[0] == "present" and handle[4] is not None
+            else None
+        )
         while True:
             if time.monotonic() >= deadline:
                 raise ControlError("Source startup exhausted its candidate endpoint deadline")
             candidate_socket = home / f"serve-g{generation}.sock"
-            occupied = False
+            occupied = candidate_socket == retained_socket
             for path in (candidate_socket, serve._endpoint_path(candidate_socket)):
                 try:
                     path.lstat()

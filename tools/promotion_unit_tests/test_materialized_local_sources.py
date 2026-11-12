@@ -94,9 +94,97 @@ def test_materialized_closure_refuses_file_uri_sources(tmp_path, kind):
         )
 
 
-def test_materializer_refuses_missing_standalone_manifest(tmp_path):
+@pytest.mark.parametrize("foreign", [False, True], ids=["owned-preimage", "foreign-preimage"])
+def test_copied_installer_consumer_binds_its_declared_library_preimage(tmp_path, foreign):
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    contract = materializer.mie.ier
+    names = set((*contract.PYTHON_FILES, *contract.SUPPORT_FILES, *contract.STANDALONE_NATIVE_FILES))
+    library = source / "libs/update-driver"
+    for name in names:
+        _write(source / "libs/installer-engine" / name, f"# canonical {name}\n")
+        _write(library / "scripts" / name, f"# reviewed source preimage {name}\n")
+    nested = candidate / "plugins/sample/libs/update-driver"
+    for name in names:
+        _write(nested / "scripts" / name, (library / "scripts" / name).read_text())
+    target = nested / "scripts/installer_engine_commands.py"
+    if foreign:
+        target.write_bytes(b"# foreign candidate content\n")
+    before = {path.relative_to(nested): path.read_bytes()
+              for path in nested.rglob("*") if path.is_file()}
+    original = {path.relative_to(source): path.read_bytes()
+                for path in source.rglob("*") if path.is_file()}
+    log = materializer.mie.materialize_derived_files(
+        candidate, canonical_root=source, copied_consumer=(library, nested),
+    )
+    if foreign:
+        assert any(line.startswith("SKIP") and "foreign content" in line for line in log), log
+        assert before == {path.relative_to(nested): path.read_bytes()
+                          for path in nested.rglob("*") if path.is_file()}
+    else:
+        assert len(log) == len(names) and not any(line.startswith("SKIP") for line in log), log
+        for name in names:
+            assert (nested / "scripts" / name).read_bytes() == original[Path("libs/installer-engine") / name]
+    assert original == {path.relative_to(source): path.read_bytes()
+                        for path in source.rglob("*") if path.is_file()}
+
+
+def test_native_standalone_sdk_support_uses_current_canonical_bytes(tmp_path):
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    contract = materializer.mie.ier
+    owners = ("agent-containers", "agent-machines", "budget-guidance")
+    names = set((*contract.PYTHON_FILES, *contract.SUPPORT_FILES, *contract.STANDALONE_NATIVE_FILES))
+    for owner in owners:
+        names.update(contract.native_files(source / "plugins" / owner, source))
+    for name in names:
+        _write(source / "libs/installer-engine" / name, f"# canonical {name}\n")
+        for owner in owners:
+            for root in (source, candidate):
+                _write(root / "plugins" / owner / "scripts" / name, f"# previous {name}\n")
+    original = {path.relative_to(source): path.read_bytes()
+                for path in source.rglob("*") if path.is_file()}
+    log = materializer.mie.materialize_derived_files(candidate, canonical_root=source)
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    for owner in owners:
+        expected_names = set(contract.native_files(source / "plugins" / owner, source))
+        if owner in contract.PYTHON_ADOPTERS:
+            expected_names.update(contract.PYTHON_FILES)
+        for name in expected_names:
+            assert (candidate / "plugins" / owner / "scripts" / name).read_bytes() == (
+                source / "libs/installer-engine" / name
+            ).read_bytes()
+        if "runtime_launcher.py" not in expected_names:
+            assert (candidate / "plugins" / owner / "scripts/runtime_launcher.py").read_bytes() == (
+                original[Path("plugins") / owner / "scripts/runtime_launcher.py"]
+            )
+    assert original == {path.relative_to(source): path.read_bytes()
+                        for path in source.rglob("*") if path.is_file()}
+
+
+def test_unrelated_library_copy_does_not_read_installer_inputs(tmp_path, monkeypatch):
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    library = source / "libs/unrelated"
+    copied = candidate / "plugins/sample/libs/unrelated"
+    library.mkdir(parents=True)
+    copied.mkdir(parents=True)
+
+    def refuse_read(*args, **kwargs):
+        raise AssertionError("An unrelated library must not acquire Installer inputs")
+
+    monkeypatch.setattr(materializer.mie.ier, "support_files", refuse_read)
+    assert materializer.mie.materialize_derived_files(
+        candidate, canonical_root=source, copied_consumer=(library, copied),
+    ) == []
+
+
+def test_materializer_refuses_missing_standalone_manifest(tmp_path, monkeypatch):
     (tmp_path / "worktree-manager").mkdir()
     (tmp_path / "plugins" / "skill-only").mkdir(parents=True)
+
+    def refuse_copy(*args, **kwargs):
+        raise AssertionError("A missing standalone manifest must refuse before copying")
+
+    monkeypatch.setattr(materializer, "materialize_installer_engine_refs", refuse_copy)
+    monkeypatch.setattr(materializer.mpiv, "materialize", refuse_copy)
     log = materializer.materialize(tmp_path, canonical_root=tmp_path)
     assert (
         len(log) == 1 and log[0].startswith("SKIP local source") and "missing" in log[0]

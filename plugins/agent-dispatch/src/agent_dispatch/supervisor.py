@@ -128,6 +128,10 @@ from .supervisor_conclusion import (  # noqa: F401 -- re-exported for existing c
     _retired_cleanup_plan,
 )
 from .supervisor_identity import RestrictedStartupMixin
+from .supervisor_relationship_settlement import (
+    rearm_claim_held_cleanup,
+    settle_completed_relationship,
+)
 from .supervisor_startup_fence import TerminalStartupMixin
 
 log = logging.getLogger("agent-dispatch.supervisor")
@@ -148,6 +152,24 @@ _LEASED = frozenset({Status.CLAIMED, Status.STARTED})
 _CONCLUSION_PER_CYCLE = 10
 _COLD_RESUME_RETRY_SECONDS = 300
 _MIN_RESERVING_TIMEOUT_SECONDS = 600
+
+
+def _bridge_creation_nonce(reservation: dict) -> str | None:
+    """Bridge's retained creation nonce for an ordinary Bridge-created worker."""
+    if reservation.get("driver") != "ordinary-bridge":
+        return None
+    info = reservation.get("agent_info")
+    if isinstance(info, str):
+        try:
+            info = json.loads(info)
+        except ValueError:
+            return None
+    creation = info.get("creation") if isinstance(info, dict) else None
+    created = creation.get("worktree") if isinstance(creation, dict) else None
+    nonce = created.get("creation_nonce") if isinstance(created, dict) else None
+    if created is None or created.get("id") != reservation.get("worktree"):
+        return None
+    return nonce if isinstance(nonce, str) and nonce else None
 
 class _ReservationsUnavailable(Exception):
     """The coordinator couldn't be reached to list reservations."""
@@ -415,26 +437,29 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
     # -- helpers -------------------------------------------------------------
 
     def _eligible(self, now: float) -> list[dict]:
-        """Queued, due tasks in the lane matching the label opt-in (oldest first).
+        """Queued, due finite tasks in the lane matching the label opt-in (oldest first).
 
-        Server-side per-label filtering applies before the 200-row limit.
-        A shared newest-first page could otherwise hide older matching tasks
-        behind other lanes' work. Deduplicate the per-label results locally.
+        Server-side per-label and finite-kind filtering applies before the
+        200-row limit. A shared newest-first page could otherwise hide older
+        matching tasks behind other lanes' work or standing charters, which only
+        explicit attachment admission may select. Deduplicate locally.
         """
         if self.labels:
             seen: dict[str, dict] = {}
             for label in sorted(self.labels):
                 for t in self.client.list(
-                    repo=self.repo, status=Status.QUEUED, label=label, limit=200
+                    repo=self.repo, status=Status.QUEUED, label=label, kind="finite", limit=200
                 ):
                     seen[t["id"]] = t
             tasks = list(seen.values())
         else:
             # No label restriction (a catch-all pool) -- nothing to scope the
             # server-side query to; same broad page as before.
-            tasks = self.client.list(repo=self.repo, status=Status.QUEUED, limit=200)
+            tasks = self.client.list(repo=self.repo, status=Status.QUEUED, kind="finite", limit=200)
         out: list[dict] = []
         for t in tasks:
+            if t.get("kind", "finite") != "finite":
+                continue  # standing charters are never finite executable work
             if (t.get("not_before") or 0) > now:
                 continue  # deferred: not due yet
             if t.get("awaiting_steer"):
@@ -751,9 +776,14 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 current = self.client.get_reservation(key)
             except DispatchError:
                 continue
-            if current.get("reservation_pool_bound") is True:
+            if current.get("reservation_pool_bound") is True and (
+                current.get("reservation_pool_assignment") is not None
+                or "reservation_pool_assignment" not in current
+            ):
                 # The coordinator's retained wake requests current-worker affirmation.
                 # A local process-resume return must never perform that acceptance.
+                # An adopted legacy binding has no recovery assignment and stays here;
+                # record_spawn admits it against its bound pool's lanes first.
                 continue
             local_sid = _parse_local_body_handle(res.get("session_handle"))
             if local_sid is None:
@@ -876,6 +906,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         "still held by another active reservation",
                         task.get("id"),
                     )
+                elif "waiting for a free lane" in str(exc):
+                    # An adopted pool body restarts only when its bound pool
+                    # has a free lane; the queue refuses atomically until then.
+                    log.info("deferring resume of cold task %s: pool is full", task.get("id"))
                 else:
                     log.exception(
                         "failed to finalize cold-task resume for %s",
@@ -1374,7 +1408,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 session_id,
                 str(reservation.get("allocation_reservation_key") or reservation["key"]),
                 driver,
-                **({"project": provenance["allocation_project"], "worktree_path": provenance["worktree_path"]}
+                **({"project": provenance["allocation_project"], "worktree_path": provenance["worktree_path"],
+                    "creation_nonce": _bridge_creation_nonce(reservation)}
                    if self.attempt_conclusion_fn is _default_attempt_conclusion else {}),
             )
         except Exception as exc:
@@ -1433,6 +1468,10 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         """Retire proven-absent bodies and preserve cleanup obligations."""
         now = time.time() if now is None else now
         released = 0
+        try:
+            rearm_claim_held_cleanup(self)
+        except (DispatchError, httpx.TransportError):
+            log.warning("claim-held cleanup sweep failed; retrying next cycle", exc_info=True)
         reservations = self._pool_reservations(
             state=(
                 f"{SpawnState.RESERVING},{SpawnState.SPAWNED},"
@@ -1858,6 +1897,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 }
                 conclusion_state = _CONCLUSION_HELD
             else:
+                if not settle_completed_relationship(self, res, task):
+                    continue
                 if body_already_released:
                     try:
                         self._conclusion_client.validate_spawn_conclusion_claim(
@@ -2365,6 +2406,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 ):
                     if not self._fence_terminal_startup(res, task):
                         continue
+                    if not settle_completed_relationship(self, res, task):
+                        continue
                     try:
                         if res.get("state") != SpawnState.RELEASING:
                             self.client.request_spawn_release(
@@ -2412,6 +2455,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                 if res.get("state") in {SpawnState.SPAWNED, SpawnState.COLD} and not (
                     self._fence_terminal_startup(res, task)
                 ):
+                    continue
+                if not settle_completed_relationship(self, res, task):
                     continue
                 local_sid = _parse_local_body_handle(res.get("session_handle"))
                 if (
@@ -3690,6 +3735,7 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
         *,
         interval: float = 30.0,
         on_cycle: Callable[[list[str]], None] | None = None,
+        on_cycle_start: Callable[[], None] | None = None,
     ) -> None:
         """Run :meth:`poll_once` each cycle, waiting between cycles.
 
@@ -3716,6 +3762,8 @@ class Supervisor(RestrictedStartupMixin, TerminalStartupMixin):
                         return
                     continue
                 try:
+                    if on_cycle_start is not None:
+                        on_cycle_start()
                     spawned = self.poll_once()
                     if on_cycle is not None:
                         from .spawn_diagnostics import SpawnDiagnostics

@@ -155,6 +155,10 @@ def load_config(*, strict: bool = False) -> ServiceConfig:
         except Exception as exc:
             if strict:
                 raise ValueError("Invalid service configuration; refusing preference fallback") from exc
+            if isinstance(data, dict) and "windows_scheduled_task" in data:
+                raise ValueError(
+                    "Invalid Windows scheduling configuration; refusing configuration fallback"
+                ) from exc
             if isinstance(data, dict) and "session_modes" in data:
                 raise ValueError(
                     "Invalid session_modes configuration; refusing preference fallback"
@@ -333,27 +337,37 @@ def migrate_config(cfg: ServiceConfig) -> ServiceConfig:
     (The former ``session_host_default_on`` value-migration is retired: Session
     Hosts are now the *only* mode -- the ``session_host_enabled`` toggle was
     removed -- so a persisted ``session_host_enabled: false`` is simply ignored
-    on load and dropped on the next config write. See dotfiles#1478.)
+    on load and dropped on the next full config save. See dotfiles#1478.)
     """
-    changed = False
-    mig_dir = config_dir() / _MIGRATION_DIR
-
-    # -- idle_reap_default_on ---------------------------------------------
-    marker = mig_dir / "idle_reap_default_on"
-    if not marker.exists():
+    root = config_dir()
+    cfg_path = root / CONFIG_FILENAME
+    marker = root / _MIGRATION_DIR / "idle_reap_default_on"
+    with config_file_lock(cfg_path):
+        before = cfg_path.read_bytes() if cfg_path.exists() else None
+        if before is not None:
+            cfg = load_config()
+            if not cfg_path.exists() or cfg_path.read_bytes() != before:
+                raise ValueError("configuration changed during migration; retry")
+        if marker.exists():
+            return cfg
         if cfg.idle_reap_ttl_seconds == 0:
+            data = (
+                yaml.safe_load(before)
+                if before is not None
+                else cfg.model_dump(exclude_defaults=False)
+            )
+            if not isinstance(data, dict):
+                raise ValueError("agent-bridge configuration must be a mapping")
+            data["idle_reap_ttl_seconds"] = 600
+            atomic_write_config(cfg_path, data, expected=before)
             cfg = cfg.model_copy(update={"idle_reap_ttl_seconds": 600})
-            changed = True
             log.info(
                 "Config migration: idle_reap_ttl_seconds 0 -> 600 "
                 "(idle-session reaper is now armed by default)"
             )
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text("applied\n", encoding="utf-8")
-
-    if changed:
-        save_config(cfg)
-    return cfg
+        return cfg
 
 
 def _state_root_machines_yaml(repo: Path) -> str | None:

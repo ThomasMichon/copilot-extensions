@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -267,7 +268,9 @@ def test_native_frozen_input_checks_canonical_source_bytes_and_ignores_only_gene
     environment.update(COPILOT_PLUGIN_ROOT=str(origin), COPILOT_PLUGIN_INSTALL_STAGED="1",
                        COPILOT_PLUGIN_STAGED_FROM=str(origin))
     if os.name == "nt":
-        environment["PATH"] = str(Path(os.environ["SystemRoot"]) / "System32")
+        environment["PATH"] = os.pathsep.join((
+            str(Path(sys.executable).parent), str(Path(os.environ["SystemRoot"]) / "System32"),
+        ))
     result = native(copied / "scripts" / "payload-mode", environment=environment)
     if changed:
         assert result.returncode != 0 and "differs from its origin" in result.stderr

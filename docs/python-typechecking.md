@@ -62,6 +62,7 @@ python tools/typecheck.py lib-single-instance-lease
 python tools/typecheck.py lib-update-telemetry
 python tools/typecheck.py lib-work-coalescing-singleton
 python tools/typecheck.py lib-worktree-identity-remaining
+python tools/typecheck.py agent-roles
 python tools/typecheck.py --inventory
 python tools/typecheck.py --inventory --json
 ```
@@ -83,6 +84,13 @@ same bytes for both the environment key and installation. Nested requirement
 includes are refused until a complete graph snapshot is qualified. The dependency
 install subprocess has a five-minute bound. Cache-path validation stays independent of Python
 3.11-only installer imports, preserving the checker's Python 3.10 bootstrap.
+
+Agent Roles checks all three Python skill-contract test files strictly on both
+analysis platforms with the existing Python 3.10 target and base checker lock.
+The synthetic JSON example retains explicit dynamic values; its assertions and
+negative cases are unchanged. This admits the static Python test scope, not
+live review, triage, fleet steering or provider behavior. It does not admit
+another project's copies or enlarge the required unit packet.
 
 Plugin Activation checks all twenty-one canonical source/test files strictly
 on both targets using the existing YAML checker lock. Dynamic JSON and YAML
@@ -413,7 +421,9 @@ The canonical Installation Context project uses a checker-only composition at
 the actual `_load_fragments()` call. Its complete loader structure must match
 the qualified adapter. The literal fragment tuple determines order; every
 physical fragment must be present exactly once. The separate PowerShell worker
-remains an independent input.
+remains an independent input. The adapter includes the Windows native-read
+helper while keeping compiled filenames in their original lexical spelling;
+the helper itself remains in the checked source.
 
 When that canonical loader is in the physical inventory, every project also
 receives the faithful view as an import root. A consumer can therefore import
@@ -425,17 +435,17 @@ the same byte/membership verification, source mapping and lease-bound cleanup;
 no stub, private-fragment import or missing-import suppression is substituted.
 
 The view preserves physical source lines, normalizing line endings to LF and
-replacing only standalone `from __future__ import annotations` declarations with
-blank mapped lines. It refuses other future imports, changed loader semantics,
-missing/extra fragments and file-wide checker directives. Product code is
-never imported or executed. Each original source first passes non-executing
-compilation, so AST-only acceptance cannot hide runtime syntax errors. Directive
-scanning uses Python's universal-newline interpretation, including CR-only
-sources. Checker diagnostics point back to original fragment
-paths and line numbers. Input and emitted-view bytes are revalidated before a
-result is credited; temporary views are removed while holding the checker lease.
-Views live beside, not inside, the prepared venv because MyPy refuses its own
-environment as an import root.
+replacing the loader call and standalone `from __future__ import annotations`
+declarations with blank mapped lines. It refuses other future imports, changed
+loader semantics, missing/extra fragments and file-wide checker directives.
+Product code is never imported or executed. Each original source first passes
+non-executing compilation, so AST-only acceptance cannot hide runtime syntax
+errors. Directive scanning uses Python's universal-newline interpretation,
+including CR-only sources. Checker diagnostics point back to original loader and
+fragment paths and line numbers. Input and emitted-view bytes are revalidated
+before a result is credited; temporary views are removed while holding the
+checker lease. Views live beside, not inside, the prepared venv because MyPy
+refuses its own environment as an import root.
 
 ```text
 python tools/typecheck.py lib-installation-context

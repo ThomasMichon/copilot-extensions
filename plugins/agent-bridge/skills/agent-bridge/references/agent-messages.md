@@ -82,6 +82,14 @@ recent output separately:
   historical receipt is explicitly `null`, never fabricated.
 - Never resend merely because a busy peer has not answered. If transport loss
   requires a retry, reuse the original `--idempotency-key` and identical request.
+  For exact keyed sends, identical means the same expected session, key, sender
+  and body byte for byte, including any trailing newline; keep the original
+  prompt file and pass it again rather than retyped text. The read-only
+  `--live-receipt-only` observation uses that same binding (see the
+  [delegation contract](../../../docs/delegation-contract.md#exact-live-cli-inbox-admission-and-observation)).
+  A binding conflict on a retry or receipt read means the caller's binding
+  differs from the original, not that delivery failed; never resend under a
+  new key to work around it.
 - `--kind` sets intent: `--notify` (informational, no answer expected) or
   `--status-check` (asks the receiver for a terse status ack, not new work), vs
   the default `prompt` (a work directive). Prefer readback for observation rather

@@ -1,0 +1,9 @@
+{
+  "comment": "Add artifact lifecycle classification and managing-artifacts guidance with explicit custody, history, delivery and runtime-compatibility boundaries.",
+  "changes": [
+    {
+      "plugin": "agent-conduct-guidance",
+      "type": "patch"
+    }
+  ]
+}

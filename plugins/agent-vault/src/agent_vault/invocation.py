@@ -59,7 +59,10 @@ def invocation_contract() -> dict:
     return {
         "schema": "agent-vault.invocation",
         "version": 1,
-        "capabilities": ["configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1"],
+        "capabilities": [
+            "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
+            "authenticated-curl-v1", "daemon-bind-default-v1", "preserved-cache-recovery-v1",
+        ],
     }
 
 

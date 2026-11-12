@@ -1,0 +1,9 @@
+{
+  "comment": "Select and verify the current compact ACP core for fresh remote Session Hosts while retaining explicit legacy receiving compatibility.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

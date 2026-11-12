@@ -19,20 +19,96 @@ plugins. It is the one piece that must work *before* the plugins do.
 > [#1165](https://github.com/ThomasMichon/copilot-extensions/issues/1165) and
 > [#1174](https://github.com/ThomasMichon/copilot-extensions/issues/1174).
 
+## Bare entry and first-run diagnostics
+
+Run `worktree-manager` without arguments in an interactive terminal to open
+Worktrees when exactly one launchable project and an engine command are available.
+Otherwise the same app opens **Setup / Doctor**, without inventing a project or
+loading operational worktree data. Multiple registered projects require an
+explicit selection; knowledge-only repositories are not standalone targets.
+Unreadable or malformed registries remain visible errors, not an empty first-run
+roster. **Reload** re-observes state without installing or adopting anything.
+
+**Review setup plan** runs the real `worktree-manager setup` dry run, and
+**Inspect Manager setup** uses the existing read-only Manager diagnostics.
+Both preserve stdout, stderr and the actual exit status before returning.
+An incomplete setup can return a nonzero status even though no changes were
+applied. Diagnostics are explicit, bounded child commands, never startup probes.
+The result screen waits for command settlement before allowing Return.
+The Manager-owned setup child retains the selected installation context; general
+contributed-command identity scrubbing is unchanged. Timeouts keep bounded
+partial stdout/stderr and do not invent a normal exit status. Unconfirmed
+cleanup retains its original custody and blocks another diagnostic attempt.
+
+This is navigation and diagnostic entry, not a complete onboarding wizard.
+Installation, repository trust/adoption, machines, plugins, knowledge binding
+and authentication retain their existing owners and explicit commands.
+**Install core**, **Add machine**, **Adopt repo** and **Enable plugins** open
+read-only guides with prerequisites, effects, owning references and supported
+next steps. Install core can open the same real setup-plan command. Applying
+setup or adoption still uses the named CLI outside the TUI; retain its result
+and follow restart instructions before returning and selecting Reload. Machine
+creation and plugin enablement have no in-app writer here. Browsing a guide
+does not execute its displayed commands, open links or change readiness.
+Redirected/noninteractive bare invocation still prints installation status;
+explicit verbs, project launch and launcher JSON output keep their contracts.
+
+## Explicit Sync progress
+
+Local paired Sync reads `agent_worktrees/sync-progress-v1.json` beside the exact
+selected engine interpreter. A valid version-1 declaration enables
+`sync --paired --json --stream`; missing, invalid or unsupported support retains
+the ordinary JSON invocation. The selected command is pinned for that invocation.
+Remote Sync remains on its existing attributable JSON path. Neither path retries
+an uncertain operation or strips an optional flag after execution starts.
+
+The existing progress screen shows real stage messages while the engine runs
+off-thread and retains the complete final result, including both pair members.
+A 30-second communication interval reports initial or later silence without
+cancelling Sync; received updates, including unfamiliar kinds, renew contact.
+A separate one-hour execution budget remains finite despite progress.
+Missing or contradictory terminal/process results are unknown outcomes, not
+success. Output is bounded; expiry retires the owned Job/group and preserves
+diagnostics. Unconfirmed cleanup retains exact custody and blocks another item.
+Escape does not dismiss an active Sync or claim cancellation/rollback. Completed
+results keep the existing diagnostic browsing controls. This does not install,
+update or automatically synchronize a worktree.
+
+Application teardown is different from Escape: idle expiry, owner-lifetime exit
+and normal Picker shutdown stop queued items, settle the current owned local
+Sync and join its worker/observer. Both streamed and legacy JSON local Sync use
+the application-owned lifetime; baseline syntax and its 120-second execution
+bound remain unchanged. Interrupted execution is unknown, not rolled back or
+safe to replay. If retirement fails after a terminal result, complete member/
+plugin results and bounded stderr remain attached to the retained cleanup error.
+An in-flight remote SSH Sync retains its prior bounded JSON lifetime: teardown
+stops later queued items but neither waits for that remote operation nor claims
+it cancelled or settled. Mixed selections join only the currently owned local
+Sync; remote streaming and remote-process ownership are unchanged.
+
 ## Picker notices and diagnostics
 
 Mux uncertainty is separate from process liveness: `MUX(?)` means last-known
 mux hosting cannot be confirmed, and `HOST(?)` means a live process's hosting
 is unknown. Neither is a zero-client detached session or proof of a safe cold
 launch. Passive PSMux CLI discovery, attachment refresh and status validation
-are unavailable rather than executing commands that can perform startup cleanup.
-Existing mappings and counts are preserved, not revalidated. See
+are replaced by Driver-owned finite authenticated socket observations,
+including fresh session identity and real client counts. Failed/unsupported
+observations preserve existing mappings without claiming fresh proof.
+The launcher qualifies the actual selected Worktrees provider's observation
+contract; older providers stay explicitly unsupported without a CLI downgrade.
+Open still creates or reattaches through the existing launch flow. Foreground
+PSMux attach/create and explicit writes retain their startup-cleanup risk. See
 [preservation-first recovery](../plugins/agent-worktrees/docs/mux.md#preserve-first-when-discovery-is-unavailable)
 for the scope, older-consumer limitation and separately authorized recovery.
+Periodic PSMux status-bar writes remain refused: restoring fresh listings
+does not reactivate cleanup-bearing background CLI work.
 
-The Picker reserves two fixed notice rows for Knowledge setup and cached-source
-refresh status. Updates to these notices do not insert entries into the worktree
-list or move its selection. Claim-coverage warnings appear as a compact warning
+The Picker allocates rows only for real Knowledge setup and cached-source
+refresh notices: none when healthy, one for either notice, two when both apply.
+Updates resize the list viewport without inserting selectable options or moving
+its keyed selection. Cached-source status stays in the notice rather than
+repeating a stale prefix in every worktree title. Claim-coverage warnings appear as a compact warning
 icon; impacted worktrees offer **Doctor** in Actions for read-only diagnostics
 and full claim inspection. Inspection does not repair or release resources.
 Re-homed resources without a worktree row retain the compact `o: Doctor`
@@ -1784,7 +1860,13 @@ in both local and live modes. The last validated observation and button
 identities remain stable while a refresh is pending.
 Missing required knowledge shows **Configure knowledge**, which navigates to
 the native Repositories section and its confirmed existing-repository binding
-action. An unavailable binding payload shows preparation guidance in the
+action. An explicitly unresolved existing binding instead offers
+**Inspect knowledge**. A pending or failed readiness check does not imply
+missing configuration and does not offer setup; its neutral notice distinguishes
+checking from an unavailable read. Worktrees **Reload (r)** retries the same
+bounded asynchronous observation and clears the notice after a successful read,
+without polling or changing configuration. Unknown remains unknown, not ready.
+An unavailable binding payload shows preparation guidance in the
 Repositories banner. Unavailable/failed reads remain explicit; a banner is not
 proof of readiness. Completion refreshes the owner observation and reconciles
 current and saved Worktrees button focus before returning from Configuration.
@@ -2292,6 +2374,18 @@ existing installer publication and per-slot leases remain in force underneath.
 Manager and engine retain their process boundary, including the engine's
 `--no-manager` re-entry, which does not bypass execution ownership.
 
+Project-controller discovery requires a capable selected engine. A legacy
+`Unknown key: 'update-controller'` response is not proof that the repository
+has no controller, even when durable authority has not been configured.
+Manager refuses that uncertainty with an engine setup/recovery diagnostic
+instead of choosing standalone execution. A confirmed no-project response is
+neutral only when the caller did not explicitly select a project. Fixed legacy
+diagnostics are recognized across UTF-8 stdout, stderr and JSON error responses;
+arbitrary stdout is not exposed as an error message.
+Only a classified no-project response permits that fallback. Mixed channels,
+extended diagnostics and unexpected exit codes remain failures even if their
+text contains a no-project phrase.
+
 ```text
 worktree-manager update --wait
 worktree-manager update --detach --json
@@ -2307,11 +2401,19 @@ successful-installation claim. The status operation is read-only and does not
 create a driver, fetch source or run installers. `--supervised-debug` keeps
 supervision in the foreground but uses the same queue and exclusive authority;
 it cannot bypass an active transaction. The engine exposes the same options.
-Equivalent pending requests can coalesce; a request arriving after execution
-starts remains separate. These requests may refer to moving source refs, so
+Equivalent pending requests can coalesce. Each addressed installation/project
+authority retains at most one waiting update: a newer accepted update replaces
+the previous waiting selection, preserving the running update. A superseded
+request remains inspectable with exit code **125** and an error naming its
+successor; it did not run and is not successful installation. Automatic work
+cannot displace an explicit waiting update. Independent installation scopes and
+required component provisioning are not discarded.
+A request arriving after execution starts remains separate from the active
+request. These requests may refer to moving source refs, so
 identical arguments do not establish the pinned target required for the shared
 driver's active-request opt-in. Explicit options, invocation context,
-installation scope and pinned runner identity are retained rather than collapsed.
+installation scope and pinned runner identity are retained in history, including
+superseded requests.
 The engine resolves the caller's marketplace context before submission, so a
 queued engine-to-Manager-to-engine round trip cannot replace it with anchor
 settings. Accepted provider argv and the explicit
@@ -3063,7 +3165,8 @@ Unreachable residents permit only explicitly labeled, independently indexed
 advisory rows or an unavailable error, never caller-side reconstruction.
 
 Plugin-contributed interactive surfaces are discovered independently from each
-enabled plugin's installed payload. `worktree-manager contracts` validates the
+enabled plugin's resolved active payload, including directory marketplaces.
+`worktree-manager contracts` validates the
 versioned manifest contract and reports disabled, malformed, duplicate, legacy,
 or missing-command contributions without importing plugin code or requiring a
 plugin installer to write into Manager-owned state. See
@@ -3148,6 +3251,22 @@ explicit action. It disposes and terminally marks the hosted binding so a later
 normal Finalize can proceed; terminal exit never performs that destruction.
 
 ### Actions dialog refinement
+
+**Finalize** is available on ordinary machine-backed worktree rows and bulk
+selections regardless of cleanup bucket. It opens an explicit confirmation;
+cancel runs nothing.
+Controller-owned children and unsupported sources retain their action boundary.
+Known live sessions, lock residue and unavailable mux observations return a
+visible refusal without invoking the engine. Resolve those lifecycle conditions
+before retrying.
+
+Otherwise the existing asynchronous executor calls the selected engine's
+canonical `finalize <id> --json`, never force cleanup. Content, objectives,
+PRs and resource obligations remain engine-owned checks; the menu does not
+reimplement them or remove saved conversations. Failed results retain the
+engine's diagnostics. Press **v** in completed Finalize progress to read the
+full scrollable result, including exact claim references; ask
+`help clean up worktree <id>` for the existing claims/obligations procedure.
 
 Actions opens from a private snapshot of the published row. Tracking-path and
 locality discovery run on its existing background worker, never before modal
@@ -3244,6 +3363,11 @@ pivot registry a real contributed pivot uses). The older minimal `picker_app`
 (`demo_source`/`capture_svg`/`run_picker`) is no longer used by `--demo`; it
 remains only as the still-live `LaunchRequest`/launch-compose machinery
 shared with other commands.
+
+The screenshot command's optional `--wait <seconds>` for a contributed pivot
+must be finite and non-negative; zero disables that additional wait. Invalid
+values return usage error 2 before preview, registry or bootstrap work. Direct
+capture APIs reject the same values with `ValueError` before starting capture.
 
 Non-live screenshots wait for the current setup epoch to apply before reading
 the compositor. Setup completion, diagnosed failure and teardown wake the

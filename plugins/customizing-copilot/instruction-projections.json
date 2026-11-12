@@ -10,6 +10,15 @@
       "customizationKind": "instructions",
       "applyTo": "**",
       "legacyMarkers": []
+    },
+    {
+      "id": "session-guidance-writers",
+      "deliveryMode": "selector",
+      "template": "instructions/session-guidance-writers.instructions.md",
+      "destination": ".github/instructions/customizing-copilot/session-guidance-writers.instructions.md",
+      "customizationKind": "instructions",
+      "applyTo": "**",
+      "legacyMarkers": []
     }
   ]
 }

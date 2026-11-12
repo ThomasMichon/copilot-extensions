@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 from .base import ProviderError
 
+MAX_SNAPSHOT_REQUESTS = 64
+
 
 class ForgeBinding(Protocol):
     @property
@@ -44,11 +46,20 @@ class ObservationCredentialError(ProviderError):
 class ObservationCredentials:
     def __init__(
         self, source: CredentialSource, *, provider: str, api_base: str, repository: str,
+        max_requests: int | None = None,
     ):
+        if max_requests is not None and (
+            type(max_requests) is not int or not 1 <= max_requests <= 128
+        ):
+            raise ValueError("invalid native observation request budget")
         self.source = source
         self.provider, self.api_base, self.repository = provider, api_base, repository
+        self.max_requests, self.requests = max_requests, 0
 
     def acquire(self) -> ObservationCredential:
+        if self.max_requests is not None and self.requests >= self.max_requests:
+            raise ObservationCredentialError("native observation request budget exhausted", transient=True)
+        self.requests += 1
         try:
             material = self.source()
         except (OSError, RuntimeError, ValueError):
@@ -64,7 +75,7 @@ class ObservationCredentials:
             or getattr(binding, "repository", None) != self.repository
             or getattr(binding, "permission", None) != "observe"
             or authentication not in (
-                ("bearer",) if self.provider == "github" else ("basic", "bearer")
+                ("bearer",) if self.provider in ("github", "gitea") else ("basic", "bearer")
             )
         ):
             raise ObservationCredentialError("PR observation credential binding mismatch")

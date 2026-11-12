@@ -226,9 +226,9 @@ class WatchControlOwner:
         rendezvous = server.rendezvous()
         host, port = rendezvous["endpoint"].split(":")
         publish_launch(
-            self._installation(), self.instance,
+            self.invocation.fresh_installation(), self.instance,
             endpoint=(host, int(port), rendezvous["token"]),
-            read_health=self.health, environment={},
+            read_health=self._health_snapshot, environment={},
         )
 
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Confirm retained native process exit after a racing image-query failure without ignoring unreadable live descendants.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -26,8 +27,13 @@ def render_registry(registry: ReposRegistry) -> str:
     if registry.account_map:
         lines.append("account_map:")
         for owner in sorted(registry.account_map):
-            lines.append(f"  {_quote(owner)}: {_quote(registry.account_map[owner])}")
+            lines.append(f"  {json.dumps(owner)}: {json.dumps(registry.account_map[owner])}")
         lines.append("")
+    if registry.account_projection:
+        lines.extend([
+            "account_projection: " + json.dumps(registry.account_projection, sort_keys=True),
+            "",
+        ])
     # Always render the ``repos:`` key explicitly, even when empty: an
     # all-comment document (no keys at all) parses to ``None``, not a
     # mapping, so the reader would record an ``"invalid"`` baseline and the
@@ -45,9 +51,9 @@ def render_registry(registry: ReposRegistry) -> str:
         if entry.remote:
             lines.append(f"    remote: {_quote(entry.remote)}")
         if entry.account:
-            lines.append(f"    account: {_quote(entry.account)}")
+            lines.append(f"    account: {json.dumps(entry.account)}")
         if entry.copilot_account:
-            lines.append(f"    copilot_account: {_quote(entry.copilot_account)}")
+            lines.append(f"    copilot_account: {json.dumps(entry.copilot_account)}")
         if entry.default_branch:
             lines.append(f"    default_branch: {_quote(entry.default_branch)}")
         if entry.tags:

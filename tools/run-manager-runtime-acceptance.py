@@ -1,7 +1,7 @@
 """Cold Manager acceptance under independently contained native group boundaries.
 
-Prepare real installed candidates before pytest's unchanged 30-second item
-checks, then execute those checks through the canonical plugin runner.
+Prepare real installed candidates alongside independent input controls, then
+execute their consumers with unchanged 30-second items and the portfolio guard.
 The application-adapter contract instead times application preparation and
 every consumer as separate 30-second items inside one 300-second group.
 """
@@ -9,8 +9,8 @@ every consumer as separate 30-second items inside one 300-second group.
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import json
+import math
 import os
 import re
 import runpy
@@ -19,18 +19,238 @@ import subprocess
 import sys
 import time
 import xml.etree.ElementTree as ET
+from collections import Counter
 from contextlib import ExitStack
 from pathlib import Path
 
-from plugin_test_containment import Limits, TestSandbox, isolated_environment, no_window_kwargs, run_contained
 from _admission_protocol import acquire
+from plugin_test_containment import (
+    Limits,
+    TestSandbox,
+    UnreapedProcessError,
+    isolated_environment,
+    no_window_kwargs,
+    run_contained,
+)
 from plugin_test_resources import record_owner, run_prefix, runs_root, venv_root
 
 REPO = Path(__file__).resolve().parents[1]
+INSTALLED_TTY_SCHEMA = "worktree-manager.installed-tty"
 APPLICATION_ADAPTER_VARIANTS = ("plugin", "standalone")
 APPLICATION_ADAPTER_PHASES = (
     "inputs", "prepare", "selection", "install", "repeat", "refusal", "fail-start", "retry", "command",
 )
+RUNTIME_INPUT_CONTROLS = (
+    "test_isolated_preparation_entrypoint_resolves_owned_helpers",
+    "test_qualified_source_staging_is_bounded_and_stops_on_failure",
+    "test_preparation_completed_units_reach_native_inactivity_owner",
+)
+
+
+def _runtime_group(python: Path, sandbox: Path) -> int:
+    """Overlap disjoint fixture roots and input controls inside the caller's single Job."""
+    native = REPO / "worktree-manager" / "tests" / "native" / "test_manager_runtime_install.py"
+    assertions = [
+        str(python), "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
+        "--timeout=30", "-o", "timeout_func_only=false", "-o", "addopts=",
+    ]
+    selection = " or ".join(RUNTIME_INPUT_CONTROLS)
+    streams = {"stdin": subprocess.DEVNULL, "stdout": sys.stdout, "stderr": sys.stderr}
+    print("Manager runtime: starting independent input controls and cold construction", flush=True)
+    prepare = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
+    children = []
+    try:
+        for command in (
+            [*assertions, f"--basetemp={sandbox / 'input-controls'}", str(native), "-k", selection],
+            [*prepare, "--prepare-step", "constructed"],
+            [*prepare, "--prepare-step", "legacy"],
+        ):
+            children.append(subprocess.Popen(command, cwd=REPO, **streams, **no_window_kwargs()))
+        for child in children[1:]:
+            result = child.wait()
+            if result:
+                return result
+        prepared = subprocess.run(
+            [*prepare, "--prepare-step", "finish"],
+            cwd=REPO, check=False, **streams, **no_window_kwargs(),
+        )
+        if prepared.returncode:
+            return prepared.returncode
+        result = children[0].wait()
+        if result:
+            return result
+        print("Manager runtime: construction and input controls passed; running consumers", flush=True)
+        return subprocess.run(
+            [*assertions, f"--basetemp={sandbox / 'assertions'}", str(native), "-k", f"not ({selection})"],
+            cwd=REPO, check=False, **streams, **no_window_kwargs(),
+        ).returncode
+    finally:
+        for child in reversed(children):
+            if child.poll() is None:
+                child.terminate()
+            child.wait(timeout=5)
+
+
+def _installed_tty_complete(report: Path, expected: dict) -> bool:
+    """Admission is semantic, identity-bound and independent of process exit."""
+    try:
+        if (
+            any(path.is_symlink() or (
+                hasattr(path, "is_junction") and path.is_junction()
+            ) for path in (report, *report.parents))
+            or not report.is_file() or report.stat().st_size > 1 << 20
+            or getattr(report.stat(), "st_file_attributes", 0) & 0x400
+        ):
+            return False
+        def unique(pairs):
+            result = {}
+            for key, value in pairs:
+                if key in result:
+                    raise ValueError("duplicate receipt field")
+                result[key] = value
+            return result
+        data = json.loads(report.read_text(encoding="utf-8"), object_pairs_hook=unique)
+        if (
+            data["schema"] != INSTALLED_TTY_SCHEMA or type(data["version"]) is not int
+            or data["version"] != 1 or data["identity"] != expected
+            or data["platform"] != "win32" or data["complete"] is not True
+            or data["errors"] != []
+            or any(type(data["identity"][key]) is not int for key in ("run_id", "run_attempt"))
+            or type(data["whole_run_seconds"]) is not int or data["whole_run_seconds"] != 720
+            or type(data["cleanup_reserve_seconds"]) is not int or data["cleanup_reserve_seconds"] != 30
+            or type(data["elapsed_seconds"]) not in (int, float)
+            or not math.isfinite(data["elapsed_seconds"]) or not 0 <= data["elapsed_seconds"] <= 720
+        ):
+            return False
+        installation = data["installation"]
+        if installation["cold"] is not True or installation["installed"] is not True:
+            return False
+        for name in ("manager", "engine"):
+            runtime = installation[name]
+            if (
+                not isinstance(runtime["generation"], str) or not runtime["generation"]
+                or runtime["source_commit"] != expected["source_commit"]
+                or not re.fullmatch(r"[0-9a-f]{64}", runtime["assembly_hash"])
+                or runtime["origins_verified"] is not True
+                or runtime["candidate_bytes_verified"] is not True
+            ):
+                return False
+        project = data["project"]
+        if not project["name"] or any(
+            project[key] is not True
+            for key in ("registered", "generated_binstub", "receipt_verified")
+        ):
+            return False
+        witnesses = data["witnesses"]
+        if len(witnesses) != 2 or {row["shell"] for row in witnesses} != {"cmd", "powershell"}:
+            return False
+        for row in witnesses:
+            if (
+                row["terminal"] != "conpty"
+                or any(row[key] is not True for key in (
+                    "project_binstub", "capability_query", "rendered", "input_visible_change", "clean_exit",
+                ))
+                or type(row["exit_code"]) is not int or row["exit_code"] != 0
+                or type(row["process_id"]) is not int or row["process_id"] <= 0
+                or type(row["process_birth"]) is not int or row["process_birth"] <= 0
+                or any(not re.fullmatch(r"[0-9a-f]{64}", row[key])
+                       for key in ("screen_before_sha256", "screen_after_sha256"))
+                or row["screen_before_sha256"] == row["screen_after_sha256"]
+                or row["input_transition"] != {
+                    "key": "q", "expected_text": "Leave the worktree picker?", "observed": True,
+                }
+                or row["input_transition"]["observed"] is not True
+                or not row["native_terminal_offer_hosts"]
+                or any(type(pid) is not int or pid <= 0 for pid in row["native_terminal_offer_hosts"])
+            ):
+                return False
+        if any(data["negative_control"][key] is not True for key in (
+            "install_succeeded", "launch_failed", "witness_rejected",
+        )):
+            return False
+        return all(data["cleanup"][key] is True for key in (
+            "complete", "owned_processes_reaped", "host_state_unchanged",
+        ))
+    except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
+def _installed_tty_acceptance(root: Path, output: Path, identity: dict) -> int:
+    from agent_procutil.owned_budget import OwnedExecutionBudget
+
+    started = time.monotonic()
+    budget = OwnedExecutionBudget.from_timeout(720, cleanup_reserve=30)
+    evidence = {
+        "schema": INSTALLED_TTY_SCHEMA, "version": 1, "identity": identity,
+        "platform": sys.platform, "complete": False, "errors": [],
+        "whole_run_seconds": 720, "cleanup_reserve_seconds": 30,
+    }
+    if sys.platform != "win32":
+        raise ValueError("installed-tty requires native Windows; no skipped qualification")
+    if root.exists() or root.is_symlink() or output.parent != root:
+        raise ValueError("installed-tty requires a fresh root and a receipt directly inside it")
+    root.mkdir(parents=True)
+    fixture = REPO / "worktree-manager" / "tests" / "native" / "test_manager_installed_tty.py"
+    host_state = runpy.run_path(str(fixture))["_host_state"]
+    before_host = host_state()
+    try:
+        with TestSandbox(prefix="tty-", dir=root) as raw:
+            sandbox = Path(raw)
+            env = isolated_environment(os.environ, sandbox, allow_explicit_tiers=True)
+            command = [
+                sys.executable, "-I", "-B",
+                str(fixture),
+                "--exercise", str(sandbox), "--identity", json.dumps(identity),
+                "--work-deadline", str(budget.execution_deadline),
+            ]
+            unreaped = None
+            try:
+                # This new contract shares one bounded owner across source
+                # preparation, both genuine constructors and interactive use.
+                for phase in ("prepare", "manager", "engine", "tty"):
+                    remaining = budget.execution_deadline - time.monotonic()
+                    minimum = 90 if phase == "tty" else 30
+                    if remaining < minimum:
+                        raise TimeoutError(f"Insufficient shared work budget before {phase}")
+                    result = run_contained(
+                        [*command, "--phase", phase], cwd=REPO, env=env, sandbox=sandbox,
+                        limits=Limits(wall_seconds=budget.deadline - time.monotonic()),
+                    )
+                    if result:
+                        raise RuntimeError(f"Native installed-tty {phase} exited {result}")
+            except UnreapedProcessError as error:
+                unreaped = error
+                raise
+            finally:
+                diagnostics = sandbox / "diagnostics"
+                if diagnostics.is_dir():
+                    try:
+                        shutil.copytree(diagnostics, root / "diagnostics")
+                    except OSError:
+                        if unreaped is None:
+                            raise
+            native = json.loads((sandbox / "native-result.json").read_text(encoding="utf-8"))
+            evidence.update(native)
+        if host_state() != before_host:
+            raise RuntimeError("Host runtime/registration/command state changed during qualification")
+        evidence["cleanup"]["host_state_unchanged"] = True
+        if time.monotonic() > budget.deadline:
+            raise TimeoutError("Installed TTY whole-run deadline exceeded during cleanup")
+        evidence["complete"] = True
+    except UnreapedProcessError as error:
+        evidence["errors"].append(f"{type(error).__name__}: {error}")
+        evidence["cleanup"] = {"complete": False, "owned_processes_reaped": False,
+                               "host_state_unchanged": False}
+        evidence["elapsed_seconds"] = time.monotonic() - started
+        try:
+            output.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+        finally:
+            raise error
+    except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        evidence["errors"].append(f"{type(error).__name__}: {error}")
+    evidence["elapsed_seconds"] = time.monotonic() - started
+    output.write_text(json.dumps(evidence, indent=2), encoding="utf-8")
+    return 0 if _installed_tty_complete(output, identity) else 1
 
 
 def _application_adapter_nodes() -> list[str]:
@@ -247,15 +467,48 @@ def _provider_acceptance(root: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--root", type=Path, required=True)
+    parser.add_argument("--root", type=Path)
     parser.add_argument("--main-seed", help="exact official Main commit for composed fixture inputs")
     parser.add_argument(
-        "--contract", choices=("runtime", "callbacks", "updater", "source", "engine-source", "uninstall", "engine-routing", "provider", "application-adapter"),
+        "--contract", choices=("runtime", "callbacks", "updater", "source", "engine-source", "uninstall", "engine-routing", "provider", "application-adapter", "installed-tty"),
         default="runtime",
     )
     parser.add_argument("--venv-root", type=Path, default=REPO / ".test-venvs" / sys.platform)
     parser.add_argument("--prepare-only", action="store_true", help="engine-routing preparation diagnostic only")
+    parser.add_argument("--runtime-group", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--runtime-python", type=Path, help=argparse.SUPPRESS)
+    parser.add_argument("--validate-result", type=Path)
+    parser.add_argument("--output", type=Path)
+    for name in ("candidate-commit", "candidate-tree", "source-commit", "main-before"):
+        parser.add_argument("--" + name)
+    parser.add_argument("--run-id", type=int)
+    parser.add_argument("--run-attempt", type=int)
     args = parser.parse_args()
+    if args.runtime_group is not None:
+        if args.runtime_python is None:
+            parser.error("--runtime-group requires --runtime-python")
+        return _runtime_group(args.runtime_python, args.runtime_group)
+    if args.contract == "installed-tty":
+        identity = {key: getattr(args, key) for key in (
+            "candidate_commit", "candidate_tree", "source_commit", "main_before", "run_id", "run_attempt",
+        )}
+        if any(not isinstance(identity[key], str) or not re.fullmatch(r"[0-9a-f]{40}", identity[key])
+               for key in ("candidate_commit", "candidate_tree", "source_commit", "main_before")) or any(
+            type(identity[key]) is not int or identity[key] <= 0 for key in ("run_id", "run_attempt")
+        ):
+            parser.error("installed-tty requires all six exact candidate/run identity fields")
+        if args.validate_result:
+            return 0 if _installed_tty_complete(args.validate_result, identity) else 1
+        if args.root is None or args.output is None:
+            parser.error("installed-tty requires --root and --output")
+        root = args.root.absolute()
+        if root == REPO or not root.is_relative_to(REPO) or root.resolve() != root:
+            parser.error("installed-tty requires a fresh non-linked directory below this checkout")
+        return _installed_tty_acceptance(root, args.output.absolute(), identity)
+    if args.validate_result or args.output:
+        parser.error("result selection requires --contract installed-tty")
+    if args.root is None:
+        parser.error("--root is required")
     if args.prepare_only and args.contract != "engine-routing":
         parser.error("--prepare-only requires --contract engine-routing")
     if args.main_seed is not None and (
@@ -302,10 +555,15 @@ def main() -> int:
         env = isolated_environment(os.environ, sandbox)
         if args.main_seed is not None:
             env["MANAGER_RUNTIME_ACCEPTANCE_MAIN_SEED"] = args.main_seed
+        env["PYTHONPATH"] = str(REPO / "tools")
+        env.pop("PYTEST_ADDOPTS", None)
         env["MANAGER_RUNTIME_ACCEPTANCE_DATA"] = str(sandbox / "fixtures.json")
         prepare_command = [str(python), "-I", "-B", str(native), "--prepare", str(sandbox)]
-        assertions = [sys.executable, str(REPO / "tools" / "run-plugin-tests.py"), "worktree-manager",
-                      "--test-file", "tests/native/" + filename]
+        assertions = [
+            str(python), "-m", "pytest", "-q", "-p", "pytest_portfolio_guard",
+            "--timeout=30", "-o", "timeout_func_only=false", "-o", "addopts=",
+            f"--basetemp={sandbox / 'assertions'}", str(native),
+        ]
         groups = (
             [("source constructions and assertions", [
                 *[[*prepare_command, "--prepare-step", step]
@@ -326,6 +584,11 @@ def main() -> int:
                  [str(python), "-I", "-B", str(native), "--exercise", str(sandbox)], assertions,
              ])]
             if args.contract == "uninstall" else
+            [("construction and assertions", [[
+                str(python), str(Path(__file__).resolve()),
+                "--runtime-group", str(sandbox), "--runtime-python", str(python),
+            ]])]
+            if args.contract == "runtime" else
             [("construction and assertions", [prepare_command, assertions])]
         )
         group_seconds = 1800 if args.contract == "source" else 300

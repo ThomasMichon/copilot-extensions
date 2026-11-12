@@ -87,17 +87,19 @@ def test_queued_relative_manager_policy_uses_original_cwd(area, monkeypatch, no_
     automatic = enqueue(RequestSpec(
         "engine-launch-update", arguments, cwd=str(caller), context=context,
     ), runner=runner, root=area / "state")
-    manual = enqueue(RequestSpec(
-        "engine-launch-update", flags, cwd=str(caller), context=context, repair=True,
-    ), runner=runner, root=area / "state")
     path.write_text("[maintenance]\nautomatic = false\n", encoding="utf-8")
     monkeypatch.chdir(area)
     observed = []
     assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
-    assert observed == [manual.id]
+    assert observed == []
     refused = status(automatic.id, root=area / "state")
     assert refused.exit_code == 3 and refused.started_at is None
     assert "maintenance.automatic is false" in refused.error
+    manual = enqueue(RequestSpec(
+        "engine-launch-update", flags, cwd=str(caller), context=context, repair=True,
+    ), runner=runner, root=area / "state")
+    assert drain(root=area / "state", executor=lambda tx: observed.append(tx.request.id) or 0) == 0
+    assert observed == [manual.id]
     assert status(manual.id, root=area / "state").exit_code == 0
 
 
@@ -193,6 +195,31 @@ def test_explicit_foreground_never_replays_foreign_pending_work(area, monkeypatc
         )
     assert status(root=area / "state") == before
     assert status(peer.id, root=area / "state").state == "pending"
+
+
+def test_explicit_foreground_distinguishes_live_and_abandoned_running_work(area, monkeypatch):
+    from update_driver import core
+
+    peer = sample(area, source="peer")
+    root = area / "state"
+    with closing(sqlite3.connect(root / "queue.sqlite3")) as db, db:
+        db.execute("UPDATE requests SET state='running',started_at=1 WHERE id=?", (peer.id,))
+    before = status(root=root)
+    monkeypatch.setattr(core, "_reconcile_foundation", lambda *args: pytest.fail("no queue repair"))
+
+    def attempt():
+        return run_explicit(
+            RequestSpec("source-recovery"),
+            runner=TrustedRunner((sys.executable, "-c", "pass"), str(area)),
+            root=root, executor=lambda tx: pytest.fail("no peer execution"),
+        )
+
+    with core.OperationLock(root / "execution.lock"):
+        with pytest.raises(StateError, match="busy"):
+            attempt()
+    with pytest.raises(InterruptedError, match="unsettled"):
+        attempt()
+    assert status(root=root) == before
 
 
 def test_explicit_foreground_stops_before_a_later_peer(area):
@@ -520,6 +547,7 @@ def test_nonboolean_active_coalescing_refuses_before_writes(area, value):
     ("UPDATE_DRIVER_WITNESS",),
     ("PYTHONPATH",),
     ("__PYVENV_LAUNCHER__",),
+    tuple(f"FIXTURE_{index}" for index in range(129)),
 ])
 def test_runner_context_projection_rejects_invalid_or_authority_keys(area, keys):
     with pytest.raises(InvalidRequestError, match="context keys"):

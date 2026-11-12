@@ -113,6 +113,33 @@ def _admission_error(
     return None
 
 
+def _bridge_created_host(
+    row: Any, task: Any, actual: Any, agent_info: dict, *, resumed: bool,
+    worktree_record: dict | None, startup_invocation: dict | None,
+    execution_machine: str | None,
+) -> str | None:
+    """Return the creating host only when Bridge provably created this worktree."""
+    if (
+        resumed or worktree_record is not None or row["worktree_ownership"]
+        or row["worktree"] or row["agent_info"] or task.target_worktree
+        or not isinstance(startup_invocation, dict)
+    ):
+        return None
+    binding = startup_invocation.get("binding") or {}
+    creation = agent_info.get("creation")
+    created = creation.get("worktree") if isinstance(creation, dict) else None
+    if (
+        binding.get("origin_kind") != "created" or not isinstance(created, dict)
+        or creation.get("status") != "complete" or creation.get("replayed") is not False
+        or created.get("id") != actual.worktree
+        or not isinstance(created.get("creation_nonce"), str)
+        or created["creation_nonce"] != binding.get("creation_nonce")
+    ):
+        return None
+    host = execution_machine or created.get("execution_machine")
+    return host.strip().casefold() if isinstance(host, str) and host.strip() else None
+
+
 def _record_agent(
     queue: Any, key: str, *, task_generation: int, agent_info: dict,
     resumed: bool, worktree_record: dict | None, startup_invocation: dict | None = None,
@@ -144,6 +171,11 @@ def _record_agent(
                 raise TaskError("ordinary pool startup requires its retained execution machine")
             require_pool_workspace(
                 conn, task, actual.worktree, execution_machine, driver=row["driver"],
+            )
+        else:
+            require_pool_workspace(
+                conn, task, actual.worktree, execution_machine or row["execution_machine"],
+                driver=row["driver"], reservation_key=key,
             )
         if row["agent_info"]:
             from .ordinary_invocation import historical_intent, same_facts
@@ -238,13 +270,18 @@ def _record_agent(
         encoded = json.dumps(recorded, sort_keys=True)
         if row["agent_info"] and not resumed and row["agent_info"] != encoded:
             raise TaskError("created-agent identity is already bound")
+        created_host = _bridge_created_host(
+            row, task, actual, agent_info, resumed=resumed, worktree_record=worktree_record,
+            startup_invocation=startup_invocation, execution_machine=execution_machine,
+        )
         conn.execute(
             "UPDATE spawn_reservations SET worktree=?,session_handle=?,agent_info=?,"
-            "worktree_ownership=?,driver='ordinary-bridge',allocation_project=?,"
+            "worktree_ownership=?,creating_host=?,driver='ordinary-bridge',allocation_project=?,"
             "worktree_path=?,execution_machine=?,conversation_retired=0,updated_at=? WHERE key=?",
             (
                 actual.worktree, handle, encoded,
-                row["worktree_ownership"] or "targeted",
+                "created" if created_host else row["worktree_ownership"] or "targeted",
+                created_host or row["creating_host"],
                 actual.project, actual.path, row["execution_machine"] or execution_machine, queue._now(None), key,
             ),
         )

@@ -1,0 +1,9 @@
+{
+  "comment": "Observe native PSMux sessions through finite authenticated socket queries without passive CLI startup.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

@@ -153,8 +153,10 @@ task admission and ownership inside that transaction.
 
 Focused source controls are in `tests/test_dispatch_worker_readiness.py`.
 Negotiated caller support, manual or absent-worktree applicability,
-Windows/native qualification, rejected-worker recovery and decline ordering
-remain pending. The ordinary assignment writer remains disabled.
+Windows/native qualification and rejected-worker recovery remain pending.
+Worker decline uses `observe-ready` before its requeue, then finalizes only
+after Dispatch settles the claim (see
+[retained task-claim ordering](../../agent-dispatch/docs/pool-worker-decline.md#retained-task-claim-ordering)). The ordinary assignment writer remains disabled.
 
 ### Selected-runtime readiness transport
 
@@ -199,7 +201,8 @@ native runner. The ordinary Dispatch CLI/prompts and existing supervisor now
 consume the providers conditionally; a caller's copied JSON is not authoritative
 Dispatch release evidence. The
 [local coordinator boundary](../../agent-dispatch/docs/pool-worker-decline.md#coordinator-owned-local-closeout)
-observes this selected runtime before atomic routing/requeue; remote-host and
+observes this selected runtime before atomic routing/requeue, using
+nonfinalizing readiness when the workspace retains its task claim; remote-host and
 installed/native worker qualification remain separate work under the
 [assignment/startup amendment](../../../efforts/active/agent-dispatch-monitor-and-confirmed-state/assignment-startup-amendment.md).
 

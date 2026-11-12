@@ -147,6 +147,7 @@ _PROJECT_ARG_SLUGS = front_door_cli._PROJECT_ARG_SLUGS
 _PROJECT_CHDIR_VERBS = front_door_cli._PROJECT_CHDIR_VERBS
 _chdir_verb_for = front_door_cli._chdir_verb_for
 _resolve_project_checkout = front_door_cli._resolve_project_checkout
+_caller_project_worktree = front_door_cli._caller_project_worktree
 _worktrees_verbs = front_door_cli._worktrees_verbs
 _canonical_slug = front_door_cli._canonical_slug
 _sibling_binstub = front_door_cli._sibling_binstub
@@ -1938,7 +1939,7 @@ from .worktree_creation import (  # noqa: E402 -- re-export position matches ori
 )
 
 
-from .launch_environment import _build_env, _self_owner_ref  # noqa: E402,F401 -- compatibility exports
+from .launch_environment import _build_env  # noqa: E402,F401 -- compatibility export
 
 
 def _repo_session_env(config: cfg.Config, work_dir: str = "") -> dict[str, str]:
@@ -2480,6 +2481,11 @@ def _cmd_status_write(
     state; see the worktree-status-core effort and the agent-fabric vision
     (disposition-is-asserted-pulse-is-derived).
     """
+    try:
+        tracking.normalize_asserted_title(title)
+    except ValueError as error:
+        output.err(str(error))
+        return 1
     config = cfg.load_config()
     worktree_id = worktree_identity._infer_worktree_id(getattr(args, "worktree_id", None), config)
     if not worktree_id:
@@ -2492,15 +2498,18 @@ def _cmd_status_write(
     if not yaml_path.exists():
         output.err(f"Tracking file not found at {yaml_path}. Cannot annotate an unknown worktree.")
         return 1
-    # pr-attribution-codenames Phase 2 (#2838): an explicit status touch is
-    # exactly the "first touch" the backfill plan describes -- lazily assign
-    # a pre-Phase-2 record's missing codename. Done as its OWN independent
-    # locked step, strictly before the disposition RMW below, so the
-    # project-wide allocation lock and the per-record lock are never held
-    # nested/simultaneously in either order (a lock-ordering/deadlock hazard
-    # flagged in review: `create` acquires them allocation-lock-then-record-
-    # lock via `create_new_record`'s own `save_record`).
+    # Backfill codenames before the disposition RMW: the allocation and
+    # per-record locks must not nest in opposite order.
     peek = tracking.load_record(yaml_path)
+    # Republish the effective agenda policy for the post-tool reminder hooks,
+    # so a running session picks up an `agendas.default` change on its next
+    # disposition write rather than only at session start/resume.
+    try:
+        from . import session_context as _session_context
+
+        _session_context.publish_agenda_policy(config, peek)
+    except Exception:
+        pass
     if not peek.codename:
         try:
             codename_tracking.ensure_codename(
@@ -2514,12 +2523,7 @@ def _cmd_status_write(
             # preserve, but a plain traceback is still a defect).
             output.err(str(e))
             return 1
-    # agent-worktrees-authoritative-daemon Phase 3: the whole load ->
-    # set_disposition -> save transaction (formerly a foreground
-    # `tracking._RecordLock` block here, #4547) now runs as the registered
-    # `status_disposition_write` verb (`tracking_disposition_write.py`),
-    # funneled through the resident daemon when reachable, or the identical
-    # code in-process (logged) via `tracking_write.dispatch` when it is not.
+    # Dispatch the whole locked transaction, with the same-code pre-send fallback.
     session_id = os.environ.get("COPILOT_AGENT_SESSION_ID") or None
     # Resolved here (mirrors session_id): the status_reported durable trace
     # must use THIS project, never a resident daemon's own ambient one.
@@ -2544,6 +2548,7 @@ def _cmd_status_write(
                 "yaml_path": str(yaml_path),
                 "summary": summary,
                 "title": title,
+                "retain_full_title": title is not None,
                 "activity": activity,
                 "follow_up": follow_up,
                 "paused": paused,
@@ -2552,11 +2557,14 @@ def _cmd_status_write(
             },
             read_lock_data=lambda: _locks.read_lock(_monitor_lock_path()),
             ensure_monitor=_ensure_status_monitor if _status_monitor_enabled() else None,
-            min_version=2,  # unconditional: a v1 daemon drops paused on ANY write
+            min_version=3,  # Every disposition write reserializes the current title.
         )
     except tracking_write.ResidentRecoveryHeld as e: return tracking_write.refuse_recovery(e, json_output=getattr(args, "json", False))
     except tracking_write.AmbiguousWriteOutcome as e:
         output.err(f"Disposition write to worktree {worktree_id} is in an unknown state: {e}")
+        return 1
+    if result.get("error") == "invalid_title":
+        output.err(result["detail"])
         return 1
     if result.get("error") == "terminal_managed":
         output.err(
@@ -3057,7 +3065,7 @@ def _monitor_sweep(
     roster_failure=None,
 ) -> int:
     """One coalescing pass over the Step 4 served-session union."""
-    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
+    from . import config_cache as _config_cache, list_cli as _list_cli, mux_status_link as _mux_status_link, resident_push as _resident_push, status_bar_cli as _status_bar_cli, status_monitor_runtime as _smr, status_updater_cli as _status_updater_cli
     from .worktrees_producer import publish_project_rosters
 
     _monitor_list_sessions = _self_override("_monitor_list_sessions", _smr._monitor_list_sessions)
@@ -3086,18 +3094,16 @@ def _monitor_sweep(
     stale_sessions: list[str] = []
     if mux_bin:
         live = _monitor_list_sessions(mux_bin)
-        if live is None:
-            if sessions._is_psmux(mux_bin) and roster_publisher is not None:
-                # Publish independent facts without discovering, pruning or painting panes.
-                publish_project_rosters(
-                    picker_projects or set(), interval=interval, project_lock=project_lock,
-                    lifecycle_priority=lifecycle_priority, governance=governance,
-                    segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
-                    roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
-                )
-            if roster_failure is not None and not sessions._is_psmux(mux_bin):
-                roster_failure(RuntimeError("mux-session enumeration unavailable"))
-            return -1
+        observed = _smr.publish_mux_observation(
+            mux_bin, live, catalog_observer, lambda: publish_project_rosters(
+                picker_projects or set(), interval=interval, project_lock=project_lock,
+                lifecycle_priority=lifecycle_priority, governance=governance,
+                segment_cache=segment_cache, config_cache_for_project=config_cache_for_project,
+                roster_publisher=roster_publisher, warm_list_cache=_warm_list_cache_for_active_project,
+            ) if roster_publisher is not None else None, roster_failure,
+        )
+        if observed is not None:
+            return observed
         from .status_monitor_discovery import discover_connected_worktrees
 
         registry.update(discover_connected_worktrees(
@@ -3114,6 +3120,7 @@ def _monitor_sweep(
         observed_sessions |= unmanaged_live_wt
     if stale_sessions:
         _status_monitor_recheck(governance, "pre-mutation:prune-registry")
+        _resident_push.notify_ended(registry, stale_sessions, live)
         _monitor_prune_registry_sessions(reg_dir, registry, stale_sessions, ctx_done, incarnations, published)
     if mux_bin:
         served = [(s, p) for s, p in registry.items() if s in unmanaged_live_wt and p]
@@ -4087,20 +4094,23 @@ class _ResidentHookPolicy:
         except Exception:
             pass
         try:
+            forwarded = getattr(module, "forwarded_env", None)
             text = module.decide(
-                payload, home=Path.home(), tracking_record=found, deadline=deadline
+                payload, env=forwarded(payload) if callable(forwarded) else None,
+                home=Path.home(), tracking_record=found, deadline=deadline
             )
         except Exception:
             return {}
         return {"additionalContext": text} if text else {}
 
-    def native_batch_targets(self, payload: dict) -> list[str] | None:
+    def native_batch_targets(self, payload: dict, *, include_shell: bool = False) -> list[str] | None:
         from .hook_ipc import HookUnavailable
 
-        forms = self._module("tool_call_forms.py")
-        if forms is None:
+        if (forms := self._module("tool_call_forms.py")) is None:
             raise HookUnavailable
         try:
+            if include_shell:
+                return forms.mixed_mutation_targets(payload, allowed_tools=_HOOK_WRITE_TOOLS | _HOOK_SHELL_TOOLS | {"view", "rg", "glob"}, classify=self.mutation_targets)
             return forms.native_mutation_targets(payload, write_tools=_HOOK_WRITE_TOOLS, cwd=_hook_payload_cwd(payload))
         except ValueError as exc:
             raise HookUnavailable from exc
@@ -4146,10 +4156,11 @@ def _resident_hook_decision(
     if kind == "preToolUse":
         return policy.pre(payload)
 
-    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation"}:
+    if kind in {"nativeToolMutation", "nativeToolBatchMutation", "shellToolMutation", "mixedToolBatchMutation"}:
         tool = payload.get("toolName") or payload.get("tool_name")
-        if (kind == "nativeToolBatchMutation" and "toolCalls" not in payload) or (
-            kind != "nativeToolBatchMutation" and (
+        batch = kind in {"nativeToolBatchMutation", "mixedToolBatchMutation"}
+        if (batch and "toolCalls" not in payload) or (
+            not batch and (
                 not isinstance(tool, str) or tool.lower() not in (
                     _HOOK_SHELL_TOOLS if kind == "shellToolMutation" else _HOOK_WRITE_TOOLS
                 )
@@ -4159,7 +4170,7 @@ def _resident_hook_decision(
             from .hook_ipc import HookUnavailable
 
             raise HookUnavailable
-        targets = policy.native_batch_targets(payload) if kind == "nativeToolBatchMutation" else policy.mutation_targets(payload)
+        targets = policy.native_batch_targets(payload, include_shell=kind == "mixedToolBatchMutation") if batch else policy.mutation_targets(payload)
         if targets is None:
             segment_cache.invalidate_all()
         else:
@@ -5274,8 +5285,7 @@ def _current_session_ids() -> set[str]:
 # ── Lazy dispatch (agent-cli-lazy-dispatch effort, Phase 1) ────────────────
 # Command -> (module, handler); modules expose add_parsers/register_cli. Regenerate by importing
 # agent_worktrees.__main__ once (pays the full cost, offline), then for each
-# add_parsers-owning module, building a throwaway
-# `argparse.ArgumentParser().add_subparsers()` and calling that module's own
+# parser module, building throwaway argparse subparsers and calling its own
 # `add_parsers(sub)` to see which command names land in `sub.choices`;
 # Cross-check COMMAND_MAP module/name; exclude inline build_parser parsers
 # (activity, activity-log, stage-update,
@@ -5342,6 +5352,7 @@ _LAZY_DISPATCH_TABLE: dict[str, tuple[str, str]] = {
     'handoff-head-observation': ('handoff_head_observation', 'cmd_observation'),
     'history-digest': ('session_metadata_cli', 'cmd_history_digest'),
     'hygiene': ('maintenance_cli', 'cmd_hygiene'),
+    'python-cache': ('python_cache_prune', 'cmd_python_cache'),
     'install': ('installation_cli', 'cmd_install'),
     'install-status': ('context_cli', 'cmd_install_status'),
     'installer-readiness': ('context_cli', 'cmd_installer_readiness'),
@@ -5457,16 +5468,12 @@ _ALL_KNOWN_VERBS: frozenset[str] = frozenset(_LAZY_DISPATCH_TABLE.keys()) | froz
 from .cli_cluster_free import CLUSTER_FREE_MODULES as _CLUSTER_FREE_MODULES
 
 
-def _dispatch_lazy(command: str, args_list: list[str]) -> int:
-    """Fast-path dispatch for a module-delegated subcommand.
+def _dispatch_lazy(command: str, args_list: list[str], *, commands: dict | None = None) -> int:
+    """Dispatch through the shared owner with the command's original parser.
 
-    Thin wrapper around the shared ``lazy_cli_dispatch`` mechanism
-    (agent-cli-lazy-dispatch effort Phase 2's own first adopter, extracted
-    from this exact function): imports and registers only the ONE module
-    that owns `command`'s parser and handler (per _LAZY_DISPATCH_TABLE),
-    instead of build_parser()'s full eager surface. The resulting
-    parser/help text for this one subcommand is identical to what
-    build_parser() would have produced for it.
+    Only the selected module is registered, not build_parser()'s eager
+    surface. An explicit handler map lets an optional source embedding
+    retain the same parser, dispatch table and cluster-loading behavior.
     """
     return _shared_dispatch_lazy(
         command, args_list,
@@ -5482,7 +5489,7 @@ def _dispatch_lazy(command: str, args_list: list[str]) -> int:
         # surface, or a test that monkeypatches COMMAND_MAP[command] to
         # intercept dispatch, gets the override it expects instead of
         # silently bypassing it).
-        command_map=globals().get("COMMAND_MAP"),
+        command_map=commands if commands is not None else globals().get("COMMAND_MAP"),
         register_cli_modules=frozenset({"pane_lifecycle"}),
     )
 
@@ -6119,6 +6126,7 @@ def _load_full_command_surface() -> None:
         "backfill-sessions": cmd_backfill_sessions,
         "doctor": cmd_doctor,
         "hygiene": cmd_hygiene,
+        "python-cache": __import__(f"{__package__}.python_cache_prune", fromlist=["cmd_python_cache"]).cmd_python_cache,
         "list-sessions": cmd_list_sessions,
         "handoff-head-observation": handoff_head_observation.cmd_observation,
         "head-session": cmd_head_session,
@@ -6284,7 +6292,7 @@ def _print_boot_provenance() -> None:
 
 # git collaboration surfaces are componentized into git_cli.py.
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, publication: object | None = None) -> int:
     global _INVOCATION_CWD
     try:
         _INVOCATION_CWD = Path.cwd()
@@ -6293,6 +6301,9 @@ def main(argv: list[str] | None = None) -> int:
 
     output.ensure_utf8_stdio()
     args_list = argv if argv is not None else sys.argv[1:]
+    if publication is not None:
+        from .pr_selected_publication import dispatch
+        return dispatch(args_list, publication)
 
     if args_list and args_list[0] in {"__source-setup", "__source-start"}:
         parser = argparse.ArgumentParser(allow_abbrev=False)
@@ -6461,8 +6472,8 @@ def main(argv: list[str] | None = None) -> int:
     # Explicit one-shot reads need no deferred lifecycle helpers.
     if args_list[0] == "pr-watch":
         from . import pr_cli
-        if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads")
-                and "/" in args_list[2] and not args_list[2].startswith("-")):
+        if not (len(args_list) >= 4 and args_list[1] in ("snapshot", "status", "threads", "diff")
+                and "/" in args_list[2] and not args_list[2].startswith("-")) and args_list[1:2] not in (["inventory"], ["population"]):
             _ensure_cluster_loaded()
         try:
             return pr_cli.cmd_pr_watch_dispatch(args_list[1:])

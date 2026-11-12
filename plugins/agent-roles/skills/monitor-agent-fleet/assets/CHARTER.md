@@ -18,6 +18,8 @@ Scope
     manifest and transport readiness: add ready, retire removed, keep
     unready as a gap>
   Exclusions: <owners, repositories or work never observed or steered>
+  Model requirement: <selected model targets must run, or none; verify from
+    runtime context/usage metadata, not per-turn model notices>
   Observation period: <time range or "from now">
 
 Mode: read-only sweep | recurring observation | steering | dormant correction
@@ -34,6 +36,8 @@ Mode: read-only sweep | recurring observation | steering | dormant correction
     unknown-state limit governs reporting, not health. Any waste finding
     returns to the confidence cadence>
   Active and parked cadences: <e.g. 30 minutes active, 2 hours parked>
+  Adaptive cadence: <granted | not granted; when granted, switch by fleet
+    health by replacing the single owned schedule, never running two>
   Early-check triggers: <question at half its revisit time, two observations
     without delta, validation over budget, unanswered change request past its
     limit, recorded deadline passed>

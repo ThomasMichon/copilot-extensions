@@ -1,0 +1,9 @@
+{
+  "comment": "Expose prepared post-tool diagnostic reports with default pytest capture",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

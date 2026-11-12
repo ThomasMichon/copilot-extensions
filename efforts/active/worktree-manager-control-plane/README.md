@@ -93,6 +93,9 @@ item in this umbrella.
 | Solo operator (private control repo) | Drives every phase end-to-end: claims the next unclaimed Plan item in the Journal, dispatches implementation, lands each slice's PR, and journals the outcome. | `copilot-extensions` worktrees created from a private control repo; no standing feature branch between slices. |
 | Restart recovery implementer | Owns the reviewed machine-restart recovery slice under #4564, with milestone reports and separate implementation PRs. | Dedicated native CLI/mux session, launched and messaged through agent-bridge; public source handle `steady-resistor`. |
 | Platform runtime implementer | Owns only the Phase 7 platform-local runtime slice coordinated under #7305; preserves initializer/profile-diagnostic and restart-recovery ownership. | Managed source worktree; public source handle `spry-workbench`; coordination through #7305 and the linked slice plan. |
+| Profile preparation implementer | Owns only the reviewed pre-adoption dependency-preparation follow-up under #11989; preserves #356/#8545 setup and #11976 acquisition ownership. | Managed source worktree; public source handle `sluggish-gasket`; coordination through #11989 and the linked subplan. |
+| First-run front-door implementer | Bounded #542 Manager entry, no-project presentation and existing-owner diagnostic/action composition; no configuration writer or rollout takeover. | Managed source worktree; public source handle `patient-knob`; coordination through #542 and the linked Phase 4 plan. |
+| Optional Sync-progress implementer | Bounded #4183 LP1-LP3/LPV Sync producer/local-consumer source increment accepted, including complete CLI comparison; other verbs/runtime/platform lanes stay separate, with no PK/WI ownership or rollout. | Managed source worktree; public source handle `patient-knob`; coordination through #4183 and the linked optional-progress plan. |
 
 ## Context
 
@@ -453,6 +456,18 @@ the same effort Journal/open bounded-source process preserves current owners.
       path, and the separate built-in progress-envelope follow-up was filed as
       [#4274](https://github.com/ThomasMichon/copilot-extensions/issues/4274).
 
+### Optional built-in lifecycle progress
+
+- [x] Review and deliver the bounded Sync producer/local ProgressScreen consumer
+      in [phase-3c-optional-sync-progress.md](phase-3c-optional-sync-progress.md),
+      under #4183 LP1-LP3/LPV (received #4274). Preserve CLI defaults, exact
+      selected-runtime support, complete paired results and existing process
+      ownership. Other verbs, remote streaming and original PK/WI acceptance
+      remain separate; this does not reopen completed Phase 3c. Provider and
+      local consumer source are accepted in #11889/#11914, with complete CLI
+      result comparison in #11924. The independent release/native/installed
+      gates and other #4183 lanes remain open.
+
 ### Phase 3d — Retire the production Picker's in-process engine-module boundary (production slice Done)
 
 Production Picker conversion is delivered. The complete original #3360
@@ -790,6 +805,15 @@ legacy Picker's terminal-mirroring call site) now lives solely in
 worktree-manager.
 
 ### Phase 4 — Bare-invocation seam & handoff (Plugin side landed; end-state pending)
+- [ ] #542 Manager first-run front door: review and deliver the
+      [bounded entry/setup-home sequence](phase-4-first-run-front-door.md).
+      Preserve #356/#8545 repository setup, native Configuration/readiness
+      writers and the full original acceptance matrix; an F1 navigation flow
+      is not completion of F2/F3 or the parent issue. F1 source flow is
+      accepted in #11837 and F2 owner sequencing in #11847. F2a read-only
+      guides are source-accepted in #11858. The Phase 4 source matrix now
+      distinguishes real registry recovery from provisioning; effectful F2b, F3 and
+      release/native/installed acceptance remain open.
 - [x] Plugin binstub seam resolves a no-args launch to a **usable** Manager on
       `PATH` (health-probed), else the still-bundled Picker, else the install
       trigger; a stale/incompatible `worktree-manager` stub can never capture the
@@ -934,6 +958,10 @@ _(agent-recommended)_ realizations of that operator-approved boundary.
       The [proposed concrete caller contract](optional-repository-bootstrap.md)
       preserves #356's first-repository registration/setup/trust/readiness
       ownership; it is not a second registration engine or a shipped option.
+- [ ] Profile-aware dependency preparation (#11989, `sluggish-gasket`):
+      review the [bounded native preparation subplan](profile-aware-repository-preparation.md)
+      before implementation. Preserve reference/no-agent setup and active
+      settings; complete prospective dependencies are not project adoption.
 - [x] Wave 0: review contribution, effective-state, and local-write contracts
       against existing owners; reconcile #543's old direct-repository-write
       premise without claiming its implementation complete.
@@ -2253,20 +2281,20 @@ Original Request, status, participants, checked credit and first gates stay._
   admission/creation owner and compose its existing consumer seam. Manager
   installation, interactive New readiness or unrelated Phase 4a completion
   is not a prerequisite for the standalone engine's pure preview.
-- [ ] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
+- [x] **M4437-P1:** Offer canonical safe/refusing Finalize on EVERY supported
   worktree row; BOTH menu presentation AND actual invocation must agree,
   rather than limiting the route to conversation/unused buckets or changing
   visibility alone.
-- [ ] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
+- [x] **M4437-P2:** Explain unmerged/outstanding-objective/work/claim
   refusals and expose the existing cleanup/claims/obligations help route.
   An operator should follow dependencies, not substitute force cleanup.
-- [ ] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
+- [x] **M4437-P3:** Reuse the canonical confirmation-gated asynchronous
   Finalize path and result/progress handling. Reconcile the original
   HEAD-ancestor-or-self-of-default AND no-outstanding-claims safety
   explanation with the actual current canonical content/default-branch/
   PR/obligation/owner policy. Do not reimplement a simplified historical
   predicate, weaken current guards or add an unrelated new ancestry gate.
-- [ ] **M4437-P4:** Retain managed-child/controller, provider-capability,
+- [x] **M4437-P4:** Retain managed-child/controller, provider-capability,
   live/unknown and source/resource boundaries. No hidden direct deletion,
   backend bypass, new cleanup authority or whole-Manager/every-host native
   programme follows from this finite menu/invocation proposal.
@@ -2369,37 +2397,53 @@ not an implementation assignment or accepted source disposition.)_
 
 ### Proposed finite action-progress Inbox consumer from #5343
 
-_(Agent-recommended additive tracking proposal; completed Inbox/non-blocking
-I/O and static-guard credit is not reopened.)_
+_(Finite source acceptance in #11948; completed Inbox/non-blocking I/O and
+static-guard credit is not reopened.)_
 
-- [ ] **P5343-1:** Migrate the ACTUAL `_run_task_action_progress` producer
+The [bounded execution proposal](phase-8-action-progress-inbox.md) preserves
+these original rows and requires source-plan review before functional edits.
+`patient-knob` owns only this registered-action producer/modal slice under
+#5343; provider, other-progress and native/resource owners remain unchanged.
+
+- [x] **P5343-1:** Migrate the ACTUAL `_run_task_action_progress` producer
   in `engine_pivot_actions`, whose worker/reader writes `pct`, `msg`,
   `done`, `error` and final message into the UI-polled progress dict.
   Another background producer or helper presence is not this migration.
-- [ ] **P5343-2:** Publish through the existing addressed Inbox and consume
+- [x] **P5343-2:** Publish through the existing addressed Inbox and consume
   its NONDESTRUCTIVE current value in `_action_stream_panel`, using
   `post`/`peek` or the canonical equivalent. Preserve smooth in-place
   per-tick latest-value display; destructive `drain`/`drain_apply`
   changed-since-drain semantics cannot substitute.
-- [ ] **P5343-3:** Bind progress/completion/error/final message to the
+- [x] **P5343-3:** Bind progress/completion/error/final message to the
   correct run, existing cancellation boundary and late-old-run fence.
   A late reader cannot update a newer run or gain process/resource
   termination authority.
-- [ ] **P5343-4:** Credit #5315's Inbox/background primitives, addressed
+- [x] **P5343-4:** Credit #5315's Inbox/background primitives, addressed
   coalescing and raw `call_from_thread` guard, which explicitly deferred
   this shared-state producer. A clean raw-call guard does not prove that
   direct worker mutation migrated. Keep one Inbox/fabric/run/UI authority,
   not a second progress store or generic all-producer rewrite.
-- [ ] **V5343-1:** Qualify the actual worker/reader -> addressed publication
+- [x] **V5343-1:** Qualify the actual worker/reader -> addressed publication
   -> render consumer with progress, completion, real error and final
   message. Repeated current reads stay nondestructive and responsive.
-- [ ] **V5343-2:** Cover cancellation and late frames from an old run while
+- [x] **V5343-2:** Cover cancellation and late frames from an old run while
   a new run is current, preserving correct identity and existing owning
   cancellation semantics throughout the actual consumer path.
-- [ ] **V5343-3:** Preserve existing primitive/I-O/guard credit and original
+- [x] **V5343-3:** Preserve existing primitive/I-O/guard credit and original
   evidence tiers through the least expensive faithful bounded owning lane
   when separately authorized. No new universal UI/native/every-host or
   whole-Manager prerequisite is added.
+
+### Finite registered-stream stderr drain
+
+The [bounded stream-consumer proposal](stream-stderr-drain.md) owns only
+concurrent stderr draining and its list/progress consumer settlement. Existing
+provider/renderer, persistent-channel, Inbox, native and installation owners
+retain their scopes; this does not reopen or transfer their programs.
+
+- [x] **SSTD:** Review the finite proposal before functional edits, then
+  deliver bounded concurrent stderr capture with real noisy-child, failure,
+  compatibility and cleanup proof through exact-head review/CI and merge.
 
 ### Proposed finite approved-source and venue-consumer contracts
 
@@ -2468,6 +2512,11 @@ explicit final numeric canonical remains OPEN even if this tracking lands.)_
 
 #### #5913 - Existing generic New to the same owned session
 
+The [New-venue composition proposal](phase-8-new-venue-creation.md) refines the
+captured-command/real-terminal handoff, provider target/custody and compatibility
+qualification before either manifest is enabled. Its finite planning claimant
+is `patient-knob`; no implementation or live acceptance is claimed.
+
 - [ ] **P5913-1:** Credit shipped generic row-independent `create_action`
   prompting/execution/refresh. Add actual CodeSpace AND Container provider
   declarations and explicit repository/spec input without requiring an
@@ -2526,6 +2575,24 @@ _(Agent-recommended direct tracking under existing Phase 7; all rows unchecked.)
   release.
 
 ## Validation Plan
+
+- [x] **VSSTD:** Qualify every local
+  [stream-drain control](stream-stderr-drain.md#validation-plan), preserving
+  provider data authority, existing deadlines and exact child/reader custody;
+  source acceptance is not installed/live-provider qualification.
+
+- [x] Qualify the [optional Sync progress flow](phase-3c-optional-sync-progress.md#validation-plan):
+  complete versioned results, real incremental local ProgressScreen use,
+  selected-runtime compatibility/rollback, independent clocks and unknown
+  outcomes. Producer/local consumer source acceptance resolves the recorded
+  source-tier flow controls; full ordinary/streamed CLI result equality and
+  SV1/S3 are accepted in #11924. This is the bounded source increment only;
+  release/native/installed evidence and remaining #4183 lanes stay independent.
+
+- [ ] Qualify the [#542 first-run front-door matrix](phase-4-first-run-front-door.md#validation-and-promotion-gates):
+  real no-project navigation/diagnostic flow, TTY/text routing, source-safe
+  owner handoffs, recovery and original empty/partial/provisioned acceptance.
+  Preserve independent native/installed gates; a plan merge is not implementation.
 
 - [ ] G1: Resolve EVERY directly retained #4096 original
   confirmation-OR-force/accepted-disposition and validation/continuing Coordination
@@ -2664,7 +2731,7 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   unsupported cases preserve valid execution. No create-then-delete,
   broad allocator redesign, Manager dependency or unrelated startup/native
   prerequisite is added.
-- [ ] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
+- [x] **M4437-V1:** Resolve M4437-P1 through P4 through BOTH actual menu
   construction and canonical invocation/refusal/help across original row
   classes, including dirty/unmerged/claimed, conversation/unused and real
   managed/controller/provider refusal. Preserve confirmations, cancellation,
@@ -2684,7 +2751,7 @@ tiers without imposing every-host or native-on-every-leaf requirements.
   personal/session/tmux boundaries and original evidence tiers; documentary
   intake is not wheel/native proof or settings/resource disposition.
 
-- [ ] **G5343:** Resolve EVERY P5343/local Validation/continuing Coordination
+- [x] **G5343:** Resolve EVERY P5343/local Validation/continuing Coordination
   clause for the actual action-progress producer AND render consumer:
   all four fields/final message, correct run/cancel/late-result fencing
   and nondestructive current-value responsiveness through the existing
@@ -2887,6 +2954,229 @@ receiver readback; all other source-specific intake conditions remain in their
 own scopes. No source/resource/physical custody or updater authority transfers.
 
 ## Journal
+
+### 2026-11-12 - Registered-stream finite source accepted
+
+Reviewed plan #12121 and implementation #12141 are merged. The
+[finite acceptance receipt](stream-stderr-drain.md#2026-11-12---finite-source-accepted)
+records 127 affected cases, both corrected High findings, genuine final-head
+approval and actual required CI before the source merge. Only SSTD/VSSTD are
+accepted; the parent and its independent native/provider/installation gates
+retain their owners. No rollout or blanket live-pivot health is claimed.
+
+### 2026-11-10 - Registered action-progress finite source accepted
+
+#11948 merged at 17:05:34 UTC as
+`d46ec448ba52aa3b5b8606f3083a89167ad3b1c5`, with genuine exact-head
+Copilot approval5845984279, no findings and all actual required CI green.
+The [finite slice](phase-8-action-progress-inbox.md#journal) records 106
+passing actual reader/Inbox/modal and maintenance controls, fail-first proof,
+source guards and explicit evidence limits. The complete original issue and
+direct/local/global Validation and continuing Coordination were reread.
+Only P5343/V5343/G5343 are accepted; completed primitives and all other
+provider/native/resource/installation scopes remain with their custodians.
+The Manager effort remains Active and no runtime rollout is claimed.
+
+### 2026-11-10 - Registered action-progress implementation candidate
+
+The bounded plan merged in #11944. The reader now publishes independent
+snapshots through the modal's existing Inbox, while actual rendering/ticks/input
+apply current values on the UI thread with exact-run fencing. The affected
+packet passes 106 cases, including inert-child/native Textual success, error
+and cancellation. The [slice journal](phase-8-action-progress-inbox.md#journal)
+records fail-first proof and evidence limits. Original P5343/V5343/G5343 remain
+unchecked pending implementation review/CI, merge and canonical acceptance.
+No provider, native-timing, installed-runtime or resource-owner transfer occurs.
+
+### 2026-11-10 - Registered action-progress Inbox proposal
+
+Added the bounded #5343 execution proposal after current issue/comment,
+open-source and actual producer/renderer reconciliation. The worker still
+mutates the UI progress dictionary, while the main screen's closure-draining
+Inbox would discard pure data before a later modal peek. The proposal keeps
+latest-value publication at the owning modal, preserves run/cancellation and
+provider authority, and specifies actual consumer and late-run controls.
+P5343/V5343 remain unchecked; no functional implementation or live operation
+is included. Source-plan review precedes execution.
+
+### 2026-11-10 - New-venue composition researched before provider wiring
+
+The [bounded #5913 proposal](phase-8-new-venue-creation.md) records the actual
+captured-create/real-terminal Open seam and provider allocation/result
+differences. `patient-knob` claims only research and reviewed planning.
+No New manifest, provider command, session or resource was created or changed;
+all P5913/V5913/G5913 gates and existing custodians remain unchanged.
+
+### 2026-11-10 - Optional Sync producer source accepted
+
+- #11889 merged as `0b3c3304e750ed6df153d3c52a113beb14ab62d4` after genuine
+  exact-head approval, resolved findings and required green CI. The
+  [acceptance record](phase-3c-optional-sync-progress.md#journal) retains
+  37-case source qualification with explicit reuse and platform limits.
+- Only provider expansion is accepted. The next slice is the selected-runtime
+  local ProgressScreen consumer; complete LP acceptance, PK/WI, remote/other
+  verbs and native/installed gates remain open. No rollout occurred.
+
+### 2026-11-10 - Optional Sync-progress proposal
+
+- `patient-knob` claims only the bounded #4183 LP Sync-progress proposal.
+  [The proposed plan](phase-3c-optional-sync-progress.md) reuses the D4
+  envelope while preserving structured Sync results, paired diagnostics and
+  selected-runtime compatibility. Review precedes implementation.
+- Existing contributed streaming is not built-in progress proof. PK/WI,
+  remaining verbs, remote support and native/installed acceptance stay open;
+  no channel, host operation, installation or custody transfer occurred.
+
+### 2026-11-10 - First-run original-matrix source audit
+
+- #11865 merged to `dev` as `c0601e44dca9508cab3b10462d0dc8eae260d065`.
+  Copilot approval `5837314932` covered exact head
+  `f0ecb761d0697ed036538a98959d1776d5e82602`, the journal-placement thread
+  was resolved and exact-head CI passed before the managed merge.
+- Reconciled the original #542 body in the [Phase 4 source matrix](phase-4-first-run-front-door.md#f3-original-matrix-reconciliation-and-source-recovery-controls).
+  Three contained production-runner/Textual cases exercise actual registry
+  partial/empty/malformed recovery, unchanged observation inputs and explicit
+  selection after Reload. Engine/core observations remain inert fixtures.
+- This advances source validation only. F2b provisioning actions, pristine-profile
+  diagnostic qualification, full native/platform and installed acceptance stay
+  open; no new writer, installation, service probe or rollout is admitted.
+
+### 2026-11-10 - First-run owner guidance and retained effectful gates
+
+- #11858 merged after exact-head approval, no inline findings and all three
+  required checks. F2a is accepted source, not release/native/installed proof.
+  The merge to `dev` was `37ebdd70acca93b10bfdeddec8108221afe25d7c`;
+  Copilot approval `5836953954` covered exact head
+  `98e79fe34008b74219098f415f999a2596f4ab80`.
+- #11847 accepted the concrete four-action owner matrix and read-only F2a
+  sequencing before implementation. The [Phase 4 source record](phase-4-first-run-front-door.md#f2a-source-implementation-and-validation)
+  records guide navigation, real setup-plan and source-preservation controls.
+  Existing Configuration detail defaults retain their consumer coverage.
+- F2b effectful composition, F3, release/native/installed qualification and
+  the original #542 checklist remain open. No installer, writer, trust,
+  maintenance or rollout authority moves to the guide screen.
+
+### 2026-11-10 - First-run F1 source accepted; F2 owner composition next
+
+- #11837 merged after exact-head approval, resolved scope/timeout findings and
+  all required checks. The [Phase 4 acceptance record](phase-4-first-run-front-door.md#f1-acceptance-and-next-slice)
+  retains source/consumer proof and names F2 adapter reconciliation next.
+  #542 and the full matrix stay open; no release or installed rollout is claimed.
+
+### 2026-11-10 - First-run F1 source flow and contained consumer proof
+
+- The [Phase 4 source record](phase-4-first-run-front-door.md#f1-source-implementation-and-validation)
+  records the genuine no-project Setup / Doctor flow, strict fresh selection,
+  real read-only child receipts and focused validation. F2/F3, review/CI,
+  native/installed qualification and #542 remain open; no rollout or writer
+  takeover is claimed.
+
+### 2026-11-10 - Bounded first-run front-door design reservation
+
+- `patient-knob` claims only the Manager-owned #542 entry/no-project
+  presentation and existing-owner composition slice. Its public reservation
+  preserves first-repository setup/trust, knowledge/authentication writers,
+  provider-policy, runtime construction and all existing native/rollout owners.
+- The production pending-binding screen already paints before discovery, but
+  ordinary absent-engine and no-project states currently become binding errors.
+  Keep the nonempty project bootstrap contract; do not substitute a fake source.
+- The linked Phase 4 proposal sequences an independently useful real
+  navigation/diagnostic flow before complete missing-source action composition
+  and original-matrix qualification. No production code, live service probe,
+  installation, source-claim transfer or parent completion is claimed.
+
+### 2026-11-09 - Truthful Knowledge readiness and explicit Reload retry
+
+- Managed source `humming-staple` takes #11735 as a bounded follow-up to the
+  existing #10763 / Phase 5 binding consumer. A check that is pending or
+  unavailable is not evidence that setup is missing. Confirmed missing
+  binding still offers configuration; an unresolved existing binding offers
+  inspection. Native New admission and configuration writers are unchanged.
+- Ordinary Worktrees Reload now requests a fresh bounded asynchronous
+  observation. There is no timer, per-render probe or automatic binding.
+  Generation fencing remains in the original reader, and unchanged action
+  sets do not reset toolbar focus. Reload's existing overall selection
+  policy is unchanged.
+- Eight fail-first cases reproduce the prior labels/state classification;
+  thirteen focused consumer cases pass after correction, including delayed
+  reads, failures, explicit Reload recovery and focus preservation. The
+  test fixture now supplies its startup scalars instead of reaching an
+  ambient engine; no timeout budget was increased.
+- The complete Configuration/notice consumer packet passes 63 cases, with
+  four opt-in native-owner cases skipped because their isolated engine
+  interpreter was not selected. No backend writer or provisioning path
+  changes here. Touched Python lint and the thirteen-plugin install
+  contract pass; this is source consumer proof, not an installed rollout.
+- The original intermittent red message is not currently reproduced and
+  its provider failure was not captured. This fixes independently confirmed
+  presentation/recovery defects, not an asserted timeout root cause or a
+  missing real binding. Broader source checks, review/CI, release and
+  separately authorized installed validation remain distinct gates.
+
+### 2026-11-08 - Bounded #4437 Finalize consumer slice
+
+- Managed source `weathered-crank` claims only M4437-P1 through P4 and
+  M4437-V1's menu/invocation/refusal-help consumer boundary. This continues
+  the reviewed finite contract, not this umbrella's other phases.
+- Keep Finalize discoverable on ordinary machine-backed rows. Preserve
+  managed-child/provider refusal, confirmation/cancel and the canonical
+  engine operation. Protected live/unknown observations become useful
+  executor refusals, never authorization to retire or restore a session.
+- Retain full local and SSH failure diagnostics through the existing
+  transport/executor. The completed progress dialog reuses the scrollable
+  command-result viewer for exact claims and the supported cleanup-help path.
+  No new command, persistent state, registry, polling or backend finality
+  predicate is introduced.
+- #11564 retains mux observation, discovery and unknown-state admission.
+  Its inspected changes are in the earlier liveness branches and the
+  Sync/Cleanup condition; this slice keeps those semantics and adds a
+  separately guarded Finalize route. No shared mux probe or live retirement.
+- Fail-first controls reproduce fourteen menu, protected-target, process
+  diagnostic and actual Textual confirmation failures against unchanged
+  production. The affected five-file packet passed 491 cases with two
+  render/capture fixture races; the 20-case residual packet then passed,
+  retaining all assertions and matching the current fake runtime API.
+  A final fourteen-case consumer run proves eighty claim references remain
+  available in the keyboard-scrollable viewer, confirmation/cancel and
+  local/SSH subprocess diagnostics. This is complementary evidence, not a
+  claimed single green 493-case run.
+- Touched-source Ruff and the install contract pass. The local conservative
+  typing sweep stopped on a cold Windows checker timeout; the prepared
+  checker-only residual passes Linux and Windows. Manager remains pending
+  typing admission, and no whole-portfolio typing pass is claimed.
+  Source review/CI, release and separately authorized installed evidence
+  remain distinct; no completion or rollout is claimed here.
+- Review found three real omissions: AHP/execution-leg live signals, the
+  separate bulk-menu predicate and detail-only canonical stderr refusals.
+  Four fail-first cases reproduced all three; the correction passes 179
+  Finalize, custody, Sync and engine-client controls. The normalizer's full
+  live-signal family now refuses, both menu paths agree, and the compact
+  summary retains the first actual refusal rather than trailing abandon
+  advice. Full diagnostics remain available without replay.
+- The required module-size check also refused the expanded engine client.
+  Its existing error-envelope parser now lives in `engine_progress`, which
+  already owns stderr/JSON-boundary handling, with the old private import
+  retained. Engine client is 995 lines; no baseline or guard was weakened.
+- The next review identified missing/malformed JSON fallback loss, not a
+  clean verdict despite zero inline issues. Four real-process controls
+  reproduced lost local and remote stdout/stderr, including malformed output
+  with exit zero. The explicit Finalize diagnostic path now retains both
+  streams as a failed result; ordinary engine-client callers are unchanged.
+  The expanded focused consumer/custody/transport packet passes 183 cases.
+
+### 2026-11-09 - Finite Finalize source acceptance reconciled
+
+- #11579 merged as `24f3953d034e85cb6280a96427cc27fa3defc364` after
+  final-head approval and green CI. The retained 183-case consumer packet
+  proves the finite M4437-P1 through P4 and M4437-V1 menu, invocation,
+  refusal/help, confirmation/cancel and local/SSH diagnostic contract.
+  Those five rows now reflect the accepted source delivery instead of
+  remaining an unimplemented proposal.
+- This status reconciliation adds no runtime behavior or new test claim.
+  #4437 remains open; release, separately authorized installed acceptance,
+  retained source-workspace finalization and the umbrella's other Plan and
+  Validation Plan items are not completed by these finite source controls.
+  No live Finalize, cleanup, mux probe or rollout is performed or authorized.
 
 ### 2026-11-05 - Planned #5898 terminal/mux receiving
 

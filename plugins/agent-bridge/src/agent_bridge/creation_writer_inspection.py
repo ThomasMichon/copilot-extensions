@@ -32,7 +32,7 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
         or session.target.cwd != scope.worktree_path or session.target.project != scope.project
         or session.target.spawn_command or session.target.container or session.target.codespace
         or session.target.remote_acp
-        or original["state"] not in {"allocated", "preparing", "launching", "delivering", "complete"}
+        or original["state"] not in {"allocated", "preparing", "launching", "delivering", "complete", "terminal"}
     ):
         raise _refuse("exact session changed its original keyed workspace")
     if session.session_id == original["session_id"]:
@@ -73,6 +73,10 @@ async def inspect_writer(manager: Any, session: Any, ready: Callable[[], bool]) 
         "worktree_writer": scope.worktree_writer.model_dump(),
         "writer_scope": support["writer_scope"], "writer_contract": support["writer_contract"],
         "retained_session_writes": support["retained_session_writes"],
+        "retained_native_resume": support.get("retained_native_resume"),
+        "automatic_recovery_stopped": (
+            manager.db.get_session(session.session_id)["cold_recovery_stop_token"] is not None
+        ),
     }
 
 

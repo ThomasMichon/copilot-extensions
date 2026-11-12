@@ -19,25 +19,28 @@ def _cleanup_witness(tmp_path, monkeypatch, events):
     if os.name == "nt":
         backend = """
 function Invoke-DaemonInstanceReconcile {
-    param($RegistryRoot, $Limit, $MaxSeconds)
+    param($RegistryRoot, $Limit, $MaxSeconds, $RuntimeRoot, [bool]$Terminate)
+    if ($Terminate -or -not $RuntimeRoot) { throw 'unsafe cleanup scope' }
     [IO.File]::AppendAllText($env:FIXTURE_GC_CALLS, "gc:${Limit}:${MaxSeconds}`n")
 }
 """
     else:
-        backend = """reconcile_daemon_instances() {
+        backend = """daemon_instance_reconcile_contract() { printf '%s\\n' 'copilot-daemon-reconcile-v1'; }
+reconcile_daemon_instances() {
+    [[ -n "$4" && "$5" == false ]] || return 9
     printf 'gc:%s:%s\\n' "$1" "$2" >> "$FIXTURE_GC_CALLS"
 }
 """
     (scripts / f"daemon_instances.{extension}").write_bytes(backend.encode())
     original = CELL._reconcile_installer_instances
 
-    def reconcile():
+    def reconcile(runtime_root):
         with monkeypatch.context() as local:
             local.setattr(CELL, "__file__", str(scripts / "cell-runtime.py"))
             local.setenv("FIXTURE_GC_CALLS", str(calls))
             local.delenv("PYTEST_CURRENT_TEST", raising=False)
             local.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
-            original()
+            original(runtime_root)
         events.append("gc")
 
     monkeypatch.setattr(CELL, "_reconcile_installer_instances", reconcile)

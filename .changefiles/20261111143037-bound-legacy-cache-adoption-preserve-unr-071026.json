@@ -1,0 +1,9 @@
+{
+  "comment": "Bound legacy cache adoption, preserve unreadable originals and recover missing values through the selected Vault owner",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

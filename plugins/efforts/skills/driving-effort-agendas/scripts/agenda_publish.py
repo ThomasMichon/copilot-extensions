@@ -83,7 +83,7 @@ def publish(home: Path, argv: list[str], *, provider_python: str | None = None,
         source = str(Path(__file__).absolute().parent)
         bootstrap = ("import sys; sys.path.insert(0," + repr(source) + "); "
                      "from agenda_provider import main; raise SystemExit(main())")
-        argv = [sys.executable, "-I", "-B", "-c", bootstrap,
+        argv = [sys.executable, "-I", "-X", "utf8", "-B", "-c", bootstrap,
                 "--provider-python", provider_python, "--project", provider_project]
     elif provider_python is not None or provider_project is not None:
         raise AgendaError("provider-v2 configuration does not alter legacy publication")

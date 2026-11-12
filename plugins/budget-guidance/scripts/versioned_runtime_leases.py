@@ -97,6 +97,8 @@ def _windows_private_lease_file(
     import sys
     import uuid
 
+    root, directory = _native_path(root), _native_path(directory)
+
     class Attributes(c.Structure):
         _fields_ = [("length", w.DWORD), ("descriptor", w.LPVOID), ("inherit", w.BOOL)]
 
@@ -506,6 +508,7 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
     key = hashlib.sha256(version.lower().encode("utf-8")).hexdigest()
     lock_dir = root / f".{kind}-leases"
     lock_path = lock_dir / (key + ".lock")
+    lookup_path = _native_path(lock_path) if os.name == "nt" else lock_path
     if open_lock is None:
         if os.name == "nt":
             fd = _windows_private_lease_file(root, lock_dir, lock_path.name)
@@ -519,7 +522,7 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
         fd = open_lock(lock_dir, lock_path.name)
     try:
         opened = os.fstat(fd)
-        named = os.lstat(lock_path)
+        named = os.lstat(lookup_path)
         if (not stat.S_ISREG(named.st_mode) or
                 (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
             raise OSError(f"{kind} lease path is not the opened ordinary file")
@@ -588,7 +591,7 @@ def _kernel_lease(root: Path, version: str, *, kind: str, shared: bool,
                     ) from exc
                 time.sleep(min(poll_interval, remaining))
         try:
-            named = os.lstat(lock_path)
+            named = os.lstat(lookup_path)
             if (not stat.S_ISREG(named.st_mode) or
                     (opened.st_dev, opened.st_ino) != (named.st_dev, named.st_ino)):
                 raise OSError(f"{kind} lease path changed while waiting")
@@ -623,20 +626,14 @@ def _reference_owner(owner: str) -> None:
         raise ValueError("runtime reference owner must be an explicit lifecycle identity")
 
 
-def read_runtime_references(root: Path) -> dict[str, list[str]]:
-    """Read durable deletion barriers; only absence means no references.
-
-    Readers deciding deletion already hold publication custody. Atomic replace
-    also permits diagnostic readers without a second kernel-lock acquisition.
-    Malformed or unreadable evidence never licenses deletion.
-    """
-    import json
-
-    path = root / _REFERENCES_FILE
+def _read_runtime_reference_state(
+    root: Path, *, allow_transaction: bool = False,
+) -> tuple[dict[str, list[str]], dict[str, str] | None]:
+    path = _native_path(root) / _REFERENCES_FILE
     try:
         before = path.lstat()
     except FileNotFoundError:
-        return {}
+        return {}, None
     if (
         not stat.S_ISREG(before.st_mode) or before.st_nlink != 1
         or before.st_size > _REFERENCES_LIMIT
@@ -666,18 +663,233 @@ def read_runtime_references(root: Path) -> dict[str, list[str]]:
         return values
 
     value = json.loads(raw, object_pairs_hook=unique)
-    if (
-        type(value) is not dict or set(value) != {"schema", "version", "owners"}
-        or value["schema"] != _REFERENCES_SCHEMA
-        or type(value["version"]) is not int or value["version"] != 1
-        or type(value["owners"]) is not dict or len(value["owners"]) > 256
+    if type(value) is not dict or value.get("schema") != _REFERENCES_SCHEMA:
+        raise ValueError("invalid runtime reference evidence")
+    version = value.get("version")
+    transaction = None
+    if type(version) is int and version == 1 and set(value) == {"schema", "version", "owners"}:
+        pass
+    elif (
+        type(version) is int and version == 2
+        and set(value) == {"schema", "version", "owners", "transaction"}
     ):
+        transaction = value["transaction"]
+        if (
+            type(transaction) is not dict or set(transaction) != {"owner", "token"}
+            or not isinstance(transaction["token"], str)
+            or re.fullmatch(r"[0-9a-f]{64}", transaction["token"]) is None
+        ):
+            raise ValueError("invalid runtime reference transaction")
+        _reference_owner(transaction["owner"])
+        if not allow_transaction:
+            raise ValueError("runtime reference transaction is pending")
+    else:
+        raise ValueError("invalid runtime reference evidence")
+    if type(value["owners"]) is not dict or len(value["owners"]) > 256:
         raise ValueError("invalid runtime reference evidence")
     for owner, versions in value["owners"].items():
         _reference_owner(owner)
         if not versions or versions != _reference_versions(versions):
             raise ValueError("invalid runtime reference generations")
-    return value["owners"]
+    return value["owners"], transaction
+
+
+def read_runtime_references(root: Path) -> dict[str, list[str]]:
+    """Read durable deletion barriers; only absence means no references.
+
+    Readers deciding deletion already hold publication custody. Atomic replace
+    also permits diagnostic readers without a second kernel-lock acquisition.
+    Malformed, unreadable or transaction-pending evidence never licenses deletion.
+    """
+    owners, _transaction = _read_runtime_reference_state(root)
+    return owners
+
+
+def _write_runtime_reference_state(
+    root: Path, owners: dict[str, list[str]], transaction: dict[str, str] | None = None,
+) -> None:
+    import secrets
+
+    value = {"schema": _REFERENCES_SCHEMA, "version": 1, "owners": owners}
+    if transaction is not None:
+        value = {**value, "version": 2, "transaction": transaction}
+    raw = json.dumps(value, ensure_ascii=True, sort_keys=True).encode("ascii")
+    if len(raw) > _REFERENCES_LIMIT or len(owners) > 256:
+        raise ValueError("runtime reference evidence exceeds its bound")
+    path = _native_path(root) / _REFERENCES_FILE
+    temporary = path.with_name(path.name + "." + secrets.token_hex(16) + ".tmp")
+    try:
+        with temporary.open("xb") as stream:
+            stream.write(raw)
+            stream.flush()
+            os.fsync(stream.fileno())
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def reference_transaction_custody(root: Path, *, timeout: float = 60.0):
+    """Serialize a consumer's complete reference reconciliation for this root."""
+    return _kernel_lease(
+        root, "owners", kind="reference-transaction", shared=False, timeout=timeout,
+    )
+
+
+def reference_recovery_prefix(owner: str) -> str:
+    """Name conservative recovery references for one lifecycle owner."""
+    import hashlib
+
+    _reference_owner(owner)
+    return "runtime-recovery/" + hashlib.sha256(owner.encode("utf-8")).hexdigest() + "/"
+
+
+def _recover_runtime_reference_transaction(root: Path) -> None:
+    """Replace an abandoned fence with references to every extant slot."""
+    from contextlib import ExitStack
+    import hashlib
+
+    root = _native_path(root)
+    with _publication_lease(root):
+        _owners, transaction = _read_runtime_reference_state(root, allow_transaction=True)
+    if transaction is None:
+        return
+    versions = root / "versions"
+    directory = versions.lstat()
+    if not stat.S_ISDIR(directory.st_mode) or getattr(directory, "st_file_attributes", 0) & 0x400:
+        raise ValueError("runtime recovery inventory is not an ordinary directory")
+    entries = tuple(versions.iterdir())
+    if len(entries) > 1024:
+        raise ValueError("runtime recovery inventory exceeds its bound")
+    evidence = {}
+    for path in entries:
+        name = path.name
+        _reference_versions([name])
+        info = path.lstat()
+        if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+            raise ValueError("runtime recovery target is not an ordinary slot")
+        evidence[name] = info
+    names = sorted(evidence)
+    if len({name.lower() for name in names}) != len(names):
+        raise ValueError("runtime recovery inventory has ambiguous slot names")
+    with ExitStack() as custody:
+        for name in sorted(names, key=str.lower):
+            custody.enter_context(_kernel_lease(root, name, kind="retention", shared=True))
+            if not os.path.samestat(evidence[name], (versions / name).lstat()):
+                raise RuntimeError("runtime recovery inventory changed")
+        custody.enter_context(_publication_lease(root))
+        owners, current = _read_runtime_reference_state(root, allow_transaction=True)
+        if current != transaction:
+            return
+        if (
+            not os.path.samestat(directory, versions.lstat())
+            or {path.name for path in versions.iterdir()} != set(names)
+            or any(not os.path.samestat(evidence[name], (versions / name).lstat()) for name in names)
+        ):
+            raise RuntimeError("runtime recovery inventory changed")
+        if names:
+            digest = hashlib.sha256(json.dumps(names, separators=(",", ":")).encode()).hexdigest()
+            prefix = reference_recovery_prefix(transaction["owner"]) + digest + "/"
+            count = (len(names) + 63) // 64
+            for index in range(count):
+                key = f"{prefix}{index:04d}-{count:04d}"
+                values = names[index * 64:(index + 1) * 64]
+                if key in owners and owners[key] != values:
+                    raise RuntimeError("runtime recovery references changed")
+                owners[key] = values
+        _write_runtime_reference_state(root, owners)
+
+
+def begin_runtime_reference_transaction(
+    root: Path, owner: str, *, timeout: float = 0.0, poll_interval: float = 0.05,
+    recover_foreign: bool = False,
+) -> dict:
+    """Fence deletion until this lifecycle atomically publishes its references.
+
+    A pending record survives process death. Existing readers reject its version
+    rather than collecting unreferenced slots; the same external owner may
+    resume it after reacquiring its own lifecycle lock.
+    """
+    import secrets
+
+    _reference_owner(owner)
+    if type(recover_foreign) is not bool:
+        raise ValueError("invalid runtime reference recovery choice")
+    if not math.isfinite(timeout) or timeout < 0 or not math.isfinite(poll_interval) or poll_interval <= 0:
+        raise ValueError("invalid runtime reference transaction wait")
+    root = _native_path(root)
+    deadline = time.monotonic() + timeout
+    recovered = False
+    while True:
+        with _publication_lease(root, timeout=max(0.0, deadline - time.monotonic())):
+            owners, transaction = _read_runtime_reference_state(root, allow_transaction=True)
+            if transaction is None:
+                versions = root / "versions"
+                try:
+                    versions.mkdir()
+                except FileExistsError:
+                    pass
+                info = versions.lstat()
+                if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                    raise ValueError("runtime reference inventory is not an ordinary directory")
+                transaction = {"owner": owner, "token": secrets.token_hex(32)}
+                _write_runtime_reference_state(root, owners, transaction)
+            if transaction["owner"] == owner:
+                return {"token": transaction["token"], "owners": owners}
+        if recover_foreign and (not recovered or time.monotonic() < deadline):
+            if recovered:
+                time.sleep(min(poll_interval, max(0.0, deadline - time.monotonic())))
+            _recover_runtime_reference_transaction(root)
+            recovered = True
+            continue
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise RuntimeError("runtime reference transaction belongs to another owner")
+        time.sleep(min(poll_interval, remaining))
+
+
+def commit_runtime_reference_transaction(
+    root: Path, owner: str, token: str, updates: dict[str, list[str]], *,
+    expected: dict[str, list[str]],
+) -> None:
+    """Atomically settle a fenced, compare-bound set of lifecycle references."""
+    from contextlib import ExitStack
+
+    _reference_owner(owner)
+    if (
+        not isinstance(token, str) or re.fullmatch(r"[0-9a-f]{64}", token) is None
+        or type(updates) is not dict or not updates or len(updates) > 256
+        or type(expected) is not dict or set(updates) != set(expected)
+    ):
+        raise ValueError("invalid runtime reference transaction update")
+    desired, previous = {}, {}
+    for key in updates:
+        _reference_owner(key)
+        if key != owner and not key.startswith(owner + "/"):
+            raise ValueError("runtime reference update belongs to another owner")
+        desired[key] = _reference_versions(updates[key])
+        previous[key] = _reference_versions(expected[key])
+    targets = {version for versions in desired.values() for version in versions}
+    if len(targets) > 1024:
+        raise ValueError("runtime reference transaction exceeds its target bound")
+    root = _native_path(root)
+    with ExitStack() as custody:
+        for version in sorted(targets, key=str.lower):
+            custody.enter_context(_kernel_lease(root, version, kind="retention", shared=True))
+            info = (root / "versions" / version).lstat()
+            if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+                raise ValueError("runtime reference target is not an ordinary slot")
+        custody.enter_context(_publication_lease(root))
+        owners, transaction = _read_runtime_reference_state(root, allow_transaction=True)
+        if transaction != {"owner": owner, "token": token}:
+            raise RuntimeError("runtime reference transaction ownership changed")
+        if any(owners.get(key, []) != versions for key, versions in previous.items()):
+            raise RuntimeError("runtime references changed before publication")
+        for key, versions in desired.items():
+            if versions:
+                owners[key] = versions
+            else:
+                owners.pop(key, None)
+        _write_runtime_reference_state(root, owners)
 
 
 def replace_runtime_references(
@@ -691,11 +903,9 @@ def replace_runtime_references(
     No PID, age, automatic expiry or force-release path exists.
     """
     from contextlib import ExitStack
-    import json
-    import secrets
-
     _reference_owner(owner)
     versions, expected = _reference_versions(versions), _reference_versions(expected)
+    root = _native_path(root)
     with ExitStack() as custody:
         # Cleanup takes retention before publication; never invert that order.
         for version in versions:
@@ -712,18 +922,4 @@ def replace_runtime_references(
             owners[owner] = versions
         else:
             owners.pop(owner, None)
-        raw = json.dumps({
-            "schema": _REFERENCES_SCHEMA, "version": 1, "owners": owners,
-        }, ensure_ascii=True, sort_keys=True).encode("ascii")
-        if len(raw) > _REFERENCES_LIMIT or len(owners) > 256:
-            raise ValueError("runtime reference evidence exceeds its bound")
-        path = root / _REFERENCES_FILE
-        temporary = path.with_name(path.name + "." + secrets.token_hex(16) + ".tmp")
-        try:
-            with temporary.open("xb") as stream:
-                stream.write(raw)
-                stream.flush()
-                os.fsync(stream.fileno())
-            temporary.replace(path)
-        finally:
-            temporary.unlink(missing_ok=True)
+        _write_runtime_reference_state(root, owners)

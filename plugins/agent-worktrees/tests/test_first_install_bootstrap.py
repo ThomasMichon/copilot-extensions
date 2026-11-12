@@ -11,11 +11,14 @@ import shutil
 import stat
 import subprocess
 import sys
+import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pytest
 
+from agent_procutil import no_window_kwargs
 
 PLUGIN = Path(__file__).resolve().parents[1]
 pytestmark = pytest.mark.guard
@@ -278,6 +281,139 @@ def test_posix_binstub_self_provisions_from_a_direct_install_layout(tmp_path: Pa
 
 
 _PWSH = shutil.which("pwsh") or shutil.which("powershell")
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows packaged entry regression")
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.parametrize("entry", ["cmd", "powershell"])
+@pytest.mark.parametrize("selection", ["absent", "same", "different"])
+@pytest.mark.parametrize("installer_fails", [False, True])
+def test_packaged_windows_entry_self_provisions_after_relocation(
+    tmp_path: Path, entry: str, selection: str, installer_fails: bool,
+) -> None:
+    archive = tmp_path / "payload.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        for relative in (
+            "plugin.json", "bin/agent-worktrees.cmd", "bin/agent-worktrees.ps1",
+            "bin/agent-worktrees-update-entry.ps1",
+        ):
+            output.write(PLUGIN / relative, relative)
+    payload = tmp_path / "relocated payload with spaces"
+    with zipfile.ZipFile(archive) as source:
+        source.extractall(payload)
+    launcher = payload / "bin" / "agent-worktrees.ps1"
+    launcher.write_text(
+        launcher.read_text(encoding="utf-8").replace(
+            r"Local\Copilot.AgentWorktrees.Provision",
+            r"Local\Copilot.AgentWorktrees.Provision.Test." + uuid.uuid4().hex,
+        ).replace(
+            # Stable selection needs no retries; fail immediately on rejection.
+            "[DateTime]::UtcNow.AddSeconds(120)", "[DateTime]::UtcNow",
+        ),
+        encoding="utf-8",
+    )
+    home = tmp_path / "empty home"
+    home.mkdir()
+    runtime = home / ".agent-worktrees"
+    selected = tmp_path / "saved payload with spaces" if selection == "different" else payload
+    if selection != "absent":
+        runtime.mkdir()
+        (runtime / "payload-dir").write_text(str(selected), encoding="utf-8")
+    admission = tmp_path / "snapshot admission.py"
+    admission.write_text(
+        "import os, runpy, sys\n"
+        "from pathlib import Path\n"
+        "from types import SimpleNamespace\n"
+        "driver = runpy.run_path(os.environ['FIXTURE_DRIVER'])\n"
+        "snapshot = os.environ['AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT']\n"
+        "args = SimpleNamespace(\n"
+        "    root=Path(sys.argv[1]), payload=Path(sys.argv[2]),\n"
+        "    selected_snapshot=None if snapshot == '::absent::' else Path(snapshot),\n"
+        "    expect_no_snapshot=snapshot == '::absent::',\n"
+        ")\n"
+        "if not driver['_selected_snapshot_current'](args):\n"
+        "    print('::agent-worktrees-driver-reselect::', file=sys.stderr)\n"
+        "    raise SystemExit(75)\n",
+        encoding="utf-8",
+    )
+    scripts = payload / "scripts"
+    scripts.mkdir()
+    # Isolate installer effects and the named mutex; retain real front-door dispatch.
+    (scripts / "install.ps1").write_text(
+        r"""
+# agent-worktrees:first-use-driver-nonblocking-v1
+param([string]$Action)
+$ErrorActionPreference = 'Stop'
+if ($Action -ne 'provision') { throw 'Expected lean provisioning' }
+[Console]::Error.WriteLine('')
+[Console]::Error.WriteLine('')
+[Console]::Error.WriteLine('source-wheel-diagnostic')
+$root = Join-Path $env:USERPROFILE '.agent-worktrees'
+& $env:FIXTURE_PYTHON $env:FIXTURE_ADMISSION $root (Split-Path -Parent $PSScriptRoot)
+if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+if ($env:FIXTURE_INSTALLER_FAILS -eq '1') {
+    Write-Error 'fixture installation failed' -ErrorAction Continue
+    exit 23
+}
+$bin = Join-Path $root 'bin'
+[void][IO.Directory]::CreateDirectory($bin)
+[IO.File]::AppendAllText((Join-Path $root 'calls'), "$PSCommandPath`n")
+$python = $env:FIXTURE_PYTHON.Replace("'", "''")
+[IO.File]::WriteAllText(
+    (Join-Path $bin 'resolve-runtime.ps1'), "`$AwPy = '$python'`n"
+)
+""",
+        encoding="utf-8",
+    )
+    if selected != payload:
+        (selected / "scripts").mkdir(parents=True)
+        shutil.copy2(scripts / "install.ps1", selected / "scripts" / "install.ps1")
+    module = tmp_path / "agent_worktrees"
+    module.mkdir()
+    (module / "__init__.py").write_text("", encoding="utf-8")
+    (module / "__main__.py").write_text(
+        "import json, sys\nprint(json.dumps(sys.argv[1:]))\n", encoding="utf-8",
+    )
+    environment = {
+        **os.environ, "USERPROFILE": str(home), "HOME": str(home),
+        "FIXTURE_PYTHON": sys.executable,
+        "FIXTURE_ADMISSION": str(admission),
+        "FIXTURE_DRIVER": str(PLUGIN / "scripts" / "runtime_install_driver.py"),
+        "FIXTURE_INSTALLER_FAILS": "1" if installer_fails else "0",
+    }
+    for name in (
+        "AGENT_WORKTREES_NO_SELFPROVISION", "COPILOT_EXTENSIONS_CONTEXT",
+        "AGENT_RT_ROOT",
+    ):
+        environment.pop(name, None)
+    command = [str(payload / "bin" / "agent-worktrees.cmd")]
+    if entry == "powershell":
+        command = [
+            str(Path(os.environ["SystemRoot"]) /
+                "System32/WindowsPowerShell/v1.0/powershell.exe"),
+            "-NoProfile", "-File", str(payload / "bin" / "agent-worktrees.ps1"),
+        ]
+    for invocation in range(2):
+        result = subprocess.run(
+            [*command, "repos", "account", "list"],
+            cwd=tmp_path, env=environment, capture_output=True, text=True,
+            timeout=30, **no_window_kwargs(),
+        )
+        assert ("source-wheel-diagnostic" in result.stderr) == (invocation == 0)
+        assert "System.Management.Automation.RemoteException" not in result.stderr
+        if installer_fails:
+            assert result.returncode != 0
+            assert "fixture installation failed" in result.stderr
+            assert not (runtime / "bin" / "resolve-runtime.ps1").exists()
+            return
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert json.loads(result.stdout) == ["repos", "account", "list"]
+        assert (runtime / "calls").read_text().splitlines() == [
+            str(selected / "scripts" / "install.ps1")
+        ]
+        assert ("provisioning on first use" in result.stderr) == (invocation == 0)
 
 
 @pytest.mark.skipif(_PWSH is None, reason="pwsh/powershell not available")
@@ -718,6 +854,97 @@ def test_posix_lean_provision_installs_resolver_and_launchers_reenter_runtime(
         assert launched.returncode == 0, launched.stderr
         version = json.loads((payload / "plugin.json").read_text())["version"]
         assert launched.stdout.startswith(f"agent-worktrees {version} "), launched.stdout
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native first-use integration")
+@pytest.mark.skipif(
+    os.environ.get("AGENT_WORKTREES_FIRST_USE_NATIVE") != "1",
+    reason="explicit native first-use test with an approved package feed",
+)
+@pytest.mark.portfolio_tier("T3")
+@pytest.mark.effect("network")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.timeout(600)
+@pytest.mark.parametrize("entry", ["payload", "global"])
+def test_windows_payload_first_use_stamps_and_provisions_under_driver(tmp_path: Path, entry: str) -> None:
+    from urllib.parse import urlsplit
+    from agent_procutil.daemon_instances import daemon_test_lifecycle
+    from update_driver import core
+
+    shell = shutil.which("powershell.exe")
+    if not shell or not shutil.which("uv"):
+        pytest.skip("native PowerShell and uv are required")
+    index = os.environ.get("UV_DEFAULT_INDEX", "")
+    parsed = urlsplit(index)
+    assert parsed.scheme == "https" and parsed.hostname and not (
+        parsed.username or parsed.password or parsed.query or parsed.fragment
+    ), "an explicit anonymous HTTPS package index is required"
+    area = tmp_path.parent / uuid.uuid4().hex[:8]
+    area.mkdir()
+    home, payload = _materialized_payload(area)
+    if entry == "global":
+        stub = payload / "bin" / "agent-worktrees.ps1"
+        text = stub.read_text(encoding="utf-8")
+        mutex = "Local\\Copilot.AgentWorktrees.Provision"
+        assert text.count(mutex) == 1
+        stub.write_text(
+            text.replace(mutex, mutex + ".Test." + uuid.uuid4().hex),
+            encoding="utf-8",
+        )
+    environment = {
+        key: os.environ[key] for key in (
+            "PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "ProgramFiles", "ProgramFiles(x86)",
+        ) if key in os.environ
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), APPDATA=str(area / "appdata"),
+        LOCALAPPDATA=str(area / "localappdata"), TEMP=str(area), TMP=str(area),
+        UV_CACHE_DIR=str(area / "uv-cache"), UV_DEFAULT_INDEX=index,
+        COPILOT_PLUGIN_ROOT=str(payload), COPILOT_EXTENSIONS_TEST_CONTAINED="0",
+        PYTEST_CURRENT_TEST="isolated-worktrees-first-use", PYTHONUTF8="1",
+        PYTHONDONTWRITEBYTECODE="1",
+    )
+    cleanup = []
+    with daemon_test_lifecycle(
+        owner="worktrees-first-use", registry_root=area / "instances", cleanup_results=cleanup,
+    ) as lifecycle:
+        result = subprocess.run(
+            [shell, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+             "-File", str(payload / "bin" / ("payload" if entry == "payload" else "")
+                          / "agent-worktrees.ps1"), "--version"],
+            cwd=home, env={**environment, **lifecycle}, capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=540,
+            creationflags=subprocess.CREATE_NO_WINDOW,
+        )
+    assert not [item for item in cleanup if item.status == "held"]
+    requests = core.status(root=home / ".copilot-extensions" / "update-driver")
+    diagnostic = []
+    for item in requests:
+        if item.log_path.is_file():
+            lines = item.log_path.read_text(encoding="utf-8", errors="replace").splitlines()
+            diagnostic.extend(
+                line[:500] for line in lines[-120:]
+                if any(word in line.lower() for word in ("error", "failed", "traceback", "timed out"))
+                and not any(word in line.lower() for word in ("token", "secret", "witness", "authorization"))
+            )
+    assert result.returncode == 0, result.stdout + result.stderr + "\n" + "\n".join(diagnostic)
+    version = json.loads((payload / "plugin.json").read_text(encoding="utf-8"))["version"]
+    assert result.stdout.startswith(f"agent-worktrees {version} "), result.stdout
+    runtime = home / ".agent-worktrees"
+    if entry == "payload":
+        snapshot = Path((runtime / "payload-dir").read_text(encoding="utf-8").strip())
+        assert snapshot.is_relative_to(runtime / "snapshots")
+    else:
+        assert not (runtime / "payload-dir").exists()
+    selected = (runtime / "current-version").read_text(encoding="utf-8").strip()
+    assert (runtime / "versions" / selected / ".install-complete.json").is_file()
+    assert [
+        (item.spec.backend, item.spec.argv[1], item.state, item.exit_code)
+        for item in requests
+    ] == (
+        [("engine-native-install", "stamp", "completed", 0)] if entry == "payload" else []
+    ) + [("engine-native-install", "provision", "completed", 0)]
 
 
 def _offline_bootstrap_env(tmp_path: Path, home: Path) -> dict[str, str]:

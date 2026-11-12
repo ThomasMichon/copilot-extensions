@@ -14,6 +14,8 @@ import pytest
 from agent_worktrees import status_monitor_cutover as control
 from agent_worktrees import worktrees_projection as projection
 from agent_worktrees import worktrees_runtime as runtime
+from agent_worktrees.worktrees_projection_index import Selection
+from agent_worktrees.worktrees_refresh import record_identity
 
 
 def request(**selection):
@@ -31,6 +33,10 @@ def request(**selection):
         request(passive=1),
         request(worktree_id=""),
         request(history=True),
+        request(refresh_id="a" * 32),
+        request(worktree_id="one", refresh_id=True),
+        request(worktree_id="one", refresh_id="a" * 32, passive=True),
+        request(worktree_id="one", refresh_id="a" * 32, bootstrap=True),
     ],
 )
 def test_worktrees_runtime_rejects_malformed_requests_without_storage(tmp_path, payload):
@@ -93,6 +99,116 @@ def test_worktrees_runtime_authenticated_transport_and_drain(tmp_path):
         assert client.worktrees_read(request())["ok"] is True
     finally:
         server.close()
+        owner.shutdown()
+
+
+def test_point_refresh_requires_its_reconciled_publication_not_an_unrelated_publish(tmp_path):
+    wake = threading.Event()
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3", wake=wake)
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32)
+    try:
+        owner.publish("project", [{"id": "one", "session_bound_live": True}], observed_at=1)
+        wake.clear()
+        assert owner.handle(query)["error"]["code"] == "unready"
+        assert wake.is_set()
+        pending = owner.refreshes.pending("project")
+        assert pending == (("a" * 32, Selection(worktree_id="one")),)
+        owner.publish("project", [{"id": "one"}], observed_at=2)
+        assert owner.handle(query)["error"]["code"] == "unready"
+        owner.publish(
+            "project", [{"id": "one"}], observed_at=3,
+            refresh_requests=[(pending[0][0], record_identity({"id": "one"}))],
+        )
+        result = owner.handle(query)
+        assert result["point_refresh"] == {
+            "request_id": "a" * 32,
+            "generation": result["projection"]["generation"],
+            "revision": 3,
+            "worktree_id": "one", "creation_nonce": None, "path": None,
+        }
+        assert owner.handle(query)["point_refresh"] == result["point_refresh"]
+        assert owner.refreshes.pending("project") == ()
+        changed = owner.handle({**query, "worktree_id": "other"})
+        assert changed["error"]["code"] == "invalid-request"
+        owner.close_admission()
+        owner.activate()
+        assert owner.handle(query)["error"]["code"] == "unready"
+    finally:
+        owner.shutdown()
+
+
+def test_point_refresh_queue_is_bounded_and_never_evicts_pending_requests(tmp_path):
+    from agent_worktrees.worktrees_refresh import MAX_REQUESTS
+
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    try:
+        for index in range(MAX_REQUESTS):
+            assert owner.handle(request(
+                worktree_id="one", refresh_id=f"{index:032x}",
+            ))["error"]["code"] == "unready"
+        overflow = request(worktree_id="one", refresh_id=f"{MAX_REQUESTS:032x}")
+        assert owner.handle(overflow)["error"]["code"] == "invalid-request"
+        pending = owner.refreshes.pending("project")
+        assert len(pending) == MAX_REQUESTS
+        owner.publish(
+            "project", [{"id": "one"}], observed_at=1,
+            refresh_requests=[(pending[0][0], record_identity({"id": "one"}))],
+        )
+        assert owner.handle(overflow)["error"]["code"] == "unready"
+        assert owner.refreshes.pending("project") == pending[1:] + (
+            (overflow["refresh_id"], Selection(worktree_id="one")),
+        )
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("changed", [
+    {"status_filter": "active"}, {"platform_filter": "windows"}, {"include_missing": False},
+])
+def test_refresh_request_id_cannot_be_reused_with_different_filters(tmp_path, changed):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32)
+    try:
+        assert owner.handle(query)["error"]["code"] == "unready"
+        assert owner.handle({**query, **changed})["error"]["code"] == "invalid-request"
+        assert owner.refreshes.pending("project") == (
+            ("a" * 32, Selection(worktree_id="one")),
+        )
+    finally:
+        owner.shutdown()
+
+
+@pytest.mark.parametrize("when", ["before-completion", "after-completion"])
+@pytest.mark.parametrize("changed", ["id", "incarnation", "path", "empty"])
+def test_refresh_receipt_cannot_follow_a_changed_record_or_selection(tmp_path, when, changed):
+    owner = runtime.WorktreesRuntime(tmp_path / "current.sqlite3")
+    owner.activate()
+    query = request(worktree_id="one", refresh_id="a" * 32, status_filter="active")
+    reconciled = {"id": "one", "creation_nonce": "first", "path": "checkout", "status": "active"}
+    replacement = {
+        **reconciled,
+        **{
+            "id": {"id": "two-one"},
+            "incarnation": {"creation_nonce": "second"},
+            "path": {"path": "other-checkout"},
+            "empty": {"status": "archived"},
+        }[changed],
+    }
+    try:
+        owner.handle(query)
+        applied = [(query["refresh_id"], record_identity(reconciled))]
+        if when == "after-completion":
+            owner.publish("project", [reconciled], observed_at=1, refresh_requests=applied)
+            assert owner.handle(query)["ok"] is True
+            applied = ()
+        owner.publish("project", [replacement], observed_at=2, refresh_requests=applied)
+        result = owner.handle(query)
+        assert result["ok"] is False and result["error"]["code"] == "refresh-unavailable"
+        assert "point_refresh" not in result
+    finally:
         owner.shutdown()
 
 
@@ -199,6 +315,156 @@ def test_passive_reads_never_record_demand_or_wake_the_producer(demand_owner):
 
     assert owner.handle(request(project="other"))["error"]["code"] == "unready"
     assert wakes == [1] and owner.demand_projects() == {"other"}
+
+
+def _freshness_owner(tmp_path, clock):
+    owner = runtime.WorktreesRuntime(
+        tmp_path / "current.sqlite3", now=lambda: clock[0],
+        freshness_bound=runtime.freshness_bound_for(15),
+    )
+    owner.activate()
+    return owner
+
+
+def test_passive_read_goes_stale_when_only_another_project_keeps_the_resident_alive(tmp_path):
+    from agent_worktrees import delegate_cli, worktrees_client
+
+    clock = [100.0]
+    owner = _freshness_owner(tmp_path, clock)
+    try:
+        owner.publish("idle", [], observed_at=1)
+        owner.publish("busy", [{"id": "busy-1"}], observed_at=1)
+        clock[0] += 10
+        fresh = owner.handle(request(project="idle", passive=True))
+        assert "availability" not in fresh
+        assert fresh["projection"]["freshness"] == {"refreshed_age_s": 10.0, "bound_s": 45.0}
+        # "idle"'s demand lapsed: the live resident keeps republishing only "busy".
+        for _ in range(3):
+            clock[0] += 15
+            owner.publish("busy", [{"id": "busy-1"}], observed_at=clock[0])
+        stale = owner.handle(request(project="idle", passive=True))
+        assert stale["worktrees"] == []
+        assert stale["availability"] == {
+            "status": "stale", "reason": "current roster refresh overdue (55s > 45s)",
+        }
+        assert "availability" not in owner.handle(request(project="busy", passive=True))
+        assert owner.demand_projects() == set()
+        # The client accepts the labeled reply, and it cannot authorize finalization.
+        validated = worktrees_client.validate_result(stale, request(project="idle", passive=True))
+        host = {"reachable": True, **{k: validated[k] for k in ("projection", "availability")}}
+        assert delegate_cli.host_roster_is_current(host) is False
+        # A demand read keeps its unlabeled contract (and renews the producer).
+        demand = owner.handle(request(project="idle"))
+        assert "freshness" not in demand["projection"] and "availability" not in demand
+    finally:
+        owner.shutdown()
+
+
+def test_passive_read_goes_stale_after_the_bound_when_the_producer_hangs(tmp_path):
+    clock = [0.0]
+    owner = _freshness_owner(tmp_path, clock)
+    try:
+        owner.publish("project", [{"id": "first"}], observed_at=1)
+        clock[0] = 45.0
+        assert "availability" not in owner.handle(request(passive=True))
+        # No sweep iteration runs again; the reader's own clock still ages it.
+        clock[0] = 45.5
+        result = owner.handle(request(passive=True))
+        assert result["worktrees"] == [{"id": "first"}]
+        assert result["availability"]["status"] == "stale"
+        assert result["projection"]["freshness"]["refreshed_age_s"] == 45.5
+        owner.publication_failed("project", OSError("producer fixture failed"))
+        clock[0] = 46.0
+        failed = owner.handle(request(passive=True))
+        assert failed["availability"] == {"status": "stale", "reason": "producer fixture failed"}
+    finally:
+        owner.shutdown()
+
+
+def test_freshness_ages_from_when_the_published_facts_were_collected(tmp_path):
+    clock = [0.0]
+    owner = _freshness_owner(tmp_path, clock)
+    try:
+        collected = owner.clock()
+        clock[0] = 50.0  # collection stalled past the 45s bound before publishing
+        owner.publish("project", [], observed_at=1, collected_from=collected)
+        result = owner.handle(request(passive=True))
+        assert result["projection"]["freshness"]["refreshed_age_s"] == 50.0
+        assert result["availability"]["status"] == "stale"
+        with pytest.raises(ValueError):
+            owner.publish("project", [], observed_at=1, collected_from=float("nan"))
+    finally:
+        owner.shutdown()
+
+
+def test_reactivated_resident_proves_freshness_only_by_its_own_publication(tmp_path):
+    clock = [0.0]
+    owner = _freshness_owner(tmp_path, clock)
+    try:
+        owner.publish("project", [{"id": "first"}], observed_at=1)
+        owner.close_admission()
+        owner.activate()
+        result = owner.handle(request(passive=True))
+        assert result["worktrees"] == [{"id": "first"}]
+        assert result["projection"]["freshness"]["refreshed_age_s"] is None
+        assert result["availability"]["status"] == "stale"
+        owner.publish("project", [{"id": "first"}], observed_at=2)
+        assert "availability" not in owner.handle(request(passive=True))
+    finally:
+        owner.shutdown()
+
+
+def test_change_events_select_projects_to_republish_without_recording_demand(demand_owner):
+    owner, _clock, wakes = demand_owner
+    owner.note_changed("/wt/a")
+    assert wakes == [1] and owner.demand_projects() == set()
+    assert owner.take_changed_projects({"/wt/a": "a"}.get) == {"a"}
+    owner.publish("a", [], observed_at=1)
+    assert owner.take_changed_projects({"/wt/a": "a"}.get) == set()
+
+    owner.publish("b", [], observed_at=1)
+
+    def broken(_path):
+        raise OSError("resolver fixture broken")
+
+    # An event that cannot be attributed republishes everything served.
+    for path, resolve in (("/wt/x", lambda _p: None), ("/wt/x", broken), (None, lambda _p: "c")):
+        owner.note_changed(path)
+        assert owner.take_changed_projects(resolve) == {"a", "b"}
+    for index in range(runtime._CHANGED_PATH_LIMIT + 1):
+        owner.note_changed(f"/wt/{index}")
+    assert owner.take_changed_projects(lambda _p: "c") == {"a", "b"}
+    assert owner.demand_projects() == set()
+
+    owner.close_admission()
+    owner.note_changed("/wt/a")
+    assert owner.take_changed_projects({"/wt/a": "a"}.get) == set()
+
+
+def test_duplicate_change_at_capacity_does_not_republish_everything(demand_owner):
+    owner, _clock, _wakes = demand_owner
+    owner.publish("a", [], observed_at=1)
+    for index in range(runtime._CHANGED_PATH_LIMIT):
+        owner.note_changed(f"/wt/{index}")
+    owner.note_changed("/wt/0")
+    assert owner.take_changed_projects(lambda _p: "c") == {"c"}
+
+
+def test_change_event_survives_sweeps_that_fail_before_publishing(demand_owner):
+    owner, _clock, _wakes = demand_owner
+    resolve = {"/wt/a": "a"}.get
+    owner.note_changed("/wt/a")
+    # A transient listing failure or deferral takes the event without publishing.
+    for _sweep in range(runtime._CHANGED_RETRY_SWEEPS):
+        assert owner.take_changed_projects(resolve) == {"a"}
+    # Retries are bounded; the unrefreshed roster then simply ages to stale.
+    assert owner.take_changed_projects(resolve) == set()
+
+    owner.note_changed("/wt/a")
+    assert owner.take_changed_projects(resolve) == {"a"}
+    owner.publish("a", [], observed_at=1)
+    assert owner.take_changed_projects(resolve) == set()
+    assert owner.demand_projects() == set()
 
 
 def test_concurrent_unavailable_readers_coalesce_per_project_and_reactivate(demand_owner):

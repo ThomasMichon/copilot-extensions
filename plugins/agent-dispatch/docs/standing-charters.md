@@ -1,0 +1,322 @@
+# Standing charters
+
+A standing charter is a durable task for a lane of continuing responsibility,
+such as one declared dispatcher seat. It is not a finite occurrence: finite
+completion, submission, abandonment and ordinary claims never conclude or
+staff it. Its identity, revisioned history and retirement tombstone survive
+restart, owner loss and re-enrollment.
+
+Standing work is source capability only. Reconciling, reserving or accepting a
+charter never launches, appoints, materializes or stops an agent; those remain
+separately authorized operations owned by their existing tools.
+
+## Identity and revisions
+
+A declaration names seven exact strings: `namespace`, `charter_key`,
+`lane_key`, `effort_ref`, `materialization_ref`, `source_revision` and
+`expected_materialization_revision`. The qualified key within one repository
+lane selects exactly one task. Repeating an unchanged declaration returns the
+same task without a new event; a changed declaration needs the current
+`standing_revision` as `expected_revision`. Values must be 1-1024 characters,
+without surrounding whitespace or control characters.
+
+Every mutation names the exact revision it observed. A stale revision,
+generation, native head or conclusion revision is refused with no effect; it
+is never retried against a newer state on the caller's behalf.
+
+| Operation | Effect |
+|-----------|--------|
+| `reconcile` | Upsert one declared lane; never retires, accepts or launches |
+| `reserve` | Retain one exact workspace assignment through the relationship owner (not acceptance) |
+| `accept` | Accept one already-existing native head; `--expected-owner-session-id` names a predecessor for succession. The same head may re-accept after a declaration change to cover the new revision without a new owner |
+| `cancel` | Cancel an unaccepted reservation (including one retired before acceptance) and settle its original relationship; never inspects, accepts or launches a head |
+| `release` | Detach an owner with exact native conclusion evidence |
+| `recovery-grant` | Delegate bounded recovery of an already accepted pairing; never staff or launch |
+| `recovery-revoke` | Revoke future recovery while retaining unresolved effects and custody |
+| `retire` | Close admission; retain any occupant, hold and unresolved obligation |
+| `settle-retirement` | Record retirement once no occupant, hold or obligation remains |
+| `reenroll` | Explicitly reopen the same retired charter in a new declaration generation |
+
+Lost replies replay the original operation identity rather than allocating a
+second owner. Unknown custody keeps the original reservation; a successor must
+accept the effective charter rather than inherit coverage implicitly.
+
+## CLI
+
+All `standing` commands require the coordinator's control credential
+(`AGENT_DISPATCH_CONTROL_TOKEN`). They never auto-start a coordinator or fail
+over through SSH; option abbreviations are refused.
+
+```console
+agent-dispatch standing reconcile --title "Dispatcher" --repo example/harness \
+  --namespace owner --charter-key dispatcher --lane-key primary \
+  --effort-ref efforts/dispatcher --materialization-ref roles/dispatcher \
+  --source-revision <source> --expected-materialization-revision <effective>
+agent-dispatch standing reserve <task-id> --expected-revision <n> \
+  --machine <host> --project <project> --worktree <worktree> --path <path> \
+  --creation-nonce <nonce>
+agent-dispatch standing accept <task-id> --expected-revision <n> \
+  --expected-generation <g> --owner-session-id <session> \
+  --expected-head-revision <h> <workspace flags>
+agent-dispatch standing cancel <task-id> --expected-revision <n> \
+  --expected-generation <g> <workspace flags>
+agent-dispatch standing release <task-id> --expected-revision <n> \
+  --expected-generation <g> --owner-session-id <session> \
+  --expected-conclusion-revision <c> <workspace flags>
+agent-dispatch standing retire <task-id> --expected-revision <n>
+agent-dispatch standing settle-retirement <task-id> --expected-revision <n>
+agent-dispatch standing reenroll <task-id> --expected-revision <n>
+agent-dispatch standing recovery-grant <task-id> --expected-revision <n> \
+  --expected-generation <g> --owner-session-id <session> <workspace flags> \
+  --grant-id <logical-grant-id> --authority-ref <approval-reference> \
+  --expires-at <unix-time> --max-attempts <positive-limit>
+agent-dispatch standing recovery-revoke <task-id> --expected-revision <n> \
+  --grant-id <logical-grant-id>
+```
+
+## Retained-pairing recovery delegation
+
+Declaration and acceptance do not grant unattended boot/failure recovery.
+`recovery-grant` records an explicit control-authorized grant for the exact
+accepted workspace, native session, assignment generation, original retained
+relationship, declaration and materialization. It requires an absolute finite
+expiry and a positive attempt limit; `authority_ref` identifies the approving
+record, not independently verified authority. The caller still owns approval
+qualification before issuing the control command.
+
+Changed ownership, charter/materialization, retirement, a task hold, expiry,
+exhausted attempts or an unresolved operation withholds effective recovery
+authority. A same-ID retry returns the original retained outcome; it cannot
+renew the grant, change its limits or reactivate a revoked grant. Replacing a
+grant requires a new logical ID and current revision, and cannot discard a
+pending operation. Grant IDs remain reserved in immutable task history.
+Revocation works even when the native attachment writer is unavailable and
+preserves the pairing and any pending effects.
+
+Grant/revocation commands themselves never launch. With supported native
+owners, the existing supervisor processes one retained pairing per cycle;
+the same confirmed-loss path covers a host boot. It rechecks trusted source,
+host policy, materialization, original assignment and native head before
+asking Worktrees to prove the exact conversation is dead. A stopped Bridge
+status alone is not that proof. Unknown liveness never becomes an empty
+standing seat or finite pool demand.
+Native durable stops are separately observed before preparation and remain
+enforced by Bridge's automatic admission; a grant does not clear them.
+
+Dispatch writes an original operation ID and consumes one bounded attempt
+before invoking Bridge. Preparation is not effect admission: revocation,
+expiry, a hold or pairing drift before the once-only claim prevents the
+invocation. Claim is the linearization point for an in-flight recovery;
+revocation prevents later claims but does not cancel an already admitted
+invocation. A failed or lost reply retains that ID and native owner. Later
+cycles inspect the original Bridge operation without issuing another resume,
+even after revocation or declaration withdrawal.
+
+Recovery restores the same local keyed ACP conversation and workspace, not a
+new agent or successor. It leaves queued prompts untouched and does not send
+a continuation message, replay an interrupted turn, recreate a native session
+or clear task relationships. The native process is available for its existing
+work owners. Unsupported historical journals, admitted-runtime custody,
+unsettled cold-update recovery, missing process identity and changed owners
+remain explicit holds rather than alternate launch paths.
+
+## Registrar discovery
+
+A trusted registrar pointer can supply standing declarations alongside process
+declarations. In a pointed repository, put them in
+`.copilot-extensions/agent-dispatch/registrar/` using the normal native-first
+configuration resolver (the legacy fallback is `.agent-dispatch/registrar/`).
+Use the existing [registrar pointer flow](spawn-supervisor.md), not a new
+registration service. Adding a pointer to a live supervisor is an enrollment
+operation and requires its own authorization.
+
+```yaml
+name: dispatcher-primary
+kind: standing-charter
+repos: example/harness
+title: Dispatcher
+spec:
+  charter_key: dispatcher
+  lane_key: primary
+  effort_ref: efforts/dispatcher
+  materialization_ref: roles/dispatcher
+  source_revision: charter-v1
+  expected_materialization_revision: materialization-v1
+  enabled: true
+```
+
+`name` accepts letters, digits, `-` and `_`; `repos` must name one explicit
+repository, not `all`. `title` and `description` are optional; the title
+defaults to `name`. All six string fields in `spec` are required and follow
+the identity bounds above. `enabled` is an optional boolean, defaulting to
+true. The discovery owner supplies `namespace`; a document cannot override
+it. Unknown fields, process settings, filters and worker requirements are
+rejected. Standing declarations never become daemon registrations, enter pool
+placement or acquire a process lease.
+
+The supervisor reconciles a **complete set per repository and discovery
+namespace**, including repositories retained by the coordinator even when
+their last declaration is removed. The source observation is separate from
+the declaration's opaque `source_revision`: a Git-backed observation requires
+an unchanged HEAD and declaration contents matching that committed tree,
+without untracked declaration files. Before updating a retained observation,
+the supervisor proves that the new Git revision equals or descends from it.
+Dirty, unreadable, incomplete, missing or rewritten sources do not authorize a
+change or removal. Deleting the pointer or making its directory disappear is
+not a retirement request. Plugin candidate withdrawal from `registrar.d`
+likewise does not supply a complete trusted standing source set.
+
+A complete non-Git source is unordered: it may enroll a previously unknown
+lane or repeat an unchanged declaration, but cannot change or retire an
+existing lane. An ordered source can update declarations, retire an explicitly
+disabled lane (`spec.enabled: false`), or retire lanes omitted from a later
+complete set. A first observation cannot infer removal without a retained
+ordering fence. To remove the last declaration, preserve an observable
+registrar directory and commit the removal; do not remove the whole source.
+Unchanged reconciliation is a no-op, and stale observation compare-and-swap
+fails without retrying against newer state.
+
+Retirement closes admission, not custody: an occupant, hold or unresolved
+obligation remains attached until its normal release/settlement path completes.
+A reservation that was never accepted settles through `cancel`, after which
+retirement can settle. Re-enabling a retiring or retired declaration does not resurrect it; explicit
+re-enrollment is required. Source-set results report `enrolled`, `changed`,
+`retired`, `unchanged`, `deferred` and the retained `observation`; `retired`
+means retirement was requested, not settled.
+
+## Finite children
+
+An ordinary finite task may name an active standing parent in the same
+repository lane. The link is immutable, never carries the parent's exclusive
+staffing key, and a dedup key cannot be reused under a different parent.
+Children keep their own claim,
+verification and completion paths and may finish after the parent retires;
+child completion never concludes the parent. A retiring parent admits no new
+children.
+
+```console
+agent-dispatch create "Triage queue" --repo example/harness --standing-parent <task-id>
+agent-dispatch list --repo example/harness --standing-parent <task-id>
+```
+
+Remote `--target-machine` create and peer `list` forward `--standing-parent`;
+an older peer CLI refuses the unknown flag. The HTTP filter is
+`GET /tasks?standing_parent_id=<id>`; it cannot be combined with `q` or `sweep`.
+
+## HTTP and capability selection
+
+| Route | Body |
+|-------|------|
+| `POST /standing-charters` | `title`, `repo`, `declaration`, optional `expected_revision` |
+| `GET /standing-charters/source-repositories?namespace=<namespace>` | No body; returns retained repositories for that namespace |
+| `GET /standing-charters/source-sets?repo=<repo>&namespace=<namespace>` | No body; returns the retained source observation |
+| `POST /standing-charters/source-sets` | `repo`, `namespace`, `entries` (`title`, `declaration`, optional boolean `enabled`), required nullable `revision` and `expected_observation` |
+| `POST /tasks/{id}/standing/reserve` | `expected_revision`, `workspace` |
+| `POST /tasks/{id}/standing/accept` | reserve fields plus `expected_generation`, `owner_session_id`, `expected_head_revision`, optional `expected_owner_session_id` |
+| `POST /tasks/{id}/standing/cancel` | reserve fields plus `expected_generation` |
+| `POST /tasks/{id}/standing/release` | reserve fields plus `expected_generation`, `owner_session_id`, `expected_conclusion_revision` |
+| `POST /tasks/{id}/standing/recovery-grant` | reserve fields plus `expected_generation`, `owner_session_id`, `grant_id`, `authority_ref`, finite `expires_at` and positive integer `max_attempts` |
+| `POST /tasks/{id}/standing/recovery-revoke` | `expected_revision`, `grant_id` |
+| `POST /standing/recovery/reconcile` | optional nullable `cursor`, integer `limit` (1-10, default 1); control-authorized bounded native recovery page |
+| `POST /tasks/{id}/standing/{retire,settle-retirement,reenroll}` | `expected_revision` |
+
+Bodies reject unknown fields, booleans as revisions and revisions below 1.
+A missing control credential configuration returns 503
+`standing_charter_control_unavailable`; a wrong bearer returns 403
+`standing_charter_control_forbidden`. Unknown tasks return 404 and fenced
+conflicts 409. Successful mutations emit `task.standing_*` events.
+
+All source-set routes also require the control credential. Their revisions are
+opaque strings or null, not the integer task revisions above. The coordinator
+enforces atomic source-set reconciliation and observation compare-and-swap;
+the trusted source caller owns completeness and Git ancestry proof because the
+coordinator cannot inspect its checkout. A partial read must never be posted
+as an empty set.
+
+`/health` advertises `standing_charters: {"version": 1, "finite_child_link": 1,
+"source_set": 1, "attachment": <bool>}`. `attachment` is true only when the
+selected relationship owner has configured local standing policy and native
+head/conclusion inspection, so it can later accept and release what it
+reserves. Clients re-check this
+capability before each standing operation, standing-parent create and
+standing-parent read, and refuse as upgrade-required before sending any
+mutation when it is absent or malformed. Reserve, accept, cancel and release also
+refuse with 409 when `attachment` is not true. Source-set operations additionally
+require `source_set: 1`; they do not fall back to per-lane writes that could
+lose complete-set or retirement semantics. Ordinary finite requests omit
+`standing_parent_id` and keep their previous wire shape.
+
+Ordinary local `serve` construction includes the
+[native standing admission assembly](configuration.md#native-local-standing-admission).
+This does not configure a finite-task relationship writer or assign a default
+pool. An explicit alternate admission factory retains its selected authority
+instead. Capability availability is not workspace readiness: unsupported native
+participants or missing original journals refuse and preserve custody.
+
+The additive `recovery_grants: 1` capability advertises grant/revocation
+storage, not automatic recovery. Clients require that exact integer before
+either request. Grant additionally requires attachment support; revocation
+does not, so degraded admission cannot prevent withdrawing authority.
+`retained_pairing_recovery: 1` separately advertises the supported local native
+consumer; explicit alternate factories report `0`. The supervisor negotiates
+it before posting a bounded page, retaining its cursor on an unknown response.
+Older providers without this capability receive no recovery request. Source
+enrollment without a grant still has no recovery effect.
+
+## Mixed versions and rollback
+
+Store triggers prevent older writers from completing, submitting, abandoning,
+reclaiming, rewriting, deleting or spawning a standing task, or from erasing
+its history. Current finite routes (`/claim`, `complete`, `abandon`) refuse a
+standing task with 409, and untargeted claims never select one. Older
+coordinators that ignore unknown query parameters are rejected by the client
+capability check rather than returning an unfiltered view. The one exception
+is `GET /tasks?kind=finite`, which supervisors use to keep finite work ahead of
+standing rows before the list limit: without the capability, the client omits
+the selector and drops retained standing rows by their claim fence. If an
+entire full page is standing rows, it refuses as upgrade-required rather than
+hide older finite work indefinitely. `kind` cannot be combined with `q` or
+`sweep`.
+
+## Adoption prerequisites
+
+Merging this source installs and activates nothing. Before an adopter relies on
+standing charters, each prerequisite below needs its own authorized owner:
+
+- **Promoted release at every caller.** The coordinator, supervisor and every
+  calling client must run a promoted release whose `/health` advertises the
+  capability above. A change merged to `dev` is not yet released; until then,
+  clients refuse as upgrade-required rather than fall back.
+- **Control credential.** Each coordinator serving standing routes needs its
+  control token (`AGENT_DISPATCH_CONTROL_TOKEN` or its `_COMMAND` form), and
+  every caller of the standing commands and source-set routes must present the
+  same bearer for the coordinator it reaches. Local-client callers resolve it the
+  same way. Callers using `--shared`, `central` task
+  authority or the legacy shared URL resolve it only from
+  `AGENT_DISPATCH_SHARED_CONTROL_TOKEN` (or its `_COMMAND` form) and never fall
+  back to the local token.
+- **Attachment owner.** `attachment` stays false until the coordinator's trusted
+  relationship admission (`RELATIONSHIP_ADMISSION` and `RELATIONSHIP_AUTHORITY`;
+  see [Configuration](configuration.md)) supplies standing admission: the
+  workspace's own host, an absolute local policy path, the materialization
+  owner's absolute read command and a `materialization_ref` resolver, plus native
+  head and conclusion inspection. Declaration and reconciliation work without
+  it; reserve, accept, cancel and release do not.
+- **Complete materialization.** Acceptance re-reads `materialization_ref` through
+  that owner (for agent-roles, `inspect-materialization` in
+  [managing-agent-topology](../../agent-roles/skills/managing-agent-topology/SKILL.md))
+  and requires a standing materialization for the same host whose source and
+  effective revisions match the declaration. A floating template reference is
+  not a materialization.
+- **Local deny policy.** Host-local vetoes are `standing-charter:` records in
+  the policy file the standing admission names, normally the machine-local
+  overrides store (`~/.agent-dispatch/overrides.json` or
+  `AGENT_DISPATCH_OVERRIDES`). Each selects a namespace and charter key,
+  optionally one lane. A veto refuses later admission only; it changes no task,
+  occupant or process, and clearing it launches nothing. Malformed or
+  unsupported policy holds admission. There is no standing-deny CLI; records
+  are written through the overrides module's standing deny and clear functions.
+- **Separate enrollment.** Adding a registrar pointer or standing source to a
+  live supervisor enrolls lanes and needs the adopter's own authorization.
+  Launching, appointing, materializing and stopping agents remain with their
+  existing owners.

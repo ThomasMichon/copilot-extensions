@@ -124,6 +124,24 @@ def instance_store(tmp_path, monkeypatch):
     return root, runtime
 
 
+def test_native_validation_refusal_cancels_exact_reservation(instance_store):
+    import os
+    import sys
+
+    from agent_procutil import no_window_flags
+    from agent_procutil.daemon_instances import spawn_instance
+
+    root, runtime = instance_store
+    with pytest.raises(ValueError):
+        spawn_instance(
+            [sys.executable, "-c", "pass"],
+            instance=DaemonInstanceSpec("fixture", runtime, Path(__file__).resolve()),
+            env={**os.environ, "INVALID": "embedded\0null"},
+            creationflags=no_window_flags(),
+        )
+    assert store.inspect(root) == []
+
+
 def test_unattended_policy_is_explicit_not_inferred_from_paths(tmp_path):
     production = DaemonInstanceSpec("fixture", tmp_path, Path(__file__).resolve())
     disposable = DaemonInstanceSpec(
@@ -290,6 +308,158 @@ def test_installer_reconcile_never_settles_production_record(instance_store, mon
     monkeypatch.setattr(store, "cleanup", lambda *_a, **_kw: pytest.fail("production sweep"))
     assert store.reconcile(root, 128, 5) == []
     assert receipt.record_path.exists()
+
+
+@pytest.mark.parametrize("supervised", [False, True])
+def test_reconcile_defaults_to_no_termination_for_expired_live_instances(
+    instance_store, monkeypatch, supervised,
+):
+    root, runtime = instance_store
+    receipt = store.reserve(DaemonInstanceSpec(
+        "expired", runtime, Path(__file__).resolve(), purpose="unattended-test",
+    ))
+    with store._locked(receipt) as path:
+        record = store._read(path)
+        record.update(pid="4321", birth="fixture", state="running")
+        if supervised:
+            record.update(supervisor_pid="4322", supervisor_birth="supervisor")
+        store._write(path, record)
+    before = receipt.record_path.read_bytes()
+    expired_wall, expired_mono = store._wall_clock() + 20000, store._monotonic_clock() + 20000
+    monkeypatch.setattr(store, "_wall_clock", lambda: expired_wall)
+    monkeypatch.setattr(store, "_monotonic_clock", lambda: expired_mono)
+    monkeypatch.setattr(store, "identity_state", lambda *_: "matching")
+    monkeypatch.setattr(store, "stop_identity", lambda *_a, **_k: pytest.fail("installer stop"))
+
+    result = store.reconcile(root, 128, 5)
+
+    assert result[0].status == "held"
+    assert result[0].reason == ("descendant-settlement-unconfirmed" if supervised else "stop-required")
+    assert receipt.record_path.read_bytes() == before
+
+
+def test_reconcile_explicit_owner_termination_preserves_expired_cleanup(instance_store, monkeypatch):
+    from unittest.mock import Mock
+
+    root, runtime = instance_store
+    receipt = store.reserve(DaemonInstanceSpec(
+        "expired", runtime, Path(__file__).resolve(), purpose="unattended-test",
+    ))
+    with store._locked(receipt) as path:
+        record = store._read(path)
+        record.update(pid="4321", birth="fixture", state="running")
+        store._write(path, record)
+    expired_wall, expired_mono = store._wall_clock() + 20000, store._monotonic_clock() + 20000
+    monkeypatch.setattr(store, "_wall_clock", lambda: expired_wall)
+    monkeypatch.setattr(store, "_monotonic_clock", lambda: expired_mono)
+    monkeypatch.setattr(store, "identity_state", lambda *_: "matching")
+    stop = Mock(return_value=True)
+    monkeypatch.setattr(store, "stop_identity", stop)
+
+    results = store.reconcile(root, 128, 5, terminate=True, runtime_root=runtime)
+
+    assert results[0].status == "settled"
+    stop.assert_called_once_with(4321, "fixture", timeout=5)
+
+@pytest.mark.parametrize("case_variant", [
+    False,
+    pytest.param(True, marks=pytest.mark.skipif(store.os.name != "nt", reason="Windows case aliases")),
+])
+def test_reconcile_scopes_dead_records_and_artifacts_to_exact_runtime(
+    instance_store, monkeypatch, case_variant,
+):
+    root, runtime = instance_store
+    foreign = runtime / "other-installation"
+    foreign.mkdir()
+    receipts = []
+    for target in (runtime, foreign):
+        receipt = store.reserve(DaemonInstanceSpec(
+            "expired", target, Path(__file__).resolve(), purpose="unattended-test",
+        ))
+        store.bind_process(receipt, store.os.getpid())
+        artifact = target / "expired.pid"
+        artifact.write_text("fixture")
+        store.add_artifact(receipt, artifact)
+        with store._locked(receipt) as path:
+            record = store._read(path)
+            record.update(pid="4321", birth="fixture", state="finished")
+            store._write(path, record)
+        receipts.append(receipt)
+    foreign_bytes = receipts[1].record_path.read_bytes()
+    expired_wall, expired_mono = store._wall_clock() + 20000, store._monotonic_clock() + 20000
+    monkeypatch.setattr(store, "_wall_clock", lambda: expired_wall)
+    monkeypatch.setattr(store, "_monotonic_clock", lambda: expired_mono)
+    monkeypatch.setattr(store, "identity_state", lambda *_: "dead")
+
+    scope = Path(str(runtime).swapcase()) if case_variant else runtime
+    results = store.reconcile(root, 128, 5, runtime_root=scope)
+
+    assert [result.instance_id for result in results] == [receipts[0].instance_id]
+    assert results[0].status == "settled"
+    assert not (runtime / "expired.pid").exists()
+    assert (foreign / "expired.pid").read_text() == "fixture"
+    assert receipts[1].record_path.read_bytes() == foreign_bytes
+    assert store._read_cursor(root, scope) == store._read_cursor(root, runtime)
+
+
+def test_scoped_cleanup_rechecks_record_runtime_under_lock(instance_store, monkeypatch):
+    _, runtime = instance_store
+    foreign = runtime / "other-installation"
+    foreign.mkdir()
+    receipt = store.reserve(DaemonInstanceSpec(
+        "foreign", foreign, Path(__file__).resolve(), purpose="unattended-test",
+    ))
+    before = receipt.record_path.read_bytes()
+    monkeypatch.setattr(store, "identity_state", lambda *_: pytest.fail("foreign process query"))
+
+    result = store.cleanup(receipt, terminate=False, runtime_root=runtime)
+
+    assert result.status == "held" and result.reason == "runtime-scope-mismatch"
+    assert receipt.record_path.read_bytes() == before
+
+
+def test_interleaved_scoped_collectors_do_not_advance_each_others_progress(
+    instance_store, monkeypatch,
+):
+    root, runtime = instance_store
+    other = runtime / "other-installation"
+    other.mkdir()
+    receipts = []
+    for target in (runtime, other):
+        receipt = store.reserve(DaemonInstanceSpec(
+            "expired", target, Path(__file__).resolve(), purpose="unattended-test",
+        ))
+        with store._locked(receipt) as path:
+            record = store._read(path)
+            record.update(pid="4321", birth="fixture", state="finished")
+            store._write(path, record)
+        receipts.append(receipt)
+    receipts.sort(key=lambda receipt: receipt.instance_id)
+    scopes = [Path(store._read(receipt.record_path)["runtime_root"]) for receipt in receipts]
+    expired_wall, expired_mono = store._wall_clock() + 20000, store._monotonic_clock() + 20000
+    monkeypatch.setattr(store, "_wall_clock", lambda: expired_wall)
+    monkeypatch.setattr(store, "_monotonic_clock", lambda: expired_mono)
+    monkeypatch.setattr(store, "identity_state", lambda *_: "dead")
+    monkeypatch.setattr(store, "stop_identity", lambda *_a, **_k: pytest.fail("collector stop"))
+
+    assert store.reconcile(root, 1, 5, runtime_root=scopes[1]) == []
+    first = store.reconcile(root, 1, 5, runtime_root=scopes[0])
+    second = store.reconcile(root, 1, 5, runtime_root=scopes[1])
+
+    assert [result.instance_id for result in first] == [receipts[0].instance_id]
+    assert [result.instance_id for result in second] == [receipts[1].instance_id]
+    assert all(result.status == "settled" for result in (*first, *second))
+
+
+def test_public_reconcile_forwards_explicit_termination_and_runtime_scope(instance_store, monkeypatch):
+    from unittest.mock import Mock
+    from agent_procutil.daemon_instances import reconcile_instances
+
+    root, runtime = instance_store
+    reconcile = Mock(return_value=[])
+    monkeypatch.setattr(store, "reconcile", reconcile)
+    assert reconcile_instances(registry_root=root, runtime_root=runtime, terminate=False) == []
+    reconcile.assert_called_once_with(root, 128, 5, terminate=False, runtime_root=runtime)
 
 
 def test_zip_member_provenance_records_real_archive_and_member(instance_store):

@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit bounded acquired-comment mapping under existing review reservations and acquisition transactions.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

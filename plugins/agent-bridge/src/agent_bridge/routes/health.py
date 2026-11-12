@@ -35,7 +35,9 @@ from ..creation_worktree_writer import CAPABILITY as CREATION_WRITER_CAPABILITY
 from ..creation_worktree_writer import RESUME_CAPABILITY as CREATION_WRITER_RESUME_CAPABILITY
 from ..creation_writer_inspection import CAPABILITY as CREATION_WRITER_INSPECTION_CAPABILITY
 from ..live_questions import CAPABILITY as LIVE_QUESTION_ANSWERS_CAPABILITY
+from ..live_delivery_state import CAPABILITY as LIVE_DELIVERY_OBSERVATION_CAPABILITY
 from ..mux_questions import CAPABILITY as MUX_QUESTION_ANSWERS_CAPABILITY
+from ..status_schema import CAPABILITY as HOST_STATUS_CAPABILITY
 
 router = APIRouter()
 
@@ -82,8 +84,11 @@ async def health(request: Request) -> dict:
             CREATION_WRITER_CAPABILITY: 1,
             CREATION_WRITER_RESUME_CAPABILITY: 1,
             CREATION_WRITER_INSPECTION_CAPABILITY: 1,
+            "retained_native_session_recovery": 1,
             LIVE_QUESTION_ANSWERS_CAPABILITY: 1,
+            LIVE_DELIVERY_OBSERVATION_CAPABILITY: 1,
             MUX_QUESTION_ANSWERS_CAPABILITY: 1,
+            HOST_STATUS_CAPABILITY: 1,
         },
         "drain_contract": {"minimum": DRAIN_CONTRACT_VERSION, "maximum": DRAIN_CONTRACT_VERSION},
         "ssh_carriers": get_default_manager().carrier_diagnostics(),
@@ -96,6 +101,14 @@ async def health(request: Request) -> dict:
         config_dir(),
         self_retire_status=getattr(request.app.state, "self_retire_status", None),
     )
+    status_runtime = getattr(request.app.state, "status_runtime", None)
+    body["host_status"] = {
+        "availability": "unavailable" if (
+            status_runtime is None or status_runtime.error
+            or status_runtime.task is None or status_runtime.task.done()
+        ) else "available",
+        "reason": status_runtime.error if status_runtime is not None else "runtime_unavailable",
+    }
     try:
         writer = await asyncio.to_thread(observe_worktree_writer)
     except (ContextRefused, OSError, ValueError, ImportError):

@@ -134,6 +134,18 @@ def test_initial_setup_wait_rejects_unbounded_timeout(timeout):
         )
 
 
+@pytest.mark.parametrize("wait", [float("nan"), float("inf"), -1])
+def test_capture_rejects_invalid_pivot_wait_before_app_creation(monkeypatch, wait):
+    from worktree_manager.production_picker.picker_tui import engine
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("invalid capture wait must fail before app creation")
+
+    monkeypatch.setattr(engine, "PickerApp", forbidden)
+    with pytest.raises(ValueError, match="finite and non-negative"):
+        asyncio.run(pcap.capture_async(None, wait_pivot=wait))
+
+
 def _fixture_source():
     """A hermetic two-worktree fleet (frozen clock; no git/SSH/subprocess)."""
     derive.NOW = datetime.datetime(2026, 6, 27, 18, 0, 0)

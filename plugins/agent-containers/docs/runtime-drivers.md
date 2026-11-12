@@ -75,10 +75,109 @@ A driver name resolves to a command, first match wins:
    invalid manifest is reported and never hides valid ones. A tool may drop its
    own manifest at install time.
 2. **PATH**: an executable named `agent-containers-driver-<name>`.
+3. **Bundled Podman**: `driver: podman` uses the selected agent-containers
+   interpreter's `agent_containers.podman_driver` when no explicit manifest or
+   PATH driver is present. An invalid explicit Podman manifest refuses instead
+   of silently selecting this fallback or a PATH implementation.
 
 `agent-containers drivers [--json]` lists registered drivers and invalid
-manifests. `installer-readiness` reports a fleet whose driver is not
+manifests, and names the bundled fallback separately (`bundled_drivers` in JSON).
+`installer-readiness` reports a fleet whose driver is not
 registered. Docker is not required when every configured fleet uses a driver.
+
+### Bundled Podman configuration
+
+```yaml
+fleets:
+  example:
+    driver: podman
+    driver_options:
+      image: registry.example.com/dev-environment:stable
+      # executable: /opt/podman/bin/podman
+      # connection: existing-connection
+      pull_policy: missing
+    size: 1
+    workspace_folder: /workspaces/example
+    exec_user: vscode
+```
+
+The initial authenticated transport is **POSIX-host SSH**, including a
+preconfigured rootless Podman engine. Windows driver-backed SSH and streaming
+exec remain unsupported; readiness refuses that lane. No native platform or
+installed/live qualification is implied by the portable driver controls.
+The image must already supply `/bin/sleep`, the configured execution user,
+the existing configured workspace directory with usable permissions, `sshd`,
+`ssh-keygen` and the normal guest tools.
+The driver replaces the image entrypoint with `/bin/sleep infinity`; provider
+readiness and SSH preparation validate the real consumer prerequisites before
+dispatch. A running member alone is not readiness proof.
+
+`image` is required. `executable` selects the existing Podman client (or an
+operator-owned equivalent wrapper), defaulting to `podman` on PATH. An optional
+`connection` names an already-configured Podman connection. The driver never
+falls back to Docker, installs an engine, initializes or starts a Podman machine,
+or runs login. Unknown `driver_options` are rejected.
+
+Image aliases, registries, mirrors, transport support, TLS and authentication
+remain Podman's configured responsibilities. The driver does not read or copy
+credential files, inject inline registry credentials, weaken TLS, or guess a
+registry. Control/image calls have closed stdin, no TTY, bounded captured output and deadlines;
+an alias requiring a prompt fails rather than becoming an interactive login.
+Remote Podman clients support only registry transport; local clients may use
+their other configured native image transports.
+
+`pull_policy` accepts `missing` (default), `always`, or `never`. `newer` is
+deliberately unsupported because Podman can suppress its pull failure in favor
+of a local image. A successful native pull/lookup must return one immutable
+image ID; creation uses that ID with `--pull=never`, not the mutable reference.
+Pull/resolve failure creates no member. Creation never uses `--replace`; an
+existing name, unknown outcome or later readiness failure preserves the member
+and its writable-layer workspace for inspection, not automatic deletion/retry.
+Stopped members remain visible. Explicit removal still follows the provider's
+existing lease and retained-work gates.
+
+All per-member effects inspect fleet/driver ownership and select the full native
+container ID before exec, copy or lifecycle commands. `start` unpauses a paused
+member and starts a stopped member; a failed operation is not replayed.
+A pinned request never reaches a same-name successor. Native diagnostics from
+failed control operations are not copied into protocol errors; those identify the operation and exit code
+and direct the operator to the selected connection/source/authentication owner.
+The driver accepts request packets up to 1 MiB. Streaming environment inheritance
+uses variable names, not secret values in host arguments.
+
+#### Native qualification (explicit opt-in)
+
+`tests/test_podman_e2e.py` is off by default. Run each fixture only with separate authority
+for one temporary member on the selected existing engine/connection and
+the selected image. It installs no engine and performs no login. Set
+`AGENT_CONTAINERS_PODMAN_E2E=1` and
+`AGENT_CONTAINERS_PODMAN_E2E_IMAGE` to that image. Optional `_EXECUTABLE`,
+`_CONNECTION`, and `_USER` variables share the same prefix. The default
+`_PULL_POLICY=never` requires a local image; another supported policy needs
+explicit pull authority.
+
+Select it with the repository's contained runner:
+`python tools/run-plugin-tests.py agent-containers --test-file tests/test_podman_e2e.py --allow-explicit-tiers`.
+Allow a bounded 120-second item budget (`--test-timeout 120`) for the native
+multi-process lifecycle and graceful stop. The runner keeps an isolated home;
+when qualifying an existing Windows connection, Podman's supported
+`PODMAN_CONNECTIONS_CONF` may point to its existing connection file without
+copying its contents or changing general test-home isolation.
+
+Each native fixture explicitly registers the bundled command in its private
+driver directory and traps an inherited Podman PATH driver. A private directory
+alone is not selection: ordinary driver resolution still prefers PATH over the
+bundled fallback.
+
+The lifecycle fixture covers provider provisioning, real native inventory,
+literal exec, copy-in, paused/resumed and stopped/restarted state on Windows or
+POSIX. Its selected image must provide `/workspaces/qualification` and no baked-in SSH
+host keys. The separate authenticated fixture is POSIX-only: it creates a fresh
+private SSH key/profile and runs a command through the driver's ProxyCommand.
+Cleanup targets only the successfully observed fixture incarnation. Unknown
+creation outcomes are preserved for inspection, never name-based cleanup.
+Lifecycle success is not authenticated dispatch; real credential-relay delivery,
+Bridge dispatch and Windows SSH still need their own acceptance.
 
 ## Protocol (version 1)
 

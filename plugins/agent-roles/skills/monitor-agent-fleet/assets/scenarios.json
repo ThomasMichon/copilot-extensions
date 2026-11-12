@@ -210,6 +210,24 @@
       "mode": "read-only",
       "facts": "A recorded recurring assignment uses a 15-minute confidence cadence and two healthy sweeps to relax. The last sweep was healthy; this sweep finds one head waiting on a question it could have defaulted.",
       "expected": "Classify the wait as waste, reset the healthy-sweep count and stay on the confidence cadence. Report evidence for G1-G5 and keep the assignment running until its recorded end condition; never declare it done."
+    },
+    {
+      "id": "receipt-binding-conflict-not-failure",
+      "mode": "steering-authorized",
+      "facts": "A keyed live steer was admitted earlier. The next receipt-only read, sent with the prompt text retyped without its trailing newline, is refused as a binding conflict.",
+      "expected": "Treat the refusal as a mismatched observation, not a delivery failure. Repeat the read with the pending record's original body file and binding, record the observed stage, and never resend or switch to a new key."
+    },
+    {
+      "id": "constituent-model-notice",
+      "mode": "read-only",
+      "facts": "The charter requires a synthetic model. A target's latest turns show model-change notices and per-call usage naming one of that model's constituents, while its context metadata still names the synthetic model as selected.",
+      "expected": "Verify the selected model from the context or usage metadata and report no charter discrepancy; do not withhold a steer or ask the target to switch models."
+    },
+    {
+      "id": "adaptive-cadence-single-schedule",
+      "mode": "read-only",
+      "facts": "A recurring assignment grants adaptive cadence. The fleet was parked, then one target stalls with an early-check trigger.",
+      "expected": "Stop the parked schedule, create one active-cadence schedule and record the reason; return to the parked cadence only once all targets run smoothly or wait on required events. Never leave two schedules running."
     }
   ]
 }

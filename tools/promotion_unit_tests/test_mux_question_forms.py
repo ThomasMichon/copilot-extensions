@@ -59,3 +59,14 @@ def test_native_echo_is_exact_and_new(forms):
     assert not forms.completion_echo(
         panel, completion.replace("Color: blue", "Another field: blue"), form, "blue",
     )
+    timed = completion.replace("Choose\n", "Choose     5s\n")
+    assert forms.completion_echo(panel, timed, form, "blue")
+    assert not forms.completion_echo(completion, timed, form, "blue")
+    assert not forms.completion_echo(
+        panel, timed.replace("Choose", "Choose another deployment"), form, "blue",
+    )
+    pending = " ○ Asking user Waiting for response7s\n────\n" + panel
+    assert forms.stable_screen(pending) == forms.stable_screen(pending.replace("7s", "8s"))
+    assert forms.stable_screen(pending) != forms.stable_screen(pending.replace("Choose", "Changed"))
+    greeting = "│  █ ▘▝ █  Check for mistakes.│\n" + pending
+    assert forms.stable_screen(greeting) == forms.stable_screen(greeting.replace("▘▝", "╴╶"))

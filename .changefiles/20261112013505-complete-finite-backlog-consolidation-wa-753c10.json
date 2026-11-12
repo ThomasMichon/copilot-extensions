@@ -1,0 +1,9 @@
+{
+  "comment": "Complete finite backlog consolidation walkthroughs for partial census, provenance, retained acquisition limits and ownership",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

@@ -27,11 +27,11 @@ def get_requires_for_build_wheel(config_settings=None): return []
 def build_wheel(wheel_directory,config_settings=None,metadata_directory=None):
  root=pathlib.Path(__file__).parent;p=tomllib.loads((root/"pyproject.toml").read_text())["project"]
  name=p["name"].replace("-","_");version=p["version"];info=f"{name}-{version}.dist-info"
- native=p["name"]=="agent-procutil";tag="py3-none-linux_x86_64" if native else "py3-none-any"
+ tag="py3-none-any"
  files={f.relative_to(root/"src").as_posix():f.read_bytes() for f in (root/"src").rglob("*") if f.is_file() and "__pycache__" not in f.parts}
  metadata=f"Metadata-Version: 2.1\nName: {p['name']}\nVersion: {version}\n"+"".join(f"Requires-Dist: {d}\n" for d in p.get("dependencies",[]))
  files[info+"/METADATA"]=(metadata+"\n").encode()
- files[info+"/WHEEL"]=f"Wheel-Version: 1.0\nGenerator: isolated-product-fixture\nRoot-Is-Purelib: {str(not native).lower()}\nTag: {tag}\n".encode()
+ files[info+"/WHEEL"]=f"Wheel-Version: 1.0\nGenerator: isolated-product-fixture\nRoot-Is-Purelib: true\nTag: {tag}\n".encode()
  rows=io.StringIO();writer=csv.writer(rows)
  for path,data in sorted(files.items()):writer.writerow([path,"sha256="+base64.urlsafe_b64encode(hashlib.sha256(data).digest()).rstrip(b"=").decode(),str(len(data))])
  writer.writerow([info+"/RECORD","",""]);files[info+"/RECORD"]=rows.getvalue().encode()
@@ -46,9 +46,9 @@ WORKER = r'''
 import sys,time
 from pathlib import Path
 from agent_procutil.daemon_instances import admit_daemon_instance,DaemonLeasePolicy
-root=Path(sys.argv[1]);registry=Path(sys.argv[2]);purpose=sys.argv[3]
+root=Path(sys.argv[1]);registry=Path(sys.argv[2]);purpose=sys.argv[3];runtime=Path(sys.argv[4])
 policy=DaemonLeasePolicy(.5,1.5) if purpose=="unattended-test" else None
-with admit_daemon_instance("consumer-"+purpose,runtime_root=root,source=Path(__file__),purpose=purpose,registry_root=registry,lease=policy) as guard:
+with admit_daemon_instance("consumer-"+purpose,runtime_root=runtime,source=Path(__file__),purpose=purpose,registry_root=registry,lease=policy) as guard:
  (root/"first.pid").write_text("owned")
  (root/"blocked").mkdir(exist_ok=True)
  (root/"blocked"/"second.pid").write_text("owned")
@@ -78,6 +78,7 @@ def _snapshot(slot):
 
 def test_normal_consumer_fresh_repeat_healthy_update_and_real_cleanup_retry(tmp_path, monkeypatch):
     import agent_procutil
+    from agent_procutil import _daemon_instance_store as store
 
     engine_dir = ROOT / "libs" / "installer-engine"
     monkeypatch.syspath_prepend(str(ROOT / "libs" / "versioned-runtime"))
@@ -97,7 +98,7 @@ def test_normal_consumer_fresh_repeat_healthy_update_and_real_cleanup_retry(tmp_
     uv = shutil.which("uv")
     assert uv
     package_root = Path(agent_procutil.__file__).parent
-    assert (package_root / "native" / "linux-x86_64" / "daemon-instance").is_file()
+    assert (package_root / "daemon_instance_runtime.pyz").is_file()
     procutil = _project(
         tmp_path / "inputs" / "procutil", "agent-procutil",
         importlib.metadata.version("agent-procutil"),
@@ -112,12 +113,13 @@ def test_normal_consumer_fresh_repeat_healthy_update_and_real_cleanup_retry(tmp_
     registry = tmp_path / "registry"
     production = tmp_path / "protected-production"
     consumer = tmp_path / "normal-consumer"
+    consumer.mkdir()
     events = []
 
     def normal_install(root, version):
         # The fixture supplies only the product's outer operation. Admission,
         # construction, installed-origin health and reuse are the real engine.
-        assert reconcile_installer_instances(package_root, registry_root=registry)
+        assert reconcile_installer_instances(package_root, registry_root=registry, runtime_root=root)
         with engine.numbered_candidate(
             root, version, plugin=product, uv=Path(uv), base_python=Path(sys.executable),
             health_module="consumer_health", wait_timeout=30, child_timeout=30,
@@ -137,11 +139,11 @@ def test_normal_consumer_fresh_repeat_healthy_update_and_real_cleanup_retry(tmp_
     worker.write_text(WORKER)
     live = []
 
-    def start(data, purpose):
+    def start(data, purpose, runtime):
         data.mkdir()
         process = subprocess.Popen(
             [str(engine.runtime.slot_python(production, "1.0.0")), "-I", "-B", str(worker),
-             str(data), str(registry), purpose],
+             str(data), str(registry), purpose, str(runtime)],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         )
         live.append(process)
@@ -161,14 +163,17 @@ def test_normal_consumer_fresh_repeat_healthy_update_and_real_cleanup_retry(tmp_
         }
         assert _snapshot(production_slot) == production_files
         assert not registry.is_relative_to(production)
-        for name in (".reconcile.cursor", ".reconcile.lock"):
-            assert (registry / name).is_file()
-            assert not (production / name).exists()
-            assert not (production_slot / name).exists()
+        for path in (store._cursor_path(registry, consumer), registry / ".reconcile.lock"):
+            assert path.is_file()
+            assert not (production / path.name).exists()
+            assert not (production_slot / path.name).exists()
+        assert foreign_record.read_bytes() == foreign_bytes
+        assert (foreign / "first.pid").read_text() == "owned"
+        assert (foreign / "blocked" / "second.pid").read_text() == "owned"
 
-    def expired(label, partial=False):
-        data = tmp_path / label
-        process = start(data, "unattended-test")
+    def expired(label, partial=False, runtime=consumer):
+        data = runtime / label
+        process = start(data, "unattended-test", runtime)
         process.communicate(timeout=7)
         assert (data / "first.pid").exists()
         assert (data / "blocked" / "second.pid").exists()
@@ -183,7 +188,14 @@ def test_normal_consumer_fresh_repeat_healthy_update_and_real_cleanup_retry(tmp_
         assert_production()
 
     try:
-        prod = start(tmp_path / "production-data", "production")
+        prod = start(production / "production-data", "production", production)
+        foreign = expired("foreign-expired-data", runtime=production)
+        foreign_record = next(
+            path for path in registry.glob("*.instance")
+            if store._read(path)["runtime_root"] == str(production)
+            and store._read(path)["purpose"] == "unattended-test"
+        )
+        foreign_bytes = foreign_record.read_bytes()
         fresh = expired("fresh-data")
         slot = normal_install(consumer, "1.0.0")
         assert events[-1] == ("1.0.0", False)

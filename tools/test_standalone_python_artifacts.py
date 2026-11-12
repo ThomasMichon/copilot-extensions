@@ -12,6 +12,7 @@ import zipfile
 import os
 import runpy
 import venv
+import uuid
 
 import pytest
 
@@ -50,7 +51,8 @@ def test_manager_embedded_metadata_covers_the_canonical_third_party_projection(t
     helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
     manager = ROOT / "worktree-manager"
     selected = helper["embedded_projects"](manager)
-    assert len(selected) == 14
+    assert {"agent-copilot-driver-core", "agent-repository-policy"} <= selected.keys()
+    assert "agent_remote_driver/mux_observation.py" in helper["embedded_members"](manager)
     for source in [manager, *(directory for directory, _data in selected.values())]:
         target = tmp_path / source.relative_to(ROOT) / "pyproject.toml"
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -333,9 +335,13 @@ def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path, mo
     helpers = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
     classes = helpers["commands"](source, package, tmp_path / "libs/versioned-runtime")
     if mode == "legacy":
-        assert "install_lib" not in classes and "egg_info" not in classes
+        assert "egg_info" not in classes
         distribution = Distribution({"cmdclass": classes})
-        assert distribution.get_command_class("install_lib") is install_lib
+        selected = distribution.get_command_class("install_lib")
+        if os.name == "nt":
+            assert issubclass(selected, install_lib) and selected.install is install_lib.install
+        else:
+            assert selected is install_lib
         return
     command = classes["install_lib"](Distribution({"name": "fixture", "version": "1.0"}))
     command.ensure_finalized()
@@ -348,6 +354,36 @@ def test_nonembedded_and_special_install_paths_keep_the_stock_owner(tmp_path, mo
     elif mode == "dry-run":
         command.dry_run = True
     assert command.install() is marker
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended path syntax")
+def test_native_build_paths_normalize_local_and_unc_roots():
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    native = helper["_native_build_path"]
+    assert native("C:\\project", "build\\lib\\.\\pkg") == "\\\\?\\C:\\project\\build\\lib\\pkg"
+    assert native("C:\\project", "\\\\?\\C:\\other\\build\\.\\pkg") == "\\\\?\\C:\\other\\build\\pkg"
+    assert native("C:\\project", "\\\\server\\share\\build\\.\\pkg") == (
+        "\\\\?\\UNC\\server\\share\\build\\pkg"
+    )
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows wheel command selection")
+def test_native_metadata_loads_when_wheel_command_is_unavailable(tmp_path, monkeypatch):
+    from setuptools import Distribution
+    from distutils.errors import DistutilsModuleError
+
+    original = Distribution.get_command_class
+
+    def command_class(self, name):
+        if name == "bdist_wheel":
+            raise DistutilsModuleError("wheel command unavailable")
+        return original(self, name)
+
+    monkeypatch.setattr(Distribution, "get_command_class", command_class)
+    helper = runpy.run_path(str(ROOT / "libs/versioned-runtime/standalone_build.py"))
+    classes = helper["commands"](tmp_path, "fleet_manager", tmp_path)
+    assert "bdist_wheel" not in classes
+    assert "build_py" in classes and "sdist" in classes
 
 
 def _source(root, component):
@@ -374,14 +410,14 @@ def _source(root, component):
     helper = root / "libs" / "versioned-runtime" / "standalone_build.py"
     helper.parent.mkdir(parents=True, exist_ok=True)
     helper.write_bytes((ROOT / "libs" / "versioned-runtime" / "standalone_build.py").read_bytes())
-    if component in {"fleet-manager", "chat-service", "index-service", "worktree-manager"}:
+    if component in {"fleet-manager", "chat-service", "index-service", "worktree-manager", "pr-service"}:
         (source / "setup.py").write_bytes(
             (ROOT / standalone.COMPONENTS[component] / "setup.py").read_bytes()
         )
         for path in standalone.injected_resources(component, root).values():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_bytes(b"# controlled canonical runtime resource\n")
-    if component == "index-service":
+    if component in {"index-service", "pr-service"}:
         (source / "_build_runtime_resource.py").write_bytes(
             (ROOT / standalone.COMPONENTS[component] / "_build_runtime_resource.py").read_bytes()
         )
@@ -539,7 +575,9 @@ def test_standalone_changed_bytes_and_toolchain_refused(tmp_path, monkeypatch, m
         artifacts.validate_bundle(directory / entry["filename"], entry, candidate_root=tmp_path)
 
 
-@pytest.mark.parametrize("component", ["fleet-manager", "chat-service", "index-service", "worktree-manager"])
+@pytest.mark.parametrize("component", [
+    "fleet-manager", "chat-service", "index-service", "worktree-manager", "pr-service",
+])
 @pytest.mark.parametrize("mutation", ["setup", "helper", "alternate", "included"])
 def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, component):
     source = _source(tmp_path, component)
@@ -547,18 +585,42 @@ def test_only_trusted_standalone_build_hook_is_admitted(tmp_path, mutation, comp
         "setup": source / "setup.py",
         "helper": tmp_path / "libs" / "versioned-runtime" / "standalone_build.py",
         "alternate": source / "setup.cfg",
-        "included": next((source / "src").iterdir()) / "_versioned_runtime.py",
+        "included": next((source / "src").iterdir()) / (
+            "_attribution/comment_preparation.py" if component == "pr-service" else "_versioned_runtime.py"
+        ),
     }[mutation]
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(b"raise RuntimeError('candidate build code must not run')\n")
     with pytest.raises((builder.ArtifactBuildError, artifacts.PromotionArtifactError)):
         standalone.validate_build(source, component=component, root=tmp_path)
 
 
-def test_index_build_selector_substitution_is_refused(tmp_path):
-    source = _source(tmp_path, "index-service")
+@pytest.mark.parametrize("component", ["index-service", "pr-service"])
+def test_standalone_build_selector_substitution_is_refused(tmp_path, component):
+    source = _source(tmp_path, component)
     (source / "_build_runtime_resource.py").write_bytes(b"raise RuntimeError('not canonical')\n")
     with pytest.raises(builder.ArtifactBuildError, match="selector"):
-        standalone.validate_build(source, component="index-service", root=tmp_path)
+        standalone.validate_build(source, component=component, root=tmp_path)
+
+
+def test_pr_release_materializes_only_the_canonical_attribution_helpers(tmp_path):
+    from materialize_launch_wrapper_assets import materialize_all
+
+    source = ROOT / standalone.COMPONENTS["pr-service"]
+    project = tmp_path / standalone.COMPONENTS["pr-service"]
+    project.mkdir(parents=True)
+    shutil.copy2(source / "packaged-assets.json", project)
+    log = materialize_all(tmp_path, canonical_root=ROOT)
+    assert len(log) == 2 and all(line.startswith("OK ") for line in log)
+    canonical = ROOT / "plugins/ai-attribution/scripts"
+    outputs = standalone.injected_resources("pr-service", ROOT)
+    assert set(outputs) == {
+        f"agent_pull_requests_service/_attribution/{name}"
+        for name in ("attribution_profile.py", "comment_preparation.py")
+    }
+    for member, origin in outputs.items():
+        assert origin == canonical / Path(member).name
+        assert (project / "src" / member).read_bytes() == origin.read_bytes()
 
 
 def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_path, monkeypatch):
@@ -573,6 +635,44 @@ def test_standalone_resource_substitution_refused_even_with_fresh_manifest(tmp_p
             component="fleet-manager", candidate_root=tmp_path,
         )
     assert archive.is_file()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Windows native wheel staging paths")
+def test_worktrees_wheel_preserves_resources_in_deep_windows_build(tmp_path):
+    root = tmp_path.parent / ("d" + uuid.uuid4().hex[:8])
+    padding = max(1, 105 - len(str(root)) - 3)
+    project = root / ("x" * padding) / "p"
+    native_project = Path("\\\\?\\" + str(project))
+    shutil.copytree(
+        ROOT / "plugins" / "agent-worktrees", native_project,
+        ignore=shutil.ignore_patterns(
+            "__pycache__", "*.egg-info", ".venv", ".test-runs", "build", "dist", "tests", "docs",
+        ),
+    )
+    relative = (
+        "agent_worktrees/_runtime_assets/scripts/_runtime_admission/libs/"
+        "agent-procutil/src/agent_procutil/windows_broker_installation.py"
+    )
+    assert len(str(project / "build" / "bdist.win-amd64" / "wheel" / relative)) >= 260
+    expected = {
+        name: path.read_bytes()
+        for name, path in __import__("plugin_runtime_resources").application_resources(
+            ROOT / "plugins" / "agent-worktrees", "agent_worktrees",
+        ).items()
+    }
+    assert relative in expected
+    archives = root / "wheels"
+    archives.mkdir()
+    result = subprocess.run(
+        [sys.executable, "-I", "-B", "-c",
+         "import setuptools.build_meta as backend; backend.build_wheel(__import__('sys').argv[1])",
+         str(archives)],
+        cwd=project, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180,
+        creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    assert result.returncode == 0, (result.stdout + result.stderr)[-6000:]
+    with zipfile.ZipFile(next(archives.glob("*.whl"))) as archive:
+        assert {name: archive.read(name) for name in expected} == expected
 
 
 @pytest.mark.parametrize("relative,package", [

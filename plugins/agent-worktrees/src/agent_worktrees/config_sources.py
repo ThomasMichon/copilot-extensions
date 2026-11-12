@@ -175,7 +175,10 @@ def compose_ordinary_preferences(
     }
     layers = [{
         "id": "defaults", "tier": "defaults", "origin": "defaults",
-        "values": {"headless": False, "auto_fast_forward": True},
+        "values": {
+            "headless": False, "auto_fast_forward": True,
+            "agendas": {"default": cfg.AGENDA_DEFAULT_OFF},
+        },
     }]
     for layer_id, tier, origin, raw in (
         ("base", "repository", "base", base),
@@ -254,6 +257,7 @@ def apply_scoped_preferences(config, scoped):
     return replace(
         config, headless=bool(values.get("headless", False)),
         auto_fast_forward=bool(values.get("auto_fast_forward", True)),
+        agenda_default=cfg.parse_agenda_default(values.get("agendas")),
         ordinary_provenance=scoped["provenance"],
     )
 

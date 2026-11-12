@@ -47,7 +47,15 @@ try {
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     $installerAction = 'stamp'
     if (Test-Path -LiteralPath $Manifest) {
-        $deployed = ([IO.File]::ReadAllText($Manifest) | ConvertFrom-Json).source.version
+        $deployment = [IO.File]::ReadAllText($Manifest) | ConvertFrom-Json
+        $deployed = $deployment.source.version
+        $wheelGeneration = $deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}'
+        if ($wheelGeneration) {
+            . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+            if (Test-NativeWheelRuntimeCurrent -Root $InstallDir -Payload $PluginDir -Plugin $name) {
+                Exit-SessionStart
+            }
+        }
         if ($deployed -isnot [string] -or -not $deployed) {
             throw 'The deployed runtime version is unavailable.'
         }
@@ -77,7 +85,7 @@ try {
             $runtimeHealthy = (Test-Path -LiteralPath (Join-Path $InstallDir '.venv')) -or
                 (Test-Path -LiteralPath (Join-Path $InstallDir 'venv'))
         }
-        if ($runtimeHealthy -and $deployed -ceq $current -and
+        if (-not $wheelGeneration -and $runtimeHealthy -and $deployed -ceq $current -and
             (-not $curVer -or $curVer -ceq $deployed)) { Exit-SessionStart }
         $installerAction = 'install'
     }
@@ -102,12 +110,11 @@ try {
             '# Installation driver lifecycle contract: bridge-install-v1' -Quiet
     )) { throw 'The packaged installation driver lacks the Bridge install lifecycle contract.' }
     $previousEap = $ErrorActionPreference
-    $previousMode = $env:AGENT_BRIDGE_NONINTERACTIVE
     $ErrorActionPreference = 'Continue'
     try {
         if ($suffix -ceq 'ps1') {
-            # This is Bridge's service choice (S4U/AtStartup), not just host UI suppression.
-            if ($installerAction -ceq 'install') { $env:AGENT_BRIDGE_NONINTERACTIVE = '1' }
+            # Host UI suppression does not opt into S4U service scheduling.
+            # Preserve only an operator's existing scheduling selector.
             $shell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
             $acknowledgement = @(& $shell -NoLogo -NoProfile -NonInteractive -ExecutionPolicy Bypass `
                 -File $firstUse -Root $executionRoot -Payload $PluginDir `
@@ -120,7 +127,6 @@ try {
         $code = $LASTEXITCODE
     } finally {
         $ErrorActionPreference = $previousEap
-        $env:AGENT_BRIDGE_NONINTERACTIVE = $previousMode
     }
     if ($code -ne 0) { throw "Installation driver admission failed (exit $code)." }
     $acknowledgementText = $acknowledgement -join "`n"

@@ -194,11 +194,18 @@ before any of those removals.
 
 Every creation/resume preparation copies the complete resolved instruction set,
 including when the same files were copied earlier. Session start queues another
-copy rather than probing a prepared generation. The publisher does not inspect
-old instruction bytes, compare content hashes or fingerprints, or reuse a
-`prepared.json` receipt. Old readiness receipts are ignored. Generated files may
+copy rather than probing a prepared generation. The publisher does not compare
+content hashes or fingerprints or reuse a `prepared.json` receipt. Old readiness
+receipts are ignored. Generated files may
 be replaced while a session is running; restart/new context loads the updated
-files through normal discovery.
+files through normal discovery. Before each unconditional replacement, the
+publisher may compare the previous bytes only to classify whether a late-copy
+notification needs restart. Equality never skips copying or establishes trust,
+readiness or model admission. Missing or unreadable previous bytes conservatively
+require restart; inability to inspect them does not block an otherwise safe copy.
+The publication revision changes before possible content additions, changes or
+removals, not for byte-identical replacements. Copy counts still report every
+installed file.
 
 A small `owners.json` in the existing Git-administrative guidance directory
 records destination-to-plugin names only. During partial discovery it keeps an
@@ -248,7 +255,10 @@ dispatch budget, including after a successful foreground copy. It does not probe
 instruction fingerprints or prepared readiness before dispatch.
 For a late backup, the exact session retains a watch on the checkout-local
 completion status. The existing post-tool hook surfaces completion once:
-changed/removed files explicitly require restart/new context before discovery;
+added, content-changed or removed files explicitly require restart/new context
+before discovery; byte-identical replacements do not create a false restart
+barrier. Unknown change state remains conservative. Publication failure after
+possible content changes retains the restart requirement;
 partial and failed outcomes retain reviewed-fallback guidance. An idle session
 is not awakened and no restart is automatic. Written files, a successful hook
 result and an acknowledgment never assert that the running model admitted the

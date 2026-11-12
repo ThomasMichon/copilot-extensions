@@ -1,0 +1,9 @@
+{
+  "comment": "Advance canonical lifecycle revisions for strict and best-effort legacy registry initialization, and fence strict observation against concurrent lifecycle changes.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

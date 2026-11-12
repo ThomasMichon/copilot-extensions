@@ -133,27 +133,51 @@ def _cmd_resume(args: argparse.Namespace) -> None:
     try:
         target, worktree_only = resume_target(args)
         writer_path = getattr(args, "worktree_writer_file", None)
-        if writer_path is not None and (
+        recovery_path = getattr(args, "retained_recovery_file", None)
+        if (writer_path is not None or recovery_path is not None) and (
             worktree_only or getattr(args, "force", False) or getattr(args, "cli", False)
             or not getattr(args, "strict", False)
         ):
             raise argparse.ArgumentTypeError(
                 "--worktree-writer-file requires --strict resume of an exact ACP session ID",
             )
+        if recovery_path is not None and writer_path is not None:
+            raise argparse.ArgumentTypeError("Retained recovery includes its writer; supply only one input file")
     except argparse.ArgumentTypeError as error:
         print(f"[FAIL] {error}", file=sys.stderr)
         raise SystemExit(2) from error
     from .workspace_creation_cli import read_writer_requirement
 
     writer = read_writer_requirement(writer_path) if writer_path is not None else None
+    recovery = None
+    if recovery_path is not None:
+        from .models import ResumeSessionRequest
+
+        try:
+            if recovery_path == "-":
+                raw = sys.stdin.read(16385)
+            else:
+                from pathlib import Path
+                with Path(recovery_path).open(encoding="utf-8") as stream:
+                    raw = stream.read(16385)
+            if len(raw) > 16384:
+                raise ValueError("Recovery input exceeds its budget")
+            body = ResumeSessionRequest.model_validate_json(raw)
+            if body.worktree_writer is None or body.retained_recovery is None:
+                raise ValueError("Recovery requires its original writer and operation")
+            writer, recovery = body.worktree_writer.model_dump(), body.retained_recovery.model_dump()
+        except (OSError, ValueError) as error:
+            print(f"[FAIL] Invalid retained recovery request: {error}", file=sys.stderr)
+            raise SystemExit(2) from error
     core = _core()
-    client = core._get_client()
+    client = core._get_client(**({"ensure": False} if recovery is not None else {}))
     configure_client(client, args)
     run_resume(
         client=client,
         target=target,
         worktree_only=worktree_only,
         worktree_writer=writer,
+        retained_recovery=recovery,
         reclaim=bool(getattr(args, "force", False)),
         strict=bool(getattr(args, "strict", False)),
         cli=bool(getattr(args, "cli", False)),
@@ -630,6 +654,7 @@ def register_session_lifecycle_commands(sub: argparse._SubParsersAction) -> None
     resume_p.add_argument("--force", "--reclaim", dest="force", action="store_true", help="Break-glass take-over: adopt the worktree even if a live interactive CLI holds it (stop that CLI first)")
     resume_p.add_argument("--strict", action="store_true", help="Identity-preserving contract: refuse (409) rather than silently start a fresh replacement conversation when the worktree has no existing session or its resume fails")
     resume_p.add_argument("--worktree-writer-file", metavar="PATH", help="Original keyed writer JSON for strict exact-session ACP resume; - reads stdin")
+    resume_p.add_argument("--retained-recovery-file", metavar="PATH", help="Once-only retained resume request including its writer; requires --strict; - reads stdin")
     resume_p.add_argument("--cli", action="store_true", help="Resume the exact native head in a headed/muxed CLI instead of headless ACP")
     resume_p.set_defaults(func=_cmd_resume)
 

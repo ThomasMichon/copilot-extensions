@@ -9,7 +9,39 @@ from unittest.mock import Mock
 import pytest
 
 from promotion_unit_contract import UnitEvidenceError
-from promotion_unit_effects import UnitRun
+from promotion_unit_effects import UnitRun, path_spelling
+
+
+def test_extended_windows_paths_retain_the_same_storage_boundary():
+    from pathlib import PureWindowsPath
+
+    for ordinary, extended in (
+        (r"C:\fixture\synthetic", r"\\?\C:\fixture\synthetic"),
+        (r"\\example\fixture\synthetic", r"\\?\UNC\example\fixture\synthetic"),
+    ):
+        root = PureWindowsPath(ordinary)
+        assert PureWindowsPath(path_spelling(extended, "win32")) == root
+        assert PureWindowsPath(path_spelling(extended + r"\data", "win32")).is_relative_to(root)
+        assert not PureWindowsPath(path_spelling(extended + r"-other\data", "win32")).is_relative_to(root)
+        assert path_spelling(extended, "linux") == extended
+    assert path_spelling(r"\\?\Volume{fixture}\data", "win32") == r"\\?\Volume{fixture}\data"
+
+
+def test_native_extended_temporary_paths_remain_confined(tmp_path):
+    root = tmp_path / "synthetic"
+    run = UnitRun(Mock(), tmp_path, {}, root)
+    run.active = True
+
+    def native(path):
+        value = str(path)
+        if sys.platform != "win32":
+            return value
+        return "\\\\?\\UNC\\" + value[2:] if value.startswith("\\\\") else "\\\\?\\" + value
+
+    run.audit("os.remove", (native(root / "held-input"), -1))
+    run.audit("open", (native(root / "held-input"), "w", 0))
+    with pytest.raises(UnitEvidenceError, match="mutation outside"):
+        run.audit("os.remove", (native(tmp_path / "outside"), -1))
 
 
 @pytest.mark.parametrize("event", [

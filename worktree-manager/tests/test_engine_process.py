@@ -11,6 +11,40 @@ import pytest
 from worktree_manager import engine_process as ep
 
 
+def test_confirmed_stream_keeps_its_posix_owner_inside_test_containment(monkeypatch):
+    calls = []
+    monkeypatch.setattr(ep, "_WINDOWS", False)
+    monkeypatch.setattr(ep, "contained_test_mode", lambda: True)
+    monkeypatch.setattr(ep.engine_posix_process, "run",
+                        lambda argv, **kw: calls.append((argv, kw)) or "owned-result")
+    assert ep.run(["engine"], timeout=3, env={}, confirm_cleanup=True) == "owned-result"
+    assert calls[0][1]["env"][ep.OWNED_GROUP_ENV] == "1"
+
+
+@pytest.mark.parametrize("failed", [False, True])
+def test_stream_cleanup_confirms_the_job_and_retains_failed_custody(monkeypatch, failed):
+    calls = []
+    process = SimpleNamespace(
+        returncode=0, communicate=lambda **_kw: (None, None), poll=lambda: 0,
+    )
+
+    def retire(timeout):
+        calls.append(timeout)
+        if failed:
+            raise OSError("fixture Job retirement unconfirmed")
+
+    job = SimpleNamespace(terminate_and_wait=retire, close=lambda: pytest.fail("unconfirmed close"))
+    monkeypatch.setattr(ep, "_WINDOWS", True)
+    monkeypatch.setattr(ep, "spawn_sync_in_kill_on_close_job", lambda *a, **k: (process, job))
+    if failed:
+        with pytest.raises(ep.EngineCleanupError) as caught:
+            ep.run(["engine"], timeout=1, env={}, confirm_cleanup=True)
+        assert caught.value.process is process and caught.value.job is job
+    else:
+        assert ep.run(["engine"], timeout=1, env={}, confirm_cleanup=True).returncode == 0
+    assert calls == [5]
+
+
 @pytest.mark.parametrize("failure", [subprocess.TimeoutExpired("engine", 1), KeyboardInterrupt()])
 @pytest.mark.parametrize("windows", [False, True])
 def test_cancel_closes_job_or_owned_group(monkeypatch, failure, windows):

@@ -51,6 +51,21 @@ steer when progress or a recorded disagreement is observed; send another only
 for materially new evidence. If the recipient disputes the steer, return the
 evidence and decision to its owner/operator rather than alternating commands.
 
+For a keyed live send, keep the exact binding with the pending record: expected
+session, idempotency key, sender and the original body file. A receipt-only
+re-observation must repeat that binding byte for byte, including any trailing
+newline, so pass the saved file rather than retyped or normalized text. A
+binding-conflict refusal on that read means the observation differs from the
+original request, not that delivery failed; correct the binding, never resend.
+
+Receipt stages `admitted` and `sdk_accepted` are delivery; `consumed` is
+consumption, proving the message reached the recipient's agent loop, not that
+the requested action ran. Confirm acceptance from the recipient's own report or
+tool history, such as the requested tool appearing in a later turn. A message
+to a recipient whose turn is running or stalled can stay `admitted` or
+`sdk_accepted` for hours: record the stage and observation time, reobserve,
+never replay.
+
 ## Never
 
 - Answer the target's permission prompts, approve its scope change or merge.

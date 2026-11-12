@@ -604,8 +604,34 @@ closed; unsupported data-files or exclusion layouts do not receive signatures.
 Both preparation and release-authorized promotion compose candidate data
 using tools and the projection manager from the pinned workflow-source
 checkout, never Python tooling imported from the candidate scratch tree.
+The same composer refreshes the declared Installer Engine consumer slots and
+generates manifest-declared Invocation shims, helpers and admission toolkits.
+Both owners use canonical candidate data and verify the actual written bytes
+before the composition is frozen. Invocation's generator and toolkit packager
+remain pinned executable tooling; candidate copies are not imported.
+Installer refresh also covers already-local writer references and registered
+library consumers copied by direct or transitive vendoring. Those copy owners
+provide their actual canonical source/destination pair, so refreshing a top-level
+standalone alone cannot leave an older packaged helper behind.
+Contributors do not synchronize those derived Dev mirrors to publish canonical
+changes. Dev's Invocation source check validates the producible inventory,
+paths and grammar, while the development install-contract check validates
+Installer producers and owned layouts. Neither is materialized-copy evidence:
+the separate exact-copy checks and frozen-candidate consumer tests remain
+required, including source-bound checker witnesses and positive unit origins.
 The release writer checks out that same pinned source; `origin/main` remains
 the promotion parent and version/state seed, not the executable tooling root.
+The source-only `tools/local_runtime_promotion.py` adapter uses this same
+composer with exact source and Main commit IDs, but retains shipped Main
+versions instead of allocating bumps. It materializes the complete tree and
+optionally reports a selected export closure, without publishing a commit,
+ref, artifact or runtime selection. Changefiles are removed only from its
+owned scratch checkout; the input checkout and pending bump intent remain
+unchanged. Main version metadata is read in bounded raw-blob batches, and
+inherited Git repository/index/config selectors do not redirect composition.
+The version writer admits all manifest, fallback, projection-template and catalog
+destinations before its first write. Linked changefile directories/files are
+rejected before version seeding or consumption, not left for later materialization.
 The writer's job-wide token is read-only. Checkout persists no credentials,
 and the release PAT is scoped only to the trusted push, coverage publication,
 PR landing and tagging shell steps. Git uses the `gh` credential helper, which
@@ -705,7 +731,8 @@ verification remain serial. Only the independent bundle attestations use up
 to four concurrent verifications, with the same pinned identities, read-only
 token and per-subject deadline. Every verification must pass and all workers
 are joined before the caller can publish or emit a success receipt.
-The CLI's exact Public Good verifier-initialization-unavailable error permits
+The CLI's exact Public Good verifier-initialization-unavailable error or
+`error creating Sigstore verifier: no valid Sigstore verifiers could be initialized` permits
 one explicitly logged retry with identical subject, identity constraints and
 read-only authority, sharing the original 120-second per-subject deadline.
 Signature, identity, policy and other failures are not retried; a second
@@ -1211,8 +1238,37 @@ Refresh publication starts pending, rereads metadata before and after completing
 its result, and supersedes any changed/unverifiable snapshot with a failure
 before a bounded retry. A delayed refresh must not leave a stale successful
 result after a concurrent description or metadata edit.
-Completed check conclusions are not rewritten: superseding failure uses a new
-check, and only an unfinished original is closed out directly.
+Batch/departure refreshes do not rewrite completed conclusions: superseding
+failure uses a new check, and only an unfinished original is closed out directly.
+
+An authorized manual dispatch can instead supply `pull_request_number` alone
+to reconcile one current open `dev` PR. It uses the existing trusted default
+checkout and refresh job's checks-write permission; the native metadata jobs
+stay read-only. The trusted inline script rejects selector/promotion mixing
+before loading the checked-out helper, including an older promotion snapshot
+whose helper does not understand the selector.
+No initial global PR listing occurs, although an incomplete/unavailable commit
+association response still requires the authoritative full census described
+above. Writes remain scoped to the selected head.
+The repair paginates all check runs and recognizes its direct series by the
+`github-actions` app, exact `source-attribution` name, `source-metadata:` digest
+namespace (including legacy unverified/superseded suffixes), and this repository's
+Actions-run URL or provider-normalized `/runs/<check-id>` URL matching that
+exact check ID. Workflow-backed jobs and other same-name producers remain
+untouched; this is producer scoping, not cryptographic publisher authentication.
+After a stable snapshot it reevaluates every owned historical run, including
+completed superseded failures, to the actual current decision and publishes a
+fresh result. A final paginated owned-series census detects new or overwritten
+results from concurrent departure refreshes; a stable PR alone cannot prove
+the whole direct series was reconciled. Invalid descriptions and shared heads
+remain failures.
+Cleanup requests are reserved for every attempted rewrite before mutation.
+Racing metadata, lost write responses and budget exhaustion fail the operation,
+publish a superseding failure and fail-close attempted rewrites, including
+completed successes. Failed cleanup remains an explicit unknown, never success.
+This is a scoped owner repair, not permission to ignore unsuccessful required
+checks or mutate checks from another producer. Without the selector, the
+existing global refresh behavior is unchanged.
 
 **Activation is separate from implementation merge.** After promotion to
 `main`, verify a real source-check failure and a body-only repair from the
@@ -1563,9 +1619,12 @@ points back into the original payload, since it may break after relocation.
 
 - **`python tools/preview_release.py <plugin>`** builds a scratch copy of
   that plugin's payload — with its vendored `libs/<lib>` materialized from
-  canonical, and the version it would get if its pending changefiles were
+  canonical and declared Invocation outputs regenerated by the pinned producer,
+  and the version it would get if its pending changefiles were
   consumed right now — entirely read-only against the real checkout. Good
-  for "what would ship" without touching anything.
+  for "what would ship" without touching anything. Invocation generation
+  refusals fail the preview before it publishes `PREVIEW.json`; source runtime
+  preparation applies the same generator and refusal contract.
 - **`python tools/materialize_main.py --candidate --dest <new-directory>`**
   builds the complete marketplace from committed HEAD using the promotion
   materializers, with a durable `MATERIALIZED.json` whole-tree hash receipt.
@@ -1918,8 +1977,49 @@ whatever changefiles are pending; nothing here is hand-edited directly.
 > consumer's own top-level `libs/*`), but a lib consumed *solely* through a
 > `uv`-editable canonical-reference pointer (no local copy at all) is
 > invisible to it. `python tools/check-version-bump.py --list` additionally
-> names those pointer-only consumers — check both before assuming you've
-> found every plugin a shared-lib change reaches.
+> names those pointer-only consumers and expands canonical sibling-library
+> dependencies transitively, including shared edges and cycles. A nested
+> library change therefore requires changefiles for indirect consumers too;
+> malformed or symlinked reachable manifests fail closed rather than hiding
+> consumers. Check both before assuming you've found every plugin a shared-lib
+> change reaches.
+>
+> **Library-only bump intents also require consumer coverage.** The presence
+> guard expands new or changed library bump entries in top-level changefiles
+> through the same map, even without a library source edit. Unchanged baseline
+> entries, release-note-only edits and removed intents do not create new
+> obligations. Consumer coverage still requires this PR's own newly added
+> changefiles, not coincidental pending entries from an earlier PR. Intent and
+> coverage reads use the resolved Git revisions, not checkout contents. PR
+> dependency discovery uses the prospective target/head integration tree, so
+> consumers or edges added on the target after a branch forked are included and
+> target-side removals do not create spurious obligations. Git merge plumbing
+> computes that tree without changing the checkout or index; conflicting inputs
+> require reconciliation. Direct consumer seeds, nested library edges and
+> packaged-source declarations still use the shared parsers. The retired
+> standalone version diagnostic retains its literal-head comparison. Git symlink
+> modes are rejected even when the checkout contains a regular file.
+>
+> New or changed library release intents and consumer coverage require fresh
+> changefile filenames: do not edit an old file to add a library/type intent or
+> recycle a filename already used in the target branch's history. Promotion
+> excludes previously consumed filenames regardless of edited contents. Use
+> `tools/changefile.py add` for a new identity; a rename to a previously unused
+> filename also creates a new release identity. Complete Git history is required
+> to verify freshness, including identities integrated after a PR forked.
+
+**Packaged version manifests propagate bumps.** A release bump can change a
+`plugin.json` or `pyproject.toml` copied into another consumer through
+`packaged-assets.json` or `launch-wrapper-assets.json`, even when that
+manifest's version was unchanged on Dev. Version allocation adds one patch
+bump for each such receiver before materialization, transitively through
+declared copies. Explicit receiver bumps are retained rather than applied
+twice; self-references and cycles do not repeat a bump. Without a new bump
+intent, merely carrying a consumed changefile into another promotion does
+not trigger this propagation. This keeps changed bundled release metadata
+from silently reusing the receiver's immutable runtime version. Receiver
+metadata and asset declarations retain the existing contained,
+non-indirect version-path guard before allocation.
 
 **All version files for a plugin must be bumped together in the same
 commit.** If any file is out of sync: a stale `plugin.json` makes

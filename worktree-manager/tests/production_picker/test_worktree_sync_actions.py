@@ -85,6 +85,9 @@ def test_prior_receiver_refuses_pair_sync_before_checkout_effects(tmp_path, monk
       "pair_results": [{"role": "harness", "updated": True, "reason": "updated"},
                        {"role": "knowledge", "updated": False, "reason": "ff-failed"}]},
      ["harness: updated", "knowledge: ff-failed"]),
+    ({"ok": False, "reason": "Sync ended without a complete terminal result", "outcome": "unknown",
+      "pair_results": [{"role": "harness", "updated": True, "reason": "updated"}]},
+     ["Sync outcome unknown; no automatic replay.", "harness: updated"]),
 ])
 def test_actual_progress_panel_preserves_sync_cause_and_partial_progress(result, expected):
     from worktree_manager.production_picker.picker_tui.engine_live_screens import ProgressScreen

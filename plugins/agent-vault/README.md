@@ -15,8 +15,8 @@ Native `uninstall` removes explicitly named runtime slots, snapshots, selectors,
 generated resolvers and service launchers. Configuration, authentication,
 `run/`, `logs/`, `core/`, `cache/` and unknown files are retained by default.
 Explicit purge still retains transaction coordination, and dry runs remain
-non-mutating. Linked roots, foreign manifests, unclassified consumers and live
-child processes refuse removal. Canonical batch-removal custody remains held
+non-mutating. Linked roots, foreign manifests and unclassified consumers or
+descendants refuse removal. Canonical batch-removal custody remains held
 through deletion; released lease registries retain their inodes without
 preventing idle removal. See the
 [install contract](../../docs/install-contract.md).
@@ -94,6 +94,42 @@ The native qualification portfolio is documented in `libs/update-driver/README.m
 3. **For selected KeePass-backed use, install KeePassXC** with `keepassxc-cli` on PATH (or at `C:\Program Files\KeePassXC\keepassxc-cli.exe` on Windows). This is not a prerequisite for loading the plugin or inactive readiness.
 4. **Point the CLI at a database** with `KPDB`, a named vault, or a repo-local `.agent-vault.json`.
 
+## Dependency profiles
+
+Native setup can explicitly select `base` or `ssh`. SSH key generation and pair
+validation need the `ssh` profile; ordinary Vault use does not. It supplies
+`pycryptodomex` in the isolated `Cryptodome` namespace, with native Windows ARM64
+support, and also supports the existing Fernet cache and AES-GCM envelope formats.
+Existing records, wrapped keys and DPAPI caches are not converted or rotated.
+For example:
+
+```powershell
+pwsh -File plugins\agent-vault\scripts\install.ps1 -Action install -Profile ssh
+```
+
+```bash
+bash plugins/agent-vault/scripts/install.sh install --profile ssh
+```
+
+The same selection works with `stamp`, `provision` and `update`. Stamping records
+the desired profile without acquiring dependencies. With no active runtime,
+first use constructs it; an existing runtime remains active after stamping.
+Use `provision` or `update` to apply a changed profile before using its capabilities.
+The installation-owned `runtime-profile.json` preserves selection across ordinary
+updates. With no explicit or recorded selection, existing base setup is unchanged.
+Use `base` explicitly to select a new base runtime without the optional crypto
+dependency; existing encrypted-cache/KEK consumers may still need that dependency.
+Profile construction requires an existing Python 3.11+ bootstrap interpreter.
+
+Profiles use separate immutable version slots and the canonical retained-input
+constructor. A failed SSH build never selects a base substitute or modifies a
+completed runtime. Package metadata remains unchanged; `deploy-manifest.json`
+records the actual `runtime_version` and `runtime_profile`. Prepared deployments
+retain their original `runtime_source` receipt separately from the profile.
+Selection does not opt into runtime activation, unlock a database, configure
+credentials or change service policy. See [SSH key custody](docs/ssh-key-preparation.md)
+and the [configuration reference](docs/configuration.md#dependency-selection).
+
 ## Source-qualified runtimes
 
 Both native installers accept canonically prepared `runtime-source.json`
@@ -163,6 +199,28 @@ stages on later invocations.
 An uninstall preview neither takes the transaction lock nor removes contents;
 normal transient payload self-staging still applies.
 
+On Windows, an owned service's venv redirector can have a physical-interpreter
+child outside the runtime directory. Uninstall retires that child before its
+waiting launcher only after checking the venv's configured base interpreter,
+the exact native process identities and ancestry, the current user, and matching
+service arguments. Unknown or additional descendants still refuse removal;
+an executable name or parent PID alone does not establish ownership.
+Native process handles retain the birth identity through termination. File
+observations use the existing external uninstall Python and headless capture,
+not the retired compiled daemon adapter. The configured base path is read as
+UTF-8 under both stock Windows PowerShell and PowerShell Core.
+The canonical same-process daemon can instead run its physical interpreter
+directly. Its default persistent-service command is admitted only after exact
+matching against the source-owned service bootstrap and optional daemon lease wrapper,
+ordinary installation-slot paths, the configured physical base, cache scope,
+current-user ownership and the retained native birth/file identities. A PID
+receipt alone still cannot authorize termination; unknown commands and children
+remain refusal conditions.
+Native removal distinguishes its own source-bound driver ancestry from runtime
+consumers using the live authenticated uninstall request, not parent PIDs alone.
+Broker removal and finite code removal retain that proof; an unverified caller
+or an additional consumer still blocks removal.
+
 ## Configuration
 
 Fast single-vault setup:
@@ -214,10 +272,12 @@ agent-vault show "API/OpenAI" -s
 agent-vault lock
 ```
 
-Fetch secrets **at the point of use** instead of exporting them into the shell:
+For API requests, let a supported authenticated CLI/MCP tool hold the credential.
+For generic gaps, use [URL-bound authenticated curl](docs/authenticated-http.md)
+with an owner-approved opt-in binding, never a manual token/header construction:
 
 ```bash
-curl -H "Authorization: Bearer $(agent-vault get 'API/OpenAI')" https://example.invalid/
+agent-vault curl -- -sS https://api.example.test/v1/items
 ```
 
 Supported built-in command groups:
@@ -225,6 +285,7 @@ Supported built-in command groups:
 | Area | Commands |
 |------|----------|
 | Entries | `get`, `batch-get`, `has`, `search`, `list`/`ls`, `show`, `add`, `set-password`, `set-username`, `remove`/`rm`, `move`/`mv` |
+| Authenticated HTTP | `curl -- <supported curl arguments>` (explicit URL binding, no caller-visible credential) |
 | SSH keys | `import-key`, `export-key`, `ssh-key prepare --entry SSH/node-a`, `ssh-key install --entry SSH/node-a --directory <absolute-path>` |
 | Service | `ping`, `start`, `stop`, `lock`, `unlock` (`--terminal`/`--here`) |
 | Config | `which`, `vault list`, `vault add`, `vault set-default`, `vault remove` |
@@ -474,7 +535,7 @@ diagnostics or plaintext artifacts.
 - The daemon keeps KeePass master passwords in memory **per database**. `VAULT_PASSWORD_TTL` controls the password TTL (default `3600` seconds). `agent-vault lock` drops the cached password immediately.
 - Credential reads fail fast by default when locked: they return an actionable error instead of hanging on a hidden prompt. Use `agent-vault unlock`, `agent-vault unlock --terminal`, or `agent-vault get --prompt ...` when you want an interactive prompt.
 - Unlock-source extensions run before prompts, so a configured provider can satisfy locked reads without UI.
-- The CLI cold-starts the daemon when needed. The installer also deploys platform supervision: a Windows Scheduled Task named `AgentVault`, or a Linux/WSL systemd user unit named `agent-vault.service` when systemd is available.
+- The CLI cold-starts the daemon when needed. Windows scheduling is opt-in via the native [`windows_scheduled_task` policy](docs/configuration.md#windows-scheduling-is-separate-from-activation); clean installs leave tasks absent and existing registrations are preserved by default. Linux/WSL installs retain the systemd user unit named `agent-vault.service` when systemd is available.
 - Windows updates start the incoming generation independently; the old build preferably settles work and retires itself. A bounded, ownership-checked central retirement handles stuck predecessors, but live credential children retain writer exclusion. Compatible private auth handoff preserves unexpired unlocked state without resetting its lifetime. See [runtime replacement](docs/runtime-replacement.md) for the contract, readiness distinction and remaining POSIX/systemd migration.
 - There is **no** `agent-vault doctor` subcommand today. Use `agent-vault ping`, `agent-vault which`, `agent-vault cache-status`, and the installer `status` action for troubleshooting.
 
@@ -488,7 +549,68 @@ agent-vault cache-populate --entry API/OpenAI
 agent-vault cache-verify --entry API/OpenAI
 ```
 
-The cache and `seal`/`unseal` require the optional `cryptography` dependency. Without it, the cache is a safe no-op and KEK commands return a clear error. Install it into the active runtime slot with the environment's package manager. On POSIX, the stable target is `~/.agent-vault/.venv/bin/python`; on Windows, read `%USERPROFILE%\.agent-vault\current-version` and target `%USERPROFILE%\.agent-vault\versions\<version>\Scripts\python.exe`.
+Fernet caches and `seal`/`unseal` use the optional `pycryptodomex` dependency
+(`cache` / `kek` extras), also supplied by the native `ssh` profile above.
+Select that profile through the installer rather than modifying a completed
+runtime. Without it, POSIX caches are inert and KEK commands return a clear
+error. New Windows caches can use native per-user DPAPI without a third-party
+package. Existing Fernet caches require the backend; unreadable originals are
+never overwritten. Existing DPAPI caches keep their format after installation.
+
+`cache-populate` bounds old-cache adoption through a contained helper: ten
+seconds for reading/decoding, with two seconds reserved separately for native
+process cleanup. Store/replacement lock acquisition is bounded to two seconds.
+A compatible cache remains in place. Otherwise, its exact encrypted file and
+wrapped key are copied into an owner-private `preserved-cache` compartment.
+If the original is busy, inaccessible or the reader times out, it is retained
+in place instead. A separately protected, schema-1 cache in that compartment
+then serves the selected Vault/database and installation. This never changes
+the authoritative Vault, SSH keys, signing keys or envelope KEKs.
+
+The helper uses isolated Python imports and the selected runtime's package
+root, never packages or startup hooks supplied by the caller's directory or
+`PYTHONPATH`. Replacement coordination stays at the original cache root across
+selection changes. If an old transaction or inaccessible lock prevents that
+coordination, or the original reader times out, cannot open the data, or lacks
+its decoder backend, the fresh empty cache may exist, but credential
+reads and writes remain pending. A later explicit population/setup retries the bounded
+assessment under the same replacement lock and carries readable pending
+journals into the current cache before permitting use. Unreadable originals
+remain preserved. An unresolved journal is never a recovered credential.
+
+Recovered compartments include the selected endpoint and host in their authority
+binding. Once recovery is active, an authority without a published compartment
+cannot fall back to the original cache. Explicit population/setup prepares a
+separate empty compartment without importing another authority's original values
+or journals. Reads alone never prepare it.
+
+Recovery uses the same live `get` request as ordinary population. Only missing
+current records are inserted: newer writes, existing values and pending
+password replacements win over a recovery response. Repeating population or
+restarting the CLI does not re-import preserved bytes or reset the new cache.
+`cache-status` (also `--json`) reports whether originals were copied or retained
+in place. It keeps recovery visible even after some entries are populated:
+the cache cannot know that every credential has been recovered. If the Vault
+is locked, unlock it explicitly or use the existing explicit `--prompt` option.
+Owner-key setup recovers only after the owner confirms the existing key; a
+failed/locked owner request does not start cache recovery or initialize a key.
+After preparation, setup re-reads the existing owner under replacement
+coordination before reconciliation; it never repeats first-owner creation.
+
+Cache-only, batch/pinned read-only, status and verification operations never
+initiate this recovery, migrate a key or unlock/start a service. They can read
+a previously published current cache. Protected-cache failures remain visible;
+an unknown schema or corrupt ciphertext is not an empty store.
+
+The selected runtime advertises `preserved-cache-recovery-v1` through the
+existing `invocation-contract --json` metadata. This is additive client-local
+behavior, not a new daemon request: existing `get` and owner-setup protocols
+are unchanged. Healthy old caches remain readable by prior clients. After
+fallback, older clients do **not** understand the new compartment selection;
+they see only the retained original, not recovered values. Do not roll back a
+recovery-dependent consumer to such a client or copy stale original records
+over current state. Preserve originals for deliberate inspection; recovery
+does not authorize their deletion or an older writer's takeover.
 
 Password replacement is journaled before the KeePass mutation. Pending
 replacements are never served by cache-first reads and cannot be overwritten by

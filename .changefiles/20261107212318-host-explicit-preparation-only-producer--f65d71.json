@@ -1,0 +1,13 @@
+{
+  "comment": "Host explicit preparation-only producer bindings with native origin discovery and retained preview inspection across provider rollback.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    },
+    {
+      "plugin": "pr-service",
+      "type": "patch"
+    }
+  ]
+}

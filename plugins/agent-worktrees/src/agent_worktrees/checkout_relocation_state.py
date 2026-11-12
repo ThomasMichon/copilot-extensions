@@ -11,6 +11,7 @@ from contextvars import ContextVar
 from pathlib import Path
 
 _owners: ContextVar[frozenset[str]] = ContextVar("checkout_relocation_owners", default=frozenset())
+RECEIVING_SCHEMA = "agent-worktrees.receiving-checkout-relocation.v1"
 
 
 def require_writer_generation() -> None:
@@ -39,7 +40,9 @@ def read(ledger: Path) -> dict | None:
     if path.is_symlink() or path.stat().st_size > 64 * 1024:
         raise ValueError("relocation journal is redirected or oversized")
     data = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(data, dict) or data.get("schema") != "agent-worktrees.checkout-relocation.v1":
+    if not isinstance(data, dict) or data.get("schema") not in {
+        "agent-worktrees.checkout-relocation.v1", RECEIVING_SCHEMA,
+    }:
         raise ValueError("unsupported relocation journal")
     if (
         data.get("phase") not in {"prepared", "copying", "copied", "published", "git-repaired", "rebound", "retiring", "complete", "cancelling", "cancelled"}
@@ -97,12 +100,41 @@ def owner(ledger: Path):
         _owners.reset(token)
 
 
+def owns(ledger: Path) -> bool:
+    return str(ledger.resolve()) in _owners.get()
+
+
 def require_idle(ledger: Path) -> None:
-    if str(ledger.resolve()) in _owners.get():
+    if owns(ledger):
         return
     data = read(ledger)
+    if data is None:
+        if not ledger.exists():
+            return
+        from . import tracking
+
+        try:
+            current = tracking.load_record(ledger, copy_result=False)
+        except FileNotFoundError:
+            return
+        _require_original_location_without_journal(current)
+        return
     if data is not None and data.get("phase") not in {"complete", "cancelled"}:
         raise ValueError("checkout relocation is unfinished; retry the original move before launch or mutation")
+    if data is not None and data["schema"] == RECEIVING_SCHEMA:
+        from .receiving_relocation import require_retained_provenance
+
+        require_retained_provenance(ledger)
+
+
+def _require_original_location_without_journal(record) -> None:
+    if not getattr(record, "receiving_allocation_present", False):
+        return
+    receipt = getattr(record, "receiving_allocation", None)
+    original = receipt.get("identity") if isinstance(receipt, dict) else None
+    path = original.get("path") if isinstance(original, dict) else None
+    if isinstance(path, str) and path != record.worktree_path:
+        raise ValueError("receiving current-location journal is missing; preserve the original record")
 
 
 def preserve(record, current, ledger: Path) -> None:
@@ -110,8 +142,12 @@ def preserve(record, current, ledger: Path) -> None:
     if current is None or str(ledger.resolve()) in _owners.get():
         return
     data = read(ledger)
-    if data is not None and record.worktree_path != current.worktree_path:
+    if (
+        data is not None or getattr(current, "receiving_allocation_present", False)
+    ) and record.worktree_path != current.worktree_path:
         raise ValueError("stale checkout location; reload the relocated worktree record")
+    if data is None and getattr(current, "receiving_allocation_present", False):
+        _require_original_location_without_journal(current)
 
 
 def require_previous_owner(data: dict) -> None:

@@ -78,13 +78,15 @@ class QueueClaimQueriesMixin:
             if task_id is not None:
                 rows = conn.execute(
                     f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
-                    "WHERE id = ? AND status = ? AND not_before <= ? AND hold_reason IS NULL",
+                    "WHERE id = ? AND status = ? AND not_before <= ? AND hold_reason IS NULL"
+                    " AND NOT EXISTS (SELECT 1 FROM task_relevance_closeouts r WHERE r.task_id=tasks.id)",
                     (task_id, Status.QUEUED, ts),
                 ).fetchall()
             else:
                 rows = conn.execute(
                     f"SELECT {_TASK_BULK_SELECT}, producer_request_hash FROM tasks "
                     "WHERE status = ? AND not_before <= ? AND hold_reason IS NULL"
+                    " AND NOT EXISTS (SELECT 1 FROM task_relevance_closeouts r WHERE r.task_id=tasks.id)"
                     " ORDER BY created_at ASC",
                     (Status.QUEUED, ts),
                 ).fetchall()
@@ -92,6 +94,10 @@ class QueueClaimQueriesMixin:
             best_affinity = -1
             producer_rejections: list[dict[str, object]] = []
             for row in rows:
+                if row["kind"] == "standing-charter":
+                    if task_id is not None:
+                        raise TaskError("standing charter requires explicit attachment admission")
+                    continue
                 if repo is not None and row["repo"] != repo:
                     continue
                 if task_id is None:
@@ -299,17 +305,27 @@ class QueueClaimQueriesMixin:
         origin_ref: str | None = None,
         exclusive_key: str | None = None,
         category: str | None = None,
+        standing_parent_id: str | None = None,
+        kind: str | None = None,
         limit: int = 200,
     ) -> list[Task]:
         """List tasks, optionally filtered. Newest first."""
         repo = self._canonical_repo(repo)
         clauses: list[str] = []
         params: list[object] = []
+        if kind is not None:
+            if kind not in ("finite", "standing-charter"):
+                raise TaskError("task kind must be 'finite' or 'standing-charter'")
+            clauses.append("kind = ?")
+            params.append(kind)
         from .task_categories import category_value
         category = category_value(category, selection=True)
         if category is not None:
             clauses.append("category = ?")
             params.append(category)
+        if standing_parent_id is not None:
+            clauses.append("standing_parent_id = ?")
+            params.append(standing_parent_id)
         if repo is not None:
             clauses.append("repo = ?")
             params.append(repo)

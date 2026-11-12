@@ -105,6 +105,14 @@ GitHub attaches check results to commits, not individual PRs. Multiple open
 description is valid. Publish a distinct head commit for each PR before retrying.
 When a peer moves, closes, or retargets away from `dev`, its departure refreshes
 the remaining PRs on the old head; they need no unrelated description edit.
+If a direct refresh's superseded failure remains after valid metadata is stable,
+an authorized workflow dispatcher can run `workflow-lockdown-guard.yml` on `main`
+with only `pull_request_number=<number>`. This reevaluates that open `dev` PR
+and reconciles only this owner's direct check series, not workflow jobs or
+independent same-name producers. Do not combine it with promotion inputs or omit
+the selector for a scoped repair: omission retains the existing global refresh.
+This route becomes available only after its source is promoted to `main`;
+a successful read-only metadata job alone does not repair historical direct checks.
 
 **PRs target `dev`, not `main`.** `main` is regenerated wholesale by a CI
 promotion pipeline (`.github/workflows/validate-and-promote.yml`,
@@ -1221,15 +1229,24 @@ Review requires evidence at the real divergence seam, not only a mocked
    service launcher.
 2. Exercise at least one real console-subsystem descendant; for SSH, include the
    configured `ProxyCommand` path when present.
-3. Observe at least two periodic cycles and assert zero visible top-level
-   windows, zero Default Terminal/`OpenConsole` acquisitions, and zero foreground
-   transitions.
+3. Exercise at least two cycles for periodic work. Use non-interactive evidence
+   for the selected visibility mechanism, such as the actual GUI-subsystem
+   entrypoint and absence of console allocation in controlled descendants,
+   alongside the shared launch primitive's contract.
 4. Exercise timeout/cancellation and confirm the complete child tree is reaped.
 5. Verify local targets stay local so a same-machine health check cannot create
    avoidable SSH/process churn.
 
-Keep this live Windows check focused; the required CI guard remains static and
-fast.
+Window enumeration and foreground tracking are supplemental diagnostics. Run
+them opportunistically when an observable console or RDP session is already
+active; otherwise record the skip reason. Do not require the operator to unlock,
+focus or attend a desktop, and do not block publication, CI or an enrollment
+decision on absent/inconclusive visual coverage. Unobserved is not a zero-window
+result. Confirmed regressions and mandatory automated checks still require
+correction; this is test design, never an admin or CI bypass.
+
+Keep native checks focused and outside required unit-only CI. Independent
+explicit platform, lifetime and deployment contracts remain in force.
 
 ### "POSIX" Is Not "Linux" — Name macOS Explicitly
 

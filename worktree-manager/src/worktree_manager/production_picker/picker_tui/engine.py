@@ -557,7 +557,7 @@ class PickerApp(App):
     PickerScreen > #nf-chrome { width: 100%; height: 2; }
     PickerScreen > #nf-machine { width: 100%; height: auto; }
     PickerScreen > #nf-buttons { width: 100%; height: auto; }
-    PickerScreen > #nf-notices { width: 100%; height: 2; overflow: hidden; }
+    PickerScreen > #nf-notices { width: 100%; height: 0; overflow: hidden; }
     PickerScreen > #nf-body-data   { width: 100%; height: 1fr; }
     PickerScreen > #nf-footer { width: 100%; height: 2; }
     /* NF5-5 native OptionList data body: picker palette + the amber cursor
@@ -603,6 +603,7 @@ class PickerApp(App):
         prepare=None,
         project_label="project",
         lifetime_cancelled=None,
+        front_door=False,
     ):
         super().__init__()
         self._source = source
@@ -612,6 +613,7 @@ class PickerApp(App):
         self._prepare = prepare
         self._project_label = project_label
         self._lifetime_cancelled = lifetime_cancelled
+        self._front_door = front_door
         self.binding_error = None
         self.result = None            # set by the screen on a launch decision
         # Idle-liveness self-exit (copilot-extensions#2761 follow-up) -- see
@@ -656,6 +658,22 @@ class PickerApp(App):
             binding.live,
             mock_mode=self._mock_mode,
             after_first_refresh=self._after_first_refresh,
+        ))
+
+    def install_setup(self, state):
+        from .setup_home import SetupHome
+
+        self.query_one(PendingBindingScreen).remove()
+        self.screen.mount(SetupHome(state))
+
+    def reload_setup(self, project=None):
+        from .setup_home import SetupHome
+
+        self.binding_error = None
+        self.query_one(SetupHome).remove()
+        self.screen.mount(PendingBindingScreen(
+            lambda: self._prepare(project_override=project, auto_open=False),
+            project or "Setup / Doctor",
         ))
 
     async def on_event(self, event) -> None:

@@ -80,6 +80,50 @@ the real Worktrees CLI retain the complete copied runtime and staged dependencie
 
 ### Source-qualified command binding
 
+The normal release-candidate materializer now delegates Invocation output
+publication to `tools/materialize_payload_invocation.py`. It computes the
+existing manifest-declared output set from canonical source after version
+stamping, then uses the generator's own writer inside the candidate. This
+includes ordinary/namespaced helpers and the self-contained admission toolkit;
+the old toolkit inventory is not an authoritative source for rebuilding itself.
+The adapter never activates the toolkit or runs an emitted program.
+Executable generator and packager tooling are loaded only from the pinned
+tooling checkout; the explicit canonical root supplies data, never Python
+tooling to import or a replacement for the tooling's own module globals.
+
+Dev CI explicitly uses `generate.py --all --source-check`: it computes the
+complete canonical output inventory, validates destination custody and Python
+grammar, and neither writes nor requires old derived mirrors. Existing output leaves
+must be ordinary single-link files and existing ancestors must be directories.
+Planned output files cannot also serve as directories for other outputs, even
+when both are absent. Absent outputs otherwise remain valid source layouts. This is not a
+claim that existing output bytes match. `--check` retains actual-output
+comparison; the candidate materializer additionally verifies exact binary/text
+bytes and executable modes after writing, before composition can freeze.
+
+Source preparation and single-plugin previews use this same owner with their
+actual canonical consumer and copied destination. They regenerate missing or
+stale declared outputs rather than relying on Dev mirrors. A changed candidate
+manifest or unsafe output plan refuses before the prepared source or preview
+metadata can be published; generation still never executes candidate tooling.
+The packaged toolkit includes its pinned generator and admission packager at
+their original relative paths, including the file-loaded tooling edges that
+static import closure alone cannot discover. Manager's separate preparer tool
+declaration includes the Invocation adapter it imports.
+Manager's existing launch-wrapper asset declaration also places the generator
+and packager under `scripts/libs/payload-invocation`, the adapter's trusted
+loader location. Raw-source retention addresses both declared asset groups;
+the canonical Versioned Runtime build helper selected by Manager's `setup.py`
+retains those tooling paths in the wheel too. The developer fallback helper is
+not the source authority for that resource policy.
+
+The remaining canonical-first witness transition is still open: source-bound
+catalog checks and their current fixtures bind real consumer/helper bytes, and
+the normal checker has no qualified source-versus-materialized phase input.
+Those checks are not weakened or silently redirected here. An explicit
+owner-supplied phase and exact positive unit/candidate origin bindings must
+precede removing these remaining Dev-copy dependencies.
+
 `runtimeAdmissionToolkit: true` packages the canonical admission/build helpers
 under `scripts/_runtime_admission/` for a required-context payload. It defaults
 to false and changes neither command/catalog bytes nor installer behavior.

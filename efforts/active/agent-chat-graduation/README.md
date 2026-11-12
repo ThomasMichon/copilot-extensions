@@ -287,9 +287,13 @@ requirements.
   Komodo binding example through existing schemas. #8578 qualifies pure template
   actualization, input refusal, resource/support closure and override preservation;
   it does not deliver an image, private allocation or effect executor.
-- [ ] Deliver an independently operable Chat service image and its actual
-  role/configuration bindings with explicit artifact, storage, identity,
-  Gateway, placement and resource inputs through existing owners.
+- [x] Deliver an independently operable Chat service image with explicit
+  artifact, storage, identity, configuration and resource bindings.
+  #8726 qualifies the source-free non-root image, retained-only startup,
+  authenticated health, writer exclusion and graceful retained restart.
+  This is source delivery and fixture qualification, not an admitted release.
+- [ ] Integrate that image's Gateway and placement bindings through the existing
+  deployment owners; retain missing connectors and effect executors explicitly.
 - [ ] Actualize that template in the resolved private configuration repository's
   dedicated worktree and publication flow, preserving overrides and selected
   template/source revisions rather than embedding private deployment state here.
@@ -403,6 +407,8 @@ requirements.
   release/platform identity, read-only application content, bounded resources,
   explicit configuration/secret references and separately retained storage;
   no source/plugin/sibling-runtime dependency or backend exposure bypass.
+  #8726 qualifies the independent image fixture and platform/resource contract.
+  Admitted release identity and actual private deployment remain open.
 - [ ] **Private composition and Komodo:** template actualization preserves
   private overrides/provenance; current support/capacity admission and exact
   prepared-plan confirmation precede real manager execution. Offline
@@ -490,6 +496,72 @@ qualification; native callbacks still require the actual assignment and
 shared-multiplex contracts above.
 
 ## Journal
+
+### 2026-11-10 - Nonactivating service candidate prepared; qualification pending
+
+- Inspected canonical `numbered_candidate`: construction and installed validation
+  precede immutable completion and retained candidate yield; neither fresh nor
+  reuse paths activate a service or publish an active selection. Chat now supplies
+  a service-only dependency closure and installed host/helper import validation
+  through that existing constructor and the unchanged retention bootstrap.
+- Extended existing construction and installed-distribution regression families
+  without changing their node membership or qualification classes. Controls cover
+  separate client/service closure, immutable reuse and incompatible-role refusal,
+  source-absent retained invocation, bootstrap/import refusal and zero hosting
+  effects. Real construction and subprocess controls remain full-only artifact
+  qualification, not actor-free promotion-unit evidence.
+- This source slice is untested and unpublished. No tests, builds, installations
+  or native/image qualification were run for it. It does not supply passive
+  readiness, promotion, selected service setup, cutover or Unix-socket recovery.
+  Keep the service lifecycle and all parent Plan/Validation gates open.
+
+### 2026-11-10 - Image qualification documentation merged
+
+- #11833 merged at 02:03:10Z as
+  `d3f858afcf1d308e2e553e1bd64d83dcde5f74a3`, from published head
+  `7bebd3dedc2828048ecbf2c5c9381750b2ef87f3`, after current-head Copilot
+  approval, required CI and source-attribution checks, with no unresolved
+  review threads. Completion used the configured additional-CODEOWNER-vote
+  exception, not a CI bypass. #7238 remained open before and after merge.
+- This completes only the documentation delivery recording #8726; it adds no
+  runtime, release, lifecycle or adoption qualification. Re-read the canonical
+  Goal, Plan and Validation Plan after pulling forward. The effort remains
+  Active, with the Chat-owned service adapter still the next implementation
+  slice. Retain this journal annotation with the next substantive change,
+  rather than opening another journal-only PR.
+
+### 2026-11-06 - Independent image merged; parent graduation remains active
+
+- #8726 merged at05:50:27Z as
+  `4f171d32bac23368926431de5a10299e9180dd73`, from approved head
+  `eaa37aab156b0e496712f707dfe655cffc057779`. Review5796235320 had no
+  open issues, all three original threads were resolved, required CI passed
+  and #7238 remained Open. Managed completion used only the configured
+  additional-CODEOWNER exception, not a CI bypass.
+- Native run42169866884 executed the same504-node membership
+  `d7c9a1d07d02e82c27590e01308946bf9769b7bc3fe7669e905a59752a98d823`
+  in all four Linux/Windows Python3.10/3.11 cells. Acceptance retained424 nodes
+  and80 full-only cases; Linux ran504 full cases, Windows502 plus the two
+  declared POSIX skips. Full timings were50.40/66.63s on Linux3.10/3.11 and
+  61.74/96.15s on Windows. The180s/600s limits and execution guards are unchanged.
+- Required CI42169779900 passed the entire4174-node unit packet with coverage
+  in89.068s and all source guards. Image run42169779715 exercised the fresh
+  Linux/amd64 image, independent participants, refusal/initialization,
+  authenticated health, exact writer exclusion, SIGTERM and retained deduplication.
+  Startup/restart/shutdown took5.153/5.152/0.215s under fixture limits.
+  Local admitted typechecks also passed all40 strict scopes for Linux/Windows;
+  pending scopes remain unqualified.
+- Re-read the canonical Plan and Validation Plan after actual merge. Close
+  only independent image delivery, split from still-open Gateway/placement
+  integration. Release admission, private composition, Komodo execution,
+  cross-host fencing, different-code update/rollback/removal, governed service
+  setup, assignment/shared listening, native adoption and migration remain open.
+  The effort remains Active; no selected runtime or private deployment changed.
+- Resume the Chat-owned service adapter against the existing lifecycle owners'
+  current published seams, retaining the connection contributor's source and
+  the no-outreach boundary. The completed image PR does not transfer neighboring
+  implementation or deployment authority. The source worktree is retained for
+  this parent return rather than finalized as a completed graduation.
 
 ### 2026-11-06 - Recover image qualification and repair unit admission
 

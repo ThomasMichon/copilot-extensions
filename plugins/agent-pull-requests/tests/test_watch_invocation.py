@@ -120,6 +120,47 @@ def test_actual_running_completed_slot_and_native_birth(installed):
 
 
 @pytest.mark.timeout(90)
+def test_actual_running_capture_validates_completion_once_without_reimporting(installed):
+    script = _PROBE.replace(
+        "runtime = capture_running(installation, environment={})",
+        """
+from agent_pull_requests import _installation_context as api
+reads = []
+validate = api.validate_runtime_slot_completion
+def counted(**arguments):
+    reads.append(True)
+    return validate(**arguments)
+api.validate_runtime_slot_completion = counted
+runtime = capture_running(installation, environment={})
+assert len(reads) == 1
+""",
+    )
+    result = _probe(installed, script=script)
+    assert result.returncode == 0, result.stderr
+    assert json.loads(result.stdout)["runtime"] == installed[1].evidence()
+
+
+@pytest.mark.timeout(90)
+def test_running_capture_refuses_a_module_removed_during_completion_validation(installed):
+    script = _PROBE.replace(
+        "runtime = capture_running(installation, environment={})",
+        """
+from agent_pull_requests import _installation_context as api
+validate = api.validate_runtime_slot_completion
+def remove_module(**arguments):
+    completed = validate(**arguments)
+    sys.modules.pop("agent_pull_requests.watch_writer")
+    return completed
+api.validate_runtime_slot_completion = remove_module
+runtime = capture_running(installation, environment={})
+""",
+    )
+    result = _probe(installed, script=script)
+    assert result.returncode != 0
+    assert "watch runtime module is unavailable" in result.stderr
+
+
+@pytest.mark.timeout(90)
 def test_matching_receipt_cannot_attest_base_interpreter(installed):
     result = _probe(installed, script=_PROBE.replace(
         "runtime = capture_running", "sys.prefix = sys.base_prefix\nruntime = capture_running",
@@ -191,7 +232,14 @@ assert prefix[-4:] == [
     str(installation.receipt), "agent-worktrees",
 ]
 assert prefix[0] == sys.executable
-assert prefix[1:5] == ["-B", "-I", "-X", "utf8"]
+import subprocess
+from agent_procutil import no_window_kwargs
+flags = subprocess.run(
+    [prefix[0], *prefix[1:-5], "-c", "import json, sys; "
+     "print(json.dumps([sys.flags.isolated, sys.dont_write_bytecode, sys.flags.utf8_mode]))"],
+    capture_output=True, text=True, check=True, timeout=10, **no_window_kwargs(),
+)
+assert json.loads(flags.stdout) == [1, True, 1]
 """,
     )
     result = _probe(installed, script=script, overrides={

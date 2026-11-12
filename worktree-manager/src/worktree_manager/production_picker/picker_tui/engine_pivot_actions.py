@@ -368,10 +368,10 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
         Builds an ``action-stream`` progress dict the screen renders live (verb +
         message + optional pct bar), spawns a daemon reader that drives the
         pivot runtime's :meth:`RegisteredPivotRuntime.run_action_stream`, and
-        updates the dict in place per frame. A late reader (the run the operator
-        already closed) is dropped by identity. Esc cancels via the recorded
-        ``cancel`` callback; the cache is invalidated on completion so the row
-        reflects the mutation."""
+        publishes independent snapshots to that modal's Inbox. Only the owning
+        modal applies them to the render dictionary. Esc cancels via the
+        recorded ``cancel`` callback; the cache is invalidated on completion
+        so the row reflects the mutation."""
         import threading as _threading
 
         rt = self._pivot_runtime(reg)
@@ -390,29 +390,41 @@ class PickerScreenPivotActionsMixin(PivotFormDraftActionsMixin):
             "cancel": cancel_ev.set,
         }
         self.progress = prog
+        screen = self._open_progress()
+        state = {key: prog[key] for key in ("pct", "msg", "done", "error")}
+
+        def _publish():
+            screen.inbox.post("action-progress", state.copy())
 
         def _on_frame(pct, msg):
-            if self.progress is prog:
-                if pct is not None:
-                    prog["pct"] = max(0.0, min(100.0, pct))
-                if msg:
-                    prog["msg"] = msg
+            if pct is not None:
+                state["pct"] = max(0.0, min(100.0, pct))
+            if msg:
+                state["msg"] = msg
+            _publish()
 
         def _worker():
-            ok, msg = rt.run_action_stream(
-                action, ctx, _on_frame, should_cancel=cancel_ev.is_set)
-            for scope in scopes:
-                rt.invalidate(scope)
-                rt.ensure(scope)
-            if self.progress is prog:
-                prog["done"] = True
-                if not ok:
-                    prog["error"] = msg or "failed"
-                elif msg:
-                    prog["msg"] = msg
+            try:
+                ok, msg = rt.run_action_stream(
+                    action, ctx, _on_frame, should_cancel=cancel_ev.is_set)
+            except Exception as exc:
+                ok, msg = False, str(exc) or "action reader failed"
+            try:
+                for scope in scopes:
+                    rt.invalidate(scope)
+                    rt.ensure(scope)
+            except Exception as exc:
+                refresh_error = str(exc) or "source refresh failed"
+                msg = refresh_error if ok else f"{msg or 'failed'}; refresh failed: {refresh_error}"
+                ok = False
+            state["done"] = True
+            if not ok:
+                state["error"] = msg or "failed"
+            elif msg:
+                state["msg"] = msg
+            _publish()
 
         _threading.Thread(target=_worker, daemon=True).start()
-        self._open_progress()
     def _open_pivot_card(self, reg, action, rec):
         """Open a read-only scrollable card-detail modal for the focused task
         (A5). The card's title/status/link/body are pulled from the action's

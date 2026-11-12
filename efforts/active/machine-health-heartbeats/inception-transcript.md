@@ -63,3 +63,28 @@ machine-specific overrides. It does not authorize automatically replacing a
 binding, registering/cloning a repository, selecting credentials or activating
 the carrier. The [Phase 4 amendment](preferences.md) separates the requested
 behavior from the proposed schema and implementation sequence.
+
+## Installable-service contribution follow-up
+
+On 2026-11-09 the operator resumed this effort:
+
+> Oh perfect. This means you can get back on-track with that effort. We'll ned a by-convention way that installable services can surface their hourly data payloads and telemetry, to be properly aggregated into the reports.
+
+This adds a reusable service contribution/discovery requirement to the
+continuing health/report flow. It does not remove the earlier configuration-only
+activation boundary. The [service contribution amendment](service-contributions.md)
+separates the required outcome from agent-recommended protocol and sequencing.
+
+## Unattended desktop validation follow-up
+
+On 2026-11-10 the operator explicitly removed the attended-desktop prerequisite:
+
+> I can only connect to this machine via RDP; there are no alternatives. We need to eliminate this forced test requirement, since it's impractical to meet the requirements as the operator
+
+The subsequent bounded direction accepts an already active console or RDP
+session, including RDP-SXS, and makes desktop observation opportunistic.
+Unavailable/inconclusive visual coverage records a reason rather than blocking
+publication, CI or an enrollment decision. Automated native functional,
+launch-mechanism, result, deadline and cleanup checks remain; no admin or CI
+bypass follows. This does not itself activate a service or release independent
+deployment/enrollment holds.

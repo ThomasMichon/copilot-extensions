@@ -1,0 +1,9 @@
+{
+  "comment": "Observe rendered Create and prompt focus before native lifecycle input instead of accepting arbitrary redraws; retain bounded focus diagnostics.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

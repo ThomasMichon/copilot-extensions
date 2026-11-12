@@ -1,12 +1,14 @@
-"""Source-owned project inputs, independent of an installed runtime."""
+"""Source and closed-wheel inputs, independent of an installed runtime."""
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
 import argparse
 from dataclasses import dataclass
+import hashlib
 import json
 import os
 from pathlib import Path, PurePosixPath
+import platform
 import re
 import sys
 import time
@@ -15,7 +17,7 @@ import uuid
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installer_engine as engine
 from installer_wheel_inputs import WheelLimits, inspect_archive
-from installer_wheel_snapshot import retain_wheel_inputs
+from installer_wheel_snapshot import WheelReuseInputs, retain_wheel_inputs
 import versioned_runtime_source as sources
 
 SCHEMA = "copilot-extensions.install-source"
@@ -149,20 +151,21 @@ def select(snapshot: Path) -> ProjectSource:
 
 
 @contextmanager
-def project_inputs(snapshot: Path, component: str, *, deadline: float | None = None):
-    """Hold the prepared complete wheel set through canonical installed health."""
+def wheel_inputs(
+    profile_path: Path, wheel_directory: Path, *, deadline: float | None = None,
+    expected_profile_sha256: str | None = None,
+):
+    """Retain an independently admitted profile; this receiver grants no approval."""
+    if not profile_path.is_absolute() or not wheel_directory.is_absolute():
+        raise ValueError("wheel inputs require absolute profile and directory paths")
+    if wheel_directory.is_symlink() or getattr(wheel_directory.lstat(), "st_file_attributes", 0) & 0x400:
+        raise ValueError("wheel input directory must not be linked")
     deadline = deadline or time.monotonic() + 600
-    selected = select_project(snapshot, component)
-    composition = selected.composition
-    project = selected.project
-    if "profile" not in project or "wheel_inputs" not in project:
-        raise ValueError("installation source has first-party inputs only; prepare its native wheel profile")
-    profile = _read(_member(snapshot, project.get("profile")))
-    if profile.get("release") != {
-        "identity": "source:" + selected.identity.source_commit,
-        "sha256": "sha256:" + selected.identity.assembly_hash,
-    } or profile.get("component") != component:
-        raise ValueError("project wheel profile differs from its source association")
+    profile = _read(profile_path)
+    if expected_profile_sha256 is not None and hashlib.sha256(json.dumps(
+        profile, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode()).hexdigest() != expected_profile_sha256:
+        raise ValueError("Native wheel profile changed after driver admission")
     rows = profile.get("wheels")
     if not isinstance(rows, list) or not rows or len(rows) > 256:
         raise ValueError("project requires a complete bounded wheel profile")
@@ -173,7 +176,7 @@ def project_inputs(snapshot: Path, component: str, *, deadline: float | None = N
         filename = row.get("filename")
         if not isinstance(filename, str) or Path(filename).name != filename:
             raise ValueError("project wheel profile has an invalid filename")
-        archives[filename] = _member(snapshot, project["wheel_inputs"] + "/" + filename)
+        archives[filename] = _member(wheel_directory, filename)
         expected[filename] = row.get("sha256")
     limits = WheelLimits(
         max_archive_bytes=128 << 20, max_expanded_bytes=1 << 30,
@@ -194,11 +197,11 @@ def project_inputs(snapshot: Path, component: str, *, deadline: float | None = N
             if expanded > limits.max_expanded_bytes:
                 raise ValueError("project wheel closure exceeds its expanded byte budget")
             if (
-                re.sub(r"[-_.]+", "-", facts.name).lower() != row["name"]
-                or facts.version != row["version"]
-                or facts.requires_python != row["requires_python"]
-                or list(facts.requires_dist) != row["requires_dist"]
-                or list(facts.provides_extras) != row["provides_extras"]
+                re.sub(r"[-_.]+", "-", facts.name).lower() != row.get("name")
+                or facts.version != row.get("version")
+                or facts.requires_python != row.get("requires_python")
+                or list(facts.requires_dist) != row.get("requires_dist")
+                or list(facts.provides_extras) != row.get("provides_extras")
             ):
                 raise ValueError("project wheel metadata differs from its prepared profile")
             distributions.append((
@@ -209,6 +212,30 @@ def project_inputs(snapshot: Path, component: str, *, deadline: float | None = N
             tuple(distributions),
         )
         inputs.verify()
+        yield inputs
+        inputs.verify()
+        if _read(profile_path) != profile:
+            raise ValueError("wheel profile changed during installation")
+
+
+@contextmanager
+def project_inputs(snapshot: Path, component: str, *, deadline: float | None = None):
+    """Hold the prepared complete wheel set through canonical installed health."""
+    selected = select_project(snapshot, component)
+    composition = selected.composition
+    project = selected.project
+    if "profile" not in project or "wheel_inputs" not in project:
+        raise ValueError("installation source has first-party inputs only; prepare its native wheel profile")
+    with wheel_inputs(
+        _member(snapshot, project.get("profile")),
+        _member(snapshot, project["wheel_inputs"]), deadline=deadline,
+    ) as inputs:
+        profile = inputs.receipt()["binding"]
+        if profile.get("release") != {
+            "identity": "source:" + selected.identity.source_commit,
+            "sha256": "sha256:" + selected.identity.assembly_hash,
+        } or profile.get("component") != component:
+            raise ValueError("project wheel profile differs from its source association")
         yield selected, inputs
         inputs.verify()
         observed = select_project(snapshot, component)
@@ -226,19 +253,119 @@ def manager_inputs(snapshot: Path, *, deadline: float | None = None):
         yield inputs
 
 
-def native_selection(selected: ProjectSource, inputs: engine.WheelInstallInputs) -> dict:
-    """Use the constructor's existing source/profile identity before native setup."""
+def _wheel_selection(payload: Path, version: str, inputs: engine.WheelInstallInputs) -> dict:
     inputs.verify()
     receipt = inputs.receipt()
-    packages = engine._package_roots(selected.payload)
+    packages = engine._package_roots(payload)
     distributions = receipt["distributions"]
     local = tuple(sorted(
         engine._package_name(package) for package in packages
         if engine._package_name(package) in distributions
     ))
-    name = engine._package_name(selected.payload)
+    name = engine._package_name(payload)
     if name not in local:
         raise ValueError("native wheel profile omits its application")
+    profile = receipt["binding"]
+    extras = tuple(next(
+        row["selected_extras"] for row in profile["wheels"] if row["name"] == name
+    ))
+    extras = engine._selected_extras(payload, extras)
+    return {
+        "runtime_version": version + ".profile." + receipt["lock_id"][7:23],
+        "payload_hash": engine._wheel_construction_hash(
+            engine._construction_hash(engine._source_files(packages), extras, local), inputs,
+        ),
+        "extras": list(extras), "local_packages": list(local),
+    }
+
+
+def wheel_selection(payload: Path, component: str, inputs: engine.WheelInstallInputs) -> dict:
+    version = sources.payload_package_version(payload, component)
+    if sources.read_source_identity(payload, version, plugin=component) is not None:
+        raise ValueError("Source payloads require their installation-source association")
+    environment = inputs.receipt()["binding"].get("target", {}).get("environment", {})
+    actual = {
+        "implementation_name": sys.implementation.name, "os_name": os.name,
+        "platform_machine": platform.machine(), "platform_system": platform.system(),
+        "platform_python_implementation": platform.python_implementation(),
+        "python_version": ".".join(platform.python_version_tuple()[:2]),
+        "sys_platform": sys.platform,
+    }
+    if any(environment.get(key) != value for key, value in actual.items()):
+        raise ValueError("wheel profile target differs from the selected native interpreter")
+    selection = {"identity": {}, **_wheel_selection(payload, version, inputs)}
+    admitted = os.environ.get("COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION")
+    if admitted is not None and json.loads(admitted) != selection:
+        raise ValueError("Native wheel selection changed after driver admission")
+    return selection
+
+
+def native_current(root: Path, payload: Path, component: str) -> bool:
+    """Read generation-qualified readiness; installation owns content admission."""
+    try:
+        version = sources.payload_package_version(payload, component)
+        if os.path.lexists(payload / sources.SOURCE_FILE):
+            return False
+        current = engine.runtime.current_version(root)
+        if not current:
+            return False
+        slot = Path(engine._native_retained_path(engine.runtime.version_dir(root, current)))
+        record = _read(slot / ".runtime-input-origins.json")
+        if (
+            record.get("schema") != "installer-engine.frozen-input-origins"
+            or type(record.get("version")) is not int or record["version"] != 2
+        ):
+            return False
+        inputs = WheelReuseInputs(
+            current, json.dumps(record["wheel_inputs"], sort_keys=True, separators=(",", ":"), allow_nan=False),
+            time.monotonic() + 60,
+        )
+        receipt = inputs.receipt()
+        name = engine._package_name(payload)
+        profile_wheels = receipt["binding"]["wheels"]
+        if (
+            name not in receipt["distributions"]
+            or not isinstance(profile_wheels, list) or not 0 < len(profile_wheels) <= 256
+            or receipt["distributions"] != {
+                row["name"]: {key: row[key] for key in ("version", "filename", "sha256")}
+                for row in profile_wheels
+            }
+            or len(profile_wheels) != len(receipt["distributions"])
+            or name not in record.get("local_packages", [])
+            or record.get("extras", []) != list(engine._selected_extras(
+                payload, tuple(next(row["selected_extras"] for row in profile_wheels if row["name"] == name)),
+            ))
+        ):
+            return False
+        if re.fullmatch(
+            re.escape(version + ".profile." + receipt["lock_id"][7:23])
+            + r"(?:[.+]repair\.[0-9a-f]{32})?", current,
+        ) is None:
+            return False
+        manifest = _read(root / "deploy-manifest.json")
+        source = manifest.get("source", {})
+        if not isinstance(source, dict):
+            return False
+        fingerprint = source.get("content_hash")
+        if (
+            source.get("version") != version or source.get("plugin") != component
+            or not isinstance(fingerprint, str) or re.fullmatch(r"[0-9a-f]{64}", fingerprint) is None
+            or manifest.get("runtime_version") != current or manifest.get("runtime_source")
+        ):
+            return False
+        # Selectors, payload identity, profile, manifest and completion are read
+        # afresh. Do not turn this startup hint into a second integrity scanner.
+        return engine.runtime.is_complete(
+            root, current, expect_hash=fingerprint,
+        ) and engine.runtime.slot_python(root, current) is not None
+    except (OSError, KeyError, TypeError, ValueError):
+        return False
+
+
+def native_selection(selected: ProjectSource, inputs: engine.WheelInstallInputs) -> dict:
+    """Use the constructor's existing source/profile identity before native setup."""
+    selection = _wheel_selection(selected.payload, selected.identity.runtime_version, inputs)
+    distributions = inputs.receipt()["distributions"]
     artifact = selected.project.get("artifact")
     artifacts = artifact.get("wheels") if isinstance(artifact, dict) else None
     if not isinstance(artifacts, list) or not artifacts or len(artifacts) > 256:
@@ -251,25 +378,16 @@ def native_selection(selected: ProjectSource, inputs: engine.WheelInstallInputs)
         if package_name in associated:
             raise ValueError("native first-party wheel associations are ambiguous")
         associated[package_name] = row
-    for package_name in local:
+    for package_name in selection["local_packages"]:
         row = associated.get(package_name, {})
         if any(
             distributions[package_name][key] != row.get(key) for key in ("filename", "sha256")
         ):
             raise ValueError("native first-party wheel differs from its source association")
-    profile = receipt["binding"]
-    extras = tuple(next(
-        row["selected_extras"] for row in profile["wheels"] if row["name"] == name
-    ))
-    extras = engine._selected_extras(selected.payload, extras)
     return {
         "identity": sources.manifest_fields(selected.identity),
         "source_descriptor": selected.source_descriptor,
-        "runtime_version": selected.identity.runtime_version + ".profile." + receipt["lock_id"][7:23],
-        "payload_hash": engine._wheel_construction_hash(
-            engine._construction_hash(engine._source_files(packages), extras, local), inputs,
-        ),
-        "extras": list(extras), "local_packages": list(local),
+        **selection,
     }
 
 
@@ -443,68 +561,85 @@ def native_session(
     expected_version: str, expected_hash: str, repair: bool = False,
 ) -> int:
     """Retain a completed wheel candidate while its native owner settles setup."""
-    if base_python.resolve(strict=True) != Path(sys.executable).resolve(strict=True):
-        raise ValueError("source construction must use its selected base interpreter")
-    if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", health_module):
-        raise ValueError("source construction requires an ordinary application module")
     with project_inputs(snapshot, component) as (selected, inputs):
         if sources.read_source_identity(
             payload, selected.identity.package_version, plugin=component,
         ) != selected.identity:
             raise ValueError("invocation payload differs from selected installation source")
-        selection = native_selection(selected, inputs)
-        if selection["payload_hash"] != expected_hash or selection["runtime_version"] != expected_version:
-            raise ValueError("native source/profile selection changed before construction")
-        version = expected_version + (".repair." + uuid.uuid4().hex if repair else "")
-        with engine.numbered_candidate(
-            root, version, plugin=selected.payload, uv=uv, base_python=base_python,
-            health_module=health_module, extras=tuple(selection["extras"]),
-            local_packages=tuple(selection["local_packages"]), wheel_inputs=inputs,
+        return _native_candidate_session(
+            selected.payload, root, inputs, native_selection(selected, inputs),
+            uv=uv, base_python=base_python, health_module=health_module,
+            expected_version=expected_version, expected_hash=expected_hash, repair=repair,
             application=_member(snapshot, selected.project["application"])
             if "application" in selected.project else None,
-            process_retention=True, reuse_generations=False,
-            expected_source_identity=selection["identity"],
-        ) as candidate:
-            if candidate.payload_hash != expected_hash:
-                raise ValueError("native candidate differs from its admitted construction inputs")
-            print(json.dumps({
-                "admission": "reuse", "version": candidate.slot.name,
-                "payload_hash": candidate.payload_hash, "reused": candidate.reused,
-            }), flush=True)
-            for line in sys.stdin:
-                if len(line) > 4096:
-                    raise ValueError("native construction command exceeds its protocol bound")
-                request = json.loads(line)
-                if not isinstance(request, dict):
-                    raise ValueError("native construction command must be an object")
-                command = request.get("command")
-                if command == "complete":
-                    if request.get("payload_hash") != candidate.payload_hash or request.get(
-                        "retain_helpers", False,
-                    ) is not True:
-                        raise ValueError("native completion differs from its retained candidate")
-                    inputs.verify()
-                    print(json.dumps({"complete": True}), flush=True)
-                elif command == "settled":
-                    print(json.dumps({"settled": True}), flush=True)
-                    return 0
-                elif command == "abort":
-                    print(json.dumps({"aborted": True, "candidate_retained": True}), flush=True)
-                    return 1
-                else:
-                    raise ValueError("unsupported native construction command")
+        )
+
+
+def _native_candidate_session(
+    payload: Path, root: Path, inputs: engine.WheelInstallInputs, selection: dict, *,
+    uv: Path, base_python: Path, health_module: str, expected_version: str, expected_hash: str,
+    repair: bool = False, application: Path | None = None,
+    nested_environment: bool = False,
+) -> int:
+    if base_python.resolve(strict=True) != Path(sys.executable).resolve(strict=True):
+        raise ValueError("native construction must use its selected base interpreter")
+    if not re.fullmatch(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*", health_module):
+        raise ValueError("native construction requires an ordinary application module")
+    if selection["payload_hash"] != expected_hash or selection["runtime_version"] != expected_version:
+        raise ValueError("native source/profile selection changed before construction")
+    version = expected_version + (".repair." + uuid.uuid4().hex if repair else "")
+    with engine.numbered_candidate(
+        root, version, plugin=payload, uv=uv, base_python=base_python,
+        health_module=health_module, extras=tuple(selection["extras"]),
+        local_packages=tuple(selection["local_packages"]), wheel_inputs=inputs,
+        application=application, process_retention=True, reuse_generations=False,
+        nested_environment=nested_environment,
+        expected_source_identity=selection["identity"],
+    ) as candidate:
+        if candidate.payload_hash != expected_hash:
+            raise ValueError("native candidate differs from its admitted construction inputs")
+        print(json.dumps({
+            "admission": "reuse", "version": candidate.slot.name,
+            "payload_hash": candidate.payload_hash, "reused": candidate.reused,
+        }), flush=True)
+        for line in sys.stdin:
+            if len(line) > 4096:
+                raise ValueError("native construction command exceeds its protocol bound")
+            request = json.loads(line)
+            if not isinstance(request, dict):
+                raise ValueError("native construction command must be an object")
+            command = request.get("command")
+            if command == "complete":
+                if request.get("payload_hash") != candidate.payload_hash or request.get(
+                    "retain_helpers", False,
+                ) is not True:
+                    raise ValueError("native completion differs from its retained candidate")
+                inputs.verify()
+                print(json.dumps({"complete": True}), flush=True)
+            elif command == "settled":
+                print(json.dumps({"settled": True}), flush=True)
+                return 0
+            elif command == "abort":
+                print(json.dumps({"aborted": True, "candidate_retained": True}), flush=True)
+                return 1
+            else:
+                raise ValueError("unsupported native construction command")
     return 1
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
-    parser.add_argument("--install-source", required=True, type=Path)
+    source = parser.add_mutually_exclusive_group()
+    source.add_argument("--install-source", type=Path)
+    source.add_argument("--wheel-profile", type=Path)
+    parser.add_argument("--wheel-directory", type=Path)
     parser.add_argument("--component", required=True)
     parser.add_argument("--payload", type=Path)
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--native-inputs", action="store_true")
     mode.add_argument("--native-session", action="store_true")
     mode.add_argument("--install-application", action="store_true")
+    mode.add_argument("--native-current", action="store_true")
     parser.add_argument("--root", type=Path)
     parser.add_argument("--uv", type=Path)
     parser.add_argument("--base-python", type=Path)
@@ -512,12 +647,54 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-runtime-version")
     parser.add_argument("--expected-payload-hash")
     parser.add_argument("--repair", action="store_true")
+    parser.add_argument("--nested-environment", action="store_true")
     parser.add_argument("arguments", nargs=argparse.REMAINDER)
     args = parser.parse_args(argv)
     if args.arguments and (
         not args.install_application or args.arguments[0] != "--"
     ):
         parser.error("application arguments require --install-application and a -- separator")
+    if args.nested_environment and not (args.wheel_profile is not None and args.native_session):
+        parser.error("--nested-environment requires a closed-wheel native construction session")
+    if args.native_current:
+        if (
+            args.root is None or args.payload is None
+            or any(value is not None for value in (
+                args.install_source, args.wheel_profile, args.wheel_directory,
+                args.uv, args.base_python, args.health_module,
+                args.expected_runtime_version, args.expected_payload_hash,
+            )) or args.repair
+        ):
+            parser.error("native readiness requires only root, payload and component")
+        return 0 if native_current(args.root, args.payload, args.component) else 1
+    if args.install_source is None and args.wheel_profile is None:
+        parser.error("select an installation source or closed-wheel profile")
+    if args.wheel_profile is not None:
+        if args.wheel_directory is None or args.payload is None:
+            parser.error("closed wheels require a profile, wheel directory and payload")
+        construction = (
+            args.root, args.uv, args.base_python, args.health_module,
+            args.expected_runtime_version, args.expected_payload_hash,
+        )
+        if args.native_session:
+            if any(value is None for value in construction):
+                parser.error("native construction requires root, uv, base Python, module and selection")
+        elif not args.native_inputs or any(value is not None for value in construction) or args.repair:
+            parser.error("closed wheels require --native-inputs or --native-session")
+        with wheel_inputs(args.wheel_profile, args.wheel_directory) as inputs:
+            selection = wheel_selection(args.payload, args.component, inputs)
+            if args.native_inputs:
+                print(json.dumps(selection, sort_keys=True, separators=(",", ":")))
+                return 0
+            return _native_candidate_session(
+                args.payload, args.root, inputs, selection,
+                uv=args.uv, base_python=args.base_python, health_module=args.health_module,
+                expected_version=args.expected_runtime_version, expected_hash=args.expected_payload_hash,
+                repair=args.repair,
+                nested_environment=args.nested_environment,
+            )
+    if args.wheel_directory is not None:
+        parser.error("--wheel-directory requires --wheel-profile")
     construction = (
         args.root, args.uv, args.base_python, args.health_module,
         args.expected_runtime_version, args.expected_payload_hash,

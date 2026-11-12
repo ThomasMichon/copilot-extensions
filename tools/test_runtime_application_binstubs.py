@@ -1347,12 +1347,24 @@ def test_generated_install_verifies_actual_long_repair_slot(application, host_na
 def test_retention_bootstrap_uses_the_completed_application_environment(
     application, foreign_interpreter,
 ):
+    import runtime_launcher
+
     root, slot, caller, environment = application
     environment["UV_PYTHON"] = sys.executable
     extension = ".cmd" if os.name == "nt" else ".sh"
     installed = invoke(slot / ("install" + extension), [], caller, environment)
     assert installed.returncode == 0, installed.stdout + installed.stderr
     completion = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
+    identity = runtime_launcher.runtime_identity(slot)
+    metadata = (
+        slot / engine.runtime.COMPLETE_MARKER,
+        slot / ".runtime-bootstrap" / "runtime-generation",
+    )
+    before = {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata}
+    reused = invoke(slot / ("install" + extension), [], caller, environment)
+    assert reused.returncode == 0, reused.stdout + reused.stderr
+    assert runtime_launcher.runtime_identity(slot) == identity
+    assert {path: (path.read_bytes(), path.stat().st_mtime_ns) for path in metadata} == before
     python = sys.executable if foreign_interpreter else str(engine.runtime.slot_python(root, slot.name))
     interpreters = [python]
     if os.name == "nt" and not foreign_interpreter:
@@ -1360,7 +1372,8 @@ def test_retention_bootstrap_uses_the_completed_application_environment(
     for python in interpreters:
         result = subprocess.run(
             [python, "-I", "-S", "-B", "-X", "utf8",
-             str(slot / ".runtime-bootstrap" / "runtime_launcher.py"), "-m", "fixture_app", "--fail"],
+             str(slot / ".runtime-bootstrap" / "runtime_launcher.py"),
+             "--runtime-identity", identity, "-m", "fixture_app", "--fail"],
             executable=python, cwd=caller, env=environment,
             capture_output=True, text=True, encoding="utf-8", timeout=30,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
@@ -1624,6 +1637,44 @@ def test_regular_install_reuses_canonical_completion_without_restamping(applicat
     assert second.returncode == 0, second.stdout + second.stderr
     assert (marker.read_bytes(), marker.stat().st_mtime_ns) == before
     assert (root / "current-version").read_text().strip() == slot.name
+
+
+def test_fresh_repair_generation_replaces_selection_and_retires_old_frontend(application):
+    root, slot, caller, environment = application
+    environment["UV_PYTHON"] = sys.executable
+    incoming = slot.with_name(slot.name + ".repair." + "d" * 32)
+    assert not (slot / ".venv").exists()
+    shutil.copytree(slot, incoming)
+    extension = ".ps1" if os.name == "nt" else ".sh"
+    first = invoke(slot / ("install" + extension), [], caller, environment)
+    assert first.returncode == 0, first.stdout + first.stderr
+    original = (slot / engine.runtime.COMPLETE_MARKER).read_bytes()
+    assert not (incoming / ".venv").exists()
+    updated = invoke(incoming / ("install" + extension), [], caller, environment)
+    assert updated.returncode == 0, updated.stdout + updated.stderr
+    assert json.loads(updated.stdout.splitlines()[-1])["state"] == "installed"
+    for selector in ("current-version", "last-known-good"):
+        assert (root / selector).read_text().strip() == incoming.name
+    assert (slot / engine.runtime.COMPLETE_MARKER).read_bytes() == original
+    selected_python = incoming / ".venv" / (
+        "Scripts/python.exe" if os.name == "nt" else "bin/python"
+    )
+    collected = subprocess.run(
+        [str(selected_python), "-I", "-B", str(incoming / "runtime" / "versioned_runtime.py"),
+         "--root", str(root), "--json", "gc", "--protect-pids", "--min-age-days", "0"],
+        executable=engine._native_retained_path(selected_python),
+        cwd=caller, env=environment, capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert collected.returncode == 0, collected.stdout + collected.stderr
+    assert json.loads(collected.stdout) == {"removed": [slot.name]}
+    assert not slot.exists() and selected_python.is_file()
+    public = Path(environment["HOME"]) / ".local" / "bin" / ("fixture-app" + extension)
+    result = invoke(public, ["--after-replacement"], caller, environment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    facts = json.loads(result.stdout)
+    assert Path(facts["prefix"]).samefile(incoming / ".venv")
+    assert facts["args"] == ["--after-replacement"]
 
 
 @pytest.mark.parametrize("extension", [".cmd", ".ps1", ".sh"])

@@ -4,8 +4,8 @@ The multi-account seam.  agent-codespaces' host-side ``gh`` calls (``gh
 codespace list/create/delete/stop/ssh``, ``gh api``) must run under the ``gh``
 account that can access the *target repo's* GitHub org -- not whatever account
 happens to be active in the ``gh`` keyring.  With two accounts backing
-different orgs (e.g. ``ThomasMichon`` for ``github/*`` and ``example-operator``
-for ``example-org/*``), running under the wrong one hides/《403》s the other
+different repos (for example ``operator-public`` for selected public repos and
+``operator-work`` for work repos), running under the wrong one hides/《403》s the other
 org's CodeSpaces entirely (#195, #190).
 
 The owner->login mapping is owned by **agent-worktrees** (its ``repos.yaml``
@@ -15,9 +15,9 @@ each plugin has its own venv and a cross-plugin Python import is fragile -- and
 mints a per-account ``GH_TOKEN`` via ``gh auth token --user <login>`` for the
 subprocess environment.
 
-Without explicit installation context, lookups degrade to **ambient** behavior
-when agent-worktrees or ``gh`` is unavailable, or when no account maps for the owner -- so wiring this
-in is additive and safe: a repo with no mapping behaves exactly as before.
+Without a resolved identity preference, ambient authentication remains available.
+Named store lookups ignore inherited tokens; an inherited token is reusable only
+after the existing identity verifier confirms the selected account.
 With explicit context, lookups use the same-cell peer boundary; rejected
 receipts propagate and cannot select ambient authentication.
 """
@@ -50,6 +50,7 @@ class AccountInventory:
     repositories: dict[str, str | None] = field(default_factory=dict)
     owners: dict[str, str | None] = field(default_factory=dict)
     unmapped_owner_fallback: bool = False
+    default_account: str | None = None
 
     def account_for(self, target: str) -> str | None:
         key = target.casefold() if "/" in target else target
@@ -58,9 +59,11 @@ class AccountInventory:
         owner = target.split("/", 1)[0]
         if owner.casefold() in self.owners:
             return self.owners[owner.casefold()]
+        if self.default_account:
+            return self.default_account
         if self.unmapped_owner_fallback:
             return owner or None
-        return account_for_repo(target)
+        return _legacy_account_for_repo(target)
 
 
 def _creation_flags() -> int:
@@ -73,21 +76,18 @@ def _agent_worktrees_bin() -> str | None:
 
 
 def account_for_repo(slug: str | None) -> str | None:
-    """Resolve an account without reusing another installation's cached state."""
+    """Resolve through a fresh, policy-qualified account snapshot."""
     if worktrees.explicit_context():
         worktrees.validate_context()
-        return _account_for_repo.__wrapped__(slug)
-    return _account_for_repo(slug)
+    if not slug:
+        return None
+    return account_inventory().account_for(slug)
 
 
-@functools.lru_cache(maxsize=256)
-def _account_for_repo(slug: str | None) -> str | None:
-    """Resolve the gh login for a repo ``owner/name`` slug, or None.
-
-    Shells ``agent-worktrees repos account-for <slug>``.  Returns None when
-    agent-worktrees is absent, errors, or reports no preference (the caller
-    then falls back to the ambient ``gh`` account -- today's behavior).
-    """
+def _legacy_account_for_repo(slug: str | None) -> str | None:
+    """Resolve a legacy target afresh without retaining old owner-derived hints."""
+    if worktrees.explicit_context():
+        worktrees.validate_context()
     if not slug:
         return None
     result = _lookup("repos", "account-for", slug)
@@ -99,8 +99,8 @@ def _account_for_repo(slug: str | None) -> str | None:
     return login or None
 
 
-def token_for_account(login: str | None) -> str | None:
-    """Avoid reusing credentials across explicit installation contexts."""
+def token_for_account(login: str | None, *, fresh: bool = False) -> str | None:
+    """Keep context isolation; observation waves can bypass the process cache."""
     explicit = worktrees.explicit_context()
     if explicit:
         worktrees.validate_context()
@@ -110,7 +110,7 @@ def token_for_account(login: str | None) -> str | None:
         provider_token = credential_token(login)
         if provider_token is not None:
             return provider_token
-    if explicit:
+    if explicit or fresh:
         return _token_for_account.__wrapped__(login)
     return _token_for_account(login)
 
@@ -120,15 +120,24 @@ def _token_for_account(login: str | None) -> str | None:
     """Mint a GitHub.com token for ``login``, independent of ambient ``GH_HOST``.
 
     Returns None when ``gh`` is unavailable or ``login`` is not an
-    authenticated ``gh`` account (caller then uses ambient auth).
+    authenticated ``gh`` account. Unavailability does not select another identity.
     """
     if not login or shutil.which("gh") is None:
         return None
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key.upper() not in {
+            "GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "GITHUB_ENTERPRISE_TOKEN",
+            "GH_DEBUG", "GH_FORCE_TTY",
+        }
+    }
+    environment.update(GH_HOST="github.com", GH_PROMPT_DISABLED="1")
     try:
         result = subprocess.run(
             ["gh", "auth", "token", "--hostname", "github.com", "--user", login],
             capture_output=True, text=True, timeout=10,
             creationflags=_creation_flags(),
+            env=environment,
         )
     except Exception:
         return None
@@ -143,21 +152,24 @@ def env_for_account(login: str | None, base: dict | None = None) -> dict:
     A copy of ``base`` (default ``os.environ``) with ``GH_TOKEN`` set to the
     account's token when one can be minted.  ``gh`` prefers ``GH_TOKEN`` over
     the keyring active account, so this pins the subprocess to ``login``
-    without a global ``gh auth switch``.  When no token is available the env is
-    returned unchanged (ambient auth).
+    without a global ``gh auth switch``. Only an unpinned identity preserves
+    ambient authentication without verification.
     """
     env = dict(base if base is not None else os.environ)
-    token = token_for_account(login)
+    if not login:
+        return env
+    from .allocation import verified_account_token
+
+    token = verified_account_token(login)
     if token:
         # GH_TOKEN wins in gh; drop a stale GITHUB_TOKEN so it can't shadow it.
         env["GH_TOKEN"] = token
         env["GH_HOST"] = "github.com"
         env.pop("GITHUB_TOKEN", None)
-    elif login:
-        from .picker_auth import credential_env
-
-        if credential_env(login) is not None:
-            raise RuntimeError(f"CodeSpace credential for {login} is unavailable; authorize again.")
+    else:
+        raise RuntimeError(
+            f"Selected CodeSpace credential for '{login}' is unavailable; no ambient fallback."
+        )
     return env
 
 
@@ -369,16 +381,28 @@ def _account_inventory() -> AccountInventory:
         for owner, login in raw.items()
     ):
         raise AccountInventoryError("agent-worktrees returned malformed account mapping")
-    seen: list[str] = []
-    for login in raw.values():
-        if login not in seen:
-            seen.append(login)
     repositories: dict[str, str | None] = {}
     owners: dict[str, str | None] = {}
     supported = (
         isinstance(data, dict) and type(data.get("resolution_version")) is int
         and data["resolution_version"] == 1
     )
+    preferred = data.get("default_account")
+    if preferred is not None and (
+        not isinstance(preferred, str) or not preferred
+        or any(char.isspace() for char in preferred)
+    ):
+        raise AccountInventoryError("agent-worktrees returned a malformed preferred account")
+    if preferred is not None and (
+        not supported or data.get("unmapped_owner_fallback") is not False
+    ):
+        raise AccountInventoryError("agent-worktrees preferred account contract is unsupported")
+    if any(
+        owner.casefold() == "github.com:*"
+        and login.casefold() != (preferred or "").casefold()
+        for owner, login in raw.items()
+    ):
+        raise AccountInventoryError("agent-worktrees preferred account contract is unsupported")
     if supported:
         for name, destination in (
             ("repository_accounts", repositories), ("owner_accounts", owners),
@@ -398,14 +422,21 @@ def _account_inventory() -> AccountInventory:
                         "agent-worktrees returned conflicting account resolution metadata",
                     )
                 destination[normalized] = value
+    candidates = [preferred, *raw.values()]
+    seen: list[str] = []
+    seen_keys: set[str] = set()
+    for login in candidates:
+        if login and login.casefold() not in seen_keys:
+            seen.append(login)
+            seen_keys.add(login.casefold())
     return AccountInventory(
         tuple(seen), repositories, owners,
         supported and data.get("unmapped_owner_fallback") is True,
+        preferred,
     )
 
 
 def clear_caches() -> None:
     """Drop memoized lookups (test hook / after an auth change)."""
-    _account_for_repo.cache_clear()
     _token_for_account.cache_clear()
     _mapped_accounts.cache_clear()

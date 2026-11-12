@@ -23,6 +23,7 @@ _REQUIRED_TOOLS = (
     "launch_wrapper_assets_ref.py",
     "materialize_installer_engine.py",
     "materialize_launch_wrapper_assets.py",
+    "materialize_payload_invocation.py",
 )
 
 
@@ -139,6 +140,184 @@ def test_scratch_git_handles_long_paths_without_changing_repository_configuratio
     assert not native_test_path(scratch).exists()
     assert configuration.read_bytes() == before
     assert _git(["config", "--get", "core.longpaths"], repo) == "false"
+
+
+def test_local_composition_uses_exact_inputs_and_main_versions(
+    repo: Path, tmp_path: Path, monkeypatch,
+) -> None:
+    import local_runtime_promotion as local
+    from installer_engine_ref import PYTHON_FILES, SUPPORT_FILES
+
+    _write_standalone(repo, "worktree-manager", "0.4.0-dev8")
+    canonical = repo / "libs/installer-engine"
+    canonical.mkdir(parents=True)
+    for name in (*PYTHON_FILES, *SUPPORT_FILES):
+        (canonical / name).write_text("# synthetic canonical asset\n", encoding="utf-8")
+    library = repo / "libs/shared"
+    library.mkdir()
+    (library / "pyproject.toml").write_text(
+        '[project]\nname = "shared"\nversion = "0.3.0-dev8"\n', encoding="utf-8",
+    )
+    _write_plugin(repo, "demo-plugin", "0.9.0-dev8")
+    _write_marketplace(repo, {"demo-plugin": "0.9.0-dev8"})
+    main = _commit(repo, "shipped versions")
+    _git(["checkout", "-q", "dev"], repo)
+    _write_standalone(repo, "worktree-manager", "0.1.0-dev1")
+    library.mkdir(parents=True)
+    (library / "pyproject.toml").write_text(
+        '[project]\nname = "shared"\nversion = "0.1.0-dev1"\n', encoding="utf-8",
+    )
+    canonical.mkdir()
+    for name in (*PYTHON_FILES, *SUPPORT_FILES):
+        (canonical / name).write_text("# synthetic canonical asset\n", encoding="utf-8")
+    _write_changefile(repo, "pending.json", "demo-plugin", "patch")
+    (repo / "tools/accumulate_bumps.py").write_text(
+        "raise RuntimeError('candidate tools must not execute')\n", encoding="utf-8",
+    )
+    (repo / "README.md").write_text("committed source\n", encoding="utf-8")
+    source = _commit(repo, "selected development source")
+    (repo / "README.md").write_text("unrelated staged work\n", encoding="utf-8")
+    _git(["add", "README.md"], repo)
+    tracked = _git(["ls-files"], repo).splitlines()
+    original = {name: (repo / name).read_bytes() for name in tracked}
+    original_index = (repo / ".git/index").read_bytes()
+    refs = _git(["show-ref"], repo)
+    worktrees = _git(["worktree", "list", "--porcelain"], repo)
+    foreign = tmp_path / "foreign"
+    foreign.mkdir()
+    _git(["init", "-q"], foreign)
+    (foreign / "sentinel").write_bytes(b"untouched\n")
+    _commit(foreign, "foreign source")
+    foreign_index = (foreign / ".git/index").read_bytes()
+    selected = []
+
+    def select_inputs(scratch: Path) -> tuple[str, ...]:
+        selected.append(scratch)
+        assert (scratch / "README.md").read_text(encoding="utf-8") == "committed source\n"
+        assert not (scratch / ".changefiles/pending.json").exists()
+        return ("README.md", "plugins/demo-plugin/plugin.json")
+
+    with monkeypatch.context() as environment:
+        environment.setenv("GIT_DIR", str(foreign / ".git"))
+        environment.setenv("GIT_WORK_TREE", str(foreign))
+        environment.setenv("GIT_INDEX_FILE", str(foreign / ".git/index"))
+        environment.setenv("GIT_CONFIG_COUNT", "1")
+        environment.setenv("GIT_CONFIG_KEY_0", "core.bare")
+        environment.setenv("GIT_CONFIG_VALUE_0", "true")
+        composed = local.compose(repo, source_commit=source, main_seed=main, select_inputs=select_inputs)
+
+    assert composed.source_commit == source and composed.main_seed == main
+    assert composed.export_paths == ("README.md", "plugins/demo-plugin/plugin.json")
+    assert json.loads(_git([
+        "show", f"{composed.tree}:plugins/demo-plugin/plugin.json",
+    ], repo))["version"] == "0.9.0-dev8"
+    for name, version in (("worktree-manager", "0.4.0-dev8"), ("libs/shared", "0.3.0-dev8")):
+        assert f'version = "{version}"' in _git([
+            "show", f"{composed.tree}:{name}/pyproject.toml",
+        ], repo)
+    assert ".changefiles/pending.json" not in _git(["ls-tree", "-r", "--name-only", composed.tree], repo)
+    assert selected and all(not path.exists() for path in selected)
+    assert _git(["show-ref"], repo) == refs
+    assert _git(["worktree", "list", "--porcelain"], repo) == worktrees
+    assert _git(["rev-parse", "HEAD"], repo) == source
+    assert (repo / ".git/index").read_bytes() == original_index
+    assert {name: (repo / name).read_bytes() for name in tracked} == original
+    assert (foreign / ".git/index").read_bytes() == foreign_index
+    assert (foreign / "sentinel").read_bytes() == b"untouched\n"
+    assert local.compose(repo, source_commit=source, main_seed=main).tree == composed.tree
+
+
+def test_local_composition_cleans_scratch_after_selection_failure(repo: Path) -> None:
+    import local_runtime_promotion as local
+
+    source = _git(["rev-parse", "dev"], repo)
+    before = _git(["worktree", "list", "--porcelain"], repo)
+
+    def fail(_scratch: Path) -> tuple[str, ...]:
+        raise ValueError("selected closure refused")
+
+    with pytest.raises(ValueError, match="selected closure refused"):
+        local.compose(repo, source_commit=source, main_seed=source, select_inputs=fail)
+    assert _git(["worktree", "list", "--porcelain"], repo) == before
+    assert _git(["status", "--porcelain"], repo) == ""
+
+
+@pytest.mark.parametrize("kind", ["source", "seed", "unavailable"])
+def test_local_composition_refuses_unpinned_or_unavailable_commits(
+    repo: Path, monkeypatch, kind: str,
+) -> None:
+    import local_runtime_promotion as local
+
+    source = _git(["rev-parse", "dev"], repo)
+    monkeypatch.setattr(pr, "add_scratch_worktree", lambda *a, **k: pytest.fail("scratch created"))
+    with pytest.raises(pr.PromotionError, match="requires an exact|cannot resolve"):
+        local.compose(
+            repo, source_commit="dev" if kind == "source" else source,
+            main_seed="main" if kind == "seed" else "0" * 40 if kind == "unavailable" else source,
+        )
+
+
+def test_promotion_freezes_both_copy_owners_and_imports_exact_candidate(repo: Path, tmp_path: Path):
+    from promotion_frozen_candidate import import_candidate
+    from test_sync_installer_engine import _promotion_installer_source
+
+    _git(["checkout", "-q", "dev"], repo)
+    _promotion_installer_source(repo, stale=True, consumer_names={"agent-vault"})
+    _write_plugin(repo, "agent-vault", "0.1.0-dev1")
+    _write_marketplace(repo, {"demo-plugin": "0.1.0-dev1", "agent-vault": "0.1.0-dev1"})
+    templates = repo / "libs/payload-invocation/templates"
+    templates.mkdir(parents=True)
+    for template in (_TOOLS.parent / "libs/payload-invocation/templates").glob("*.tmpl"):
+        shutil.copyfile(template, templates / template.name)
+    payload = repo / "plugins/agent-vault"
+    manifest = payload / "payload-invocation.json"
+    manifest.write_text(json.dumps({
+        "schema": "copilot-extensions.payload-invocation", "version": 1,
+        "command": "agent-vault", "module": "agent_vault", "purpose": "Vault command",
+        "runtimeRoot": ".agent-vault", "noSelfProvisionEnv": "AGENT_VAULT_NO_SELFPROVISION",
+    }), encoding="utf-8")
+    for suffix in ("sh", "ps1"):
+        (payload / "scripts" / f"resolve-runtime.{suffix}").write_bytes(b"# synthetic resolver\n")
+    (payload / "bin").mkdir()
+    (payload / "bin/agent-vault.ps1").write_bytes(b"# stale generated shim\n")
+    changes = repo / ".changefiles"
+    changes.mkdir()
+    (changes / "20260101-copy-owners.json").write_text(json.dumps({
+        "comment": "Compose both declared copy owners",
+        "changes": [{"plugin": "agent-vault", "type": "patch"}],
+    }), encoding="utf-8")
+    dev = _commit(repo, "canonical copy-owner inputs")
+    tracked = _git(["ls-files"], repo).splitlines()
+    before = {name: (repo / name).read_bytes() for name in tracked}
+    main = _git(["rev-parse", "main"], repo)
+    frozen = tmp_path / "frozen"
+    report = pr.promote(
+        repo=repo, dev_ref=dev, main_ref=main, push=False,
+        prepare_candidate_dir=frozen, promotion_time="2026-01-02T03:04:05Z",
+    )
+    assert report["promoted"] and not report["pushed"]
+    record = import_candidate(
+        frozen, repo=repo, dev_sha=dev, main_before=main, candidate_sha=report["commit"],
+    )
+    checkout = pr.add_scratch_worktree(record["candidate_sha"], repo=repo)
+    try:
+        candidate = checkout / "plugins/agent-vault"
+        copied = candidate / "scripts/installer_engine_commands.py"
+        assert copied.read_bytes() == before["libs/installer-engine/installer_engine_commands.py"]
+        assert copied.read_bytes() != before["plugins/agent-vault/scripts/installer_engine_commands.py"]
+        assert (candidate / "bin/agent-vault.ps1").read_bytes() != before["plugins/agent-vault/bin/agent-vault.ps1"]
+        assert json.loads((candidate / "plugin.json").read_text())["version"] == "0.1.1-dev1"
+        generator = pr._load_module(_TOOLS.parent / "libs/payload-invocation/generate.py", "frozen_invocation")
+        assert generator.process_manifest(
+            candidate / "payload-invocation.json", check=True, canonical_root=checkout,
+        ) == []
+        assert _git(["rev-parse", "HEAD"], checkout) == record["candidate_sha"]
+        assert _git(["rev-parse", "HEAD^{tree}"], checkout) == record["tree"]
+        assert _git(["status", "--porcelain"], checkout) == ""
+    finally:
+        pr.remove_scratch_worktree(checkout, repo=repo)
+    assert _git(["rev-parse", "dev"], repo) == dev
+    assert {name: (repo / name).read_bytes() for name in tracked} == before
 
 
 @pytest.mark.parametrize("bookkeeping", [(), ("state",), ("baseline",), ("state", "baseline")])
@@ -730,6 +909,51 @@ def _write_changefile(repo: Path, name: str, plugin: str, bump_type: str) -> Non
     )
 
 
+def test_promote_bumps_packaged_manifest_receiver_without_repeating_bump(repo: Path):
+    for name, version in (("producer", "0.1.0-dev1"), ("receiver", "0.4.0-dev1")):
+        _write_plugin(repo, name, version)
+    _write_marketplace(repo, {
+        "demo-plugin": "0.1.0-dev1", "producer": "0.1.0-dev1", "receiver": "0.4.0-dev1",
+    })
+    (repo / "plugins/receiver/packaged-assets.json").write_text(json.dumps({
+        "schema": "copilot-extensions.packaged-assets",
+        "version": 1,
+        "canonicalDir": "plugins",
+        "payloadDir": "src/bundle",
+        "files": ["producer/plugin.json", "receiver/plugin.json"],
+    }), encoding="utf-8")
+    _commit(repo, "declare packaged manifest inputs")
+    _git(["branch", "-f", "dev"], repo)
+    _git(["checkout", "-q", "dev"], repo)
+    _write_changefile(repo, "20260101-producer.json", "producer", "patch")
+    _commit(repo, "bump producer only")
+
+    first = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert first["bumps"] == {
+        "producer": ("0.1.0-dev1", "0.1.1-dev1"),
+        "receiver": ("0.4.0-dev1", "0.4.1-dev1"),
+    }
+    for name in ("producer", "receiver"):
+        canonical = _git(["show", f"{first['commit']}:plugins/{name}/plugin.json"], repo)
+        packaged = _git([
+            "show", f"{first['commit']}:plugins/receiver/src/bundle/{name}/plugin.json",
+        ], repo)
+        assert packaged == canonical
+    _git(["update-ref", "refs/heads/main", first["commit"]], repo)
+    (repo / "README.md").write_text("unrelated change\n", encoding="utf-8")
+    _commit(repo, "unrelated change with consumed changefile still on dev")
+
+    second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
+
+    assert second["bumps"] == {}
+    for name in ("producer", "receiver"):
+        path = f"plugins/receiver/src/bundle/{name}/plugin.json"
+        assert _git(["show", f"{second['commit']}:{path}"], repo) == _git([
+            "show", f"{first['commit']}:{path}",
+        ], repo)
+
+
 def test_promote_does_not_reapply_a_changefile_left_behind_on_dev(repo: Path):
     """Regression: a promotion never mutates dev's own tree (by design), so
     an already-consumed changefile can keep sitting there indefinitely (the
@@ -841,15 +1065,15 @@ def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path):
     iterated `plugins/*`, so a promotion round with no new changefile for
     such a consumer would regress its `pyproject.toml` back to dev's stale
     literal, or repeat an already-shipped bump (PR #4514 review)."""
-    _git(["checkout", "-q", "dev"], repo)
-    _write_standalone(repo, "worktree-manager", "0.1.0-dev1")
-    _commit(repo, "add worktree-manager")
-    _git(["checkout", "-q", "main"], repo)
-    first_add = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
-    assert first_add["promoted"] is True
-    _git(["update-ref", "refs/heads/main", first_add["commit"]], repo)
-    _git(["reset", "--hard", "main"], repo)
+    from installer_engine_ref import PYTHON_FILES, SUPPORT_FILES
 
+    _write_standalone(repo, "worktree-manager", "0.1.0-dev1")
+    canonical = repo / "libs/installer-engine"
+    canonical.mkdir(parents=True)
+    for name in (*PYTHON_FILES, *SUPPORT_FILES):
+        (canonical / name).write_text("# synthetic canonical asset\n", encoding="utf-8")
+    _commit(repo, "initial standalone release")
+    _git(["branch", "-f", "dev"], repo)
     _git(["checkout", "-q", "dev"], repo)
     _write_changefile(repo, "20260101-wtm-abc123.json", "worktree-manager", "patch")
     (repo / "worktree-manager" / "src" / "worktree_manager").mkdir(parents=True)
@@ -857,18 +1081,13 @@ def test_promote_preserves_shipped_version_of_a_standalone_consumer(repo: Path):
         "x = 1\n", encoding="utf-8",
     )
     _commit(repo, "worktree-manager: change + changefile")
-    _git(["checkout", "-q", "main"], repo)
-
     first = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert first["bumps"] == {"worktree-manager": ("0.1.0-dev1", "0.1.1-dev1")}
     _git(["update-ref", "refs/heads/main", first["commit"]], repo)
-    _git(["reset", "--hard", "main"], repo)
 
     # Unrelated new content on dev; this round drives NO new bump at all.
-    _git(["checkout", "-q", "dev"], repo)
     (repo / "worktree-manager" / "README.md").write_text("y\n", encoding="utf-8")
     _commit(repo, "worktree-manager: unrelated change only")
-    _git(["checkout", "-q", "main"], repo)
 
     second = pr.promote(repo=repo, dev_ref="dev", main_ref="main", push=False)
     assert second["promoted"] is True
@@ -1126,6 +1345,8 @@ def test_promote_syncs_instruction_projections_after_a_version_bump(tmp_path: Pa
     _git(["init", "-q", "-b", "main"], root)
     _git(["config", "user.name", "Test"], root)
     _git(["config", "user.email", "test@example.com"], root)
+    if os.name == "nt":
+        _git(["config", "core.longpaths", "true"], root)
     (root / "tools").mkdir()
     for name in _REQUIRED_TOOLS:
         shutil.copy(_TOOLS / name, root / "tools" / name)

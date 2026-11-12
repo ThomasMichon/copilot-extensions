@@ -6,6 +6,7 @@ import shutil
 import subprocess
 import tempfile
 import threading
+from dataclasses import asdict, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from agent_worktrees.lease_config import LeaseSettings
 from agent_worktrees.lease_protocol import (
     LeaseRecord,
     ProtocolError,
+    ReturnedGeneration,
     format_timestamp,
     ref_for,
     resource,
@@ -85,47 +87,70 @@ def test_released_only_rechecks_holder_after_cas_race(monkeypatch):
     assert len(transitions) == 1
 
 
-def test_return_proof_survives_successor_and_compaction_gc(settings, remote):
-    moment = BASE
+@pytest.mark.parametrize("phase", ["original-return", "successor", "final-release", "compaction"])
+def test_return_proof_survives_successor_and_compaction_gc(return_proof_history, phase):
+    remote, settings, history = return_proof_history
+    start = {
+        "original-return": "first", "successor": "returned",
+        "final-release": "renewed-transfer", "compaction": "final",
+    }[phase]
+    ref = ref_for(settings.ref_prefix, resource("codespace", "returned"))
+    git(f"--git-dir={remote}", "update-ref", ref, history[start][0])
+    moment = BASE + timedelta(seconds={
+        "original-return": 1, "successor": 3, "final-release": 6, "compaction": 7,
+    }[phase])
     client = store(settings)
     client._now = lambda: moment
-    first = client.acquire("codespace", "returned", "first/project/work")
-    moment += timedelta(seconds=1)
-    renewed = client.renew("codespace", "returned", first.oid)
-    assert renewed.record.lease_id == first.record.lease_id
-    moment += timedelta(seconds=1)
-    returned = client.release("codespace", "returned", renewed.oid, retain_return_proof=True)
+    first_oid, first = history["first"]
+    returned_oid, returned = history["returned"]
     original_proof = [{
-        "lease_id": first.record.lease_id, "holder": first.record.holder,
-        "released_at": returned.record.renewed_at,
+        "lease_id": first.lease_id, "holder": first.holder,
+        "released_at": returned.renewed_at,
     }]
-    assert returned.to_dict()["returned_generations"] == original_proof
-    moment += timedelta(seconds=1)
-    successor = client.acquire("codespace", "returned", "next/project/work", released_only=True)
-    assert successor.to_dict()["returned_generations"] == original_proof
-    moment += timedelta(seconds=1)
-    transferred = client.transfer("codespace", "returned", successor.oid, "third/project/work")
-    moment += timedelta(seconds=1)
-    transferred = client.renew("codespace", "returned", transferred.oid)
-    moment += timedelta(seconds=1)
-    final = client.release("codespace", "returned", transferred.oid)
-    proofs = final.to_dict()["returned_generations"]
-    assert proofs == original_proof + [{
-        "lease_id": transferred.record.lease_id, "holder": transferred.record.holder,
-        "released_at": final.record.renewed_at,
+    final_oid, final = history["final"]
+    proofs = original_proof + [{
+        "lease_id": final.lease_id, "holder": final.holder,
+        "released_at": final.renewed_at,
     }]
-    assert successor.record.lease_id not in {item["lease_id"] for item in proofs}
-    with pytest.raises(LeaseLost):
-        client.release("codespace", "returned", renewed.oid, retain_return_proof=True)
-    assert client.inspect("codespace", "returned").oid == final.oid
-    moment += timedelta(days=31)
-    assert len(client.squash_stale(retention_days=30, kind="codespace")) == 1
-    git(f"--git-dir={remote}", "reflog", "expire", "--expire=now", "--all")
-    git(f"--git-dir={remote}", "gc", "--prune=now")
-    assert git(f"--git-dir={remote}", "cat-file", "-e", returned.oid, check=False).returncode != 0
-    compacted = client.inspect("codespace", "returned")
-    assert compacted.to_dict()["returned_generations"] == proofs
-    assert compacted.record.lease_id == final.record.lease_id
+    if phase == "original-return":
+        renewed = client.renew("codespace", "returned", first_oid)
+        assert renewed.record.lease_id == first.lease_id
+        assert renewed.record.returned_generations == ()
+        moment += timedelta(seconds=1)
+        actual = client.release("codespace", "returned", renewed.oid, retain_return_proof=True)
+        assert actual.to_dict()["returned_generations"] == original_proof
+    elif phase == "successor":
+        successor = client.acquire("codespace", "returned", "next/project/work", released_only=True)
+        assert successor.to_dict()["returned_generations"] == original_proof
+        moment += timedelta(seconds=1)
+        transferred = client.transfer("codespace", "returned", successor.oid, "third/project/work")
+        assert transferred.to_dict()["returned_generations"] == original_proof
+        moment += timedelta(seconds=1)
+        renewed = client.renew("codespace", "returned", transferred.oid)
+        assert renewed.record.lease_id == transferred.record.lease_id
+        assert renewed.to_dict()["returned_generations"] == original_proof
+        assert successor.record.lease_id not in {
+            item["lease_id"] for item in renewed.to_dict()["returned_generations"]
+        }
+    elif phase == "final-release":
+        actual = client.release("codespace", "returned", history["renewed-transfer"][0])
+        assert actual.to_dict()["returned_generations"] == proofs
+        assert history["successor"][1].lease_id not in {
+            item["lease_id"] for item in actual.to_dict()["returned_generations"]
+        }
+        with pytest.raises(LeaseLost):
+            client.release("codespace", "returned", history["renewed"][0], retain_return_proof=True)
+        assert client.inspect("codespace", "returned").oid == actual.oid
+    else:
+        assert client.inspect("codespace", "returned").oid == final_oid
+        moment += timedelta(days=31)
+        assert len(client.squash_stale(retention_days=30, kind="codespace")) == 1
+        git(f"--git-dir={remote}", "reflog", "expire", "--expire=now", "--all")
+        git(f"--git-dir={remote}", "gc", "--prune=now")
+        assert git(f"--git-dir={remote}", "cat-file", "-e", returned_oid, check=False).returncode != 0
+        compacted = client.inspect("codespace", "returned")
+        assert compacted.to_dict()["returned_generations"] == proofs
+        assert compacted.record.lease_id == final.lease_id
 
 
 def test_return_proof_evicts_only_the_oldest_generation(monkeypatch):
@@ -292,6 +317,80 @@ def store(settings: LeaseSettings, now: datetime = BASE) -> GitLeaseStore:
         sleep=lambda _seconds: None,
         jitter=lambda _low, _high: 0,
     )
+
+
+@pytest.fixture(scope="session")
+def _return_proof_history_seed(tmp_path_factory):
+    """Seed canonical prefixes; each case exercises its own real Git effects."""
+    remote = tmp_path_factory.mktemp("return-proof-seed") / "coordination.git"
+    first = LeaseRecord(
+        schema_version=1, resource=asdict(resource("codespace", "returned")),
+        state="leased", event="acquire", lease_id="1" * 32, holder="first/project/work",
+        issued_at=format_timestamp(BASE), renewed_at=format_timestamp(BASE),
+        expires_at=format_timestamp(BASE + timedelta(seconds=60)), ttl_seconds=60, context={},
+    )
+    renewed = replace(
+        first, event="renew", renewed_at=format_timestamp(BASE + timedelta(seconds=1)),
+        expires_at=format_timestamp(BASE + timedelta(seconds=61)),
+    )
+    released_at = format_timestamp(BASE + timedelta(seconds=2))
+    returned = replace(
+        renewed, schema_version=2, state="released", event="release", renewed_at=released_at,
+        expires_at=released_at, ttl_seconds=0,
+        returned_generations=(ReturnedGeneration(first.lease_id, first.holder, released_at),),
+    )
+    successor = replace(
+        returned, state="leased", event="acquire", lease_id="2" * 32, holder="next/project/work",
+        ttl_seconds=60,
+        issued_at=format_timestamp(BASE + timedelta(seconds=3)),
+        renewed_at=format_timestamp(BASE + timedelta(seconds=3)),
+        expires_at=format_timestamp(BASE + timedelta(seconds=63)),
+    )
+    transferred = replace(
+        successor, event="transfer", lease_id="3" * 32, holder="third/project/work",
+        issued_at=format_timestamp(BASE + timedelta(seconds=4)),
+        renewed_at=format_timestamp(BASE + timedelta(seconds=4)),
+        expires_at=format_timestamp(BASE + timedelta(seconds=64)),
+    )
+    renewed_transfer = replace(
+        transferred, event="renew", renewed_at=format_timestamp(BASE + timedelta(seconds=5)),
+        expires_at=format_timestamp(BASE + timedelta(seconds=65)),
+    )
+    final_at = format_timestamp(BASE + timedelta(seconds=6))
+    final = replace(
+        renewed_transfer, state="released", event="release", renewed_at=final_at, expires_at=final_at,
+        ttl_seconds=0,
+        returned_generations=returned.returned_generations + (
+            ReturnedGeneration(transferred.lease_id, transferred.holder, final_at),
+        ),
+    )
+    records = [
+        ("first", first), ("renewed", renewed), ("returned", returned), ("successor", successor),
+        ("transferred", transferred), ("renewed-transfer", renewed_transfer), ("final", final),
+    ]
+    history = {}
+    with _published_seed_environment(tmp_path_factory):
+        git("init", "--template=", "--bare", str(remote))
+        tree = git(f"--git-dir={remote}", "mktree", input_text="").stdout.strip()
+        parent = None
+        for name, record in records:
+            parents = ["-p", parent] if parent else []
+            parent = git(
+                f"--git-dir={remote}", "commit-tree", tree, *parents,
+                input_text=serialize_record(record) + "\n",
+            ).stdout.strip()
+            history[name] = (parent, record)
+        ref = ref_for(_settings(remote).ref_prefix, resource("codespace", "returned"))
+        git(f"--git-dir={remote}", "update-ref", ref, parent)
+    return remote, history
+
+
+@pytest.fixture
+def return_proof_history(tmp_path, _return_proof_history_seed):
+    seed, history = _return_proof_history_seed
+    remote = tmp_path / "coordination.git"
+    shutil.copytree(seed, remote, copy_function=shutil.copyfile)
+    return remote, _settings(remote), copy.deepcopy(history)
 
 
 @pytest.fixture(scope="session")

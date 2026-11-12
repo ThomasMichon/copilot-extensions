@@ -741,9 +741,8 @@ def test_successful_managed_reap_removes_only_owned_seed_state(tmp_path, monkeyp
     other = state.state_path(path).parent / "unrelated-state.txt"
     other.write_text("keep me", encoding="utf-8")
     record = tracking.load_record(path)
-    record.branch = ""
-    record.worktree_path = ""
-    monkeypatch.setattr(reap_cli.sessions, "has_mux_session", lambda *a: False)
+    record.branch = record.worktree_path = ""
+    monkeypatch.setattr(reap_cli.sessions, "_list_mux_sessions", lambda **_kwargs: {})
     monkeypatch.setattr(
         reap_cli.sessions, "scan_sessions_fast",
         lambda *a: SimpleNamespace(active_sessions=set()),
@@ -1045,7 +1044,8 @@ def test_native_reap_terminal_pair_sidecar_failure_preserves_evidence(tmp_path, 
     before = {file: file.read_bytes() for file in (path, state.state_path(path), pair_receipt)}
     record = tracking.load_record(path)
     record.branch = record.worktree_path = ""
-    monkeypatch.setattr(reap_cli.sessions, "has_mux_session", lambda *a: failure == "live")
+    mux = {reap_cli.sessions.mux_session_name(record.worktree_id): 0} if failure == "live" else {}
+    monkeypatch.setattr(reap_cli.sessions, "_list_mux_sessions", lambda **_kwargs: mux)
     monkeypatch.setattr(reap_cli.sessions, "scan_sessions_fast", lambda *a: SimpleNamespace(active_sessions=set()))
     monkeypatch.setattr(reap_cli.disposition_history, "remove", lambda *a: None)
     monkeypatch.setattr(reap_cli.handoff_trace, "remove_trace", lambda *a: None)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from contextlib import nullcontext
 from dataclasses import dataclass
 import logging
 import os
@@ -499,8 +500,12 @@ def _launch_headed(
         subject["attempt_id"], subject["resolution_id"], subject["parent_id"],
     )
 
+    planned_status = getattr(execution, "planned_status", None)
+
     def admit() -> None:
-        launch_seed_native.admit(record_path, correlation, subject["operation_id"])
+        launch_seed_native.admit(
+            record_path, correlation, subject["operation_id"], planned_status=planned_status,
+        )
 
     def spawned(pid: int, birth: str) -> None:
         launch_seed_native.spawned(
@@ -521,6 +526,7 @@ def _launch_headed(
             with launch_seed_native.admission(
                 record_path, correlation, subject["operation_id"], admission_only=True,
                 preserve_seed_id=preserve_seed_id, require_cold_stop=False,
+                planned_status=planned_status,
             ) as check:
                 code, certain = run(check)
         else:
@@ -603,14 +609,19 @@ def _prepare(
         print(f"Could not read launch-prompt worktree: {exc}", file=sys.stderr)
         return 3
     from . import agent_policy
+    from .retained_native_resume import require_record as require_retained_native
     from repository_policy import AgentHostingError
 
     try:
         agent_policy.require(record.worktree_path)
-    except AgentHostingError as exc:
+        require_retained_native(record, native_resume_session)
+    except (AgentHostingError, ValueError) as exc:
         print(str(exc), file=sys.stderr)
         return 3
-    current = launch_seed_state.peek(record_path)
+    current = (
+        launch_seed_state.peek(record_path, read_only=True) if admission_only
+        else launch_seed_state.peek(record_path)
+    )
     if native_resume_session:
         from .session_liveness import session_liveness
 
@@ -690,6 +701,11 @@ def _prepare(
     if child_environment is None and launch_execution.NATIVE_HINT_ENV in os.environ:
         child_environment = os.environ.copy()
         child_environment.pop(launch_execution.NATIVE_HINT_ENV)
+    from .retained_native_resume import ENVIRONMENT_KEY
+
+    if ENVIRONMENT_KEY in os.environ or ENVIRONMENT_KEY in (child_environment or {}):
+        child_environment = dict(child_environment if child_environment is not None else os.environ)
+        child_environment.pop(ENVIRONMENT_KEY, None)
     return PreparedLaunch(
         argv, receipt, child_environment, current.seed_id if current is not None and not invoke else None,
     )
@@ -701,40 +717,51 @@ def _launch(
     native_resume_session: str | None = None,
     execution: launch_execution.Execution | None = None,
 ) -> int:
-    prepared = _prepare(
-        record_path, command, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
-        preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-        execution=execution,
-    )
-    if isinstance(prepared, int):
-        return prepared
-    headed_session = _headed_session(prepared.argv) if (
-        invoke or admission_only and native_resume_session is None
-    ) else None
-    if headed_session is not None:
-        if execution is None:
-            raise ValueError("Headed execution requires the original launch attempt")
-        return _launch_headed(
-            record_path, prepared, execution, headed_session,
-            admission_only=admission_only, preserve_seed_id=preserve_seed_id,
+    # Head writers use this record lock, not the independent launch lease.
+    with (
+        tracking._RecordLock(record_path, require_sidecar=True)
+        if native_resume_session is not None else nullcontext()
+    ):
+        prepared = _prepare(
+            record_path, command, invoke=invoke, seed_id=seed_id, admission_only=admission_only,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            execution=execution,
         )
-    argv, receipt, child_environment = prepared.argv, prepared.receipt, prepared.environment
-    try:
-        if os.name != "nt" and not invoke and not admission_only and execution is None:
-            if child_environment is not None:
-                os.execvpe(argv[0], argv, child_environment)
-            os.execvp(argv[0], argv)
-        # A real interactive child inherits this console; non-interactive
-        # consumers must not allocate a new one.
-        process = subprocess.Popen(
-            argv, stdout=sys.stdout, stderr=sys.stderr,
-            **({"env": child_environment} if child_environment is not None else {}),
-            **({} if _interactive_console() else no_window_kwargs()),
-        )
-    except OSError as exc:
-        restored = launch_seed_state.restore(record_path, receipt) if receipt else None
-        print(f"Could not start Copilot command: {exc}; seed restoration: {restored}", file=sys.stderr)
-        return 3
+        if isinstance(prepared, int):
+            return prepared
+        headed_session = _headed_session(prepared.argv) if (
+            invoke or admission_only and native_resume_session is None
+        ) else None
+        if headed_session is not None:
+            if execution is None:
+                raise ValueError("Headed execution requires the original launch attempt")
+            return _launch_headed(
+                record_path, prepared, execution, headed_session,
+                admission_only=admission_only, preserve_seed_id=preserve_seed_id,
+            )
+        argv, receipt, child_environment = prepared.argv, prepared.receipt, prepared.environment
+        try:
+            from .session_shell import startup_command
+
+            argv = startup_command(argv, record_path=record_path)
+            if os.name != "nt" and not invoke and not admission_only and execution is None:
+                if child_environment is not None:
+                    os.execvpe(argv[0], argv, child_environment)
+                os.execvp(argv[0], argv)
+            # A real interactive child inherits this console; non-interactive
+            # consumers must not allocate a new one.
+            process = subprocess.Popen(
+                argv, stdout=sys.stdout, stderr=sys.stderr,
+                **({"env": child_environment} if child_environment is not None else {}),
+                **({} if _interactive_console() else no_window_kwargs()),
+            )
+        except (OSError, ValueError) as exc:
+            from .sessions_pane_args import _cleanup_startup_command
+
+            _cleanup_startup_command(argv)
+            restored = launch_seed_state.restore(record_path, receipt) if receipt else None
+            print(f"Could not start Copilot command: {exc}; seed restoration: {restored}", file=sys.stderr)
+            return 3
     cleanup_failed = False
     if execution:
         execution.spawned(process.pid, invoke=invoke)

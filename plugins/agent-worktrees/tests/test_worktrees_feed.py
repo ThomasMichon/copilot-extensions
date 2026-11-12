@@ -235,11 +235,14 @@ def test_legacy_feed_never_receives_unnegotiated_bootstrap(tmp_path):
         owner.shutdown()
 
 
-def test_feed_refuses_a_passive_subscription_without_recording_demand(tmp_path):
+@pytest.mark.parametrize("selection", [
+    {"passive": True}, {"worktree_id": "one", "refresh_id": "a" * 32},
+])
+def test_feed_refuses_point_only_operations_without_recording_demand(tmp_path, selection):
     owner = WorktreesRuntime(tmp_path / "current.sqlite3")
     owner.activate()
     owner.publish("project", [{"id": "one"}], observed_at=1)
-    stream = owner.feed.stream(request(passive=True), lambda: False)
+    stream = owner.feed.stream(request(**selection), lambda: False)
     try:
         frame = next(stream)
         assert frame["type"] == "error" and frame["error"]["code"] == "invalid-request"
@@ -559,6 +562,41 @@ def test_worktrees_feed_filter_membership_and_deletes_are_committed(owner):
     owner.publish("project", [{"id": "one", "status": "done"}], observed_at=3)
     assert apply(receiver, transaction(stream))["worktrees"] == []
     stream.close()
+
+
+def test_semantic_archive_transition_leaves_default_socket_feed_but_not_explicit_inventory(owner):
+    row = {"id": "retained", "status": "active", "checkout_present": True}
+    owner.publish("project", [row], observed_at=2)
+    payload = request(include_missing=False)
+    server = control.ControlServer(
+        lambda action, body: owner.health() if action == "health" else owner.handle(body),
+        token="fixture",
+        stream_handle=lambda action, body, disconnected: owner.feed.stream(body, disconnected),
+    )
+    server.start()
+    frames = client.transport(
+        control.ControlClient(f"http://127.0.0.1:{server.port}", token="fixture"), payload,
+    )
+    receiver = client.FeedReceiver(payload)
+    try:
+        assert apply(receiver, transaction(frames))["worktrees"] == [row]
+        archived = {**row, "status": "archived"}
+        owner.publish("project", [archived], observed_at=3)
+        update = transaction(frames)
+        result = apply(receiver, update)
+        assert any(frame["type"] == "delete" for frame in update)
+        assert result["worktrees"] == []
+        assert result["projection"]["selected_count"] == 0
+        assert result["projection"]["roster_count"] == 1
+        assert owner.handle(request(worktree_id="retained"))["worktrees"] == [archived]
+        owner.publish("project", [row], observed_at=4)
+        assert apply(receiver, transaction(frames))["worktrees"] == [row]
+    finally:
+        frames.close()
+        owner.close_admission()
+        assert owner.feed.wait_closed(1)
+        server.close()
+    assert owner.feed.active_count() == 0
 
 
 def test_worktrees_feed_heartbeat_never_redecodes_the_unchanged_roster(owner, monkeypatch):

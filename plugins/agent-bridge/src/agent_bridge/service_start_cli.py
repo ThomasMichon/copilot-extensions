@@ -333,6 +333,15 @@ def _run_start(
 
 def _cmd_status(args: argparse.Namespace) -> None:
     core = _core()
+    recovery_operation = getattr(args, "recovery_operation", None)
+    if recovery_operation is not None:
+        if not getattr(args, "session_id", None) or not getattr(args, "json", False):
+            print("[FAIL] --recovery-operation requires an exact session ID and --json", file=sys.stderr)
+            raise SystemExit(2)
+        core._json_out(core._get_client(ensure=False).inspect_retained_recovery(
+            args.session_id, recovery_operation,
+        ))
+        return
     if getattr(args, "worktree_writer", False) and (
         not getattr(args, "session_id", None) or not getattr(args, "full", False)
     ):
@@ -776,6 +785,7 @@ def register_service_start_commands(sub: argparse._SubParsersAction) -> None:
         action="store_true",
         help="With an exact session ID and --full, requalify its original keyed-creation writer",
     )
+    status_p.add_argument("--recovery-operation", metavar="ID", help="Read one original retained recovery without replay; requires exact session and --json")
     status_p.add_argument(
         "--steps",
         type=int,

@@ -78,7 +78,7 @@ def _capture_promoting_routing(monkeypatch, tmp_path, capsys, *, refused=False, 
     )
     monkeypatch.setattr("zdd.cutover.CutoverOrchestrator", FakeOrchestrator)
     monkeypatch.setattr(__main__, "_routing_endpoint", lambda: None)
-    monkeypatch.setattr(__main__.subprocess, "Popen", lambda *_args, **_kwargs: handle)
+    monkeypatch.setattr(__main__, "spawn_daemon", lambda *_args, **_kwargs: handle)
 
     rc = __main__.cmd_deploy(
         SimpleNamespace(
@@ -110,11 +110,14 @@ def test_deploy_propagates_native_recovery_refusal(monkeypatch, tmp_path, capsys
 def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> None:
     captured = {}
     spawned = {}
-    real_spawn_daemon = __main__.spawn_daemon
+
+    class Handle:
+        pid = 4321
 
     def record_spawn_daemon(argv, **kwargs):
+        spawned["command"] = argv
         spawned["spawn_daemon"] = kwargs
-        return real_spawn_daemon(argv, **kwargs)
+        return Handle()
 
     monkeypatch.setattr(__main__, "spawn_daemon", record_spawn_daemon)
 
@@ -167,16 +170,6 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
         },
     )
 
-    class Handle:
-        pid = 4321
-
-    def popen(command, **kwargs):
-        spawned["command"] = command
-        spawned["kwargs"] = kwargs
-        return Handle()
-
-    monkeypatch.setattr(__main__.subprocess, "Popen", popen)
-
     rc = __main__.cmd_deploy(__main__.build_parser().parse_args([
         "deploy",
         "--json",
@@ -198,27 +191,20 @@ def test_deploy_wires_cutover_orchestrator(monkeypatch, tmp_path, capsys) -> Non
 
     handle = captured["spawn_passive"](4555)
     assert handle.pid == 4321
-    assert spawned["command"][1:4] == ["-I", "-X", "utf8"]
+    assert spawned["command"][1] == "-I"
+    utf8 = spawned["command"].index("utf8")
+    assert spawned["command"][utf8 - 1] == "-X"
     assert "start" in spawned["command"]
     assert "__cell-start" not in spawned["command"]
-    assert spawned["kwargs"]["cwd"] == str((tmp_path / "home").resolve())
-    assert "PYTHONPATH" not in spawned["kwargs"]["env"]
-    assert "PYTHONHOME" not in spawned["kwargs"]["env"]
-    # A resident daemon: launched through the shared primitive, breaking away
-    # from the deploying process's Job (never falling back into it), from the
-    # runtime root, with an append-only log kept free of per-request lines.
     home = (tmp_path / "home").resolve()
     launch = spawned["spawn_daemon"]
     assert launch["cwd"] == home
     assert launch["log_path"] == home / "service-stdio.log"
-    assert launch.get("breakaway", True) is True
-    assert not launch.get("contained_fallback", False)
+    assert launch["instance"].service == "agent-index"
+    assert launch["instance"].runtime_root == home
+    assert "PYTHONPATH" not in launch["env"]
+    assert "PYTHONHOME" not in launch["env"]
     assert launch["env_overrides"]["AGENT_INDEX_LOG_LEVEL"] == "warning"
-    assert spawned["kwargs"]["env"]["AGENT_INDEX_LOG_LEVEL"] == "warning"
-    assert spawned["kwargs"]["stdin"] is __main__.subprocess.DEVNULL
-    assert (home / "service-stdio.log").read_text(encoding="utf-8").startswith(
-        tuple("0123456789")
-    )
 
 
 def test_passive_spawn_keeps_an_explicit_log_level(monkeypatch, tmp_path) -> None:
@@ -284,7 +270,7 @@ def test_namespaced_deploy_spawns_private_cell_entrypoint(
     class Handle:
         pid = 4321
 
-    def popen(command, **kwargs):
+    def spawn(command, **kwargs):
         spawned["command"] = command
         spawned["kwargs"] = kwargs
         return Handle()
@@ -330,7 +316,7 @@ def test_namespaced_deploy_spawns_private_cell_entrypoint(
             "instanceToken": "instance-token",
         },
     )
-    monkeypatch.setattr(__main__.subprocess, "Popen", popen)
+    monkeypatch.setattr(__main__, "spawn_daemon", spawn)
 
     rc = __main__.cmd_deploy(
         SimpleNamespace(
@@ -347,7 +333,7 @@ def test_namespaced_deploy_spawns_private_cell_entrypoint(
     assert "start" not in [
         part for part in spawned["command"] if part != "__cell-start"
     ]
-    assert spawned["kwargs"]["cwd"] == str(home.resolve())
+    assert spawned["kwargs"]["cwd"] == home.resolve()
 
 
 @pytest.mark.parametrize(
@@ -416,8 +402,8 @@ def test_governance_block_after_passive_health_leaves_old_route_and_service(
             return None
 
     monkeypatch.setattr(
-        __main__.subprocess,
-        "Popen",
+        __main__,
+        "spawn_daemon",
         lambda *_args, **_kwargs: events.append("passive-spawned") or Handle(),
     )
 

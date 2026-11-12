@@ -16,8 +16,11 @@ from __future__ import annotations
 
 import sys
 from . import terminal_launch as _terminal_launch
+from .fault_diagnostics import enable as _enable_fault_diagnostics
+
 
 if __name__ == "__main__":
+    _enable_fault_diagnostics()
     if _terminal_launch.answer_query():
         raise SystemExit(0)
     _terminal_launch.validate_or_exit()
@@ -31,6 +34,7 @@ if __name__ == "__main__":
         raise SystemExit(_resident_picker_finish(sys.argv[2:]))
 
 import json
+import math
 import os
 import subprocess
 from pathlib import Path
@@ -896,6 +900,9 @@ def _cmd_picker(rest: list[str]) -> int:
     except ValueError:
         print("error: --wait must be a number")
         return 2
+    if not math.isfinite(wait_pivot) or wait_pivot < 0:
+        print("error: --wait must be finite and non-negative")
+        return 2
 
     if demo_mode:
         # Preview mode: render the REAL production Picker (not a stand-in
@@ -1009,7 +1016,7 @@ def _remote_machine_env(decision: dict) -> tuple[str | None, str | None]:
     return decision.get("machine") or None, decision.get("env") or None
 
 
-def _run_production_picker(project: str, *, initial_decision=None) -> int:
+def _run_production_picker(project: str, *, initial_decision=None, front_door=False) -> int:
     """Run the transplanted production UX and act on its launch decision.
 
     ``"refresh"``/``"manager-update"`` apply an update and loop back to
@@ -1034,7 +1041,7 @@ def _run_production_picker(project: str, *, initial_decision=None) -> int:
         else:
             raise_current_process_priority()
             try:
-                decision = runner.run(project)
+                decision = runner.run(project, **({"front_door": True} if front_door else {}))
             except runner.ProjectSelectionError as error:
                 print(f"error: {error}")
                 return 2
@@ -1586,6 +1593,13 @@ def main(argv: list[str] | None = None) -> int:
             print("error: --project needs exactly one project name")
             return 2
         return _cmd_picker([args[1]])
+    if not args:
+        from .production_picker.picker_tui import _interactive_stdin
+
+        if _interactive_stdin(sys.stdin) and (
+            _interactive_stdin(sys.stdout) or _interactive_stdin(sys.stderr)
+        ):
+            return _run_production_picker("", front_door=True)
     _print_intro()
     return 0
 
@@ -1625,6 +1639,7 @@ def console_entry() -> None:
     """
     from ._shutdown_exit import run_and_exit
 
+    _enable_fault_diagnostics()
     _ensure_utf8_streams()
     run_and_exit(main)
 

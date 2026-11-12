@@ -22,6 +22,8 @@ from typing import Callable, Mapping, Sequence, TextIO
 from single_instance_lease.operation import OperationLock, OperationLockedError
 from . import _invocation, authority, boot, foundation_state
 from ._directory import create_queue_directory
+from .pending_updates import capture_home as _capture_home
+from .pending_updates import supersede_waiting as _supersede_waiting
 
 SCHEMA = 4
 STATES = frozenset({"pending", "running", "completed", "interrupted", "blocked"})
@@ -445,6 +447,7 @@ def enqueue(
     """Commit acceptance; only trusted adapters with pinned targets may share active work."""
     root = _root(root)
     spec, runner = _spec(spec), _runner(runner)
+    spec = _spec(_capture_home(spec, runner))
     override = os.environ.get("BOOTSTRAP_KILLSWITCH_STATE_FILE")
     if override and not spec.killswitch_path:
         path = Path(override).expanduser()
@@ -480,11 +483,15 @@ def enqueue(
                 ).fetchone()
             if row is None:
                 identifier = uuid.uuid4().hex
+                _supersede_waiting(db, root, spec, runner, identifier)
                 db.execute(
                     "INSERT INTO requests(id,identity,spec,runner,state,created_at) VALUES(?,?,?,?,?,?)",
                     (identifier, identity, spec_json, runner_json, "pending", time.time()),
                 )
                 row = db.execute("SELECT * FROM requests WHERE id=?", (identifier,)).fetchone()
+            elif row["state"] == "pending":
+                # Coalescing an existing selection also collapses legacy backlog.
+                _supersede_waiting(db, root, spec, runner, row["id"])
             request = _request(row, root)
             db.commit()
             return request
@@ -697,7 +704,7 @@ def _execute(transaction: Transaction) -> int:
     # The shim changes cwd/env and directs output before exec. The product
     # invocation itself remains exactly the pinned argv supplied by its adapter.
     command = [
-        sys.executable, "-I", *agent_procutil.python_cache_args(transaction.root),
+        sys.executable, "-I", "-S", *agent_procutil.python_cache_args(transaction.root),
         str(Path(__file__).with_name("_runner.py")),
         str(transaction.root), request.id, witness["UPDATE_DRIVER_WITNESS"],
         str(Path(agent_procutil.__file__).resolve()),
@@ -889,8 +896,11 @@ def run_explicit(
         _assert_foundation_clear(root, include_running=True)
         with _database(root, writable=True) as db:
             db.execute("BEGIN IMMEDIATE")
+            lock.assert_owned()
+            if db.execute("SELECT 1 FROM requests WHERE state='running' LIMIT 1").fetchone() is not None:
+                raise InterruptedError("installation queue has unsettled running work; recovery required")
             if db.execute(
-                "SELECT 1 FROM requests WHERE state IN ('pending','running') LIMIT 1",
+                "SELECT 1 FROM requests WHERE state='pending' LIMIT 1",
             ).fetchone() is not None or _has_fence(db, root):
                 raise StateError("request-local execution requires an idle, unfenced queue; nothing replayed")
             _upgrade_schema(db, root, lock)

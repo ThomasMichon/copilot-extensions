@@ -1,0 +1,9 @@
+{
+  "comment": "Accept native kill-on-close zero exits while retaining attached caller liveness and cleanup proof",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

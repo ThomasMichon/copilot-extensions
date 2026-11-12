@@ -10,7 +10,9 @@ software or activate services/schedules. All domains report
 `preferences accept` and `preferences publish` add explicit local transactions,
 each read-only until `--apply --expect <preview-token>` is supplied. Acceptance
 stores data, not domain configuration; publication replaces only a selected local
-file. Neither command discovers or enrolls a cloud carrier.
+file. Neither command discovers or enrolls a cloud carrier. The additive
+`preferences carrier` commands select that file from an explicitly configured
+local OneDrive replica, as described below; they do not call the provider.
 
 The [reviewed Phase 4 plan](../../../efforts/active/machine-health-heartbeats/preferences.md)
 owns the remaining native adoption and carrier qualification work. Local exchange
@@ -218,8 +220,8 @@ Write parent directories must already exist; an unavailable received directory
 still projects the accepted snapshot as offline data. Output replacement is local publication
 only: `remote_receipt` stays `not-observed`, and publication does not prove a
 provider received or preserved it. There is no distributed compare-and-swap;
-concurrent provider changes/conflict-copy detection require the future qualified
-carrier adapter, not an mtime winner or a synchronized lock.
+the carrier adapter's conservative local name census below is not a provider
+concurrency guarantee, an mtime winner or a synchronized lock.
 
 Exit `0` means eligible preview or completed local transaction, `1` means a
 blocked/unavailable preview, and `2` means invalid input, changed confirmation,
@@ -240,6 +242,128 @@ manually, relax parsing or replay a different effectful operation.
 Provider rollback preserves the read-only preview baseline. Local policy and
 exchange output have their own strict version-1 schemas, independent of package
 versions; no retirement window is opened by this additive change.
+
+## Read accepted repository defaults
+
+`preferences repositories --state-dir <local-state> --machine <native-logical-id>
+--harness <native-canonical-id> [--local-overrides <local.json>]` projects only
+the unsynchronized local `policy.json`, `accepted.json` and optional explicit
+override. It does not read a carrier, accept new input, resolve repositories,
+call Worktrees or create any files. Missing accepted data reports an absent
+preference; withdrawal and local suppression retain their existing meanings.
+The policy must admit repositories and all domains present in the selected
+documents. Wrong publishers, invalid inputs and mismatched local machine scope
+remain errors, not an empty default.
+
+The read-only response uses `agent-machines.preferences.repositories`, integer
+version `1`, with `scope`, `accepted_revision`, `knowledge_preference`, winning
+`provenance` and an `input_revision` bound to the exact selected input bytes and
+paths. It always reports `configuration_applied: false` and
+`binding_changed: false`. Exit `0` includes absent/suppressed defaults; exit `2`
+means unavailable or invalid selected input. No apply flag is supported.
+
+Worktrees' optional
+[Repositories Configuration consumer](../../agent-worktrees/docs/repositories-configuration.md#accepted-default-in-configuration)
+supplies native identities and owns explicit adoption. Before invoking this
+additive command it checks `preferences-repositories-v1.json` in the exact
+selected Machines runtime slot: this schema/version, `accepted_projection: 1`,
+`read_only: true` and `target_identity: caller-native`. Missing, invalid or
+unsupported metadata leaves only the optional feature unavailable; a newer
+payload is not proof of runtime support. Old preview/exchange callers keep their
+existing syntax and behavior. No baseline is retired or effectful fallback added.
+
+## Selected OneDrive local replica
+
+The optional `preferences carrier publish|receive` commands reuse the same
+policy, revision checks, local watermarks, atomic writer and confirmation lock.
+They never discover an account or directory, install/authenticate a sync client,
+call a provider API, hydrate a placeholder, enroll a participant or start a
+watcher. A configured account label is not authenticated account evidence.
+
+After separately approving the carrier/account, audience, participating
+identities and permitted data, place `carrier.json` beside the unsynchronized
+`policy.json`. This command does not create that configuration:
+
+```json
+{
+  "schema": "agent-machines.preferences.carrier",
+  "version": 1,
+  "provider": "onedrive",
+  "account": "example-account",
+  "directory": "<absolute selected local replica namespace>",
+  "participants": ["example-publisher", "example-receiver"]
+}
+```
+
+Replace the directory placeholder with an absolute native path to a
+**preprovisioned dedicated preference namespace**, not the whole sync root.
+The directory may differ between participating machines. It contains only the
+fixed `preferences.json` document; health and Vault use separate namespaces.
+The local state directory must be disjoint from it, in either direction.
+Locally authored candidates and local overrides must also remain outside it.
+No directory or synchronized file is created by a preview.
+
+This strict local schema rejects unknown fields, versions/providers, relative
+or parent-traversing paths, linked/reparse paths, duplicate participant
+identities and more than 64 participants. Both the policy's publisher and
+participant must be explicitly listed, with exact spelling. The existing policy
+still selects permitted domains and the sole administrative publisher; the
+carrier cannot expand either. A received snapshot cannot configure its carrier.
+Only the existing typed snapshot fields are published: no local account labels,
+paths, policy, watermarks, overrides or raw telemetry are exported.
+
+```text
+agent-machines preferences carrier publish --state-dir <publisher-local-state> --input <complete-candidate.json>
+agent-machines preferences carrier receive --state-dir <receiver-local-state> --machine <logical-id> --harness <canonical-id> [--local-overrides <local.json>]
+```
+
+Repeat the exact operation with `--apply --expect <preview-token>` to confirm.
+`receive` means local acceptance only, not configuration application; its
+`--full-snapshot` flag retains the existing explicit parent-gap reconciliation.
+The account-labelled carrier configuration and bounded namespace census join
+the existing token inputs and are reread under the local writer lock. Changed
+configuration, entries, candidate, override or watermark requires a new preview.
+
+The census inspects at most 128 immediate directory entries, without recursion
+or reading any unexpected file. **Any entry other than `preferences.json`
+blocks exchange as `carrier-conflict`**, including an apparent conflict copy
+or incomplete temporary publication. An excessive census refuses with
+`carrier-namespace-too-large`. Nothing chooses a newer file by mtime, merges
+copies, deletes unknown entries or repairs a provider. The conservative
+dedicated-namespace rule avoids depending on a particular conflict-name suffix.
+It cannot detect a conflict that has not arrived locally.
+
+A missing namespace reports `carrier-unavailable`; a missing document reports
+`unavailable`. Both retain accepted local preferences and explicit overrides.
+Neither is withdrawal or permission to create/rebind a namespace. A present
+malformed, unsupported, unreadable or linked document remains an explicit error.
+Only a valid newer complete snapshot can withdraw shared defaults; adopted
+native configuration and machine-local choices remain independent.
+
+The version-1 exchange response adds a `carrier` field only for this additive
+operation. It reports `binding: configured-not-provider-verified`,
+`local_replica_observed`, namespace availability and conflict presence.
+The observation describes the exact document read during planning, not a
+post-publication readback; `receive` retains `operation: accept`.
+`synchronization`, `peer_receipt` and the existing `remote_receipt` remain
+`not-observed`, including after a successful local publication. Exit meanings
+are unchanged. If confirmation or response output fails, `applied: null` in
+the bounded error means acknowledgement is unknown; inspect the local watermark
+and exact document before deciding on another operation. Never blindly replay.
+
+Discover this syntax with `preferences carrier --help` on the selected runtime.
+Older runtimes reject it and retain their existing explicit exchange path; no
+caller migrates automatically. Fresh normal-CLI tests use two fixture-owned local
+replicas with an explicit fixture copy between them. They prove file exchange,
+not OneDrive synchronization, cloud-placeholder support, authenticated audience,
+installed-runtime adoption, Linux qualification or peer delivery. Those lanes
+and any real carrier effects retain their independent approval/acceptance gates.
+
+The focused source checks are `tests/test_preference_carrier.py` plus the
+existing codec/exchange regression files. Select
+`tests/native/test_preferences_consumer.py -k carrier` with the contained
+runner's `--allow-explicit-tiers` for the fresh subprocess replica flow and
+actual closed-output acknowledgement control.
 
 ## Confirmed Copilot scalar floors
 

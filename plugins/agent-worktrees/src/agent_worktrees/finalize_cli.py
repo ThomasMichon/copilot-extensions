@@ -497,6 +497,10 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             worktree_id = worktree_identity._resolve_worktree_id(worktree_id)
 
         if getattr(args, "title_only", False):
+            try:
+                tracking.normalize_asserted_title(args.title)
+            except ValueError as error:
+                return output._json_error(str(error)) if use_json else (output.err(str(error)) or 1)
             yaml_path = (cfg.tracking_dir(config.repo_name) if getattr(args, "rewrite_pr", False) else cfg.tracking_dir()) / f"{worktree_id}.yaml"
             if not yaml_path.exists():
                 output.err(f"Tracking file not found for {worktree_id}")
@@ -504,8 +508,9 @@ def cmd_push_changes(args: argparse.Namespace) -> int:
             if args.title:
                 with tracking._RecordLock(yaml_path):
                     record = tracking.load_record(yaml_path)
-                    record.title = tracking.cap_title(args.title)
-                    record.title_asserted = record.title is not None
+                    tracking.set_disposition(
+                        record, title=args.title, save=False, tracking_path=yaml_path.parent,
+                    )
                     tracking.save_record(record)
                 print(f"[OK] Worktree {worktree_id} title updated: {record.title}")
             else:
@@ -868,6 +873,11 @@ def cmd_attribution_audit(args: argparse.Namespace) -> int:
 
 
 def cmd_mark_complete(args: argparse.Namespace) -> int:
+    try:
+        full_title = tracking.normalize_asserted_title(args.title)
+    except ValueError as error:
+        output.err(str(error))
+        return 1
     config = cfg.load_config()
     worktree_id = worktree_identity._infer_worktree_id(args.worktree_id, config)
 
@@ -883,7 +893,6 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
     if not yaml_path.exists():
         output.warn(f"Tracking file not found at {yaml_path}")
         print("Creating minimal tracking file...")
-        capped = tracking.cap_title(args.title)
         record = tracking.WorktreeRecord(
             worktree_id=worktree_id,
             branch=git_ops.get_current_branch("."),
@@ -894,31 +903,36 @@ def cmd_mark_complete(args: argparse.Namespace) -> int:
             started_at=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             last_resumed_at=datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             resume_count=0,
-            title=capped,
-            title_asserted=capped is not None,
+            title=full_title,
+            title_asserted=full_title is not None,
             status="active" if args.title_only else "complete",
             completed_at=None if args.title_only else datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
             creation_nonce=secrets.token_hex(8),
         )
+        if args.title:
+            tracking.set_disposition(
+                record, title=args.title, save=False, tracking_path=yaml_path.parent,
+            )
         tracking.save_record(record, yaml_path)
     else:
         if (not args.title_only) or args.title:
             with tracking._RecordLock(yaml_path):
                 record = tracking.load_record(yaml_path)
                 if args.title:
-                    record.title = tracking.cap_title(args.title)
-                    record.title_asserted = record.title is not None
+                    tracking.set_disposition(
+                        record, title=args.title, save=False, tracking_path=yaml_path.parent,
+                    )
                 if not args.title_only:
                     tracking.update_status(record, "complete", save=False)
                 tracking.save_record(record)
 
     if args.title_only:
-        print(f"[OK] Worktree {worktree_id} title updated: {args.title}")
+        print(f"[OK] Worktree {worktree_id} title updated: {full_title}")
         return 0
 
     msg = f"[OK] Worktree {worktree_id} marked complete (status flag only)."
     if args.title:
-        msg += f" Title: {args.title}"
+        msg += f" Title: {full_title}"
     print(msg)
     print(
         "NOTE: This only sets the tracking flag. Content has NOT been pushed. "

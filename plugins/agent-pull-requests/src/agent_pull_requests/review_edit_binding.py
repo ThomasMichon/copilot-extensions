@@ -28,6 +28,18 @@ def previous_preparation(document: dict, original: dict, action: dict, baseline:
     body = comment.get("content")
     if not isinstance(body, str):
         raise ValueError("selected owned baseline requires native text")
+    for operation in document.get("terminal_recovery", {}).get("operations", []):
+        if operation["scope"] != original["scope"]:
+            continue
+        for state in operation["actions"]:
+            if state["kind"] == "verdict" or state["state"] == "retired":
+                continue
+            if not _could_target(state, state["receipt"], action):
+                continue
+            if state["state"] == "unknown":
+                raise ValueError("unresolved native effect may refer to the selected owned comment")
+            if "prepared" in state:
+                raise ValueError("selected owned comment requires its retired original preparation")
     identities: set[str] = set()
     matching: list[dict] = []
     for operation in document["reviews"]:

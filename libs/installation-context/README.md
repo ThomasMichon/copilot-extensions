@@ -37,8 +37,10 @@ its whole working set rolled back.
   the same self-contained file set into every consuming plugin. When an admitted
   bootstrap addresses the entrypoint through Windows `GLOBALROOT`, fragment reads
   preserve that lexical namespace instead of resolving it back through a DOS
-  drive mapping. Ordinary paths retain physical resolution; this does not
-  admit an interpreter or bypass source, receipt or ownership validation.
+  drive mapping. Ordinary paths retain physical resolution; on Windows their
+  fragment reads use extended DOS/UNC spelling so deep retained paths remain
+  readable. This does not admit an interpreter or bypass source, receipt or
+  ownership validation.
 - `installation-context.sh` plus `json-query.awk` provides a Bash bootstrap that
   does not require Python or `jq`. Read-only `status`, `deployment-status`,
   `probe-plugin-publication` and `probe-legacy` support stock macOS Bash 3.2;
@@ -694,6 +696,13 @@ metadata. First publication calculates the desired digest and immediately
 recalculates it before the atomic no-replace write; any add, remove, rename,
 type change, directory replacement, or content change fails before a completion
 marker can appear.
+
+The Python path-based walker overlaps at most eight regular-file reads per
+batch, preserving the caller's context in each worker. Every batch joins before
+traversal advances or directory state is rechecked, including on failure.
+This does not cache content proofs or relax any later validation.
+Link/reparse rejection uses each boundary's captured native stat attributes,
+without repeating separate path queries for the same observation.
 
 `slot-complete` and Python's `complete_runtime_slot` API require explicit
 context, marketplace/plugin identity, exact expected payload root/version,

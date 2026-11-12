@@ -46,7 +46,9 @@ of independently owned service daemons. There is no Task, COM or UAC fallback.
 
 The private executor shim places generated Python bytecode beneath the existing
 driver root's `cache/python`, outside the invoking runtime's immutable slot.
-Its pinned product invocation and installation custody remain unchanged.
+It skips `site` initialization: the shim uses only the standard library and
+explicitly located participant/procutil modules. The pinned product invocation,
+its normal interpreter behavior and installation custody remain unchanged.
 
 New Windows queue directories are created atomically with the actual process
 TokenUser as owner and protected, inheritable FullControl for that account,
@@ -91,12 +93,18 @@ creation, not an implicit permission migration or a read-only status side effect
   `context_keys` declares the adapter-approved, credential-free environment
   projection from `RequestSpec.context`: before product startup, the runner
   clears every declared key and restores only the request's saved values.
+  The declaration permits at most 128 names, including absent keys that must
+  be cleared; the request still retains at most 64 context values.
   This happens before module import and project routing, not just inside an
   eventual command handler. Absent keys cannot leak from the caller that
   happened to start the shared worker. The declaration participates in request
   equivalence; driver capability and Python import keys cannot be projected.
   Adapters must retain the original invocation directory as the runner cwd
   when their front door changes directory during project resolution.
+  Update admission captures a nonempty `AGENT_HOME` as an absolute value
+  against the retained runner cwd, not the source anchor in `RequestSpec.cwd`.
+  Older records with a relative home use that same execution directory for
+  scope comparison, preserving independent caller installations.
 - `runtime_command(module, args=()) -> (argv, env)` uses `direct_python` and
   the current runtime's `.runtime-bootstrap/runtime_launcher.py` with
   `-I -S -B -X utf8` when present. It never resolves a newer selected slot.
@@ -125,11 +133,34 @@ creation, not an implicit permission migration or a read-only status side effect
   active arrivals. Fresh Manager bootstrap also keeps later active arrivals
   separate: its retained Manager/SDK inputs do not pin every marketplace target
   discovered by the following suite update.
-  Distinct inputs/options stay separate, and completed requests never debounce
-  a new attempt. This does not yet resolve a central desired target, order
+  Update requests (`manager`, `engine`, and software-enabled automatic
+  `engine-launch-update`) retain at most one waiting selection per addressed
+  installation/project authority. A newer accepted request atomically
+  supersedes older never-started waiting updates in that scope, including a
+  different retained runner, source or explicit option selection. Manager
+  bootstrap and installed-CLI requests share their addressed Manager root and
+  logical project, including a bootstrap's retained `--project` arguments.
+  The running request is unchanged; component provisioning, bootstrap install
+  recipes, standalone bootstrap/staged/reconciliation launch phases,
+  reconciliation-only automatic launch work and independent scopes remain
+  separate. Automatic requests cannot replace a waiting explicit update and
+  are refused before admission in that case.
+  Superseded records retain their original invocation and finish as
+  `completed`, exit code **125**, with an error naming the successor and
+  confirming nothing ran. This is terminal non-success, not installation
+  completion or proof that the successor succeeded. Existing readers and
+  waiters use the same schema and integer-result contract; an old submitting
+  runtime still has its original FIFO policy until updated.
+  Completed requests never debounce a new attempt.
+  This does not yet resolve a central desired target, order
   versions, or bound worker-launch fan-out. The opt-in changes no journal schema.
   Existing unsettled global fences refuse admission with `InterruptedError`;
   a detached caller cannot receive an apparently healthy receipt behind one.
+- `run_explicit(spec, *, runner, root=None)` takes execution custody without
+  waiting and runs only its own newly admitted request. An active custodian or
+  ordinary pending work is busy; a running row found under acquired custody is
+  unsettled and raises `InterruptedError`. It leaves that row unchanged for
+  explicit recovery and never replays another request.
 - `status(request_id=None, *, root=None)` reads one Request or a tuple.
   Missing state is empty; status does not mkdir, initialize, repair, or recover
   a database. Unknown schema and malformed records fail explicitly.
@@ -885,6 +916,24 @@ Missing/corrupt selectors and incompatible queues refuse before bootstrap
 staging or prerequisites, preserving queue bytes and the healthy selection.
 No native branch reads, edits or deletes SQLite.
 
+For an existing queue that predates the first retained foundation, the same
+front door additionally accepts `-AdmissionRuntimeRoot <owning-product-runtime-root>`.
+The caller supplies its explicitly resolved installed runtime, never an ambient
+interpreter or command. This bridge is available only when foundation progress
+and artifacts are both absent; it does not repair or bypass an existing broken
+foundation. The canonical read-only runtime resolver must select the exact
+complete `current-version` slot. Last-known-good/newest fallback, linked paths,
+missing retention assets and incomplete slots refuse before acquisition.
+The selected runtime runs only the existing fixed `foundation_admission` module,
+with the same fresh witness and strict bounded child as a retained foundation.
+Installed health, actual witness interoperability and strict progress parsing
+are the compatibility boundary, not equality of independently released package
+versions. Unsupported installed modules or protocols refuse explicitly.
+Admission only reads queue history; pending requests are neither drained nor
+replayed, and unsettled effects remain fenced. The product selector is checked
+again after admission. Neither this option nor source availability authorizes a
+live repair or a later ordinary queue worker.
+
 The producer does not enroll maintenance or enable ordinary first-use
 publishers. Native macOS genesis and the remaining first-use integrations
 stay explicit, separate boundaries. The single foundation progress snapshot
@@ -905,6 +954,12 @@ Vault's legacy session bootstrap also uses the fixed stamp/provision actions.
 Explicit installer entry points remain separate, unadopted callers.
 Other plugin identities and snapshot-specific recipes remain unsupported rather than being inferred
 from an arbitrary command line.
+
+Windows Vault provision explicitly hands its verified participant witness and
+native re-entry marker to the frozen installer, including client-only recipes.
+The installer authenticates that existing owner instead of submitting another
+request behind its own execution lock. Stamp and non-Windows recipes do not
+receive this native handoff.
 
 MCP's fixed `stamp`/`provision` recipe admits its canonical installed payload
 and default legacy root, retaining its actual `init` front rather than assuming

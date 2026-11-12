@@ -21,7 +21,8 @@ pytestmark = [
 @pytest.mark.skipif(os.name != "nt", reason="Native Windows payload entry")
 @pytest.mark.parametrize("host", HOSTS)
 @pytest.mark.parametrize("apply", [False, True])
-def test_configuration_payload_entry_never_bootstraps_missing_runtime(tmp_path, host, apply):
+@pytest.mark.parametrize("operation", ["configuration", "health-run", "health-prepare"])
+def test_configuration_payload_entry_never_bootstraps_missing_runtime(tmp_path, host, apply, operation):
     payload, home = tmp_path / "payload", tmp_path / "home"
     scripts = payload / "scripts"
     (scripts / "installation-context").mkdir(parents=True)
@@ -71,21 +72,32 @@ def test_configuration_payload_entry_never_bootstraps_missing_runtime(tmp_path, 
                 if path.is_file() and path.name != "StartupProfileData-NonInteractive"}
 
     before = snapshot()
+    arguments = (
+        ["health", "prepare-job" if operation == "health-prepare" else "run",
+         "--store-dir", str(tmp_path / "store")]
+        if operation.startswith("health-") else ["installation-configuration", "--project", "sample"]
+    )
+    if apply:
+        arguments += ["--apply"]
+        if operation == "health-run":
+            arguments += ["--expect-policy", "a" * 64]
     result = subprocess.run(
         [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
          "-File", str(payload / "bin" / "agent-machines.ps1"),
-         "installation-configuration", "--project", "sample", *(["--apply"] if apply else [])],
+         *arguments],
         cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15,
         **no_window_kwargs(),
     )
     assert result.returncode == 1, (result.stdout, result.stderr)
-    assert "Configuration requires an already provisioned runtime" in result.stderr
+    name = "Health collection" if operation.startswith("health-") else "Configuration"
+    assert f"{name} requires an already provisioned runtime" in result.stderr
     assert not canary.exists() and not (home / ".agent-machines").exists()
     assert snapshot() == before
 
 
 @pytest.mark.parametrize("apply", [False, True])
-def test_posix_configuration_payload_entry_never_bootstraps_missing_runtime(tmp_path, apply):
+@pytest.mark.parametrize("operation", ["configuration", "health-run", "health-prepare"])
+def test_posix_configuration_payload_entry_never_bootstraps_missing_runtime(tmp_path, apply, operation):
     bash = _bash()
     if bash is None:
         pytest.skip("Bash is unavailable")
@@ -122,16 +134,26 @@ def test_posix_configuration_payload_entry_never_bootstraps_missing_runtime(tmp_
             "actualMode": "legacy", "desiredMode": "legacy",
         }),
     )
+    arguments = (
+        ["health", "prepare-job" if operation == "health-prepare" else "run",
+         "--store-dir", str(tmp_path / "store")]
+        if operation.startswith("health-") else ["installation-configuration", "--project", "sample"]
+    )
+    if apply:
+        arguments += ["--apply"]
+        if operation == "health-run":
+            arguments += ["--expect-policy", "a" * 64]
     result = subprocess.run(
         [bash, "-c",
          'export HOME="$(cd "$FIXTURE_HOME" && pwd)"\n'
          'getent() { printf "fixture:x:%s:0::%s:/bin/bash\\n" "$(id -u)" "$HOME"; }\n'
          'export -f getent\nexec bash "$@"',
          "fixture", str(payload / "bin" / "agent-machines"),
-         "installation-configuration", "--project", "sample", *(["--apply"] if apply else [])],
+         *arguments],
         cwd=tmp_path, env=environment, capture_output=True, text=True, timeout=15,
         **no_window_kwargs(),
     )
     assert result.returncode == 1, (result.stdout, result.stderr)
-    assert "Configuration requires an already provisioned runtime" in result.stderr
+    name = "Health collection" if operation.startswith("health-") else "Configuration"
+    assert f"{name} requires an already provisioned runtime" in result.stderr
     assert not canary.exists() and not list(home.iterdir())

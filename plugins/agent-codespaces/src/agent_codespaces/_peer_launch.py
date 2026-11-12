@@ -7,9 +7,11 @@ on Windows PowerShell 5.1. Resolution never provisions or activates anything.
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import subprocess
 import sys
 import threading
@@ -27,6 +29,7 @@ PEERS = {
     "agent-ssh": "agent_ssh",
     "agent-pull-requests": "agent_pull_requests",
     "agent-machines": "agent_machines",
+    "agent-vault": "agent_vault",
 }
 OWNERS = {
     "agent-bridge", "agent-dispatch", "agent-codespaces", "agent-containers",
@@ -189,6 +192,36 @@ def legacy_peer_environment(inherited: dict[str, str]) -> dict[str, str]:
     return environment
 
 
+def _vault_service_suffix(root: str) -> str:
+    if sys.platform == "win32":
+        import ctypes
+        from ctypes import wintypes
+
+        # Match the native gate's invariant casing, not Python's contextual lowercasing.
+        mapping = ctypes.WinDLL("kernel32", use_last_error=True).LCMapStringEx
+        mapping.argtypes = (
+            wintypes.LPCWSTR, wintypes.DWORD, wintypes.LPCWSTR, ctypes.c_int,
+            wintypes.LPWSTR, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, wintypes.LPARAM,
+        )
+        mapping.restype = ctypes.c_int
+        size = mapping("", 0x100, root, -1, None, 0, None, None, 0)
+        if not size:
+            raise ValueError("Vault native installation suffix is unavailable")
+        mapped = ctypes.create_unicode_buffer(size)
+        if not mapping("", 0x100, root, -1, mapped, size, None, None, 0):
+            raise ValueError("Vault native installation suffix is unavailable")
+        normalized = mapped.value
+    else:
+        if not sys.platform.startswith("linux"):
+            raise ValueError("Vault peer invocation supports native Windows and Linux only")
+        if not (shutil.which("sha256sum") or shutil.which("shasum")):
+            raise ValueError("Vault peer requires the native owner's SHA-256 suffix support")
+        normalized = root.replace("\\", "/").translate(
+            str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"),
+        )
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:12]
+
+
 def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict[str, str]:
     """Rebind installation routing, retaining non-routing caller/session data."""
     environment = legacy_peer_environment(inherited)
@@ -243,6 +276,27 @@ def peer_environment(context: dict[str, Any], inherited: dict[str, str]) -> dict
                 environment[key] = value
     elif plugin == "agent-pull-requests":
         environment["AGENT_PULL_REQUESTS_HOME"] = context["stateRoot"]
+    elif plugin == "agent-vault":
+        root = str(Path(context["pluginRoot"]).absolute())
+        suffix = _vault_service_suffix(root)
+        for key in ("KPDB", "VAULT_GROUP", "AGENT_VAULT", "_AGENT_WORKTREES_VAULT_RUNTIME_GUARD"):
+            environment.pop(key, None)
+        environment.update({
+            "AGENT_VAULT_HOME": root,
+            "AGENT_VAULT_VALIDATED_CONTEXT": context["installReceipt"],
+            "AGENT_VAULT_INSTALLATION_ID": f"{context['marketplaceId']}/{plugin}",
+            "AGENT_VAULT_RUN_DIR": str(Path(root) / "run"),
+            "AGENT_VAULT_CORE_RUN_DIR": str(Path(root) / "core"),
+            "AGENT_VAULT_CACHE_DIR": str(Path(root) / "cache"),
+            "AGENT_VAULT_SOCKET": str(Path(root) / "run" / "agent-vault.sock"),
+            "AGENT_VAULT_PIPE": rf"\\.\pipe\agent-vault-{suffix}",
+            "AGENT_VAULT_PID": str(Path(root) / "run" / "agent-vault-service.pid"),
+            "AGENT_VAULT_LOG": str(Path(root) / "logs" / "agent-vault-service.log"),
+            "AGENT_VAULT_PORT": "0",
+            "AGENT_VAULT_SYSTEMD_UNIT": f"agent-vault-{suffix}.service",
+            "AGENT_VAULT_TASK_NAME": f"AgentVault-{suffix}",
+            "AGENT_VAULT_NO_SELFPROVISION": "1",
+        })
     return environment
 
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid Utility cmdlet initialization in prepared Windows hook JSON conversion while retaining shell semantics.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

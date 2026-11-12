@@ -86,7 +86,7 @@ function Register-AwNativeSeedConsoleControl {
 }
 
 function Invoke-AwNativeSeedPhase {
-    param([string]$Root, [string[]]$Arguments, [hashtable]$Runtime, [hashtable]$Environment)
+    param([string]$Root, [string[]]$Arguments, [hashtable]$Runtime, [hashtable]$Environment, [hashtable]$Diagnostics)
     $runtime = if ($Runtime) { $Runtime } else { Get-AwNativeSeedRuntime $Root }
     if (-not $runtime) { return $null }
     $process = $null
@@ -120,7 +120,17 @@ function Invoke-AwNativeSeedPhase {
         if (-not [Threading.Tasks.Task]::WaitAll(
             [Threading.Tasks.Task[]]@($stdout, $stderr), 1000
         )) { return $null }
-        if ($process.ExitCode -ne 0) { return $null }
+        if ($process.ExitCode -ne 0) {
+            $diagnostic = $stderr.GetAwaiter().GetResult()
+            if ($null -ne $Diagnostics) { $Diagnostics['stderr'] = $diagnostic }
+            [Console]::Error.Write($diagnostic)
+            if ($env:WORKTREE_SETUP_LOG) {
+                try {
+                    [IO.File]::AppendAllText($env:WORKTREE_SETUP_LOG, $diagnostic)
+                } catch {}
+            }
+            return $null
+        }
         $raw = $stdout.GetAwaiter().GetResult()
         $reply = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
         $document = [System.Text.Json.JsonDocument]::Parse($raw)
@@ -204,6 +214,17 @@ function Read-AwAdmissionBytes {
     return ,$bytes
 }
 
+function Get-AwAdmissionRefusalReason {
+    param([string]$Stderr, [bool]$HostExited)
+    if ($HostExited) { return 'Session host exited before admission completed' }
+    $prefix = 'Startup admission refused: '
+    $line = @($Stderr -split "`r?`n" | Where-Object { $_.StartsWith($prefix, [StringComparison]::Ordinal) })
+    if (-not $line.Count) { return $null }
+    $reason = (($line[-1].Substring($prefix.Length)) -replace '\s+', ' ').Trim()
+    if ($reason.Length -gt 512) { $reason = $reason.Substring(0, 509) + '...' }
+    return $reason
+}
+
 function Invoke-AwHeadedAdmission {
     param(
         [Net.Sockets.TcpListener]$Listener, [Diagnostics.Process]$Process,
@@ -256,13 +277,19 @@ function Invoke-AwHeadedAdmission {
         foreach ($argument in $nativeArguments.EnumerateArray()) {
             if ($argument.GetString() -cne $Headed.argv[$index++]) { return $false }
         }
+        $diagnostics = @{}
         $admitted = Invoke-AwNativeSeedPhase $Root (
             @('--phase', 'admit') + $Callback + $AdmissionArguments
-        ) -Runtime $Runtime
+        ) -Runtime $Runtime -Diagnostics $diagnostics
         $accepted = [bool]($admitted -and $admitted.recorded -eq $true -and -not $Process.HasExited)
-        $reply = [Text.Encoding]::UTF8.GetBytes(
-            '{"version":1,"accepted":' + $accepted.ToString().ToLowerInvariant() + '}'
-        )
+        $answer = '{"version":1,"accepted":' + $accepted.ToString().ToLowerInvariant()
+        if (-not $accepted) {
+            $reason = Get-AwAdmissionRefusalReason ([string]$diagnostics['stderr']) $Process.HasExited
+            if ($reason) {
+                $answer += ',"reason":' + [System.Text.Json.JsonSerializer]::Serialize($reason, [string])
+            }
+        }
+        $reply = [Text.Encoding]::UTF8.GetBytes($answer + '}')
         $header = [BitConverter]::GetBytes([uint32]$reply.Length)
         if ([BitConverter]::IsLittleEndian) { [Array]::Reverse($header) }
         $stream.WriteTimeout = 1000
@@ -318,6 +345,30 @@ function Wait-AwNativeSeedBackend {
             # Transport loss must not suppress the actual exit and return callback.
         }
     } finally { $childWait.Dispose() }
+}
+
+function Open-AwNativeHeadFence {
+    param([string]$Record)
+    if (-not $IsWindows) { throw 'Native PowerShell head fencing requires Windows.' }
+    $stream = [IO.File]::Open(
+        [IO.Path]::ChangeExtension($Record, '.lock'),
+        [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::ReadWrite
+    )
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    try {
+        while ($true) {
+            try {
+                $stream.Lock(0, 1)
+                return $stream
+            } catch [IO.IOException] {
+                if ($clock.ElapsedMilliseconds -ge 2000) { throw }
+                [Threading.Thread]::Sleep(50)
+            }
+        }
+    } catch {
+        $stream.Dispose()
+        throw
+    }
 }
 
 function Invoke-AwNativeSeedBackend {
@@ -423,17 +474,40 @@ function Invoke-AwNativeSeedBackend {
     $receiptUncertain = $false
     $outputCopies = [Collections.Generic.List[object]]::new()
     $consoleControl = $null
+    $headFence = $null
     try {
         $consoleControl = Register-AwNativeSeedConsoleControl
         try {
-            if (-not $process.Start()) {
-                [Console]::Error.WriteLine('Native backend start is unconfirmed; the handoff is retained.')
+            if ($NativeResumeSession) {
+                try { $headFence = Open-AwNativeHeadFence $Record }
+                catch {
+                    [Console]::Error.WriteLine('Native head-writer fence is unavailable; no backend started.')
+                    return 3
+                }
+                $admitted = Invoke-AwNativeSeedPhase $Root (
+                    @('--phase', 'admit') + $callbackArgs + $admissionArgs
+                ) -Runtime $runtime
+                if (-not ($admitted -and $admitted.recorded -eq $true)) {
+                    [Console]::Error.WriteLine('Native head admission changed; no backend started.')
+                    return 3
+                }
+                $null = $info.Environment.Remove('AGENT_WORKTREES_RETAINED_NATIVE_RESUME')
+            }
+            try {
+                if (-not $process.Start()) {
+                    [Console]::Error.WriteLine('Native backend start is unconfirmed; the handoff is retained.')
+                    return 3
+                }
+            } catch [ComponentModel.Win32Exception] {
+                $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs) -Runtime $runtime
+                [Console]::Error.WriteLine('Native backend could not start; inspect its retained launch outcome.')
                 return 3
             }
-        } catch [ComponentModel.Win32Exception] {
-            $null = Invoke-AwNativeSeedPhase $Root (@('--phase', 'spawn-failed') + $callbackArgs) -Runtime $runtime
-            [Console]::Error.WriteLine('Native backend could not start; inspect its retained launch outcome.')
-            return 3
+        } finally {
+            if ($headFence -and -not $prepared.headed) {
+                $headFence.Dispose()
+                $headFence = $null
+            }
         }
         # Explicit output handles also preserve the original stdin handle in
         # consoleless children. Never pipe a real terminal's interactive streams.
@@ -478,15 +552,21 @@ function Invoke-AwNativeSeedBackend {
             } else { $null }
             $receiptUncertain = -not ($spawned -and $spawned.recorded -eq $true)
         } catch { $receiptUncertain = $true }
+        if ($headFence -and -not $receiptUncertain) {
+            $headFence.Dispose()
+            $headFence = $null
+        }
         # Keep the actual child handle until exit; detaching the mux is not exit.
         Wait-AwNativeSeedBackend $process $outputCopies.ToArray()
         $code = $process.ExitCode
         $returnedArgs = @('--phase', 'returned', '--exit-code', [string]$code) + $callbackArgs
         if ($receiptUncertain) { $returnedArgs += '--receipt-uncertain' }
-        $null = Invoke-AwNativeSeedPhase $Root $returnedArgs -Runtime $runtime
+        # Terminal observation uses the current provider after runtime replacement.
+        $null = Invoke-AwNativeSeedPhase $Root $returnedArgs
         if ($code -eq 0 -and $receiptUncertain) { return 3 }
         return $code
     } finally {
+        if ($headFence) { $headFence.Dispose() }
         if ($listener) { $listener.Stop() }
         if ($consoleControl) {
             $null = [AwNativeSeed.ConsoleControl]::SetConsoleCtrlHandler($consoleControl.Pointer, $false)

@@ -1,0 +1,9 @@
+{
+  "comment": "Release canonical attribution helpers in the standalone PR service wheel and source artifact",
+  "changes": [
+    {
+      "plugin": "services/pr",
+      "type": "patch"
+    }
+  ]
+}

@@ -9,21 +9,19 @@
   all three of its roles.
 - **Scope:** branch (application intent; configuration detail lives in its child)
 - **Status:** Active
-- **Last revised:** 2026-11-05
+- **Last revised:** 2026-11-10
 - **Reality docs:** [`docs/install-contract.md`](../../docs/install-contract.md) ·
   [`docs/architecture.md`](../../docs/architecture.md)
 
 ## Purpose & Intent
 
-The friction this vision exists to abolish: a Copilot plugin is **inert until a
-session launches**. Its installer — the code that actually creates binstubs,
-runtimes, services, and config — does not run at delivery time. A user who
-adopts copilot-extensions but never tells their agent to run the setup flows is
-left with plugins "installed" yet **nothing on the machine built**: no core
-runtime, no binstubs, no turnkey system. Bootstrap that relies on an agent
-*remembering* to run install steps is bootstrap that silently fails — and the
-failure is invisible until the user tries to use a command that was never
-created.
+The friction this vision exists to abolish: delivered Copilot knowledge and
+connectors are not an installed backend. Applications, commands, services and
+configuration must be prepared through their independent installation owners,
+before an agent needs them. Enabling a plugin must not construct those runtimes
+from its payload or make a session responsible for remembering a hidden setup
+step. Missing setup remains visible rather than failing only when a command is
+first used.
 
 The north star is a **single, obvious, out-of-plugin entry point** that takes a
 bare machine to a working harness in one turnkey flow, and then **stays** as the
@@ -36,10 +34,12 @@ do.
 Crucially, this awareness runs **one way and carries no dependency**: the
 installer *knows about* the plugins — their prerequisites, their configuration,
 and "what to do" to make each ready — but **no plugin is built to depend on the
-installer, and the installer is never a runtime dependency of a plugin**. Every
-plugin remains independently installable and fully functional on its own; the
+installer, and the installer is never a runtime dependency of a plugin**.
+Connector content remains independently deliverable, and each backend has a
+complete standalone installation path without Copilot or Manager; the
 installer is a **knowing outsider** that sets things up, not a layer anything is
-wired to.
+wired to. Backend implementations and their installation inputs are distributed
+outside plugin payloads.
 
 Two roles at first, a third as the harness grows — **one app**:
 
@@ -58,9 +58,9 @@ Two roles at first, a third as the harness grows — **one app**:
   choosing where and how to launch. A terminal multiplexer is one optional
   provider capability, not the control-plane's universal execution model. This
   is where the Worktree Picker lives. It is **optional** in the
-  strongest sense: the plugins carry the in-session tools an agent needs to do
-  its job and **provision and manage themselves — daemons included — with this
-  control-plane entirely absent**. The control-plane makes the fleet *legible and
+  strongest sense: plugins supply in-session connection and knowledge surfaces,
+  while independently installed components supervise their own declared lifetime
+  with **this control-plane entirely absent**. The control-plane makes the fleet *legible and
   launchable by a human*; it is never a prerequisite for the plugins to function.
 
 Because it is the surface a user runs directly, the app also **keeps itself
@@ -115,18 +115,22 @@ and fix how it is wired.
   guarantees, and interaction promises are defined by the
   [picker](../picker/README.md) vision; this app is where that surface is
   **delivered and kept current**. It is **optional**: a user who only wants the
-  in-session plugin tools never has to run it, and the plugins are fully
-  self-sufficient without it.
+  in-session connector never has to run it, and each required backend has a
+  complete independent installation path without it.
 - **Plugin updating & cross-plugin alignment** — keeping the installed plugin
   set **current and mutually consistent**: updating plugins and their user-global
   runtimes, and checking that the versions, shared contracts, and configuration
   across plugins **line up** (no drift, no half-upgraded set), offering to
   reconcile what has fallen out of alignment. This complements — never replaces —
-  each plugin's own ability to provision and reconcile itself.
+  each component's independent installation and reconciliation owner.
 - **Self-update** — because it is fetched and run directly (not through the
   plugin pipe) and *wraps* session launches, the app **keeps itself up to date on
   its own when automatic maintenance is adopted**, out-of-band from any
   Copilot session, so the launcher never depends on a session to refresh it.
+- **Supplementary installables** - adopting repositories and their effective
+  plugin selections contribute tools, services and applications to the same
+  installation system. The [supplementary-installables vision](supplementary-installables/README.md)
+  defines that extension boundary without another builder or lifecycle owner.
 - **Presets** — a shareable configuration bundle a `<repo>-harness` plugin
   carries **as part of its own payload** (related-repo declarations, venue/
   CodeSpace product defaults, and more), so adopting the plugin preconfigures
@@ -681,18 +685,25 @@ prevents concrete conflicting writes; preserving old serialization is not an
 installation requirement.
 
 The execution owner has a standalone installation foundation available before
-plugin provisioning, including first installation without an existing Python
-runtime. A plugin can establish that foundation from its own installation
-surface without requiring Manager, another plugin, or an independently
-administered always-on coordinator. Foundation construction has one bounded,
-recoverable owner; it is not a general-purpose exception for running plugin
-installers. Once ready, first-use publication follows the same durable request
+connector use, including first installation without an existing Python runtime.
+Explicit component setup can establish that foundation without requiring
+Manager, a Copilot plugin, or an independently administered always-on coordinator.
+Foundation construction has one bounded, recoverable installation owner; it is
+not an exception that lets plugin loading become runtime provisioning. Once
+ready, explicit installation publication follows the same durable request
 contract as later updates. Missing, incompatible or interrupted foundation state
 is handled by that same installation authority, including fresh establishment
 or supported recovery, never by an independent competing installer.
 
 Equivalent same-target requests debounce and share the active operation's
 observable result; different-target requests wait or queue rather than race.
+An addressed update has at most one waiting successor. A newer accepted update
+replaces the older waiting selection, retaining an attributable superseded
+outcome instead of running stale queued installer code. This does not cancel
+the active update, replay uncertain work, or discard subordinate component
+installation. Independent installations retain independent selections.
+Automatic requests cannot displace an explicit user's waiting selection or
+inherit its authority; a superseded request never reports installation success.
 One authoritative desired-version selection supplies normal installation
 targets, keeping automatic advancement monotonic instead of allowing competing
 callers to cause accidental rollback. Deliberate repair or rollback selection
@@ -715,7 +726,7 @@ merely to avoid a reboot.
 Explicitly supervised debugging can execute directly only while holding the
 same exclusive authority. Recurring scheduling is a separate, consented
 responsibility: a maintenance trigger submits to the execution owner rather
-than introducing another installation driver. Standalone plugins retain their
+than introducing another installation driver. Standalone components retain their
 independent installation and recovery paths; adopting this suite-level owner
 does not make Manager a mandatory plugin dependency.
 

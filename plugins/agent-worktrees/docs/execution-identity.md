@@ -104,19 +104,93 @@ JSON. `platform` must agree with `environment`; missing version metadata keeps
 the original legacy machine/platform interpretation. Unsupported, partial or
 conflicting explicit tuples are errors, never fallback execution authority.
 
+### Retained local checkout authority
+
+A checkout already registered in this machine's receiving project store is
+local by that store and its actual Git checkout, not by a machine-topology
+lookup. The retained proof checks the selected project, exact tracking path
+and snapshot, absolute nonredirected checkout, repository family and reciprocal
+Git worktree registration. It reads Git's marker, common-directory and
+backpointer files directly, without starting Git or acquiring optional topology.
+It also covers adopted linked checkouts and retained managed checkouts outside
+a newer allocation root. An anchor record instead proves the exact configured
+local Git anchor, including a bare repository or a Git-file anchor whose
+`gitdir` and optional `commondir` point to the actual repository metadata.
+The record's platform must still match the actual current execution environment;
+an optional topology's platform label cannot replace that OS check.
+A branch switch or detached HEAD does not change locality or rewrite the
+recorded branch. Branch-sensitive custody is separate: managed cleanup outside
+the current allocation namespace retains recorded-branch proof, and a conflicting
+or unproven retained checkout cannot establish claimant death. Cross-project
+claimant checks use the owner's receiving configuration for that proof; failed
+configuration acquisition remains unknown without rebinding the active project.
+
+Existing local resolve/resume, folder trust, original-owner lookup and producer
+settlement use that proof before machine-name selection. A renamed, missing,
+malformed or incorrectly platform-mapped optional topology cannot veto the
+retained checkout. Ordinary configuration retains the configured/detected name
+when optional topology resolution fails; acquisition diagnostics still retain
+the failed observation. Explicit remote routing and new allocation continue to
+validate their selected execution context.
+A historical alias never overrides an explicitly declared remote or ambiguous
+target. The optional local-ID probe searches registered receiving projects without
+rebinding the ambient project, and local suffix ambiguity does not consume a
+selector intended for a remote store. Admitted local selection carries its exact
+canonical ID and receiving project into resume rather than resolving the same
+input again against another project's suffixes. Explicit keys, aliases and
+profiles are selected before an observed-hostname fallback; unrelated hostname
+metadata does not turn a retained checkout into a remote destination.
+Caller-declared targets also precede a cross-project historical-name fallback,
+even when the receiving project has no topology of its own. Malformed local
+record shapes are failed optional probes, not a veto on strict remote routing.
+The reserved `@anchor` ID is always scoped to the selected project, never a
+cross-project global-ID or relocation candidate. A declared local target still
+carries its proven receiving project and canonical worktree ID into resume.
+
+No identity migration is necessary. IDs, historical physical and execution
+names, sessions, pairs, claims and owner references remain intact. Qualified
+owner lookup must name the actual retained record's execution owner. That
+accessor preserves the original machine label for legacy records; a versioned
+guest's physical host is not an alias for its execution owner. An unrelated
+native or remote owner does not select a coincident local ID.
+Receipt-backed ownership continues to require its original receiving creation
+journal, incarnation, relationships and finality. Locality neither releases a
+claim nor waives live process, launch, handoff or lifecycle ownership.
+An in-memory receipt recovered by that owner remains provable against the exact
+original indexed journal without rewriting the ledger or upgrading the journal
+during a locality read.
+Failed or absent receipt recovery cannot authorize a foreign-owned child:
+without a validated receipt, an owned local record requires an independently
+proven retained local parent.
+Claimant absence is confirmed dead only after execution locality is validated;
+an unvalidated configured name retained after topology failure is not proof.
+Actual retained owner records remain locally observable, but an invalid current
+context leaves an absent owner unconfirmed and preserves the custody hold.
+Topology-only alias equality cannot replace rejected record-scoped proof.
+A qualified legacy alias, including a current configured name that differs
+from the stored owner, needs that proof before the record can establish death;
+an unproven local alias remains unknown without a remote/self probe.
+`doctor` reports `local_registration` for the project's records, distinguishing
+proven local checkouts, absent checkouts and present but unproven paths, without
+rewriting historical identities.
+
+### Unretained records and new execution
+
 The typed tracking accessor preserves the exact historical machine label for
 legacy records. Ordinary saves do not migrate their format or alter a versioned
 identity. Concurrent changes to environment, execution owner or identity version
 invalidate a loaded writer even when its physical host is unchanged. Mutation
-still requires the receiving project's current execution context and actual
-platform; sharing a physical host does not make native and guest owners equal.
+without retained-local proof requires the receiving project's current execution
+context and actual platform; sharing a physical host does not make native and
+guest owners equal.
 The optional receiving registry customizes that context rather than enrolling
 the local machine. The complete physical/environment/execution tuple must match
 the validated context, and explicit registered execution keys retain their
 canonical-key and platform checks. Project and actual-ledger snapshot checks
 remain independent of naming; a detected name is not a receiving-record grant.
-Cleanup, including forced removal, applies that tuple check before any missing,
-empty or unscoped registry fallback retained for historical records. Resolved
+Without retained-local proof, cleanup, including forced removal, applies that
+tuple check before any missing, empty or unscoped registry fallback retained for
+historical records. Resolved
 controller navigation and strict resource-owner scans use the execution owner;
 malformed explicit tuples make the scan incomplete rather than borrowing the
 physical host or disappearing behind an owner filter.

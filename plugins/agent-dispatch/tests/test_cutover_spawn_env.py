@@ -62,6 +62,40 @@ def test_apply_service_env_overlay_is_a_noop_without_a_service_env_file(tmp_path
     assert result == {"PATH": "/usr/bin"}
 
 
+@pytest.mark.parametrize("configured", [False, True])
+@pytest.mark.parametrize("strict", [False, True])
+def test_coordinator_registrar_comes_from_service_not_initiating_profile(tmp_path, configured, strict):
+    from agent_dispatch.install_paths import coordinator_service_environment
+
+    inherited = {"AGENT_DISPATCH_REGISTRAR_DIR": str(tmp_path / "profile" / "registrar")}
+    selected = tmp_path / "shared-registrar"
+    if configured:
+        (tmp_path / "service.env").write_text(f"AGENT_DISPATCH_REGISTRAR_DIR={selected}\n")
+    result = coordinator_service_environment(inherited, tmp_path, strict=strict)
+    assert result["AGENT_DISPATCH_REGISTRAR_DIR"] == str(selected if configured else tmp_path / "registrar")
+    assert inherited["AGENT_DISPATCH_REGISTRAR_DIR"] == str(tmp_path / "profile" / "registrar")
+
+
+def test_lazy_coordinator_spawn_does_not_inherit_profile_registrar(tmp_path, monkeypatch, daemon_calls):
+    from agent_dispatch import __main__ as main_mod
+
+    monkeypatch.setattr("agent_dispatch.install_paths.install_dir", lambda: tmp_path)
+    monkeypatch.setattr("agent_dispatch.procutil.resolve_own_runtime_python", lambda: "python")
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "profile" / "registrar"))
+    main_mod._spawn_coordinator_process()
+    assert daemon_calls[0][1]["env"]["AGENT_DISPATCH_REGISTRAR_DIR"] == str(tmp_path / "registrar")
+
+
+def test_coordinator_registrar_remains_absolute_after_child_changes_directory(tmp_path, monkeypatch):
+    from pathlib import Path
+    from agent_dispatch.install_paths import coordinator_service_environment
+
+    monkeypatch.chdir(tmp_path)
+    root = Path("runtime")
+    env = coordinator_service_environment({}, root)
+    assert env["AGENT_DISPATCH_REGISTRAR_DIR"] == str(tmp_path / root / "registrar")
+
+
 @pytest.mark.parametrize("windows_keys", [False, True])
 def test_service_env_overlay_matches_native_key_semantics(tmp_path, monkeypatch, windows_keys):
     from agent_dispatch import install_paths
@@ -191,6 +225,7 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
     monkeypatch.delenv("AGENT_DISPATCH_CONTROL_TOKEN", raising=False)
     monkeypatch.delenv("AGENT_DISPATCH_CONTROL_TOKEN_COMMAND", raising=False)
     monkeypatch.setenv("AGENT_DISPATCH_ROUTING_DIR", str(tmp_path / "routing"))
+    monkeypatch.setenv("AGENT_DISPATCH_REGISTRAR_DIR", str(tmp_path / "profile" / "registrar"))
     monkeypatch.setattr("agent_dispatch.config.client_token", lambda: None)
     monkeypatch.setattr(zdd_breadcrumb, "recover_stale_cutover", lambda *a, **k: {"recovered": False})
     monkeypatch.setattr(zdd_breadcrumb, "read_breadcrumb", lambda *a, **k: None)
@@ -241,6 +276,7 @@ def test_cutover_spawn_passive_applies_service_env_overlay(tmp_path, monkeypatch
     # The passive replacement runs from the runtime root, never this
     # process's own cwd.
     assert kwargs["cwd"] == install_dir
+    assert kwargs["env"]["AGENT_DISPATCH_REGISTRAR_DIR"] == str(install_dir / "registrar")
 
 
 def test_cutover_spawn_passive_fresh_port_wins_over_service_env_port_pin(

@@ -24,7 +24,7 @@ def _resident_selection(*, min_version: int = 2) -> tuple[Path, tuple[str, int, 
         endpoint is None or not isinstance(generation, str) or not generation.strip()
         or not isinstance(runtime, str) or not runtime.strip()
     ):
-        raise ValueError("selected resident lacks incarnation-checked relationship inspection")
+        raise ValueError(f"selected resident lacks resource_relationship inspection contract version {min_version}")
     return path, endpoint, generation, runtime
 
 
@@ -35,7 +35,11 @@ def _inspect_resident(args: dict) -> dict:
     nonce = payload.get("expected_creation_nonce")
     if nonce is None:
         raise ValueError("resident-only inspection requires expected_creation_nonce")
-    min_version = 3 if "expected_writer_identity" in payload else 2
+    min_version = 4 if "expected_head" in payload else 3 if "expected_writer_identity" in payload else 2
+    if "predecessor_session_id" in payload.get("expected_head", {}):
+        min_version = 5
+    if "expected_conclusion" in payload:
+        min_version = 6
     selection = _resident_selection(min_version=min_version)
     _, endpoint, generation, runtime = selection
     try:
@@ -61,6 +65,15 @@ def _inspect_resident(args: dict) -> dict:
         or result.get("creation_nonce") != nonce
         or ("expected_writer_identity" in payload
             and result.get("writer_identity") != payload["expected_writer_identity"])
+        or ("expected_head" in payload and (
+            result.get("phase") != "bound"
+            or producer.canonical_json(result.get("head")) != producer.canonical_json(payload["expected_head"])
+        ))
+        or ("expected_conclusion" in payload and (
+            result.get("phase") != "bound"
+            or producer.canonical_json(result.get("conclusion"))
+            != producer.canonical_json(payload["expected_conclusion"])
+        ))
         or not isinstance(contract, dict)
         or any(
             type(contract.get(key)) is not type(value) or contract[key] != value
@@ -86,9 +99,13 @@ def cmd_resource_relationship(args) -> int:
                 "inspect_absence": True,
                 "expected_creation_nonce": True,
                 "expected_writer_identity": True,
+                "head_inspect": 1,
+                "succession_inspect": 1,
+                "conclusion_inspect": 1,
                 "resident_inspect": 1,
                 "writer_scope": "executing-process",
                 "retained_session_writes": 1,
+                "retained_native_resume": 1,
                 "writer_contract": relationship.writer_contract(),
                 "writer_identity": relationship.writer_identity(),
                 "max_ref_bytes": producer.MAX_REF_BYTES, "max_input_bytes": producer.MAX_INPUT_BYTES,

@@ -23,6 +23,33 @@ def git_environment(**overrides: str) -> dict[str, str]:
     return {**environment, **overrides}
 
 
+def git_text(
+    repo: Path, args: list[str], *, check: bool = True,
+    env: dict[str, str] | None = None, input_text: str | None = None,
+) -> str:
+    environment = git_environment()
+    if env is not None:
+        candidate_identity = {
+            f"GIT_{role}_{field}"
+            for role in ("AUTHOR", "COMMITTER") for field in ("DATE", "NAME", "EMAIL")
+        }
+        environment.update({
+            key: value for key, value in env.items()
+            if not key.upper().startswith("GIT_") or key in candidate_identity
+        })
+    result = subprocess.run(
+        ["git", "--no-replace-objects",
+         *(["-c", "core.longpaths=true", "-c", "checkout.workers=2"] if os.name == "nt" else []),
+         *args],
+        cwd=str(repo), capture_output=True, env=environment,
+        input=input_text.encode("utf-8") if input_text is not None else None,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    if check and result.returncode:
+        raise ValueError(f"git {' '.join(args)} failed: {result.stderr.decode('utf-8').strip()}")
+    return result.stdout.decode("utf-8").strip()
+
+
 def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
     env = git_environment()
     result = subprocess.run(
@@ -37,7 +64,7 @@ def _git(repo: Path, args: list[str], *, data: bytes | None = None) -> bytes:
 
 def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
     result = subprocess.run(
-        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        ["git", "--no-replace-objects", "merge-base", "--is-ancestor", ancestor, descendant],
         cwd=str(repo), capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )
@@ -47,7 +74,7 @@ def is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
 def changefile_existed_at(rev: str, name: str, *, repo: Path) -> bool:
     """Read whether a changefile was already present at the previous Dev boundary."""
     result = subprocess.run(
-        ["git", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
+        ["git", "--no-replace-objects", "cat-file", "-e", f"{rev}:.changefiles/{name}"],
         cwd=str(repo), capture_output=True, text=True, env=git_environment(),
         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
     )

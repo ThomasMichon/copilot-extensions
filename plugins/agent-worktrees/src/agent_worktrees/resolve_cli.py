@@ -16,13 +16,17 @@ from . import codename_tracking, config as cfg
 from . import machine_identity as machine_identity
 from .launch_trace import append_launch_event
 from .execution_spaces import ExecutionSpaceError, registry_for_config
-from .resume_seed import cold_start_error, plain_live_open, seed_for_attempt
+from .resume_seed import (
+    RETAINED_HANDOFF_WARNING, cold_start_error, plain_live_open,
+    preserve_unconfirmed_seed, preserved_seed_selection_error, seed_for_attempt,
+)
 from .launch_seed_exec import deferred_command
 from .worktree_creation import LaunchSeedStagingFailure
 from .launch_progress import preview_mode, step
 from .resolve_picker_cli import ResolvePickerContext, run_legacy_picker
 from .resolve_machine_cli import remote_selector_args as _remote_selector_args
 from .resolve_target import target_is_local as _target_is_local
+from .resolve_target import retained_target
 
 
 def _core():
@@ -61,10 +65,6 @@ def _emit_remote_plan_for_env(*args, **kwargs):
 
 def _heal_stale_anchor_if_self_missing(*args, **kwargs):
     return _core()._heal_stale_anchor_if_self_missing(*args, **kwargs)
-
-
-
-
 
 
 def _launch_profile_selection(*args, **kwargs):
@@ -226,6 +226,18 @@ class _ResolveEarlyExit(RuntimeError):
         self.exit_code = exit_code
 
 
+def _select_target(state: ResolveCommandState, config: cfg.Config) -> tuple[cfg.Config, bool]:
+    environment = getattr(state.args, "environment", None)
+    retained = retained_target(config, state.worktree_id, state.requested_machine, environment)
+    if retained is not None:
+        config, worktree_id = retained
+        cfg.set_active_project(config.repo_name)
+        state.config, state.worktree_id = config, worktree_id
+        state.args.worktree_id = worktree_id
+        return config, True
+    return config, _target_is_local(config, state.requested_machine, environment)
+
+
 def add_parsers(sub) -> None:
     """Register the ``resolve`` subcommand."""
     parser = sub.add_parser("resolve", help="Resolve launch plan as JSON (for shell wrappers)")
@@ -307,6 +319,7 @@ def add_parsers(sub) -> None:
         help="Require atomically fenced native launch-seed staging",
     )
     parser.add_argument("--seed-id", default=None, help="Execute this already-staged launch intent")
+    parser.add_argument("--preserve-seed-id", default=None, help="Open without delivering this retained intent")
     parser.add_argument("--launch-attempt-id", default=None, help="Correlate a confirmed Manager launch attempt")
     parser.add_argument(
         "--require-launch-attempt", action="store_true",
@@ -422,6 +435,8 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
         ))
     ):
         return output._json_error("Native resume requires an existing unseeded --worktree-id and --no-resume", exit_code=3)
+    if error := preserved_seed_selection_error(args):
+        return output._json_error(error, exit_code=3)
     if (
         getattr(args, "launch_request_b64", None) is not None
         or getattr(args, "launch_request_status", None) is not None
@@ -524,12 +539,10 @@ def _cmd_resolve(args: argparse.Namespace) -> int:
             output.err("Run 'agent-worktrees list' to see available worktrees.")
             return 1
 
-        if state.requested_machine:
+        if state.requested_machine or state.worktree_id:
             config = state.load_config()
             try:
-                target_is_local = _target_is_local(
-                    config, state.requested_machine, getattr(args, "environment", None),
-                )
+                config, target_is_local = _select_target(state, config)
                 requested_environment = (
                     cfg.detect_platform() if target_is_local else resolve_machine_selection(
                         registry_for_config(config), state.requested_machine,
@@ -635,35 +648,10 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     except Exception as exc:
         return output._json_error(str(exc))
 
-    # Self-targeting (--machine <this machine's own name>) must behave like
-    # --machine was never passed -- exactly as the interactive/non-JSON path
-    # already does (its own `state.requested_machine != config.machine` guard
-    # a few lines up, before calling `_try_machine_handoff`). Without this
-    # check, `_emit_remote_plan_for_env` below looks the name up in
-    # machines.yaml with no local-machine awareness at all (unlike
-    # `_load_remote_machines`, which the interactive path's "Other Machines"
-    # menu is built from) and happily emits a real "ssh <this box>" handoff
-    # plan for a caller already running on it -- confirmed live: an
-    # `agent-worktrees copilot`/Worktree Manager flow invoked with this
-    # machine's own alias round-tripped through SSH back to itself instead of
-    # resolving locally.
-    #
-    # BUT a same-machine target can still legitimately name a DIFFERENT
-    # --environment (e.g. --machine some-host --environment WSL, invoked
-    # from the Windows side of the same physical box) -- exactly the case
-    # `_load_remote_machines` itself special-cases ("for the local machine,
-    # only environments that differ from the current platform are
-    # included"). That worktree lives in a separate OS/filesystem with its
-    # own tracking directory, never visible to this process's local
-    # `cfg.tracking_dir()`. Treating same-machine-name as proof of "no
-    # dispatch needed" regardless of --environment made every same-machine
-    # cross-platform resume (e.g. the Windows Worktree Picker launching a
-    # WSL worktree) fail closed with a bogus "Worktree not found" instead of
-    # SSHing into the requested environment -- confirmed live.
+    # Keep the admitted receiving project/ID through resume. A different
+    # execution environment still requires its own remote selection.
     try:
-        same_machine = _target_is_local(
-            config, state.requested_machine, getattr(state.args, "environment", None),
-        )
+        config, same_machine = _select_target(state, config)
         requested_environment = (
             cfg.detect_platform() if same_machine else resolve_machine_selection(
                 registry_for_config(config), state.requested_machine,
@@ -805,15 +793,18 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
         verdict = sessions.verify_worktree_active(record)
     if staged_seed is not None and plain_live_open(state.args, verdict):
         staged_seed = None
+    retain_seed = preserve_unconfirmed_seed(state.args, staged_seed)
     if staged_seed is not None and not getattr(state.args, "bare_resume", False):
-        seed_error = cold_start_error(verdict, staged_seed.kind)
+        seed_error = cold_start_error(verdict, staged_seed.kind, preserving=retain_seed)
         if seed_error:
             return output._json_error(seed_error, exit_code=3)
-        if staged_seed.handoff_id:
+        if staged_seed.handoff_id and not retain_seed:
             return output._json_error(
                 "Previous launch-prompt handoff is unconfirmed; the seed is retained "
                 "but will not be automatically submitted twice.", exit_code=3,
             )
+    if retain_seed:
+        print(RETAINED_HANDOFF_WARNING, file=sys.stderr)
     if not getattr(state.args, "dry_run", False):
         try:
             with step("Recording worktree resume", worktree_id=worktree_id), tracking._RecordLock(
@@ -884,7 +875,7 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     elif not no_resume:
         _emit_parent_context_hint(record, to_stderr=True)
 
-    seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False))
+    seed_pending = bool(staged_seed and not getattr(state.args, "bare_resume", False) and not retain_seed)
     env["WORKTREE_NO_PROVISION"] = "0" if getattr(state.args, "first_launch", False) else "1"
     if native_resume and (seed_pending or not no_resume):
         return output._json_error("Native ACP resume cannot consume a launch seed or select CLI history", exit_code=3)
@@ -933,6 +924,9 @@ def _resolve_json_mode(state: ResolveCommandState) -> int:
     }
     if selection.assignment is not None:
         launch["profile_assignment"] = profile_assignment.metadata(selection.assignment)
+    if retain_seed and staged_seed is not None:
+        launch["seed_preserved_id"] = staged_seed.seed_id
+        launch["seed_preservation_version"] = 1
     if getattr(state.args, "dry_run", False):
         launch["preview"] = True
         if warning := getattr(selection, "warning", ""):

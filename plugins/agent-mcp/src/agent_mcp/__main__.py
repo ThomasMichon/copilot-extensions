@@ -9,6 +9,8 @@ Subcommands:
   forward <name|--config FILE>  Thin per-session forwarder: attach to a resident
                                 serve session-host and pump stdio<->socket, with a
                                 direct-bridge fallback (the #744 multiplexer child).
+  session-owner-capabilities    Inspect selected-runtime owner handoff support
+                                without starting or attaching an MCP session.
   validate <name|FILE>          Parse + schema-check a bridge config (no run).
   diagnose <name|FILE>          Staged connectivity check: config -> auth ->
                                 transport -> handshake -> catalog. Reports
@@ -81,7 +83,9 @@ def _cmd_bridge(args: argparse.Namespace) -> int:
     if not target:
         print("agent-mcp bridge: a bridge name or --config FILE is required", file=sys.stderr)
         return 2
-    from . import forward
+    from . import forward, owner_handoff
+    if owner_handoff.requested(args):
+        return owner_handoff.run(target, args)
     return forward.run(target)
 
 
@@ -91,7 +95,9 @@ def _cmd_forward(args: argparse.Namespace) -> int:
         print("agent-mcp forward: a bridge name or --config FILE is required",
               file=sys.stderr)
         return 2
-    from . import forward
+    from . import forward, owner_handoff
+    if owner_handoff.requested(args):
+        return owner_handoff.run(target, args)
     return forward.run(target, socket_path=args.socket)
 
 
@@ -187,22 +193,9 @@ def _cmd_status(_args: argparse.Namespace) -> int:
 
 
 def _cmd_installer_readiness(_args: argparse.Namespace) -> int:
-    from .config import (
-        BRIDGES_DIR,
-        discover_plugin_bridge_candidates,
-        normalize_bridge_name,
-    )
-    from .installer_readiness import emit, evaluate
+    from .installer_readiness import configured_readiness, emit
 
-    candidates = []
-    if BRIDGES_DIR.is_dir():
-        for path in sorted(BRIDGES_DIR.iterdir()):
-            suffix = path.suffix.lower()
-            if suffix not in (".yaml", ".yml", ".json"):
-                continue
-            candidates.append((normalize_bridge_name(path.name), path))
-    candidates.extend(discover_plugin_bridge_candidates())
-    return emit(evaluate(candidates))
+    return emit(configured_readiness())
 
 
 # ---------------------------------------------------------------------------
@@ -769,6 +762,11 @@ class _LazyVersionAction(argparse.Action):
 
 
 def build_parser() -> argparse.ArgumentParser:
+    from .owner_capabilities import command as owner_capabilities
+    from .owner_exec import command as owner_exec
+    from .owner_entry import command as owner_entry
+    from .owner_handoff import add_arguments as add_owner_arguments
+
     _h = "bridge name under ~/"
     _h += ".agent-mcp/bridges/"  # marketplace-isolation: allow deployed-runtime-diagnostics
     parser = argparse.ArgumentParser(prog="agent-mcp", description=__doc__)
@@ -782,6 +780,7 @@ def build_parser() -> argparse.ArgumentParser:
                        "AGENT_MCP_NO_MULTIPLEX for the classic in-process bridge)")
     p_bridge.add_argument("name", nargs="?", help=_h)
     p_bridge.add_argument("--config", help="explicit path to a bridge config file")
+    add_owner_arguments(p_bridge)
     p_bridge.set_defaults(func=_cmd_bridge)
 
     p_forward = sub.add_parser(
@@ -792,7 +791,27 @@ def build_parser() -> argparse.ArgumentParser:
     p_forward.add_argument("--config", help="explicit path to a bridge config file")
     p_forward.add_argument("--socket", help="serve socket handle to attach "
                                             "(default: $AGENT_MCP_HOME/serve.sock)")
+    add_owner_arguments(p_forward)
     p_forward.set_defaults(func=_cmd_forward)
+
+    sub.add_parser(
+        "session-owner-capabilities",
+        help="inspect selected-runtime owner handoff support without startup",
+    ).set_defaults(func=owner_capabilities)
+
+    p_owner_entry = sub.add_parser(
+        "session-owner-entry", help="optional physical owner receiver (internal overlay entry)",
+    )
+    p_owner_entry.add_argument("request", help="session-only launch request")
+    p_owner_entry.set_defaults(func=owner_entry)
+
+    p_owner_exec = sub.add_parser(
+        "exec-client", help="opt in selected MCP entries at a native Linux client exec boundary",
+    )
+    p_owner_exec.add_argument("--mcp-config", required=True, help="explicit MCP entry configuration")
+    p_owner_exec.add_argument("--server", action="append", required=True, help="server name to adopt")
+    p_owner_exec.add_argument("client", nargs=argparse.REMAINDER, help="native copilot command after --")
+    p_owner_exec.set_defaults(func=owner_exec)
 
     p_validate = sub.add_parser("validate", help="validate a bridge config")
     p_validate.add_argument("name", help="bridge name or path to a config file")

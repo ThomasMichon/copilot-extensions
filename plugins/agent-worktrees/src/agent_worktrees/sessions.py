@@ -12,6 +12,7 @@ The only sanctioned full walk of the state root is the explicit
 from __future__ import annotations
 
 import json
+import logging
 import os
 import platform
 from collections.abc import Callable, Iterable
@@ -33,9 +34,9 @@ from .sessions_pane_retire import (
 )
 
 try:  # libyaml (C) is dramatically faster; the one sanctioned sweep uses it.
-    from yaml import CSafeLoader as _YamlSafeLoader
+    from yaml import CSafeLoader as _YamlSafeLoader  # noqa: F401 -- backfill compatibility export
 except ImportError:  # pragma: no cover - pure-Python fallback
-    from yaml import SafeLoader as _YamlSafeLoader
+    from yaml import SafeLoader as _YamlSafeLoader  # noqa: F401 -- backfill compatibility export
 
 
 @dataclass
@@ -834,7 +835,7 @@ def resolve_resume_target(
     )
 
 
-def backfill_sessions(records: list) -> dict[str, list[str]]:
+def backfill_sessions(records: list, *, strict: bool = False) -> dict[str, list[str]]:
     """Populate empty session registries from existing session-state data.
 
     Scans ``~/.copilot/session-state/`` once, matches sessions to
@@ -852,76 +853,9 @@ def backfill_sessions(records: list) -> dict[str, list[str]]:
     ``doctor``), never implicitly on a routine read. Parsed with the C YAML
     loader since this is the lone remaining O(sessions) path.
     """
-    session_dir = _session_state_dir()
-    if not session_dir.exists():
-        return {}
+    from .session_backfill import backfill_sessions as discover
 
-    # Collect worktrees that need backfilling
-    path_to_wt: dict[str, str] = {}  # normalized_path → worktree_id
-    for rec in records:
-        sessions = getattr(rec, "sessions", None)
-        if sessions:
-            continue  # already has entries
-        if not rec.worktree_path:
-            continue
-        path_to_wt[_normalize_path(rec.worktree_path)] = rec.worktree_id
-
-    if not path_to_wt:
-        return {}
-
-    # Single pass over all session directories
-    # worktree_id → list of (session_id, updated_at)
-    discovered: dict[str, list[tuple[str, str]]] = {}
-
-    for entry in session_dir.iterdir():
-        if not entry.is_dir():
-            continue
-
-        # Skip detached parent-continuation sessions (subconscious /
-        # rem-agent runs); they reuse the parent's cwd and must not be
-        # backfilled into a worktree's session registry.
-        if _is_detached_session(entry):
-            continue
-
-        ws_file = entry / "workspace.yaml"
-        if not ws_file.exists():
-            continue
-
-        # Must have conversation data (not a stale stub)
-        if not (entry / "session.db").exists() and not (entry / "events.jsonl").exists():
-            continue
-
-        try:
-            with open(ws_file, encoding="utf-8") as f:
-                ws_data = yaml.load(f, Loader=_YamlSafeLoader)
-        except Exception:
-            continue
-
-        if not ws_data or not isinstance(ws_data, dict):
-            continue
-
-        cwd = ws_data.get("cwd", "")
-        if not cwd:
-            continue
-
-        norm_cwd = _normalize_path(cwd)
-
-        # Match against worktree paths
-        for wt_path, wt_id in path_to_wt.items():
-            if norm_cwd == wt_path or norm_cwd.startswith(wt_path + os.sep):
-                updated_at = str(ws_data.get("updated_at", ""))
-                discovered.setdefault(wt_id, []).append(
-                    (entry.name, updated_at)
-                )
-                break
-
-    # Return just the session IDs, sorted by updated_at (newest last)
-    result: dict[str, list[str]] = {}
-    for wt_id, entries in discovered.items():
-        entries.sort(key=lambda e: e[1])
-        result[wt_id] = [sid for sid, _ in entries]
-
-    return result
+    return discover(records, strict=strict)
 
 
 # Copilot CLI event types that render meaningfully in a transcript view.
@@ -1242,30 +1176,19 @@ class LiveVerdict:
     check this rather than assume every returned verdict is fully probed."""
 
     mux_probe_ok: bool = True
-    """False only when the MUX probe itself (``mux_status_many``) raised --
-    narrower than the aggregate ``probes_ok`` above, which also goes False on
-    an unrelated reclaim/lock-probe failure. A caller deciding whether `a live
-    mux might exist and would reattach instead of exec'ing a fresh command`
-    (e.g. seed-delivery gating) should check THIS, not the aggregate: a
-    reclaim failure with a conclusive "no mux" from the mux probe itself is
-    not mux uncertainty. Cold-start Resume prompts require the aggregate
-    ``probes_ok`` as well, because a live un-muxed Copilot also forbids them."""
+    """False when ``mux_status_many`` failed, independently of lock probes.
+    Cold-start prompts also require aggregate ``probes_ok``: an un-muxed
+    Copilot forbids them even when mux absence is confirmed."""
 
 
-def verify_worktree_active(record) -> LiveVerdict:
-    """Authoritatively verify whether ONE worktree has a live session right now.
+def verify_worktree_active(record, *, strict: bool = False) -> LiveVerdict:
+    """Verify one worktree's mux and registered lock-backed Copilot liveness.
 
-    Unlike the batched populate scan, this pays for a precise single-worktree
-    truth-check: the mux ``has-session`` presence AND the authoritative
-    ``inuse.<pid>.lock`` binding resolved by :func:`reclaim.resolve_bound_copilots`
-    (which binds pid<->session<->worktree from the lock file, not a cwd guess, so
-    a bare Copilot -- launched straight in a terminal and ``/resume``-d -- is
-    still found as long as its session is registered on the record). Intended for
-    the exact moments the operator acts on a worktree (Actions-menu open,
-    Enter->Open/Resume), never the fleet-wide populate.
-
-    Returns a :class:`LiveVerdict`. Best-effort and never raises: a mux or
-    reclaim hiccup degrades to whichever signal succeeded.
+    Lock identity, not cwd, also finds bare Copilots resumed elsewhere.
+    Use this point-in-time probe for individual actions, not fleet population.
+    ``strict=True`` treats unavailable lock/process evidence as unconfirmed.
+    Returns a :class:`LiveVerdict`; probe failures retain successful signals
+    and set ``probes_ok=False`` rather than raising.
     """
     from . import reclaim
 
@@ -1274,7 +1197,8 @@ def verify_worktree_active(record) -> LiveVerdict:
     mux_probe_ok = True
     try:
         info = mux_status_many([wt_id], strict=True).get(wt_id) or MuxInfo()
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not verify worktree mux presence: %s", exc)
         info = MuxInfo()
         probes_ok = False
         mux_probe_ok = False
@@ -1283,15 +1207,18 @@ def verify_worktree_active(record) -> LiveVerdict:
     live_ids: list[str] = []
     bare = False
     try:
+        binding_options = {"strict": True} if strict else {}
         bound = reclaim.resolve_bound_copilots(
             worktree_id=wt_id,
             session_ids=[
                 entry.session_id for entry in (getattr(record, "sessions", None) or ())
             ],
+            **binding_options,
         )
         live_ids = sorted({b["session_id"] for b in bound if b.get("session_id")})
         bare = any(b.get("homing") == "bare" for b in bound)
-    except Exception:
+    except Exception as exc:
+        logging.getLogger(__name__).warning("Could not verify registered Copilot bindings: %s", exc)
         probes_ok = False
     lock_live = bool(live_ids)
 
@@ -1376,13 +1303,21 @@ def worktree_id_from_mux_session(
 def has_mux_session(
     worktree_id: str, *, strict: bool = False, timeout: float = 5,
 ) -> bool:
-    """Probe mux presence; strict callers retain unavailable evidence."""
+    """Probe mux presence; strict callers retain unavailable evidence.
+
+    Windows strict checks cap the caller's timeout at five seconds in total.
+    """
     import subprocess
     from agent_procutil import no_window_kwargs
 
+    if strict and platform.system() == "Windows":
+        from .psmux_observation import observe
+        return mux_session_name(worktree_id) in observe(timeout=timeout)
     sess_name = mux_session_name(worktree_id)
     if platform.system() == "Windows":
-        cmd = ["psmux", "has-session", "-t", sess_name]
+        from agent_remote_driver.mux_observation import observe_psmux
+
+        return observe_psmux(sess_name, timeout=min(timeout, 5)).presence()
     else:
         cmd = ["tmux", "has-session", "-t", f"={sess_name}"]
     try:
@@ -1398,17 +1333,15 @@ def has_mux_session(
 
 
 def _list_mux_sessions(*, strict: bool = False) -> dict[str, int] | None:
-    """Query all mux sessions with their attached client counts.
-
-    Returns a dict of session_name -> attached_client_count, or None if
-    the list-sessions command is unavailable or fails.
-    """
+    """Return client counts, or None when passive listing is unavailable."""
     import subprocess
     from agent_procutil import no_window_kwargs
     from .mux_list_result import is_empty_tmux_listing, parse_session_counts
 
     if platform.system() == "Windows":
-        return None
+        from .psmux_observation import list_session_counts
+
+        return list_session_counts()
     cmd = ["tmux", "list-sessions", "-F", "#{session_name}:#{session_attached}"]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=5, **no_window_kwargs())
@@ -1471,6 +1404,11 @@ def mux_status_many(worktree_ids: list[str], *, strict: bool = False) -> dict[st
     if not worktree_ids:
         return result
 
+    if platform.system() == "Windows":
+        from .psmux_observation import session_status
+
+        return session_status(worktree_ids, strict=strict)
+
     all_sessions = _list_mux_sessions(strict=True) if strict else _list_mux_sessions()
     if all_sessions is not None:
         for wt_id in worktree_ids:
@@ -1503,6 +1441,10 @@ def mux_status_for_display(worktree_ids: list[str]) -> dict[str, MuxInfo]:
     """Keep independent display facts usable without inventing mux negatives."""
     from .mux_list_result import MuxObservationUnavailable
 
+    if platform.system() == "Windows":
+        from .psmux_observation import display_status
+
+        return display_status(worktree_ids)
     try:
         return mux_status_many(worktree_ids)
     except MuxObservationUnavailable:
@@ -1750,6 +1692,10 @@ def has_mux_session_named(
     import subprocess
 
     mux_bin = _mux_bin(mux)
+    if _is_psmux(mux_bin):
+        from agent_remote_driver.mux_observation import observe_psmux
+
+        return observe_psmux(session_name).presence()
     target = _mux_named_session_target(session_name, mux_bin)
     try:
         result = subprocess.run(
@@ -2142,6 +2088,10 @@ def mux_active_pane_named(
     import subprocess
 
     mux_bin = _mux_bin(mux)
+    if _is_psmux(mux_bin):
+        from .psmux_observation import active_pane
+
+        return active_pane(session_name)
     target = _mux_named_session_target(session_name, mux_bin)
     if not _is_psmux(mux_bin):
         # display-message takes a pane target, not a session-only target.

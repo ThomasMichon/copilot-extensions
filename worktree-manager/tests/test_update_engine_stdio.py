@@ -4,11 +4,49 @@ from __future__ import annotations
 import json
 import os
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from worktree_manager import update_bootstrap
+
+
+@pytest.mark.timeout(30)
+@pytest.mark.skipif(
+    os.name != "nt" or os.environ.get("COPILOT_EXTENSIONS_ALLOW_EXPLICIT_TEST_TIERS") != "1",
+    reason="opt-in original-budget native Windows Manager queue qualification",
+)
+def test_native_queued_manager_preserves_original_cohort_budget(tmp_path, tmp_path_factory, monkeypatch):
+    import update_driver
+    from agent_procutil.owned_process import run_owned
+    from worktree_manager import engine_client
+
+    home = tmp_path_factory.mktemp("ud") / "home"
+    home.mkdir()
+    events = tmp_path / "events.jsonl"
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    monkeypatch.setenv("UPDATE_DRIVER_TEST_EVENTS", str(events))
+    accepted = ["synthetic-accepted-provider"]
+    monkeypatch.setenv(engine_client.ENGINE_ARGV_ENV, json.dumps(accepted))
+    fixture = Path(__file__).parent / "fixtures" / "update_driver_cli.py"
+    for override in ("synthetic-first-provider", "synthetic-second-provider", None):
+        if override is None:
+            monkeypatch.delenv(engine_client.ENGINE_CMD_ENV)
+        else:
+            monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, override)
+        result = run_owned([sys.executable, str(fixture), "submit-only"], timeout=20)
+        assert result.returncode == 0, result.stderr
+    root = home / ".copilot-extensions" / "update-driver"
+    assert len(update_driver.status(root=root)) == 3
+    monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, "wrong-worker-provider")
+    result = run_owned([sys.executable, "-m", "update_driver", "worker"], timeout=20)
+    assert result.returncode == 0, result.stderr
+    records = [json.loads(line) for line in events.read_text().splitlines()]
+    assert [record["provider"] for record in records if record["phase"] == "start"] == [
+        ["synthetic-first-provider"], ["synthetic-second-provider"], accepted,
+    ]
 
 
 @pytest.mark.parametrize("interrupted", [False, True])

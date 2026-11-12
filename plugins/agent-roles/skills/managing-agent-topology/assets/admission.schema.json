@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Saved native task admission evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "observedAt", "sourceRef", "complete", "reviewRoles", "machines", "tasks"],
+  "properties": {
+    "version": {"type": "integer", "const": 1},
+    "observedAt": {"$ref": "#/$defs/text"},
+    "sourceRef": {"$ref": "#/$defs/text"},
+    "complete": {"type": "boolean"},
+    "reviewRoles": {"type": "array", "maxItems": 256, "uniqueItems": true, "items": {"$ref": "#/$defs/text"}},
+    "machines": {"type": "array", "maxItems": 1024, "items": {"$ref": "#/$defs/machine"}},
+    "tasks": {"type": "array", "maxItems": 4096, "items": {"$ref": "#/$defs/task"}}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1, "maxLength": 4096},
+    "owner": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": ["machine", "project", "worktree"],
+      "properties": {
+        "machine": {"$ref": "#/$defs/text"},
+        "project": {"$ref": "#/$defs/text"},
+        "worktree": {"$ref": "#/$defs/text"}
+      }
+    },
+    "machine": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["machine", "interactiveReserveSlots", "reviewReserveSlots"],
+      "properties": {
+        "machine": {"$ref": "#/$defs/text"},
+        "interactiveReserveSlots": {"type": "integer", "minimum": 0},
+        "reviewReserveSlots": {"type": "integer", "minimum": 0}
+      }
+    },
+    "task": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "requestId", "observedAt", "sourceRef", "role", "kind", "priority",
+        "operatorTask", "readiness", "holdReason", "status", "generation", "owner", "ownerSessionId"],
+      "properties": {
+        "id": {"$ref": "#/$defs/text"},
+        "requestId": {"$ref": "#/$defs/text"},
+        "observedAt": {"$ref": "#/$defs/text"},
+        "sourceRef": {"$ref": "#/$defs/text"},
+        "role": {"$ref": "#/$defs/text"},
+        "kind": {"type": "string", "enum": ["standing", "temporary"]},
+        "priority": {"type": "integer", "minimum": 0, "maximum": 1000000},
+        "operatorTask": {"type": "boolean"},
+        "readiness": {"type": "string", "enum": ["ready", "waiting", "held", "unknown"]},
+        "holdReason": {"type": ["string", "null"], "minLength": 1, "maxLength": 4096},
+        "status": {"type": "string", "enum": ["queued", "suspended", "claimed", "started", "submitted",
+          "completed", "abandoned", "dead_letter", "proposed"]},
+        "generation": {"type": "integer", "minimum": 0},
+        "owner": {"$ref": "#/$defs/owner"},
+        "ownerSessionId": {"type": ["string", "null"], "minLength": 1, "maxLength": 4096}
+      }
+    }
+  }
+}

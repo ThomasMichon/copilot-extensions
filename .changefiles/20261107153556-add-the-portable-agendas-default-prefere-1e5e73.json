@@ -1,0 +1,9 @@
+{
+  "comment": "Add the portable agendas.default preference (off|expected) with session Agenda guidance and a throttled adoption nudge; session start publishes the effective policy so the resident, fallback and prepared PowerShell hooks deliver it without loading configuration",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

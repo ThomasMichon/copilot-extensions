@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 from pathlib import Path
@@ -160,3 +161,83 @@ def test_missing_or_differently_bound_owner_never_creates_a_selection(
             "source_attachment": attachment, "budget_seconds": 60,
         })
     assert store.path.read_bytes() == before and backend.calls == []
+
+
+@pytest.mark.parametrize("environment", [True], indirect=True)
+@pytest.mark.parametrize("transport", ["native", "gateway"])
+@pytest.mark.parametrize("lost", [False, True])
+def test_actual_preparation_only_cli_keeps_original_preview_without_a_writer(
+    environment: tuple, prepared_workspace: tuple, selection_workspace: tuple, producer: tuple,
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], transport: str, lost: bool,
+) -> None:
+    from agent_pull_requests.generation_cache import GenerationCache
+    from agent_pull_requests.watch_replay_store import ReplayStore
+    from agent_pull_requests.workspace_operations import WorkspaceUnavailable
+    from agent_pull_requests.workspace_tools import WorkspaceTools
+    from test_workspace_tools import invoke_cli
+
+    store, _, _, attachment, backend, _ = environment
+    gateway, client, native, _, _, _ = prepared_workspace
+    draft, _ = selection_workspace
+    selected, profile, record_path, _ = producer
+    operations = native.operations
+    operations.__init__(
+        store, operations.cache, scope=operations.scope, read_owner=operations.read_owner,
+        binding_ref=operations.binding_ref, checkpoint=operations.checkpoint,
+        max_work_seconds=operations.max_work_seconds, prepared_reviews=True,
+        selection_preparer=selected,
+    )
+    host = WorkspaceTools(native if transport == "native" else client)
+    capabilities = asyncio.run(host.capabilities())
+    assert {"allocate", "receipt"} <= set(capabilities["operations"])
+    assert "submit" not in capabilities["operations"] and not operations.write_available
+    request = {"number": 42, "intent": draft, "source_attachment": attachment, "budget_seconds": 60}
+    execute = operations.execute
+    if lost:
+        def drop(operation: str, payload: dict, **kwargs: object) -> dict:
+            result = execute(operation, payload, **kwargs)
+            if operation == "allocate":
+                raise RuntimeError("synthetic lost preparation-only preview")
+            return result
+
+        monkeypatch.setattr(operations, "execute", drop)
+        code, _ = invoke_cli(host, "allocate", request, monkeypatch, capsys)
+        assert code != 0
+        monkeypatch.setattr(operations, "execute", execute)
+    code, preview = invoke_cli(host, "allocate", request, monkeypatch, capsys)
+    assert code == 0 and preview["result"]["approval_required"] is True, preview
+    chosen = preview["result"]["intent"]
+    assert chosen["actions"][0]["body"].startswith("[Selected profile] ")
+    assert chosen["actions"][0]["preparation"]["identity"]["source"]["origin"] == {
+        "codename": "bolted-circuit",
+    }
+    assert backend.calls == []
+    before = store.path.read_bytes()
+    operations.store = ReplayStore(store.root, store.namespace, service_identity=store.service_identity)
+    profile.write_text("invalid-profile", encoding="utf-8")
+    record_path.write_text("invalid-record", encoding="utf-8")
+    with monkeypatch.context() as unavailable:
+        unavailable.setattr(GenerationCache, "lookup", lambda *a, **k: pytest.fail("preview recovery used cache"))
+        code, retry = invoke_cli(host, "allocate", request, monkeypatch, capsys)
+        assert code == 0 and retry == preview and store.path.read_bytes() == before
+        submission = {**request, "intent": chosen}
+        code, _ = invoke_cli(host, "submit", submission, monkeypatch, capsys)
+        assert code != 0
+        with pytest.raises(WorkspaceUnavailable, match="write context unavailable"):
+            execute("submit", submission, expires_at=native.expires_at(), checkpoint=lambda: None)
+    operations.selection_preparer = None
+    code, _ = invoke_cli(host, "allocate", request, monkeypatch, capsys)
+    assert code != 0 and store.path.read_bytes() == before
+    inspect_request = {"number": 42, "operation_id": chosen["operation_id"]}
+    code, retained = invoke_cli(host, "inspect", inspect_request, monkeypatch, capsys)
+    assert code == 0 and retained["result"]["intent"] == chosen
+    assert retained["result"]["selection"]["stage"] == "prepared"
+    operations.prepared_reviews = False
+    code, _ = invoke_cli(host, "inspect", inspect_request, monkeypatch, capsys)
+    assert code != 0 and store.path.read_bytes() == before
+    operations.prepared_reviews = True
+    operations.selection_preparer = selected
+    code, retry = invoke_cli(host, "allocate", request, monkeypatch, capsys)
+    assert code == 0 and retry == preview
+    assert store.path.read_bytes() == before and backend.calls == []
+    asyncio.run(gateway.drain(timeout=2))

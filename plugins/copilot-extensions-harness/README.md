@@ -44,6 +44,12 @@ without a competing `sessionStart` output.
   [diagnosing-validate-and-promote-failures](skills/diagnosing-validate-and-promote-failures/SKILL.md)
   skill.
 
+External-service outage reports carry
+[first-party bulletin receipts and scoped attribution](references/external-service-outages.md).
+The release guide's [GitHub Actions errata](skills/diagnosing-validate-and-promote-failures/references/github-actions.md)
+distinguish platform startup/runner failures from executed test failures and
+retain normal recovery and publication gates.
+
 | Skill | Priority | Covers |
 |-------|----------|--------|
 | [reviewing-copilot-extensions-vision](skills/reviewing-copilot-extensions-vision/SKILL.md) | Explicit review assignment | Applies the public [Maintainer's Vision Adherence Review](references/maintainer-vision-adherence-review.md) as a conceptual repository lens; can pair with a generic reviewer without replacing CI, tactical review or merge gates |
@@ -94,9 +100,30 @@ wrapper to report that diagnostic while the host-facing hook still exits
 successfully; direct legacy callers retain a zero exit code. Deliberate mention/uninspectable-body denials in an adopted,
 matching repository remain policy decisions, not execution failures.
 
-The guard first classifies publication syntax locally, using the same tokenizer
-and write predicates as the body scanner. Ordinary reads and unrelated shell
-commands perform no repository/manifest/body discovery and start no child
+The camelCase registration uses `matcher: "bash|powershell"`. Copilot CLI
+matches this case-sensitively against the complete runtime `toolName`, before
+launching either shell command. Other tools never reach this guard's shell or
+Python process. This matches the original evaluator's policy domain; it does
+not add a read exemption to another guard or expand aggregate tool metadata.
+Shell input, interpreter lookup, live controls, policy and failure handling
+are unchanged. No input buffering, decoder, source-hash check or cache is added.
+
+This declaration requires Copilot CLI's command-hook matcher support
+(1.0.63 or later); unsupported hosts must retain the previous declaration.
+See the [official matcher contract](https://docs.github.com/en/copilot/reference/hooks-reference#matcher-filtering).
+The provider feature precedes this declaration change; rolling back the
+declaration requires no state migration. A host that ignores the optional
+filter retains the original evaluator's no-op path, but that is not proof of
+support for hosts that reject unknown configuration.
+`registered_matcher_preserves_original_policy_domain` checks the registration
+against real evaluator decisions, including exact shell names, non-shell
+events, case and qualified-name boundaries. Direct wrapper tests bypass host
+registration: they prove the retained evaluator/transport, not live CLI
+filtering or installed throughput.
+
+The Python evaluator first classifies publication syntax locally, using the same tokenizer
+and write predicates as the body scanner. Its ordinary reads and unrelated shell
+commands perform no repository/manifest/body discovery and start no additional child
 processes. This is not a mention-substring filter: body files, stdin, implicit
 create bodies, command prefixes and compound statements still reach the scoped
 policy check.
@@ -128,10 +155,29 @@ repeated command/filter/select pipelines; it preserves `python3`, `python`,
 then `py` priority and excludes WindowsApps aliases. Fixture tests compare
 selection with the prior resolver, and native timing includes that resolver
 as a separate baseline. Shell and interpreter startup remain real costs.
+Windows path construction and output forwarding use in-process framework
+operations rather than path/output cmdlets. The wrapper still invokes the
+original Python evaluator, forwards its input, retains the live kill switch
+and policy/diagnostic decisions, and discards partial output from failed
+children. Bash behavior is unchanged.
+
+For a fixed-fixture Windows A/B/A comparison, select
+`windows_wrapper_module_attribution` with `COPILOT_MENTION_PROFILE_BASELINE`
+set to a full lowercase commit ID and `COPILOT_MENTION_PROFILE_BASELINE_REPO`
+to its readable source checkout. Both shells run fresh processes against
+the original evaluator; only the wrapper command changes. Git reads the
+baseline without modifying it. The comparison requires the selected child
+to complete and preserves the 10-second child, 30-second item and 300-second
+group limits. Finite samples do not qualify installed composition or tails.
+`windows_wrapper_preserves_policy_and_failure_contract` checks actual
+denials, live-stop behavior, missing/failed helpers and input/output forwarding
+while trapping path/output cmdlets. These explicit native cases can also use
+the [owner-only hosted Windows lane](../../TESTING.md#owner-only-hosted-windows-escape-hatch).
+
 It never executes a proposed `gh` publication or performs a network request:
 
 ```text
-python tools/run-plugin-tests.py copilot-extensions-harness --test-file tests/test_copilot_mention_guard.py
+python tools/run-plugin-tests.py copilot-extensions-harness --test-file tests/test_copilot_mention_guard.py --test-timeout 30 --timeout 300 --plugin-timeout 300
 ```
 
 | Sub-agent | Covers |

@@ -22,7 +22,7 @@ from .watch_installation import PLUGIN_ID, WatchInstallation
 from .watch_custody import endpoint_tuple, endpoint_value, read_launch, require_absent
 from .watch_exit import observe_cleanup_exit, observe_exit, record_exit
 from .watch_private import confirm_private, require_private, write_private
-from .watch_runtime import WatchInstance, WatchRuntime, native_start_time
+from .watch_runtime import WatchInstance, WatchRuntime, capture_completed_pair, native_start_time
 from .watch_rollback import require_rollback_selection, restore_route, validate_restoration
 
 _FILE = "watch-owner-transaction.json"
@@ -213,6 +213,13 @@ def _controller_held(
 def _read_identity(
     installation: WatchInstallation, *, environment: Mapping[str, str] | None,
 ) -> dict:
+    return _read_evidence(installation, environment=environment)[0]
+
+
+def _read_evidence(
+    installation: WatchInstallation, *, environment: Mapping[str, str] | None,
+    expected_document: dict | None = None,
+) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
     installation.read_identity(environment=environment)
     raw = _private_bytes(installation.run_root / _FILE)
     if raw is None:
@@ -220,12 +227,18 @@ def _read_identity(
     document = _json_object(raw)
     if document.get("installation") != installation.evidence():
         raise PermissionError("watch owner transaction binding or phase is invalid")
-    return _validate_document(installation, document, environment=environment)
+    if expected_document is not None and document != expected_document:
+        raise PermissionError("watch owner journal changed; reconcile before continuing")
+    return _validate_document(
+        installation, document, environment=environment,
+        concurrent_runtimes=expected_document is not None,
+    )
 
 
 def _validate_document(
     installation: WatchInstallation, document: dict, *, environment: Mapping[str, str] | None,
-) -> dict:
+    concurrent_runtimes: bool = False,
+) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
     if set(document) != {
         "schema", "transactionId", "authorization", "installation", "phase", "revision",
         "controller", "prior", "target", "targetManifest", "predecessor", "successor",
@@ -261,9 +274,15 @@ def _validate_document(
         or any(char not in "0123456789abcdef" for char in authorization)
     ):
         raise ValueError("watch owner transaction authorization is invalid")
-    target = WatchRuntime.from_identity_evidence(
-        document["target"], installation, environment=environment,
-    )
+    predecessor = None
+    if concurrent_runtimes:
+        target, predecessor = capture_completed_pair(
+            document["target"], document["predecessor"], installation, environment=environment,
+        )
+    else:
+        target = WatchRuntime.from_identity_evidence(
+            document["target"], installation, environment=environment,
+        )
     _manifest(bytes.fromhex(document["targetManifest"]), target)
     instances = {}
     for role in ("predecessor", "successor"):
@@ -283,7 +302,7 @@ def _validate_document(
                 if instance.evidence() != value:
                     raise PermissionError("watch successor does not match the completed target")
             else:
-                instance = WatchInstance.from_identity_evidence(
+                instance = predecessor or WatchInstance.from_identity_evidence(
                     document[role], installation, environment=environment,
                 )
             instances[role] = instance
@@ -385,7 +404,7 @@ def _validate_document(
         raise PermissionError("watch terminal custody lacks exact obsolete-instance exit evidence")
     validate_restoration(document)
     installation.read_identity(environment=environment)
-    return document
+    return document, target, instances
 
 
 def _cleanup_document(installation: WatchInstallation, document: dict) -> None:
@@ -441,7 +460,7 @@ def _archived_terminal(
     if document.get("phase") not in {"complete", "rolled-back"}:
         raise FileExistsError("watch owner transaction requires explicit reconciliation and archival")
     _require_cell_history(installation, document.get("installation"))
-    document = _validate_document(installation, document, environment=environment)
+    document, _, _ = _validate_document(installation, document, environment=environment)
     archive = installation.run_root / "watch-owner-history" / f'{document["transactionId"]}.json'
     saved = _private_bytes(archive)
     if saved is None or _terminal_custody(_json_object(saved)) != _terminal_custody(document):
@@ -597,8 +616,17 @@ class WatchJournal:
         return self._document["authorization"]
 
     def _current(self) -> dict:
+        return self._current_evidence()[0]
+
+    def _current_evidence(self) -> tuple[dict, WatchRuntime, dict[str, WatchInstance]]:
         self.installation.require_current(environment=self.environment)
-        return self._current_identity()
+        self._guard()
+        evidence = _read_evidence(
+            self.installation, environment=self.environment, expected_document=self._document,
+        )
+        if evidence[0] != self._document:
+            raise PermissionError("watch owner journal changed; reconcile before continuing")
+        return evidence
 
     def _current_identity(self) -> dict:
         self._guard()
@@ -628,6 +656,9 @@ class WatchJournal:
 
     def archive(self) -> Path:
         """Retain terminal custody durably before a later transaction can replace it."""
+        self._guard()
+        path = self.installation.run_root / "watch-owner-history" / f'{self.transaction_id}.json'
+        raw = _private_bytes(path)
         document = self._current()
         if document["phase"] not in {"complete", "rolled-back"}:
             raise PermissionError("watch pending transaction cannot be archived")
@@ -635,14 +666,11 @@ class WatchJournal:
             _target_selection(self.installation, document)
         else:
             require_rollback_selection(self.installation, document)
-        path = self.installation.run_root / "watch-owner-history" / f'{self.transaction_id}.json'
-        raw = _private_bytes(path)
         if raw is not None:
             if _terminal_custody(_json_object(raw)) != _terminal_custody(document):
                 raise PermissionError("watch transaction archive already has different custody")
             confirm_private(path)
         else:
-            self._current()
             _persist(path, document, replace=False)
         return path
 
@@ -651,7 +679,7 @@ class WatchJournal:
         read_health: Callable[[], Mapping[str, object]],
     ) -> None:
         """Bind an authenticated endpoint to an already attributable exact instance."""
-        document = self._current()
+        document, _, instances = self._current_evidence()
         if (
             role not in {"predecessor", "successor"} or document[role] is None
             or role in document["exited"] or document["phase"] in {"complete", "rolled-back"}
@@ -663,9 +691,7 @@ class WatchJournal:
         other = document["endpoints"]["successor" if role == "predecessor" else "predecessor"]
         if other is not None and (other["host"], other["port"]) == endpoint[:2]:
             raise PermissionError("watch transaction endpoints are not distinct")
-        instance = WatchInstance.from_evidence(
-            document[role], self.installation, environment=self.environment,
-        )
+        instance = instances[role]
         instance.require_live(
             self.installation, read_health=read_health, environment=self.environment,
         )
@@ -797,7 +823,7 @@ class WatchJournal:
         self._write(document)
 
     def commit(self, *, read_health: Callable[[], Mapping[str, object]] | None = None) -> None:
-        document = self._current()
+        document, _, instances = self._current_evidence()
         metadata_only = document["predecessor"] is None and document["successor"] is None
         if metadata_only and document["launchInstanceId"] is not None:
             raise PermissionError("watch reserved successor launch remains unresolved")
@@ -810,9 +836,7 @@ class WatchJournal:
         if not metadata_only:
             if read_health is None:
                 raise PermissionError("watch commit requires exact successor readiness")
-            successor = WatchInstance.from_evidence(
-                document["successor"], self.installation, environment=self.environment,
-            )
+            successor = instances["successor"]
             health = successor.require_live(
                 self.installation, read_health=read_health, environment=self.environment,
             )
@@ -846,7 +870,7 @@ class WatchJournal:
         observe_cleanup_exit(self)
 
     def finish(self, *, read_health: Callable[[], Mapping[str, object]] | None = None) -> None:
-        document = self._current()
+        document, _, instances = self._current_evidence()
         if document["phase"] not in {"committed", "rolling-back"}:
             raise PermissionError("watch transaction is not ready for completion")
         forward = document["phase"] == "committed"
@@ -865,9 +889,7 @@ class WatchJournal:
         if document[role] is not None:
             if read_health is None:
                 raise PermissionError("watch completion requires exact active-owner health")
-            instance = WatchInstance.from_evidence(
-                document[role], self.installation, environment=self.environment,
-            )
+            instance = instances[role]
             health = instance.require_live(
                 self.installation, read_health=read_health, environment=self.environment,
             )
@@ -913,9 +935,9 @@ def authorize_control(
         _target_selection(installation, document)
     if operation == "resume":
         require_rollback_selection(installation, document)
-    instance.require_live(
-        installation, read_health=lambda: {"instance": instance.evidence()}, environment=environment,
-    )
+    installation.require_current(environment=environment)
+    instance.require_native_identity(installation, environment=environment)
+    installation.require_current(environment=environment)
 
 
 def authorize_cleanup(
@@ -954,8 +976,6 @@ def authorize_cleanup(
         launched, _ = read_launch(installation, document, environment=environment)
         if launched != instance:
             raise PermissionError("watch passive cleanup differs from durable native launch custody")
-    instance.require_live_identity(
-        installation, read_health=lambda: {"instance": instance.evidence()}, environment=environment,
-    )
+    instance.require_native_identity(installation, environment=environment)
     installation.require_cleanup(environment=environment)
     _cleanup_document(installation, document)

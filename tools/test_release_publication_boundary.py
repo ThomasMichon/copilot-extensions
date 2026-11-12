@@ -218,30 +218,46 @@ class PromotionJobAdmissionTests(_ShellFixture):
 
     def test_admitted_source_still_requires_every_validation_result(self) -> None:
         template = script(step(self.promote, "decide"))
+        declared = jobs(WORKFLOW.read_text(encoding="utf-8"))
         validation = [
             "full", "worktree-manager", "agent-index-service-linux",
             "agent-index-service-windows", "guards-full-sweep", "python-artifacts",
         ]
         if "needs.source-units.result" in template:
             validation = ["source-units", "python-artifacts"]
+        installed = "native-installed-manager-windows"
+        for native in ("native-resume-windows", installed):
+            if native in declared:
+                self.assertIn(f"needs.{native}.result", template)
+                self.assertIn(native, needs(self.promote))
+                validation.append(native)
         fields = {"needs.gate.result": "success", "needs.gate.outputs.is_dev": "true"}
         if "needs.compose-candidate.outputs.composed" in template:
             fields["needs.compose-candidate.outputs.composed"] = "true"
         fields.update({f"needs.{name}.result": "success" for name in validation})
+        complete = f"needs.{installed}.outputs.complete"
+        if installed in declared:
+            self.assertIn(complete, template)
+            fields[complete] = "true"
         scenarios = [
-            ({}, True),
+            ({}, True, 0),
             *(
-                ({f"needs.{name}.result": result}, False)
+                ({f"needs.{name}.result": result}, False, int(installed in declared))
                 for name, result in itertools.product(
                     validation, ("failure", "cancelled", "skipped", "", "unknown"),
                 )
             ),
-            ({"needs.gate.result": "SUCCESS"}, False),
-            ({"needs.gate.outputs.is_dev": "True"}, False),
+            ({"needs.gate.result": "SUCCESS"}, False, 0),
+            ({"needs.gate.outputs.is_dev": "True"}, False, 0),
         ]
+        if installed in declared:
+            scenarios.extend(
+                ({complete: value}, False, 1)
+                for value in ("false", "True", "", "unknown")
+            )
         if "needs.compose-candidate.outputs.composed" in fields:
-            scenarios.append(({"needs.compose-candidate.outputs.composed": "false"}, False))
-        for overrides, proceed in scenarios:
+            scenarios.append(({"needs.compose-candidate.outputs.composed": "false"}, False, 0))
+        for overrides, proceed, returncode in scenarios:
             with self.subTest(overrides=overrides):
                 values = {**fields, **overrides}
                 command = re.sub(
@@ -250,9 +266,14 @@ class PromotionJobAdmissionTests(_ShellFixture):
                     template,
                 )
                 completed = self.shell("set -u\n" + command, {}, timeout=5)
-                self.assertEqual(completed.returncode, 0, completed.stdout + completed.stderr)
+                self.assertEqual(completed.returncode, returncode, completed.stdout + completed.stderr)
                 decisions = completed.output.splitlines()
-                self.assertEqual(decisions, [f"proceed={str(proceed).lower()}"])
+                early_native_refusal = bool(
+                    overrides.keys() & {f"needs.{installed}.result", complete}
+                )
+                self.assertEqual(
+                    decisions, [] if early_native_refusal else [f"proceed={str(proceed).lower()}"],
+                )
                 if not proceed and not overrides.keys() & {
                     "needs.gate.result", "needs.gate.outputs.is_dev",
                     "needs.compose-candidate.outputs.composed",

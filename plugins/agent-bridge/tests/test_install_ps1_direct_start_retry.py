@@ -12,6 +12,7 @@ functions and a fake interpreter that always fails.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -75,6 +76,7 @@ def test_failed_direct_starts_are_drained_and_retried(tmp_path, host):
         [host, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
          "-File", str(script)],
         capture_output=True, text=True, timeout=120, check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     out = proc.stdout.splitlines()
     starts = [line for line in out if line.startswith("STEP Starting agent-bridge")]
@@ -82,3 +84,41 @@ def test_failed_direct_starts_are_drained_and_retried(tmp_path, host):
     assert out.count("DRAIN") == 3
     assert any(line.startswith("FAIL agent-bridge failed to start") for line in out)
     assert proc.returncode == 1
+
+
+@pytest.mark.skipif(os.name != "nt", reason="isolated Windows installer startup")
+@pytest.mark.parametrize("task", ["missing", "module-unavailable", "disabled"])
+def test_direct_start_needs_no_task_but_respects_disabled_intent(tmp_path, task):
+    fake_python = tmp_path / "python.cmd"
+    fake_python.write_text("@echo START %*\r\n@exit /b 0\r\n")
+    script = tmp_path / "start.ps1"
+    query = (
+        "[pscustomobject]@{State='Disabled'}" if task == "disabled" else "$null"
+    )
+    script.write_text(
+        "$ErrorActionPreference='Stop'\n"
+        f"$LinkPython='{fake_python}'; $TaskName='fixture-only'\n"
+        "function Test-ActiveIsForward { $false }\n"
+        "function Get-RunningProcess { $null }\n"
+        "function Test-HealthOnce { $true }\n"
+        "function Get-ActiveEndpoint { [pscustomobject]@{Port=12345} }\n"
+        "function Write-UpdateMarker { }; function Clear-UpdateMarker { }\n"
+        f"function Get-ScheduledTask {{ {query} }}\n"
+        + ("function Get-Command { $null }\n" if task == "module-unavailable" else "")
+        + "function Start-ScheduledTask { throw 'scheduler startup forbidden' }\n"
+        "function Stop-DaemonProcesses { throw 'daemon stop forbidden' }\n"
+        "function Write-Step { param($m) }; function Write-Ok { param($m) }\n"
+        + _invoke_start() + "\nInvoke-Start\n",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [_hosts()[0], "-NoProfile", "-NonInteractive", "-File", str(script)],
+        capture_output=True, text=True, timeout=15, creationflags=subprocess.CREATE_NO_WINDOW,
+    )
+    if task == "disabled":
+        assert result.returncode != 0
+        assert "refusing direct-start fallback" in result.stderr
+        assert "START" not in result.stdout
+    else:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert "START -m agent_bridge service start --direct" in result.stdout

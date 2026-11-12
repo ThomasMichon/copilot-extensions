@@ -23,6 +23,8 @@ jobs:
       contents: read
     outputs:
       source_sha: ${{ steps.admit.outputs.source_sha }}
+      packet: ${{ steps.admit.outputs.packet }}
+      native: ${{ steps.admit.outputs.native }}
     steps:
       - name: Require original and rerun owner on default-branch control
         env:
@@ -80,15 +82,63 @@ jobs:
         run: >-
           python control/tools/seasoned_uv.py --uv uv --registry-only --
           --system pytest pytest-timeout pytest-asyncio pyyaml packaging
+      - name: Prepare pinned native caller prerequisites only on this disposable runner
+        id: native
+        if: needs.admit.outputs.native == 'true'
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "winqual-native-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          $null = New-Item -ItemType Directory -Path $root
+          $pins = @(
+            @{
+              Name = 'copilot'; Variable = 'COPILOT_NATIVE_TEST_EXECUTABLE'
+              Url = 'https://github.com/github/copilot-cli/releases/download/v1.0.105/copilot-win32-x64.zip'
+              Hash = '34e16e9cf47de0e1534920171d6f39fa246638bddbb6ece820870b382bcc061a'
+            },
+            @{
+              Name = 'psmux'; Variable = 'PSMUX_TEST_BIN'
+              Url = 'https://github.com/psmux/psmux/releases/download/v3.3.8/psmux-v3.3.8-windows-x64.zip'
+              Hash = '1ad127ba937194a890b933a73d9b023e297bd73dc742abd841bf159984c2effe'
+            }
+          )
+          foreach ($pin in $pins) {
+            $archive = Join-Path $root "$($pin.Name).zip"
+            Write-Host "Preparing pinned native prerequisite: $($pin.Name)"
+            & ".\control\tools\download_pinned_native.ps1" -Uri "$($pin.Url)" -OutFile "$archive" -TimeoutSeconds 120
+            if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $pin.Hash) {
+              throw 'Pinned native prerequisite archive digest mismatch'
+            }
+            $destination = Join-Path $root $pin.Name
+            Expand-Archive -LiteralPath $archive -DestinationPath $destination
+            $binaries = @(Get-ChildItem -LiteralPath $destination -Filter "$($pin.Name).exe" -Recurse -File)
+            if ($binaries.Count -ne 1) { throw 'Expected exactly one pinned native executable' }
+            "$($pin.Variable)=$($binaries[0].FullName)" >> $env:GITHUB_ENV
+            $binaries[0].DirectoryName >> $env:GITHUB_PATH
+          }
+          "COPILOT_DRIVER_HEADED_MUX_E2E=1" >> $env:GITHUB_ENV
       - name: Execute typed selection through canonical bounded owners
+        if: ${{ success() || (failure() && needs.admit.outputs.native == 'true' && steps.native.outcome == 'failure') }}
+        env:
+          UV_DEFAULT_INDEX: ${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || needs.admit.outputs.packet == 'native-worktrees-copilot' || needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-manager-no-mux' || needs.admit.outputs.packet == 'native-worktrees-manager-mux') && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
+          WINDOWS_QUALIFICATION_NATIVE_PREPARATION: ${{ steps.native.outcome }}
         run: >-
           python control/tools/windows_qualification_worker.py execute
           --candidate candidate --output evidence
+      - name: Sanitize native evidence independently after worker interruption
+        id: sanitize
+        if: always() && needs.admit.outputs.native == 'true'
+        env:
+          UV_DEFAULT_INDEX: ${{ (needs.admit.outputs.packet == 'native-worktrees-embody' || needs.admit.outputs.packet == 'native-worktrees-copilot' || needs.admit.outputs.packet == 'native-worktrees-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-copilot-caller-jobs' || needs.admit.outputs.packet == 'native-worktrees-manager-no-mux' || needs.admit.outputs.packet == 'native-worktrees-manager-mux') && secrets.WINDOWS_QUALIFICATION_INDEX_URL || '' }}
+        run: python control/tools/windows_qualification_worker.py sanitize --output evidence
       - name: Retain request-bound evidence even after failure
-        if: ${{ always() }}
+        if: ${{ always() && (needs.admit.outputs.native != 'true' || steps.sanitize.outcome == 'success') }}
         uses: actions/upload-artifact@v4
         with:
           name: winqual-${{ inputs.request_id }}-${{ github.run_attempt }}
-          path: evidence
+          path: |
+            evidence/result.json
+            evidence/phase-*.log
+            evidence/junit/**/*.xml
+            evidence/packet/
           if-no-files-found: warn
           retention-days: 7

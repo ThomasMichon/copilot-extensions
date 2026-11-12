@@ -9,9 +9,25 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
-from .config import ConfigError, load_config, normalize_bridge_name
+from .config import ConfigError, normalize_bridge_name
+from .configuration import load_readiness_config
 
 MODULE_ID = "agent-mcp/runtime"
+
+
+def configured_candidates() -> list[tuple[str, Path]]:
+    from . import config
+    from .provider_selection import provider_filter
+
+    candidates = []
+    if config.BRIDGES_DIR.is_dir():
+        candidates.extend(
+            (normalize_bridge_name(path.name), path)
+            for path in sorted(config.BRIDGES_DIR.iterdir())
+            if path.suffix.lower() in {".yaml", ".yml", ".json"}
+        )
+    candidates.extend(config.discover_plugin_bridge_candidates(include=provider_filter()))
+    return candidates
 
 
 def _result(state: str, detail: str) -> dict[str, Any]:
@@ -24,12 +40,19 @@ def _result(state: str, detail: str) -> dict[str, Any]:
     }
 
 
+def configured_readiness() -> dict[str, Any]:
+    try:
+        return evaluate(configured_candidates())
+    except ConfigError as error:
+        return _result("failed", str(error))
+
+
 def evaluate(
     candidates: Sequence[tuple[str, Path]],
     *,
-    loader: Callable[[str], object] = load_config,
+    loader: Callable[[str], object] = load_readiness_config,
 ) -> dict[str, Any]:
-    """Validate configured bridges without starting an upstream process."""
+    """Validate native bridges without requiring a repository or starting an upstream."""
     unique_candidates = tuple(
         dict.fromkeys(
             (normalize_bridge_name(name), path.resolve())

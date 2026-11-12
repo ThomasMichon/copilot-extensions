@@ -651,6 +651,74 @@ boundary, not universal filesystem interception: custom launch commands and
 legacy setup scripts remain responsible for entering through
 `agent-worktrees config-root` before writing concrete setup configuration.
 
+### Actor-free recovery journal
+
+`launch_recovery_store.WorktreeRecoveryStore` adapts the standalone Driver
+core's complete recovery-record contract to the existing tracking writer.
+It is a bookkeeping provider, not an installed recovery controller or native
+admission path. No production launch caller invokes it yet.
+
+Construction takes a canonical, registered worktree-record path, not a path
+derived from a recovery descriptor. The descriptor's `owner_ref` must be that
+record's qualified execution-machine/project/worktree claim reference;
+`worktree_ref` is its worktree ID. The journal additionally binds the immutable
+worktree creation nonce. All eleven descriptor fields are exact keys. Source,
+lease and native-incarnation references are historical assertions, not proof
+of current authority or whole-scope settlement.
+
+The version-1 `launch_recovery_compare_and_swap` tracking-write verb uses the
+same registered implementation in the resident and pre-send direct fallback.
+Its receiver rechecks the canonical record and receiving execution-space
+authority under the strict record lock. An older resident does not advertise
+this verb; the existing pre-send fallback uses the current implementation.
+After possible admission, a failed acknowledgement stays ambiguous: reread
+the same original operation, never select another writer or replay an effect.
+
+One `launch-recovery.json` in the worktree's external launch-state directory
+retains complete versioned core records. Revision zero reserves absence;
+each CAS appends exactly one phase, preserves the prior step prefix and holds,
+and forbids operation-ID reuse across descriptors in that worktree store.
+The commit flushes the temporary file, publishes through the existing
+write-through/namespace durability helper, then acknowledges. Unknown effects
+remain in the complete history after restored observation. Read-only status
+does not create directories or lock files, renew authority or clear holds.
+Unsupported/corrupt state and the 64-record/2-MiB store limit refuse without
+repair, eviction or truncation. No reset or deletion API is supplied.
+
+Actor-free and contained fresh-process CAS controls cover this persistence
+contract. They do not qualify native retirement, restoration, automatic
+recovery, source-lease enforcement or live rollout. Those remain separate
+original-owner/provider integration gates.
+
+`launch_recovery_admission.RecoveryAdmissionInspector` adds passive inspection
+over that store and the actual original launch-execution journal. Its caller
+supplies an independently retained `RecoveryBinding`: exact descriptor, launch
+correlation/operation, approved source-selection references, original
+`OwnerIntent` snapshot and opaque native owner handle. The snapshot is captured
+at the original launch, not recaptured when an inspector is constructed or
+reopened. Construction and inspection compare it with canonical owner state;
+closed owners, including `orphaned`, and opaque/unsupported provider bindings
+are refused. Provider snapshots are immutable serialized values, not mutable
+dataclass references. Inspection matches all request/current binding fields,
+requires the exact durable intent/revision, and rereads owner/journal/store
+state after checking the supplied lease's conservative remaining lifetime.
+Restoration candidates additionally need the recorded newer authority revision
+and an owner-supplied settlement observation. Opaque lease IDs are not authority
+revisions. Changed, missing, revoked or ambiguous inputs remain held, unknown
+or marked for same-operation reconciliation; prior holds and unknown work
+are not cleared.
+
+The inspector invokes only the retained lease's local `remaining_seconds()`
+reader. It never acquires a grant, installs credentials, writes intent,
+dispatches a native operation or reconstructs a lost custody handle.
+`candidate` means supplied owned inputs match, not that a real source/controller
+was verified or a provider scope independently settled. Every result keeps
+`effects_wired: false`, `native_recovery: unqualified` and `replay: never`.
+Neither a result nor a reconstructed inspector is an admission certificate.
+No ordinary caller, observer, CLI or RPC is wired to it. Actual current-source
+verification, final-boundary serialization, durable provider reacquisition and
+native recovery qualification remain unimplemented.
+
 ### Launch-owned pane assets and current boundary handlers
 
 Windows Picker and `sessions.mux_new_session` creators coordinate through
@@ -790,6 +858,33 @@ backend PID and finishes the seed. Receipt uncertainty keeps the handoff and
 actual wait; it does not restore or replay. Custom/intermediary commands,
 ACP and unselected sessions retain their existing Python execution paths.
 Full caller convergence is still in progress.
+
+Recordless normalized setup (including anchor launches) invokes the same
+retained headed core at its final backend handoff, after environment priming
+and setup hooks. The setup script calls its selected Worktrees runtime's
+internal `normalized_backend` entrypoint only for a direct `copilot` executable;
+custom providers and `gh copilot` retain their existing shell invocation.
+The entrypoint uses the same native argument selection as recorded launches,
+preserving explicit resume, preferences and literal input. Unselected ACP,
+AHP, help and ambiguous/remote modes keep their original native invocation.
+An eligible fresh launch selects one identity; repository hosting policy is
+checked before core preparation and again through live-owner startup admission.
+Native directory overrides must match the caller's selected execution directory;
+an allowed caller cannot admit a different target through `-C`.
+The core receives directory-bound argv even on resume without an explicit `-C`,
+so historical session metadata cannot restore a different workspace.
+The installation's `launch-attempts/<operation>/` retains the copied runtime
+and native receipt without inventing a worktree record or using the anchor
+claim ledger as launch authority. This path adds no recovery or auth admission.
+The existing private-directory primitives create caller-owned attempt parents,
+attempts and runtime directories before bundle construction, independent of umask;
+unsafe existing paths refuse instead of being chmod-repaired or reused.
+A missing/incompatible selected runtime or uncertain native receipt never
+replays the original command through a raw-backend fallback. Legacy direct
+script use with no Worktrees runtime selection retains its existing behavior;
+an explicitly selected installation with no usable resolver/runtime refuses.
+Resolver calls temporarily bind the explicit launch installation and restore
+the prior ambient runtime root before setup/backend execution.
 
 The selected POSIX provider separately advertises `posix-headed-env-v1` in
 `backend_execution_modes`. A copied seeded setup discovers it before
@@ -1152,8 +1247,13 @@ owners.
 The Windows `scripts/native-seed-boundary.ps1` adapter is dot-sourced
 into that existing setup owner. It retains the actual child handle and wait.
 The headed path discovers preparation/receipt support against one captured,
-completed immutable runtime slot and uses that slot throughout; each finite
-call independently refuses a changed current selection before effects.
+completed immutable runtime slot for preparation, admission and spawn; each
+finite call independently refuses a changed current selection before effects.
+After actual child exit, terminal observation resolves the then-current provider
+so removal of the outgoing slot does not strand its return receipt. It retains
+the version-1 contract and original execution correlation/operation identity.
+A missing or incompatible current provider leaves that receipt unconfirmed,
+preserving the actual exit without retrying preparation, creation or the callback.
 Older providers retain direct execution without receiving new syntax.
 Before coordinator creation the shell opens a bounded private loopback
 admission channel. It verifies the retained coordinator, exact native argv,
@@ -2784,7 +2884,7 @@ focused).
 *group* becomes **one** native container widget = **one tab-stop**, with the arrow
 keys moving *within* it -- never one tab-stop per item. Textual's list widgets are
 each a tab-group by construction: `OptionList` (single-select menus), `SelectionList`
-(multi-select **checkbox lists** -- the New-worktree options `Bare`/`No Mux`/`Local
+(multi-select **checkbox lists** -- the New-worktree options `Anchor repo`/`No Mux`/`AHP`/`Local
 model` and the Clean/Sync scope buckets, both hand-rolled in `ScopeDlgScreen`
 today), and `RadioSet` (pick-exactly-one). Only a *heterogeneous* group the native
 lists don't cover (a `Confirm`/`Cancel` button pair; later, the main-screen chrome)
@@ -2854,7 +2954,7 @@ genuine judgement call; live operator feedback on real data is the tie-breaker.
 
 **NF1 slice 3 -- the checkbox dialogs -> `SelectionList` + the `FocusGroup`
 primitive.** `ScopeDlgScreen` (shared by Clean/Sync scope and the New-worktree
-options `Bare`/`No Mux`/`Local model`/`Anchor repo`) was the picker's genuine
+options `Anchor repo`/`No Mux`/`AHP`/`Local model`) was the picker's genuine
 **multi-select checkbox list**, hand-rolled as a `section`/`idx`/`bidx` cursor over
 a static `Panel`. It now composes a native Textual **`SelectionList`** for the
 toggles (one tab-stop; arrow to move, Space to toggle -- the framework owns focus +
@@ -3265,6 +3365,12 @@ the Picker moved to `worktree-manager/`.
 standalone Python entry. Existing sessions that cached the old command keep
 using `hook_client.py`; a payload refresh is not proof their command changed.
 
+The declared scripts root, native script and admission-helper filesystem paths
+use `IO.Path.Combine` directly. A prepared native read therefore does not
+initialize `Microsoft.PowerShell.Management` merely to join these fixed child
+paths. Source/context/legacy selection and the original runtime, policy and CWD
+compatibility routes remain unchanged.
+
 For the default installation, `view`, `rg` and `glob` can return without Python,
 IPC, repository discovery or runtime selection. `hook-read-policy.json` binds
 that exemption to the exact normalized sources of all four guards. Missing,
@@ -3275,8 +3381,149 @@ contract tests also exercise each real guard's read decision, not just hashes.
 A hot active pre-tool stop can return natively; invalid/unsupported flag state
 keeps the normal guard path and its diagnostic.
 
-The native read contract currently hashes four bounded source files per read
-(at most 128 KiB each); it is not a daemon-published worktree-policy cache and
+Prepared Windows membership also permits a single `powershell` or `pwsh` event
+whose original argument carrier yields exactly one of the no-argument literals
+from `hook_pre_relevance.py`'s canonical `SHELL_READ_HEADS`. The same tuple builds
+the ordinary client's existing conservative expression; its argument grammar and
+contextual refusal are unchanged. Non-command tool metadata remains data, and
+the primary command keeps the original guard precedence. A present `toolArgs`
+selects that value even when invalid; only its absence selects `tool_input`.
+An object supplies the first nonempty string under the original guards' ordered
+command keys, derived by the existing renderer from all four identical
+`CMD_ARG_KEYS` declarations. Earlier null, empty or nonstring values are skipped;
+an earlier whitespace or protected command is not skipped for a later safe value.
+A raw string supplies the whole command. The native consumer does not parse
+shell syntax, normalize text or decode JSON argument strings.
+Bare commands outside that exact tuple, shell command aliases, quotes,
+substitutions and redirection retain original policy. Argument-bearing commands
+have the additional conservative proof described below.
+`toolCalls` still takes precedence over top-level tool fields.
+
+The existing version-1 contract carries optional `nativeShellReadCommands` and
+`nativeShellReadDependencies`; the latter binds the canonical relevance source
+in addition to the four original guards. Current source/control/admission checks
+remain live. Missing, invalid, old or drifted literal-proof data declines this
+optimization without retiring existing read/write proofs. Prior readers ignore
+the additive properties and keep their original shell path; readers limited to
+primary object arguments retain fallback for other carriers. The additional
+carrier selection uses the same declaration and original guard-source bindings.
+Optional `nativeShellReadCommandKeys` supplies ordered selection data, not another
+permission list. Its absence preserves the command-only object baseline and raw
+strings; a supplied empty, duplicate, nonstring or over-128-key list declines shell
+exemption. Older command-only consumers ignore this addition and retain fallback
+for alternate keys; they do not enforce the new optimization. No existing form
+is retired, and rollback to older data or readers retains its original path.
+There is no new caller syntax or package-version handshake. Regenerate the
+contract after relevance-source changes too. Eligible events return an empty
+no-op response without runtime selection, policy-worker startup or Management
+module initialization; that is not an explicit permission grant. Protected and
+uncertain events retain the original raw payload, guard decisions and owned
+worker cleanup. Nonmatching PowerShell commands with an object-command or
+raw-string carrier can additionally read the bounded contract while declining
+the proof; their source hashes are not scanned merely to reject an undeclared
+command.
+
+Prepared membership also permits complete all-read native batches of
+`view`, `rg`, `glob` and those exact-literal `powershell`/`pwsh` calls.
+Each shell member selects only its own `args`, never a top-level fallback.
+The existing literal and command-key declarations are loaded once, and the
+shared guard/dependency sources are verified once per event, not per member.
+Shell members additionally require the original relevance-source binding.
+Any uncertain or protected member declines the whole read proof; later safe
+members cannot rescue it. Older readers retain whole raw fallback for shell
+batches, and absent optional command-key metadata retains command-only selection.
+Read and write branches share one strict batch-envelope
+validator: 1..128 dictionary members, nonempty string names and only
+`name`/`args`/`id` keys, including when a caller supplies a key named `Keys`.
+Every member must be a recognized read before the read exemption applies;
+batch members override top-level tool fields through the original normalization
+contract. This proof additionally binds the existing target-form and map-reader
+sources, without reading target inventories or interpreting read arguments as
+shell commands. Missing prepared evidence or incompatible source contracts,
+empty/malformed/oversized envelopes and unsupported members retain the original
+route. A later write must still satisfy the complete write proof below or use
+the original raw-event evaluator.
+
+Optional `nativeShellReadArguments` version 1 extends this same proof to one or
+more unquoted ASCII arguments on the original read heads. The existing renderer
+extracts the original relevance expression, all three guards' write-search
+expressions and both original PR-close invocation expressions without importing
+their owners. Only the explicitly supported ASCII boolean regex syntax and
+original case-insensitive flags are translated; named captures become
+noncapturing groups. Unsupported source expressions, flags or syntax stop
+generation. The native reader uses invariant case-insensitive matching, requires
+the whole original read expression and declines any original write or PR
+invocation match. Rejecting a whole PR invocation is deliberately conservative:
+it can decline an API read that the original close finder would not mutate.
+
+This applies only to argument-bearing commands; no-argument literals retain their
+ordinal comparison. ASCII spaces/tabs and original bare path/option punctuation
+are accepted without rewriting the command. Unicode, other whitespace, quotes,
+JSON strings, substitutions, separators and redirection retain whole raw
+fallback. Missing or invalid optional argument facts decline that argument proof,
+not an independently valid literal proof; a batch needing an unproved argument
+member falls back whole. Literal-only prior readers ignore the addition and keep
+their old argument path. New readers with old declarations do likewise. No form
+is retired and no caller or package-version handshake is added.
+
+The declaration remains bounded to 4096 bytes. Compiled predicates are local to
+one event and reused across members; the same declaration is loaded once and the
+same shared sources are verified once. Original source/input/member bounds,
+current control/context/admission checks and policy-worker cleanup remain
+unchanged. This is native source-proof optimization, not a new permission table,
+shell evaluator, runtime rollout or installed/composed-throughput qualification.
+
+For prepared Windows membership, the original guards' native write
+names (`create`, `edit`, `str_replace`, `str_replace_editor`,
+`str_replace_based_edit_tool`, `write`, `write_file`, `insert`, `new_file` and
+`multi_edit`, plus recognizable `apply_patch` calls) can also return natively
+when current Git metadata proves every target belongs to that same linked
+worktree. Targets include the original direct path aliases and one-level
+`edits`, `files` and `changes` entry aliases. Each structured list and each
+call's distinct raw targets retain the original 128 limit; the complete event
+also has a conservative 128-distinct-raw-target ceiling. A native batch may contain at most
+128 calls, limited to those writes and optional `view`, `rg` or `glob` reads,
+with at least one write. The entire envelope and every target must qualify;
+batch members take precedence over top-level tool fields, as in the original
+`tool_call_forms.py` normalizer. Membership, source identity, configuration and
+inventory checks are shared within the event, not repeated per call.
+The shell reads the live stateless configuration and the
+original complete guarded-anchor inventory and posture view; it does not
+cache an allow decision or infer anchor protection from posture rows alone.
+Inventory identities are validated lexically without filesystem probes of
+unrelated repositories; current source and target paths retain live checks.
+Stateless checks retain the original guard's universal-newline, whitespace
+and leading-dot path normalization, including the normalized basename.
+Protected personal-state paths, anchors, foreign or nested repositories,
+unsupported batch members, unrecognized patches, nested or incomplete structured entries,
+malformed/oversized batches,
+unsupported paths and incomplete evidence retain
+the original raw-event policy path. Eligible installation cells retain the
+same complete native membership proof; unprepared cells retain validation.
+This exemption additionally fingerprints the original target-form and map
+readers in `hook-read-policy.json`. Regenerate that contract after either
+reader changes. Other shell commands and Git/PR operations are not covered by
+this write proof; the exact literal read proof above is separate.
+Patch arguments may be objects, JSON objects or freeform patch strings.
+The existing collector unions direct/structured aliases with every original
+Add/Update/Delete/Move header in every `input`, `patch` and `command` field,
+including both move endpoints. Each present patch field must be a string with
+a complete Begin/End envelope, at least one original header target and at most
+131072 characters; all existing per-call/event target limits still apply.
+Fragments, targetless, non-object JSON, malformed or oversized fields retain
+the original raw-event policy path. This is a conservative relevance proof,
+not a replacement patch parser or validator.
+Argument strings containing literal original header lines retain their raw
+interpretation before JSON decoding, so permissive JSON comments cannot hide
+a target that the original strict guards would inspect as freeform input.
+The entry discovers optional facts support from the loaded admission function;
+an older helper keeps its original call and policy path without that proof.
+
+The single-read contract hashes four bounded guard sources; all-read batches
+add the two existing normalizer/reader sources (at most 128 KiB per file).
+Source checks are per event, not per member. The shared envelope validation can
+run again when an ineligible read batch proceeds to write proof, but performs
+no process, filesystem or topology work. This is not a daemon-published worktree-policy cache and
 does not claim zero filesystem cost. Exact fingerprints deliberately prevent a
 partial helper upgrade from reusing a stale exemption. A future lifecycle- or
 daemon-published generation may replace this repeated check after its own
@@ -3292,7 +3539,13 @@ decision; it is not authorization or proof that policy was satisfied. Confirmed
 protected violations retain their existing deny/ask outcomes.
 
 Native JSON readers reject non-object roots before PowerShell can enumerate
-a singleton array. Non-exempt native fallback uses the strict entry and checks
+a singleton array. On PowerShell 6+, the pre-tool reader reuses managed
+admission's same-engine JSON helper instead of initializing the JSON cmdlet
+again. This covers event, stop-state, installation-context and policy-response
+decoding without changing admission or forwarding the decoded event to Python:
+the original raw UTF-8 input still reaches the policy worker. PowerShell 5
+retains its existing plain serializer and metadata behavior. Non-exempt native
+fallback uses the strict entry and checks
 a bounded, typed object response before forwarding diagnostics. Empty,
 malformed and down-level unknown-entry responses report unavailable evaluation
 without a permission decision. Child UTF-8 settings override inherited

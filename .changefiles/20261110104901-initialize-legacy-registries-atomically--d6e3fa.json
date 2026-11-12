@@ -1,0 +1,9 @@
+{
+  "comment": "Initialize legacy registries atomically from an uncached locked record, preserving concurrent winners and refusing replaced incarnations.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

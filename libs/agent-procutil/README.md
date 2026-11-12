@@ -32,6 +32,17 @@ entrypoint. The caller must retain the complete source closure for the worker's
 lifetime. Omission keeps the launcher's package; this option changes neither
 native containment nor leases and does not add a production admission wrapper.
 
+An explicit `stdio_fds=(stdin_fd, stdout_fd, stderr_fd)` retains an existing
+caller-owned stdio channel while using the same native daemon admission,
+Job-escape verification and instance lease. All three must be open, nonnegative
+file descriptors; pipe-creation sentinels and a simultaneous `stderr_log_path`
+are refused. The descriptors remain borrowed: the caller keeps its copies and
+their inheritance flags, while native process creation supplies the child's
+standard handles. `log_path` still receives separate startup diagnostics, never
+protocol output. Omission retains DEVNULL stdin and the existing log routing.
+This option neither creates a relay nor establishes an originating-session
+lifetime; the application must own that boundary explicitly.
+
 The explicit Linux user-systemd fixture is
 `tests/systemd_daemon_fixture.py qualify <fresh-private-directory>`.
 It uses finite caller units and a renewable test-instance lease to prove
@@ -148,6 +159,63 @@ Cache reuse neither migrates nor deletes existing caches. Runtime inventory,
 retention, and explicit uninstall/all-code-absent accounting still belong to
 their existing lifecycle owners; external cache routing does not establish
 that those gates have passed or introduce another cleanup policy.
+
+### Platform-cache provider contract
+
+`agent_procutil.python_cache.POLICY_VERSION == 2` advertises the additive
+`policy_arguments(root, runtime=target)` provider. Existing `cache_arguments`
+and `python_cache_args` callers retain their preceding contract; consumer
+migration and update-time collection are separate lifecycle work.
+
+The new provider returns `["-X", "pycache_prefix=<private-platform-cache>"]`
+only for a completed target slot belonging to the addressed installation.
+It returns `["-B"]` for an unsealed target, unsupported ownership, unavailable
+cache or invalid metadata, without allocating per-invocation directories.
+Forward the complete vector rather than extracting a prefix. A new caller
+with an older provider uses its documented no-write fallback.
+
+The base is Windows Local AppData (absolute `LOCALAPPDATA` or its native known
+folder), macOS `~/Library/Caches`, or absolute `XDG_CACHE_HOME` with `~/.cache`
+as the other POSIX default. Relative overrides never select the working
+directory. The owned layout is
+`copilot-extensions/python/v1/<installation>/installed-<identity>/bytecode`.
+Identity includes the normalized installation/target paths and completed
+content; native Python cache tags still separate interpreter bytecode.
+
+Native ownership and permissions must protect executable cache input and its
+ancestors from other unprivileged users' writes or substitution. New
+directories use private creation; existing foreign/shared-writable paths are
+not repaired or trusted. A matching JSON record is not an access boundary.
+Windows validates ownership/DACLs and POSIX validates ownership/modes.
+Owned POSIX cache directories require private traversal, so a permissively
+created `.pyc` cannot become writable input for another user through a
+world-traversable cache tree. Windows checks inheritable access rules as well
+as rules applying to the directory itself. Because Windows bypass-traverse
+access can reach independently granted children below a private directory,
+the provider additionally checks existing bytecode descendants' ownership and
+DACLs. This metadata-only admission stops at 256 entries or 50 ms between
+filesystem/security calls; exhaustion selects `-B` without changing the cache.
+Large Windows caches therefore currently lose reuse rather than bypass
+protection. POSIX private traversal needs no descendant walk.
+macOS additionally reads extended
+ACLs: deny-only ACLs are safe; extended allow entries are conservatively
+unsupported and select the no-write fallback rather than inferring safety
+from mode bits. An unresolved user home likewise selects the fallback.
+
+The namespace's bounded `owner.json` lives beside bytecode. Its installation's
+private `catalog.sqlite` indexes ownership before the provider enables cache
+writes, reserving restart-safe collection progress without a directory census.
+The catalog, existing SQLite sidecars and owner record receive native file
+protection checks before use. Under SQLite serialization, an empty schema-zero
+catalog can finish initialization after an interrupted first allocation;
+nonempty or unknown schemas are not reset. Owner records are completely written
+and flushed before exclusive hard-link publication, so interruption cannot
+expose a partial record. Unsupported atomic publication selects `-B`.
+Unknown schemas, conflicting records and failed catalog operations take the
+no-write fallback, preserving the existing objects. This provider neither
+deletes a cache nor changes runtime selection, retention or service lifetime.
+The caller still owns target admission and retention across launch; an owner
+record or catalog entry is not a runtime lease or permission to execute it.
 
 ## Windows bootstrap and shell admission
 
@@ -924,6 +992,42 @@ The `interactive_completion=true` selector in the manual
 `installation-context-acceptance.yml` lane runs this focused packet on Linux,
 macOS and Windows; it does not widen required unit-only PR CI.
 
+## Opt-in asynchronous foreground custody
+
+`async_foreground.require_foreground_custody()` checks the Linux pidfd,
+main-thread and default-SIGCHLD requirements before native creation.
+`await AsyncForegroundProcess.start(argv, cwd=..., env=..., before_exec=...)`
+uses the existing private-session guardian, PTY and caller-lifetime pipe.
+The original native command stays gated until its actual PID/pidfd is retained
+and the optional synchronous admission callback succeeds. `pid` is the native
+child, not the guardian. Redirected streams remain inherited.
+An overlapping terminal-backed start in the same process refuses before taking
+another mode snapshot; ownership remains held through restoration and close.
+Readiness and output drainage accept valid descriptors above the `select()` range.
+
+`wait()` returns the native exit status only after whole-session settlement and
+terminal restoration. `terminate()` closes the original lifetime channel and
+awaits that same cleanup. Cancelled waiters do not cancel the retained cleanup;
+callers still explicitly terminate their owned foreground scope on unwind.
+Failed settlement raises `OwnedCleanupError` retaining the original guardian,
+provider resources and bounded retry, not permission to signal a numeric PID.
+Confirmation or output-drain failure still restores caller terminal modes while
+retaining unresolved custody and descriptors; a restoration failure is preserved
+in the cleanup error chain. Retry output drainage honors the caller's absolute
+deadline even while bytes continue progressing.
+Managed detachment outside the private session keeps the existing exemption.
+
+The guardian's opt-in receipt reports **settlement**, not early acceptance of a
+whole-scope stop. `retirement_started` therefore remains false until the receipt
+and an independent whole-session confirmation. Root pidfd signalling, scheduling
+cleanup or writing a pipe cannot mark SDK EOF as expected. An earlier unexplained
+observation must stay irreversible; this provider alone is not proof of auth-wait
+recovery. The Driver's POSIX source-auth receiver remains unsupported until its
+actual expiry, renewal and same-session flow is independently qualified.
+Windows and macOS refuse this new API; existing `run_interactive` behavior is
+unchanged. Abrupt caller death still triggers the existing guardian, while an
+uncatchable signal cannot restore the caller's terminal modes.
+
 ## Caller-owned native execution with streaming limits
 
 An ordinary synchronous caller that also needs caller-death cleanup uses the
@@ -1181,12 +1285,25 @@ remain read-only metadata. File access/share/disposition, binary record bytes
 and noninheritance retain their existing behavior. Portable registry imports
 still load no native bindings; Windows descriptor types are initialized lazily.
 
-`reconcile_instances(registry_root=None, limit=128, max_seconds=5)` is an explicit
-installer backstop for **expired disposable** instances and observed-exit
-finite control records. Resident production and unexpired disposable records
-are preserved. No import, status, lookup or session-start
+`reconcile_instances(registry_root=None, limit=128, max_seconds=5,
+terminate=False, runtime_root=None)` is an explicit backstop for **expired
+disposable** instances and observed-exit finite control records. It never
+signals a live process by default: expired live instances remain held, including
+their supervisors. Explicit lifecycle owners may opt into `terminate=True`;
+that retains the existing identity, lease, protection and self-cleanup checks.
+Resident production and unexpired disposable records are preserved.
+An optional absolute, unredirected `runtime_root` selects only records with that
+exact runtime anchor, not other installations or nested anchors. Cleanup checks
+the scope again under the instance lock before process queries or mutations.
+No import, status, lookup or session-start
 routine invokes it implicitly. The module CLI offers `inspect` and `reconcile`
-with `--registry-root`, `--limit`, and `--max-seconds`.
+with `--registry-root`, `--limit`, `--max-seconds`, `--runtime-root` and the
+explicit `--terminate` opt-in. `cleanup_instance` remains an explicit
+lifecycle-owner operation with its existing termination default.
+Installer adapters require their addressed runtime root, always select
+termination-free reconciliation and defer cleanup when scope is missing.
+Already-exited owned artifacts may be settled; live, protected, uncertain,
+foreign-runtime and resident-production records retain their existing holds.
 The additional finite-production control-record case requires observed native
 exit and never inherits disposable-artifact reclamation authority.
 Collectors resume lexicographically after the last visited canonical instance
@@ -1218,6 +1335,23 @@ custody covers the complete import closure rather than just one entry script.
 The archive contains only canonical `.py` files, not bytecode or native code;
 `tools/sync-versioned-runtime.py --only-installer-instances` publishes it beside
 the source-only installer adapters with non-group-writable permissions.
+
+The PowerShell facade accepts `-RuntimeRoot` and `-Terminate` (default `$false`).
+Bash accepts `reconcile_daemon_instances <limit> <seconds> <registry-root>
+<runtime-root> <terminate>`, with `false` as the termination default.
+New native callers query the executing helper's read-only `reconcile-contract`
+before cleanup: contract version 1 requires termination-policy and runtime-scope
+support. The Bash wrapper also declares `daemon_instance_reconcile_contract`;
+installer PowerShell adapters check the loaded facade's parameters before
+calling it. Bash installer adapters clear inherited contract and reconciliation
+functions in their private subshell before loading the addressed helper; only
+that helper's definitions may authorize cleanup. An inherited read-only function
+that cannot be cleared safely defers the optional backstop without changing the
+caller's bindings. Legacy or rolled-back helpers that cannot enforce these requirements
+defer reconciliation before any cleanup request, without replaying an unscoped
+or termination-enabled fallback. Older callers remain syntactically accepted by
+new providers but inherit the termination-free default. This intentional safety
+correction affects reconciliation, not owner-driven lease supervision or cleanup.
 
 The interpreter and selected source must have attributable filesystem custody.
 Missing, redirected or writable helper inputs refuse rather than downloading
@@ -1610,6 +1744,35 @@ CPU lower bound, and must never be added to it.
 CPU enforcement, consumer role aggregation and process-tree reclamation are
 not provided by this API. Run its focused and native tests with the library's
 `dev` and `metrics` extras under the adopting repository's bounded test runner.
+
+## Labeled scratch directories
+
+`agent_procutil.scratch.labeled_scratch(prefix, purpose, *, owner_refs=None,
+retention=None, cleanup=True)` creates a timestamped
+`<prefix><UTC stamp>-<random>` directory under the OS temp directory (or
+`AGENT_SCRATCH_ROOT`, or an explicit `root=`), writes a `scratch-owner.json`
+breadcrumb (schema, purpose, retention reason, creation time, PID and owner
+references such as the Copilot session, bound worktree and launch IDs taken
+from the environment) and removes the directory on exit. Removal is best
+effort and never follows symlinks or junctions: a link is unlinked, not
+traversed, and each directory is pinned before it is entered (descriptor-
+relative traversal on POSIX, a no-share-delete handle on Windows) so a
+directory swapped for a link mid-cleanup is never followed. Incomplete
+cleanup keeps the breadcrumb, so retained scratch stays labeled.
+An unreadable breadcrumb is retained even after other children are removed,
+since a failed final directory removal could not restore its contents.
+`create_labeled_scratch` / `remove_scratch` serve callers whose
+scratch outlives one `with` block. Removal rejects raw paths ending in a
+separator, `.` or `..` before inspection, since those suffixes can force
+directory-link traversal even during a no-follow lookup.
+
+`python -m agent_procutil.scratch report [--root DIR] [--json]` is a
+read-only inventory of a temp root: entries grouped by name prefix with
+counts, bytes, oldest/newest age and how many carry a breadcrumb (only a
+regular-file breadcrumb is read). It has no
+deletion capability; stale content is left for the operator to review.
+Byte accounting walks directory contents recursively and can be expensive on
+large roots; this is an explicitly invoked diagnostic, not a startup probe.
 
 ## Vendoring
 

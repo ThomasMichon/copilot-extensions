@@ -8,6 +8,13 @@ version retirement and slot collection are not steps in that incoming gate.
 Build, source admission, authentication, permission, I/O and incoming health
 failures remain failures; an unknown foreign installation is not taken over.
 
+Installation readiness validates native bridge declarations and machine-local
+overlays without selecting a caller's repository timing preferences. It can run
+from an installer payload directory without a repository context. Invalid native
+declarations and overlays still fail readiness. Actual bridge/tool requests retain
+the repository-qualified configuration composer and its strict context checks;
+this readiness boundary does not waive request-time preference validation.
+
 ## Current admission
 
 The default current handle is `$AGENT_MCP_HOME/current/serve.sock`. Both a
@@ -48,6 +55,14 @@ handle and listener ownership are rechecked at guarded publication; a listener
 appearing during readiness cannot be overwritten. Successful recovery atomically
 repoints the handle to the qualified incoming generation, without deleting it
 first or terminating an incumbent process.
+
+A POSIX symlink whose resolved same-directory socket target is missing remains
+a retained handle snapshot, not an absent handle or a live-owner claim. Existing
+non-socket targets, foreign targets and actual inspection I/O failures still
+refuse. Incoming startup reserves that retained target name even when no socket
+file exists, so constructing the candidate cannot activate the old link before
+guarded publication. Link identity and raw target are rechecked; a changed link
+is not overwritten or deleted to complete installation.
 
 An explicit bridge configuration need not appear in global discovery. When
 serving is enabled, fresh admission can publish the selected generation on
@@ -152,6 +167,13 @@ The focused `tests/test_incoming.py` packet covers capable-but-stale admission,
 activation inhibition, foreign installation refusal, changed selection/endpoint,
 failed candidate health and occupied legacy discovery with an empty global
 catalog. These are isolated source-boundary controls, not installed acceptance.
+
+The application callback controls in `tests/test_application_install.py` also
+exercise real private POSIX socket links: missing sibling targets, existing
+socket/non-socket and foreign targets, inspection I/O failure, changed-link
+admission and guarded publication races. They prove distinct candidate-socket
+selection and atomic handle publication with substituted process/control owners;
+they are not a live daemon or installed-consumer qualification.
 
 On Windows, the explicitly selected
 `tests/test_installer_native_capture_ps1.py -k generated_cmd_uses_marker_owner_and_preserves_stdin`

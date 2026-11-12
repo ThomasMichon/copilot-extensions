@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 import subprocess
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -244,6 +245,106 @@ def test_error_envelope_is_surfaced(monkeypatch):
     with pytest.raises(ec.EngineError) as ei:
         ec.list_worktrees("dotfiles", classify=False)
     assert "no such project" in str(ei.value)
+
+
+def _legacy_controller_engine(tmp_path, stdout, *, stderr="", returncode=1):
+    script = tmp_path / "legacy engine.py"
+    script.write_text(
+        "import sys\n"
+        "sys.stdout.reconfigure(encoding='utf-8', errors='replace')\n"
+        "sys.stderr.reconfigure(encoding='utf-8', errors='replace')\n"
+        "assert sys.argv[-2:] == ['get', 'update-controller']\n"
+        f"sys.stdout.write({stdout!r})\n"
+        f"sys.stderr.write({stderr!r})\n"
+        f"raise SystemExit({returncode})\n",
+        encoding="utf-8",
+    )
+    ec.set_engine_command([sys.executable, str(script)])
+
+
+def test_legacy_controller_probe_preserves_utf8_controller_path(tmp_path, monkeypatch):
+    monkeypatch.setenv("PYTHONIOENCODING", "cp1252")
+    selected = "tools/\u66f4\u65b0.py"
+    _legacy_controller_engine(
+        tmp_path, selected + "\n", stderr=f"Selected {selected}\n", returncode=0,
+    )
+    assert ec.get_value("example", "update-controller") == selected
+
+
+@pytest.mark.parametrize(("stdout", "stderr"), [
+    ("  \u2717 Unknown key: 'update-controller'. Use 'get keys' to list available keys.\n", ""),
+    ("\x1b[0;31m\u2717\x1b[0m Unknown key: 'update-controller'. Use 'get keys' to list available keys.\n", ""),
+    ("", "Unknown key: 'update-controller'"),
+    (json.dumps({"error": "Unknown key: 'update-controller'"}), ""),
+])
+def test_legacy_controller_probe_never_assumes_no_project_controller(tmp_path, monkeypatch, stdout, stderr):
+    from worktree_manager import project_update_controller
+
+    project = tmp_path / "project"
+    (project / ".agent-worktrees").mkdir(parents=True)
+    (project / ".agent-worktrees" / "config.yaml").write_text(
+        "update_controller:\n  windows: tools/update.py\n  linux: tools/update.py\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(ec, "run_engine_passthrough", lambda *_args, **_kwargs: pytest.fail("unexpected update"))
+    _legacy_controller_engine(tmp_path, stdout, stderr=stderr)
+    with pytest.raises(ec.EngineFeatureUnavailable, match="cannot determine.*project update controller"):
+        project_update_controller.handoff(["--project", "example"])
+
+    authority = SimpleNamespace(configured=True, mode="project", project="example")
+    with pytest.raises(ValueError, match="selected project update controller is unavailable"):
+        project_update_controller.handoff(["--project", "example"], authority=authority)
+
+
+def test_legacy_controller_probe_without_a_project_can_fall_back(tmp_path):
+    from worktree_manager import project_update_controller
+
+    _legacy_controller_engine(
+        tmp_path,
+        "  \u2717 Cannot load config: No active project could be resolved. agent-worktrees discovers "
+        "its context from the current directory (like git); run from inside a managed repo or "
+        "worktree, or pass --project <name>.\n",
+    )
+    assert project_update_controller.handoff([]) is None
+    with pytest.raises(ec.EngineError, match="no output"):
+        project_update_controller.handoff(["--project", "example"])
+
+
+@pytest.mark.parametrize(("stdout", "stderr", "returncode"), [
+    ("unrelated output", "Could not resolve a project for 'get'.", 1),
+    ("", "Could not resolve a project for 'get'. Additional failure.", 1),
+    (json.dumps({"error": "No active project could be resolved. Additional failure."}), "", 1),
+    ("", "Could not resolve a project for 'get'.", 2),
+], ids=["mixed-channels", "extended-stderr", "extended-json", "wrong-exit"])
+def test_legacy_controller_probe_rejects_unconfirmed_no_project(
+    tmp_path, stdout, stderr, returncode,
+):
+    from worktree_manager import project_update_controller
+
+    _legacy_controller_engine(tmp_path, stdout, stderr=stderr, returncode=returncode)
+    with pytest.raises(ec.EngineError):
+        project_update_controller.handoff([])
+
+
+@pytest.mark.parametrize(("returncode", "extra", "stderr", "expected"), [
+    (1, "unrelated output\n", "", "no output"),
+    (1, "", "permission denied", "permission denied"),
+    (2, "", "", "no output"),
+])
+def test_legacy_controller_probe_does_not_hide_other_failures(
+    tmp_path, returncode, extra, stderr, expected,
+):
+    from worktree_manager import project_update_controller
+
+    _legacy_controller_engine(
+        tmp_path,
+        "  \u2717 Unknown key: 'update-controller'. Use 'get keys' to list available keys.\n" + extra,
+        stderr=stderr, returncode=returncode,
+    )
+    with pytest.raises(ec.EngineError, match=expected) as failure:
+        project_update_controller.handoff(["--project", "example"])
+    assert "unrelated output" not in str(failure.value)
 
 
 def test_invalid_json_raises(monkeypatch):
@@ -949,6 +1050,44 @@ def test_resolve_resume_parses_plan(monkeypatch):
     assert plan.cmd == ["copilot", "--resume=sess123"]
     assert plan.work_dir == "/w/x" and plan.worktree_id == "m-win-1200-ab12"
     assert plan.post_exit is True
+
+
+def test_resolve_retained_hint_keeps_selected_engine(monkeypatch):
+    seen = []
+
+    def handler(cmd, kw):
+        seen.append(cmd)
+        assert cmd[0] == "/selected/engine"
+        assert kw["env"]["AGENT_WORKTREES_RETAINED_SEED_PLANS"] == "1"
+        return _fake_completed(cmd, stdout=json.dumps(_RESUME_PLAN))
+
+    _install_fake(monkeypatch, handler)
+    ec.set_engine_command(["/selected/engine"])
+    monkeypatch.setattr(
+        ec, "installed_engine_command", lambda *a, **k: pytest.fail("selected engine was bypassed"),
+    )
+    assert ec.resolve_launch_plan("demo", worktree_id="wt-a").is_exec
+    assert len(seen) == 1
+
+
+def test_preserved_selector_rollback_refuses_before_effects(tmp_path):
+    engine = tmp_path / "legacy_engine.py"
+    effect = tmp_path / "effect.txt"
+    engine.write_text(
+        "import argparse,json\nfrom pathlib import Path\n"
+        "p=argparse.ArgumentParser()\np.add_argument('--project')\n"
+        "p.add_argument('verb',choices=['resolve'])\n"
+        "p.add_argument('--json',action='store_true')\np.add_argument('--worktree-id')\n"
+        f"p.parse_args()\nPath({str(effect)!r}).write_text('executed')\n"
+        "print(json.dumps({'action':'exec','cmd':['copilot']}))\n",
+        encoding="utf-8",
+    )
+    ec.set_engine_command([sys.executable, str(engine)])
+    with pytest.raises(ec.EngineError, match="unrecognized arguments: --preserve-seed-id"):
+        ec.run_json("demo", [
+            "resolve", "--json", "--worktree-id", "wt-a", "--preserve-seed-id", "original-a",
+        ])
+    assert not effect.exists()
 
 
 def test_resolve_new_sends_new_flag(monkeypatch):

@@ -40,6 +40,12 @@ def _ps1_text() -> str:
     return INSTALL_PS1.read_text(encoding="utf-8")
 
 
+def _service_text(role: str) -> str:
+    return (
+        INSTALL_PS1.parent.parent / "src" / "agent_dispatch" / "service_launchers" / f"{role}.ps1"
+    ).read_text(encoding="utf-8")
+
+
 def test_install_sh_exists():
     assert INSTALL_SH.is_file(), f"missing {INSTALL_SH}"
 
@@ -208,10 +214,10 @@ def test_serve_mode_supports_explicit_machine_scope():
     # documented in the shipped supervisor.env template
     assert "AGENT_DISPATCH_SUPERVISE_MACHINE=" in sh
 
-    ps1 = _ps1_text()
+    ps1 = _service_text("supervisor")
     assert "'AGENT_DISPATCH_SUPERVISE_MACHINE'" in ps1  # parsed from the env file
-    assert "@('--machine', `$sMachine)" in ps1
-    assert "AGENT_DISPATCH_SUPERVISE_MACHINE=" in ps1
+    assert "@('--machine', $sMachine)" in ps1
+    assert "AGENT_DISPATCH_SUPERVISE_MACHINE=" in _ps1_text()
 
 
 def test_shipped_env_defaults_to_no_labels():
@@ -316,16 +322,16 @@ class TestWindowsSupervisorInstall:
         assert "Substring(0, 12).ToLowerInvariant()" in text
 
     def test_supervise_invocation_is_all_repos_scoped(self):
-        text = _ps1_text()
+        text = _service_text("supervisor")
         assert "'supervise', '--all-repos'" in text, (
             "the Windows supervisor launcher must run `supervise --all-repos` so "
             "it does not silently filter every task out (the lane gotcha)"
         )
 
     def test_launcher_refuses_label_less_run(self):
-        text = _ps1_text()
+        text = _service_text("supervisor")
         # The launcher guards on an empty label set and exits EX_CONFIG (78).
-        assert "if (-not `$haveLabel)" in text
+        assert "if (-not $haveLabel)" in text
         assert "exit 78" in text, (
             "the Windows launcher must exit non-zero (EX_CONFIG) rather than "
             "embody everything when no opt-in label is configured"
@@ -337,15 +343,10 @@ class TestWindowsSupervisorInstall:
         body = text[idx:]
         # MODE=serve short-circuits the gate (the master daemon self-gates); match
         # the label-guard substring present in both the legacy and serve conditions.
-        gate = body.index("(Test-SupervisorLabelsConfigured -EnvFile $EnvFile)")
-        start = body.index("Invoke-SupervisorTaskAction -Operation start -Name $Name")
-        disable = body.index("Invoke-SupervisorTaskAction -Operation disable -Name $Name")
-        # enable/start in the positive branch (after the gate); disable in the
-        # inert (no-label) else branch (after start).
-        assert gate < start < disable, (
-            "enable/start must be gated by Test-SupervisorLabelsConfigured for "
-            "that env file, with Disable-ScheduledTask in the inert branch"
-        )
+        enabled = body.index("$settings.Enabled = ($mode -eq 'serve'")
+        registration = body.index("Register-ScheduledTask -TaskName $Name")
+        assert enabled < registration
+        assert "Invoke-DispatchSupervisorEnsure" in body
 
     def test_serve_mode_runs_master_daemon_and_self_gates(self):
         """MODE=serve switches the Windows launcher to the master daemon, enables
@@ -353,8 +354,8 @@ class TestWindowsSupervisorInstall:
         tasks -- cross-platform parity with the systemd path."""
         text = _ps1_text()
         assert (
-            "'supervise', 'serve', '--legacy-env', '--interval', `$interval"
-            in text
+            "'supervise', 'serve', '--legacy-env', '--interval', $interval"
+            in _service_text("supervisor")
         )
         assert "function Get-SupervisorMode" in text
         idx = text.index("function Install-SupervisorTaskInstance")
@@ -377,9 +378,8 @@ class TestWindowsSupervisorInstall:
         assert "$NoSupervisor" in body and "$NoService" in body, (
             "the supervisor install must skip client-only / -NoSupervisor hosts"
         )
-        assert "Remove-AllSupervisorTasks" in body, (
-            "client-only / -NoSupervisor must remove primary and profile supervisors"
-        )
+        assert "Remove-AllSupervisorTasks" not in body
+        assert "Remove-DispatchScheduledTaskOnly" in body
 
     def test_supervisor_wired_into_actions(self):
         text = _ps1_text()
@@ -404,8 +404,9 @@ class TestWindowsSupervisorInstall:
         idx = text.index("function Install-SupervisorTaskInstance")
         body = text[idx:]
         assert "(Test-SupervisorLabelsConfigured -EnvFile $EnvFile)" in body
-        assert "Invoke-SupervisorTaskAction -Operation enable -Name $Name" in body
-        assert "Invoke-SupervisorTaskAction -Operation disable -Name $Name" in body
+        assert "$settings.Enabled = ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile))" in body
+        assert "Invoke-DispatchSupervisorEnsure -Name $Name -EnvFile $EnvFile" in body
+        assert "Invoke-SupervisorTaskAction -Operation disable -Name $Name" not in body
 
     def test_profile_reconcile_removes_orphan_tasks(self):
         text = _ps1_text()
@@ -426,7 +427,8 @@ class TestWindowsSupervisorInstall:
     def test_windows_launchers_export_install_dir(self):
         text = _ps1_text()
         assert "$env:AGENT_DISPATCH_INSTALL_DIR = $InstallDir" in text
-        assert "`$env:AGENT_DISPATCH_INSTALL_DIR = '" in text
+        for role in ("coordinator", "supervisor"):
+            assert "$env:AGENT_DISPATCH_INSTALL_DIR = $InstallDir" in _service_text(role)
 
     def test_launchers_survive_a_locked_log(self):
         """A busy/locked ``*-service.log`` must never block startup.
@@ -439,23 +441,23 @@ class TestWindowsSupervisorInstall:
         WRITABLE log -- the canonical file, else a version+pid-aware fallback -- and
         never let a banner-write failure be fatal.
         """
-        text = _ps1_text()
+        text = _service_text("coordinator") + _service_text("supervisor")
         # Both launchers define + use the writable-log resolver.
         assert text.count("function Resolve-WritableLog") == 2, (
             "both the coordinator and supervisor launchers must resolve a writable "
             "log so a locked log can't block startup"
         )
-        assert "Resolve-WritableLog (Join-Path `$PSScriptRoot 'serve-service.log')" in text
-        assert "Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log')" in text
+        assert "Resolve-WritableLog (Join-Path $InstallDir 'serve-service.log')" in text
+        assert "Resolve-WritableLog (Join-Path $InstallDir 'supervise-service.log')" in text
         # The fallback is version- and pid-aware (never contends).
-        assert "-`$ver-`$PID.log" in text, (
+        assert "-$ver-$PID.log" in text, (
             "the fallback log path must be version+pid aware so it never contends"
         )
         # The old fatal pattern -- a bare banner Out-File to a fixed path -- is gone.
         assert "'serve-service.log'\n" not in text
         assert (
-            "\"[`$(Get-Date -Format o)] agent-dispatch coordinator launch "
-            "(host=`$pinned port=`$portShown)\" |\n    Out-File" not in text
+            "\"[$(Get-Date -Format o)] agent-dispatch coordinator launch "
+            "(host=$pinned port=$portShown)\" |\n    Out-File" not in text
         ), "the coordinator banner write must be wrapped, not a bare fatal Out-File"
 
     def test_versioned_activate_gates_migration_stop_on_real_venv_path(self):
@@ -478,9 +480,7 @@ class TestWindowsSupervisorInstall:
         )
 
     def test_supervisor_task_refreshed_in_place_without_reregister(self):
-        """Register-once model (#689): a non-elevated update must refresh an
-        already-registered supervisor task IN PLACE -- no re-register (elevation) --
-        by killing the detached daemon and restarting the task onto the new slot."""
+        """Incoming readiness must not sweep workers or rewrite existing tasks."""
         text = _ps1_text()
         assert "function Restart-SupervisorTaskInPlace" in text
         # The install pass retires every detached generation once, then restarts
@@ -488,12 +488,8 @@ class TestWindowsSupervisorInstall:
         assert "function Retire-SupervisorProcesses" in text
         install_idx = text.index("function Install-SupervisorTask {")
         install_body = text[install_idx : text.index("\n}\n", install_idx)]
-        assert install_body.index("Invoke-SupervisorsStop") < install_body.index(
-            "Retire-SupervisorProcesses"
-        )
-        assert install_body.index("Retire-SupervisorProcesses") < install_body.index(
-            "Install-SupervisorTaskInstance"
-        )
+        assert "Invoke-SupervisorsStop" not in install_body
+        assert "Retire-SupervisorProcesses" not in install_body
         idx = text.index("function Restart-SupervisorTaskInPlace")
         body = text[idx : text.index("\nfunction ", idx + 1)]
         assert "Stop-DispatchProcess -Subcommand supervise" not in body
@@ -505,30 +501,20 @@ class TestWindowsSupervisorInstall:
         # reserved for a first install or a genuine task-definition drift.
         inst = text.index("function Install-SupervisorTaskInstance")
         instbody = text[inst:]
-        assert "$existingTask = Get-ScheduledTask -TaskName $Name" in instbody
-        assert "$matchesDesired = $existingAction -and" in instbody, (
-            "an already-registered task with a matching action must be detected "
-            "without relying on the caller's elevation state"
-        )
-        assert "if ($matchesDesired) {" in instbody
-        assert "Restart-SupervisorTaskInPlace -Name $Name" in instbody
+        assert instbody.index("if ($existingNative)") < instbody.index("New-ScheduledTaskAction")
+        existing = instbody[instbody.index("if ($existingNative)") : instbody.index("# MODE=serve")]
+        assert "Invoke-DispatchSupervisorEnsure" in existing
+        assert "return" in existing
+        assert "Get-DispatchNativeTask -Name $Name -Root $InstallDir" in instbody
+        assert "Restart-SupervisorTaskInPlace -Name $Name" not in instbody
 
-    def test_supervisor_task_instance_migrates_drifted_definition_when_elevated(self):
-        """#1837: an ordinary update (elevated or not) must never force-register
-        an already-correct supervisor task; only a genuine drift between the
-        registered action and the desired one -- and elevation being available --
-        may re-register. A drift without elevation must degrade to an in-place
-        restart (stale definition kept) rather than losing the task."""
+    def test_supervisor_first_registration_cannot_force_overwrite_a_raced_task(self):
         text = _ps1_text()
         inst = text.index("function Install-SupervisorTaskInstance")
         instbody = text[inst:]
-        matches_idx = instbody.index("if ($matchesDesired) {")
-        drift_block = instbody[matches_idx : instbody.index("$trigger = New-ScheduledTaskTrigger -AtLogOn", matches_idx)]
-        assert "if (-not (Test-Elevated)) {" in drift_block, (
-            "a drifted-but-unelevated definition must degrade to an in-place "
-            "restart of the stale task, not silently attempt Register -Force"
-        )
-        assert drift_block.count("Restart-SupervisorTaskInPlace -Name $Name") == 2
+        assert instbody.index("if ($existingNative)") < instbody.index("New-ScheduledTaskAction")
+        registration = instbody[instbody.index("Register-ScheduledTask -TaskName $Name"):]
+        assert "-Settings $settings -Principal $principal -Force" not in registration
 
     def test_interactive_update_retires_wrapper_master_and_children_once(self):
         text = _ps1_text()
@@ -585,18 +571,13 @@ class TestWindowsSupervisorInstall:
         helper = text[helper_idx : text.index("\nfunction ", helper_idx + 1)]
         # Register-once: an already-registered Interactive task must be cycled in
         # place (no re-register -> no elevation) on a non-elevated call.
-        assert "(-not (Test-Elevated))" in helper
-        assert "Stop-ScheduledTask -TaskName $Name" in helper
-        assert "Start-ScheduledTask -TaskName $Name" in helper
-        # A mismatched leftover (e.g. a stale S4U boot task) must NOT be treated
-        # as a match -- only a genuine Interactive-logon task short-circuits.
-        assert "$existingTask.Principal.LogonType -eq 'Interactive'" in helper
+        assert "if ($existingTask) { return $true }" in helper
+        assert "Stop-ScheduledTask -TaskName $Name" not in helper
+        assert "Enable-ScheduledTask -TaskName $Name" not in helper
         assert "-RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)" in helper
         assert "-LogonType Interactive -RunLevel Limited" in helper
-        assert "return $false" in helper, (
-            "must return $false (not throw) when elevation is unavailable, so "
-            "callers can degrade gracefully to the HKCU Run fallback"
-        )
+        assert "throw 'Explicit interactive task registration failed" in helper
+        assert "return $false" not in helper
 
         # Install-CoordinatorTask's generated launcher body is itself a
         # here-string containing literal `function ...` text (e.g.
@@ -607,20 +588,14 @@ class TestWindowsSupervisorInstall:
         coord_body = text[coord_idx:coord_end]
         interactive_coord = coord_body[coord_body.index("(Get-ServiceMode) -eq 'interactive'") :]
         assert "Install-InteractiveScheduledTask -Name $TaskName" in interactive_coord
-        assert "Start-CoordinatorNonElevatedFallback -Launcher $launcher -Primary" in interactive_coord, (
-            "must still fall back to the HKCU Run path when the Scheduled Task "
-            "path returns $false (elevation unavailable)"
-        )
+        assert "Start-CoordinatorNonElevatedFallback -Launcher" not in interactive_coord
 
         sup_idx = text.index("function Install-SupervisorTaskInstance")
         sup_end = text.index("function Install-SupervisorTask {", sup_idx)
         sup_body = text[sup_idx:sup_end]
         interactive_sup = sup_body[sup_body.index("(Get-ServiceMode) -eq 'interactive'") :]
         assert "Install-InteractiveScheduledTask -Name $Name" in interactive_sup
-        assert "Install-SupervisorLogonAutostart -Name $Name -Launcher $Launcher -EnvFile $EnvFile" in interactive_sup, (
-            "must still fall back to the HKCU Run path when the Scheduled Task "
-            "path returns $false (elevation unavailable)"
-        )
+        assert "Install-SupervisorLogonAutostart -Name $Name -Launcher $Launcher" not in interactive_sup
         # The label-less safety gate (no opt-in label -> fully inert) must still
         # be checked before ever attempting the Scheduled Task path.
         assert "mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)" in interactive_sup
@@ -640,10 +615,10 @@ class TestWindowsSupervisorInstall:
         # The guard must be the first executable statement (before any
         # Get-ScheduledTask/etc. call that would themselves throw/misbehave
         # without the module loaded).
-        first_get_scheduled_task = helper.index("Get-ScheduledTask -TaskName $Name")
+        first_get_scheduled_task = helper.index("Get-DispatchNativeTask -Name $Name")
         assert guard_idx < first_get_scheduled_task
         guard_body = helper[guard_idx : helper.index("\n    }", guard_idx)]
-        assert "return $false" in guard_body
+        assert "throw 'Explicit interactive scheduling" in guard_body
 
     def test_interactive_scheduled_task_nostart_never_stops_a_running_task(self):
         """Install-InteractiveScheduledTask's register-once/cycle-in-place fast
@@ -656,14 +631,7 @@ class TestWindowsSupervisorInstall:
         text = _ps1_text()
         helper_idx = text.index("function Install-InteractiveScheduledTask")
         helper = text[helper_idx : text.index("\nfunction ", helper_idx + 1)]
-        fast_path_idx = helper.index("if ($matchingType -and (-not (Test-Elevated)))")
-        fast_path = helper[fast_path_idx : helper.index("\n    }\n", fast_path_idx)]
-        assert "if ($NoStart) {" in fast_path
-        no_start_branch = fast_path[
-            fast_path.index("if ($NoStart) {") : fast_path.index("} else {")
-        ]
-        assert "Stop-ScheduledTask" not in no_start_branch
-        assert "Start-ScheduledTask" not in no_start_branch
-        else_branch = fast_path[fast_path.index("} else {") :]
-        assert "Stop-ScheduledTask -TaskName $Name" in else_branch
-        assert "Start-ScheduledTask -TaskName $Name" in else_branch
+        existing = helper.index("if ($existingTask) { return $true }")
+        assert existing < helper.index("New-ScheduledTaskAction")
+        assert "Stop-ScheduledTask" not in helper
+        assert "Start-ScheduledTask" not in helper

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import replace
 import os
 from pathlib import Path
@@ -106,8 +107,7 @@ def _account(registry: repos.ReposRegistry, name: str, url: str) -> str:
     if urlsplit(url).hostname != "github.com":
         return ""
     owner = urlsplit(url).path.strip("/").split("/")[0].casefold()
-    index = repos.AccountLookupIndex.from_registry(registry)
-    return index.account_map.get(owner) or ""
+    return repos.account_for_github_owner(owner, registry=registry) or ""
 
 
 def _credential_args(url: str, account: str, *, cwd: Path) -> list[str]:
@@ -167,20 +167,81 @@ def _acquisition_environment() -> dict[str, str]:
     return protocol._environment(attended=_terminal())
 
 
-def _clone(
-    url: str, path: Path, credential_args: list[str], *, commit: str | None = None,
-) -> None:
-    environment = _acquisition_environment()
+def _parent(path: Path) -> None:
+    if not path.parent.is_dir():
+        raise protocol.SetupError("Repository target parent must already exist.")
+    protocol._plain(path.parent)
+    enclosing = subprocess.run(
+        ["git", "-C", str(path.parent), "rev-parse", "--absolute-git-dir"],
+        capture_output=True, text=True, timeout=30,
+        env=repository_identity_env(), **no_window_kwargs(),
+    )
+    if enclosing.returncode == 0:
+        raise protocol.SetupError("Repository target cannot be nested inside another checkout.")
+    if enclosing.returncode != 128:
+        raise protocol.SetupError("Repository target ownership could not be qualified.")
+
+
+def _resolved_url(url: str, parent: Path, environment: dict[str, str]) -> None:
     resolved = subprocess.run(
-        ["git", "ls-remote", "--get-url", "--", url], cwd=path.parent,
+        ["git", "ls-remote", "--get-url", "--", url], cwd=parent,
         capture_output=True, text=True, timeout=30, env=environment, **no_window_kwargs(),
     )
     if resolved.returncode or protocol.https_url(resolved.stdout.strip()) != protocol.https_url(url):
         raise protocol.SetupError("Git URL rewrites select another remote; acquisition was refused.")
+
+
+def _unregistered(registry: repos.ReposRegistry, name: str, path: Path, url: str) -> None:
+    from .project_state import canonical_repository_id
+
+    identity = canonical_repository_id(name, remote=url)
+    for key, entry in registry.repos.items():
+        local = entry.local_path()
+        if (
+            key.casefold() == name.casefold()
+            or local and (
+                Path(local).resolve() == path.resolve()
+                or path.resolve().is_relative_to(Path(local).resolve())
+            )
+            or entry.remote and canonical_repository_id(key, remote=entry.remote) == identity
+        ):
+            raise protocol.SetupError("Repository name, destination or identity is already registered.")
+
+
+def acquisition_selection(url: str, target: str) -> tuple[str, Path, str]:
+    """Inspect an absent, unregistered destination without credentials or effects."""
+    canonical = protocol.https_url(url)
+    name, path = _selection(canonical, target, ask=False)
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise protocol.SetupError("Acquisition requires an absent destination; inspect the existing target.")
+    _parent(path)
+    path = path.resolve()
+    registry = repos.read_registry(strict=True)
+    _unregistered(registry, name, path, canonical)
+    _resolved_url(canonical, path.parent, protocol._environment(attended=False))
+    return name, path, _account(registry, name, canonical)
+
+
+def _clone(
+    url: str, path: Path, credential_args: list[str], *, commit: str | None = None,
+    attended: bool | None = None,
+) -> None:
+    environment = (
+        _acquisition_environment() if attended is None else protocol._environment(attended=attended)
+    )
+    _resolved_url(url, path.parent, environment)
+    streams = protocol._stdio_kwargs() if attended is not False else {
+        "stdin": subprocess.DEVNULL, "stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL,
+        **no_window_kwargs(),
+    }
     completed = subprocess.run(
         ["git", "--no-replace-objects", *credential_args, "-c", "core.hooksPath=" + os.devnull,
          "clone", *(["--no-checkout"] if commit else []), "--", url, str(path)],
-        cwd=path.parent, env=environment, **protocol._stdio_kwargs(),
+        cwd=path.parent, env=environment, **streams,
     )
     if completed.returncode:
         raise protocol.SetupError(
@@ -203,7 +264,7 @@ def _clone(
         completed = subprocess.run(
             ["git", "--no-replace-objects", *credential_args, "-c", "core.hooksPath=" + os.devnull,
              "-C", str(path), "checkout", "--detach", commit, "--"],
-            env=environment, **protocol._stdio_kwargs(),
+            env=environment, **streams,
         )
         if completed.returncode:
             raise protocol.SetupError(
@@ -214,28 +275,36 @@ def _clone(
 
 def acquire(
     name: str, path: Path, url: str, *, commit: str | None = None,
+    register: bool = True, validate: Callable[[], None] | None = None,
 ) -> protocol.Source:
-    """Preserve unknown outcomes and register only a qualified matching checkout."""
+    """Acquire a qualified checkout; acquisition-only never registers or runs setup."""
     commit = _commit(commit) if commit is not None else None
     canonical = protocol.https_url(url)
     registry = repos.read_registry(strict=True)
+    if not register:
+        selected_name, selected_path, account = acquisition_selection(canonical, str(path))
+        if name != selected_name or selected_path != path:
+            raise protocol.SetupError("Acquisition selection changed; preview the destination again.")
+        credential_args = _credential_args(canonical, account, cwd=path.parent)
+        if validate is not None:
+            validate()
+        # Exclusive creation reserves only this destination; partial targets are never removed.
+        path.mkdir()
+        protocol._plain(path)
+        _clone(canonical, path, credential_args, commit=commit, attended=False)
+        source = protocol.qualify(path, canonical)
+        _require_commit(source, commit)
+        current = repos.read_registry(strict=True)
+        _unregistered(current, name, path, canonical)
+        if current._baseline != registry._baseline or _account(current, name, canonical) != account:
+            raise protocol.SetupError("Repository registration or account changed; inspect the acquired target.")
+        return source
     _registration(registry, name, path, canonical)
     if path.exists() or path.is_symlink():
         source = protocol.qualify(path, canonical)
     else:
         parent = path.parent
-        if not parent.is_dir():
-            raise protocol.SetupError("Repository target parent must already exist.")
-        protocol._plain(parent)
-        enclosing = subprocess.run(
-            ["git", "-C", str(parent), "rev-parse", "--show-toplevel"],
-            capture_output=True, text=True, timeout=30,
-            env=repository_identity_env(), **no_window_kwargs(),
-        )
-        if enclosing.returncode == 0:
-            raise protocol.SetupError("Repository target cannot be nested inside another checkout.")
-        if enclosing.returncode != 128:
-            raise protocol.SetupError("Repository target ownership could not be qualified.")
+        _parent(path)
         account = _account(registry, name, canonical)
         credential_args = _credential_args(url, account, cwd=parent)
         _clone(url, path, credential_args, commit=commit)

@@ -78,6 +78,7 @@ def test_spawn_daemon_launches_with_undecodable_or_multiline_executable(
 
     monkeypatch.setattr(pu.subprocess, "Popen", fake_popen)
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
+    monkeypatch.delenv(pu._JOB_SCOPES_ENV, raising=False)
     executable = "/opt/svc\udcff\nbin"
     log_path = tmp_path / "d.log"
 
@@ -85,5 +86,7 @@ def test_spawn_daemon_launches_with_undecodable_or_multiline_executable(
 
     assert calls == [[executable, "serve"]], "the child still gets the real executable"
     data = log_path.read_bytes()
-    assert data.count(b"\n") == 1
-    assert b"executable=/opt/svc\\udcff\\nbin" in data
+    header = data.splitlines(keepends=True)[0]
+    _assert_one_line(header)
+    assert data.count(b"spawn_daemon cwd=") == 1
+    assert b"executable=/opt/svc\\udcff\\nbin" in header

@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit native session-owner lifetime for internal adopted conduits; keep ordinary caller selection unchanged.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

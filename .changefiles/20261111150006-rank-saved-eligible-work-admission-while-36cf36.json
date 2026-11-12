@@ -1,0 +1,9 @@
+{
+  "comment": "Rank saved eligible work admission while preserving native owners and interactive and review capacity.",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

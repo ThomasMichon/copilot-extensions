@@ -6,6 +6,7 @@ from dataclasses import asdict
 
 from .azure_observation import identity, thread_evidence, validate_target
 from .azure_observation_reads import AdoReader
+from .azure_resolution_evidence import report_candidate, report_evidence
 
 
 def get_report(provider, repo, number, *, api_base, token, reader_factory=AdoReader):
@@ -14,12 +15,16 @@ def get_report(provider, repo, number, *, api_base, token, reader_factory=AdoRea
     reader = reader_factory(provider, repo, number, api_base, token)
     before = reader.pr()
     validate_target(before, provider, repo)
+    initial, candidate_error = report_candidate(reader, before, provider, repo, number)
     collection = reader.threads()
     error = collection.error
     report = {
         "schema": "agent-worktrees.pr-threads", "version": 1,
         "provider": "azure-devops", "repo": repo, "pr": number,
         "supported": True, "complete": False, "threads": [], "error": error,
+        "resolution_candidate": report_evidence(
+            initial, None, complete_report=False, rows=(), error=candidate_error or error,
+        ),
     }
     if error:
         return report
@@ -58,11 +63,16 @@ def get_report(provider, repo, number, *, api_base, token, reader_factory=AdoRea
         return report
     after = reader.pr()
     validate_target(after, provider, repo)
+    final, final_error = report_candidate(reader, after, provider, repo, number)
     report.update(
         complete=True,
         head_sha=(after.get("lastMergeSourceCommit") or {}).get("commitId") or "",
         observed_head_sha=(before.get("lastMergeSourceCommit") or {}).get("commitId") or "",
         candidate_changed=(after.get("lastMergeSourceCommit") or {}).get("commitId")
         != (before.get("lastMergeSourceCommit") or {}).get("commitId"),
+        resolution_candidate=report_evidence(
+            initial, final, complete_report=collection.count_verified,
+            rows=collection.records, error=candidate_error or final_error,
+        ),
     )
     return report

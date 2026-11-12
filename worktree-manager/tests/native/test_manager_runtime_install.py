@@ -7,6 +7,7 @@ import argparse
 import io
 import json
 import os
+import runpy
 import shutil
 import subprocess
 import sys
@@ -20,9 +21,11 @@ from contextlib import redirect_stderr
 
 import pytest
 from agent_procutil import no_window_kwargs
-from native_acceptance_helpers import _environment, _prepare_command
 
 from worktree_manager import self_install as si
+
+_helpers = runpy.run_path(str(Path(__file__).with_name("native_acceptance_helpers.py")))
+_environment, _prepare_command = _helpers["_environment"], _helpers["_prepare_command"]
 
 SOURCE = Path(__file__).resolve().parents[2]
 LEGACY_RELEASE = "9c7a61518540787498c77a284f640c36bbe7d8e4"
@@ -42,11 +45,76 @@ print(json.dumps({'controller_version': worktree_manager.__version__, 'slot': re
 """
 
 
+def test_isolated_preparation_entrypoint_resolves_owned_helpers(tmp_path):
+    from agent_procutil.owned_process import run_caller_owned
+
+    result = run_caller_owned(
+        [sys.executable, "-I", "-B", str(Path(__file__).resolve()), "--help"],
+        cwd=tmp_path, timeout=15, max_stdout_bytes=4096, max_stderr_bytes=4096,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "--prepare" in result.stdout
+
+
 def _run(argv, env, cwd):
     return subprocess.run(
         list(map(str, argv)), env=env, cwd=cwd, capture_output=True,
         text=True, encoding="utf-8", timeout=20, **no_window_kwargs(),
     )
+
+
+def _stage_qualified_source(command, env, cwd):
+    listed = _run([*command, "ls-files", "--others", "--exclude-standard", "-z"], env, cwd)
+    assert listed.returncode == 0, listed.stdout + listed.stderr
+    paths = [path for path in listed.stdout.split("\0") if path]
+    for offset in range(0, len(paths), 64):
+        batch = paths[offset:offset + 64]
+        staged = _run([*command, "--literal-pathspecs", "add", "--", *batch], env, cwd)
+        assert staged.returncode == 0, staged.stdout + staged.stderr
+        print(f"Manager acceptance: staged qualified source completed-units={offset + len(batch)}",
+              flush=True)
+
+
+@pytest.mark.parametrize("failed_batch", [None, 2])
+def test_qualified_source_staging_is_bounded_and_stops_on_failure(tmp_path, monkeypatch, capsys, failed_batch):
+    env = _environment(tmp_path)
+    command = ["git", "-c", "core.autocrlf=false", "-C", str(tmp_path)]
+    initialized = _run([*command, "init", "--quiet"], env, tmp_path)
+    assert initialized.returncode == 0, initialized.stderr
+    expected = [f"source-{index:03d}[literal].txt" for index in range(145)]
+    for name in expected:
+        (tmp_path / name).write_text(name, encoding="utf-8")
+    (tmp_path / ".gitignore").write_text("ignored.txt\nhome/\n", encoding="utf-8")
+    (tmp_path / "ignored.txt").write_text("not staged", encoding="utf-8")
+    original = _run
+    batches = []
+
+    def run(argv, env, cwd):
+        if "add" in argv:
+            batch = argv[argv.index("--") + 1:]
+            assert 0 < len(batch) <= 64
+            batches.append(batch)
+            if len(batches) == failed_batch:
+                return SimpleNamespace(returncode=1, stdout="", stderr="staging failed")
+        return original(argv, env, cwd)
+
+    monkeypatch.setitem(_stage_qualified_source.__globals__, "_run", run)
+    if failed_batch:
+        with pytest.raises(AssertionError, match="staging failed"):
+            _stage_qualified_source(command, env, tmp_path)
+        assert len(batches) == failed_batch
+        assert capsys.readouterr().out.splitlines() == [
+            "Manager acceptance: staged qualified source completed-units=64",
+        ]
+    else:
+        _stage_qualified_source(command, env, tmp_path)
+        assert len(batches) == 3
+        assert set(sum(batches, [])) == {".gitignore", *expected}
+        assert len(capsys.readouterr().out.splitlines()) == 3
+        staged = original([*command, "ls-files", "-z"], env, tmp_path)
+        assert staged.returncode == 0, staged.stderr
+        assert set(staged.stdout.split("\0")) - {""} == {".gitignore", *expected}
+    assert all((tmp_path / name).read_text(encoding="utf-8") == name for name in expected)
 
 
 @pytest.mark.parametrize("phase", ["payload-copy", "inventory"])
@@ -225,21 +293,22 @@ def _prepare_qualified_construction(constructed):
     (qualified / "plugin.json").write_text(json.dumps({
         "name": "worktree-manager", "version": package_version,
     }), encoding="utf-8")
+    command = [
+        "git", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false",
+        "-c", f"core.hooksPath={qualified / '.git' / 'hooks'}", "-C", qualified,
+    ]
     for arguments in (
         ["init", "--quiet"],
-        ["add", "."],
         ["-c", "user.name=Manager Fixture", "-c", "user.email=fixture@example.invalid",
          "commit", "--quiet", "-m",
          "Construct isolated qualified Manager fixture\n\n"
          "Co-authored-by: Copilot <223556219+Copilot@users.noreply.github.com>\n"
          "Copilot-Session: 00000000-0000-4000-8000-000000000001"],
     ):
-        git = _run([
-            "git", "-c", "core.autocrlf=false", "-c", "core.safecrlf=false",
-            "-c", f"core.hooksPath={qualified / '.git' / 'hooks'}",
-            "-C", qualified, *arguments,
-        ], env, directory)
+        git = _run([*command, *arguments], env, directory)
         assert git.returncode == 0, git.stdout + git.stderr
+        if arguments[0] == "init":
+            _stage_qualified_source(command, env, directory)
     commit = _run(["git", "-C", qualified, "rev-parse", "HEAD"], env, directory).stdout.strip()
     tree = _run(["git", "-C", qualified, "rev-parse", "HEAD^{tree}"], env, directory).stdout.strip()
     digest = source.assembly_hash(qualified)
@@ -551,9 +620,9 @@ def test_mux_passive_uses_target_retained_interpreter_without_pythonpath(constru
 
 @pytest.mark.parametrize("after_replace", [False, True])
 def test_acknowledged_start_publication_fault_never_restores_native_selection(
-    constructed, monkeypatch, after_replace,
+    replacement_ready, monkeypatch, after_replace,
 ):
-    directory, env, root, previous, _ = constructed
+    directory, env, root, previous, _ = replacement_ready
     prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
     target = Path(prepared["target"])
     markers = [root / "current-version", root / "last-known-good"]
@@ -564,7 +633,7 @@ def test_acknowledged_start_publication_fault_never_restores_native_selection(
         )
     }
     publication = si._runtime_installer().runtime._runtime_component("versioned_runtime_publication")
-    replace = publication.os.replace
+    replace = publication.replace_selector
     faults = []
     evidence_before = set((root / ".installer-inputs").glob("manager-selection-*"))
 
@@ -579,9 +648,9 @@ def test_acknowledged_start_publication_fault_never_restores_native_selection(
 
     try:
         with monkeypatch.context() as patch:
-            patch.setattr(publication.os, "replace", fail_second)
+            patch.setattr(publication, "replace_selector", fail_second)
             result, cutovers = _update_from_payload(Path(prepared["qualified"]), root, env)
-        assert faults == [True]
+        assert faults == [True], result
         assert result.action == "error" and "second-selector fault" in result.reason
         assert cutovers == [str(target)]
         assert markers[0].read_text().strip() == target.name
@@ -598,14 +667,93 @@ def test_acknowledged_start_publication_fault_never_restores_native_selection(
             path.write_bytes(content)
 
 
-def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(constructed, monkeypatch):
+@pytest.mark.parametrize("after_replace", [False, True])
+def test_partial_publication_restores_native_selection_without_cutover(
+    replacement_ready, monkeypatch, after_replace,
+):
+    _, _, root, previous, _ = replacement_ready
+    prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
+    target = Path(prepared["target"])
+    markers = [root / "current-version", root / "last-known-good"]
+    before = {path: path.read_bytes() for path in markers}
+    receipts = {
+        path: path.read_bytes() for slot in (previous, target) for path in (
+            slot / ".install-complete.json", slot / ".runtime-input-origins.json",
+        )
+    }
+    installer = si._runtime_installer()
+    publication = installer.runtime._runtime_component("versioned_runtime_publication")
+    replace = publication.replace_selector
+    faults, cutovers = [], []
+
+    def fail_second(source, destination):
+        if Path(destination) == markers[1] and not faults:
+            assert markers[0].read_text().strip() == target.name
+            faults.append(True)
+            if after_replace:
+                replace(source, destination)
+            raise PermissionError("native second-selector fault")
+        return replace(source, destination)
+
+    # No incoming startup has been acknowledged on this publication-only path.
+    with monkeypatch.context() as patch:
+        patch.setattr(publication, "replace_selector", fail_second)
+        with pytest.raises(PermissionError, match="native second-selector fault"):
+            installer.activate(
+                root, target.name, expected=previous.name,
+                after_publish=lambda: cutovers.append(str(target)),
+            )
+    assert faults == [True]
+    assert cutovers == []
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert all(path.read_bytes() == content for path, content in receipts.items())
+
+
+def test_failed_incoming_start_preserves_native_selection(replacement_ready):
+    _, env, root, previous, _ = replacement_ready
+    prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
+    target = Path(prepared["target"])
+    markers = [root / "current-version", root / "last-known-good"]
+    before = {path: path.read_bytes() for path in markers}
+    receipts = {
+        path: path.read_bytes() for slot in (previous, target) for path in (
+            slot / ".install-complete.json", slot / ".runtime-input-origins.json",
+        )
+    }
+
+    def fail_start(**_options):
+        assert all(path.read_bytes() == content for path, content in before.items())
+        raise RuntimeError("native incoming startup failed before acknowledgement")
+
+    result, attempts = _update_from_payload(
+        Path(prepared["qualified"]), root, env, activation=fail_start,
+    )
+    assert result.action == "error" and "startup failed before acknowledgement" in result.reason
+    assert attempts == [str(target)]
+    assert all(path.read_bytes() == content for path, content in before.items())
+    assert all(path.read_bytes() == content for path, content in receipts.items())
+
+
+@pytest.fixture
+def replacement_ready(constructed):
+    directory, env, root, previous, process = constructed
+    prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
+    target = Path(prepared["target"])
+    selected = si.current_version(root)
+    assert selected in {previous.name, target.name}
+    si._runtime_installer().activate(root, previous.name, expected=selected)
+    assert si.current_version(root) == previous.name
+    return directory, env, root, previous, process
+
+
+def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(replacement_ready, monkeypatch):
     from worktree_manager import mux_daemon_cutover as cutover
 
     started = time.monotonic()
     def phase(name: str) -> None:
         print(f"Manager replacement {name}: {time.monotonic() - started:.2f}s", flush=True)
 
-    directory, env, root, previous, _ = constructed
+    directory, env, root, previous, _ = replacement_ready
     prepared = json.loads(Path(os.environ["MANAGER_RUNTIME_ACCEPTANCE_DATA"]).read_text())["constructed"]
     target = Path(prepared["target"])
     assert si.payload_version(previous / "payload") == si.payload_version(target / "payload")
@@ -728,16 +876,32 @@ def test_same_package_generation_update_replaces_and_verifies_live_fixture_mux(c
                 process.wait(timeout=5)
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--prepare", type=Path, required=True)
-    destination = parser.parse_args().prepare
-    print("Manager acceptance: fresh bootstrap", flush=True)
-    data = {"constructed": _prepare_constructed(destination / "first")}
-    print("Manager acceptance: selected legacy repair", flush=True)
-    data["legacy"] = _prepare_legacy_repair(
-        destination / "legacy", Path(data["constructed"]["input_payload"]),
-    )
+def _prepare(destination, step=None):
+    if step in (None, "constructed"):
+        print("Manager acceptance: fresh bootstrap", flush=True)
+        constructed = _prepare_constructed(destination / "first")
+        (destination / "constructed.json").write_text(json.dumps(constructed), encoding="utf-8")
+    if step in (None, "legacy"):
+        print("Manager acceptance: selected legacy repair", flush=True)
+        constructed = json.loads((destination / "constructed.json").read_text(encoding="utf-8"))
+        legacy = _prepare_legacy_repair(
+            destination / "legacy", Path(constructed["input_payload"]),
+        )
+        (destination / "legacy.json").write_text(json.dumps(legacy), encoding="utf-8")
+    if step not in (None, "finish"):
+        return
+    data = {
+        key: json.loads((destination / f"{key}.json").read_text(encoding="utf-8"))
+        for key in ("constructed", "legacy")
+    }
     print("Manager acceptance: failed construction rollback", flush=True)
     data["failed"] = _prepare_failed_construction(destination / "failed", data["constructed"])
     (destination / "fixtures.json").write_text(json.dumps(data), encoding="utf-8")
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--prepare", type=Path, required=True)
+    parser.add_argument("--prepare-step", choices=("constructed", "legacy", "finish"))
+    args = parser.parse_args()
+    _prepare(args.prepare, args.prepare_step)

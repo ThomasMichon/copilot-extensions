@@ -78,7 +78,7 @@ def stage_index_installer(payload: Path, *, materialized: bool) -> Path:
     )
     scripts = payload / "scripts"
     scripts.mkdir(parents=True)
-    for name in ("source-runtime.sh", "source-runtime.ps1", "versioned_runtime_native.ps1"):
+    for name in ("source-runtime.sh", "source-runtime.ps1", "versioned_runtime_native.ps1", "scheduling-policy.ps1"):
         shutil.copy2(PLUGIN / "scripts" / name, scripts / name)
     for extension in ("sh", "ps1"):
         source = PLUGIN / "scripts" / f"install.{extension}"
@@ -234,6 +234,7 @@ def run_ps(tmp_path: Path, script: str) -> subprocess.CompletedProcess[str]:
         "function Write-Warn { param($Msg) }\n"
         + formatter + "\n"
         "function Write-Skip { param($Msg) }\n"
+        "function Test-IndexStartAllowed { param($Name); $true }\n"
         "function Write-Fail { param($Msg) throw $Msg }\n"
         f"function Get-BootstrapPython {{ param([switch]$ExternalOnly) return '{sys._base_executable}' }}\n"
         "function Start-Process { throw 'Forbidden process launch' }\n"

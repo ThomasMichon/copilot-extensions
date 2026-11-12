@@ -20,9 +20,20 @@
 // flight, so a slow one degrades registration latency, never extension
 // readiness. The four calls also run in parallel (`Promise.all`), bounded by
 // the single slowest one instead of their sum.
+//
+// Even async, a `get` can outlast any fixed timeout on a contended host, and a
+// lookup that always times out would leave the session untargetable for its
+// whole life. So the identity agent-worktrees' sessionStart hook already
+// stamped into this session's own state folder (`worktree-binding.json`) is
+// read first -- a bounded async file read, no subprocess -- and re-read on
+// every refresh, since that hook can finish after this extension loaded. The
+// CLI stays the fallback for whatever the binding lacks, and the refresher
+// gives it a longer timeout than the load-time lookup.
 import { exec, execFile } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { isAbsolute } from "node:path";
+import { constants, realpathSync } from "node:fs";
+import { lstat, open } from "node:fs/promises";
+import { homedir } from "node:os";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // Epoch seconds this process started (wall clock minus uptime), fixed once
@@ -46,16 +57,20 @@ export function processIdentity() {
 // shell:true-with-argv deprecation warning (args would otherwise be
 // concatenated unescaped), while POSIX uses `execFile` directly with no
 // shell at all.
-export function runCliAsync(bin, args, cwd) {
+export const METADATA_CLI_TIMEOUT_MS = 8_000;
+// The refresher runs off the registration path, so it can wait out a slow host.
+export const METADATA_REFRESH_CLI_TIMEOUT_MS = 60_000;
+
+export function runCliAsync(bin, args, cwd, { timeoutMs = METADATA_CLI_TIMEOUT_MS } = {}) {
   return new Promise((resolve) => {
     try {
       if (process.platform === "win32") {
         const line = [bin, ...args.map((a) => `"${String(a).replace(/"/g, '""')}"`)].join(" ");
-        exec(line, { cwd, timeout: 8000, encoding: "utf-8", windowsHide: true }, (err, stdout) => {
+        exec(line, { cwd, timeout: timeoutMs, encoding: "utf-8", windowsHide: true }, (err, stdout) => {
           resolve(err ? null : String(stdout).trim());
         });
       } else {
-        execFile(bin, args, { cwd, timeout: 8000, encoding: "utf-8" }, (err, stdout) => {
+        execFile(bin, args, { cwd, timeout: timeoutMs, encoding: "utf-8" }, (err, stdout) => {
           resolve(err ? null : String(stdout).trim());
         });
       }
@@ -65,12 +80,75 @@ export function runCliAsync(bin, args, cwd) {
   });
 }
 
+// --- sessionStart worktree binding ---
+// agent-worktrees' sessionStart hook records which worktree this session
+// registered against in `<session-state>/<session id>/worktree-binding.json`.
+// It is evidence for this session only: a file naming another session, or one
+// that is malformed, oversized, linked or absent, is ignored. The Copilot CLI
+// honors COPILOT_HOME for its state; the hook writes under the user's home, so
+// both are checked (deduplicated).
+const SESSION_BINDING_MAX_BYTES = 16 * 1024;
+const bindingSegment = (value) => typeof value === "string"
+  && /^[A-Za-z0-9._-]{1,160}$/.test(value) && value !== "." && value !== "..";
+
+export function sessionStateRoots(env = process.env) {
+  const roots = [];
+  if (env.COPILOT_HOME && isAbsolute(env.COPILOT_HOME)) roots.push(join(env.COPILOT_HOME, "session-state"));
+  const home = (process.platform === "win32" ? env.USERPROFILE : env.HOME) || homedir();
+  if (home && isAbsolute(home)) roots.push(join(home, ".copilot", "session-state"));
+  return [...new Set(roots)];
+}
+
+async function readBindingFile(root, sessionId) {
+  let handle;
+  try {
+    const dir = join(root, sessionId);
+    if (!(await lstat(dir)).isDirectory()) return null;
+    const path = join(dir, "worktree-binding.json");
+    if (!(await lstat(path)).isFile()) return null;
+    handle = await open(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0) | (constants.O_NONBLOCK || 0));
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > SESSION_BINDING_MAX_BYTES) return null;
+    const bytes = Buffer.alloc(SESSION_BINDING_MAX_BYTES + 1);
+    let length = 0;
+    while (length < bytes.length) {
+      const { bytesRead } = await handle.read(bytes, length, bytes.length - length, null);
+      if (!bytesRead) break;
+      length += bytesRead;
+    }
+    if (length > SESSION_BINDING_MAX_BYTES) return null;
+    return JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes.subarray(0, length)));
+  } catch {
+    return null;
+  } finally {
+    if (handle) await handle.close().catch(() => {});
+  }
+}
+
+// Resolves this session's `{ worktree_id, machine, repo }` from its binding
+// (each null when the binding lacks a usable value), or null without one.
+export async function readSessionBinding(sessionId, { env = process.env } = {}) {
+  if (!bindingSegment(sessionId)) return null;
+  for (const root of sessionStateRoots(env)) {
+    const binding = await readBindingFile(root, sessionId);
+    if (!binding || typeof binding !== "object" || binding.sessionId !== sessionId) continue;
+    const usable = (value) => (bindingSegment(value) ? value : null);
+    const identity = {
+      worktree_id: usable(binding.worktreeId), machine: usable(binding.machine), repo: usable(binding.project),
+    };
+    if (identity.worktree_id || identity.machine || identity.repo) return identity;
+  }
+  return null;
+}
+
 // --- One-time session metadata ---
 // Deliberately never awaited on the critical path to readiness by the caller
 // (see extension.mjs's load-time init) -- state.meta starts unset and this
 // fills it in whenever it resolves; register()'s payload spread tolerates an
 // absent/partial value and self-corrects on the next heartbeat.
-export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.env } = {}) {
+export async function resolveMetadataAsync({
+  cwd = process.cwd(), env = process.env, sessionId = null, timeoutMs = METADATA_CLI_TIMEOUT_MS,
+} = {}) {
   if (env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT) {
     const root = env.AGENT_BRIDGE_RECEIVING_PLUGIN_ROOT;
     if (!isAbsolute(root) || realpathSync(root) !== realpathSync(fileURLToPath(new URL("../..", import.meta.url)))
@@ -86,12 +164,16 @@ export async function resolveMetadataAsync({ cwd = process.cwd(), env = process.
       ...processIdentity(),
     };
   }
-  const getAsync = (key) => runCliAsync("agent-worktrees", ["get", key], cwd); // marketplace-isolation: allow agent-worktrees-management
+  // The binding answers without a subprocess; only what it lacks is looked up.
+  // An explicit AGENT_BRIDGE_SCOPE_ID still outranks both for the worktree.
+  const bound = await readSessionBinding(sessionId, { env });
+  const getAsync = (key) => runCliAsync("agent-worktrees", ["get", key], cwd, { timeoutMs }); // marketplace-isolation: allow agent-worktrees-management
+  const known = (value, key) => (value ? Promise.resolve(value) : getAsync(key));
   const [branch, sessionScopeId, machine, repo] = await Promise.all([
     runCliAsync("git", ["rev-parse", "--abbrev-ref", "HEAD"], cwd),
-    getAsync("session-scope-id"),
-    getAsync("machine"),
-    getAsync("project"),
+    known(env.AGENT_BRIDGE_SCOPE_ID || bound?.worktree_id, "session-scope-id"),
+    known(bound?.machine, "machine"),
+    known(bound?.repo, "project"),
   ]);
   return {
     // A physical hostname cannot identify the logical Windows/WSL owner.
@@ -139,32 +221,59 @@ export function registrationMetadata(meta) {
   };
 }
 
-// ``refresh()`` re-resolves the metadata while a field above is still missing,
-// at most once per backoff (30 s doubling to 10 min), and fills in only what was
-// missing -- a value already known is never replaced. Resolves true when it
-// filled something in (the next registration then carries it).
-export function metadataRefresher(state, resolve = resolveMetadataAsync, now = Date.now) {
+// ``refresh()`` fills in an identity field above that is still missing, and
+// never replaces a value already known. Every call re-reads the sessionStart
+// binding (no subprocess); the CLI lookup runs at most once per backoff (30 s
+// doubling to 10 min) with the longer refresh timeout, and once a few lookups
+// still leave the identity incomplete it is logged, once. Resolves true when
+// it filled something in (the next registration then carries it).
+export const METADATA_WARN_AFTER_ATTEMPTS = 3;
+
+export function metadataRefresher(state, resolve = resolveMetadataAsync, now = Date.now, {
+  env = process.env, log = () => {}, warnAfter = METADATA_WARN_AFTER_ATTEMPTS,
+} = {}) {
   let nextAt = 0;
   let delay = METADATA_RETRY_MIN_MS;
   let running = false;
-  return async () => {
+  let attempts = 0;
+  let warned = false;
+  const missingFields = () => {
     const meta = state.meta || {};
-    if (meta.receiving_scope_id && meta.receiving_scope_id === meta.worktree_id) return false;
-    const missing = IDENTITY_FIELDS.filter((k) => !meta[k]);
-    if (!missing.length || running || now() < nextAt) return false;
+    if (meta.receiving_scope_id && meta.receiving_scope_id === meta.worktree_id) return [];
+    return IDENTITY_FIELDS.filter((k) => !meta[k]);
+  };
+  const fill = (fresh) => {
+    const filled = {};
+    for (const k of missingFields()) if (fresh && fresh[k]) filled[k] = fresh[k];
+    if (!Object.keys(filled).length) return false;
+    state.meta = { ...(state.meta || fresh), ...filled };
+    return true;
+  };
+  return async () => {
+    if (!missingFields().length) return false;
+    const bound = await readSessionBinding(state.sessionId, { env });
+    const fromBinding = fill(bound && { ...bound, worktree_id: env.AGENT_BRIDGE_SCOPE_ID || bound.worktree_id });
+    if (!missingFields().length || running || now() < nextAt) return fromBinding;
     running = true;
     try {
-      const fresh = await resolve().catch(() => null);
-      const filled = {};
-      for (const k of missing) if (fresh && fresh[k]) filled[k] = fresh[k];
-      if (Object.keys(filled).length) {
-        state.meta = { ...(state.meta || fresh), ...filled };
+      const fresh = await resolve({
+        sessionId: state.sessionId, env, timeoutMs: METADATA_REFRESH_CLI_TIMEOUT_MS,
+      }).catch(() => null);
+      attempts += 1;
+      const fromLookup = fill(fresh);
+      if (fromLookup) {
         delay = METADATA_RETRY_MIN_MS;
-        return true;
+      } else {
+        nextAt = now() + delay;
+        delay = Math.min(delay * 2, METADATA_RETRY_MAX_MS);
       }
-      nextAt = now() + delay;
-      delay = Math.min(delay * 2, METADATA_RETRY_MAX_MS);
-      return false;
+      const missing = missingFields();
+      if (missing.length && attempts >= warnAfter && !warned) {
+        warned = true;
+        log(`session identity still incomplete after ${attempts} lookups (missing: ${missing.join(", ")}); `
+          + "worktree-addressed targeting stays unavailable until it resolves; still retrying");
+      }
+      return fromLookup || fromBinding;
     } finally {
       running = false;
     }

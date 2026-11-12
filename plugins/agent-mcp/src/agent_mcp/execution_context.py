@@ -27,7 +27,7 @@ _INSTALL_BOOKKEEPING = (
 
 
 def descriptor() -> dict:
-    return {"contract": _CONTRACT, "key": _KEY}
+    return {"contract": _CONTRACT, "key": _KEY, "trace_bookkeeping": 1}
 
 
 def _references(cfg, key):
@@ -46,7 +46,7 @@ def inherited_environment(cfg):
     return environment
 
 
-def semantic_environment(cfg):
+def semantic_environment(cfg, *, trace_bookkeeping=False):
     from .home import default_home_dir
 
     from agent_procutil.daemon_instances import INSTANCE_ENV, REGISTRY_ENV
@@ -65,10 +65,18 @@ def semantic_environment(cfg):
     ):
         if not _references(cfg, key):
             environment.pop(key, None)
+    if trace_bookkeeping:
+        # Preserve the original v2 algorithm until both peers select this additive mode.
+        for key in (
+            "COPILOT_EXTENSIONS_BOOT_TRACE", "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN",
+            "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
+        ):
+            if not _references(cfg, key):
+                environment.pop(key, None)
     return environment
 
 
-def _identity(cfg, key: str) -> str:
+def _identity(cfg, key: str, *, trace_bookkeeping=False) -> str:
     # Dynamic acquisition and routed/CLI execution need stronger per-target
     # custody than this first-slice equivalence check provides.
     if cfg.routing is not None or cfg.server.type != "stdio" or any(
@@ -77,7 +85,9 @@ def _identity(cfg, key: str) -> str:
         raise SharingUnavailable("execution context requires current direct execution")
     # No raw context crosses IPC or enters a checkpoint, argv, or log.
     data = json.dumps(
-        {"config": asdict(cfg), "environment": semantic_environment(cfg), "cwd": os.getcwd()},
+        {"config": asdict(cfg), "environment": semantic_environment(
+            cfg, trace_bookkeeping=trace_bookkeeping,
+        ), "cwd": os.getcwd()},
         sort_keys=True, separators=(",", ":"), default=str,
     ).encode()
     if len(data) > 1024 * 1024:
@@ -91,29 +101,46 @@ def request_fields(handle, bridge) -> dict:
 
     if incoming.launch_generation() is None:
         return {}  # unmanaged development retains its existing peer contract
-    peer = incoming._ping(handle).get("execution_context")
+    return fields_for_peer(
+        load_config(bridge, repository_root=Path.cwd()), incoming._ping(handle),
+    )
+
+
+def fields_for_peer(cfg, reply) -> dict:
+    """Bind this caller's complete context to an already authenticated peer."""
+    peer = reply.get("execution_context") if isinstance(reply, dict) else None
     if not isinstance(peer, dict) or peer.get("contract") != _CONTRACT:
         raise SharingUnavailable("serving peer cannot qualify caller execution context")
     key = peer.get("key")
     if not isinstance(key, str) or len(key) != 64:
         raise SharingUnavailable("serving peer has an invalid execution context")
     try:
-        digest = _identity(load_config(bridge, repository_root=Path.cwd()), key)
+        if len(bytes.fromhex(key)) != 32:
+            raise ValueError("invalid context key length")
+        mode = peer.get("trace_bookkeeping")
+        trace_bookkeeping = type(mode) is int and mode == 1
+        digest = _identity(cfg, key, trace_bookkeeping=trace_bookkeeping)
     except (ValueError, TypeError) as exc:
         raise SharingUnavailable("caller execution context cannot be qualified") from exc
-    return {"execution_context": {"contract": _CONTRACT, "digest": digest}}
+    context = {"contract": _CONTRACT, "digest": digest}
+    if trace_bookkeeping:
+        context["trace_bookkeeping"] = 1
+    return {"execution_context": context}
 
 
 def load_config(bridge, request, loader, *, repository_root):
     from . import incoming
 
-    cfg = loader(bridge, repository_root=repository_root)
     supplied = request.get("execution_context")
     if supplied is None and incoming.launch_generation() is None:
-        return cfg
+        return loader(bridge, repository_root=repository_root)
     if not isinstance(supplied, dict) or supplied.get("contract") != _CONTRACT:
         raise SharingUnavailable("caller execution context is required")
-    expected = _identity(cfg, _KEY)
+    mode = supplied.get("trace_bookkeeping", 0)
+    if type(mode) is not int or mode not in (0, 1):
+        raise SharingUnavailable("unsupported caller trace-bookkeeping identity mode")
+    cfg = loader(bridge, repository_root=repository_root)
+    expected = _identity(cfg, _KEY, trace_bookkeeping=mode == 1)
     actual = supplied.get("digest")
     if not isinstance(actual, str) or not hmac.compare_digest(actual, expected):
         raise SharingUnavailable("caller execution context differs; no work accepted")

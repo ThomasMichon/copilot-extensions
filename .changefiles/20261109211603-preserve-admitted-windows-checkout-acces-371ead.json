@@ -1,0 +1,9 @@
+{
+  "comment": "Preserve admitted Windows checkout access when creating relocation stages on Python 3.13.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

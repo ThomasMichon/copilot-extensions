@@ -375,7 +375,7 @@ def bare_orphan_worktree_ids(
 # Session-state lattice -- the bridge-lock layer (#4272)
 # ---------------------------------------------------------------------------
 
-def live_bridge_worktrees() -> set[str]:
+def live_bridge_worktrees(*, strict: bool = False) -> set[str]:
     """Worktree ids that currently host a **live bridge-owned Copilot session**.
 
     The bridge-lock layer of the session-state lattice (#4272): agent-bridge
@@ -390,20 +390,51 @@ def live_bridge_worktrees() -> set[str]:
     ``bound_live`` reconciler at surfacing a **bare-resumed / bridge-owned**
     session (cwd=home, invisible to the mux + registered-session scans -- #1416):
     the lock *carries* the worktree id, so no attribution guess is needed.
-    Best-effort: an enumeration hiccup yields an empty set, never an exception.
+    Best-effort by default. Strict observation refuses unreadable or malformed
+    lock evidence rather than treating it as absence.
     """
     out: set[str] = set()
     try:
         state_dir = sessions._session_state_dir()
-        if not state_dir.exists():
-            return out
-        for lock_path in state_dir.glob("*/bridge.lock"):
-            data = locks.read_lock(lock_path)
-            if data and locks.lock_is_live(data):
+        if strict:
+            import json
+            from .push_timeout import ObservationUnavailable
+
+            try:
+                with os.scandir(state_dir) as entries:
+                    paths = [Path(entry.path) / "bridge.lock" for entry in entries if entry.is_dir()]
+            except FileNotFoundError:
+                return out
+        else:
+            if not state_dir.exists():
+                return out
+            paths = state_dir.glob("*/bridge.lock")
+        for lock_path in paths:
+            if strict:
+                try:
+                    data = json.loads(lock_path.read_text(encoding="utf-8"))
+                except FileNotFoundError:
+                    continue
+                except ValueError as error:
+                    raise ObservationUnavailable("Bridge lock is malformed") from error
+                if (
+                    not isinstance(data, dict) or type(data.get("pid")) is not int
+                    or data["pid"] <= 0 or not isinstance(data.get("worktree_id"), str)
+                    or not data["worktree_id"]
+                ):
+                    raise ObservationUnavailable("Bridge lock has no conclusive owner identity")
+            else:
+                data = locks.read_lock(lock_path)
+            live = data and (locks.lock_is_running(data) if strict else locks.lock_is_live(data))
+            if live:
                 wt = data.get("worktree_id")
                 if wt:
                     out.add(str(wt))
-    except OSError:
+    except OSError as error:
+        if strict:
+            from .push_timeout import ObservationUnavailable
+
+            raise ObservationUnavailable("Bridge lock observation is unavailable") from error
         return out
     return out
 

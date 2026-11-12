@@ -4,6 +4,7 @@ import http.client
 import importlib
 import json
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -77,6 +78,109 @@ def test_response_completes_before_deadline():
         writer.close()
 
 
+@pytest.mark.parametrize("deadline", [True, float("inf"), float("nan"), "later"])
+def test_invalid_deadline_refuses_before_network(monkeypatch, deadline):
+    monkeypatch.setattr(
+        spf, "_deadline_opener", lambda value: pytest.fail("invalid deadline reached network"),
+    )
+    with pytest.raises(spf.SeasonedVersionError, match="finite monotonic deadline"):
+        spf._default_fetch("https://example.invalid/metadata", deadline=deadline)
+
+
+@pytest.mark.parametrize("phase", ["dns", "address-attempts"])
+def test_deadline_bounds_connection_establishment_and_reaps_worker(monkeypatch, tmp_path, phase):
+    processes = []
+    real_popen = subprocess.Popen
+    marker = tmp_path / "entered.txt"
+    setup = (
+        "import pathlib,runpy,socket,sys,time\n"
+        "marker,target,phase=sys.argv[1:4]\n"
+        "def blocked(*args,**kwargs):\n"
+        " pathlib.Path(marker).write_text(phase)\n"
+        " time.sleep(20)\n"
+        " raise OSError('fixture must be cancelled')\n"
+        "if phase=='dns': socket.getaddrinfo=blocked\n"
+        "else: socket.create_connection=blocked\n"
+        "sys.argv=sys.argv[4:]\n"
+        "runpy.run_path(target,run_name='__main__')\n"
+    )
+
+    def popen(command, **options):
+        redirected = [
+            *command[:3], "-c", setup, str(marker), command[3], phase, *command[3:],
+        ]
+        process = real_popen(redirected, **options)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(spf.subprocess, "Popen", popen)
+    started = time.monotonic()
+    with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
+        spf._default_fetch("https://example.invalid/metadata", deadline=started + 1)
+    assert marker.read_text() == phase
+    assert time.monotonic() - started < 2
+    assert len(processes) == 1 and processes[0].poll() is not None
+
+
+@pytest.mark.parametrize("early_eof", [False, True])
+def test_deadline_bounds_trickling_https_proxy_connect(monkeypatch, early_eof):
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    listener.settimeout(2)
+    stop, connected = threading.Event(), threading.Event()
+    request_data = []
+    proxy_url = f"http://127.0.0.1:{listener.getsockname()[1]}"
+    for name in ("HTTPS_PROXY", "https_proxy"):
+        monkeypatch.setenv(name, proxy_url)
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "")
+
+    def proxy():
+        try:
+            with listener.accept()[0] as connection:
+                connection.settimeout(1)
+                request = b""
+                while b"\r\n\r\n" not in request and not stop.is_set():
+                    block = connection.recv(4096)
+                    if not block:
+                        return
+                    request += block
+                if stop.is_set():
+                    return
+                request_data.append(request)
+                connection.sendall(b"HTTP/1.1 200 Connection established\r\nX-Slow: ")
+                connected.set()
+                while not stop.wait(0.02):
+                    connection.sendall(b"x")
+        except OSError:
+            if not stop.is_set() and not connected.is_set():
+                raise
+
+    producer = threading.Thread(target=proxy)
+    producer.start()
+    started = time.monotonic()
+    try:
+        if early_eof:
+            with socket.create_connection(listener.getsockname(), timeout=1) as connection:
+                connection.sendall(b"CONNECT example.invalid:443 HTTP/1.1\r\n")
+            producer.join(timeout=1)
+            assert not producer.is_alive()
+            assert not connected.is_set()
+        else:
+            with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
+                spf._default_fetch("https://example.invalid/metadata", deadline=started + 1)
+            assert connected.is_set()
+            assert request_data[0].startswith(b"CONNECT example.invalid:443 ")
+        assert time.monotonic() - started < 2
+    finally:
+        stop.set()
+        listener.close()
+        producer.join(timeout=2)
+    assert not producer.is_alive()
+
+
+@pytest.mark.parametrize("transport", ["response", "worker"])
 @pytest.mark.parametrize("prefix,chunk,followup", [
     (b"HTTP/1.1 200", b"x", None),
     (b"HTTP/1.1 200 OK\r\nX-Slow: ", b"x", None),
@@ -90,13 +194,14 @@ def test_response_completes_before_deadline():
     (b"HTTP/1.1 302 Redirect\r\nLocation: /final\r\nContent-Length: 0\r\n\r\n", None,
      b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\n{}"),
 ])
-def test_default_fetch_bounds_response_lifetime(monkeypatch, prefix, chunk, followup):
+def test_default_fetch_bounds_response_lifetime(monkeypatch, prefix, chunk, followup, transport):
     listener = socket.socket()
     listener.bind(("127.0.0.1", 0))
     listener.listen(1)
     listener.settimeout(1)
     stop, streaming = threading.Event(), threading.Event()
-    monkeypatch.setenv("NO_PROXY", "127.0.0.1")
+    for name in ("NO_PROXY", "no_proxy"):
+        monkeypatch.setenv(name, "127.0.0.1")
     timers = []
     real_timer = spf.threading.Timer
 
@@ -107,39 +212,54 @@ def test_default_fetch_bounds_response_lifetime(monkeypatch, prefix, chunk, foll
 
     monkeypatch.setattr(spf.threading, "Timer", timer)
 
+    processes = []
+    real_popen = subprocess.Popen
+
+    def popen(*args, **kwargs):
+        process = real_popen(*args, **kwargs)
+        processes.append(process)
+        return process
+
+    monkeypatch.setattr(spf.subprocess, "Popen", popen)
+
     def stream():
-        for content in [prefix, *([followup] if followup is not None else [])]:
-            with listener.accept()[0] as connection:
-                connection.settimeout(1)
-                request = b""
-                while b"\r\n\r\n" not in request:
-                    block = connection.recv(4096)
-                    if not block:
-                        return
-                    request += block
-                try:
-                    connection.sendall(content)
-                    streaming.set()
-                    end = time.monotonic() + 1.2
-                    while chunk is not None and not stop.wait(0.02) and time.monotonic() < end:
-                        connection.sendall(chunk)
-                except OSError:
-                    pass
+        try:
+            for content in [prefix, *([followup] if followup is not None else [])]:
+                with listener.accept()[0] as connection:
+                    connection.settimeout(1)
+                    request = b""
+                    while b"\r\n\r\n" not in request:
+                        block = connection.recv(4096)
+                        if not block:
+                            return
+                        request += block
+                    try:
+                        connection.sendall(content)
+                        streaming.set()
+                        end = time.monotonic() + 1.2
+                        while chunk is not None and not stop.wait(0.02) and time.monotonic() < end:
+                            connection.sendall(chunk)
+                    except OSError:
+                        pass
+        except OSError:
+            if not stop.is_set():
+                raise
 
     producer = threading.Thread(target=stream)
     producer.start()
     started = time.monotonic()
+    fetch = spf._fetch_response if transport == "response" else spf._default_fetch
     try:
         url = f"http://127.0.0.1:{listener.getsockname()[1]}/metadata"
         if chunk is not None:
             with pytest.raises(spf.SeasonedVersionError, match="deadline exceeded"):
-                spf._default_fetch(url, deadline=started + 0.35)
+                fetch(url, deadline=started + 0.35)
         elif prefix.startswith(b"HTTP/1.1 404"):
             with pytest.raises(spf.urllib.error.HTTPError) as rejected:
-                spf._default_fetch(url, deadline=started + 1)
+                fetch(url, deadline=started + 1)
             assert rejected.value.code == 404
         else:
-            assert spf._default_fetch(url, deadline=started + 1) == b"{}"
+            assert fetch(url, deadline=started + 1) == b"{}"
         assert streaming.is_set()
         assert time.monotonic() - started < 0.9
     finally:
@@ -147,7 +267,10 @@ def test_default_fetch_bounds_response_lifetime(monkeypatch, prefix, chunk, foll
         producer.join(timeout=1)
         listener.close()
     assert not producer.is_alive()
-    assert timers and not any(timer.is_alive() for timer in timers)
+    if transport == "response":
+        assert timers and not any(timer.is_alive() for timer in timers)
+    else:
+        assert processes and all(process.poll() is not None for process in processes)
 
 
 def test_release_retains_only_selected_seasoned_file_hashes():

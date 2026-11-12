@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import hashlib
 import os
+import stat
 import tempfile
-import zipapp
+import zipfile
 from pathlib import Path
 
 import agent_procutil
@@ -24,6 +25,8 @@ _DRIVER_MODULES = (
     "headed/staging.py",
     "headed/launcher.py",
     "headed/receipt.py",
+    "headed/recovery.py",
+    "headed/recovery_codec.py",
     "headed/extension.mjs",
     "headed/acp-adapter.mjs",
     "headed/host-client.mjs",
@@ -35,6 +38,7 @@ _DRIVER_MODULES = (
     "session_host/osutil.py",
     "session_host/preference_spawn.py",
     "session_host/launcher.py",
+    "session_host/host_state.py",
     "session_host/startup_admission.py",
     "session_host/legacy_launcher.py",
     "session_host/receiver_policy.py",
@@ -42,7 +46,8 @@ _DRIVER_MODULES = (
 _PROCUTIL_MODULES = (
     "__init__.py", "_async.py", "_caller_owned.py", "_darwin_caller_owned.py", "_job_scopes.py",
     "_daemon_instance_child.py", "_daemon_instance_identity.py", "_daemon_instance_native.py",
-    "_daemon_instance_owner.py", "_daemon_instance_clock.py", "_daemon_instance_records.py",
+    "_daemon_instance_owner.py", "_daemon_instance_clock.py", "_daemon_instance_reconcile.py",
+    "_daemon_instance_records.py",
     "_daemon_instance_store.py", "_interpreter.py", "_linux_pidfd.py", "_output_relay.py",
     "_windows_caller_owned.py", "_windows_job_types.py", "python_cache.py",
     "daemon.py", "daemon_broker.py", "daemon_instances.py", "linux_daemon_scope.py", "native_child.py",
@@ -117,8 +122,7 @@ def _sources(legacy: bool) -> tuple[tuple[str, bytes], ...]:
 
 
 def bundle_source_hash(*, legacy: bool = False) -> str:
-    """A stable sha256 over the staged **source** (not the zip, whose metadata
-    varies) -- the cache key that guarantees byte-identity across host and CS."""
+    """A stable sha256 over the source, independent of archive representation."""
     h = hashlib.sha256()
     for archive_rel, contents in _sources(legacy):
         h.update(archive_rel.encode("utf-8"))
@@ -156,16 +160,16 @@ def build_session_host_bundle(
         return out, sha
 
     with tempfile.TemporaryDirectory(prefix="agent-driver-bundle-", dir=dest) as td:
-        stage = Path(td) / "src"
-        for archive_rel, contents in _sources(legacy):
-            dst = stage / archive_rel
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            dst.write_bytes(contents)
         tmp_out = Path(td) / "bundle.pyz"
-        # A shebang so the far side can also run ``./bundle.pyz`` directly.
-        zipapp.create_archive(
-            stage, target=str(tmp_out),
-            interpreter="/usr/bin/env python3",
-        )
+        with tmp_out.open("wb") as stream:
+            stream.write(b"#!/usr/bin/env python3\n")
+            with zipfile.ZipFile(stream, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+                for archive_rel, contents in sorted(_sources(legacy)):
+                    entry = zipfile.ZipInfo(archive_rel)
+                    entry.create_system = 3
+                    entry.compress_type = zipfile.ZIP_DEFLATED
+                    entry.external_attr = (stat.S_IFREG | 0o600) << 16
+                    archive.writestr(entry, contents)
+        tmp_out.chmod(0o700)
         os.replace(tmp_out, out)
     return out, sha

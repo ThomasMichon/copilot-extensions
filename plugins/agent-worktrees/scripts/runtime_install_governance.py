@@ -187,6 +187,22 @@ class Governance:
                 )
             yield (json.dumps(manifest, indent=2) + "\n").encode("utf-8")
 
+    def publication_environment(self) -> dict[str, str]:
+        environment = dict(os.environ)
+        if not self.context:
+            import command_binding as binding
+
+            lifecycle = binding._load_lifecycle()
+            lease = lifecycle.borrowed_lease(
+                binding._rules(), self.helper, payload_root=self.payload,
+                plugin_id="agent-worktrees", legacy_root=self.root,
+                project_root=self.project_root, **self.binding_options,
+            )
+            if lease is None:
+                raise InstallationRefused("Helper publication requires its existing borrowed lifecycle")
+            environment[lifecycle.TICKET_ENV] = json.dumps(lease.ticket)
+        return environment
+
     @contextmanager
     def held(self, *, timeout: float = 180):
         if self.publication_locks or self.command_lock is not None:

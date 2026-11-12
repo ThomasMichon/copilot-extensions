@@ -52,8 +52,8 @@ def add_parsers(sub) -> None:
         "(write mode). Use RARELY and INTENTIONALLY -- only when the "
         "worktree's main theme genuinely changes, not for routine "
         "progress (use --activity/--summary for that). Keep "
-        "it short (<=30 chars; longer is truncated) so it fits the "
-        "status bar / Picker rows -- put detail in --summary.",
+        "it identifying (up to 512 normalized characters); compact displays "
+        "shorten it without changing the stored title. Put recaps in --summary.",
     )
     p.add_argument(
         "--follow-up",

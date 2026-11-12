@@ -62,6 +62,27 @@ foreground clients and protected connectivity are excluded, including children
 of a central service. Unprovable retirement is skipped and reported separately.
 Never sweep by interpreter name.
 
+The shared installer instance backstop is separate from central-service
+retirement. It reconciles only the addressed runtime root and never requests
+process termination. An expired instance that is still live remains held;
+another installation's record and artifacts are not cleanup candidates.
+Observed-exit artifacts retain their existing exact-ownership checks. Missing
+scope or a legacy helper without termination-policy/runtime-scope support defers
+this optional cleanup before effects, preserving installation success without
+falling back to a global sweep. Bash adapters do not accept capability markers
+or reconciliation functions inherited from their caller: both are cleared in
+the existing private subshell before loading the addressed helper. A failed
+clear or missing helper-owned declaration defers cleanup, retaining the caller's
+bindings. Healthy installation-cell replay uses the validated cell root, not
+the legacy default directory.
+The count limit bounds all scanned records,
+including foreign-root records; each runtime scope has its own progress cursor
+so interleaved installers cannot advance past another installation's work.
+Python and native wrappers share that cursor namespace (case-normalized on
+Windows), the existing collection lock and the time bound. Unscoped lifecycle
+collection retains the legacy global cursor.
+Explicit lifecycle-owner cleanup and lease supervision remain separate.
+
 Runtime code, old daemon generations, stale installer transactions and owned
 launchers/registrations are replaceable; configuration, credentials, repositories,
 worktrees, sessions and databases are not. This is not factory reset. The
@@ -112,6 +133,45 @@ release uses its retained lifecycle bootstrap without first discovering a remove
 payload. Its retained-owner check recognizes both direct-slot and nested `.venv`
 interpreters, preserving completion and command-ownership validation. Namespaced
 release still resolves its authorized installed payload.
+
+## Native closed-wheel inputs
+
+The Windows native recipes accept `WheelProfile`, `WheelDirectory`,
+`WheelPython` and `WheelUv` together for installation/update/provisioning
+(`init` where that is the recipe's existing action). Manager's Python entry
+uses the corresponding `--wheel-profile`, `--wheel-directory`,
+`--wheel-python` and `--wheel-uv` options.
+
+These are construction inputs, not release/feed approval or a Source
+association. The caller admits the selected release, complete dependency
+closure, actual target and applicable local restrictions. A Source-qualified
+payload still requires its real `--install-source` association; raw wheel
+inputs cannot replace or manufacture it.
+
+The complete profile and inspected wheel bytes participate in the immutable
+generation and payload hash. Construction is offline, no-index, no-deps,
+no-build and hash-required. The existing native owner retains the candidate
+through health, activation, command/manifest publication and settlement;
+service cutover, task policy, disabled holds, data and recovery keep their
+existing owners. MCP keeps its nested environment; Manager remains independent.
+Bootstrap readiness recognizes the completed profile generation rather than
+mistaking it for package-version drift. Package comparisons strip the generated
+profile suffix; recovery still requires an exact current/last-known-good
+selection instead of choosing a dependency profile by hash order.
+
+Unchanged startup reads the existing selector, bounded constructor receipt,
+deployment manifest, completion marker and interpreter presence. The package
+identity, exact profile/closure, selected extras and manifest construction hash
+must agree with that completed generation. Each observation rereads this evidence:
+changed or missing evidence, package/profile changes and Source-qualified payloads
+invalidate the hint. It does not enumerate or hash payload/dependency trees, prove
+serving health, or admit construction from a receipt. Explicit installation still
+checks the actual retained payload/wheel bytes and installed health, including when
+reusing the selected healthy `.repair` or `+repair` generation.
+
+Unsupported native capability/dependency profiles may use only the caller's
+permitted ordinary fallback. A failed native installation or changed retained
+input is an actual failure, not permission to hide it with a source rebuild.
 
 ## Manager first-party artifact and retained hosts
 
@@ -194,6 +254,21 @@ stdlib-only profile coordinator and canonical construction/retention leases,
 source admission, completion and activation primitives. Explicit optional-profile
 failure leaves the active selector intact, never a successful base-only downgrade.
 See the plugin README's **Optional restricted SSH runtime** for provisioning.
+
+Vault's explicit [base/SSH selection](../plugins/agent-vault/README.md#dependency-profiles)
+uses the same independent profile dimension and installation-owned desired state,
+with the canonical numbered-candidate constructor and existing attached native
+adapter. Unselected legacy base setup retains its prior behavior. Its source
+snapshot/redirect receipt remains original; actual profiled runtime identity is
+reported separately. Selecting dependencies adds no activation or credential
+authority.
+
+Collected Vault source updates use the existing version-1 target provider and
+pre-completion slot profile/hash evidence, including an unselected legacy base.
+Retained profile construction still performs native PATH/pruning finalization;
+start/status resolve the active runtime read-only. Legacy command ownership
+matches the full current simple-writer template, preserving early scoped
+dispatch separately from cold provisioning rather than dropping either phase.
 
 Prepared source deployments retain this independent profile dimension:
 `<package-version>+<profile>.source.<commit>.<assembly>`. The coordinator validates
@@ -1534,12 +1609,21 @@ binstubs, and any long-running service stay on the **old** version. Its
 CLI emits it and we cannot change it, so a runtime plugin can read "updated"
 while its actual runtime has not moved.
 
-Consequence — a rule for every plugin in this repo:
+The requirements below describe the **legacy plugin-owned runtime adapter
+contract** for consumers that explicitly declare it. A Python project, console
+script or `agent-*` name is not itself an adoption declaration. Independent
+applications and services have their own installation owners; their Copilot
+connectors do not need to acquire a legacy self-provisioning payload.
+The [service-model target](../visions/plugin-services/README.md#connector-only-plugin-payloads)
+separates backend implementations and installation inputs from plugin delivery.
+Existing declared adapters retain their source, hook, activation and
+materialized-byte contracts until their separately governed migration.
 
-- A plugin that ships **only** skills, hooks, and/or agents needs no installer:
+For a plugin that adopts this legacy contract:
+
+- A plugin that ships **only** skills, hooks, extensions and/or agents needs no installer:
   `copilot plugin update` fully deploys it.
-- A plugin that ships a **runtime** — anything beyond skills/hooks/agents: a
-  venv, command, or long-running service — **must** ship:
+- A plugin-managed runtime that adopts this contract **must** ship:
   1. matching `scripts/install.{ps1,sh}` or `scripts/init.{ps1,sh}` entrypoints
      implementing this contract, and
   2. an **install skill** an agent can trigger to deploy/refresh that runtime
@@ -1563,7 +1647,7 @@ Consequence — a rule for every plugin in this repo:
      their catalog and payload dispatcher must share the same fail-closed
      activation gate.
 
-Every agent-facing command belongs to its implementing payload. Skills consume
+Within this payload-local contract, each command belongs to its implementing payload. Skills consume
 the owning plugin's exact catalog `argv`; they do not hardcode another plugin's
 path or discover a same-named command through `PATH`. The command glossary is
 static invocation context, not a snapshot of live worktrees, sessions, leases,
@@ -2593,6 +2677,19 @@ caller. Each interpreter must be absolute and outside the selected removal
 root. Changed arguments, unrelated ancestry, non-Python images and deeper
 chains remain unrecognized; this is not stop authority or a general parent
 exemption.
+Vault's fixed Windows native uninstall additionally recognizes only its
+authenticated, running `plugin-native-install` request: exact source digest,
+removal recipe, pinned participant and execution shim, and native foreground
+callers. At most seven source-bound process identities cover the callback,
+optional self-stage and original caller. Both broker admission and finite
+runtime removal revalidate that same custody and the native ancestry. Missing
+or changed custody, source, arguments or birth identities refuse; a parent PID
+or shared root argument never grants a general controller exemption.
+The original PowerShell host is attributed only through that exact pinned
+foreground child and its revalidated native identity. Interactive and `-Command`
+hosts, relative script paths and the default installation root do not need to
+imitate generated-child syntax. Generated installer/staging children still
+require the exact source file and removal recipe.
 The same live teardown proof admits at most four native installer-child
 levels matching its original or staged installer and removal root before
 classifying the exact staging watchdog. Another script, root or parent chain
@@ -3198,6 +3295,17 @@ the whole wait exits **75** (reported by `update` as `blocked_by_lock`, never as
 success), and a lock fault exits 1.
 It is distinct from the binstub's `.provision.lock`, which only single-flights
 first-use provisioning around the installer call in unadopted wrappers.
+Windows Worktrees `stamp` is a native driver request before publishing its
+snapshot pointer or global binstub, and binds the files its selected snapshot
+copier can retain. Its payload dispatcher and global binstub use request-local,
+nonblocking driver admission while holding their respective first-use locks;
+they release the lock before retrying a busy driver, recheck selection on each
+attempt, and never replay pending work. An unsettled queue fails rather than
+being retried as ordinary contention. A selected installer lacking the
+nonblocking first-use contract is refused until explicit install or repair
+through the selected authority; standalone installation cannot override
+project authority.
+The contract marker is a compatibility check, not execution authority.
 The canonical version-1 payload shim and Bridge/Dispatch retained command gates
 serialize stale PID-link revalidation with `.provision.reap.mutex` when `flock`
 is unavailable. They install cleanup before acquisition, release only a mutex
@@ -4171,6 +4279,11 @@ directories. A resource may be a package subdirectory of another admitted
 project; its presence must not make that parent look fully copied while its
 `pyproject.toml` and other build inputs are still missing.
 
+Retained temporary inputs have an explicit lifetime. Garbage collection and
+interpreter shutdown do not retire them; their retaining owner must exit the
+contexts after owned children settle. An abandoned context leaves its inputs
+intact rather than treating finalization as proof that deletion is safe.
+
 Retained-input cleanup preserves an active exception or a nonzero UV child
 result, including captured output and the original exit status. A secondary
 filesystem cleanup failure is reported independently as `retained-input-cleanup`,
@@ -4178,6 +4291,7 @@ not as dependency-seasoning rejection. Cleanup failure after otherwise successfu
 execution raises `RetainedInputCleanupError` and makes the CLI fail; it never
 turns an incomplete cleanup into success. Context-owned runtime construction
 uses the same exception-preserving cleanup path.
+Explicit removal does not treat an inaccessible parent as an absent directory.
 
 The deployment CLI and immutable runtime engine select non-editable retention.
 Explicit editable operands, including requirement-file entries, are refused.
@@ -4555,7 +4669,11 @@ delivery policy, including public-index refusal and cross-origin credential
 isolation. Explicit nonempty download-origin restrictions still constrain
 artifact destinations.
 Native non-index selection settings and first-party exclusions remain in
-force. The observed project indexes are rechecked after selected-wheel
+force. Initial selection and final readback share entry validation and the
+same native tag projection. The recheck binds all compatible candidate records
+and their metadata, plus the index's transport identity; changes to incompatible
+wheels do not invalidate that selection. Malformed incompatible entries still
+refuse readback. The observed project indexes are rechecked after selected-wheel
 acquisition and source validation while the delivery is held; source is
 validated again afterward. The index check is a snapshot, not a lock on
 subsequent feed changes. The mode
@@ -5345,6 +5463,30 @@ both the index URI and captured credential identity are identical, preserving
 every reference. Different supplemental indexes or credential identities
 remain refusals.
 
+#### Native configuration-selector handoff
+
+The canonical `libs/installer-engine/installer_driver.py` carries
+`AGENT_DISPATCH_INSTALLATION_CONFIG`, `AGENT_INDEX_INSTALLATION_CONFIG` and
+`AGENT_INDEX_CONFIG_ROOT` through the existing request context and trusted runner.
+Relative selectors resolve against the original filesystem working directory
+before staging; absent selectors remain absent. Empty or unsupported
+selector-looking fields fail rather than silently selecting defaults.
+
+An explicit installation-policy file must be bounded, ordinary and bound to the
+selected plugin's exact installation root. Index's configuration-directory
+selector remains a directory location, not an installation-root alias; an absent
+directory can remain an explicit future location. Other plugins' admitted
+selectors are transported without rebinding them to the current plugin.
+Authenticated native re-entry must retain the admitted selectors as well as the
+existing source, argument, project and incarnation bindings. Changed, missing or
+foreign active selectors refuse before native installation effects.
+
+Selector-aware installers retain their pre-driver refusal with an older provider
+that cannot transport these fields. Updated providers preserve transport; they
+do not teach an older native consumer a new policy schema or prove service
+readiness, first-provision behavior, non-admin operation or live lifetime.
+No scheduler, broker or account enrollment is part of this transport boundary.
+
 The completed snapshot contains a copyable, locked UV application with its
 associated wheels and slot-local install entries. `install --stage` creates
 only the nested `.venv`; it does not run setup, publish globals, select a
@@ -5369,6 +5511,10 @@ its flat or nested interpreter without following a selector or resolving a UV
 project at the asset directory.
 Resource-packaging hooks on ordinary source installations use the existing
 isolated source-build fallback rather than the static-project wheel cache.
+On Windows, the shared standalone build helper uses normalized extended-length
+paths for build, wheel staging and installation copies, including UNC roots.
+Archive member names remain relative; metadata-only setup still works before
+an optional wheel command is installed. No machine long-path setting is changed.
 An explicitly prepared application installs its first-party wheels offline
 without running those first-party backends. Neither path upgrades, stops or
 removes unrelated service installations.
@@ -5994,8 +6140,10 @@ The incoming monitor must advertise `status-monitor-async-retirement-v1`,
 guarded preparation recovery and a valid receiver generation. A compatible
 outgoing peer advertises those contracts and retires independently. Missing
 outgoing metadata, a legacy generation or a control timeout does not veto
-installation: native PID/birth and unchanged route custody still identify the
-predecessor. Before promotion, the new resident attempts one bounded
+installation. Native PID/birth qualifies optional predecessor cleanup, not
+incoming election. Structural, unchanged route custody remains mandatory for
+publication even when outgoing native identity cannot be observed. Before
+promotion, the new resident attempts one bounded
 `successor-handoff` notice carrying the exact old and selected successor endpoints.
 It uses the existing health seam to require the running peer's
 `status-monitor-successor-handoff-v1` capability; missing or malformed support
@@ -6025,8 +6173,48 @@ If the predecessor exits before the first grace record is armed, the same gate
 compare-releases its exact fallback under the observed active selection before
 settling custody. A missing active selection or failed route cleanup retains
 custody for retry; no grace record or force permission is fabricated.
-An unrouted, identity-unknown or changed owner remains an explicit refusal.
-This fallback does not weaken the incoming runtime's preparation contract.
+An unrouted or native-identity-unobservable incumbent defers retirement instead
+of refusing the incoming installation. The installation owner preserves exact
+older recovery bytes and the route/discovery observations under
+`status-monitor-observations/`, with durable canonical references protecting
+the retained code. Both cutover locks serialize moving an archived recovery
+record out of the active breadcrumb slot; no older attempt is recovered,
+cancelled, terminated or reported successful. The resident releases these
+references only after positive native exit for every recorded identity.
+Missing or unreadable exit evidence keeps retention pending. Malformed routing,
+archive I/O failure, a concurrent route change and failed incoming identity or
+readiness remain real failures. This fallback does not weaken the incoming
+runtime's preparation contract.
+Malformed observation envelopes report pending retirement through the existing
+resident error path rather than terminating the healthy incoming monitor.
+An undecodable non-null archived breadcrumb retains its bytes and code even
+after readable route/discovery owners exit: those exits cannot account for
+an unknown passive process. Missing archives never hide surviving canonical
+observation references. Refusal callbacks compare the validated raw route
+snapshot, preserving absent legacy generation fields and null optional metadata.
+A previous-only route still requires incoming startup, even without readable
+discovery. Its raw `active: null` is preserved through guarded publication;
+replacement opts out of eager route healing without changing legacy ZDD defaults.
+An unavailable pre-transition reuse probe selects replacement, not installation
+failure; post-publication serving attestation remains strict. Observation
+retention uses bounded reference groups in the existing atomic reference
+transaction, preceded by a durable write-ahead mapping. Interrupted final
+archives and reference commits therefore remain recoverable even after the
+observations change. The write-ahead record precedes the deletion fence, and
+the fence precedes slot inventory capture; a crash before the inventory is
+persisted resumes conservatively under that same fence. Recovery captures every
+pending inventory and atomically publishes their combined references before
+clearing the shared fence. Terminal cleanup intent is durable before reference
+release, so a failed archive deletion never re-retains slots that GC has since
+removed. The installer restores
+archived references before ordinary retirement reservation regardless of whether
+outgoing identity is now readable. Resident reconciliation also restores
+prepared dev-claim references without granting their release. A qualified
+predecessor exiting after observation does not veto unchanged raw-route CAS.
+Deferred dev release carries the original exact claim,
+including when the outgoing slot cannot be identified. Only the owning
+installer's committed outcome grants release, and native exit, current selection
+and exact claim ownership remain mandatory at reconciliation.
 The existing explicit cold-retirement helper retains its held cutover guard,
 authenticated runtime-prefix, native pin and positive-exit checks. Ordinary
 replacement does not invoke that helper before incoming startup or require its

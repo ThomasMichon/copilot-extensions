@@ -25,6 +25,7 @@ import socket
 import stat
 import sys
 import threading
+import time
 from pathlib import Path
 
 from .home import default_home_dir as default_home_dir
@@ -173,7 +174,7 @@ def discard_stale_handle(explicit: str | None = None) -> None:
             pass
 
 
-def _connect(path: str | Path) -> tuple[socket.socket, str | None]:
+def _connect(path: str | Path, *, timeout: float | None = None) -> tuple[socket.socket, str | None]:
     """Open a blocking client connection; return ``(sock, token)``.
 
     Dials loopback TCP when an endpoint sidecar is present (token from it), else
@@ -184,7 +185,8 @@ def _connect(path: str | Path) -> tuple[socket.socket, str | None]:
     ep = _read_endpoint(path)
     if ep is not None:
         try:
-            sock = socket.create_connection((_TCP_HOST, ep["port"]))
+            options = {} if timeout is None else {"timeout": timeout}
+            sock = socket.create_connection((_TCP_HOST, ep["port"]), **options)
         except OSError as exc:
             raise HostUnreachableError(
                 f"serve host unreachable at {_TCP_HOST}:{ep['port']}: {exc}") from exc
@@ -193,6 +195,8 @@ def _connect(path: str | Path) -> tuple[socket.socket, str | None]:
         raise HostUnreachableError(f"no serve endpoint for {path}")
     sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     try:
+        if timeout is not None:
+            sock.settimeout(timeout)
         sock.connect(str(path))
     except OSError as exc:
         _close(sock)
@@ -201,7 +205,7 @@ def _connect(path: str | Path) -> tuple[socket.socket, str | None]:
     return sock, None
 
 
-def _read_ack_line(sock: socket.socket) -> bytes:
+def _read_ack_line(sock: socket.socket, *, deadline: float | None = None) -> bytes:
     """Read one newline-terminated line directly off the socket.
 
     Reads a byte at a time so it consumes **exactly** up to (and including) the
@@ -211,6 +215,11 @@ def _read_ack_line(sock: socket.socket) -> bytes:
     """
     buf = bytearray()
     while True:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("serve handshake deadline expired")
+            sock.settimeout(remaining)
         b = sock.recv(1)
         if not b:
             break
@@ -289,7 +298,7 @@ def _close(sock: socket.socket) -> None:
         pass
 
 
-def pump(sock: socket.socket) -> None:
+def pump(sock: socket.socket, *, session_owner=None) -> None:
     """Bidirectionally pump line-delimited JSON-RPC between stdio and ``sock``.
 
     stdin -> socket and socket -> stdout run on two daemon threads (blocking I/O,
@@ -297,7 +306,9 @@ def pump(sock: socket.socket) -> None:
     end: on stdin EOF the client half-closes the socket (so the host drains and
     closes), and the pump keeps forwarding the host's final replies until the
     host closes the connection. A parent-death watchdog covers the case where
-    stdin EOF never arrives (the Windows ``cmd``-shim grandchild).
+    stdin EOF never arrives (the Windows ``cmd``-shim grandchild). An opt-in
+    adopted conduit instead supplies its explicitly pinned session owner;
+    intermediate ancestors are not its lifetime boundary.
     """
     # watchdog is stdlib-only and light; import here so a direct-fallback path
     # (which never calls pump) doesn't pay for it.
@@ -339,11 +350,17 @@ def pump(sock: socket.socket) -> None:
         _close(sock)  # unblock a reader parked in recv()
 
     reap_descendants_on_exit()
-    install_parent_death_watchdog(_stop)
-
-    threading.Thread(target=_client_to_host, name="agent-mcp-fwd-in",
-                     daemon=True).start()
-    threading.Thread(target=_host_to_client, name="agent-mcp-fwd-out",
-                     daemon=True).start()
-    done.wait()
-    _close(sock)
+    try:
+        if session_owner is None:
+            install_parent_death_watchdog(_stop)
+        else:
+            session_owner.start(_stop)
+        threading.Thread(target=_client_to_host, name="agent-mcp-fwd-in",
+                         daemon=True).start()
+        threading.Thread(target=_host_to_client, name="agent-mcp-fwd-out",
+                         daemon=True).start()
+        done.wait()
+    finally:
+        _close(sock)
+        if session_owner is not None:
+            session_owner.close()

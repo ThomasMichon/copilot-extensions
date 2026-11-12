@@ -533,6 +533,8 @@ def test_explicit_application_source_requires_canonical_attributable_input(tmp_p
 
 
 @pytest.mark.parametrize("plugin,dependency,source", [
+    ("agent-index", "fleet-manager", "fleet-manager"),
+    ("agent-worktrees", "fleet-manager", "fleet-manager"),
     ("agent-pull-requests", "fleet-manager", "fleet-manager"),
     ("agent-dispatch", "agent-pull-requests", "plugins/agent-pull-requests"),
     ("agent-dispatch", "fleet-manager", "fleet-manager"),

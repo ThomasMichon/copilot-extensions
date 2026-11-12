@@ -125,6 +125,52 @@ decision from that retired lifetime.
 
 ## Explicit paired worktree Sync
 
+### Optional Sync progress producer
+
+The version-1 `agent-worktrees.sync-progress` declaration is packaged as
+`agent_worktrees/sync-progress-v1.json` in the selected runtime. A caller that
+has qualified that exact runtime may opt into `sync --json --stream`, with the
+same worktree selection and optional `--paired` behavior. `--stream` without
+`--json` refuses before configuration or synchronization. Existing text and
+single-document JSON invocations are unchanged.
+Sync option names are exact: abbreviated spellings such as `--str` are rejected
+before synchronization.
+
+The opt-in emits flushed D4 NDJSON: `{"type":"progress","pct":null,"msg":"..."}`
+at real operation stages, including owner-emitted waiting updates during
+long nested work. Percentages are indeterminate rather than estimates.
+A terminal `done` or `error` frame carries `message` and the complete original
+versioned JSON object in `result`, using the same canonical formatter as ordinary
+JSON output. Paired member outcomes, preparation state and failure
+detail are not replaced with the latest message. Stream success follows actual
+Sync completion; a blocked single repository is an error even where the legacy
+JSON command's exit code alone was not a success predicate.
+
+Invalid or ambiguous worktree selectors produce a terminal error with
+`reason: "worktree-id-rejected"`, the original diagnostic in `detail`, and
+`outcome: "not-started"`. If a later batch item raises, the terminal result
+retains earlier completed entries and identifies the interrupted item with
+`reason: "sync-interrupted"` and `outcome: "unknown"`. No `updated` value is
+invented for that item, later items are not started, and successful earlier
+mutations are not claimed rolled back. Ordinary non-streamed exception handling
+is unchanged.
+Ordinary preflight exceptions, including malformed tracking documents, also
+produce a terminal error. Frames use the shared unbuffered, single-attempt stdout
+writer. Unconfirmed stdout writes are never retried; loss
+of a complete terminal frame remains an unknown observation, not replay authority.
+
+The producer does not add cancellation, rollback, retry or a progress store.
+The [Manager's local consumer](../../../worktree-manager/README.md#explicit-sync-progress)
+qualifies the exact selected interpreter's declaration before opting in,
+retains the complete result and observes communication separately from its
+finite execution budget. Remote Sync retains its existing JSON path. Readers
+must preserve unknown outcomes after missing terminal output and select the
+legacy baseline before effects when support is absent, never replay a started
+Sync after removing an optional flag. Every target update is communication
+evidence; consumer silence and execution budgets remain independent.
+
+### Paired synchronization semantics
+
 The original `sync --worktree-id <id> --json` contract remains a
 single-repository fast-forward. Optional `--paired` requests both registered
 worktree members followed by local plugin/instruction preparation. Picker Sync
@@ -446,6 +492,25 @@ Replay also checks the stored fingerprint and prompt kind against the request,
 and Resume must retain its requested worktree identity, including after the
 locked receipt reload.
 A target without the request capability rejects before mutation.
+## Local retained-prompt preservation (`retained-seed-v1`)
+
+An ordinary local promptless resume can request preserved-handoff plans through
+the call-scoped `AGENT_WORKTREES_RETAINED_SEED_PLANS=1` hint on its existing
+resolve invocation. A supporting Engine may return `seed_preserved_id` with
+`seed_preservation_version: 1` and `seed_pending: false`. Manager validates that
+declaration and carries the identity through local shell
+delegation using the strict `--preserve-seed-id` selector, not `--seed-id` or
+staging. Re-resolution refuses missing or replaced intent; final admission-only
+preparation revalidates the same identity without claiming it. Legacy terminal
+prompt delivery is skipped for this plan.
+
+An older Engine may ignore the optional hint and retain its original refusal;
+an older Manager never requests the feature. An unsupported explicit selector
+must reject before effects, without a weaker retry. No additional discovery RPC,
+resident cache or delivery receipt is introduced. Recognized launch-seed module
+fallbacks refresh their interpreter after runtime selection for admission-only
+as well as prompt-delivery execution.
+
 ## Resident current-roster reads
 
 The separate [`record --worktree-id <exact-id> --json`](cli-reference.md#exact-durable-record-read)
@@ -458,18 +523,91 @@ readers still must not scan tracking YAML or independently compute facts.
 The Manager requires `list --json --current`. Ordinary JSON/stream listings
 also select that authority while resident monitoring is enabled; explicit
 profile-history inspection and glance retain their separate workflow paths.
-`--classify`, `--cache-only`, `--fresh`, exact IDs/codenames and `--refresh`
-do not authorize a different caller-side computation. A row refresh selects
-one indexed slot; it does not backfill sessions or enumerate the fleet.
+`--classify`, `--cache-only`, `--fresh` and exact IDs/codenames do not
+authorize a different caller-side computation. An ordinary point read selects
+one indexed slot without backfilling sessions or enumerating the fleet.
+
+Explicit `--worktree-id <id> --refresh` requires the running resident's
+`worktrees-refresh-v1` capability, discovered through the existing authenticated
+health response. It sends a fresh 32-character hexadecimal `refresh_id` on the
+current-roster point request. Only the producer reconciles the selected record's
+session registry and bound/mux liveness. The request remains `unready` until
+that reconciliation is included in a successful publication. An unrelated
+publication, missing mux observation or failed publication cannot acknowledge
+it. Freshly observed mux absence is not overridden by a cached managed-mux
+receipt for that selected record. The resident keeps that older observation
+superseded across later publications for its remaining cache-freshness window;
+a higher mapping revision or a later received observation may supersede it.
+This bounded protection survives request retirement within the resident.
+Native process queries use the existing tri-state liveness reader, including
+conclusive exit of a retained Windows process handle. Access-denied/image-query
+failures, unreadable session directories and unreadable/malformed Bridge locks
+cannot establish absence.
+For an unindexed legacy record, the sanctioned backfill sweep must establish
+complete, attributable workspace discovery; unreadable, missing or malformed
+candidate metadata cannot become an empty authoritative registry. The normal
+backfill API retains its best-effort default for existing callers.
+
+Strict reconciliation probes outside the record lock, then takes the canonical
+required-sidecar lock and rechecks the record incarnation and observation fence.
+It saves registry and liveness together through the canonical writer and rereads
+the actual mapping before publishing the confirmed record. Contention, failed or
+unconfirmed writes, and concurrent fenced changes cannot earn a completion
+receipt. Best-effort background stamps do not satisfy this operation.
+
+Success adds `point_refresh: {request_id, generation, revision}`, identifying
+that request's publication barrier. The reader verifies the request ID, current
+generation and a positive revision no later than its returned roster revision.
+Repeated reads of the same request reuse its completion; changing its project
+or selector refuses. An ambiguous selector rejects only its request, without
+poisoning the project's ordinary publication. The resident retains at most
+128 requests, evicting only completed or rejected entries, and clears them
+on admission closure/re-election. Refresh
+is a point operation, incompatible with passive/bootstrap/feed requests.
+Older callers retain their existing read behavior; a newer explicit-refresh
+caller refuses a resident missing this optional capability before requesting
+reconciliation. Ordinary reads remain available after provider rollback.
+No caller-side reconstruction, advisory fallback or automatic runtime update
+substitutes for the requested observation.
+Unavailable observations terminate only that request with `refresh-unavailable`;
+the retained request ID does not repeat the failed work. Ordinary Git/tracking
+publications and feed updates continue without acknowledging the failed refresh.
+Unconfirmed owned-process cleanup remains a hard producer failure.
 
 The existing authenticated monitor control endpoint advertises
 `worktrees-current-v1`. Its request carries `contract_version: 1`, project,
 optional status/platform/ID/codename selection and Boolean `include_missing`.
+The CLI maps `--all` to `include_missing: true`, retaining complete inventory,
+including archives. Its default `false` selects present, non-archived rows:
+a retained checkout cannot make an archive active again. Publisher-built
+selection indexes apply that predicate before suffix resolution and feed
+barriers. Archived rows remain in complete publications and exact explicit
+inventory reads; an archive transition removes only their default membership.
+Clients reject an older resident or saved selection that still admits an
+archived default row, without recomputing facts or rewriting the saved store.
 An optional Boolean `passive: true` marks a demand-free read: the resident
 answers from its publication but neither renews project scan demand nor wakes
-its producer for an unpublished project, and the feed refuses it. Residents
+its producer for an unpublished project, and the feed refuses it. Its
+`projection` adds `freshness: {"refreshed_age_s", "bound_s"}`: the monotonic
+age, measured when the read is served, of the fact collection behind this
+resident's last successful publication of the project (`null` before its first
+publish since election) and the bound `max(45s, 3 × monitor interval)`. A missing or overdue refresh
+adds `availability.status: stale` unless a publication-failure label is
+already present. Consumers treat a passive roster as current only with a
+proven in-bound freshness; a reply without it (older resident) remains
+non-authoritative. Residents
 that predate the field reject it as `invalid-request`; a passive client then
 returns the labeled advisory saved roster, never a demand read.
+Worktree state-change notifications (`worktreeChanged`) queue the changed
+path and wake the resident; the next sweep republishes the resolved project
+(or every published project when unresolved) without recording demand. The
+project stays queued until a publication succeeds, for at most three sweeps,
+so a sweep that fails or defers before publishing does not drop the event. Mux
+lifecycle feeds the same queue: a managed-mux observation whose committed
+facts change (for example `live` or attached clients) notifies its worktree
+path, and a sweep that prunes a registered direct-lane session missing from the
+mux listing notifies that session's path. A newly listed direct-lane session is
+served and published by the sweep that discovers it.
 Results carry `ok`, `contract_version`, `worktrees` and `projection`:
 schema version, generation, revision, observation timestamp, complete-roster
 and selected-row counts, and quality. Current rows are independently bounded to 64 KiB and omit

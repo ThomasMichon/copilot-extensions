@@ -10,6 +10,7 @@
     "agent-bridge/extensions/agent-bridge/announce.mjs",
     "agent-bridge/extensions/agent-bridge/bridge-endpoint.mjs",
     "agent-bridge/extensions/agent-bridge/delivery.mjs",
+    "agent-bridge/extensions/agent-bridge/delivery-state.mjs",
     "agent-bridge/extensions/agent-bridge/extension.mjs",
     "agent-bridge/extensions/agent-bridge/metadata.mjs",
     "agent-bridge/extensions/agent-bridge/plugin-readiness.mjs",

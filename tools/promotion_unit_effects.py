@@ -12,12 +12,25 @@ from coverage import CoveragePlugin
 from promotion_unit_contract import UnitEvidenceError
 
 
+def path_spelling(value: str, platform: str) -> str:
+    if platform == "win32":
+        if value.startswith("\\\\?\\UNC\\"):
+            return "\\\\" + value[8:]
+        if value.startswith("\\\\?\\") and len(value) > 6 and value[5:7] == ":\\":
+            return value[4:]
+    return value
+
+
+def canonical_path(value) -> Path:
+    return Path(path_spelling(str(Path(value).resolve()), sys.platform))
+
+
 class UnitRun(CoveragePlugin):
     def __init__(self, coverage, root: Path, sources: dict, temporary: Path, *, nodes=()):
         self.coverage = coverage
-        self.root = root
+        self.root = canonical_path(root)
         self.sources = sources
-        self.temporary = temporary
+        self.temporary = canonical_path(temporary)
         self.nodes = tuple(nodes)
         self.opened_sources: set[str] = set()
         self.collected: list[str] = []
@@ -45,7 +58,7 @@ class UnitRun(CoveragePlugin):
             except OSError:
                 self.refuse("unavailable directory-relative mutation identity")
             path = directory / path
-        return path.resolve()
+        return canonical_path(path)
 
     def guarded_open(self, name, flags, mode=0o777, *, dir_fd=None):
         if not self.active:
@@ -82,7 +95,7 @@ class UnitRun(CoveragePlugin):
             else:
                 source = self.mutation_path(args[0], args[2] if len(args) > 2 else None)
                 destination = self.mutation_path(args[1], args[3] if len(args) > 3 else None)
-            if not all(path.resolve().is_relative_to(self.temporary) for path in (source, destination)):
+            if not all(canonical_path(path).is_relative_to(self.temporary) for path in (source, destination)):
                 self.refuse("filesystem indirection outside synthetic temporary storage")
         if event in mutations:
             for index, directory_index in mutations[event]:
@@ -98,7 +111,7 @@ class UnitRun(CoveragePlugin):
                 path = Path(name)
                 if not path.is_absolute() and mode is None:
                     self.refuse("unattributable descriptor-relative open")
-                path = path.resolve()
+                path = canonical_path(path)
             if ".git" in (part.casefold() for part in path.parts):
                 self.refuse("actual Git storage access")
             writing = (

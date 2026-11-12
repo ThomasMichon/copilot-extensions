@@ -45,6 +45,8 @@ $EngineVenvPython = 'engine-python'
 $EngineTaskName = 'inert-engine-task'
 $NoService = $Mode -eq 'no-service'
 function Get-ScheduledTask { return $null }
+function Test-IndexStartAllowed { param($Name); $true }
+$script:IndexObservedTasks = @{}
 function Get-ActiveSlotPython { return 'primary-python' }
 function Test-Path {
     param($Path)
@@ -87,13 +89,16 @@ function Write-Skip { param($Msg) Write-Output "SKIP:$Msg" }
         stop = calls[0]
         module = stop.index("-m")
         assert stop[module:] == ["-m", "agent_index", "engine", "stop"]
-        assert stop[:module] == ["-I", *python_cache_args(root), "-X", "utf8"]
+        assert stop[:module] == ["-I", "-X", stop[2], "-X", "utf8"]
+        cache = Path(stop[2].removeprefix("pycache_prefix="))
+        assert cache.parent == Path(python_cache_args(root)[1].partition("=")[2]).parent
+        assert re.fullmatch(r"unsealed-[0-9a-f]{32}", cache.name)
         if mode == "stop-failed":
             assert len(calls) == 1
         else:
             start = calls[1]
             module = start.index("-m")
-            assert start[:module] == ["-I", *python_cache_args(root), "-X", "utf8"]
+            assert start[:module] == stop[:module]
             assert start[module:] == ["-m", "agent_index", "engine", "start", "--strict"]
     if mode != "ready":
         assert "OK:" not in result.stdout

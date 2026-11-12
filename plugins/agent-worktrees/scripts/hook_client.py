@@ -219,6 +219,17 @@ def _capture_native_source() -> dict:
         return {"version": 1, "qualified": False, "reason": "native-source-unavailable"}
 
 
+# Mirrors nudge_status.NUDGE_ENV_KEYS (asserted equal in tests).
+_POST_TOOL_ENV_KEYS = ("AGENT_WORKTREES_NUDGE", "AGENT_WORKTREES_AGENDA_NUDGE",
+                       "AGENT_WORKTREES_NUDGE_CALLS", "AGENT_WORKTREES_NUDGE_MINUTES")
+
+
+def _enrich_post_tool_payload(payload: dict) -> dict:
+    """Forward this session's nudge switches; the resident's env is not ours."""
+    env = {key: os.environ[key] for key in _POST_TOOL_ENV_KEYS if key in os.environ}
+    return {**payload, "_agentWorktrees": {"environment": env}}
+
+
 def _enrich_session_end_payload(payload: dict) -> dict:
     return {
         **payload,
@@ -856,6 +867,8 @@ def decide(
         payload = _enrich_session_payload(payload)
     if kind == "sessionEnd" and not isinstance(payload.get("_agentWorktrees"), dict):
         payload = _enrich_session_end_payload(payload)
+    if kind == "postToolUse" and not isinstance(payload.get("_agentWorktrees"), dict):
+        payload = _enrich_post_tool_payload(payload)
     if kind == "preToolUse" and (payload.get("toolName") or payload.get("tool_name")) in ("view", "rg", "glob", "bash", "sh", "shell", "powershell", "pwsh", "cmd", "run", "run_command", "execute", "exec", "terminal"):
         helper = _load_sibling("hook_pre_relevance.py")
         irrelevant = getattr(helper, "is_irrelevant", None)

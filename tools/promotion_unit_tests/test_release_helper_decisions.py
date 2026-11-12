@@ -554,6 +554,83 @@ def test_installer_reference_materialization_preserves_comments_and_refuses_ambi
         assert (target / f"scripts/install.{ext}").read_text() == text
 
 
+@pytest.mark.parametrize("ext", ["ps1", "sh"])
+@pytest.mark.parametrize("case", ["corruption", "source-drift"])
+def test_native_installer_copy_is_verified_before_entrypoint_rewrite(tmp_path, monkeypatch, ext, case):
+    canonical, destination = tmp_path / "canonical", tmp_path / "release"
+    source, target = canonical / "plugins/example", destination / "plugins/example"
+    text = engine.canonical_line(ext) + "\n"
+    _write(source / f"scripts/install.{ext}", text)
+    script = target / f"scripts/install.{ext}"
+    _write(script, text)
+    canonical_engine = canonical / f"libs/installer-engine/installer-engine.{ext}"
+    _write(canonical_engine, "# admitted engine\n")
+    output = target / f"scripts/installer-engine.{ext}"
+    copyfile = installers.shutil.copyfile
+    copied = []
+
+    def copy_then_fault(src, dst, *args, **kwargs):
+        result = copyfile(src, dst, *args, **kwargs)
+        if Path(src) == canonical_engine and Path(dst) == output:
+            copied.append((src, dst))
+            (output if case == "corruption" else canonical_engine).write_bytes(b"# changed engine\n")
+        return result
+
+    monkeypatch.setattr(installers.shutil, "copyfile", copy_then_fault)
+    log = installers.materialize_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=target,
+        canonical_root=canonical, dest_root=destination,
+    )
+    assert copied == [(canonical_engine, output)]
+    assert len(log) == 1 and log[0].startswith("SKIP"), log
+    assert ("postwrite bytes" if case == "corruption" else "canonical source changed") in log[0]
+    assert script.read_text() == text
+
+
+@pytest.mark.parametrize("case", ["stale", "absent", "foreign", "absent-bad-digest"])
+def test_declared_human_initializer_refresh_uses_source_preimage(tmp_path, case):
+    canonical, destination = tmp_path / "canonical", tmp_path / "release"
+    source, target = canonical / "plugins/agent-mcp", destination / "plugins/agent-mcp"
+    script = source / "scripts/init.ps1"
+    text = "$ErrorActionPreference = 'Stop'\n\n" + engine.HUMAN_PROLOGUE + "\n"
+    _write(script, text)
+    _write(script.parent / engine.HUMAN_HELPER, "# admitted prior initializer\n")
+    declaration = engine.human_output_json(script)
+    if case == "absent-bad-digest":
+        data = json.loads(declaration)
+        data["initializer_sha256"] = "invalid"
+        declaration = json.dumps(data, indent=2) + "\n"
+    _write(script.with_suffix(".human-output.json"), declaration)
+    if case.startswith("absent"):
+        (script.parent / engine.HUMAN_HELPER).unlink()
+    _write(canonical / "libs/installer-engine" / engine.HUMAN_HELPER, "# current initializer\n")
+    _write(target / "scripts/init.ps1", text)
+    _write(target / "scripts/init.human-output.json", declaration)
+    if not case.startswith("absent"):
+        _write(target / "scripts" / engine.HUMAN_HELPER,
+               "# foreign initializer\n" if case == "foreign" else "# admitted prior initializer\n")
+    before = {path.relative_to(canonical): path.read_bytes()
+              for path in canonical.rglob("*") if path.is_file()}
+    kwargs = dict(
+        source_consumer_dir=source, dest_consumer_dir=target,
+        canonical_root=canonical, dest_root=destination,
+    )
+    if case in {"foreign", "absent-bad-digest"}:
+        with pytest.raises(ValueError, match="conflicting native human-output assets"):
+            installers.materialize_ref_into(**kwargs)
+        assert (target / "scripts/init.human-output.json").read_text() == declaration
+    else:
+        log = installers.materialize_ref_into(**kwargs)
+        assert log and all(line.startswith("OK") for line in log), log
+        emitted = target / "scripts/init.ps1"
+        assert emitted.with_suffix(".human-output.json").read_text() == engine.human_output_json(emitted)
+        assert (emitted.parent / engine.HUMAN_HELPER).read_bytes() == (
+            canonical / "libs/installer-engine" / engine.HUMAN_HELPER
+        ).read_bytes()
+    assert before == {path.relative_to(canonical): path.read_bytes()
+                      for path in canonical.rglob("*") if path.is_file()}
+
+
 @pytest.mark.parametrize("case", ["valid", "wrong-name", "conditional", "escape"])
 def test_standalone_dependency_source_follows_exact_declared_identity(tmp_path, case):
     project = tmp_path / "services/example"
@@ -571,6 +648,78 @@ def test_standalone_dependency_source_follows_exact_declared_identity(tmp_path, 
     else:
         with pytest.raises(ValueError, match="invalid local source mapping"):
             standalone.local_dependency_source(project, "example.lib", source_root=tmp_path)
+
+
+@pytest.mark.parametrize("case", ["absent", "stale", "foreign"])
+def test_single_consumer_wrapper_refreshes_declared_standalone_assets(tmp_path, case):
+    canonical, destination = tmp_path / "canonical", tmp_path / "release"
+    source = canonical / "worktree-manager"
+    _write(source / "scripts/source.txt", "retained\n")
+    _write(destination / "scripts/source.txt", "retained\n")
+    for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES):
+        _write(canonical / "libs/installer-engine" / name, "# canonical " + name + "\n")
+    if case != "absent":
+        _write(source / "scripts/installer_engine_commands.py", "# admitted older helper\n")
+        _write(destination / "scripts/installer_engine_commands.py",
+               "# foreign helper\n" if case == "foreign" else "# admitted older helper\n")
+    before = {path.relative_to(canonical): path.read_bytes()
+              for path in canonical.rglob("*") if path.is_file()}
+    log = materializer.materialize_installer_engine_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=destination,
+        canonical_root=canonical,
+    )
+    if case == "foreign":
+        assert any(line.startswith("SKIP") and "foreign content" in line for line in log), log
+        assert not (destination / "scripts/installer_engine.py").exists()
+    else:
+        assert log and all(line.startswith("OK") for line in log), log
+        for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES):
+            assert (destination / "scripts" / name).read_bytes() == (
+                canonical / "libs/installer-engine" / name
+            ).read_bytes()
+    assert before == {path.relative_to(canonical): path.read_bytes()
+                      for path in canonical.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("case", ["absent", "stale", "foreign"])
+def test_single_consumer_canonical_reference_refreshes_support_before_conversion(tmp_path, case):
+    canonical, destination = tmp_path / "canonical", tmp_path / "release"
+    source = canonical / "plugins/agent-vault"
+    for ext in ("ps1", "sh"):
+        text = engine.canonical_line(ext) + "\n"
+        _write(source / f"scripts/install.{ext}", text)
+        _write(destination / f"scripts/install.{ext}", text)
+        _write(canonical / f"libs/installer-engine/installer-engine.{ext}",
+               "# fixture engine uses " + engine.SUPPORT_FILES[0] + "\n")
+    for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES):
+        _write(canonical / "libs/installer-engine" / name, "# canonical " + name + "\n")
+    if case != "absent":
+        _write(source / "scripts/installer_engine_commands.py", "# admitted older helper\n")
+        _write(destination / "scripts/installer_engine_commands.py",
+               "# foreign helper\n" if case == "foreign" else "# admitted older helper\n")
+    before = {path.relative_to(canonical): path.read_bytes()
+              for path in canonical.rglob("*") if path.is_file()}
+    candidate_before = {path.relative_to(destination): path.read_bytes()
+                        for path in destination.rglob("*") if path.is_file()}
+    log = materializer.materialize_installer_engine_ref_into(
+        source_consumer_dir=source, dest_consumer_dir=destination, canonical_root=canonical,
+    )
+    if case == "foreign":
+        assert any(line.startswith("SKIP") and "foreign content" in line for line in log), log
+        assert candidate_before == {path.relative_to(destination): path.read_bytes()
+                                    for path in destination.rglob("*") if path.is_file()}
+    else:
+        assert log and all(line.startswith("OK") for line in log), log
+        for name in (*engine.PYTHON_FILES, *engine.SUPPORT_FILES, "installer-engine.ps1", "installer-engine.sh"):
+            assert (destination / "scripts" / name).read_bytes() == (
+                canonical / "libs/installer-engine" / name
+            ).read_bytes()
+        for ext in ("ps1", "sh"):
+            assert engine.is_local_ref(
+                engine.find_engine_ref(destination / f"scripts/install.{ext}", ext), destination,
+            )
+    assert before == {path.relative_to(canonical): path.read_bytes()
+                      for path in canonical.rglob("*") if path.is_file()}
 
 
 @pytest.mark.parametrize("case", ["valid", "fresh-file", "yanked-file", "missing-hash"])

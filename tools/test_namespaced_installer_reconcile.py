@@ -43,7 +43,20 @@ def test_actual_machines_cell_provision_reconciles_only_after_admission(tmp_path
     )
     shutil.copyfile(REPO / "plugins/agent-machines/scripts" / f"init.{style}", scripts / f"init.{style}")
     shutil.copyfile(ENGINE / f"installer-instance-reconcile.{style}", scripts / f"installer-instance-reconcile.{style}")
+    shutil.copyfile(
+        REPO / "plugins/agent-machines/scripts/cell_installer.py", scripts / "cell_installer.py",
+    )
+    for name in ("versioned_runtime.py", "versioned_runtime_source.py", "versioned_runtime_leases.py"):
+        shutil.copyfile(REPO / "libs/versioned-runtime" / name, scripts / name)
     if style == "ps1":
+        shutil.copyfile(
+            REPO / "plugins/agent-machines/scripts/installer-human-output.ps1",
+            scripts / "installer-human-output.ps1",
+        )
+        shutil.copyfile(
+            REPO / "plugins/agent-machines/scripts/legacy-transaction.ps1",
+            scripts / "legacy-transaction.ps1",
+        )
         shutil.copyfile(
             REPO / "libs/versioned-runtime/versioned_runtime_native.ps1",
             scripts / "versioned_runtime_native.ps1",
@@ -52,6 +65,12 @@ def test_actual_machines_cell_provision_reconciles_only_after_admission(tmp_path
         REPO / "plugins/agent-machines/scripts/installation-context/json-query.awk",
         context_scripts / "json-query.awk",
     )
+    if style == "ps1":
+        for name in ("shell-caller-owned.ps1", "daemon_instance_runtime.pyz"):
+            shutil.copyfile(
+                REPO / "plugins/agent-machines/scripts/installation-context" / name,
+                context_scripts / name,
+            )
     if state in {"healthy", "bad-cutover"}:
         (cell / "current-version").write_text("9.9.9\n", encoding="utf-8")
     context = cell / "install.json"
@@ -74,7 +93,7 @@ def test_actual_machines_cell_provision_reconciles_only_after_admission(tmp_path
         # Exercise the locked native transaction, not cross-process lock contention.
         "AGENT_MACHINES_CELL_PROVISION_LOCK_HELD": "1",
         "FIXTURE_CALLS": native(calls), "FIXTURE_VALIDATED": json.dumps(validated),
-        "FIXTURE_STATE": state,
+        "FIXTURE_STATE": state, "FIXTURE_RUNTIME_ROOT": native(cell),
     })
     if style == "sh":
         runner = """#!/usr/bin/env bash
@@ -86,11 +105,15 @@ case "$1" in
         printf '{"status":"ready","reason":"namespaced-active","actualMode":"%s"}\\n' "$mode" ;;
     slot-cutover) [[ "$FIXTURE_STATE" != bad-cutover ]] || exit 8
         printf '{"status":"ready"}\\n' ;;
-    slot-provision) printf '{"status":"ready"}\\n' ;;
+    slot-provision|snapshot-validate) printf '{"status":"ready"}\\n' ;;
     *) exit 91 ;;
 esac
 """
-        backend = """reconcile_daemon_instances() {
+        backend = """daemon_instance_reconcile_contract() {
+    printf '%s\\n' 'copilot-daemon-reconcile-v1'
+}
+reconcile_daemon_instances() {
+    [[ "$1" == 128 && "$2" == 5 && "$4" == "$FIXTURE_RUNTIME_ROOT" && "$5" == false ]] || return 9
     printf 'gc:%s:%s\\n' "$1" "$2" >> "$FIXTURE_CALLS"
 }
 """
@@ -117,13 +140,18 @@ switch ($action) {
         '{"status":"ready"}'
     }
     slot-provision { '{"status":"ready"}' }
+    snapshot-validate { '{"status":"ready"}' }
     default { exit 91 }
 }
 exit 0
 """
         backend = """
 function Invoke-DaemonInstanceReconcile {
-    param($RegistryRoot, $Limit, $MaxSeconds)
+    param($RegistryRoot, $Limit, $MaxSeconds, [string]$RuntimeRoot, [bool]$Terminate = $true)
+    if ($Limit -ne 128 -or $MaxSeconds -ne 5 -or $Terminate -or
+        [IO.Path]::GetFullPath($RuntimeRoot) -ne [IO.Path]::GetFullPath($env:FIXTURE_RUNTIME_ROOT)) {
+        throw 'Unsafe fixture reconciliation request'
+    }
     [IO.File]::AppendAllText($env:FIXTURE_CALLS, "gc:${Limit}:${MaxSeconds}`n")
 }
 """

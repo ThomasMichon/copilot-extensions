@@ -238,6 +238,7 @@ def test_actual_engine_noop_retains_polling_cursor_and_vectors(native):
     state = IndexState.load(config.state_file)
     assert state.sources[SOURCE].last_commit is None
     state.sources[SOURCE].last_commit = "prior-poll"
+    state.completed_family_cursors[SOURCE] = "prior-poll"
     state.save(config.state_file)
     db = MultiModelStore(config.lance_dir)
     table = db.content_store._get_or_create_table()

@@ -1,0 +1,9 @@
+{
+  "comment": "Filter publication-guard registration to its original shell-tool policy domain.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

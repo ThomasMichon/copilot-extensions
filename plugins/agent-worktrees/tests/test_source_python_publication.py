@@ -103,6 +103,8 @@ def test_candidate_checks_full_source_pin_at_boundaries(engine, tmp_path, monkey
     def context(value):
         yield value
 
+    monkeypatch.setattr(engine, "retained_source_wheels", lambda value, *_args, **_kwargs: context(value))
+
     def construct(*_args, **_kwargs):
         python.parent.mkdir(parents=True, exist_ok=True)
         python.write_bytes(b"fixture interpreter")
@@ -277,6 +279,103 @@ def admitted(driver, root, owner, content, monkeypatch, *, hold=True):
         monkeypatch.setenv(lifecycle.TICKET_ENV, json.dumps(lease.ticket))
         with governance.held(timeout=2):
             yield governance, lease
+
+
+@pytest.mark.parametrize(("shell", "executable"), native_hosts())
+@pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
+@pytest.mark.timeout(90)
+def test_native_callback_forwards_current_governance_lease(
+    publication_case, shell, executable,
+):
+    driver, root, slot, owner, content, _identity = publication_case
+    assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" not in os.environ
+    governance = driver.Governance(root, owner)
+    with governance.held(timeout=CALLBACK_TIMEOUT):
+        with driver.runtime.retention_custody(
+            root, slot.name, payload_hash="candidate",
+        ) as (_slot, descriptor):
+            transaction = driver._publish_helpers(
+                governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
+                content, slot, descriptor, timeout=CALLBACK_TIMEOUT,
+                base_python=Path(sys._base_executable),
+            )
+            transaction.keep()
+        for marker in ("current-version", "last-known-good"):
+            assert not (root / marker).exists()
+        for name in ("resolve-runtime.sh", "resolve-runtime.ps1"):
+            assert (root / "bin" / name).read_bytes() == (content / "scripts" / name).read_bytes()
+    assert "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE" not in os.environ
+
+
+class TestPsExtended:
+    @pytest.fixture
+    def tmp_path(self, tmp_path_factory):
+        return tmp_path_factory.mktemp("p")
+
+    @pytest.mark.skipif(os.name != "nt", reason="Windows extended-length paths")
+    @pytest.mark.timeout(90)
+    @pytest.mark.parametrize(
+        ("deep", "scope", "spelling"),
+        [(False, "resolvers", "extended"), (True, "wrappers", "extended"), (True, "wrappers", "ordinary")],
+    )
+    def test_ps_extended_path(self, publication_case, monkeypatch, tmp_path, deep, scope, spelling):
+        executable = shutil.which("pwsh")
+        if executable is None:
+            pytest.skip("PowerShell is unavailable")
+        driver, root, slot, owner, content, _identity = publication_case
+        target = content
+        deep_root = tmp_path / ("deep-" + "x" * 100)
+        if deep:
+            target = deep_root / ("y" * 100) / "content"
+            extended = Path("\\\\?\\" + str(target))
+            extended.parent.mkdir(parents=True)
+            shutil.copytree(content, extended)
+            assert len(str(target / "scripts" / "install.ps1")) > 260
+        else:
+            extended = Path("\\\\?\\" + str(content.resolve()))
+            assert os.path.samefile(extended, content)
+        selected = target if spelling == "ordinary" else extended
+        settled = False
+        try:
+            with admitted(driver, root, owner, content, monkeypatch) as (governance, _lease):
+                with driver.runtime.retention_custody(root, slot.name, payload_hash="candidate") as (_slot, descriptor):
+                    transaction = driver._publish_helpers(
+                        governance, {"shell": "ps1", "executable": executable, "scope": scope},
+                        selected, slot, descriptor, timeout=CALLBACK_TIMEOUT,
+                        base_python=Path(sys._base_executable),
+                    )
+                    transaction.verify()
+                    transaction.keep()
+                    settled = True
+                for name in ("resolve-runtime.sh", "resolve-runtime.ps1"):
+                    assert (root / "bin" / name).read_bytes() == (content / "scripts" / name).read_bytes()
+                if scope == "wrappers":
+                    assert (root / "bin" / "session-conduct.ps1").read_bytes() == (
+                        content / "scripts" / "session-conduct.ps1"
+                    ).read_bytes()
+                    global_command = tmp_path / "home" / ".local" / "bin" / "agent-worktrees.ps1"
+                    if governance.context:
+                        assert not global_command.exists()
+                    else:
+                        assert global_command.read_bytes() == (content / "bin" / "agent-worktrees.ps1").read_bytes()
+        finally:
+            if deep and settled:
+                shutil.rmtree(Path("\\\\?\\" + str(deep_root)))
+
+    @pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
+    def test_callback_rejects_other_content(self, publication_case, monkeypatch, tmp_path):
+        driver, root, _slot, _owner, content, _identity = publication_case
+        other = tmp_path / "other"
+        other.mkdir()
+        monkeypatch.setattr(driver, "helper_publication_plan", lambda *_args: {
+            "root": str(root), "content": str(content),
+        })
+        with pytest.raises(driver.InstallationRefused, match="content root differs"):
+            driver.main([
+                "--root", str(root), "--plugin", str(other),
+                "--inspect-helper-publication", str(tmp_path / "plan"),
+                "--publication-digest", "a" * 64,
+            ])
 
 
 def test_manifest_binding_preserves_selected_installation_mode(publication_case, monkeypatch):
@@ -533,6 +632,7 @@ def test_actual_native_callback_preserves_owner_and_selected_runtime(
 
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("publication_case", ["legacy"], indirect=True)
+@pytest.mark.timeout(90)
 def test_native_callback_retains_project_only_source(
     publication_case, monkeypatch, shell, executable,
 ):
@@ -566,7 +666,7 @@ def test_native_callback_retains_project_only_source(
         ) as (_slot, descriptor):
             transaction = driver._publish_helpers(
                 governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
-                content, slot, descriptor, timeout=20,
+                content, slot, descriptor, timeout=CALLBACK_TIMEOUT,
                 base_python=Path(sys._base_executable),
             )
             transaction.keep()
@@ -577,6 +677,7 @@ def test_native_callback_retains_project_only_source(
 
 @pytest.mark.parametrize(("shell", "executable"), native_hosts())
 @pytest.mark.parametrize("fault", ["owner", "stale-owner", "governance", "token"])
+@pytest.mark.timeout(90)
 def test_actual_callback_rejects_changed_authority(
     publication_case, monkeypatch, shell, executable, fault,
 ):
@@ -617,7 +718,8 @@ def test_actual_callback_rejects_changed_authority(
             with pytest.raises(subprocess.CalledProcessError) as caught:
                 driver._publish_helpers(
                     governance, {"shell": shell, "executable": executable, "scope": "resolvers"},
-                    content, slot, descriptor, timeout=20, base_python=Path(sys._base_executable),
+                    content, slot, descriptor, timeout=CALLBACK_TIMEOUT,
+                    base_python=Path(sys._base_executable),
                 )
             diagnostic = " ".join(caught.value.stderr.casefold().split())
             expected = {

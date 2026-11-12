@@ -1642,15 +1642,22 @@ def test_toolchain_invalid_or_expired_budget_refuses_before_effects(tmp_path, mo
     assert not (tmp_path / "toolchain").exists()
 
 
-def test_toolchain_bounded_public_discovery_is_explicitly_unavailable(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        btl, "resolve_public_source", lambda *a: pytest.fail("unbounded public discovery ran"),
-    )
-    with pytest.raises(bpa.ArtifactBuildError, match="deadline-bound public"):
+def test_toolchain_public_discovery_retains_caller_budget_before_construction(tmp_path, monkeypatch):
+    deadline = time.monotonic() + 10
+
+    def resolve(packages, age, **options):
+        assert packages == btl._LOCKED_TOOLCHAIN_PACKAGES
+        assert age == 7
+        assert options == {"deadline": deadline}
+        raise bpa.ArtifactBuildError("bounded metadata discovery failed")
+
+    monkeypatch.setattr(btl, "resolve_public_source", resolve)
+    with pytest.raises(bpa.ArtifactBuildError, match="bounded metadata discovery failed"):
         btl.resolve_toolchain_lock(
             tmp_path / "toolchain", source_policy="seasoned-public",
-            deadline=time.monotonic() + 10,
+            deadline=deadline,
         )
+    assert not (tmp_path / "toolchain").exists()
 
 
 @pytest.mark.parametrize("expire_after", [None, "venv", "install", "versions"])

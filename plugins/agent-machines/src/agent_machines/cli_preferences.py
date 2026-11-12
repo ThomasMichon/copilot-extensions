@@ -40,6 +40,23 @@ def add_parser(subparsers) -> None:
         else:
             parser.add_argument("--output", type=Path, required=True, help="exact local publication document")
         parser.set_defaults(func=run_exchange)
+    carrier = commands.add_parser(
+        "carrier", help="explicit exchange through a configured local OneDrive replica", allow_abbrev=False,
+    )
+    operations = carrier.add_subparsers(dest="carrier_operation", required=True)
+    for name in ("receive", "publish"):
+        parser = operations.add_parser(name, allow_abbrev=False)
+        parser.add_argument("--state-dir", type=Path, required=True, help="local policy and carrier.json")
+        parser.add_argument("--apply", action="store_true", help="confirm local exchange, not native adoption")
+        parser.add_argument("--expect", default="")
+        if name == "publish":
+            parser.add_argument("--input", type=Path, required=True, help="complete locally authored snapshot")
+        else:
+            parser.add_argument("--machine", required=True)
+            parser.add_argument("--harness", required=True)
+            parser.add_argument("--local-overrides", type=Path)
+            parser.add_argument("--full-snapshot", action="store_true")
+        parser.set_defaults(func=run_carrier)
     parser = commands.add_parser("copilot", help="preview or adopt accepted Copilot scalar floors")
     parser.add_argument("--state-dir", type=Path, required=True, help="local accepted state and policy")
     parser.add_argument("--local-overrides", type=Path)
@@ -54,6 +71,29 @@ def add_parser(subparsers) -> None:
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--expect", default="")
     parser.set_defaults(func=run_telemetry)
+    parser = commands.add_parser(
+        "repositories", help="read accepted relationship defaults without native effects", allow_abbrev=False,
+    )
+    parser.add_argument("--state-dir", type=Path, required=True)
+    parser.add_argument("--local-overrides", type=Path)
+    parser.add_argument("--machine", required=True, help="native caller's logical execution identity")
+    parser.add_argument("--harness", required=True, help="native caller's canonical repository identity")
+    parser.set_defaults(func=run_repositories)
+
+
+def run_repositories(args) -> int:
+    from .preference_repositories import project
+
+    try:
+        result = project(
+            args.state_dir, machine=args.machine, harness=args.harness, local=args.local_overrides,
+        )
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False))
+        return 0
+    except (preferences.PreferenceError, OSError) as error:
+        reason = str(error) if isinstance(error, preferences.PreferenceError) else "preference-input-unavailable"
+        print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
+        return 2
 
 
 def run_preview(args) -> int:
@@ -94,6 +134,38 @@ def run_exchange(args) -> int:
     except (preferences.PreferenceError, OSError, TimeoutError) as error:
         reason = str(error) if isinstance(error, preferences.PreferenceError) else "exchange-unavailable"
         print(json.dumps({"ok": False, "error": reason}), file=sys.stderr)
+        return 2
+
+
+def run_carrier(args) -> int:
+    from .cli_health import _silence_failed_stdout
+    from .preference_carrier import exchange
+
+    result = None
+    try:
+        fields = (
+            {"source": args.input} if args.carrier_operation == "publish"
+            else {
+                "machine": args.machine, "harness": args.harness,
+                "local": args.local_overrides, "full_snapshot": args.full_snapshot,
+            }
+        )
+        result = exchange(
+            args.carrier_operation, state=args.state_dir, apply=args.apply, expected=args.expect, **fields,
+        )
+        print(json.dumps(result, separators=(",", ":"), allow_nan=False), flush=True)
+        return 0 if result["eligible"] else 1
+    except (preferences.PreferenceError, OSError, TimeoutError) as error:
+        if result is not None and isinstance(error, OSError):
+            _silence_failed_stdout()
+        reason = (
+            "response-output-unavailable" if result is not None
+            else str(error) if isinstance(error, preferences.PreferenceError) else "carrier-exchange-unavailable"
+        )
+        print(json.dumps({
+            "ok": False, "error": reason, "applied": None if args.apply else False,
+            "configuration_applied": False, "binding_changed": False, "peer_receipt": "not-observed",
+        }), file=sys.stderr)
         return 2
 
 

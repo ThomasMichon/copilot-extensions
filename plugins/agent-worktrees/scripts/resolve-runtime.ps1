@@ -154,6 +154,27 @@ function _Aw-TrySlot([string]$ver) {
   return $null
 }
 
+function _Aw-ReadSelector([string]$path) {
+  if ($PSVersionTable.PSVersion.Major -ge 6 -and -not $IsWindows) {
+    try { return ([IO.File]::ReadAllText($path)).Trim() } catch { return '' }
+  }
+  $stream = $null
+  $reader = $null
+  try {
+    $share = [IO.FileShare]([IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read, $share)
+    $reader = [IO.StreamReader]::new($stream, [Text.Encoding]::UTF8, $true)
+    return $reader.ReadToEnd().Trim()
+  } catch {
+    $cause = $_.Exception
+    while ($cause.InnerException) { $cause = $cause.InnerException }
+    if ($cause -is [IO.FileNotFoundException] -or $cause -is [IO.DirectoryNotFoundException]) { return '' }
+    throw
+  } finally {
+    if ($reader) { $reader.Dispose() } elseif ($stream) { $stream.Dispose() }
+  }
+}
+
 function _Aw-VersionKey([string]$ver) {
   $packageVersion = $ver -creplace '[+.]repair\.[0-9a-f]{32}$', ''
   if ($packageVersion -cmatch '^(\d+)\.(\d+)\.(\d+)(?:[.-]dev(\d+))?(?:\+[a-z0-9][a-z0-9.-]*)?$') {
@@ -175,8 +196,7 @@ function _Aw-VersionKey([string]$ver) {
 
 # Tier 1: the `current-version` marker (source of truth; atomically written).
 _Aw-WriteBootTrace 'resolver-marker-start' 'resolver' 'current-version'
-$_awv = ''
-try { $_awv = ([IO.File]::ReadAllText((Join-Path $_awr 'current-version'))).Trim() } catch {}
+$_awv = _Aw-ReadSelector (Join-Path $_awr 'current-version')
 if ($_awv) { $AwPy = _Aw-TrySlot $_awv }
 if ($AwPy) {
   $_awTraceSource = 'current-version'
@@ -190,8 +210,7 @@ if ($AwPy) {
 # (`last-known-good`), preferred over a newest-slot guess. Read only here.
 if (-not $AwPy) {
   _Aw-WriteBootTrace 'resolver-marker-start' 'resolver' 'last-known-good'
-  $_awlkg = ''
-  try { $_awlkg = ([IO.File]::ReadAllText((Join-Path $_awr 'last-known-good'))).Trim() } catch {}
+  $_awlkg = _Aw-ReadSelector (Join-Path $_awr 'last-known-good')
   if ($_awlkg) { $AwPy = _Aw-TrySlot $_awlkg }
   if ($AwPy) {
     $_awTraceSource = 'last-known-good'
@@ -205,8 +224,9 @@ if (-not $AwPy) {
 # Tier 3: true first-run -> newest complete installed slot.
 if (-not $AwPy) {
   $_awSlots = @(Get-ChildItem (Join-Path $_awr 'versions') -Directory -ErrorAction SilentlyContinue)
-  if (@($_awSlots | Where-Object { $_.Name -cmatch '[+.]source\.' }).Count) {
-    [Console]::Error.WriteLine('Source-qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered source fallback')
+  if (@($_awSlots | Where-Object { $_.Name -cmatch '[+.]source\.|\.profile\.[0-9a-f]{16}(?:[.+]repair\.[0-9a-f]{32})?$' }).Count) {
+    $_awKind = if (@($_awSlots | Where-Object { $_.Name -cmatch '[+.]source\.' }).Count) { 'source' } else { 'profile' }
+    [Console]::Error.WriteLine("Qualified runtime recovery requires an exact current-version or last-known-good selector; refusing unordered $_awKind fallback")
   } else {
     $AwPy = $_awSlots |
       Sort-Object { _Aw-VersionKey $_.Name } |

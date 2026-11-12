@@ -519,13 +519,19 @@ def augment_session_message(
     session_id: str | None,
     plugin_related_anchors: list[str] | None = None,
 ) -> str:
-    """Append a generated-briefings pointer to an existing session message.
+    """Append agenda guidance and a generated-briefings pointer to a session message.
+
+    ``session_id`` comes from the hook payload, never the process environment,
+    which in the resident belongs to whichever session spawned it.
 
     Never raises and never drops ``message`` -- a failure anywhere in
     briefing generation degrades silently to the unmodified message, matching
     the related-repo-briefing vision's "fail toward the existing terse line,
     never toward silence or block" behavior.
     """
+    from .session_context import with_agenda_guidance
+
+    message = with_agenda_guidance(message, config, record, session_id=session_id or None)
     try:
         names = write_related_briefings(
             config, record, cwd=cwd, session_id=session_id,

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sqlite3
 import subprocess
 import threading
@@ -24,6 +25,9 @@ CONTRACT_VERSION = 1
 READ_ACTION = "worktrees-read"
 CAPABILITY = "worktrees-current-v1"
 _DEMAND_LINGER_SECONDS = 30.0
+_FRESHNESS_FLOOR_SECONDS = 45.0
+_CHANGED_PATH_LIMIT = 256
+_CHANGED_RETRY_SWEEPS = 3
 _FIELDS = frozenset(
     {
         "contract_version",
@@ -35,6 +39,7 @@ _FIELDS = frozenset(
         "include_missing",
         "bootstrap",
         "passive",
+        "refresh_id",
     }
 )
 
@@ -63,7 +68,21 @@ def request_selection(payload: dict) -> tuple[str, dict]:
     Selection(**selection)
     if selection["worktree_id"] is not None and selection["codename"] is not None:
         raise ProjectionError("current-roster selectors are mutually exclusive")
+    if "refresh_id" in payload:
+        refresh_id = payload["refresh_id"]
+        if (
+            not isinstance(refresh_id, str) or len(refresh_id) != 32
+            or any(c not in "0123456789abcdef" for c in refresh_id)
+            or selection["worktree_id"] is None
+            or payload.get("passive") is True or payload.get("bootstrap") is True
+        ):
+            raise ProjectionError("point refresh requires an exact selection and a valid request ID")
     return project, selection
+
+
+def freshness_bound_for(interval: float) -> float:
+    """How long a project's last publication may prove a passive read current."""
+    return max(_FRESHNESS_FLOOR_SECONDS, 3.0 * float(interval))
 
 
 def owner_generation(db_path: Path) -> str | None:
@@ -99,7 +118,7 @@ class WorktreesRuntime:
     """No request callback loads records or waits for the owner's state lock."""
 
     @classmethod
-    def for_monitor(cls, wake, admitted, context):
+    def for_monitor(cls, wake, admitted, context, *, interval: float = 30.0):
         import os
 
         from . import status_monitor_cutover, status_monitor_runtime
@@ -113,11 +132,12 @@ class WorktreesRuntime:
             hook_facts=HookFactsPublisher(
                 root, PROCESS_GENERATION, project_root=cfg.project_dir, context=context,
             ),
+            freshness_bound=freshness_bound_for(interval),
         )
 
     def __init__(
         self, db_path: Path, *, wake=None, now=time.monotonic, elected=None, admitted=None,
-        hook_facts=None,
+        hook_facts=None, freshness_bound: float = freshness_bound_for(30.0),
     ) -> None:
         from .worktrees_feed import WorktreesFeed
 
@@ -131,6 +151,15 @@ class WorktreesRuntime:
         self._publication_errors: dict[str, str] = {}
         self._demand: dict[str, float] = {}
         self._unready_demand: set[str] = set()
+        # Monotonic start of each project's last successful publication by this
+        # resident. Passive reads compare it with the bound at request time, so
+        # a hung sweep loop ages out instead of vouching for an old roster.
+        self._refreshed: dict[str, float] = {}
+        self._freshness_bound = float(freshness_bound)
+        self._changed_paths: set[str] = set()
+        self._changed_all = False
+        # Changed projects awaiting a successful publication -> sweeps taken.
+        self._changed_pending: dict[str, int] = {}
         self._wake = wake
         self._now = now
         self._elected = elected
@@ -146,6 +175,9 @@ class WorktreesRuntime:
         from .owner_observation_native_intake import NativeIntake
 
         self.native_observations = NativeIntake(self)
+        from .worktrees_refresh import RefreshRequests
+
+        self.refreshes = RefreshRequests()
 
     @property
     def _read_elected(self):
@@ -189,6 +221,10 @@ class WorktreesRuntime:
                 self._reason = "ready"
                 self._error = None
                 self._unready_demand.clear()
+                # A (re)elected resident proves freshness only by its own publishes.
+                self._refreshed.clear()
+                self._changed_pending.clear()
+                self.refreshes.clear()
             self.feed.activate()
             self.agendas.activate()
             self.observations.activate()
@@ -202,6 +238,8 @@ class WorktreesRuntime:
         with self._lock:
             self._admitting = False
             self._reason = reason
+            self._changed_pending.clear()
+            self.refreshes.clear()
         self.feed.close(reason)
         self.native_observations.close_admission()
         self.agendas.close(reason)
@@ -211,11 +249,12 @@ class WorktreesRuntime:
 
     def health(self) -> dict:
         from .worktrees_feed import BOOTSTRAP_CAPABILITY, FEED_CAPABILITY
+        from .worktrees_refresh import CAPABILITY as REFRESH_CAPABILITY
 
         with self._lock:
             result = {
                 "capabilities": [
-                    CAPABILITY, FEED_CAPABILITY, BOOTSTRAP_CAPABILITY,
+                    CAPABILITY, FEED_CAPABILITY, BOOTSTRAP_CAPABILITY, REFRESH_CAPABILITY,
                     observations.CAPABILITY, "picker-bootstrap-v1",
                     "worktree-agendas-v1",
                     "worktree-agendas-v2",
@@ -372,6 +411,19 @@ class WorktreesRuntime:
             if demand:
                 self._record_demand_locked(project)
             publication_error = self._publication_errors.get(project)
+            refreshed_at = self._refreshed.get(project)
+            refresh_receipt = None
+            if "refresh_id" in payload:
+                try:
+                    refresh_receipt = self.refreshes.request(
+                        project, Selection(**selection), payload["refresh_id"],
+                    )
+                except ProjectionError as exc:
+                    return self._failure(getattr(exc, "code", "invalid-request"), str(exc))
+                if refresh_receipt is None:
+                    if self._wake is not None:
+                        self._wake.set()
+                    return self._failure("unready", "requested point refresh is awaiting publication")
         try:
             result = self.store.read(
                 project, **selection, contract_version=payload["contract_version"],
@@ -385,11 +437,48 @@ class WorktreesRuntime:
         except ProjectionError as exc:
             return self._failure("invalid-request", str(exc))
         result = {"ok": True, "contract_version": payload["contract_version"], **result}
+        if refresh_receipt is not None:
+            from .worktrees_refresh import receipt_matches
+
+            if not receipt_matches(refresh_receipt, result):
+                return self._failure(
+                    "refresh-unavailable", "Point-refresh receipt does not match the selected record",
+                )
+            result["point_refresh"] = refresh_receipt
         if payload["contract_version"] == observations.VERSION:
             result["project"] = project
         if publication_error is not None:
             result["availability"] = {"status": "stale", "reason": publication_error}
+        if not demand:
+            self._label_passive_freshness(result, refreshed_at)
         return result
+
+    def _label_passive_freshness(self, result: dict, refreshed_at: float | None) -> None:
+        """Prove a demand-free read current only from this resident's recent publish.
+
+        Passive readers renew no demand, so a project whose demand lapsed (or
+        whose producer hung after publishing) keeps serving its last rows. The
+        age is measured here, on the reader's thread, so it grows even when the
+        sweep loop makes no progress.
+        """
+        bound = self._freshness_bound
+        age = None if refreshed_at is None else max(0.0, self._now() - refreshed_at)
+        result["projection"] = {
+            **result["projection"],
+            "freshness": {
+                "refreshed_age_s": None if age is None else round(age, 3),
+                "bound_s": bound,
+            },
+        }
+        if "availability" in result:
+            return
+        if age is None:
+            reason = "current roster has not been refreshed by this resident"
+        elif age > bound:
+            reason = f"current roster refresh overdue ({age:.0f}s > {bound:.0f}s)"
+        else:
+            return
+        result["availability"] = {"status": "stale", "reason": reason}
 
     def _failure(self, code: str, message: str) -> dict:
         return {
@@ -410,8 +499,24 @@ class WorktreesRuntime:
             | self.observations.projects()
         )
 
-    def publish(self, project: str, rows, *, observed_at: float, record_heads=None) -> None:
+    def clock(self) -> float:
+        """This runtime's monotonic clock, for a producer to mark when it
+        starts collecting the facts it will :meth:`publish`."""
+        return self._now()
+
+    def publish(
+        self, project: str, rows, *, observed_at: float, record_heads=None,
+        collected_from: float | None = None,
+        refresh_requests=(),
+    ) -> None:
         project = _identity(project, name="project")
+        started = self._now()
+        if collected_from is not None:
+            # Freshness ages from when collection began (a :meth:`clock`
+            # reading), so a stalled collection cannot publish at age zero.
+            if type(collected_from) not in (int, float) or not math.isfinite(collected_from):
+                raise ValueError("collected_from must be a finite clock reading")
+            started = min(started, collected_from)
         with self._activation_lock:
             with self._lock:
                 if not self._admitting:
@@ -437,10 +542,80 @@ class WorktreesRuntime:
                     if self._wake is not None:
                         self._wake.set()
                 raise
-        with self._lock:
-            self._publication_errors.pop(project, None)
-            self._unready_demand.discard(project)
+            # Still under the activation lock: a re-election that clears the
+            # freshness map cannot interleave with this publication's mark.
+            with self._lock:
+                self._publication_errors.pop(project, None)
+                self._unready_demand.discard(project)
+                self._refreshed[project] = started
+                self._changed_pending.pop(project, None)
+                if refresh_requests:
+                    self.refreshes.complete(project, refresh_requests, read=self.store.read)
         self.feed.changed(project)
+
+    def note_changed(self, path: str | None) -> None:
+        """Queue a worktree state-change event for the next sweep's publish set.
+
+        Unlike a read, this records no project demand, so events alone never
+        keep an idle resident alive; they only make the next woken sweep
+        republish the affected project. ``None`` (or overflow) means "every
+        project this resident publishes".
+        """
+        with self._lock:
+            if not self._admitting:
+                return
+            key = None if path is None else str(path)
+            # Only a new distinct path past capacity overflows; duplicates are no-ops.
+            if key is None or (
+                key not in self._changed_paths
+                and len(self._changed_paths) >= _CHANGED_PATH_LIMIT
+            ):
+                self._changed_all = True
+                self._changed_paths.clear()
+            elif not self._changed_all:
+                self._changed_paths.add(key)
+        if self._wake is not None:
+            self._wake.set()
+
+    def take_changed_projects(self, resolve: Callable[[str], str | None]) -> set[str]:
+        """Return projects with unpublished change events; unresolved paths mean all.
+
+        A changed project stays pending until a publication succeeds, so a
+        sweep that fails or defers before publishing (for example a transient
+        mux-listing failure) does not lose its event. Retries are bounded to
+        ``_CHANGED_RETRY_SWEEPS`` sweeps per event; after that the project
+        simply ages to stale like any unrefreshed roster.
+        """
+        with self._lock:
+            paths, everything = self._changed_paths, self._changed_all
+            self._changed_paths, self._changed_all = set(), False
+            published = set(self._refreshed)
+        projects: set[str] = set()
+        if paths or everything:
+            published |= self.store.published_projects()
+            unresolved = everything
+            for path in () if everything else paths:
+                try:
+                    project = resolve(path)
+                except Exception:
+                    project = None
+                if isinstance(project, str) and project:
+                    projects.add(project)
+                else:
+                    unresolved = True
+            if unresolved:
+                projects |= published
+        with self._lock:
+            if not self._admitting:
+                return set()
+            for project in projects:
+                self._changed_pending[project] = 0
+            for project, sweeps in list(self._changed_pending.items()):
+                if sweeps >= _CHANGED_RETRY_SWEEPS:
+                    del self._changed_pending[project]
+                else:
+                    self._changed_pending[project] = sweeps + 1
+            return set(self._changed_pending)
 
     def publication_failed(self, project: str, error: Exception) -> None:
         project = _identity(project, name="project")

@@ -11,6 +11,47 @@ configuration loading. [`models.py`](../src/agent_bridge/models.py) defines
 [machine-config.md](machine-config.md) is the canonical complete topology,
 adoption, machine identity, legacy roster and source-path reference.
 
+## Windows scheduling (installation-local)
+
+Set `windows_scheduled_task` in the installation's native `config.yaml`:
+
+- `preserve` (default/unset): never create a missing task; leave any existing
+  registration, custom definition and enablement unchanged.
+- `enabled`: provision a missing task. Normal updates retain existing tasks;
+  deliberate definition repair remains `install.ps1 provision`.
+- `absent`: unregister only a task validated as this installation's own.
+  Foreign/ambiguous tasks and removal failures are errors, never force-purged.
+  Task-query permission/CIM failures or an unavailable ScheduledTasks module
+  also refuse retirement; they are not evidence of absence. Default `preserve`
+  remains usable without the module.
+
+This changes the previous default: clean install, first-use provisioning and
+repeat update no longer create logon tasks. On-demand `agent-bridge service
+start` and the installer's native direct-start fallback remain available without
+Task Scheduler, local-account setup or administrative rights. Existing explicit
+`-NonInteractive` / `AGENT_BRIDGE_NONINTERACTIVE` scheduling opt-ins are retained;
+an explicit `absent` selection wins over that compatibility opt-in.
+Automatic bootstrap does not manufacture that opt-in for drift or incomplete
+installs; its windowless PowerShell host is independent of service scheduling.
+
+After editing configuration, `scripts\install.ps1 schedule` reconciles task
+policy alone. With `absent` it does not stop a running daemon, delete runtime
+or state, or change activation/maintenance policy. Install/update/provision
+also reconcile the selection, including content-match fast paths.
+Provision serializes policy reads and task changes with install/update/schedule.
+Self-elevating repair releases that lock before elevation, then re-enters provision
+to recheck current policy, ownership and holds under the lock. Task ownership
+requires the actual PowerShell script operand (including supported conhost
+wrapping), not an owned path forwarded to a foreign script.
+Repair assessment and elevation retain the selected installation's exact task
+name; an available installed task-name binding must agree with that selection.
+
+A disabled existing task retains an independent startup hold: provisioning
+does not enable it, installer startup does not bypass it, and absence refuses to erase
+that intent. Deliberately clear the disabled intent before task retirement;
+absence is not a service-disable switch. Maintenance/automatic-update holds
+retain their existing owner and scope. No replacement supervisor is installed.
+
 ## Files and selectors
 
 The installation's `config.yaml` (legacy standalone `~/.agent-bridge/config.yaml`)
@@ -146,7 +187,9 @@ existing snapshot/cache interval contract. Native `config show`, `config
 validate`, roster reads and spawn paths share the loader; changing files does
 not imply a running service has reloaded. Concurrent writers use
 `config_write.py` locks and compare-before-write behavior; session mode changes
-are preserved or refused on conflict.
+are preserved or refused on conflict. The one-time idle-reaper value migration
+re-reads under that lock, changes only its own setting, and records its marker
+after a successful write.
 
 `auth.yaml`, `active.json`, generation records, PID/process handles, session
 host descriptors, session databases and provider/credential receipts are

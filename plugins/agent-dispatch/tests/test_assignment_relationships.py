@@ -20,6 +20,7 @@ from agent_dispatch.assignment_workspace import AssignmentWorkspace
 from agent_dispatch.client import DispatchClient, DispatchError
 from agent_dispatch.coordinator import create_app
 from agent_dispatch.queue import Status, TaskError, TaskQueue
+from agent_dispatch.queue_spawn_conclusion import CLAIM_HELD_REARM_CAPABILITY
 from agent_dispatch.queue_task_relationships import WRITER
 from agent_dispatch.task_obligations import read_snapshot
 from agent_dispatch.task_relationships import AssignmentSubject
@@ -34,6 +35,10 @@ class GroundOwner:
         self.lose_reply: str | None = None
         self.before_reply: Any = None
         self.queue: TaskQueue | None = None
+        self.standing_supported = True
+
+    def standing_attachment_supported(self) -> bool:
+        return self.standing_supported
 
     def __call__(self, workspace: AssignmentWorkspace, operation: str, payload: dict) -> dict:
         self.calls.append((operation, copy.deepcopy(payload)))
@@ -549,6 +554,222 @@ def test_submission_and_abandonment_keep_responsibility_until_independent_comple
     queue.confirm(task.id)
     assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
     assert next(iter(owner.claims.values()))["closeout"]["relationship_verification"]["retired"]
+
+
+def test_supervisor_settles_exact_relationship_only_after_independent_completion(
+    assignment, independent_readiness,
+):
+    from agent_dispatch.supervisor_relationship_settlement import settle_completed_relationship
+
+    queue, owner, workspace, task = assignment
+    start_managed(queue, workspace, task)
+    (reservation,) = queue.list_reservations(task_id=task.id)
+    supervisor = SimpleNamespace(client=queue)
+    queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
+    submitted = asdict(queue.get(task.id))
+    assert settle_completed_relationship(supervisor, asdict(reservation), submitted)
+    assert queue.task_relationship(task.id)["state"] == "bound"
+    queue.confirm(task.id)
+    completed = asdict(queue.get(task.id))
+    assert settle_completed_relationship(supervisor, asdict(reservation), completed)
+    assert queue.task_relationship(task.id)["state"] == "closed"
+    claim_record = next(iter(owner.claims.values()))
+    assert claim_record["closeout"]["relationship_verification"]["retired"]
+    assert settle_completed_relationship(supervisor, asdict(reservation), completed)
+    assert len(owner.claims) == 1
+
+
+def _settled_retired_attempt(queue, workspace, task, reason="outstanding-obligations"):
+    start_managed(queue, workspace, task)
+    (reservation,) = queue.list_reservations(task_id=task.id)
+    queue.complete(task.id, workspace.worker_id, result={"answer": "proposed"})
+    queue.request_spawn_release(
+        reservation.key, disposition="settled",
+        finished_startup_revision=queue.get_reservation(reservation.key).startup_revision,
+    )
+    held_detail = json.dumps({
+        "action": "preserved",
+        "reason": "retired-body-cleanup",
+        "worktree_cleanup": {
+            "state": "held", "attempts": 1,
+            "outcome": {"action": "preserved", "reason": reason},
+        },
+    })
+    return reservation, held_detail
+
+
+def _rearm_supervisor(queue, task, health, get=None):
+    from agent_dispatch.supervisor import Supervisor
+
+    return SimpleNamespace(
+        client=SimpleNamespace(
+            health=lambda: health,
+            get=get or (lambda task_id: asdict(queue.get(task_id))),
+            reconcile_task_relationship=queue.reconcile_task_relationship,
+        ),
+        _pool_reservations=lambda **filters: [
+            asdict(r) for r in queue.list_reservations(task_id=task.id)
+            if r.conclusion_state == filters["conclusion_state"]
+        ],
+        _conclusion_retry_payload=Supervisor._conclusion_retry_payload,
+        _conclusion_client=queue,
+        _matches_pool=lambda _task: True,
+    )
+
+
+@pytest.mark.parametrize("claimed", [False, True])
+def test_claim_held_retired_cleanup_rearms_only_after_confirmation(
+    assignment, independent_readiness, claimed,
+):
+    from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
+
+    queue, owner, workspace, task = assignment
+    reservation, held_detail = _settled_retired_attempt(queue, workspace, task)
+    if claimed:
+        queue.retire_spawn(
+            reservation.key, exact_absence=True, conclusion_state="pending",
+            conclusion_detail=json.dumps({"action": "pending", "reason": "retired-body-cleanup"}),
+        )
+        _, granted, token = queue.claim_spawn_conclusion_retry(reservation.key)
+        assert granted and token
+        queue.record_spawn_conclusion(
+            reservation.key, conclusion_state="held", conclusion_detail=held_detail,
+            claim_token=token,
+        )
+        assert queue.get_reservation(reservation.key).cleanup_claim_token == token
+    else:
+        queue.retire_spawn(
+            reservation.key, exact_absence=True, conclusion_state="held",
+            conclusion_detail=held_detail,
+        )
+    supervisor = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1})
+
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert queue.get_reservation(reservation.key).conclusion_state == "held"
+    assert queue.task_relationship(task.id)["state"] == "bound"
+
+    queue.confirm(task.id)
+    assert rearm_claim_held_cleanup(supervisor) == 1
+    assert queue.task_relationship(task.id)["state"] == "closed"
+    rearmed = queue.get_reservation(reservation.key)
+    cleanup = json.loads(rearmed.conclusion_detail)["worktree_cleanup"]
+    assert rearmed.conclusion_state == "pending"
+    assert (cleanup["state"], cleanup["attempts"], cleanup["next_attempt_at"]) == ("pending", 0, 0)
+    assert not rearmed.cleanup_claim_token
+    _, granted, _ = queue.claim_spawn_conclusion_retry(reservation.key)
+    assert granted
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert len(owner.claims) == 1
+
+
+@pytest.mark.parametrize("unsettled", ["other-hold", "relationship-bound"])
+def test_queue_rearm_derives_payload_and_refuses_unqualified_holds(
+    assignment, independent_readiness, unsettled,
+):
+    queue, owner, workspace, task = assignment
+    reason = "dirty-worktree" if unsettled == "other-hold" else "outstanding-obligations"
+    reservation, held_detail = _settled_retired_attempt(queue, workspace, task, reason)
+    queue.retire_spawn(
+        reservation.key, exact_absence=True, conclusion_state="held",
+        conclusion_detail=held_detail,
+    )
+    queue.confirm(task.id)
+    if unsettled == "other-hold":
+        assert queue.reconcile_task_relationship(task.id)["state"] == "closed"
+        match = "not held only for a task claim"
+    else:
+        assert queue.task_relationship(task.id)["state"] == "bound"
+        match = "task relationship is not settled"
+
+    with pytest.raises(TaskError, match=match):
+        queue.rearm_claim_held_conclusion(reservation.key, expected_detail=held_detail)
+    held = queue.get_reservation(reservation.key)
+    assert (held.conclusion_state, held.conclusion_detail) == ("held", held_detail)
+
+
+def test_claim_held_rearm_waits_for_coordinator_capability(assignment, independent_readiness):
+    from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
+
+    queue, owner, workspace, task = assignment
+    reservation, held_detail = _settled_retired_attempt(queue, workspace, task)
+    queue.retire_spawn(
+        reservation.key, exact_absence=True, conclusion_state="held",
+        conclusion_detail=held_detail,
+    )
+    queue.confirm(task.id)
+
+    def unexpected_get(_task_id):
+        raise AssertionError("settled a relationship the coordinator cannot re-arm")
+
+    legacy = _rearm_supervisor(queue, task, {"task_relationships": {"version": 1}}, unexpected_get)
+    assert rearm_claim_held_cleanup(legacy) == 0
+    assert queue.get_reservation(reservation.key).conclusion_state == "held"
+    assert queue.task_relationship(task.id)["state"] == "bound"
+
+    upgraded = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1})
+    assert rearm_claim_held_cleanup(upgraded) == 1
+    assert queue.get_reservation(reservation.key).conclusion_state == "pending"
+
+
+def test_claim_held_rearm_tolerates_coordinator_transport_failures(
+    assignment, independent_readiness,
+):
+    from agent_dispatch.supervisor_relationship_settlement import rearm_claim_held_cleanup
+
+    queue, owner, workspace, task = assignment
+    reservation, held_detail = _settled_retired_attempt(queue, workspace, task)
+    queue.retire_spawn(
+        reservation.key, exact_absence=True, conclusion_state="held",
+        conclusion_detail=held_detail,
+    )
+    queue.confirm(task.id)
+
+    def timed_out(*_args, **_kwargs):
+        raise httpx.ReadTimeout("coordinator timed out")
+
+    supervisor = _rearm_supervisor(queue, task, {CLAIM_HELD_REARM_CAPABILITY: 1}, timed_out)
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    supervisor.client.health = timed_out
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert queue.get_reservation(reservation.key).conclusion_state == "held"
+
+
+def test_claim_held_rearm_bounds_attempts_and_rotates_past_failures():
+    from agent_dispatch.client import DispatchError
+    from agent_dispatch.supervisor import Supervisor
+    from agent_dispatch.supervisor_relationship_settlement import (
+        _REARM_PER_CYCLE, rearm_claim_held_cleanup,
+    )
+
+    detail = json.dumps({
+        "worktree_cleanup": {
+            "state": "held",
+            "outcome": {"action": "preserved", "reason": "outstanding-obligations"},
+        },
+    })
+    rows = [
+        {"key": f"r{i:02d}", "task_id": f"t{i:02d}", "task_relationship_event_id": i,
+         "conclusion_detail": detail}
+        for i in range(_REARM_PER_CYCLE + 3)
+    ]
+    reads = []
+
+    def failing_get(task_id):
+        reads.append(task_id)
+        raise DispatchError(503, "coordinator unavailable")
+
+    supervisor = SimpleNamespace(
+        client=SimpleNamespace(get=failing_get, health=lambda: {CLAIM_HELD_REARM_CAPABILITY: 1}),
+        _pool_reservations=lambda **_filters: list(reversed(rows)),
+        _conclusion_retry_payload=Supervisor._conclusion_retry_payload,
+    )
+
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert reads == [f"t{i:02d}" for i in range(_REARM_PER_CYCLE)]
+    reads.clear()
+    assert rearm_claim_held_cleanup(supervisor) == 0
+    assert reads[:3] == [f"t{i:02d}" for i in range(_REARM_PER_CYCLE, _REARM_PER_CYCLE + 3)]
+    assert len(reads) == _REARM_PER_CYCLE
 
 
 def test_legacy_or_forged_writer_answer_never_admits_execution(assignment):

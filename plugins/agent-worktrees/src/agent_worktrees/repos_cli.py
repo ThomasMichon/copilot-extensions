@@ -61,8 +61,11 @@ def _repos_usage() -> None:
     print("                                      Read-only selected GitHub account and API observations")
     print("  registration inspect --anchor PATH --default-name NAME")
     print("                                      Read-only unique project/exposure inspection (versioned JSON)")
+    print("  registration preflight --repository NAME")
+    print("                                      Read-only registration/provider/account/server-policy observations")
     print("  account [list|set <owner> <login>|unset <owner>]")
     print("                                      Decoupled owner->gh-login map (account_map)")
+    print("  account default [<login>|--unset]   Preferred GitHub identity; exact repo overrides win")
     print("  account-for [owner|owner/name|name] Print the resolved gh login (exit 1 if none)")
     print("  copilot-account-for <name>          Print the intended Copilot CLI login for a")
     print("     [--json]                         registered repo (exit 1 if none resolved)")
@@ -108,12 +111,17 @@ def _clarify_registration_account(
     from . import git_ops, repos
 
     try:
+        if not explicit_account:
+            entry = repos.read_registry(strict=True).repos.get(name)
+            if entry is not None:
+                explicit_account = entry.account
+                remote = remote or entry.remote
         res = repos.resolve_registration_account(remote, explicit_account)
     except Exception:
         return
 
     if not res.needs_clarify:
-        if res.source in ("account_map", "sibling") and res.login:
+        if res.source in ("account_map", "default") and res.login:
             output.info(f"  account:  {res.login} (via {res.source})")
         return
 
@@ -122,35 +130,40 @@ def _clarify_registration_account(
     interactive = sys.stdin is not None and sys.stdin.isatty()
 
     if not interactive:
-        remedy = f"repos account set {owner} <login>"
+        remedy = "repos account default <login>"
         extra = f"  (authenticated: {', '.join(accounts)})" if accounts else ""
         output.warn(
-            f"'{name}': owner '{owner}' is not an authenticated gh account "
-            f"(likely an org); its gh/CodeSpace ops would use an unusable "
-            f"derived login. Pin one: {remedy}{extra}"
+            f"'{name}': repository owner '{owner}' does not select an operator "
+            f"account. Configure a preferred account: {remedy}; or use "
+            f"'repos add {name} <path> --account <login>' for this repo only.{extra}"
         )
         return
 
     output.warn(
-        f"Repo owner '{owner}' is not an authenticated gh account (likely an "
-        f"org). Which gh account should repos under '{owner}' use?"
+        f"Repository owner '{owner}' is a namespace, not your login. "
+        f"Which gh account should repository '{name}' use?"
     )
     for i, a in enumerate(accounts, 1):
         print(f"    {i}) {a}")
     if accounts:
         print("    (enter a number or a login; blank to skip)")
     try:
-        choice = input(f"  Account for '{owner}': ").strip()
+        choice = input(f"  Account for repository '{name}': ").strip()
     except EOFError:
         choice = ""
     if not choice:
-        output.warn(f"Skipped -- set later with: repos account set {owner} <login>")
+        output.warn(f"Skipped -- set later with: repos add {name} <path> --account <login>")
         return
     if choice.isdigit() and accounts:
         idx = int(choice) - 1
         if 0 <= idx < len(accounts):
             choice = accounts[idx]
-    repos.set_account_map(owner, choice)
+    registry = repos.read_registry(strict=True)
+    if name not in registry.repos:
+        output.warn(f"Repository '{name}' is not registered; account choice was not saved.")
+        return
+    registry.repos[name].account = choice
+    repos.write_registry(registry)
     if path and repos.is_https_remote(remote):
         try:
             host = repos.derive_https_host(remote) or "github.com"
@@ -678,7 +691,8 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
                 "(repo inferred from the active project when omitted)"
             )
             return 1
-        if shutil.which("gh") is None:
+        executable = shutil.which("gh")
+        if executable is None:
             output.err("gh CLI not found on PATH")
             return 1
         if repos.is_unresolved_registered_target(target):
@@ -696,54 +710,12 @@ def cmd_repos_dispatch(argv: list[str]) -> int:
             return 1
         if login and not injected:
             output.warn(f"could not mint a gh token for '{login}'; using ambient auth")
-        return subprocess.run(["gh", *gh_args], env=env).returncode
+        return subprocess.run([executable, *gh_args], env=env).returncode
 
     if sub == "account":
-        acsub = rest[0] if rest else "list"
-        acrest = rest[1:] if rest else []
-        if acsub == "list":
-            json_out = "--json" in acrest
-            if json_out:
-                from .repo_accounts import resolution_snapshot
+        from .repo_accounts import command_account
 
-                if "--with-resolutions" in acrest:
-                    try:
-                        payload = resolution_snapshot()
-                    except repos.RepositoryResolutionError as exc:
-                        return output._json_error(
-                            f"Account resolution metadata could not be read: {exc}",
-                            exit_code=2,
-                        )
-                else:
-                    payload = {"account_map": dict(repos.read_registry().account_map)}
-                output._json_output(payload)
-                return 0
-            registry = repos.read_registry()
-            if not registry.account_map:
-                print("No account_map entries.")
-                print("Add one with: repos account set <owner> <login>")
-                return 0
-            output.header("Account map (owner -> gh login)")
-            for owner in sorted(registry.account_map.keys()):
-                print(f"  {owner:<24} -> {registry.account_map[owner]}")
-            return 0
-        if acsub == "set":
-            if len(acrest) < 2:
-                output.err("Usage: repos account set <owner> <login>")
-                return 1
-            repos.set_account_map(acrest[0], acrest[1])
-            return 0
-        if acsub in ("unset", "remove", "rm"):
-            if not acrest:
-                output.err("Usage: repos account unset <owner>")
-                return 1
-            if repos.unset_account_map(acrest[0]):
-                return 0
-            output.err(f"No account_map entry for '{acrest[0]}'")
-            return 1
-        output.err(f"Unknown 'repos account' subcommand: {acsub}")
-        output.info("Usage: repos account [list|set <owner> <login>|unset <owner>]")
-        return 1
+        return command_account(rest)
 
     if sub == "allow-edits":
         from . import allow_edits
@@ -878,7 +850,7 @@ def _accounts_usage() -> None:
     print("  remove <login>                      Remove an account entry")
     print()
     print("Examples:")
-    print(f"  {project} accounts set ThomasMichon --scopes codespace,repo,workflow \\")
+    print(f"  {project} accounts set <your-login> --scopes codespace,repo,workflow \\")
     print("      --login-flow 'gh auth login -h github.com'")
     print(f"  {project} accounts list")
 

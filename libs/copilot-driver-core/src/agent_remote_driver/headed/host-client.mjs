@@ -24,6 +24,7 @@ export function createHeadedSession(native, { binding, cwd, nativePid }) {
   let helloResolve;
   let helloReject;
   let helloDone = false;
+  let inputReadiness = false;
   const pending = new Map();
 
   function fail() {
@@ -84,13 +85,13 @@ export function createHeadedSession(native, { binding, cwd, nativePid }) {
     }
   }
 
-  async function request(method, params) {
+  async function request(method, params, timeout = 8_000) {
     if (closed || held || !helloDone || pending.size >= 4) throw unavailable();
     const id = randomUUID();
     let timer;
     const reply = new Promise((resolve, reject) => {
       pending.set(id, { resolve, reject });
-      timer = setTimeout(fail, 8_000);
+      timer = setTimeout(fail, timeout);
       try {
         write("W", Buffer.from(JSON.stringify({ jsonrpc: "2.0", id, method, params }) + "\n"));
       } catch {
@@ -156,13 +157,56 @@ export function createHeadedSession(native, { binding, cwd, nativePid }) {
         !["enqueue", "immediate"].every((mode) => support.modes.includes(mode))) {
       throw unavailable();
     }
+    const readiness = initialized._meta.inputReadiness;
+    if (readiness !== undefined) {
+      if (readiness?.version !== 1 || readiness.method !== "copilot-driver/input-status") {
+        throw unavailable();
+      }
+      inputReadiness = true;
+    }
+  }
+
+  function requireBinding() {
+    if (closed || held || native.sessionId !== binding.sessionId) {
+      fail();
+      throw unavailable();
+    }
   }
 
   async function controlled() {
-    if (closed || held || native.sessionId !== binding.sessionId) throw unavailable();
+    requireBinding();
     connection ??= connect().catch(() => { fail(); throw unavailable(); });
-    await connection;
-    if (closed || held || native.sessionId !== binding.sessionId) throw unavailable();
+    try { await connection; } finally { requireBinding(); }
+  }
+
+  async function readyForInput() {
+    if (!inputReadiness) return;
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      const state = await request(
+        "copilot-driver/input-status", { sessionId: binding.sessionId }, deadline - Date.now(),
+      );
+      if (state?.sessionId !== binding.sessionId ||
+          !["pending", "observed", "not-requested"].includes(state.startupSeed) ||
+          !["pending", "active", "idle-observed", "not-requested"].includes(state.startupTurn) ||
+          !["ready", "pending", "busy", "unavailable"].includes(state.prompt) ||
+          !["ready", "pending", "busy", "unavailable"].includes(state.nativeSend) ||
+          (state.startupSeed === "not-requested") !== (state.startupTurn === "not-requested") ||
+          (state.startupSeed === "pending" && state.startupTurn !== "pending") ||
+          (state.startupSeed === "observed" && !["active", "idle-observed"].includes(state.startupTurn)) ||
+          (state.nativeSend === "ready" && state.startupSeed === "pending") ||
+          (state.prompt === "ready" && ["pending", "active"].includes(state.startupTurn))) {
+        fail();
+        throw unavailable();
+      }
+      if (state.nativeSend === "ready") return;
+      if (state.nativeSend !== "pending") {
+        fail();
+        throw unavailable();
+      }
+      await delay(Math.min(20, Math.max(0, deadline - Date.now())));
+    }
+    throw new Error("Native startup input is not ready; no prompt was dispatched");
   }
 
   return {
@@ -179,12 +223,14 @@ export function createHeadedSession(native, { binding, cwd, nativePid }) {
         throw new Error("Unsupported headed delivery options");
       }
       await controlled();
+      try { await readyForInput(); } finally { requireBinding(); }
       let result;
       try {
         result = await request("copilot-driver/native-send", {
           sessionId: binding.sessionId, prompt: options.prompt, mode: options.mode ?? "enqueue",
           ...(options.displayPrompt === undefined ? {} : { displayPrompt: options.displayPrompt }),
         });
+        requireBinding();
       } catch {
         fail();
         throw unavailable();

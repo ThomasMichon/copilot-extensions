@@ -236,6 +236,8 @@ def test_original_queue_admission_uses_its_own_exact_request_snapshot(boundary, 
     }
     queue = b.relationships.QueueTaskRelationshipsMixin()
     queue._relationship_authority = "local"
+    queue._relationship_writer = b.writer
+    queue.get = lambda ref: SimpleNamespace(kind="task") if ref == b.request["task_id"] else None
     if change == "queue":
         snapshot["queue_identity"] = "d" * 32
     elif change == "authority":
@@ -297,6 +299,8 @@ def test_original_preparation_is_requeried_without_recapturing_another_reservati
 
     queue = b.relationships.QueueTaskRelationshipsMixin()
     queue._relationship_authority = "local"
+    queue._relationship_writer = b.writer
+    queue.get = lambda ref: SimpleNamespace(kind="task") if ref == b.request["task_id"] else None
     queue._connect = lambda: nullcontext(SimpleNamespace(execute=execute))
     b.monkeypatch.setattr(
         sys.modules[f"{PACKAGE}.task_obligations"], "read_snapshot",

@@ -266,6 +266,8 @@ def _binding_inputs(
         if platform not in module.platforms:
             continue
         for purpose, actions in (("readiness", module.readiness), ("installer", module.installer)):
+            if host.readiness_only and purpose != "readiness":
+                continue
             try:
                 argv, executable, content_digest, target_digest = _admit_invocation(
                     actions[platform], platform,
@@ -283,7 +285,7 @@ def _binding_inputs(
         })
         for owner_id, owner in host.bindings.items()
     }
-    return {
+    bound: dict[str, object] = {
         "platform": platform.value,
         "execution": execution,
         "activationDigest": host.activation_digest,
@@ -310,13 +312,18 @@ def _binding_inputs(
                 for item, action in module.readiness.items()
             },
         } for module in modules],
-    }, owners
+    }
+    if host.readiness_only:
+        bound["purpose"] = "required-readiness-only"
+    return bound, owners
 
 
 def _required_modules(host: HostAdmission) -> list[str]:
     if (
         not host.activation_complete or host.refused or host.report.findings
-        or any(owner.refusal for owner in host.bindings.values())
+        or (
+            not host.readiness_only and any(owner.refusal for owner in host.bindings.values())
+        )
     ):
         raise RepairAdmissionError("required selection needs a complete enabled-owner inventory")
     return [
@@ -327,9 +334,9 @@ def _required_modules(host: HostAdmission) -> list[str]:
 
 def _readmit(
     project_root: Path, modules: Sequence[str], platform: Platform, plan_digest: str,
-    home: Path | None, required: bool,
+    home: Path | None, required: bool, *, readiness_only: bool = False,
 ) -> dict[str, OwnerBinding]:
-    fresh = admit_host(project_root, home=home)
+    fresh = admit_host(project_root, home=home, readiness_only=readiness_only)
     fresh_selected = _closure(fresh, _required_modules(fresh) if required else modules, platform)
     fresh_inputs, owners = _binding_inputs(fresh, fresh_selected, platform)
     if digest(fresh_inputs) != plan_digest:
@@ -345,8 +352,13 @@ def repair(
     readiness_timeout: float = 15, installer_timeout: float = 300,
     confirm_restart: str | None = None,
     on_observation: Callable[[list[dict[str, object]]], None] | None = None,
+    readiness_only: bool = False,
 ) -> dict[str, object]:
     """Serialize apply and explicit restart confirmation against durable obligations."""
+    if type(readiness_only) is not bool or (
+        readiness_only and (apply or not required or modules or expected_plan_digest or confirm_restart)
+    ):
+        raise RepairAdmissionError("readiness-only observation requires read-only required selection")
     journal = RestartJournal(home if home is not None else Path.home())
     try:
         if confirm_restart is not None:
@@ -370,6 +382,7 @@ def repair(
                     readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
                     journal=journal,
                     on_observation=on_observation,
+                    readiness_only=readiness_only,
                 )
         journal.load()
         return _repair(
@@ -379,6 +392,7 @@ def repair(
             readiness_timeout=readiness_timeout, installer_timeout=installer_timeout,
             journal=journal,
             on_observation=on_observation,
+            readiness_only=readiness_only,
         )
     except OSError as error:
         raise RepairAdmissionError("installation repair state cannot be accessed or persisted") from error
@@ -390,6 +404,7 @@ def _repair(
     expected_plan_digest: str | None, home: Path | None,
     readiness_timeout: float, installer_timeout: float, journal: RestartJournal,
     on_observation: Callable[[list[dict[str, object]]], None] | None = None,
+    readiness_only: bool = False,
 ) -> dict[str, object]:
     """Reconstruct host admission and invoke only the explicit selected closure."""
     if (
@@ -404,7 +419,7 @@ def _repair(
     if apply and (not (modules or required) or not expected_plan_digest):
         raise RepairAdmissionError("repair apply requires qualified modules and the expected plan digest")
     platform = current_platform()
-    host = admit_host(project_root, home=home)
+    host = admit_host(project_root, home=home, readiness_only=readiness_only)
     if required:
         modules = _required_modules(host)
     selected = _closure(host, modules, platform)
@@ -461,6 +476,7 @@ def _repair(
         try:
             fresh_owner = _readmit(
                 project_root, modules, platform, plan_digest, home, required,
+                readiness_only=readiness_only,
             )[module.owner.owner_id]
             if not refresh_readiness and _satisfies(module, observation):
                 continue
@@ -472,6 +488,7 @@ def _repair(
                     continue
                 fresh_owner = _readmit(
                     project_root, modules, platform, plan_digest, home, required,
+                    readiness_only=readiness_only,
                 )[module.owner.owner_id]
                 if _satisfies(module, observation):
                     continue
@@ -510,7 +527,10 @@ def _repair(
             interrupted = True
             continue
         try:
-            _readmit(project_root, modules, platform, plan_digest, home, required)
+            _readmit(
+                project_root, modules, platform, plan_digest, home, required,
+                readiness_only=readiness_only,
+            )
         except KeyboardInterrupt:
             outcome.after = Observation("unknown", "owner-revalidation-interrupted")
             interrupted = True
@@ -520,7 +540,10 @@ def _repair(
     selection_refusal = None
     if required and not interrupted and not execution_halted:
         try:
-            _readmit(project_root, modules, platform, plan_digest, home, required)
+            _readmit(
+                project_root, modules, platform, plan_digest, home, required,
+                readiness_only=readiness_only,
+            )
         except KeyboardInterrupt:
             interrupted = True
         except RepairAdmissionError:

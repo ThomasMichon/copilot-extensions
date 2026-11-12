@@ -647,24 +647,98 @@ def stamped_snapshot(tmp_path_factory):
     )
 
 
-def _no_service_provision_command(home: Path, installer: Path, pwsh: str) -> list[str]:
+def _no_service_provision_command(
+    home: Path, installer: Path, pwsh: str, *, action: str = "provision",
+) -> list[str]:
     runner = home / "tmp" / "provision.ps1"
     runner.write_text(
-        "param($Installer, $InstallRoot)\n"
+        "param($Installer, $InstallRoot, $Action)\n"
         "function Get-ScheduledTask {}\n"
         "function Stop-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Start-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Register-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Set-ScheduledTask { throw 'unexpected service mutation' }\n"
         "function Unregister-ScheduledTask { throw 'unexpected service mutation' }\n"
-        "& $Installer provision -NoService -InstallDir $InstallRoot\n"
+        "& $Installer $Action -NoService -InstallDir $InstallRoot\n"
         "exit $LASTEXITCODE\n",
         encoding="utf-8",
     )
     return [
         pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File",
-        str(runner), str(installer), str(home / ".agent-vault"),
+        str(runner), str(installer), str(home / ".agent-vault"), action,
     ]
+
+
+@pytest.mark.parametrize("profile", ["base", "ssh"])
+def test_native_profile_stamp_persists_selection_without_runtime_or_uv(tmp_path, profile):
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    payload = _stage_payload(tmp_path)
+    home = tmp_path / "home"
+    env = _isolated_install_env(home)
+    _stamp_uv_guard(tmp_path, env)
+    command = [
+        pwsh, "-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-File", str(payload / "scripts" / "install.ps1"), "stamp", "-Profile", profile,
+    ]
+    result = subprocess.run(
+        command, env=env, cwd=home, capture_output=True, text=True,
+        timeout=60, **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    root = home / ".agent-vault"
+    assert json.loads((root / "runtime-profile.json").read_text()) == {
+        "schema": "agent-vault.runtime-profile", "version": 1, "profile": profile,
+    }
+    snapshot = Path((root / "payload-dir").read_text().strip())
+    assert (snapshot / "scripts" / "runtime_profile.py").is_file()
+    assert not (root / "current-version").exists()
+    assert not list((root / "versions").glob("*/pyvenv.cfg"))
+    assert _uv_events(env) == []
+
+
+def test_prepared_profile_inputs_preserve_source_and_published_provenance(tmp_path):
+    from .test_payload_invocation import _installer_function
+
+    pwsh = shutil.which("pwsh") or shutil.which("powershell")
+    if not pwsh:
+        pytest.skip("PowerShell is unavailable")
+    snapshot = tmp_path / "source"
+    (snapshot / "tests").mkdir(parents=True)
+    (snapshot / "scripts").mkdir()
+    (snapshot / "tests" / "sentinel.py").write_text("RETAIN = True\n")
+    (snapshot / "scripts" / "runtime_profile.py").write_text("retained helper fixture\n")
+    (snapshot / "runtime-source.json").write_text("retained original identity fixture\n")
+    receipt = snapshot / "snapshot-provenance.json"
+    receipt.write_text("separate source-owner receipt fixture\n")
+    before = {str(p.relative_to(snapshot)): (p.read_bytes(), p.stat().st_mtime_ns)
+              for p in snapshot.rglob("*") if p.is_file()}
+    root = tmp_path / "runtime"
+    root.mkdir()
+    runner = tmp_path / "inputs.ps1"
+    runner.write_text(
+        "param($Source, $Root)\n$ErrorActionPreference='Stop'\n"
+        "$InstallDir=$Root; $script:SourceRuntimeIdentity='prepared'\n"
+        "function Publish-SourceSnapshot { return $Source }\n"
+        + _installer_function("Get-RuntimeProfileHelper")
+        + _installer_function("Remove-RuntimeProfileInputs")
+        + "\n$helper=Get-RuntimeProfileHelper\n"
+        "[Console]::Out.WriteLine($script:RuntimeProfileInputs.Path)\n",
+    )
+    result = subprocess.run(
+        [pwsh, "-NoLogo", "-NoProfile", "-File", str(runner), str(snapshot), str(root)],
+        capture_output=True, text=True, timeout=15, **agent_procutil.no_window_kwargs(),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    inputs = Path(result.stdout.strip())
+    assert inputs.parent == root
+    assert not (inputs / receipt.name).exists()
+    assert {str(p.relative_to(inputs)): p.read_bytes() for p in inputs.rglob("*") if p.is_file()} == {
+        name: value[0] for name, value in before.items() if name != receipt.name
+    }
+    assert {str(p.relative_to(snapshot)): (p.read_bytes(), p.stat().st_mtime_ns)
+            for p in snapshot.rglob("*") if p.is_file()} == before
 
 
 @pytest.mark.timeout(60)
@@ -892,24 +966,28 @@ def test_staged_start_fallback_uses_preserved_project(provisioned_snapshot):
     )
     runner = state.fixture_root / "staged-start.ps1"
     runner.write_text(
-        "param($Installer,$Python,$Project)\n"
+        "param($Installer,$Python,$Project,$Root)\n"
         "$ErrorActionPreference='Stop'\n"
-        "$LinkPython=$Python;$TaskName='fixture'\n"
+        "$LinkPython=$Python;$TaskName='fixture';$InstallDir=$Root\n"
         "$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT=$Project\n"
         "function Get-ScheduledTask {}\n"
         "function Start-ScheduledTask {throw 'unexpected task mutation'}\n"
         "$tokens=$null;$errors=$null\n"
         "$ast=[System.Management.Automation.Language.Parser]::ParseFile($Installer,[ref]$tokens,[ref]$errors)\n"
         "if($errors.Count){throw 'Installer parse failed'}\n"
-        "$function=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Invoke-Start'},$false)\n"
-        ". ([scriptblock]::Create($function.Extent.Text))\n"
+        "foreach($name in @('Get-ActiveVaultPython','Invoke-Start')) {\n"
+        "    $function=$ast.Find({param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name},$false)\n"
+        "    if(-not $function){throw \"Required installer function is missing: $name\"}\n"
+        "    . ([scriptblock]::Create($function.Extent.Text))\n"
+        "}\n"
         "Invoke-Start\n", encoding="utf-8",
     )
     try:
         result = subprocess.run(
             [state.pwsh, "-NoProfile", "-NonInteractive", "-File", str(runner),
              str(state.snapshot / "scripts" / "install.ps1"),
-             str(slot / "Scripts" / "python.exe"), str(project)],
+             str(slot / "Scripts" / "python.exe"), str(project),
+             str(state.home / ".agent-vault")],
             cwd=state.home, env=env, capture_output=True, text=True,
             timeout=30, **agent_procutil.no_window_kwargs(),
         )

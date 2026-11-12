@@ -1,5 +1,31 @@
 """Manager-owned native launchers for retained and compatible legacy runtimes."""
 
+# Reuse the runtime's sealed ``installed-<digest>`` bytecode cache when its
+# install evidence is valid; otherwise keep the launcher-minted unsealed prefix.
+_CACHE_SELECTOR_SH = (
+    "import os, sys\n"
+    "try:\n"
+    "    from agent_procutil.python_cache import cache_arguments\n"
+    "    prefix = cache_arguments(sys.argv[1], runtime=sys.executable)[1].split(\"=\", 1)[1]\n"
+    "    assert os.path.basename(prefix).startswith(\"installed-\")\n"
+    "except Exception:\n"
+    "    prefix = sys.pycache_prefix\n"
+    "sys.stdout.write(prefix)\n"
+)
+_CACHE_SELECTOR_PS = _CACHE_SELECTOR_SH.replace('"', "'").replace(
+    "sys.stdout.write(prefix)", "import json; print(json.dumps(prefix))"
+)
+# Single-line, double-quote-free form for cmd. It prints only an ASCII
+# installed-* prefix; on fallback or failure it prints nothing (or exits
+# non-zero) so the caller keeps its minted prefix untouched, because ``set /p``
+# reads the result in the console code page.
+_CACHE_SELECTOR_CMD = (
+    "import os,sys,importlib.util as u;"
+    "m=u.find_spec('agent_procutil') and __import__('agent_procutil.python_cache',fromlist=['_']);"
+    "q=m and m.cache_arguments(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1];"
+    "sys.stdout.write(q if q and os.path.basename(q).startswith('installed-') and q.isascii() else '')"
+)
+
 
 def _legacy_runtime_probe() -> str:
     from .self_install import _SLOT_COMPLETE_MARKER, _SLOT_KEY_FILES
@@ -56,10 +82,14 @@ def _sh_binstub() -> str:
         '    python="$slot/.venv/Scripts/python.exe"\n'
         'fi\n'
         'if [[ -x "$python" ]]; then\n'
-        f'    if ! "$python" -I -X "pycache_prefix=$cache" -c "{probe}" "$slot" >/dev/null 2>&1; then\n'
+        f'    if ! "$python" -I -B -X "pycache_prefix=$cache" -c "{probe}" "$slot" >/dev/null 2>&1; then\n'
         '        echo "invalid constructed worktree-manager runtime: $slot" >&2\n'
         '        exit 1\n'
         '    fi\n'
+        '    selector_root="$root"\n'
+        '    [[ "$python" != *.exe ]] || selector_root="$(cygpath -aw "$root")"\n'
+        f'    selected="$("$python" -I -B -X utf8 -X "pycache_prefix=$cache" -c \'{_CACHE_SELECTOR_SH}\' "$selector_root" 2>/dev/null)" '
+        '&& [[ -n "$selected" && "$selected" != *$\'\\n\'* ]] && cache="$selected"\n'
         '    exec "$python" -I -X utf8 -X "pycache_prefix=$cache" -m worktree_manager "$@"\n'
         'fi\n'
         'echo "invalid constructed worktree-manager runtime: $slot; run bootstrap to repair" >&2\n'
@@ -100,21 +130,38 @@ def _cmd_binstub() -> str:
         'mkdir "%CACHE%" >nul 2>&1\r\n'
         'if errorlevel 1 goto reserve_cache\r\n'
         'set "VER="\r\n'
+        'for /L %%R in (1,1,4096) do (\r\n'
+        '    (set /p VER=<"%WORKTREE_MANAGER_ROOT%\\current-version") 2>nul\r\n'
+        '    if defined VER goto selector_read\r\n'
+        '    if errorlevel 1 goto selector_final\r\n'
+        ')\r\n'
+        ':selector_final\r\n'
         'set /p VER=<"%WORKTREE_MANAGER_ROOT%\\current-version"\r\n'
-        'if "%VER%"=="" exit /b 1\r\n'
+        ':selector_read\r\n'
+        'if "%VER%"=="" (rmdir "%CACHE%" >nul 2>&1 & exit /b 1)\r\n'
         'set "SLOT=%WORKTREE_MANAGER_ROOT%\\versions\\%VER%"\r\n'
         'if exist "%SLOT%\\.runtime-bootstrap\\runtime_launcher.py" goto retained\r\n'
         'if not exist "%SLOT%\\.venv\\Scripts\\python.exe" goto invalid\r\n'
-        f'"%SLOT%\\.venv\\Scripts\\python.exe" -I -X "pycache_prefix=%CACHE%" -c "{probe}" "%SLOT%" >nul 2>&1\r\n'
+        f'"%SLOT%\\.venv\\Scripts\\python.exe" -I -B -X "pycache_prefix=%CACHE%" -c "{probe}" "%SLOT%" >nul 2>&1\r\n'
         'if errorlevel 1 goto invalid\r\n'
+        'set "MINTED=%CACHE%"\r\n'
+        'set "SELECTED="\r\n'
+        f'"%SLOT%\\.venv\\Scripts\\python.exe" -I -B -X utf8 -X "pycache_prefix=%MINTED%" -c "{_CACHE_SELECTOR_CMD}" '
+        '"%WORKTREE_MANAGER_ROOT%" >"%MINTED%\\.selected" 2>nul\r\n'
+        'if not errorlevel 1 set /p SELECTED=<"%MINTED%\\.selected"\r\n'
+        'del /f /q "%MINTED%\\.selected" >nul 2>&1\r\n'
+        'if defined SELECTED set "CACHE=%SELECTED%"\r\n'
+        'if not "%CACHE%"=="%MINTED%" rmdir /s /q "%MINTED%" >nul 2>&1\r\n'
         '"%SLOT%\\.venv\\Scripts\\python.exe" -I -X utf8 -X "pycache_prefix=%CACHE%" -m worktree_manager %* '
-        '& call exit /b %%errorlevel%%\r\n'
+        '& call set "CACHE_RC=%%errorlevel%%" & rmdir /s /q "%MINTED%" >nul 2>&1 & call exit /b %%CACHE_RC%%\r\n'
         ':invalid\r\n'
+        'rmdir /s /q "%CACHE%" >nul 2>&1\r\n'
         '>&2 echo invalid constructed worktree-manager runtime: "%SLOT%"\r\n'
         'exit /b 1\r\n'
         ':retained\r\n'
         '"%SLOT%\\Scripts\\python.exe" -I -S -B -X utf8 -X "pycache_prefix=%CACHE%" "%SLOT%\\.runtime-bootstrap\\runtime_launcher.py" '
-        '-m worktree_manager %* & call exit /b %%errorlevel%%\r\n'
+        '-m worktree_manager %* & call set "CACHE_RC=%%errorlevel%%" & rmdir /s /q "%CACHE%" >nul 2>&1 '
+        '& call exit /b %%CACHE_RC%%\r\n'
     )
 
 
@@ -152,13 +199,21 @@ def _ps1_binstub() -> str:
         '}\n'
         '$python = Join-Path $slot ".venv\\Scripts\\python.exe"\n'
         'if (Test-Path -LiteralPath $python -PathType Leaf) {\n'
-        f'    & $python -I -X "pycache_prefix=$cache" -c "{probe}" $slot 2>$null\n'
+        f'    & $python -I -B -X "pycache_prefix=$cache" -c "{probe}" $slot 2>$null\n'
         '    if ($LASTEXITCODE -ne 0) {\n'
         '        [Console]::Error.WriteLine("invalid constructed worktree-manager runtime: $slot")\n'
         '        exit 1\n'
         '    }\n'
+        '    $minted = $cache\n'
+        "    $selector = @'\n"
+        f'{_CACHE_SELECTOR_PS}'
+        "'@\n"
+        '    $selected = & $python -I -B -X "pycache_prefix=$cache" -c $selector $root\n'
+        '    if ($LASTEXITCODE -eq 0 -and @($selected).Count -eq 1) { try { $cache = [string]($selected | ConvertFrom-Json) } catch { $cache = $minted } }\n'
         '    Invoke-ManagerTerminalPython $python (@("-I", "-X", "utf8", "-X", "pycache_prefix=$cache", "-m", "worktree_manager") + $args) @("-I", "-B", "-m", "worktree_manager", "--version")\n'
-        '    exit $LASTEXITCODE\n'
+        '    $code = $LASTEXITCODE\n'
+        '    if ($cache -eq $minted) { try { [IO.Directory]::Delete($cache, $true) } catch {} }\n'
+        '    exit $code\n'
         '}\n'
         '[Console]::Error.WriteLine("invalid constructed worktree-manager runtime: $slot; run bootstrap to repair")\n'
         "exit 1\n"

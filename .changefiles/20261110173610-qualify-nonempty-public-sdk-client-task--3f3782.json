@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify nonempty public SDK client-task inventory and session isolation",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

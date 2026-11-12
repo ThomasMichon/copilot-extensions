@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse complete native prepared-cell membership for source-bound pre-tool reads",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

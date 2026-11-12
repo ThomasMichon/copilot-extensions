@@ -1,0 +1,9 @@
+{
+  "comment": "Drive normal live Refresh before stopped Resume and verify native Copilot exit status",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "dev"
+    }
+  ]
+}

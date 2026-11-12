@@ -147,6 +147,7 @@ def test_unreaped_standalone_tree_retains_sandbox_and_releases_lease(
 @pytest.mark.parametrize("component,package", [
     ("fleet-manager", "fleet_manager"),
     ("services/index", "agent_index_service"),
+    ("services/pr", "agent_pull_requests_service"),
 ])
 def test_retained_preparation_builds_actual_standalone_resource_hooks(
     tmp_path, monkeypatch, component, package,
@@ -172,12 +173,26 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
         }.items()
     }
     companions = {}
+    retained_resources = (resources,)
+    if component == "services/pr":
+        expected = {}
+        companions = {
+            "_attribution/" + name: Path("plugins/ai-attribution/scripts") / name
+            for name in ("attribution_profile.py", "comment_preparation.py")
+        }
+        for destination, relative in companions.items():
+            target = checkout / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(SCRIPT.parent.parent / relative, target)
+            expected[destination] = target.read_bytes()
+        retained_resources += (checkout / "plugins/ai-attribution/scripts",)
     if component == "fleet-manager":
         # This build tests retained Fleet resources, not the optional SSH packages.
         for relative, name in (
             ("plugins/agent-ssh", "agent-ssh"),
             ("libs/single-instance-lease", "agent-single-instance-lease"),
             ("libs/agent-procutil", "agent-procutil"),
+            ("libs/zdd", "agent-zdd"),
         ):
             dependency = checkout / relative
             dependency.mkdir(parents=True)
@@ -241,7 +256,7 @@ def test_retained_preparation_builds_actual_standalone_resource_hooks(
     else:
         runner.run_uv_install(
             "uv", ["--no-config", "--python", sys.executable, str(project)],
-            cwd=checkout, trusted_source_roots=(checkout,), retained_resource_roots=(resources,),
+            cwd=checkout, trusted_source_roots=(checkout,), retained_resource_roots=retained_resources,
         )
     assert len(retained) == 1 and not retained[0].exists()
     with zipfile.ZipFile(next(output.glob("*.whl"))) as wheel:
@@ -463,6 +478,8 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
         (tmp_path / "libs" / "installer-engine").mkdir()
     if component in {"fleet-manager", "services/pr", "services/ssh"}:
         (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil").mkdir()
+    if component == "services/pr":
+        (tmp_path / "plugins/ai-attribution/scripts").mkdir(parents=True)
     monkeypatch.setattr(runner, "REPO", tmp_path)
     python = runner.default_python(component)
     python.parent.parent.mkdir(parents=True)
@@ -477,6 +494,8 @@ def test_fresh_preparation_attributes_complete_local_graph(tmp_path, monkeypatch
             expected_resources += (tmp_path / "libs" / "installer-engine",)
         if component in {"fleet-manager", "services/pr", "services/ssh"}:
             expected_resources += (tmp_path / "libs" / "agent-procutil" / "src" / "agent_procutil",)
+        if component == "services/pr":
+            expected_resources += (tmp_path / "plugins/ai-attribution/scripts",)
         assert kwargs["retained_resource_roots"] == expected_resources
         return admitted(uv, arguments, **kwargs)
 

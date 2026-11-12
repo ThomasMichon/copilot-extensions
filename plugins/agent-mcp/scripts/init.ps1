@@ -20,7 +20,11 @@ param(
     [ValidateSet('install', 'init', 'stamp', 'provision', 'uninstall', 'broker-remove')]
     [string]$Action = 'install',
     [string]$InstallDir,
-    [switch]$Force
+    [switch]$Force,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -32,6 +36,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'init', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, init or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 if ($Action -eq 'uninstall' -and (($InstallDir -split '[\\/]') -contains '..')) {
     throw 'Uninstall refuses parent-traversal path components'
@@ -77,7 +90,8 @@ if ($env:OS -eq 'Windows_NT' -and
     $driverOptions = @()
     if ($Force) { $driverOptions += 'Force' }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
-        -Plugin 'agent-mcp' -Action $Action -Options $driverOptions
+        -Plugin 'agent-mcp' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $script:McpBootstrapPython = $driverPython
@@ -392,6 +406,7 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
+    if ($WheelProfile) { return $WheelPython }
     # Construction helpers share the native driver's 3.11 floor, not the
     # package's 3.10 floor. External callers must run outside the slot.
     $probe = @'
@@ -479,6 +494,12 @@ print(json.dumps(sys._base_executable if sys.argv[1] == 'base' else sys.executab
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-mcp' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     <# Cheap payload fingerprint for the completion marker (#935): sha256 of
        pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
     try {
@@ -512,10 +533,16 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $constructionOptions = if ($WheelProfile) {
+        $options = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-mcp' `
+            -Uv $WheelUv -HealthModule 'agent_mcp' -Repair:$Force
+        $options['NestedEnvironment'] = $true
+        $options
+    } else { @{ Footprint = (Join-Path $PSScriptRoot 'uninstall-profile.json'); Plugin = 'agent-mcp' } }
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) `
-        -Footprint (Join-Path $PSScriptRoot 'uninstall-profile.json') -Plugin 'agent-mcp'
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @constructionOptions
     $script:SrcVersion = $script:RuntimeConstructionSession.Version
     $script:VenvDir = Join-Path (Join-Path (Join-Path $InstallDir 'versions') $SrcVersion) '.venv'
     $script:VenvPython = Join-Path $VenvDir $(if ($env:OS -eq 'Windows_NT') { 'Scripts\python.exe' } else { 'bin/python' })
@@ -837,6 +864,13 @@ if ($Action -eq 'uninstall') {
     if ($status.Trim() -eq 'absent') { Write-Ok 'Legacy MCP runtime is already absent'; exit 0 }
 } else {
     Initialize-SourceRuntime
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-mcp' -Root $InstallDir
+        $script:VenvDir = Join-Path $VenvDir '.venv'
+        $script:VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
+        $script:LinkDir = $VenvDir
+    }
 }
 if (-not (Enter-InstallLock)) {
     Write-Fail "Could not acquire the install transaction lock ($(Join-Path $InstallDir '.install.lock')) within $(Get-InstallLockTimeoutSec)s -- another install is still running; refusing to proceed unlocked"
@@ -858,7 +892,7 @@ if ($Action -eq 'uninstall') {
 Assert-SourceRuntime
 if ($Action -in @('install', 'init', 'provision')) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
@@ -884,7 +918,7 @@ if (-not $pythonCmd) {
 Write-Ok "Python: $pythonCmd"
 
 # Check for uv -- install via winget if missing
-if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+if (-not $WheelProfile -and -not (Get-Command uv -ErrorAction SilentlyContinue)) {
     if ($hasWinget) {
         Write-Step 'uv not found -- installing via winget...'
         $prevEAP = $ErrorActionPreference

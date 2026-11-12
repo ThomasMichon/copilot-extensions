@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import os
 import shlex
 from pathlib import Path
@@ -24,6 +25,7 @@ def run_probes(
     root: Path, proof: dict, vector: dict, *,
     evidence=evidence, expected_roles: frozenset[str] = frozenset(),
     isolated_probes: frozenset[str] = frozenset(),
+    aggregate_timeout: float | None = None,
 ) -> dict:
     from agent_procutil.owned_process import run_caller_owned
 
@@ -52,7 +54,10 @@ def run_probes(
         })
         request.write_bytes(payload)
         cases: dict[str, int] = {}
-        deadline = time.monotonic() + (600 if os.name == "nt" else 240)
+        budget = aggregate_timeout if aggregate_timeout is not None else (600 if os.name == "nt" else 240)
+        if not math.isfinite(budget) or budget <= 0:
+            raise ValueError(f"{label} aggregate probe budget must be finite and positive")
+        deadline = time.monotonic() + budget
         for index, group in enumerate(groups):
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -67,6 +72,8 @@ def run_probes(
                     sys.executable, str(root / "tools/run-plugin-tests.py"), "agent-bridge",
                     "--test-file", Path(evidence.TEST).relative_to("plugins/agent-bridge").as_posix(),
                     "-k", " or ".join(group),
+                    "--subsuite-timeout", str(remaining),
+                    "--plugin-timeout", str(remaining),
                     *(["--test-timeout", "120"] if os.name == "nt" else []),
                 ], timeout=remaining, max_stdout_bytes=4 * 1024 * 1024,
                     max_stderr_bytes=1024 * 1024)

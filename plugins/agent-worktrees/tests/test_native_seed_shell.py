@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import sys
+import venv
 
 import pytest
 
@@ -60,6 +61,7 @@ def test_native_runtime_selection_preserves_the_application_environment(tmp_path
 def _run(
     tmp_path, *, child_exit=7, missing=False, uncertain=False, absent_end=False,
     stdin=None, child_stderr="", location=None, failed_sink=None,
+    native_resume=False,
 ):
     observed = tmp_path / "observed.jsonl"
     payload = tmp_path / "prepared.json"
@@ -72,6 +74,7 @@ def _run(
         + (f"sys.{failed_sink}.write('x' * (2 * 1024 * 1024))\n" if failed_sink else "")
         +
         "print(json.dumps(sys.argv[1:],ensure_ascii=False))\n"
+        + ("print(json.dumps('AGENT_WORKTREES_RETAINED_NATIVE_RESUME' in os.environ))\n" if native_resume else "")
         + ("print(json.dumps(sys.stdin.read(),ensure_ascii=False))\n" if stdin is not None else "")
         + ("print(json.dumps(os.getcwd()))\n" if location is not None else "")
         + f"sys.stderr.write({child_stderr!r})\n"
@@ -89,6 +92,30 @@ def _run(
         "attempt_id": "a" * 32, "resolution_id": "b" * 32,
         "operation_id": "c" * 32, "parent_id": None,
     }), encoding="utf-8")
+    probe = tmp_path / "head-writer.py"
+    if native_resume:
+        probe.write_text(
+            "import sys\nfrom pathlib import Path\nfrom agent_worktrees import tracking\n"
+            "try:\n"
+            " with tracking._RecordLock(Path(sys.argv[1]), timeout=0, require_sidecar=True): pass\n"
+            "except TimeoutError: sys.exit(7)\n",
+            encoding="utf-8",
+        )
+    probe_check = (
+        f"    $probe = [Diagnostics.ProcessStartInfo]::new({_literal(Path(sys.executable))})\n"
+        "    $probe.UseShellExecute=$false; $probe.CreateNoWindow=$true\n"
+        "    $probe.RedirectStandardOutput=$true; $probe.RedirectStandardError=$true\n"
+        f"    foreach ($arg in @('-I',{_literal(probe)},{_literal(tmp_path / 'wt-a.yaml')})) "
+        "{ $probe.ArgumentList.Add($arg) }\n"
+        "    $writer=[Diagnostics.Process]::Start($probe)\n"
+        "    $out=$writer.StandardOutput.ReadToEndAsync(); $err=$writer.StandardError.ReadToEndAsync()\n"
+        "    try {\n"
+        "      if (-not $writer.WaitForExit(10000)) { $writer.Kill($true); throw 'head probe timed out' }\n"
+        "      [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($out,$err))\n"
+        "      $expected=if ($phase -eq 'admit') { 7 } else { 0 }\n"
+        "      if ($writer.ExitCode -ne $expected) { throw ('head-writer fence mismatch: '+$err.Result) }\n"
+        "    } finally { $writer.Dispose() }\n"
+    ) if native_resume else ""
     driver = tmp_path / "driver.ps1"
     driver.write_text(
         f". {_literal(SCRIPT)}\n"
@@ -99,6 +126,8 @@ def _run(
         f"  [IO.File]::AppendAllText({_literal(observed)}, "
         "((ConvertTo-Json -InputObject @($Arguments) -Compress) + \"`n\"))\n"
         f"  if ($phase -eq 'prepare') {{ return (Get-Content -Raw {_literal(payload)} | ConvertFrom-Json) }}\n"
+        + ("  if ($phase -eq 'admit' -or $phase -eq 'spawned') {\n" + probe_check + "  }\n" if native_resume else "")
+        +
         "  if ($phase -eq 'spawned') {\n"
         "    $childPid = [int]$Arguments[3]\n"
         "    $birth = [Diagnostics.Process]::GetProcessById($childPid).StartTime.ToUniversalTime().ToFileTimeUtc()\n"
@@ -111,9 +140,12 @@ def _run(
         "}\n"
         + (f"Set-Location -LiteralPath {_literal(location)}\n" if location is not None else "")
         + f"[Environment]::CurrentDirectory = {_literal(origin)}\n"
+        + ("$env:AGENT_WORKTREES_RETAINED_NATIVE_RESUME='fixture-original-owner'\n" if native_resume else "")
         +
         f"$code = Invoke-AwNativeSeedBackend -Root {_literal(tmp_path)} "
-        f"-Record {_literal(tmp_path / 'wt-a.yaml')} -SeedId fixture -Command @('copilot')\n"
+        f"-Record {_literal(tmp_path / 'wt-a.yaml')} "
+        + ("-AdmissionOnly -NativeResumeSession native-original " if native_resume else "-SeedId fixture ")
+        + "-Command @('copilot')\n"
         "exit $code\n",
         encoding="utf-8",
     )
@@ -158,6 +190,15 @@ def test_native_backend_preserves_literal_argv_actual_identity_and_exit(tmp_path
     assert "--receipt-uncertain" not in events[-1]
 
 
+def test_native_resume_fences_actual_powershell_creation_and_consumes_marker(tmp_path):
+    result, events, argv = _run(tmp_path, native_resume=True)
+    assert result.returncode == 7, result.stderr
+    lines = result.stdout.splitlines()
+    assert json.loads(lines[0]) == argv
+    assert json.loads(lines[1]) is False
+    assert [event[1] for event in events] == ["prepare", "admit", "spawned", "returned"]
+
+
 def test_native_definite_os_spawn_failure_is_the_only_restore_callback(tmp_path):
     result, events, _ = _run(tmp_path, missing=True)
     assert result.returncode == 3
@@ -179,6 +220,73 @@ def test_native_absent_end_handler_preserves_actual_exit_quietly(tmp_path):
     assert result.returncode == 0, result.stderr
     assert [event[1] for event in events] == ["prepare", "spawned", "returned"]
     assert not result.stderr
+
+
+@pytest.mark.parametrize("supported", [True, False], ids=["current-provider", "unsupported-current"])
+def test_terminal_callback_survives_outgoing_provider_removal(tmp_path, supported):
+    root = tmp_path / "runtime"
+    outgoing, incoming = (root / "versions" / name for name in ("1.0", "2.0"))
+    observed, gate = tmp_path / "phases.jsonl", tmp_path / "spawn-provider"
+    child = (
+        "import pathlib,time\n"
+        "from agent_remote_driver.session_host.osutil import pid_alive\n"
+        f"gate=pathlib.Path({str(gate)!r})\n"
+        "while not gate.is_file(): time.sleep(0.01)\n"
+        "provider=int(gate.read_text())\n"
+        "while pid_alive(provider): time.sleep(0.01)\n"
+        f"pathlib.Path({str(root / 'current-version')!r}).write_text('2.0')\n"
+        f"pathlib.Path({str(outgoing / '.runtime-bootstrap' / 'runtime_launcher.py')!r}).unlink()\n"
+        "raise SystemExit(7)\n"
+    )
+    prepared = {
+        "version": 1, "argv": [sys.executable, "-I", "-B", "-c", child], "environment": None,
+        "attempt_id": "a" * 32, "resolution_id": "b" * 32,
+        "operation_id": "c" * 32, "parent_id": None,
+    }
+    for slot in (outgoing, incoming):
+        venv.EnvBuilder(with_pip=False).create(slot / ".venv")
+        (slot / "application.json").write_text("{}", encoding="utf-8")
+        (slot / ".install-complete.json").write_text("{}", encoding="utf-8")
+        bootstrap = slot / ".runtime-bootstrap" / "runtime_launcher.py"
+        bootstrap.parent.mkdir()
+        bootstrap.write_text(
+            "import json,os,sys\nfrom pathlib import Path\n"
+            "if '--describe-contract' in sys.argv:\n"
+            "    print(json.dumps({'contract':'agent-worktrees.native-seed','version':1,"
+            "'backend_preparation_modes':[],'backend_process_receipts':[]}));raise SystemExit(0)\n"
+            "args=sys.argv[1:];phase=args[args.index('--phase')+1]\n"
+            "assert args[args.index('--contract-version')+1]=='1'\n"
+            f"with Path({str(observed)!r}).open('a',encoding='utf-8') as stream:\n"
+            "    stream.write(json.dumps({'phase':phase,'python':sys.executable,'args':args})+'\\n')\n"
+            + (
+                "if phase=='returned': raise SystemExit(3)\n"
+                if slot == incoming and not supported else ""
+            )
+            + f"if phase=='spawned':\n"
+            f"    gate=Path({str(gate)!r});pending=gate.with_suffix('.pending')\n"
+            "    pending.write_text(str(os.getpid()));pending.replace(gate)\n"
+            f"print(json.dumps({prepared!r} if phase=='prepare' else {{'recorded':True}}))\n",
+            encoding="utf-8",
+        )
+    (root / "current-version").write_text(outgoing.name, encoding="utf-8")
+    copied = tmp_path / SCRIPT.name
+    shutil.copyfile(SCRIPT, copied)
+    result = run_caller_owned([
+        shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-Command",
+        f". {_literal(copied)}; "
+        f"$code=Invoke-AwNativeSeedBackend -Root {_literal(root)} "
+        f"-Record {_literal(tmp_path / 'record.yaml')} -Command @('copilot'); exit $code",
+    ], cwd=tmp_path, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 7, result.stdout + result.stderr
+    assert not (outgoing / ".runtime-bootstrap" / "runtime_launcher.py").exists()
+    events = [json.loads(line) for line in observed.read_text(encoding="utf-8").splitlines()]
+    assert [event["phase"] for event in events] == ["prepare", "spawned", "returned"]
+    assert all(Path(event["python"]).is_relative_to(outgoing) for event in events[:2])
+    assert Path(events[-1]["python"]).is_relative_to(incoming)
+    arguments = events[-1]["args"]
+    assert arguments[arguments.index("--exit-code") + 1] == "7"
+    assert arguments[arguments.index("--operation-id") + 1] == prepared["operation_id"]
+    assert "--receipt-uncertain" not in arguments
 
 
 @pytest.mark.parametrize("setup, fault", [
@@ -226,9 +334,21 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
             f"    client.check({native_argv + (['changed'] if fault == 'argv' else [])!r},"
             "os.getcwd(),'selected',dict(os.environ))\n"
         )
-        + "except (ValueError,OSError,EOFError):\n    raise SystemExit(19)\n"
+        + "except (ValueError,OSError,EOFError) as exc:\n"
+        f"    Path({str(tmp_path / 'refusal.txt')!r}).write_text(str(exc),encoding='utf-8')\n"
+        "    raise SystemExit(19)\n"
         "finally:\n    client.close()\n"
-        f"child=subprocess.Popen([sys.executable,'-I','-c',{child_code!r}],**no_window_kwargs())\n"
+        + (
+            "import msvcrt\n"
+            f"descriptor=os.open({str(tmp_path / 'record.lock')!r},os.O_RDWR)\n"
+            "try:\n"
+            "    try: msvcrt.locking(descriptor,msvcrt.LK_NBLCK,1)\n"
+            "    except OSError: pass\n"
+            "    else: raise AssertionError('head-writer fence released before native child creation')\n"
+            "finally: os.close(descriptor)\n"
+            if setup else ""
+        )
+        + f"child=subprocess.Popen([sys.executable,'-I','-c',{child_code!r}],**no_window_kwargs())\n"
         + (
             "" if fault == "receipt" else
             "value={'version':2,'mode':'headed','process_receipt':PROCESS_RECEIPT,'state':'native_starting',"
@@ -258,7 +378,8 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
             "\nfunction Get-AwNativeSeedRuntime { param([string]$Root)\n"
             f"return @{{Python={_literal(Path(sys.executable))};Bootstrap='fixture'}}\n}}\n"
             "function Invoke-AwNativeSeedPhase {\n"
-            "param([string]$Root,[string[]]$Arguments,[hashtable]$Runtime,[hashtable]$Environment)\n"
+            "param([string]$Root,[string[]]$Arguments,[hashtable]$Runtime,[hashtable]$Environment,"
+            "[hashtable]$Diagnostics)\n"
             f"[IO.File]::AppendAllText({_literal(observed)},"
             "((ConvertTo-Json -Compress -InputObject @($Arguments))+\"`n\"))\n"
             "if ($Arguments[0] -eq '--describe-contract') { return @{"
@@ -269,7 +390,8 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
             "if ($phase -eq 'setup') { return @{version=1;attempt_id=('a'*32);resolution_id=('b'*32);"
             "operation_id=('c'*32);parent_id=$null;setup_seed_id=$null}}\n"
             f"if ($phase -eq 'prepare') {{return (Get-Content -Raw {_literal(prepared)} | ConvertFrom-Json)}}\n"
-            + ("if ($phase -eq 'admit') {return $null}\n" if fault == "policy" else "")
+            + ("if ($phase -eq 'admit') {$Diagnostics['stderr']=\"noise`nStartup admission refused: "
+               "ValueError: worktree status is 'finalized'`n\"; return $null}\n" if fault == "policy" else "")
             + "if ($phase -eq 'spawned') {\n"
             "if ($Environment['AGENT_BRIDGE_SESSION_HOST_NONCE'] -cne ('a'*64)) {throw 'private binding missing'}\n"
             f"$state=Get-Content -Raw {_literal(state)} | ConvertFrom-Json\n"
@@ -321,7 +443,7 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
         assert prepare[prepare.index("--launch-parent-id") + 1] == "c" * 32
     phases = [event[1] for event in events if event[0] == "--phase"]
     assert phases.count("prepare") == 1
-    assert phases.count("admit") == (0 if fault in {"argv", "duplicate"} else 1)
+    assert phases.count("admit") == (0 if fault in {"argv", "duplicate"} else 2 if setup else 1)
     if setup:
         for event in [prepare, *(event for event in events if event[:2] == ["--phase", "admit"])]:
             assert "--admission-only" in event
@@ -333,7 +455,11 @@ def test_headed_original_shell_owns_admission_and_distinct_native_receipt(tmp_pa
     if fault:
         assert "spawned" not in phases
         assert "--receipt-uncertain" in events[-1]
-    else:
+    if fault == "policy":
+        assert (tmp_path / "refusal.txt").read_text(encoding="utf-8") == (
+            "Original caller refused startup admission: ValueError: worktree status is 'finalized'"
+        )
+    if not fault:
         spawn, = [event for event in events if event[:2] == ["--phase", "spawned"]]
         assert spawn[spawn.index("--headed-state-file") + 1] == str(state)
         assert spawn[spawn.index("--headed-session-id") + 1] == "selected"
@@ -402,6 +528,39 @@ def test_finite_phase_uses_powershell_location_not_environment_cwd(tmp_path):
     assert Path(reply["cwd"]) == selected
     assert reply["argv"] == ["2026-01-01T00:00:00Z", ""]
     assert reply["environment"] == {"DATE_LITERAL": "2026-01-01T00:00:00Z"}
+
+
+@pytest.mark.parametrize("configured_log", [False, True])
+def test_finite_phase_preserves_failure_diagnostics_without_accepting_a_reply(tmp_path, configured_log):
+    bootstrap = tmp_path / "refused.py"
+    bootstrap.write_text(
+        "import sys\n"
+        "sys.stdout.write('{\"recorded\":true}')\n"
+        "sys.stderr.write('Native preparation refused: fixture\\n')\n"
+        "sys.exit(3)\n",
+        encoding="utf-8",
+    )
+    setup_log = tmp_path / "setup.log"
+    driver = tmp_path / "refused.ps1"
+    driver.write_text(
+        f". {_literal(SCRIPT)}\n"
+        f"$env:WORKTREE_SETUP_LOG = {_literal(setup_log) if configured_log else '$null'}\n"
+        f"$runtime = @{{Python={_literal(Path(sys.executable))};Bootstrap={_literal(bootstrap)}}}\n"
+        f"$reply = Invoke-AwNativeSeedPhase {_literal(tmp_path)} @('--phase','prepare') -Runtime $runtime\n"
+        "ConvertTo-Json -InputObject @{reply=$reply} -Compress\n",
+        encoding="utf-8",
+    )
+    result = run_caller_owned(
+        [shutil.which("pwsh"), "-NoProfile", "-NoLogo", "-File", str(driver)],
+        cwd=tmp_path, timeout=15, max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {"reply": None}
+    assert result.stderr == "Native preparation refused: fixture\n"
+    if configured_log:
+        assert setup_log.read_text(encoding="utf-8") == result.stderr
+    else:
+        assert not setup_log.exists()
 
 
 def test_headed_discovery_is_read_only_strict_and_cached_per_selected_slot(tmp_path):

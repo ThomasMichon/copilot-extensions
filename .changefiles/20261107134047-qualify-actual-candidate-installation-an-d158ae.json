@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify actual candidate installation and generated project-binstub Manager TTY readiness before promotion.",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

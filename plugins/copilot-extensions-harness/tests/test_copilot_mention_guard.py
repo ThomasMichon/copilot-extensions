@@ -5,6 +5,7 @@ import importlib.util
 import io
 import json
 import os
+import re
 import shlex
 import shutil
 import statistics
@@ -802,6 +803,176 @@ def test_native_hook_process_counts_and_latency(
         metrics["git_children"] = len(calls)
     with capsys.disabled():
         print("\nmention-guard native measurement: " + json.dumps(metrics, sort_keys=True))
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(
+    os.name != "nt" or not os.environ.get("COPILOT_MENTION_PROFILE_BASELINE"),
+    reason="Explicit contained Windows publication-wrapper attribution",
+)
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("event", ["read", "shell-read"])
+def test_windows_wrapper_module_attribution(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str], shell: str, event: str,
+) -> None:
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.fail(f"Required profiling shell {shell} is unavailable")
+    git = shutil.which("git")
+    assert git, "Required comparison Git executable is unavailable"
+    revision = os.environ["COPILOT_MENTION_PROFILE_BASELINE"]
+    assert len(revision) == 40 and all(char in "0123456789abcdef" for char in revision)
+    baseline = subprocess.run(
+        [git, "-C", os.environ["COPILOT_MENTION_PROFILE_BASELINE_REPO"],
+         "show", f"{revision}:plugins/copilot-extensions-harness/hooks.json"],
+        capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+    )
+    assert baseline.returncode == 0, baseline.stderr
+    hook = json.loads(baseline.stdout)["hooks"]["preToolUse"][0]["powershell"]
+    candidate = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
+    state = tmp_path / "pretool.json"
+    state.write_text('{"active": false}', encoding="utf-8")
+    environment = {
+        **os.environ,
+        "COPILOT_PLUGIN_ROOT": str(PLUGIN),
+        "COPILOT_PROJECT_DIR": str(tmp_path),
+        "PRETOOL_KILLSWITCH_STATE_FILE": str(state),
+    }
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    payload = {"toolName": "view", "cwd": str(tmp_path), "toolArgs": {"path": "example.txt"}}
+    if event == "shell-read":
+        payload.update(toolName="powershell", toolArgs={"command": "git status --short"})
+    samples = []
+    for variant, command in (("baseline", hook), ("candidate", candidate), ("baseline", hook)):
+        assert command.endswith("exit 0")
+        observed = (
+            "$global:LASTEXITCODE=913; "
+            + command.removesuffix("exit 0").replace("exit 0", "throw 'test interpreter unavailable'")
+            + "if ($LASTEXITCODE -ne 0) { throw 'guard child did not complete' }; exit 0"
+        )
+        started = time.monotonic()
+        result = subprocess.run(
+            [executable, "-NoProfile", "-NonInteractive", "-Command", observed],
+            input=json.dumps(payload), cwd=tmp_path, env=environment,
+            capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+        )
+        elapsed = time.monotonic() - started
+        assert result.returncode == 0, result.stderr
+        assert result.stdout == result.stderr == ""
+        samples.append({"variant": variant, "process_seconds": elapsed})
+    with capsys.disabled():
+        print(json.dumps({
+            "shell": shell, "event": event, "baseline_revision": revision,
+            "fixed_fixture_aba": samples,
+        }))
+
+
+@pytest.mark.parametrize("tool", ["bash", "powershell", "view", "rg", "glob", "PowerShell", "vendor.bash", None])
+def test_registered_matcher_preserves_original_policy_domain(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], tool: str | None,
+) -> None:
+    guard = _load_guard()
+    monkeypatch.setenv("COPILOT_EXTENSIONS_CONTEXT", "fixture")
+    monkeypatch.setattr(guard, "target_repo_from_manifest", lambda *args: "owner/repository")
+    monkeypatch.setattr(guard, "adopting_harness", lambda *args: True)
+    monkeypatch.setattr(guard, "current_repo_matches", lambda *args, **kwargs: True)
+    monkeypatch.setattr(guard.sys, "stdin", io.StringIO(json.dumps({
+        "toolName": tool, "toolArgs": {"command": 'gh pr comment 1 --body "@copilot review"'},
+    })))
+    assert guard.main() == 0
+    result = capsys.readouterr()
+    assert result.err == ""
+    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]
+    matcher = hook.get("matcher")
+    selected = matcher is None or re.fullmatch(matcher, tool or "") is not None
+    if result.out:
+        assert json.loads(result.out)["permissionDecision"] == "deny"
+        assert selected, "Registration excluded an event the original evaluator denies"
+    else:
+        assert not selected, "Registration still launches the evaluator for its no-op domain"
+
+
+@pytest.mark.portfolio_tier("T2")
+@pytest.mark.effect("process")
+@pytest.mark.effect("filesystem")
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows publication-wrapper contract")
+@pytest.mark.parametrize("shell", ["pwsh", "powershell.exe"])
+@pytest.mark.parametrize("case", [
+    "read", "mention", "uninspectable", "stop", "malformed-stop",
+    "missing-guard", "child-failed", "echo", "relative-echo",
+])
+def test_windows_wrapper_preserves_policy_and_failure_contract(
+    tmp_path: Path, shell: str, case: str,
+) -> None:
+    executable = shutil.which(shell)
+    if not executable:
+        pytest.fail(f"Required native shell {shell} is unavailable")
+    subprocess.run(
+        ["git", "init", "-q"], cwd=tmp_path, check=True,
+        timeout=10, creationflags=NO_WINDOW,
+    )
+    target = _load_guard().target_repo_from_manifest(PLUGIN)
+    assert target
+    with (tmp_path / ".git" / "config").open("a", encoding="utf-8") as stream:
+        stream.write(f'\n[remote "origin"]\nurl = https://github.com/{target}.git\n')
+    _enable_harness(tmp_path)
+    state = tmp_path / "pretool.json"
+    state.write_text(
+        '{"active":"invalid"}' if case == "malformed-stop"
+        else json.dumps({"active": case == "stop"}),
+        encoding="utf-8",
+    )
+    root = PLUGIN
+    if case in {"missing-guard", "child-failed", "echo", "relative-echo"}:
+        root = tmp_path / "payload space's [literal]"
+        scripts = root / "scripts"
+        scripts.mkdir(parents=True)
+        if case == "child-failed":
+            (scripts / "copilot-mention-guard.py").write_text(
+                "print('partial-policy')\nraise SystemExit(3)\n", encoding="utf-8",
+            )
+        elif case in {"echo", "relative-echo"}:
+            (scripts / "copilot-mention-guard.py").write_text(
+                "import json,sys\nprint(json.dumps(json.load(sys.stdin),sort_keys=True))\n",
+                encoding="utf-8",
+            )
+    command = 'gh pr comment 1 --body "@copilot review"'
+    if case == "uninspectable":
+        command = "gh pr comment 1 --body-file -"
+    payload = {
+        "toolName": "view" if case == "read" else "powershell",
+        "cwd": str(tmp_path),
+        "toolArgs": json.dumps({"command": command, "text": "\u00e9\u4e2d\U0001f680\nsecond line"}),
+    }
+    environment = {
+        **os.environ,
+        "COPILOT_PLUGIN_ROOT": str(root.relative_to(tmp_path)) if case == "relative-echo" else str(root),
+        "COPILOT_PROJECT_DIR": str(tmp_path),
+        "PRETOOL_KILLSWITCH_STATE_FILE": str(state),
+    }
+    environment.pop("COPILOT_EXTENSIONS_CONTEXT", None)
+    hook = json.loads((PLUGIN / "hooks.json").read_text())["hooks"]["preToolUse"][0]["powershell"]
+    result = subprocess.run(
+        [executable, "-NoProfile", "-NonInteractive", "-Command",
+         "function Join-Path { throw 'path cmdlet requested' }; "
+         "function Write-Output { throw 'output cmdlet requested' }; " + hook],
+        input=json.dumps(payload, indent=2), cwd=tmp_path, env=environment,
+        capture_output=True, text=True, timeout=10, creationflags=NO_WINDOW,
+    )
+    assert result.returncode == 0, result.stderr
+    if case in {"missing-guard", "child-failed"}:
+        assert result.stdout == ""
+        assert result.stderr == "[copilot-extensions-harness] mention guard unavailable; skipped\n"
+    else:
+        assert result.stderr == ""
+        if case in {"read", "stop"}:
+            assert result.stdout == ""
+        elif case in {"echo", "relative-echo"}:
+            assert json.loads(result.stdout) == payload
+        else:
+            assert json.loads(result.stdout)["permissionDecision"] == "deny"
 
 
 def test_hook_exits_with_blocked_file_reader(tmp_path: Path) -> None:

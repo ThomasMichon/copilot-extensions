@@ -8,13 +8,16 @@ import subprocess
 import httpx
 import pytest
 
-from agent_dispatch import __main__ as cli, pool_worker_decline_cli as worker
+from agent_dispatch import __main__ as cli
+from agent_dispatch import pool_worker_decline_cli as worker
 from agent_dispatch.client import DispatchError, DispatchUpgradeRequired
 from agent_dispatch.queue import Status
+from tests import test_pool_decline_closeout as closeout
 from tests import test_pool_placement_client as controls
 from tests.test_pool_worker_decline import prepared_worker
 
 q = controls.q
+governed = closeout.governed
 api = controls.api
 
 
@@ -59,7 +62,9 @@ def test_actual_parser_prepares_then_only_finalizes_own_workspace(q, caller, cap
     assert q.get(task_id).status == Status.CLAIMED and q.get(task_id).owner is None
     assert q.get(task_id).excludes == ["capability:unrelated"]
     assert q.pool_worker_decline(task_id).exclusions == ("worktree:worktree",)
-    assert [r.url.path for r in requests] == [f"/tasks/{task_id}", "/health", f"/tasks/{task_id}/pool-decline"]
+    assert [r.url.path for r in requests] == [
+        f"/tasks/{task_id}", "/health", f"/tasks/{task_id}/relationship", "/health", f"/tasks/{task_id}/pool-decline",
+    ]
     assert commands[0][0] == [*prefix, "record", "--describe-closeout-contract", "--json"]
     assert commands[1][0] == [
         *prefix, "finalize", "--dispatch-task-id", task_id,
@@ -207,3 +212,262 @@ def test_machine_self_exclusion_refuses_unavailable_or_changed_assignment(
         args.func(args)
     assert q.pool_worker_decline(task_id) is None
     assert not commands and all(r.method == "GET" for r in requests)
+
+
+@pytest.fixture
+def governed_cli(governed, monkeypatch):
+    """The real parser and coordinator over a workspace that retains its task claim."""
+    from fastapi.testclient import TestClient
+
+    from tests import test_pool_placement as placement_controls
+
+    g = governed
+    order, requests = [], []
+    with TestClient(placement_controls.create_app(
+        g.q, token="data", control_token="control", enable_mcp=False, verification_interval=0,
+    )) as app:
+        monkeypatch.setenv("COPILOT_AGENT_SESSION_ID", "native")
+        monkeypatch.setattr(cli, "_identity", lambda args: ("host-a", "tree"))
+        monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(app, requests, control=False))
+        monkeypatch.setattr(worker, "DISPOSITION_POLL_SECONDS", 0)
+
+        def finalize(binding, worktree):
+            order.append(("finalize", g.q.get(g.task_id).status, g.q.task_relationship(g.task_id)["state"]))
+            assert binding["reservation_key"] == g.binding["reservation_key"] and worktree == "tree"
+
+        monkeypatch.setattr(worker, "_finalize", finalize)
+        args = cli.build_parser().parse_args([
+            "decline", g.task_id, "--pool-generation", str(g.binding["generation"]),
+            "--owner-session-id", "native", "--exclude-self", "worktree",
+            "--note", "The pool lacks the required tool.",
+        ])
+        yield g, args, order, requests, app
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_retained_claim_orders_readiness_requeue_settlement_then_finalization(governed_cli, monkeypatch, capsys):
+    g, args, order, requests, _ = governed_cli
+    await_disposition = worker._await_disposition
+
+    def supervisor_observes(client, task_id, decline):
+        order.append(("prepared", g.q.get(task_id).status, g.q.task_relationship(task_id)["state"]))
+        g.q.close_pool_decline(task_id, **g.binding)
+        await_disposition(client, task_id, decline)
+
+    monkeypatch.setattr(worker, "_await_disposition", supervisor_observes)
+    assert args.func(args) == 0
+    emitted = json.loads(capsys.readouterr().out)
+    assert emitted["routing"] == "requeued" and emitted["task_relationship"] == "closed"
+    assert order == [
+        ("prepared", Status.CLAIMED, "bound"), ("finalize", Status.QUEUED, "closed"),
+    ]
+    current = g.q.get(g.task_id)
+    assert current.generation == g.binding["generation"] + 1 and current.excludes == ["worktree:tree"]
+    assert sum("observe-ready" in argv for argv in g.calls) == 1
+    paths = [r.url.path for r in requests if r.method == "POST"]
+    assert paths == [f"/tasks/{g.task_id}/pool-decline", f"/tasks/{g.task_id}/pool-decline/settlement"]
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_unconfirmed_disposition_retains_claim_then_rerun_converges_once(governed_cli, monkeypatch, capsys):
+    g, args, order, requests, _ = governed_cli
+    monkeypatch.setattr(worker, "DISPOSITION_WAIT_SECONDS", 0)
+    with pytest.raises(DispatchError, match="not yet confirmed"):
+        args.func(args)
+    assert not order and g.q.get(g.task_id).status == Status.CLAIMED
+    assert g.q.task_relationship(g.task_id)["state"] == "bound"
+    assert "not yet confirmed" in g.q.pool_worker_decline(g.task_id).blocker
+    g.owner.lose_reply = "close"
+    assert g.q.close_pool_decline(g.task_id, **g.binding).relationship["state"] == "retained"
+    requeued = g.q.get(g.task_id)
+    for _ in range(2):
+        assert args.func(args) == 0
+        assert json.loads(capsys.readouterr().out)["task_relationship"] == "closed"
+    assert order == [("finalize", Status.QUEUED, "closed")] * 2
+    assert g.q.get(g.task_id) == requeued
+    assert sum("observe-ready" in argv for argv in g.calls) == 1
+    assert not any(r.url.path.endswith("/closeout") for r in requests)
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_unconfirmed_disposition_reads_keep_polling_until_requeue(governed_cli, monkeypatch, capsys):
+    g, args, order, requests, _ = governed_cli
+    await_disposition = worker._await_disposition
+    failures = [
+        httpx.ConnectError("lost"), DispatchError(503, "unavailable"), ValueError("invalid json"),
+    ]
+
+    def lossy_observation(client, task_id, decline):
+        real_get = client.get
+
+        def get(identifier, **kwargs):
+            if failures:
+                raise failures.pop(0)
+            return real_get(identifier, **kwargs)
+
+        monkeypatch.setattr(client, "get", get)
+        g.q.close_pool_decline(task_id, **g.binding)
+        await_disposition(client, task_id, decline)
+
+    monkeypatch.setattr(worker, "_await_disposition", lossy_observation)
+    assert args.func(args) == 0
+    assert json.loads(capsys.readouterr().out)["task_relationship"] == "closed"
+    assert not failures and order == [("finalize", Status.QUEUED, "closed")]
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+@pytest.mark.parametrize("blocker_lost", [False, True])
+def test_persistently_lost_disposition_reads_record_blocker_and_retain_claim(
+    governed_cli, monkeypatch, blocker_lost,
+):
+    g, args, order, requests, _ = governed_cli
+    monkeypatch.setattr(worker, "DISPOSITION_WAIT_SECONDS", 0)
+    await_disposition = worker._await_disposition
+
+    def lost_observation(client, task_id, decline):
+        def get(identifier, **kwargs):
+            raise httpx.ReadTimeout("observation lost")
+
+        def unreachable(*a, **k):
+            raise httpx.ConnectError("coordinator unreachable")
+
+        monkeypatch.setattr(client, "get", get)
+        if blocker_lost:
+            monkeypatch.setattr(client, "record_pool_decline_blocker", unreachable)
+        await_disposition(client, task_id, decline)
+
+    monkeypatch.setattr(worker, "_await_disposition", lost_observation)
+    with pytest.raises(DispatchError, match="not yet confirmed .*observation lost.*custody retained"):
+        args.func(args)
+    assert not order and g.q.get(g.task_id).status == Status.CLAIMED
+    assert g.q.task_relationship(g.task_id)["state"] == "bound"
+    blocker = g.q.pool_worker_decline(g.task_id).blocker
+    assert blocker is None if blocker_lost else "observation lost" in blocker
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_old_coordinator_with_retained_claim_refuses_before_decision(governed_cli, monkeypatch):
+    g, args, order, requests, app = governed_cli
+
+    def rewrite(request, response):
+        if request.url.path == "/health":
+            value = response.json()
+            value["pool_placement"].pop("worker_decline_readiness_closeout_versions")
+            return httpx.Response(200, json=value)
+        return response
+
+    monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(
+        app, requests, control=False, rewrite=rewrite,
+    ))
+    with pytest.raises(DispatchUpgradeRequired):
+        args.func(args)
+    assert g.q.pool_worker_decline(g.task_id) is None and not order
+    assert all(r.method == "GET" for r in requests)
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_unsettled_claim_for_another_reservation_refuses_before_decision(governed_cli, monkeypatch):
+    g, args, order, requests, app = governed_cli
+
+    def rewrite(request, response):
+        if request.url.path.endswith("/relationship"):
+            value = response.json()
+            value["request"]["reservation_key"] = "replacement-reservation"
+            return httpx.Response(200, json=value)
+        return response
+
+    monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(
+        app, requests, control=False, rewrite=rewrite,
+    ))
+    with pytest.raises(DispatchError, match="original task relationship"):
+        args.func(args)
+    assert g.q.pool_worker_decline(g.task_id) is None and not order
+    assert all(r.method == "GET" for r in requests)
+    assert g.q.task_relationship(g.task_id)["state"] == "bound"
+
+
+def _replace_after_settled_decline(g, args, monkeypatch):
+    monkeypatch.setattr(worker, "DISPOSITION_WAIT_SECONDS", 0)
+    with pytest.raises(DispatchError, match="not yet confirmed"):
+        args.func(args)
+    # Dispatch settled the claim, but the worker never finalized its workspace.
+    assert g.q.close_pool_decline(g.task_id, **g.binding).relationship["state"] == "closed"
+    requeued = g.q.get(g.task_id)
+    g.q.retire_spawn(g.binding["reservation_key"], exact_absence=True, conclusion_state="skipped")
+    g.q.publish_pool_catalog_scope(
+        "host-a", "linux", "publisher-0", generation=1, expected_revision=1,
+        registration_revision=g.q.pool_registration_revision(), expected_cohort_revision=1,
+        input_revision="fresh-pool", definitions=(closeout.pool(),), now=requeued.not_before,
+    )
+    replacement, admitted = g.q.reserve_spawn(
+        g.task_id, reserved_by="allocator", driver="cli",
+        pool_catalog_revision=g.q.pool_catalog_snapshot().revision, now=requeued.not_before,
+    )
+    assert admitted and replacement.key != g.binding["reservation_key"]
+    assert g.q.pool_worker_decline(g.task_id) is None
+    return g.q.get(g.task_id)
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_rerun_after_replacement_placement_recovers_exact_original_binding(governed_cli, monkeypatch, capsys):
+    g, args, order, requests, _ = governed_cli
+    placed = _replace_after_settled_decline(g, args, monkeypatch)
+    requests.clear()
+    for _ in range(2):
+        assert args.func(args) == 0
+        emitted = json.loads(capsys.readouterr().out)
+        assert emitted["task_relationship"] == "closed"
+        assert emitted["decline"]["reservation_key"] == g.binding["reservation_key"]
+    assert order == [("finalize", placed.status, "closed")] * 2
+    assert g.q.get(g.task_id) == placed
+    assert not any(
+        r.method == "POST" and r.url.path.endswith(("/closeout", "/pool-decline")) for r in requests
+    )
+
+
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_recovery_refuses_another_incarnation_or_unsettled_decline(governed_cli):
+    g, _, _, _, app = governed_cli
+    from tests.test_pool_placement import headers
+    url = f"/tasks/{g.task_id}/pool-decline/recovery"
+    body = {"worker_id": g.binding["worker_id"], "native_id": "native",
+            "generation": g.binding["generation"]}
+    g.q.prepare_pool_decline(
+        g.task_id, **g.binding, exclusions=["worktree:tree"], note="The pool lacks the required tool.",
+    )
+    assert app.get(url, headers=headers("data"), params=body).status_code == 404
+    g.q.close_pool_decline(g.task_id, **g.binding)
+    found = app.get(url, headers=headers("data"), params=body)
+    assert found.status_code == 200
+    assert found.json()["decline"]["reservation_key"] == g.binding["reservation_key"]
+    assert found.json()["worktree"] == "tree"
+    for change in ({"native_id": "other"}, {"generation": g.binding["generation"] + 1},
+                   {"worker_id": "host-a/other"}):
+        assert app.get(url, headers=headers("data"), params={**body, **change}).status_code == 404
+
+
+@pytest.mark.parametrize("versions", ["missing", None, [], [True], [2]])
+@pytest.mark.parametrize("governed", [False], indirect=True)
+def test_rolled_back_coordinator_refuses_recovery_before_settlement(governed_cli, monkeypatch, versions):
+    g, args, order, requests, app = governed_cli
+    placed = _replace_after_settled_decline(g, args, monkeypatch)
+
+    def rewrite(request, response):
+        if request.url.path == "/health":
+            value = response.json()
+            if versions == "missing":
+                value["pool_placement"].pop("worker_decline_binding_recovery_versions")
+            else:
+                value["pool_placement"]["worker_decline_binding_recovery_versions"] = versions
+            return httpx.Response(200, json=value)
+        return response
+
+    monkeypatch.setattr(cli, "_client", lambda *a, **k: controls.connected(
+        app, requests, control=False, rewrite=rewrite,
+    ))
+    requests.clear()
+    with pytest.raises(DispatchUpgradeRequired, match="binding recovery"):
+        args.func(args)
+    assert not order and g.q.get(g.task_id) == placed
+    assert not any(r.url.path.endswith(("/recovery", "/settlement")) for r in requests)
+    assert all(r.method == "GET" for r in requests)

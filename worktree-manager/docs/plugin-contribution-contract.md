@@ -10,9 +10,16 @@ shipping static JSON under its own payload:
 <installed-plugins>/<marketplace>/<plugin>/pivots/<name>.json
 ```
 
-The Manager scans those payloads directly for plugins enabled user-global or for
-the selected project. A plugin installer does not copy into Manager-owned state,
-and neither side imports or declares a package dependency on the other.
+The Manager resolves active payloads through the shared plugin-activation owner,
+including directory marketplaces declared user-global or by the selected project,
+with their local settings overrides, and scans their `pivots/*.json` directly.
+Project lookup uses its resolved anchor, including anchor-only registrations.
+The selected scope's root wins over a
+cached copy of the same plugin; marketplace and plugin identity come from that
+resolution, not the directory's name. Source-resolution failures remain typed
+`activation-*` findings, including when the resolver selects an installed fallback.
+A plugin installer does not copy into Manager-owned state, and neither side
+imports or declares a package dependency on the other.
 
 ## Manifest
 
@@ -104,6 +111,21 @@ owned producer. Finite envelopes also require `done` and exit zero; rows followe
 by EOF or a nonzero exit remain an incomplete read. Older Managers may time out a progressing long observation;
 refresh after updating the consumer rather than claiming the partial read ready.
 Held subscriptions retain their existing first-publication and lifetime rules.
+Registered list and progress-action streams drain diagnostic stderr concurrently
+and separately from NDJSON stdout, retaining at most 1 MiB per invocation.
+Exceeding that limit or failing to read or settle the diagnostic pipe is an
+explicit failure, even after a terminal success frame. Diagnostics do not renew
+the list's publication clock. Cancellation and close retire the owned child and
+join its diagnostic reader; stdout and its communication reader must also settle.
+An unsettled child, stdout pipe or reader remains tracked rather
+than being reported as successfully cleaned up. Older consumers can still block
+on a pipe-filling diagnostic burst; unchanged provider frames alone cannot fix
+that consumer defect.
+An observed diagnostic failure immediately marks only its captured read scope
+and generation failed, retaining rows for inspection and blocking actions before
+cleanup can wait on stdout. Later frames cannot republish that failed read as
+ready, and a late failure from a superseded generation cannot poison its
+replacement. Child and reader custody remain with the original cleanup owner.
 View-wide executable actions remain unavailable until the consumer has a successful current
 read with no replacement pending. Confirmation and final command dispatch
 recheck the captured scopes, including queued synchronous, progress, Configuration
@@ -223,6 +245,19 @@ For the existing provider-owned authentication use of these seams, see the
 [in-Picker device-authorization pattern](../../docs/patterns/in-picker-device-authorization.md).
 It covers account/scope verification, safe progress presentation, cancellation,
 SSH browser use and candidate-consumer ownership without changing this schema.
+
+### Registered row-action progress
+
+A registered row action with `progress: true` streams through its runtime into
+the owning `ProgressScreen`'s Inbox. The reader publishes independent latest-value
+snapshots; only the UI thread applies them. Rendering uses nondestructive reads,
+so coalesced updates and terminal messages remain visible across ticks, including
+completion before mounting or a failed wake. Closed or replaced runs cannot
+change or cancel a newer run through late data, queued wakes or old modal input.
+Provider errors and unexpected reader/refresh failures settle as errors rather
+than leaving Working indefinitely. The existing provider owns cancellation and
+source refresh; this presentation path changes neither its NDJSON schema nor
+process-lifecycle authority.
 
 ### Shared form drafts
 
@@ -494,11 +529,27 @@ JSON object with exactly these fields:
 }
 ```
 
-`version` must be integer 1, `token` a nonempty string, `summary` a string,
+`version` must be integer 1 or 2, `token` a nonempty string, `summary` a string,
 `effects` an array of strings, and `findings` an array of code/severity/message
 string records. Findings use `error`, `warning`, or `info`. The returned target
-must equal the row target, scope must be `machine-local`, and operation must
-be `set` or `reset`. Malformed/unsupported output, a target mismatch, nonzero
+must equal the row target. Version 1 retains `scope: "machine-local"` and
+operation `set` or `reset`. Version 2 uses the same exact fields with
+`scope: "remote-repository"` and operation `create` or `protect-default`.
+These pairs cannot be mixed; the confirmation renders the actual scope and
+operation rather than labeling remote effects as machine-local. The outer form
+manifest remains version 1. This receiver support does not itself expose a
+remote action, implement a provider transaction or grant creation/policy authority.
+
+Providers must qualify their own executing runtime's operation support before
+offering new syntax. A Manager predating preview version 2 rejects that proposal
+before Apply; it cannot safely receive a version-1 proposal mislabeled local as
+a fallback. New Managers preserve version-1 local providers. Missing or
+rolled-back provider support leaves only the optional operation unavailable,
+without replaying an effectful command or disabling existing local forms.
+The [private knowledge-creation plan](../../efforts/active/worktree-manager-control-plane/phase-5-private-knowledge-creation.md)
+retains the separate native provider, protection-completion and consumer work.
+
+Malformed/unsupported output, a target mismatch, nonzero
 exit, timeout, or error finding blocks Apply. Failure is visible and retryable.
 Warnings, target, effects, and collected non-secret values are displayed before
 consent; Cancel is focused initially. Edit preserves in-memory values but
@@ -516,9 +567,12 @@ The token is a stale-proposal check, not a credential. Under its shared mutation
 serialization, the provider must revalidate authority, exact target, operation,
 normalized values and all relevant source/local baselines before writing.
 Conflicts require fresh preview and consent, never an automatic broadened retry.
-Reset removes the supported local override and restores current inheritance;
+Version-1 reset removes the supported local override and restores current inheritance;
 it never persists a copy of an inherited value. Provider code owns these writes,
-not the Manager. Browse, refresh, preview, edit and cancel must not create state,
+not the Manager. Version-2 providers retain their own remote target/account,
+confirmation, partial-effect and unknown-outcome recovery contract. A preview
+token never authorizes replay after uncertain remote acceptance.
+Browse, refresh, preview, edit and cancel must not create state,
 ensure a daemon, reserve work or launch agents. The provider must redact secrets
 before emitting rows, fields, previews, diagnostics, receipts, or argv values;
 this is not a secret editor. Apply uses the existing full stdout/stderr/exit
@@ -567,7 +621,9 @@ than becoming a mutation performed merely by browsing Configuration.
 - During the migration window, the report also compares the old
   `~/.agent-worktrees/pivots` copy registry with enabled payloads and reports
   stale or orphaned legacy entries. The Manager never uses those copies as its
-  source of truth.
+  source of truth. Inspection is read-only and includes owned declarations whose
+  `visible_when.state_root_file` condition currently hides their UI pivot; a
+  hidden pivot is not an orphan.
 - The contribution file is inert when Worktree Manager is absent. A plugin's
   own CLI/service behavior is unchanged.
 

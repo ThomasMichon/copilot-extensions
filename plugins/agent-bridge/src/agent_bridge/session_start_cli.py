@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import sys
 from dataclasses import dataclass
 
@@ -262,7 +261,7 @@ def _prepare_caller_context(client, agent_name: str, caller_id: str | None) -> _
         from .relationship_authority import RelationshipRefused, canonical_owner
 
         owner = core._worktrees_get("owner-ref")
-        if (caller or "AGENT_WORKTREES_OWNER_REF" in os.environ) and not owner:
+        if caller and not owner:
             raise BridgeClientError(422, "Managed remote request has no qualified host owner")
         if owner is not None:
             try:

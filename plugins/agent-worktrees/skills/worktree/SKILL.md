@@ -48,6 +48,14 @@ description: >
 
 # Worktree Skill
 
+Focused discovery entrypoints are
+[finalizing-worktrees](../finalizing-worktrees/SKILL.md) and
+[cleaning-worktrees](../cleaning-worktrees/SKILL.md).
+They route here rather than copying the lifecycle procedures.
+Read [closeout versus reclamation](references/closeout-and-reclamation.md) when
+artifact retention or finalized-but-retained children affect the task; it
+distinguishes the contract from installed finalization/removal coupling.
+
 > **Always use the payload command.** Replace `<agent-worktrees catalog argv[0]>`
 > below with the exact `argv[0]` supplied by the session catalog. Quote it at
 > each shell call site. See [references/reference.md](references/reference.md)

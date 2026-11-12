@@ -14,7 +14,11 @@ param(
     [string]$RuntimeVersion,
     [string]$ExpectedNamespaceGeneration,
     [string]$ExpectedInstallGeneration,
-    [switch]$Force
+    [switch]$Force,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -26,6 +30,15 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision') -or $Context) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
 function Copy-InstallerStageDirectory {
@@ -102,7 +115,8 @@ if ($env:OS -eq 'Windows_NT' -and
     $driverOptions = @()
     if ($Force) { $driverOptions += 'Force' }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
-        -Plugin 'agent-pull-requests' -Action $Action -Options $driverOptions
+        -Plugin 'agent-pull-requests' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
@@ -387,6 +401,7 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v3 source-kind -- keep byte-identical across plugins ===
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
+    if ($WheelProfile) { return $WheelPython }
     foreach ($d in @($VenvDir, $LinkDir)) {
         # Windows venv layout first; `bin/python` is the POSIX layout pwsh sees off Windows.
         if ($d) { foreach ($rel in 'Scripts\python.exe', 'bin/python') { $p = Join-Path $d $rel; if (Test-Path $p) { return $p } } }
@@ -475,6 +490,7 @@ function Test-SourceRuntimeUnchanged {
 function Get-SourceManifestFields {
     if (-not $SourceRuntimeIdentity) { Test-SourceRuntimeUnchanged }
     $fields = @{}
+    if ($NativeWheelSelection) { $fields['runtime_version'] = $SrcVersion }
     if ($SourceRuntimeIdentity) {
         foreach ($property in ($SourceRuntimeIdentity | ConvertFrom-Json).PSObject.Properties) {
             $fields[$property.Name] = $property.Value
@@ -484,6 +500,12 @@ function Get-SourceManifestFields {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-pull-requests' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     # Use the canonical fingerprint_source() (libs/versioned-runtime), not a
     # bespoke pyproject.toml-only hash: a prior audit (#5472) found exactly
     # this narrower scope on another adopter -- changing src\agent_pull_requests
@@ -566,9 +588,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-pull-requests' `
+        -Uv $WheelUv -HealthModule 'agent_pull_requests' -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     Test-SourceRuntimeUnchanged
     return $true
 }
@@ -769,6 +797,10 @@ if ($Action -eq 'uninstall') {
 }
 $needsInstallLock = $Action -in @('install', 'update', 'stamp', 'provision', 'uninstall')
 if ($Action -in @('install', 'update', 'stamp', 'provision')) { Initialize-SourceRuntime }
+if ($WheelProfile) {
+    Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-pull-requests' -Root $InstallDir
+}
 if ($needsInstallLock -and -not (Enter-InstallLock)) {
     Write-Fail "Timed out waiting for the install transaction lock: $(Join-Path $InstallDir '.install.lock')"
     exit 1
@@ -778,7 +810,7 @@ try {
     if ($Action -in @('install', 'update', 'stamp', 'provision')) { Test-SourceRuntimeUnchanged }
     if ($Action -in @('install', 'update', 'provision')) {
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
     }
     if ($Action -eq 'stamp') { Invoke-Stamp; exit 0 }
 
@@ -811,7 +843,7 @@ try {
         exit 1
     }
 
-    $uvPath = Ensure-Uv -InstallRoot $InstallDir
+    $uvPath = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
     if (-not $uvPath) {
         Write-Fail 'uv is required but could not be resolved or acquired'
         exit 1

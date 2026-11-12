@@ -1,4 +1,4 @@
-"""Local cache access without cryptography or vault unlock on Windows."""
+"""Local cache access without optional crypto packages or Vault unlock."""
 
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ def native_cache(monkeypatch, tmp_path):
     original = builtins.__import__
 
     def without_crypto(name, *args, **kwargs):
-        if name == "cryptography" or name.startswith("cryptography."):
+        if name.startswith(("cryptography", "Cryptodome")) or name == "protected_crypto":
             raise ImportError("cryptography unavailable")
         return original(name, *args, **kwargs)
 
@@ -47,7 +47,7 @@ def test_native_cache_survives_reopen_without_vault_unlock(native_cache):
 import builtins
 original = builtins.__import__
 def blocked(name, *args, **kwargs):
-    if name == 'cryptography' or name.startswith('cryptography.'):
+    if name.startswith(('cryptography', 'Cryptodome')) or name == 'protected_crypto':
         raise ImportError('unavailable crypto')
     return original(name, *args, **kwargs)
 builtins.__import__ = blocked

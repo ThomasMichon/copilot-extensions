@@ -40,7 +40,8 @@ from zdd.routing import Endpoint
 from . import routing_persistence
 from .cutover_result import CutoverResult as CutoverResult
 from .cutover_selection import (
-    candidate_port, routing_deadline, routing_lock_kwargs, validate_routing_lock_timeout,
+    candidate_port, raw_active, refuse_current_old, routing_deadline,
+    routing_lock_kwargs, validate_routing_lock_timeout,
 )
 
 if TYPE_CHECKING:
@@ -119,7 +120,10 @@ class CutoverOrchestrator:
         drain_predecessor: bool = True,
         refuse_restoration: Callable[[dict[str, Any] | None], str | None] | None = None,
         routing_lock_timeout: float | None = None,
+        preserve_raw_active: bool = False,
     ) -> None:
+        if preserve_raw_active and refuse_old is None:
+            raise ValueError("raw active preservation requires a publication refusal guard")
         if expected_old is not None and refuse_old is None:
             raise ValueError("an expected predecessor also requires a publication refusal guard")
         if on_published is not None and expected_old is None:
@@ -144,6 +148,7 @@ class CutoverOrchestrator:
         self.routing = routing_mod
         self.drain_before_publish = drain_before_publish
         self.expected_old = expected_old
+        self.preserve_raw_active = preserve_raw_active
         self.on_published = on_published
         self.self_retirement = self_retirement
         self.activate_successor = activate_successor
@@ -220,19 +225,10 @@ class CutoverOrchestrator:
 
     def _raw_active(self) -> dict | None:
         """The routing table's own ``active`` row -- never healed to ``previous``."""
-        table = self.routing.read_table(self.config_dir)
-        active_raw = table.get("active") if isinstance(table, dict) else None
-        return active_raw if isinstance(active_raw, dict) else None
+        return raw_active(self)
 
     def _refuse_current_old(self, result: CutoverResult) -> bool:
-        if self.refuse_old is None:
-            return False
-        refusal = self.refuse_old(self._raw_active())
-        if not refusal:
-            return False
-        result.error = refusal
-        result.steps.append(f"refused: {refusal}")
-        return True
+        return refuse_current_old(self, result)
 
     # -- main ----------------------------------------------------------------
 
@@ -404,7 +400,10 @@ class CutoverOrchestrator:
             return result
         # Exact-predecessor callers own recovery; preserve their route witness
         # even when the observed native predecessor exited before selection.
-        if conditional is None and not self.drain_before_publish and self.expected_old is None:
+        if (
+            conditional is None and not self.drain_before_publish
+            and self.expected_old is None and not self.preserve_raw_active
+        ):
             try:
                 self.routing.reap_stale_active(
                     self.config_dir, service=self.service, **routing_lock_kwargs(self.routing_lock_timeout),
@@ -444,7 +443,7 @@ class CutoverOrchestrator:
             old_for_cas = Endpoint.from_dict(raw_active) if raw_active else None
         old = (
             conditional.old if conditional else old_for_cas
-            if self.retire_failed_predecessor is not None
+            if self.retire_failed_predecessor is not None or self.preserve_raw_active
             else self.routing.read_active_endpoint(self.config_dir)
         )
         result.old_endpoint = old

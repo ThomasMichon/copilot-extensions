@@ -60,6 +60,80 @@ def inventory_paths(repo: Path, environment: dict[str, str] | None) -> tuple[Pat
     return (repo / home).resolve(), (repo / cache).resolve()
 
 
+def _cached_origin_url(candidate: Path) -> str | None:
+    """Read ``remote.origin.url`` from a cache clone's own config without running Git."""
+    config = candidate / ".git" / "config"
+    try:
+        if not config.is_file() or config.is_symlink():
+            return None
+        lines = config.read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return None
+    in_origin = False
+    for raw in lines:
+        line = raw.strip()
+        if line.startswith("["):
+            header = line.strip("[]").strip()
+            in_origin = header.replace("\t", " ").split(None, 1) == ["remote", '"origin"']
+            continue
+        if in_origin and "=" in line:
+            key, _, value = line.partition("=")
+            if key.strip().casefold() == "url":
+                return value.strip().strip('"') or None
+    return None
+
+
+def _select_registered_catalogs(
+    source: str, registration: Any, matches: list[tuple[Any, ...]],
+) -> list[tuple[Any, ...]]:
+    """Narrow same-named cache catalogs to the one the registration describes.
+
+    Copilot CLI may leave an older clone of the same marketplace under a
+    different directory name (for example after its cache naming changed).
+    Prefer the candidate whose Git origin matches the registered remote and,
+    for GitHub registrations, whose directory is the native ``<owner>-<repo>``
+    slug. Anything still ambiguous is left for the caller to refuse.
+    """
+    if len(matches) < 2 or not isinstance(registration, dict):
+        return matches
+    definition = registration.get("source")
+    if not isinstance(definition, dict):
+        return matches
+    kind = definition.get("source")
+    location = definition.get("repo") if kind == "github" else definition.get("url")
+    if kind not in REMOTE_MARKETPLACE_SOURCE_KINDS or not isinstance(location, str):
+        return matches
+    expected = normalize_remote(
+        f"https://github.com/{location}.git" if kind == "github" else location,
+    )
+    if expected is None:
+        return matches
+    if kind == "github":
+        # GitHub owner and repository names are case-insensitive.
+        expected = expected.casefold()
+
+    def _origin(root: Path) -> str | None:
+        origin = normalize_remote(_cached_origin_url(root) or "")
+        return origin.casefold() if kind == "github" and origin else origin
+
+    selected = [match for match in matches if _origin(match[0]) == expected]
+    if kind == "github" and len(selected) > 1:
+        slug = location.strip("/").replace("/", "-").casefold()
+        native = [match for match in selected if match[0].name.casefold() == slug]
+        if len(native) == 1:
+            selected = native
+    if len(selected) != 1:
+        return matches
+    ignored = [match[0].name for match in matches if match is not selected[0]]
+    logging.getLogger("plugin-resolve").warning(
+        "%s ignored stale same-named marketplace cache catalog(s) %s; selected %s "
+        "(stale_marketplace_cache: remove the stale directory from the Copilot "
+        "marketplace cache to silence this warning)",
+        source, ", ".join(ignored), selected[0][0].name,
+    )
+    return selected
+
+
 def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
     name, marketplace = split_source(source)
     registration = _settings_document(home / "settings.json", jsonc_header=True).get(
@@ -83,6 +157,7 @@ def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
             if root.is_absolute() and root.exists():
                 declared_catalog = root.resolve(strict=True)
     matches = []
+    named: list[tuple[Path, dict[str, Any]]] = []
     catalogs = cache / "marketplaces"
     candidates = (
         [declared_catalog] if declared_catalog is not None
@@ -108,6 +183,10 @@ def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
             if candidate == declared_catalog:
                 raise ValueError(f"Installed marketplace catalog identity differs: {source}")
             continue
+        named.append((candidate, document))
+    # Choose among same-named clones before validating entries, so a stale
+    # clone that predates the requested plugin cannot fail the lookup.
+    for candidate, document in _select_registered_catalogs(source, registration, named):
         owner = document.get("owner")
         if not isinstance(owner, dict) or not isinstance(owner.get("name"), str) or not owner["name"].strip():
             raise ValueError(f"Installed marketplace owner metadata is missing: {source}")
@@ -119,7 +198,10 @@ def installed_item(source: str, home: Path, cache: Path) -> dict[str, Any]:
             raise ValueError(f"Installed marketplace catalog does not uniquely declare: {source}")
         matches.append((candidate, *publication_metadata(candidate, source)))
     if len(matches) > 1:
-        raise ValueError(f"Installed marketplace catalog is ambiguous: {source}")
+        raise ValueError(
+            f"Installed marketplace catalog is ambiguous: {source} "
+            f"(candidates: {', '.join(match[0].name for match in matches)})",
+        )
     catalog_path, metadata, entry = matches[0] if matches else (None, {}, {})
     if declared_catalog is not None:
         catalog = load_marketplace(declared_catalog)

@@ -46,6 +46,14 @@ guarantee, with agent-worktrees as its repo-identity anchor. A worktree
 checkout's own directory name is a per-session, per-machine identifier that
 must never be adopted downstream as if it were the repo's registered name.
 
+A retained checkout registered in the receiving machine's local project store
+is local by that registration and its repository evidence, not by a historical
+hostname. Missing, invalid or incorrectly mapped optional machine topology must
+not prevent entering that checkout or settling its original local ownership.
+Host renames preserve worktree IDs, sessions, relationships and claim references;
+they do not require identity migration to make existing work usable. Explicit
+remote selection and new allocation retain their own execution-target checks.
+
 The resident agent-worktrees service maintains a flattened, attributable map of
 registered repository information, including each repository's resolved local
 root and management class. Consumers can obtain the whole map through one
@@ -90,8 +98,12 @@ an operator actually intends for the repo in play: the `gh`/git identity
 own inference identity (the account Copilot itself authenticates its own
 requests as, tracked independently of `gh`). agent-worktrees is the durable
 owner of both resolutions. The `gh` identity resolves through an explicit
-per-repo `account` override or the decoupled owner-keyed `account_map` where
-policy declares one. Operations governed by that explicit choice never depend
+per-repo `account` override, the decoupled owner-keyed `account_map`, or an
+explicit preferred GitHub account where policy declares one. An organization
+or user namespace describes repository ownership, not the operator's identity.
+A dependency publisher must never become the consumer's inferred public login,
+and a repository-only account exception must not spread to its siblings.
+Operations governed by an explicit choice never depend
 on whichever account happens to be globally active. Without an explicit
 preference, ambient authentication remains a supported default, visibly
 distinct from a pinned identity. The Copilot identity resolves separately and is

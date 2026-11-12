@@ -31,12 +31,15 @@ class PoolWorkerDecline:
 class PoolDeclineCloseout:
     receipt: dict
     applied: bool
+    relationship: dict | None = None
 
 
 class _QueueOwner(Protocol):
     def _connect(self) -> sqlite3.Connection: ...
     def _fetch(self, conn: sqlite3.Connection, task_id: str) -> Task | None: ...
     def _now(self, now: float | None) -> float: ...
+    def task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict | None: ...
+    def reconcile_task_relationship(self, task_id: str, *, event_id: int | None = None) -> dict: ...
     def _audit(
         self, conn: sqlite3.Connection, task_id: str, *, ts: float,
         from_status: str, to_status: str, worker: str | None, note: str,
@@ -76,6 +79,35 @@ def current_pool_decline(
     })
 
 
+def recovered_pool_decline(
+    conn: sqlite3.Connection, task_id: str, *, worker_id: str, native_id: str, generation: int,
+) -> tuple[PoolWorkerDecline, str] | None:
+    """Find this exact incarnation's decline only behind its committed closeout receipt.
+
+    A replacement placement detaches the decline from the current assignment, so a
+    lost reply must be recovered by its original binding rather than current state.
+    """
+    rows = conn.execute(
+        "SELECT d.*, c.receipt, r.worktree AS reservation_worktree FROM pool_worker_declines d"
+        " JOIN pool_worker_decline_closeouts c ON c.reservation_key=d.reservation_key"
+        " JOIN spawn_reservations r ON r.key=d.reservation_key"
+        " WHERE d.task_id=? AND d.worker_id=? AND d.native_id=? AND d.generation=?",
+        (task_id, worker_id, native_id, generation),
+    ).fetchall()
+    if len(rows) != 1:
+        return None
+    row = dict(rows[0])
+    receipt, worktree = json.loads(row.pop("receipt")), row.pop("reservation_worktree")
+    decline = PoolWorkerDecline(**{**row, "exclusions": tuple(json.loads(row["exclusions"]))})
+    binding = {
+        "worker_id": worker_id, "native_id": native_id, "generation": generation,
+        "startup_revision": decline.startup_revision, "reservation_key": decline.reservation_key,
+    }
+    if receipt.get("task_id") != task_id or receipt.get("binding") != binding or not worktree:
+        return None
+    return decline, worktree
+
+
 def require_no_pool_decline(
     conn: sqlite3.Connection, task_id: str, *, reservation_key: str | None = None,
 ) -> None:
@@ -109,11 +141,30 @@ class PoolDeclineMixin:
             startup_revision=startup_revision, reservation_key=reservation_key, now=now,
         )
 
+    def settle_pool_decline(
+        self: _QueueOwner, task_id: str, worker_id: str, *, native_id: str,
+        generation: int, startup_revision: int, reservation_key: str,
+    ) -> PoolDeclineCloseout:
+        """Retry claim settlement only behind this exact binding's committed disposition."""
+        from .queue_pool_decline_closeout import settle
+        return settle(
+            self, task_id, worker_id=worker_id, native_id=native_id, generation=generation,
+            startup_revision=startup_revision, reservation_key=reservation_key,
+        )
+
     def pool_worker_decline(
         self: _QueueOwner, task_id: str,
     ) -> PoolWorkerDecline | None:
         with self._connect() as conn:
             return current_pool_decline(conn, task_id)
+
+    def recover_pool_decline(
+        self: _QueueOwner, task_id: str, *, worker_id: str, native_id: str, generation: int,
+    ) -> tuple[PoolWorkerDecline, str] | None:
+        with self._connect() as conn:
+            return recovered_pool_decline(
+                conn, task_id, worker_id=worker_id, native_id=native_id, generation=generation,
+            )
 
     def prepare_pool_decline(
         self: _QueueOwner, task_id: str, worker_id: str, *, native_id: str,

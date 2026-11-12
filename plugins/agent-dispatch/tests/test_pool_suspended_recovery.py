@@ -622,6 +622,8 @@ def test_expired_suspended_worker_grant_requires_exact_trusted_renewal(
                 task_id, "host-a/worktree", "native", expected_generation=generation, expected_epoch=0,
             )
         assert waiting.value.status_code == 409
+        from tests.test_pool_startup_policy import renew
+        renew(q, clock[0])
         revision = request(q, task_id, now=clock[0])
         with DispatchClient(
             "http://testserver", task_token=original, transport=httpx.MockTransport(transport),
@@ -654,3 +656,404 @@ def test_expired_suspended_worker_grant_requires_exact_trusted_renewal(
             task_id, "host-a/worktree", owner_session_id="native",
             expected_generation=generation, recovery_revision=revision,
         )["status"] == Status.STARTED
+
+
+def _suspend_placed(q: TaskQueue, native: str, now: float = 101) -> tuple[str, str]:
+    t = task(q)
+    reservation, _ = place(q, t)
+    record_native(q, reservation, worktree=f"wt-{native}", native=native)
+    q.record_spawn(reservation.key, session_handle=native, startup_complete=True, startup_revision=1)
+    started = q.start(
+        t.id, f"host-a/wt-{native}", owner_session_id=native,
+        expected_generation=q.get(t.id).generation, now=now,
+    )
+    q.suspend(t.id, started.owner, reason="intentional wait", cooldown_seconds=None, now=now + 1)
+    return t.id, reservation.key
+
+
+def _cold(q: TaskQueue, key: str) -> None:
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET state=? WHERE key=?", (SpawnState.COLD, key))
+
+
+def test_cold_suspended_body_does_not_hold_a_pool_lane(q: TaskQueue) -> None:
+    _, key, _ = suspended(q)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    _cold(q, key)
+    reservation, _ = place(q, task(q))
+    assert reservation.key != key
+
+
+def test_reactivation_waits_for_a_lane_then_outranks_fresh_placement(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    request(q, task_id)
+    waiting = q.pool_startup(task_id)
+    assert waiting.recovery_requested_at is None and q.list_wakes(task_id) == []
+    assert q.get(task_id).resume_requested and q.get(task_id).status == Status.SUSPENDED
+    _cold(q, running.key)
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+    assert reconcile_recoveries(q, now=110) == 1
+    assert q.pool_startup(task_id).recovery_requested_at == 110
+    assert len(q.list_wakes(task_id)) == 1
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+
+
+def test_waiting_reactivations_take_freed_lanes_in_request_order(q: TaskQueue) -> None:
+    publish(q, pool())
+    first, first_key = _suspend_placed(q, "native-1")
+    _cold(q, first_key)
+    second, second_key = _suspend_placed(q, "native-2", now=111)
+    _cold(q, second_key)
+    running, _ = place(q, task(q))
+    q.resume(second, "host-a/wt-native-2", wake_requested=True, now=120)
+    q.resume(first, "host-a/wt-native-1", wake_requested=True, now=121)
+    _cold(q, running.key)
+    reconcile_recoveries(q, now=125)  # within the catalog publication's validity
+    assert q.pool_startup(second).recovery_requested_at == 125
+    assert q.pool_startup(first).recovery_requested_at is None
+    assert q.list_wakes(first) == []
+
+
+def test_detached_waiter_completion_waits_for_its_cold_owners_lane(q: TaskQueue) -> None:
+    from agent_dispatch.queue_execution_custody import ExecutionSendUnresolved
+    task_id, key, _ = suspended(q)
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/worktree", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    wake = q.claim_due_run_waiter_wake()
+    assert getattr(wake, "pool_recovery_revision", None) is None
+    with pytest.raises(ExecutionSendUnresolved, match="free lane"):
+        prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.COLD
+    _cold(q, running.key)
+    prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.SPAWNED
+    with pytest.raises(TaskError, match="capacity"):
+        place(q, task(q))
+
+
+def test_cold_wake_still_counts_its_tasks_older_accountable_attempt(q: TaskQueue) -> None:
+    from agent_dispatch.queue_execution_custody import ExecutionSendUnresolved
+    publish(q, pool(capacity=2))
+    task_id, key = _suspend_placed(q, "native-a")
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/wt-native-a", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    with q._connect() as conn:
+        older = dict(conn.execute("SELECT * FROM spawn_reservations WHERE key=?", (key,)).fetchone())
+        older.update(
+            key="older-attempt", attempt=older["attempt"] - 1, state=SpawnState.SPAWNED,
+            worktree="wt-older", session_handle="older-native",
+        )
+        conn.execute(
+            f"INSERT INTO spawn_reservations ({', '.join(older)}) VALUES ({', '.join('?' * len(older))})",
+            tuple(older.values()),
+        )
+        conn.execute(
+            "INSERT INTO pool_reservation_bindings SELECT 'older-attempt', registration_id, machine, env,"
+            " capabilities FROM pool_reservation_bindings WHERE reservation_key=?", (key,),
+        )
+    place(q, task(q))
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    wake = q.claim_due_run_waiter_wake()
+    with pytest.raises(ExecutionSendUnresolved, match="free lane"):
+        prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.COLD
+
+
+def test_detached_wake_retaking_a_waiting_reactivations_lane_counts_once(q: TaskQueue) -> None:
+    from agent_dispatch.queue_pool_placement import pool_lane_load
+    publish(q, pool(capacity=2))
+    task_id, key = _suspend_placed(q, "native-a")
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/wt-native-a", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    other, _ = place(q, task(q))
+    q.resume(task_id, "host-a/wt-native-a", wake_requested=True, now=103)
+    assert q.pool_startup(task_id).recovery_requested_at is None  # waiting for a lane
+    _cold(q, other.key)
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    wake = q.claim_due_run_waiter_wake()
+    prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.SPAWNED
+    with q._connect() as conn:
+        # Keep the waiting entry as an unresolved send would, so counting alone is checked.
+        conn.execute("UPDATE task_pool_assignments SET lane_wait_since=103 WHERE task_id=?", (task_id,))
+        identity = tuple(conn.execute(
+            "SELECT registration_id, machine, env FROM pool_reservation_bindings WHERE reservation_key=?",
+            (key,),
+        ).fetchone())
+        assert pool_lane_load(conn, identity) == 2
+    _cold(q, running.key)
+    place(q, task(q))
+
+
+def test_lane_blocked_wake_does_not_starve_a_runnable_wake(q: TaskQueue) -> None:
+    import asyncio
+
+    from agent_dispatch.run_waiter_wake import drain_run_waiter_wakes
+    publish(q, pool())
+    blocked_id, blocked_key = _suspend_placed(q, "native-a")
+    blocked_waiter = q.register_run_waiter(
+        blocked_id, pid=123, host="host-a", start_token="waiter-a",
+        resume_worktree="host-a/wt-native-a", command=["synthetic-wait"],
+    )
+    _cold(q, blocked_key)
+    runnable_id, _ = _suspend_placed(q, "native-b")
+    runnable_waiter = q.register_run_waiter(
+        runnable_id, pid=124, host="host-a", start_token="waiter-b",
+        resume_worktree="host-a/wt-native-b", command=["synthetic-wait"],
+    )
+    for task_id, waiter in ((blocked_id, blocked_waiter), (runnable_id, runnable_waiter)):
+        q.recover_dead_run_waiter(
+            task_id, generation=waiter["generation"], reason="external",
+            message="continue", sender="recovery",
+        )
+    [blocked] = q.list_run_waiter_wakes(blocked_id)
+    with q._connect() as conn:
+        conn.execute("UPDATE run_waiter_wakes SET created_at=50 WHERE id=?", (blocked.id,))
+    delivered = []
+
+    async def scenario() -> None:
+        loop = asyncio.create_task(drain_run_waiter_wakes(
+            q, interval=0.01, deliver=lambda _o, task_id, *_a: delivered.append(task_id) or True,
+        ))
+        try:
+            for _ in range(200):
+                if delivered:
+                    break
+                await asyncio.sleep(0.01)
+        finally:
+            loop.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await loop
+
+    asyncio.run(scenario())
+    assert delivered == [runnable_id]
+    [blocked] = q.list_run_waiter_wakes(blocked_id)
+    assert blocked.status == "pending" and blocked.attempts == 0 and blocked.not_before > 100
+    assert q.get_reservation(blocked_key).state == SpawnState.COLD
+
+
+def test_lane_waiter_resumed_without_wake_starts_without_waking(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    q.resume(task_id, "host-a/worktree", wake_requested=False, now=103)
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    _cold(q, running.key)
+    assert reconcile_recoveries(q, now=110) == 1
+    assert q.pool_startup(task_id).recovery_requested_at == 110
+    assert q.list_wakes(task_id) == []
+    q.resume(task_id, "host-a/worktree", wake_requested=True, now=111)
+    assert len(q.list_wakes(task_id)) == 1  # a later wake request reaches the started recovery
+
+
+def _parked_waiter_behind_running(q: TaskQueue) -> tuple[str, str, str]:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    request(q, task_id)
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    return task_id, key, running.key
+
+
+def test_lane_waiter_that_can_no_longer_start_releases_its_lane(q: TaskQueue) -> None:
+    task_id, key, running_key = _parked_waiter_behind_running(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET cooling_token='cooling' WHERE key=?", (key,))
+    _cold(q, running_key)
+    reconcile_recoveries(q, now=110)
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    assert q.list_wakes(task_id) == []
+    place(q, task(q))
+
+
+def test_lane_waiter_with_retired_conversation_holds_no_lane(q: TaskQueue) -> None:
+    _, key, running_key = _parked_waiter_behind_running(q)
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET conversation_retired=1 WHERE key=?", (key,))
+    _cold(q, running_key)
+    place(q, task(q))
+
+
+def test_dropped_lane_wait_keeps_the_callers_no_wake_choice(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    q.resume(task_id, "host-a/worktree", wake_requested=False, now=103)
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET cooling_token='cooling' WHERE key=?", (key,))
+    _cold(q, running.key)
+    reconcile_recoveries(q, now=110)  # cannot start: its lane wait is dropped
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    with q._connect() as conn:
+        conn.execute("UPDATE spawn_reservations SET cooling_token=NULL WHERE key=?", (key,))
+    reconcile_recoveries(q, now=120)
+    assert q.pool_startup(task_id).recovery_requested_at == 120
+    assert q.list_wakes(task_id) == []
+
+
+def test_lane_waiter_admitted_by_a_later_no_wake_resume_still_wakes(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    q.resume(task_id, "host-a/worktree", wake_requested=True, now=103)
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    _cold(q, running.key)
+    q.resume(task_id, "host-a/worktree", wake_requested=False, now=110)
+    assert q.pool_startup(task_id).recovery_requested_at == 110
+    assert len(q.list_wakes(task_id)) == 1
+
+
+def _disable_pools(q: TaskQueue) -> None:
+    [scope] = q.pool_catalog_snapshot().scopes
+    q.publish_pool_catalog_scope(
+        scope.machine, scope.env, scope.publisher_id, generation=scope.generation,
+        expected_revision=scope.revision, registration_revision=q.pool_registration_revision(),
+        expected_cohort_revision=1, input_revision="disabled", definitions=(),
+    )
+
+
+def test_unavailable_catalog_defers_a_waiting_reactivation(q: TaskQueue) -> None:
+    task_id, _, running_key = _parked_waiter_behind_running(q)
+    _cold(q, running_key)
+    assert reconcile_recoveries(q, now=200) == 0  # the publication expired at 130
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    assert q.list_wakes(task_id) == []
+
+
+def test_disabled_pool_defers_its_waiting_reactivation(q: TaskQueue) -> None:
+    task_id, key, running_key = _parked_waiter_behind_running(q)
+    _cold(q, running_key)
+    _disable_pools(q)
+    assert reconcile_recoveries(q, now=110) == 0
+    assert q.pool_startup(task_id).recovery_requested_at is None
+    assert q.list_wakes(task_id) == []
+    assert q.get(task_id).resume_requested
+
+
+def test_disabled_pool_defers_a_recovery_admitted_cold_wake(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    _cold(q, key)
+    request(q, task_id)
+    assert q.pool_startup(task_id).recovery_requested_at is not None
+    _disable_pools(q)
+    with pytest.raises(TaskError, match="disabled"):
+        q.record_spawn(key, session_handle="native", startup_complete=True, startup_revision=1)
+    assert q.get_reservation(key).state == SpawnState.COLD
+
+
+def test_renewed_suspend_after_a_detached_wake_withdraws_the_resume(q: TaskQueue) -> None:
+    publish(q, pool(capacity=2))
+    task_id, key = _suspend_placed(q, "native-a")
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/wt-native-a", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    other, _ = place(q, task(q))
+    q.resume(task_id, "host-a/wt-native-a", wake_requested=True, now=103)
+    assert q.pool_startup(task_id).recovery_requested_at is None  # waiting for a lane
+    _cold(q, other.key)
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    wake = q.claim_due_run_waiter_wake()
+    prepare_recovery_wake(q, wake)
+    assert q.get(task_id).resume_requested  # the lane was re-taken, the resume intent remains
+    q.suspend(task_id, q.get(task_id).owner, reason="intentional wait", cooldown_seconds=None, now=120)
+    assert not q.get(task_id).resume_requested
+    _cold(q, key)
+    _cold(q, running.key)
+    assert reconcile_recoveries(q, now=130) == 0
+    assert q.list_wakes(task_id) == []
+
+
+def test_stale_detached_wake_does_not_take_its_cold_owners_lane(q: TaskQueue) -> None:
+    task_id, key, _ = suspended(q)
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/worktree", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    wake = q.claim_due_run_waiter_wake()
+    q.register_run_waiter(
+        task_id, pid=124, host="host-a", start_token="waiter-next",
+        resume_worktree="host-a/worktree", command=["synthetic-wait"],
+    )
+    with pytest.raises(TaskError, match="fence advanced"):
+        prepare_recovery_wake(q, wake)
+    assert q.get_reservation(key).state == SpawnState.COLD
+    place(q, task(q))  # the capacity-one lane is still free
+
+
+def test_cold_restart_keeps_a_lane_wait_recorded_after_it_commits(
+    q: TaskQueue, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from agent_dispatch import queue_pool_recovery
+    publish(q, pool(capacity=2))
+    task_id, key = _suspend_placed(q, "native-a")
+    waiter = q.register_run_waiter(
+        task_id, pid=123, host="host-a", start_token="waiter-start",
+        resume_worktree="host-a/wt-native-a", command=["synthetic-wait"],
+    )
+    _cold(q, key)
+    running, _ = place(q, task(q))
+    other, _ = place(q, task(q))
+    q.resume(task_id, "host-a/wt-native-a", wake_requested=True, now=103)
+    _cold(q, other.key)
+    q.recover_dead_run_waiter(
+        task_id, generation=waiter["generation"], reason="external",
+        message="continue", sender="recovery",
+    )
+    restart = queue_pool_recovery._restart_cold
+
+    def restart_then_resume_again(*args, **kwargs):
+        restart(*args, **kwargs)
+        # A renewed suspension and a new no-wake resume land before any cleanup.
+        q.suspend(task_id, q.get(task_id).owner, reason="intentional wait", cooldown_seconds=None, now=110)
+        _cold(q, key)
+        place(q, task(q))
+        q.resume(
+            task_id, "host-a/wt-native-a", wake_requested=False, wake_message="new resume", now=111,
+        )
+
+    monkeypatch.setattr(queue_pool_recovery, "_restart_cold", restart_then_resume_again)
+    prepare_recovery_wake(q, q.claim_due_run_waiter_wake())
+    with q._connect() as conn:
+        waiting = conn.execute(
+            "SELECT lane_wait_since, lane_wait_message, lane_wait_wake FROM task_pool_assignments"
+            " WHERE task_id=?", (task_id,),
+        ).fetchone()
+    assert tuple(waiting) == (111, "new resume", 0)
+    assert running.key

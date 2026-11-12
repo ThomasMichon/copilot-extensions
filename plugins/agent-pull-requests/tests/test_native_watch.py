@@ -1741,3 +1741,35 @@ def test_native_cli_accepts_option_looking_callback_arguments_over_stdin(
     ]) == 0
     assert json.loads(capsys.readouterr().out)["registered"]
     assert seen[1][1]["notify"] == {"argv": callback}
+
+
+def test_observation_read_retains_cleanup_thread_without_changing_generic_command_owner(monkeypatch):
+    from agent_pull_requests import native_command
+    entered, release = threading.Event(), threading.Event()
+    def cleanup(deadline):
+        entered.set()
+        if not release.wait(max(0, deadline - time.monotonic())):
+            raise TimeoutError("synthetic cleanup remains held")
+    error = watch_process.OwnedCleanupError(None, cleanup_retry=cleanup)
+    monkeypatch.setattr(
+        native_command, "run_caller_owned", lambda *_a, **_kw: (_ for _ in ()).throw(error),
+    )
+    with pytest.raises(watch_process.OwnedCleanupError):
+        native_command.run_command([sys.executable], timeout=1)
+    assert not entered.is_set()
+    result = []
+    def observe():
+        try:
+            native_command.run_observation_command([sys.executable], timeout=1)
+        except BaseException as failure:
+            result.append(failure)
+    thread = threading.Thread(target=observe)
+    thread.start()
+    try:
+        assert entered.wait(2)
+        assert thread.is_alive() and not result
+    finally:
+        release.set()
+        thread.join(5)
+    assert not thread.is_alive() and len(result) == 1
+    assert isinstance(result[0], native_command.NativeCommandUnavailable)

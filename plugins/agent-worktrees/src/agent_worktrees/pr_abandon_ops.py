@@ -11,6 +11,8 @@ from pathlib import Path
 from . import claim_history, config as cfg, obligations, tracking
 from .config import Config
 
+_CLOSE_COMMENT_WARNING_PREFIXES = ("comment post failed:", "(comment post failed:")
+
 #: The stern, alternatives-first refusal every first (no ``--confirm``)
 #: ``pr-abandon`` call returns. Deliberately verbose and repeated in full
 #: every time -- this is the ONLY place ``--confirm`` is ever mentioned to a
@@ -171,7 +173,7 @@ def abandon_pr(
         close_result = provider.close_pull(
             repo, number, api_base=api_base, token=token, comment=comment,
         )
-        if close_result and "comment post failed" not in close_result:
+        if close_result and not close_result.startswith(_CLOSE_COMMENT_WARNING_PREFIXES):
             return {**base, "error": close_result}
         warning = close_result or ""
 

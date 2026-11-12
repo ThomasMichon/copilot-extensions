@@ -1,0 +1,17 @@
+{
+  "comment": "Ship the optional closed hourly contribution protocol with existing telemetry consumers",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    },
+    {
+      "plugin": "libs/process-telemetry",
+      "type": "patch"
+    }
+  ]
+}

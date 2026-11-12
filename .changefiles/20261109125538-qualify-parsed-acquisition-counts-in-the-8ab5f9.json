@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify parsed acquisition counts in the existing native hosted control",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

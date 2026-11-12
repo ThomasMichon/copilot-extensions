@@ -832,6 +832,9 @@ async def test_retained_acquisition_and_later_lineage_use_actual_owner_processes
         environment["PYTHONPATH"] = os.pathsep.join((
             str(root / "tools/http47_capture_bootstrap"), str(root / "tools"),
         ))
+        if os.name == "nt":
+            # Source-audited cold imports are not production lineage latency evidence.
+            monkeypatch.setattr(worktree_lineage, "_LINEAGE_TIMEOUT_S", 30.0)
         lineage_run = worktree_lineage._run
 
         def traced_lineage(command, *args, **kwargs):

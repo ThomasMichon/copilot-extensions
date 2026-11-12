@@ -111,7 +111,7 @@ class SupervisorSources(SupervisorPoolPublication):
         with self._declaration_reader_lock:
             source = read()
             values = tuple(source)
-            return DeclarationRead(values, source.complete, source.reason) if isinstance(source, DeclarationRead) else values
+            return replace(source, declarations=values) if isinstance(source, DeclarationRead) else values
 
     def _read_source_overrides(self) -> Mapping[str, dict]:
         from . import overrides as ov
@@ -170,16 +170,17 @@ class SupervisorSources(SupervisorPoolPublication):
             return []
         from .registrar_reconcile import declared_registrations
 
-        def read() -> tuple[list[dict], bool, str]:
+        def read() -> tuple[list[dict], bool, str, Iterable[Any]]:
             source = self._read_source_declarations(declared_source)
             registrations = declared_registrations(list(source), machine=self.machine, env=self.env)
             return (
                 registrations, isinstance(source, DeclarationRead) and source.complete,
                 source.reason if isinstance(source, DeclarationRead) else "source-completeness-unconfirmed",
+                source,
             )
 
         try:
-            registrations, complete, reason = self._bounded_read("declarations", read)
+            registrations, complete, reason, source = self._bounded_read("declarations", read)
         except TimeoutError as exc:
             self._observe_source("declarations", "cached" if self._last_declared is not None else "pending")
             if self._last_declared is None:
@@ -204,7 +205,71 @@ class SupervisorSources(SupervisorPoolPublication):
         self._local_source_inputs["declarations"] = copy.deepcopy(registrations)
         self._last_declared = registrations
         self._published_declared_ids = self._publish_declarations(registrations)
+        if (
+            complete and self._source_observations["declarations"].state == "fresh"
+            and self._pool_capture_deadline.get() is None
+        ):
+            self._reconcile_standing_sources(source)
+            self._reconcile_standing_recovery()
         return registrations
+
+    def _reconcile_standing_sources(self, source: DeclarationRead) -> None:
+        from .single_instance import SingletonAdmissionError
+        from .supervisor_standing_sources import reconcile_standing_sources
+
+        if not source.source_observations:
+            return
+        deadline = self._reconcile_deadline
+        if deadline is None:
+            deadline = time.monotonic() + self._reconcile_call_budget
+        client = self.client
+        target = getattr(client, "base_url", None)
+        try:
+            lock = self._pool_lock()
+            with lock.guard_current_acquisition(deadline=deadline) as acquisition:
+                def before_write() -> None:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("standing source deadline exhausted")
+                    if self._pool_lock() is not lock or lock.acquisition != acquisition:
+                        raise SingletonAdmissionError("standing source singleton changed")
+                    if self.client is not client or getattr(client, "base_url", None) != target:
+                        raise SingletonAdmissionError("standing source coordinator changed")
+
+                reconcile_standing_sources(source, client, deadline=deadline, before_write=before_write)
+        except Exception as exc:
+            log.warning("standing source reconciliation withheld: error_type=%s", type(exc).__name__)
+
+    def _reconcile_standing_recovery(self) -> None:
+        method = getattr(self.client, "recover_standing_batch", None)
+        if not callable(method):
+            return
+        deadline = self._reconcile_deadline
+        if deadline is None:
+            deadline = time.monotonic() + self._reconcile_call_budget
+        if time.monotonic() >= deadline:
+            return
+        try:
+            lock = self._pool_lock()
+            client = self.client
+            with lock.guard_current_acquisition(deadline=deadline):
+                if self.client is not client:
+                    return
+                result = method(
+                    cursor=getattr(self, "_standing_recovery_cursor", None),
+                    limit=1, deadline=deadline,
+                )
+                if result is None:
+                    return
+                cursor = result.get("next_cursor")
+                if (
+                    type(result.get("version")) is not int or result["version"] != 1
+                    or not isinstance(result.get("reports"), list)
+                    or cursor is not None and (not isinstance(cursor, str) or not cursor)
+                ):
+                    raise ValueError("standing recovery coordinator result is unconfirmed")
+                self._standing_recovery_cursor = cursor
+        except Exception as exc:
+            log.warning("standing recovery held: error_type=%s", type(exc).__name__)
 
     def _overridden_off(self) -> set[str]:
         """Read the same veto once; preserve legacy behavior on failed reads."""

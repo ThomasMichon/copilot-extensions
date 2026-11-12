@@ -308,6 +308,65 @@ def test_valid_registry_passes(repo: Path) -> None:
     assert "OK (2 contracts, 2 fixtures)" in result.stdout
 
 
+def test_provenance_batch_preserves_exact_blobs_and_metadata_without_per_commit_children(
+    repo: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first = _git(repo, "rev-parse", "HEAD")
+    spaced = "source directory/space name.py"
+    _write(repo, spaced, "VALUE = 1\n")
+    _git(repo, "add", "--", spaced)
+    _git(repo, "commit", "-qm", "add spaced source")
+    second = _git(repo, "rev-parse", "HEAD")
+    blob = _git(repo, "rev-parse", f"{first}:{SOURCE}")
+    other_blob = _git(repo, "rev-parse", f"{second}:{spaced}")
+    spec = importlib.util.spec_from_file_location("batch_contract_git", EVIDENCE_MODULE)
+    assert spec and spec.loader
+    evidence = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(evidence)
+    monkeypatch.setattr(evidence, "REPO", repo)
+    calls = []
+    run = subprocess.run
+
+    def recorded(argv, **kwargs):
+        calls.append(argv)
+        assert kwargs["env"]["GIT_NO_LAZY_FETCH"] == "1"
+        return run(argv, **kwargs)
+
+    monkeypatch.setattr(evidence.subprocess, "run", recorded)
+    absent = "f" * 40
+    evidence.prefetch_sources([
+        (first, SOURCE, blob), (second, SOURCE, blob), (second, spaced, other_blob),
+        (second, "missing source.py", blob), (absent, SOURCE, blob),
+    ])
+    assert evidence.git_blob(first, SOURCE) == blob
+    assert evidence.git_blob(second, spaced) == other_blob
+    assert evidence.git_blob(second, "missing source.py") is None
+    assert evidence.git_blob(absent, SOURCE) is None
+    assert evidence.git_file_sha256(first, SOURCE) == _sha256(repo, SOURCE)
+    assert evidence.blob_sha256(other_blob) == _sha256(repo, spaced)
+    assert evidence.plugin_version_at(first) == evidence.plugin_version_at(second) == "1.0.0"
+    assert evidence.integer_constant_at(second, SOURCE, "HTTP_PROTOCOL_VERSION") == 12
+    assert len(calls) == 3
+    assert sum("--batch" in argv for argv in calls) == 2
+    assert all("show" not in argv and "ls-tree" not in argv for argv in calls)
+
+
+@pytest.mark.parametrize("path", ["source\ninjected", "source\rinjected", "source\0injected"])
+def test_provenance_batch_refuses_delimiters_before_any_object_read(
+    path: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    spec = importlib.util.spec_from_file_location("unsafe_batch_contract_git", EVIDENCE_MODULE)
+    assert spec and spec.loader
+    evidence = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(evidence)
+    monkeypatch.setattr(
+        evidence.subprocess, "run",
+        lambda *_args, **_kwargs: pytest.fail("invalid paths must not start Git"),
+    )
+    with pytest.raises(ValueError, match="Invalid provenance path"):
+        evidence.prefetch_sources([("1" * 40, path, "2" * 40)])
+
+
 def test_checker_validates_complete_chunked_history_without_rewriting(repo: Path) -> None:
     import agent_bridge_contract_registry as codec
 

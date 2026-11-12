@@ -66,6 +66,74 @@ def _certificate(certfile: Path, keyfile: Path) -> None:
     ))
 
 
+@pytest.fixture
+def https_remote(source, tmp_path, monkeypatch):
+    """A real HTTPS Git endpoint with optional synthetic credential handling."""
+    marker = tmp_path / "unexpected-setup"
+    (source / "setup.ps1").write_text(
+        "Set-Content -LiteralPath '" + str(marker).replace("'", "''") + "' -Value 'unexpected'\n"
+        "throw 'Acquisition must not run repository setup'\n", encoding="utf-8",
+    )
+    (source / "setup.sh").write_text(
+        "touch " + shlex.quote(str(marker)) + "\nexit 99\n", encoding="utf-8",
+    )
+    commit(source)
+    web = tmp_path / "https-web"
+    web.mkdir()
+    bare = web / "remote-knowledge.git"
+    git(tmp_path, "clone", "--bare", "-q", str(source), str(bare))
+    git(bare, "--git-dir", str(bare), "update-server-info")
+    certfile, keyfile = tmp_path / "https.pem", tmp_path / "https-key.pem"
+    _certificate(certfile, keyfile)
+    observed = {"requests": 0, "private": True}
+
+    class Handler(SimpleHTTPRequestHandler):
+        def do_GET(self):
+            observed["requests"] += 1
+            if observed["private"] and not self.headers.get("Authorization"):
+                self.send_response(401)
+                self.send_header("WWW-Authenticate", 'Basic realm="Disposable fixture"')
+                self.end_headers()
+                return
+            super().do_GET()
+
+        def log_message(self, *_):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(web)))
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(certfile, keyfile)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    helper = tmp_path / "noninteractive-owner.py"
+    helper.write_text(
+        "import json,os,pathlib,sys\n"
+        "if sys.argv[-1] == 'get':\n"
+        " sys.stdin.read()\n"
+        " pathlib.Path(__file__).with_suffix('.called').write_text(json.dumps({"
+        "k:os.environ.get(k) for k in ('GCM_INTERACTIVE','GCM_GUI_PROMPT','GIT_TERMINAL_PROMPT')}))\n"
+        " print('username=synthetic\\npassword=disposable-test-value\\n')\n",
+        encoding="utf-8",
+    )
+    config = tmp_path / "https.gitconfig"
+    git(tmp_path, "config", "--file", str(config), "http.sslCAInfo", str(certfile))
+    git(tmp_path, "config", "--file", str(config), "http.schannelUseSSLCAInfo", "true")
+    git(tmp_path, "config", "--file", str(config), "credential.helper",
+        "!" + shlex.quote(sys.executable) + " " + shlex.quote(str(helper)))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(config))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1")
+    monkeypatch.setenv("no_proxy", "localhost,127.0.0.1")
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield f"https://localhost:{server.server_port}/{bare.name}", observed, helper, config
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+        assert not thread.is_alive()
+
+
 @pytest.mark.timeout(240)
 @pytest.mark.parametrize("selection", ["default", "older", "missing", "blob"])
 def test_real_https_clone_credential_owner_and_repository_setup(

@@ -20,6 +20,15 @@ class CleanupRecoveryClientMixin:
             **({"json": {"claimant_machine": claimant_machine}} if claimant_machine is not None else {}),
         ))
 
+    def rearm_claim_held_conclusion(
+        self, key: str, *, expected_detail: str, claimant_machine: str | None = None,
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            f"/spawn-reservations/{key}/conclusion/rearm-claim-held",
+            json={"expected_detail": expected_detail,
+                  **({"claimant_machine": claimant_machine} if claimant_machine is not None else {})},
+        ))
+
     def validate_spawn_conclusion_claim(
         self, key: str, claim_token: str, *, claimant_machine: str | None = None,
     ) -> dict:
@@ -75,3 +84,6 @@ class HostBoundConclusionClient:
 
     def record_spawn_conclusion(self, key, **kwargs):
         return self._client.record_spawn_conclusion(key, **self._bound_arguments(kwargs))
+
+    def rearm_claim_held_conclusion(self, key, **kwargs):
+        return self._client.rearm_claim_held_conclusion(key, **self._bound_arguments(kwargs))

@@ -14,6 +14,73 @@ from tests.test_supervisor_daemon import FakeClient, FakeLauncher, FakeLock, _da
 VERSION = "1.2.3+source." + "a" * 40 + "." + "b" * 16 + ".profile." + "c" * 16
 
 
+@pytest.mark.parametrize("case", ["matching", "settings", "scope", "authority", "absent", "unreadable", "explicit-named"])
+def test_old_source_caller_without_markers_gets_matching_primary_binding(tmp_path, monkeypatch, case):
+    from contextlib import ExitStack
+    from agent_dispatch import __main__ as cli, source_start, supervisor_source
+    from agent_dispatch.supervisor_lane_status import PROFILE_ENV, GENERATION_ENV
+    from agent_dispatch.supervisor_profile import OWNER_ENV, MasterProfile
+    from tests.test_source_supervisor_startup import _sources
+
+    for key in (PROFILE_ENV, GENERATION_ENV, OWNER_ENV):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", str(tmp_path))
+    _sources(monkeypatch)
+    primary = tmp_path / "supervisor.env"
+    primary.write_text(
+        "AGENT_DISPATCH_SUPERVISE_MODE=serve\n"
+        "AGENT_DISPATCH_SUPERVISE_MACHINE=anomalous-potato\n"
+        "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS=--no-declared\n",
+    )
+    plan = source_start.supervisor_plan(tmp_path)
+    # Older producers reconstructed effective flags and sent no binding markers.
+    argv = ["supervise", "serve", "--interval", "5.0", "--env", "default",
+            "--machine", "anomalous-potato", "--no-declared"]
+    if case == "settings":
+        argv[3] = "7"
+    elif case == "scope":
+        argv[5] = "other-scope"
+    elif case == "authority":
+        argv = ["--url", "http://127.0.0.1:7777", *argv]
+    args = cli.build_parser().parse_args(argv)
+    daemon = _daemon(
+        FakeClient([]), FakeLauncher(), lock=FakeLock(),
+        self_update_enabled=True, self_update_argv=argv,
+        self_update_install_dir=lambda: tmp_path,
+    )
+    daemon.env = args.env
+    existing = None
+    if case == "absent":
+        primary.unlink()
+    elif case == "unreadable":
+        original_read = Path.read_bytes
+
+        def denied(path):
+            if path == primary:
+                raise PermissionError("fixture primary read refused")
+            return original_read(path)
+
+        monkeypatch.setattr(Path, "read_bytes", denied)
+    elif case == "explicit-named":
+        named = tmp_path / "supervisors" / "named.env"
+        named.parent.mkdir()
+        named.write_text("AGENT_DISPATCH_SUPERVISE_MODE=serve\n")
+        existing = MasterProfile(named, None, argv)
+        daemon._master_profile = existing
+    monkeypatch.setattr(source_start, "require_selected_source", lambda: tmp_path)
+    with ExitStack() as clients:
+        supervisor_source.configure_admission(daemon, args, object(), clients)
+        binding = getattr(daemon, "_master_profile", None)
+        if case != "matching":
+            assert binding is existing
+            return
+        assert binding is not None, "new Source admission did not adopt the matching old producer"
+        assert binding.source_primary
+        assert binding.path == primary and binding.generation == plan.profile_generation
+        assert binding.arguments == argv
+        assert all(key not in os.environ for key in (PROFILE_ENV, GENERATION_ENV, OWNER_ENV))
+
+
 def test_preparation_directory_io_is_not_an_absent_candidate(tmp_path, monkeypatch):
     from agent_dispatch import supervisor_source
 
@@ -223,6 +290,72 @@ def test_preparation_requires_native_artifact_custody_not_running_bit(monkeypatc
         "artifact_0_device": device, "artifact_0_inode": inode,
     })
     assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture") == document
+    assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture", exclude_pid=os.getpid()) is None
+    document.update(settings={"interval": 7}, profile_binding={"path": str(tmp_path / "profile.env"), "generation": "new"})
+    path.write_text(json.dumps(document), encoding="utf-8")
+    expected = {key: document[key] for key in ("settings", "profile_binding")}
+    assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture", expected=expected) == document
+    assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture", expected={
+        **expected, "settings": {"interval": 5},
+    }) is None
+    assert supervisor_source.read_prepared(tmp_path, VERSION, "fixture", expected={
+        **expected, "profile_binding": {**expected["profile_binding"], "generation": "old"},
+    }) is None
+
+
+@pytest.mark.parametrize("peer_kind", ["equivalent", "settings", "profile"])
+def test_same_version_candidate_stands_down_only_for_equivalent_preparation(tmp_path, monkeypatch, peer_kind):
+    from agent_dispatch import companion, config, single_instance, supervisor_source as source
+    from agent_dispatch.supervisor_status_io import runtime_status_path
+    from agent_procutil import _daemon_instance_identity as identity, daemon_instances
+
+    daemon = _daemon(FakeClient([]), FakeLauncher(), lock=FakeLock())
+    scope = source.supervisor_lease_scope(daemon.machine, daemon.env)
+    monkeypatch.setattr(config, "run_dir", lambda: tmp_path / "run")
+    monkeypatch.setattr(daemon, "_recheck_governance", lambda _: None)
+    granted = iter([False, True])
+    monkeypatch.setattr(daemon, "acquire_singleton", lambda: next(granted))
+    monkeypatch.setattr(single_instance, "is_locked", lambda _: True)
+    monkeypatch.setattr(single_instance, "read_holder_pid", lambda _: 901)
+    monkeypatch.setattr(companion, "process_start_token", lambda _: "start")
+    monkeypatch.setattr(identity, "identity_state", lambda *_: "matching")
+    status = runtime_status_path(scope)
+    status.parent.mkdir(parents=True)
+    status.write_text(json.dumps({
+        "runtime_version": VERSION, "generation": {"pid": 901, "start_token": "start"},
+    }))
+    directory = tmp_path / "run" / "supervisor-candidates"
+    directory.mkdir()
+    incarnation = "e" * 32
+    path = directory / (incarnation + ".json")
+    own = {
+        "settings": {"interval": 7},
+        "profile_binding": {"path": str(tmp_path / "supervisor.env"), "generation": "new"},
+        "owner": {"authority_target": "fixture"},
+    }
+    peer = {
+        **own, "runtime_version": VERSION, "scope": scope, "instance_id": incarnation,
+        "registry_root": str(tmp_path / "registry"), "birth": "peer-birth",
+        "generation": {"pid": 901, "start_token": "start"}, "progress": {"phase": "prepared"},
+    }
+    if peer_kind == "settings":
+        peer["settings"] = {"interval": 5}
+    elif peer_kind == "profile":
+        peer["profile_binding"] = {**own["profile_binding"], "generation": "old"}
+    path.write_text(json.dumps(peer))
+    device, inode = identity.path_identity(path)
+    monkeypatch.setattr(daemon_instances, "inspect_instances", lambda _: [{
+        "instance_id": incarnation, "state": "running", "runtime_root": str(tmp_path),
+        "pid": "901", "birth": "peer-birth", "artifact_count": "1",
+        "artifact_0_path": str(path), "artifact_0_device": device, "artifact_0_inode": inode,
+    }])
+    admitted = []
+    admission = SimpleNamespace(
+        root=tmp_path, version=VERSION, record=own, prepare=lambda _: None,
+        check=lambda: None, probe=lambda: None, admitted=lambda: admitted.append(True),
+    )
+    assert source.acquire_candidate(daemon, admission, once=False, single_instance=True) is (peer_kind != "equivalent")
+    assert admitted == ([] if peer_kind == "equivalent" else [True])
 
 
 def test_source_retirement_does_not_forget_unit_with_unconfirmed_native_exit(tmp_path):

@@ -5,11 +5,12 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Callable
 
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from pydantic import BaseModel, ConfigDict, Field
 
 from .events import EventBus
 from .queue import TaskError, TaskQueue
+from .queue_pool_decline import PoolDeclineCloseout
 
 POOL_DECLINE_PROTOCOL = "pool_worker_decline/v1"
 
@@ -69,6 +70,23 @@ def register(app: FastAPI, queue: TaskQueue, bus: EventBus, control_auth: Callab
         bus.publish({"type": "task.worker_decline_blocked", "task_id": task_id})
         return {"protocol": POOL_DECLINE_PROTOCOL, "version": 1, "decline": asdict(result)}
 
+    @app.get("/tasks/{task_id}/pool-decline/recovery")
+    def recovery(
+        task_id: str, worker_id: str = Query(min_length=1), native_id: str = Query(min_length=1),
+        generation: int = Query(ge=1, le=2**63 - 2),
+    ) -> dict:
+        # Read-only: returns a binding only behind its committed closeout receipt.
+        found = queue.recover_pool_decline(
+            task_id, worker_id=worker_id, native_id=native_id, generation=generation,
+        )
+        if found is None:
+            raise HTTPException(404, detail="no settled worker decline for this exact incarnation")
+        decline, worktree = found
+        return {
+            "protocol": POOL_DECLINE_PROTOCOL, "version": 1,
+            "decline": asdict(decline), "worktree": worktree,
+        }
+
     @app.post("/tasks/{task_id}/pool-decline/closeout", dependencies=[Depends(control_auth)])
     def closeout(task_id: str, body: DeclineBindingBody, request: Request) -> dict:
         arguments = body.model_dump(exclude={"version"})
@@ -87,4 +105,24 @@ def register(app: FastAPI, queue: TaskQueue, bus: EventBus, control_auth: Callab
         if result.applied:
             bus.publish({"type": "task.queued", "task_id": task_id})
             bus.publish({"type": "spawn.release_requested", "reservation_key": body.reservation_key})
-        return {"protocol": POOL_DECLINE_PROTOCOL, "version": 1, "closeout": result.receipt}
+        return _closeout_response(result)
+
+    @app.post("/tasks/{task_id}/pool-decline/settlement")
+    def settlement(task_id: str, body: DeclineBindingBody, request: Request) -> dict:
+        # Bound to an already committed disposition; the queue proves retirement itself.
+        gate = request.app.state.drain_gate
+        with gate.track_claim():
+            if gate.draining:
+                raise HTTPException(409, detail="worker decline settlement is inhibited while draining")
+            try:
+                result = queue.settle_pool_decline(task_id, **body.model_dump(exclude={"version"}))
+            except TaskError as exc:
+                raise HTTPException(409, detail=str(exc)) from exc
+        return _closeout_response(result)
+
+
+def _closeout_response(result: PoolDeclineCloseout) -> dict:
+    response = {"protocol": POOL_DECLINE_PROTOCOL, "version": 1, "closeout": result.receipt}
+    if result.relationship is not None:
+        response["task_relationship"] = result.relationship
+    return response

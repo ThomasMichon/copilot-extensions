@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from contextlib import contextmanager, nullcontext
+from contextlib import ExitStack, contextmanager, nullcontext
 from dataclasses import asdict
 import json
 import os
@@ -12,7 +12,7 @@ import secrets
 import sys
 from uuid import uuid4
 
-from . import agent_policy, config as cfg, launch_execution, locks
+from . import agent_policy, config as cfg, launch_attempt, launch_execution, locks
 from . import tracking_write
 
 _ERRORS = (ValueError, OSError, TimeoutError, tracking_write.AmbiguousWriteOutcome, tracking_write.ResidentRecoveryHeld)
@@ -87,6 +87,11 @@ def prepare(
         record_path, correlation or launch_execution.Correlation(uuid4().hex, uuid4().hex),
     )
     execution.append("execution-requested")
+    try:
+        _retain_planned_status(record_path, execution)
+    except (*_ERRORS, KeyboardInterrupt):
+        execution.observed("unknown")
+        raise
     try:
         # Admission-only preparation performs no seed mutation. Seeded preparation
         # uses the existing seed authority's own guards, never a nested lease.
@@ -190,14 +195,67 @@ def _headed_command(command: list[str]) -> tuple[list[str], str] | None:
 def admit(
     record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
     *, admission_only: bool = False, preserve_seed_id: str | None = None,
-    native_resume_session: str | None = None,
+    native_resume_session: str | None = None, planned_status: str | None = None,
 ) -> None:
     """Recheck the original launch immediately before its retained coordinator creates native."""
+    if native_resume_session is not None:
+        # The Windows native parent owns the head-writer fence through Start().
+        # This finite checker must not acquire its parent's record/launch locks.
+        _admission_check(
+            record_path, correlation, operation_id, admission_only=admission_only,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            planned_status=planned_status,
+        )()
+        return
     with admission(
         record_path, correlation, operation_id, admission_only=admission_only,
         preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+        planned_status=planned_status,
     ):
         pass
+
+
+_TERMINAL_STATUSES = frozenset({"finalizing", "complete", "completed", "finalized", "archived"})
+# Resolve deliberately reopens these with their checkout retained; only a
+# transition into them after the launch started is changed intent.
+_RESUMABLE_STATUSES = frozenset({"complete", "completed", "finalized"})
+
+
+def _planned_status_path(record_path: Path, attempt_id: str, operation_id: str) -> Path:
+    receipt = launch_attempt._path(record_path.parent, attempt_id, operation_id, execution=True)
+    return receipt.with_name(receipt.name.removesuffix(".execution.json") + ".planned-status.json")
+
+
+def _retain_planned_status(record_path: Path, execution: launch_execution.Execution) -> None:
+    """Persist the preparation-time status for separate native admission callbacks."""
+    path = _planned_status_path(
+        record_path, execution.subject["attempt_id"], execution.subject["operation_id"],
+    )
+    launch_attempt._mkdir(path.parent)
+    launch_attempt._write(path, {"version": 1, "status": execution.planned_status})
+
+
+def _read_planned_status(record_path: Path, attempt_id: str, operation_id: str) -> str | None:
+    """Return the retained status, or None (strict refusal) when absent or invalid."""
+    try:
+        path = _planned_status_path(record_path, attempt_id, operation_id)
+        with path.open("rb") as stream:
+            raw = stream.read(1025)
+        value = json.loads(raw) if len(raw) <= 1024 else None
+    except (OSError, ValueError):
+        return None
+    if (
+        not isinstance(value, dict) or set(value) != {"version", "status"}
+        or value["version"] != 1 or not isinstance(value["status"], str)
+    ):
+        return None
+    return value["status"]
+
+
+def _status_refused(status: str, planned_status: str | None) -> bool:
+    if status not in _TERMINAL_STATUSES:
+        return False
+    return not (planned_status == status and status in _RESUMABLE_STATUSES)
 
 
 @contextmanager
@@ -205,41 +263,75 @@ def admission(
     record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
     *, admission_only: bool = False, preserve_seed_id: str | None = None,
     native_resume_session: str | None = None, require_cold_stop: bool = True,
+    planned_status: str | None = None,
+    head_fence: ExitStack | None = None,
 ):
     """Keep the original creation fence until the exec or retained owner releases it."""
-    from . import launch_admission, launch_seed_exec, launch_seed_state, tracking
+    from . import launch_admission, tracking
+
+    with (
+        launch_admission.guard(record_path),
+        ExitStack() as held,
+    ):
+        record_scope = head_fence if head_fence is not None else held
+        if head_fence is not None:
+            held.callback(head_fence.close)
+        if native_resume_session is not None:
+            record_scope.enter_context(tracking._RecordLock(record_path, require_sidecar=True))
+        check = _admission_check(
+            record_path, correlation, operation_id, admission_only=admission_only,
+            preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            require_cold_stop=require_cold_stop, planned_status=planned_status,
+        )
+        check()
+        yield check
+
+
+def _admission_check(
+    record_path: Path, correlation: launch_execution.Correlation, operation_id: str,
+    *, admission_only: bool = False, preserve_seed_id: str | None = None,
+    native_resume_session: str | None = None, require_cold_stop: bool = True,
+    planned_status: str | None = None,
+):
+    from . import launch_seed_exec, launch_seed_state, tracking
 
     if not require_cold_stop and (not admission_only or native_resume_session is not None):
         raise ValueError("Only ordinary admission-only execution may omit the cold-stop check")
-    with launch_admission.guard(record_path):
-        def check() -> None:
-            _owner, saved = _load(record_path, correlation, operation_id)
-            if any(event["phase"] == "process-spawned" for event in saved["events"]):
-                raise ValueError("Original headed launch was already observed")
-            receipt = _receipt(record_path, saved)
-            if admission_only:
-                if receipt is not None or not launch_seed_exec._valid_request(
-                    record_path, invoke=False, seed_id=None, admission_only=True,
-                    preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-                ):
-                    raise ValueError("Admission-only creation cannot claim a prompt")
-                prepared = launch_seed_exec._prepare(
-                    record_path, ["admission-check"], invoke=False, seed_id=None, admission_only=True,
-                    preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
-                )
-                if isinstance(prepared, int):
-                    raise ValueError("Original admission-only launch intent changed before creation")
-            current = tracking.load_record(record_path)
-            if (
-                current.status in {"finalizing", "complete", "completed", "finalized", "archived"}
-                or current.pending_seed
-                or not admission_only and receipt is None and launch_seed_state.peek(record_path) is not None
+    def check() -> None:
+        _owner, saved = _load(record_path, correlation, operation_id)
+        if any(event["phase"] == "process-spawned" for event in saved["events"]):
+            raise ValueError("Original headed launch was already observed")
+        receipt = _receipt(record_path, saved)
+        planned = planned_status
+        if planned is None:
+            planned = _read_planned_status(record_path, correlation.attempt_id, operation_id)
+        if admission_only:
+            if receipt is not None or not launch_seed_exec._valid_request(
+                record_path, invoke=False, seed_id=None, admission_only=True,
+                preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
             ):
-                raise ValueError("Original headed launch intent changed before creation")
-            if require_cold_stop and (error := launch_seed_exec._final_cold_error(current)):
-                raise ValueError(error)
-        check()
-        yield check
+                raise ValueError("Admission-only creation cannot claim a prompt")
+            prepared = launch_seed_exec._prepare(
+                record_path, ["admission-check"], invoke=False, seed_id=None, admission_only=True,
+                preserve_seed_id=preserve_seed_id, native_resume_session=native_resume_session,
+            )
+            if isinstance(prepared, int):
+                raise ValueError("Original admission-only launch intent changed before creation")
+        current = tracking.load_record(record_path)
+        if _status_refused(current.status, planned):
+            raise ValueError(
+                f"Original headed launch intent changed before creation: "
+                f"worktree status is {current.status!r}"
+                + (f" (launch started as {planned!r})" if planned else "")
+            )
+        if (
+            current.pending_seed
+            or not admission_only and receipt is None and launch_seed_state.peek(record_path) is not None
+        ):
+            raise ValueError("Original headed launch intent changed before creation")
+        if require_cold_stop and (error := launch_seed_exec._final_cold_error(current)):
+            raise ValueError(error)
+    return check
 
 
 def _require_process(pid: int | None, process_start_time: str | None) -> None:
@@ -489,11 +581,17 @@ def main() -> int:
             elif args.phase == "admit" and not args.receipt_uncertain and all(value is None for value in (
                 args.pid, args.process_start_time, args.exit_code,
             )):
-                admit(
-                    args.record, correlation, args.operation_id,
-                    admission_only=args.admission_only, preserve_seed_id=args.preserve_seed_id,
-                    native_resume_session=args.native_resume_session,
-                )
+                try:
+                    admit(
+                        args.record, correlation, args.operation_id,
+                        admission_only=args.admission_only, preserve_seed_id=args.preserve_seed_id,
+                        native_resume_session=args.native_resume_session,
+                    )
+                except ValueError as exc:
+                    # The Windows responder relays this bounded line to the session host.
+                    from agent_remote_driver.session_host.startup_admission import refusal_reason
+                    print(f"Startup admission refused: {refusal_reason(exc)}", file=sys.stderr)
+                    raise
             elif args.phase == "spawn-failed" and not args.receipt_uncertain and all(value is None for value in (
                 args.pid, args.process_start_time, args.exit_code,
             )):

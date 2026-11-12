@@ -1,0 +1,9 @@
+{
+  "comment": "Use native sealed memfd when standalone Python omits Linux bindings",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

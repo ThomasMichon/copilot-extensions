@@ -76,7 +76,7 @@ def validate_runner(runner: TrustedRunner) -> TrustedRunner:
     if len({k for k, _v in pairs}) != len(pairs):
         raise core.InvalidRequestError("runner environment keys must be unique")
     context_keys = core._vector(runner.context_keys)
-    if len(context_keys) > 64 or len(set(context_keys)) != len(context_keys) or any(
+    if len(context_keys) > 128 or len(set(context_keys)) != len(context_keys) or any(
         not re.fullmatch(r"[A-Z_][A-Z0-9_]{0,127}", key)
         or key.startswith("UPDATE_DRIVER_")
         or key in {"PYTHONPATH", "__PYVENV_LAUNCHER__"}

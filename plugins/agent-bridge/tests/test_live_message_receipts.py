@@ -703,9 +703,10 @@ def test_live_read_pins_snapshot_and_receipt_across_worktree_rollover(
 
     def request(
         method: str, path: str, *, params: dict[str, object] | None = None,
-        allow_retry: bool = True,
+        allow_retry: bool = True, _endpoint: str | None = None,
     ) -> dict[str, object]:
         assert not allow_retry
+        assert _endpoint == "http://127.0.0.1:1"
         if path == "/health":
             return {"protocol_version": LIVE_MESSAGE_RECEIPT_PROTOCOL_VERSION}
         response = api.request(method, path, params=params)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import importlib.util
 import logging
 import os
 import subprocess
@@ -10,6 +11,9 @@ import sys
 import time
 from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
+
+import pytest
 
 from process_telemetry import SinkSlot
 from process_telemetry.configured_spool import install_retained
@@ -21,10 +25,26 @@ from agent_machines import cli_health
 from agent_machines.__main__ import main
 
 
+def native_bridge_records(events, *, stamp):
+    source = Path(__file__).resolve().parents[1] / "test_health_report.py"
+    spec = importlib.util.spec_from_file_location("native_health_report_controls", source)
+    assert spec and spec.loader
+    controls = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(controls)
+    return controls.native_bridge_records(events, stamp=stamp)
+
+
 def test_existing_configured_sink_to_normal_cli_report_and_chart(tmp_path, capsys):
     base = tmp_path / "capture"
     (base / "retained").mkdir(parents=True)
     slot = SinkSlot()
+    transitions = native_bridge_records([
+        ("user_message", {}),
+        ("agent_message", {}),
+        ("tool_call_start", {"tool_call_id": "not-output-tool"}),
+        ("tool_call_update", {"tool_call_id": "not-output-tool", "status": "error"}),
+        ("turn_complete", {}),
+    ], stamp=time.time_ns() // 1_000_000)
 
     def factory(directory):
         return RetainedSpool(
@@ -41,10 +61,12 @@ def test_existing_configured_sink_to_normal_cli_report_and_chart(tmp_path, capsy
             measurement = begin(slot, "example", "preparation")
             assert measurement is not None
             measurement.finish(outcome)
+        for transition in transitions:
+            slot.emit(transition)
         deadline = time.monotonic() + 5
         path = base / "retained" / "example-telemetry.jsonl"
         while time.monotonic() < deadline:
-            if path.exists() and len(path.read_text().splitlines()) == 2:
+            if path.exists() and len(path.read_text().splitlines()) == 2 + len(transitions):
                 break
             time.sleep(.01)
         else:
@@ -56,11 +78,20 @@ def test_existing_configured_sink_to_normal_cli_report_and_chart(tmp_path, capsy
     observed_at = datetime.now(timezone.utc) + timedelta(seconds=1)
     child = subprocess.run([
         sys.executable, "-m", "agent_machines", "health", "report", "--input", str(path),
+        "--store-dir", str(tmp_path / "absent-store"),
         "--now", observed_at.isoformat(), "--chart", str(chart),
     ], capture_output=True, text=True, timeout=20, **no_window_kwargs())
     assert child.returncode == 0, child.stderr
     report = json.loads(child.stdout)
-    assert report["coverage"]["accepted_records"] == 2
+    assert report["coverage"]["accepted_records"] == 2 + len(transitions)
+    groups = {
+        group["kind"]: group for hour in report["hours"] for group in hour["groups"]
+    }
+    assert groups["bridge-tool"]["outcomes"] == {"running": 1, "error": 1}
+    assert "p95_ns" not in groups["bridge-tool"]
+    assert "not-output" not in child.stdout
+    assert report["health"] == {"state": "unavailable", "reason": "local-store-unavailable"}
+    assert not (tmp_path / "absent-store").exists()
     assert chart.read_text().startswith("<svg")
     assert "example/preparation" in chart.read_text()
     before = path.read_bytes()
@@ -85,6 +116,29 @@ def test_input_discovery_never_creates_files_or_counts_the_same_file_twice(tmp_p
     assert report["coverage"]["duplicate_inputs"] == 1
     assert report["coverage"]["accepted_records"] == 1
     assert not missing.exists()
+
+
+def test_unresolvable_store_preserves_telemetry_and_an_external_chart(tmp_path, capsys):
+    loop = tmp_path / "loop"
+    try:
+        loop.symlink_to(loop, target_is_directory=True)
+    except OSError:
+        pytest.skip("fixture symlink creation unavailable")
+    path = tmp_path / "events.jsonl"
+    path.write_text(json.dumps({
+        "kind": "state_transition", "name": "task", "event": "task.completed",
+        "ts": time.time_ns() // 1_000_000,
+    }) + "\n", encoding="utf-8")
+    chart = tmp_path / "external.svg"
+    assert main([
+        "health", "report", "--input", str(path), "--store-dir", str(loop),
+        "--chart", str(chart),
+    ]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["coverage"]["accepted_records"] == 1
+    assert result["health"] == {"state": "unavailable", "reason": "local-store-unavailable"}
+    assert "Local health store unavailable" in chart.read_text(encoding="utf-8")
+    assert loop.is_symlink()
 
 
 def test_normal_cli_hourly_slot_roundtrip_uses_explicit_local_inputs(tmp_path):

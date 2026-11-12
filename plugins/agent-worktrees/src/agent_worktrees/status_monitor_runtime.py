@@ -15,13 +15,11 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from agent_procutil import no_window_kwargs, windowless_python
+from agent_procutil import windowless_python
 
 from . import activity, locks, output, sessions_pane_retire, stale_runtime_reap, tracking
 from . import config as cfg
 from . import status_updater_cli
-from .mux_list_result import is_empty_tmux_listing, parse_monitor_sessions
-from .mux_creation import is_psmux
 from .status_monitor_python import direct_monitor_python as direct_monitor_python
 from .status_monitor_spawn import _spawn_detached as _spawn_detached
 
@@ -788,39 +786,32 @@ def _monitor_list_sessions(
 ) -> dict[str, tuple[int, str]] | None:
     """Observe the monitor's selected binary, not a platform-default mux.
 
-    PSMux CLI observation is unsupported because startup can reap live servers.
-    TMux returns ``{session_name: (attached, incarnation)}``; incomplete or
+    PSMux uses Driver's native socket observation, never CLI startup.
+    Returns ``{session_name: (attached, incarnation)}``; incomplete or
     unavailable evidence returns ``None`` so the caller neither prunes nor exits.
     """
     override = _core_helper("_monitor_list_sessions", _monitor_list_sessions)
     if override is not _monitor_list_sessions:
         return override(mux_bin)
-    if is_psmux(mux_bin):
-        # Even read-only PSMux CLI commands can reap other running servers.
-        return None
-    try:
-        r = subprocess.run(
-            [
-                mux_bin,
-                "list-sessions",
-                "-F",
-                "#{session_name}:#{session_attached}:#{session_id}:#{session_created}",
-            ],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            **no_window_kwargs(),
-        )
-    except Exception:
-        return None
-    if r.returncode != 0:
-        return {} if is_empty_tmux_listing(mux_bin, r) else None
-    if (r.stderr or "").strip():
-        return None
-    try:
-        return parse_monitor_sessions(r.stdout, strict=True)
-    except ValueError:
-        return None
+    from .status_monitor_discovery import list_sessions
+
+    return list_sessions(mux_bin)
+
+
+def publish_mux_observation(
+    mux_bin, live, catalog_observer, publish_rosters, roster_failure,
+) -> int | None:
+    """Keep unknown enumeration and native reads out of periodic pane writes."""
+    from . import sessions
+
+    if not sessions._is_psmux(mux_bin):
+        if live is None and roster_failure is not None:
+            roster_failure(RuntimeError("mux-session enumeration unavailable"))
+        return -1 if live is None else None
+    if live is not None and catalog_observer is not None:
+        catalog_observer(set(live))
+    publish_rosters()
+    return -1 if live is None else len(live)
 
 
 def _monitor_managed_session_union(

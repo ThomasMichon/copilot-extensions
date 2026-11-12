@@ -649,27 +649,38 @@ class TestDefaultPairedSiblingFinal:
         rec = _rec_paired(pair_kind="anchor")
         assert prune.default_paired_sibling_final(rec) is True
 
-    def test_sibling_finalized_true(self, tmp_path, monkeypatch):
+    def _paired_with_sibling(self, tmp_path, monkeypatch, status, *, points_back=True):
+        # The probe accepts only an exact reciprocal sibling (#8314): same pair
+        # id, the other role, and a pair_ref naming this record.
         monkeypatch.setattr(tracking.cfg, "project_dir", lambda _project: tmp_path)
         sibling_dir = tmp_path / "worktrees"
         sibling_dir.mkdir()
-        sib = _rec()
-        sib.worktree_id = "wt-k"
-        sib.status = "finalized"
-        self._save(sibling_dir, sib)
         rec = _rec_paired(pair_ref="m/k/wt-k")
+        sib = _rec(status=status)
+        sib.worktree_id = "wt-k"
+        sib.repo = "k"
+        sib.pair_id = rec.pair_id
+        sib.pair_role = "knowledge"
+        sib.pair_kind = "worktree"
+        sib.pair_ref = tracking.format_claim_ref(
+            rec.execution_machine, rec.repo, rec.worktree_id if points_back else "wt-other",
+        )
+        self._save(sibling_dir, sib)
+        return rec
+
+    def test_sibling_finalized_true(self, tmp_path, monkeypatch):
+        rec = self._paired_with_sibling(tmp_path, monkeypatch, "finalized")
         assert prune.default_paired_sibling_final(rec) is True
 
     def test_sibling_not_finalized_false(self, tmp_path, monkeypatch):
-        monkeypatch.setattr(tracking.cfg, "project_dir", lambda _project: tmp_path)
-        sibling_dir = tmp_path / "worktrees"
-        sibling_dir.mkdir()
-        sib = _rec()
-        sib.worktree_id = "wt-k"
-        sib.status = "active"
-        self._save(sibling_dir, sib)
-        rec = _rec_paired(pair_ref="m/k/wt-k")
+        rec = self._paired_with_sibling(tmp_path, monkeypatch, "active")
         assert prune.default_paired_sibling_final(rec) is False
+
+    def test_non_reciprocal_sibling_none(self, tmp_path, monkeypatch):
+        rec = self._paired_with_sibling(
+            tmp_path, monkeypatch, "finalized", points_back=False,
+        )
+        assert prune.default_paired_sibling_final(rec) is None
 
     def test_sibling_missing_none(self, tmp_path, monkeypatch):
         monkeypatch.setattr(tracking.cfg, "project_dir", lambda _project: tmp_path)

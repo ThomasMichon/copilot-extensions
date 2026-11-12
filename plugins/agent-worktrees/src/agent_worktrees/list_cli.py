@@ -172,7 +172,8 @@ def _list_records_for_args(args: argparse.Namespace):
         records = [
             r
             for r in records
-            if r.worktree_path
+            if r.status != "archived"
+            and r.worktree_path
             and Path(r.worktree_path).exists()
             and (Path(r.worktree_path) / ".git").exists()
         ]
@@ -191,16 +192,21 @@ def _filter_list_worktree(records, raw_id: str):
     return matches
 
 
-def _refresh_list_record(rec: tracking.WorktreeRecord) -> None:
+def _refresh_list_record(
+    rec: tracking.WorktreeRecord, *, strict: bool = False,
+) -> tracking.WorktreeRecord | None:
     """Repair and refresh one record before an explicit Picker row read."""
+    if strict:
+        from .record_liveness_refresh import refresh_record
+
+        return refresh_record(rec)
     if getattr(rec, "sessions", None) is None:
         try:
+            from .record_liveness_refresh import initialize_registry
+
             discovered = sessions.backfill_sessions([rec])
-            rec.sessions = [
-                tracking.SessionEntry(session_id=session_id, started_at="")
-                for session_id in discovered.get(rec.worktree_id, [])
-            ]
-            tracking.save_record(rec)
+            if not initialize_registry(rec, discovered.get(rec.worktree_id, [])):
+                return None
         except Exception:
             pass
 
@@ -421,7 +427,14 @@ def cmd_list(args: argparse.Namespace) -> int:
         )
         if not getattr(args, "fresh", False):
             cached = list_cache.read_fresh(_lc_key)
-            if cached is not None:
+            if cached is not None and (
+                getattr(args, "all", False)
+                or (
+                    isinstance(cached["worktrees"], list)
+                    and all(isinstance(row, dict) and row.get("status") != "archived"
+                            for row in cached["worktrees"])
+                )
+            ):
                 output._json_output(cached)
                 return 0
         if _status_monitor_enabled():

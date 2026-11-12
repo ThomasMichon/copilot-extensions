@@ -76,11 +76,10 @@ def publish_launch(
     ):
         raise PermissionError("watch launch is not the exact reserved passive child")
     value = endpoint_value(endpoint)
-    health = read_health()
-    _passive_health(instance, health)
-    instance.require_live(
-        installation, read_health=lambda: health, environment=environment,
+    health = instance.require_live(
+        installation, read_health=read_health, environment=environment,
     )
+    _passive_health(instance, health)
     # Recheck all custody after the live health proof, before publication.
     if _read_identity(installation, environment=environment) != document:
         raise PermissionError("watch launch transaction changed during attestation")

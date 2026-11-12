@@ -122,6 +122,7 @@ def test_native_payload_configuration_root_keeps_caller_paths(tmp_path, environm
     assert metadata.returncode == 0, metadata.stdout + metadata.stderr
     assert json.loads(metadata.stdout)["capabilities"] == [
         "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
+        "authenticated-curl-v1", "daemon-bind-default-v1",
     ]
     assert not (runtime / "run").exists()
 
@@ -328,6 +329,7 @@ def test_native_user_shortcut_preserves_cold_scope_and_read_only_contract(
     if prepared and operation == "contract":
         assert json.loads(result.stdout)["capabilities"] == [
             "configuration-root-v1", "batch-get-v1", "ssh-key-install-pin-v1",
+            "authenticated-curl-v1", "daemon-bind-default-v1",
         ]
     if not prepared and dispatcher_aware and operation == "contract":
         assert json.loads(result.stdout)["runtime_prepared"] is False
@@ -1134,6 +1136,95 @@ def test_relative_config_survives_actual_marketplace_self_staging(tmp_path):
     assert (runtime / "payload-dir").is_file(), result.stdout + result.stderr
     assert not (runtime / "current-version").exists()
     assert not (runtime / "service.ps1").exists()
+
+
+@pytest.mark.skipif(os.name != "nt", reason="native installed-payload schedule staging")
+@pytest.mark.parametrize("selection", ["repo-opt-in", "invalid-config", "unavailable-project"])
+def test_schedule_staging_retains_project_for_activation_and_service_snapshot(tmp_path, selection):
+    from .test_payload_invocation import _installer_function
+
+    home, project = tmp_path / "home", tmp_path / "project"
+    project.mkdir()
+    env = _isolated_install_env(home)
+    env.pop("AGENT_VAULT_CONFIG", None)
+    env.pop("COPILOT_PLUGIN_STAGED_FROM", None)
+    env["COPILOT_EXTENSIONS_TEST_CONTAINED"] = "1"
+    (project / ".agent-vault.json").write_text(
+        '{"enabled":true}' if selection != "invalid-config" else '{"enabled":"invalid"}',
+        encoding="utf-8",
+    )
+    if selection == "unavailable-project":
+        env["COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT"] = str(project / "unavailable")
+    prepared = _make_fake_plugin(tmp_path / "prepared", "agent-vault")
+    (tmp_path / "prepared" / ".agent-vault.json").unlink()
+    shutil.copyfile(
+        PLUGIN / "scripts" / "versioned_runtime_native.ps1",
+        prepared / "scripts" / "versioned_runtime_native.ps1",
+    )
+    payload = home / ".copilot" / "installed-plugins" / "example" / "agent-vault"
+    shutil.copytree(prepared, payload)
+    runtime = home / ".agent-vault"
+    (runtime / "bin").mkdir(parents=True)
+    interpreter = runtime / "snapshot.ps1"
+    interpreter.write_text(
+        "$project=$args[-1]; $global:LASTEXITCODE=0\n"
+        "@{root=$project; config=(Join-Path $project '.agent-vault.json')} | ConvertTo-Json -Compress\n",
+        encoding="utf-8-sig",
+    )
+    (runtime / "bin" / "resolve-runtime.ps1").write_text(
+        f"$AgentRtPy='{interpreter}'\n", encoding="utf-8-sig",
+    )
+    report = tmp_path / "schedule-report.json"
+    env["FIXTURE_SCHEDULE_REPORT"] = str(report)
+    source = (PLUGIN / "scripts" / "install.ps1").read_text(encoding="utf-8-sig")
+    prefix = source[:source.index("# === install-contract:v4 smoke seam")]
+    # Keep the actual entry, staging and activation reader; replace only the
+    # post-stage installation setup and external task/interpreter boundaries.
+    harness = """
+$TaskName='fixture'; $TaskLauncher=Join-Path $InstallDir 'service.ps1'
+$RunDir=Join-Path $InstallDir 'run'; $SocketPath='fixture'; $PipePath='fixture'
+$PidFile='fixture'; $LogFile='fixture'; $installationId=''; $LinkPython=''
+$script:registered=0
+function Write-Ok { param($m) }; function Write-Skip { param($m) }
+function Write-Warn { param($m) throw $m }; function Write-Fail { param($m) throw $m }
+function Get-WindowsScheduledTaskPolicy { 'enabled' }
+function Get-SchedulingPolicyTask { param($Policy) $null }
+function Start-ScheduledTask { throw 'task-only must not start task' }
+function powershell.exe { throw 'task-only must not ensure service' }
+function Stop-ScheduledTask { throw 'task-only must not stop task' }
+function New-ScheduledTaskAction { param($Execute,$Argument,$WorkingDirectory) @{} }
+function New-ScheduledTaskTrigger { param([switch]$AtLogOn,$User) [pscustomobject]@{Delay=''} }
+function New-ScheduledTaskSettingsSet { param([switch]$AllowStartIfOnBatteries,[switch]$DontStopIfGoingOnBatteries,
+    [switch]$StartWhenAvailable,$ExecutionTimeLimit,$MultipleInstances,$RestartCount,$RestartInterval) @{} }
+function Register-ScheduledTask { param($TaskName,$Action,$Trigger,$Settings,$Description) $script:registered++ }
+"""
+    (payload / "scripts" / "install.ps1").write_text(
+        prefix + harness + _installer_function("Register-AgentVaultTask")
+        + "\nRegister-AgentVaultTask\n"
+        + "@{project=$env:COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT; registered=$script:registered;"
+        " cwd=(Get-Location).ProviderPath; staged=$env:COPILOT_PLUGIN_STAGED_FROM} | ConvertTo-Json -Compress |"
+        " Set-Content -LiteralPath $env:FIXTURE_SCHEDULE_REPORT\n",
+        encoding="utf-8-sig",
+    )
+    result = subprocess.run(
+        [shutil.which("powershell"), "-NoProfile", "-NonInteractive", "-File",
+         str(payload / "scripts" / "install.ps1"), "schedule", "-InstallDir", str(runtime)],
+        cwd=project, env=env, capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    if selection != "repo-opt-in":
+        assert result.returncode != 0, result.stdout + result.stderr
+        assert not report.exists()
+        assert not (runtime / "service.ps1").exists()
+        return
+    assert result.returncode == 0, result.stdout + result.stderr
+    actual = json.loads(report.read_text(encoding="utf-8-sig"))
+    assert actual["registered"] == 1
+    assert Path(actual["project"]) == project
+    assert Path(actual["cwd"]) == home
+    assert Path(actual["staged"]) == payload
+    launcher = (runtime / "service.ps1").read_text(encoding="utf-8-sig")
+    assert f"$env:AGENT_VAULT_CONFIG = '{project / '.agent-vault.json'}'" in launcher
+    assert str(project) in launcher
 
 
 def test_automatic_cell_selection_supplies_qualified_activation_owner(tmp_path):

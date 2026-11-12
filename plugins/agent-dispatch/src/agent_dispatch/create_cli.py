@@ -153,6 +153,7 @@ def _cmd_create(args: argparse.Namespace) -> int:
             evaluator_ref=args.evaluator_ref,
             require_verification=args.require_verification,
             dedup_key=args.dedup_key,
+            standing_parent_id=getattr(args, "standing_parent", None),
             producer_scope=(
                 {"repo": repo, "source": args.source} if producer_fence_requested else None
             ),
@@ -722,6 +723,10 @@ def _create_args_parent() -> argparse.ArgumentParser:
         help="hold completion at submitted until an evaluator or explicit review confirms it",
     )
     cp.add_argument("--dedup-key")
+    cp.add_argument(
+        "--standing-parent",
+        help="link this finite child to an accepted standing-charter task (requires coordinator support)",
+    )
     cp.add_argument(
         "--producer-id",
         help="selected producer metadata for --producer-generation",

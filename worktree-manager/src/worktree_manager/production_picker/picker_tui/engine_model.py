@@ -5,6 +5,7 @@ from __future__ import annotations
 import time
 
 from . import derive
+from .engine_configuration import knowledge_configuration_needed
 from .engine_helpers import ACTIVE_SPECS, BUTTON_SETS, C_DIM, C_READY, C_WARN, DISPO_MARK, LIST_SPECS, SPINNER
 from .source_read_notices import worktree_reload_pending, worktree_row_identity, worktree_setup_failed, worktree_source_instance
 
@@ -24,7 +25,7 @@ class PickerScreenModelMixin:
             bset = []
             if self._tab_supports("create"):
                 bset.append("N")
-            if getattr(self, "_knowledge_readiness", {}).get("ready") is not True:
+            if knowledge_configuration_needed(getattr(self, "_knowledge_readiness", None)):
                 if callable(getattr(self.src, "knowledge_readiness", None)):
                     bset.append("KB")
             scoped = self._scope_data()

@@ -1,0 +1,9 @@
+{
+  "comment": "Compose exact development inputs through canonical promotion without allocating package versions",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

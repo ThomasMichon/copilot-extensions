@@ -14,7 +14,7 @@ function Write-PreToolUnavailable([string]$Boundary) {
 function ConvertFrom-PreToolJson([string]$Text) {
     if (-not $Text.TrimStart().StartsWith('{')) { throw 'Expected a JSON object' }
     if ($PSVersionTable.PSVersion.Major -ge 6) {
-        return ConvertFrom-Json -InputObject $Text -AsHashtable -ErrorAction Stop
+        return ,(ConvertFrom-ManagedWorktreesJson $Text)
     }
     if (-not $script:preToolJson) {
         [void][Reflection.Assembly]::Load('System.Web.Extensions, Version=4.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35')
@@ -53,11 +53,7 @@ function Get-NativePreToolStop {
     } catch { return $null }
 }
 
-function Test-NativePreToolRead([object]$Payload) {
-    if ($env:COPILOT_EXTENSIONS_CONTEXT -or $Payload -isnot [Collections.IDictionary]) { return $false }
-    $name = $Payload.toolName
-    if (-not $name) { $name = $Payload.tool_name }
-    if ($name -isnot [string] -or $name -cnotin @('view', 'rg', 'glob')) { return $false }
+function Test-NativePreToolSources([bool]$WriteProof = $false, [string]$ShellCommand, [object]$ShellArguments, [object[]]$ShellBatch) {
     try {
         $policy = Read-PreToolJson ([IO.Path]::Combine($PSScriptRoot, 'hook-read-policy.json')) 4096
         if ($policy.schema -isnot [string] -or $policy.schema -cne 'agent-worktrees.native-read-policy' -or
@@ -65,8 +61,107 @@ function Test-NativePreToolRead([object]$Payload) {
             $policy.guards -isnot [Collections.IDictionary]) { return $false }
         $names = @('statelessness_guard.py', 'cross_repo_guard.py', 'anchor_write_guard.py', 'pr_supersede_guard.py')
         if ($policy.guards.Count -ne $names.Count) { return $false }
+        $sources = $policy.guards
+        $extra = @()
+        $dependencies = @{}
+        if ($WriteProof) {
+            $writeDependencies = $policy.nativeWriteDependencies
+            $extra = @('tool_call_forms.py', 'guarded_anchor_map.py')
+            if ($writeDependencies -isnot [Collections.IDictionary] -or
+                $writeDependencies.get_Count() -ne $extra.Count) { return $false }
+            foreach ($dependency in $extra) { $dependencies[$dependency] = $writeDependencies[$dependency] }
+        }
+        if ($ShellCommand -or $null -ne $ShellArguments -or $null -ne $ShellBatch) {
+            $selectedCommands = [Collections.Generic.List[string]]::new()
+            if ($ShellCommand) { $selectedCommands.Add($ShellCommand) }
+            $carriers = [Collections.Generic.List[object]]::new()
+            if ($null -ne $ShellArguments) { $carriers.Add($ShellArguments) }
+            if ($null -ne $ShellBatch) {
+                if ($ShellBatch.Count -lt 1 -or $ShellBatch.Count -gt 128) { return $false }
+                foreach ($carrier in $ShellBatch) { $carriers.Add($carrier) }
+            }
+            if ($carriers.Count) {
+                $keys = @('command')
+                if ($policy.ContainsKey('nativeShellReadCommandKeys')) {
+                    $keys = $policy['nativeShellReadCommandKeys']
+                    if ($keys -isnot [Collections.IList] -or $keys.Count -lt 1 -or $keys.Count -gt 128) {
+                        return $false
+                    }
+                    $seen = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+                    foreach ($key in $keys) {
+                        if ($key -isnot [string] -or -not $key -or -not $seen.Add($key)) { return $false }
+                    }
+                }
+                foreach ($carrier in $carriers) {
+                    $command = $null
+                    if ($carrier -is [string]) {
+                        $command = $carrier
+                    } elseif ($carrier -is [Collections.IDictionary]) {
+                        foreach ($key in $keys) {
+                            $value = $carrier[$key]
+                            if ($value -is [string] -and $value) { $command = $value; break }
+                        }
+                    }
+                    if (-not $command) { return $false }
+                    $selectedCommands.Add($command)
+                }
+            }
+            $commands = $policy.nativeShellReadCommands
+            if ($commands -isnot [Collections.IList] -or $commands.Count -lt 1 -or $commands.Count -gt 128) {
+                return $false
+            }
+            $heads = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            foreach ($command in $commands) {
+                if ($command -isnot [string] -or -not $command) { return $false }
+                $null = $heads.Add($command)
+            }
+            $readArguments = $null
+            $rejectArguments = $null
+            foreach ($command in $selectedCommands) {
+                if ($heads.Contains($command)) { continue }
+                # Only bare ASCII argument candidates use the optional original-owner predicates.
+                if ($command -cmatch '[^\x09\x20-\x7e]' -or
+                    $command.Trim([char[]]@(' ', "`t")).IndexOfAny([char[]]@(' ', "`t")) -lt 0) {
+                    return $false
+                }
+                if ($null -eq $readArguments) {
+                    $argumentFacts = $policy['nativeShellReadArguments']
+                    if ($argumentFacts -isnot [Collections.IDictionary] -or $argumentFacts.get_Count() -ne 3 -or
+                        ($argumentFacts['version'] -isnot [int] -and $argumentFacts['version'] -isnot [long]) -or
+                        $argumentFacts['version'] -ne 1 -or $argumentFacts['read'] -isnot [string] -or
+                        -not $argumentFacts['read'] -or $argumentFacts['reject'] -isnot [Collections.IList] -or
+                        $argumentFacts['reject'].Count -ne 5) { return $false }
+                    $options = [Text.RegularExpressions.RegexOptions]::IgnoreCase -bor
+                        [Text.RegularExpressions.RegexOptions]::CultureInvariant
+                    $readArguments = [regex]::new('\A(?:' + $argumentFacts['read'] + ')\z', $options)
+                    $rejectArguments = [Collections.Generic.List[regex]]::new()
+                    foreach ($pattern in $argumentFacts['reject']) {
+                        if ($pattern -isnot [string] -or -not $pattern) { return $false }
+                        $rejectArguments.Add([regex]::new($pattern, $options))
+                    }
+                }
+                if (-not $readArguments.IsMatch($command)) { return $false }
+                foreach ($reject in $rejectArguments) {
+                    if ($reject.IsMatch($command)) { return $false }
+                }
+            }
+            $shellDependencies = $policy.nativeShellReadDependencies
+            if ($shellDependencies -isnot [Collections.IDictionary] -or
+                $shellDependencies.get_Count() -ne 1) { return $false }
+            $dependencies['hook_pre_relevance.py'] = $shellDependencies['hook_pre_relevance.py']
+            $extra += 'hook_pre_relevance.py'
+        }
+        if ($extra.Count) {
+            if ($dependencies -isnot [Collections.IDictionary] -or $dependencies.get_Count() -ne $extra.Count) {
+                return $false
+            }
+            $sources = @{}
+            foreach ($guard in $names) { $sources[$guard] = $policy.guards[$guard] }
+            foreach ($dependency in $extra) { $sources[$dependency] = $dependencies[$dependency] }
+            $names += $extra
+        }
         foreach ($guard in $names) {
-            $expected = $policy.guards[$guard]
+            $expected = $sources[$guard]
             if ($expected -isnot [string] -or $expected -cnotmatch '^[0-9a-f]{64}$') { return $false }
             $path = [IO.Path]::Combine($PSScriptRoot, $guard)
             $info = [IO.FileInfo]::new($path)
@@ -79,6 +174,288 @@ function Test-NativePreToolRead([object]$Payload) {
                 $actual = ([BitConverter]::ToString($hasher.ComputeHash($utf8.GetBytes($text)))).Replace('-', '').ToLowerInvariant()
             } finally { $hasher.Dispose() }
             if ($actual -cne $expected) { return $false }
+        }
+        return $true
+    } catch { return $false }
+}
+
+function Get-NativePreToolBatch([object]$Calls) {
+    if ($Calls -isnot [Collections.IList] -or $Calls.Count -lt 1 -or $Calls.Count -gt 128) {
+        return $null
+    }
+    foreach ($call in $Calls) {
+        if ($call -isnot [Collections.IDictionary] -or $call['name'] -isnot [string] -or
+            -not $call['name']) { return $null }
+        # A caller's Keys field must not shadow the dictionary's own keys.
+        foreach ($key in $call.get_Keys()) {
+            if ($key -cnotin @('name', 'args', 'id')) { return $null }
+        }
+    }
+    return ,$Calls
+}
+
+function Test-NativePreToolRead([object]$Payload, [bool]$PreparedMembership = $false) {
+    if (($env:COPILOT_EXTENSIONS_CONTEXT -and -not $PreparedMembership) -or
+        $Payload -isnot [Collections.IDictionary]) { return $false }
+    if ($Payload.ContainsKey('toolCalls')) {
+        if (-not $PreparedMembership) { return $false }
+        $calls = Get-NativePreToolBatch $Payload['toolCalls']
+        if ($null -eq $calls) { return $false }
+        $shellArguments = [Collections.Generic.List[object]]::new()
+        foreach ($call in $calls) {
+            if ($call['name'] -cin @('view', 'rg', 'glob')) { continue }
+            if ($call['name'] -cnotin @('powershell', 'pwsh')) { return $false }
+            $shellArguments.Add($call['args'])
+        }
+        if ($shellArguments.Count) {
+            return Test-NativePreToolSources -WriteProof $true -ShellBatch $shellArguments.ToArray()
+        }
+        return Test-NativePreToolSources -WriteProof $true
+    }
+    $name = $Payload.toolName
+    if (-not $name) { $name = $Payload.tool_name }
+    if ($name -isnot [string]) { return $false }
+    if ($name -cin @('view', 'rg', 'glob')) { return Test-NativePreToolSources }
+    if (-not $PreparedMembership -or $name -cnotin @('powershell', 'pwsh')) { return $false }
+    if ($Payload.ContainsKey('toolArgs')) {
+        $args = $Payload['toolArgs']
+    } else {
+        $args = $Payload['tool_input']
+    }
+    if ($args -isnot [Collections.IDictionary] -and ($args -isnot [string] -or -not $args)) {
+        return $false
+    }
+    return Test-NativePreToolSources -ShellArguments $args
+}
+
+function Read-NativePreToolText([string]$Path, [int]$Limit) {
+    $null = Get-PreparedWorktreesPath $Path
+    $stream = [IO.FileStream]::new(
+        $Path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+        [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+    try {
+        if ($stream.Length -gt $Limit) { throw 'Oversized native pre-tool facts' }
+        $bytes = [byte[]]::new($Limit + 1)
+        $count = 0
+        while ($count -lt $bytes.Length) {
+            $read = $stream.Read($bytes, $count, $bytes.Length - $count)
+            if (-not $read) { break }
+            $count += $read
+        }
+        if ($count -eq $bytes.Length) { throw 'Oversized native pre-tool facts' }
+        return $utf8.GetString($bytes, 0, $count)
+    } finally { $stream.Dispose() }
+}
+
+function Test-NativePreToolWrite([object]$Payload, [object]$Facts) {
+    try {
+        if ($Facts -isnot [Collections.IDictionary]) { return $false }
+        $writeTools = @(
+            'create', 'edit', 'str_replace', 'str_replace_editor', 'str_replace_based_edit_tool',
+            'write', 'write_file', 'insert', 'new_file', 'multi_edit', 'apply_patch')
+        # Source-bound tool_call_forms owns this header-target grammar.
+        $patchTarget = '^\*\*\* (?:Add File|Update File|Delete File|Move to): (.+)\r?$'
+        $writeArgs = [Collections.Generic.List[object]]::new()
+        $cwd = $Payload.cwd
+        if ($Payload.ContainsKey('toolCalls')) {
+            # tool_call_forms gives batch members precedence over top-level tool fields.
+            $calls = Get-NativePreToolBatch $Payload['toolCalls']
+            if ($null -eq $calls) { return $false }
+            foreach ($call in $calls) {
+                if ($call['name'] -cnotin ($writeTools + @('view', 'rg', 'glob'))) { return $false }
+                if ($call['name'] -cin $writeTools) {
+                    $writeArgs.Add(@{ name = $call['name']; args = $call['args'] })
+                }
+            }
+            if (-not $Payload.ContainsKey('cwd')) { $cwd = $Payload.workingDirectory }
+        } else {
+            $name = $Payload.toolName
+            if (-not $name) { $name = $Payload.tool_name }
+            if ($name -isnot [string] -or $name -cnotin $writeTools) { return $false }
+            $writeArgs.Add(@{ name = $name; args = $(if ($Payload.ContainsKey('toolArgs')) {
+                $Payload.toolArgs
+            } else { $Payload.tool_input }) })
+        }
+        if (-not $writeArgs.Count -or $cwd -isnot [string] -or
+            (Get-PreparedWorktreesPath $cwd) -cne $Facts.workspace) { return $false }
+        $root = $Facts.identity.root
+        if (-not [IO.File]::Exists([IO.Path]::Combine($root, '.git'))) { return $false }
+        # Membership proves enrollment; current Git bytes still prove this target's identity.
+        $pointer = (Read-NativePreToolText ([IO.Path]::Combine($root, '.git')) 8192).TrimEnd("`n").TrimEnd("`r")
+        if (-not $pointer.StartsWith('gitdir:', [StringComparison]::OrdinalIgnoreCase)) { return $false }
+        $pointer = $pointer.Substring(7)
+        if ($pointer.StartsWith(' ')) { $pointer = $pointer.Substring(1) }
+        if (-not $pointer) { return $false }
+        $gitDir = Get-PreparedWorktreesPath ([IO.Path]::Combine($root, $pointer))
+        if ($gitDir -cne $Facts.identity.git_dir) { return $false }
+        $common = (Read-NativePreToolText ([IO.Path]::Combine($gitDir, 'commondir')) 8192).TrimEnd("`n").TrimEnd("`r")
+        if (-not $common -or (Get-PreparedWorktreesPath ([IO.Path]::Combine($gitDir, $common))) -cne
+            $Facts.identity.common_dir -or -not [IO.File]::Exists([IO.Path]::Combine($gitDir, 'HEAD')) -or
+            -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'objects')) -or
+            -not [IO.Directory]::Exists([IO.Path]::Combine($Facts.identity.common_dir, 'refs'))) { return $false }
+        $rawPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($write in $writeArgs) {
+            $args = $write.args
+            if ($args -is [string]) {
+                if ($write.name -ceq 'apply_patch' -and [regex]::IsMatch($args, $patchTarget, 'Multiline')) {
+                    # A permissive JSON decoder must not discard headers inside comments.
+                    $args = @{ command = $args }
+                } else {
+                    try { $args = ConvertFrom-PreToolJson $args }
+                    catch {
+                        if ($write.name -cne 'apply_patch') { return $false }
+                        $args = @{ command = $args }
+                    }
+                }
+            }
+            if ($args -isnot [Collections.IDictionary]) { return $false }
+            $entries = [Collections.Generic.List[object]]::new()
+            $entries.Add($args)
+            foreach ($key in @('edits', 'files', 'changes')) {
+                if (-not $args.ContainsKey($key)) { continue }
+                $values = $args[$key]
+                if ($values -isnot [Collections.IList] -or $values.Count -gt 128) { return $false }
+                foreach ($entry in $values) {
+                    if ($entry -isnot [Collections.IDictionary]) { return $false }
+                    foreach ($nested in @('edits', 'files', 'changes')) {
+                        if ($entry.ContainsKey($nested)) { return $false }
+                    }
+                    $entries.Add($entry)
+                }
+            }
+            $callPaths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+            for ($index = 0; $index -lt $entries.Count; $index++) {
+                $found = $false
+                foreach ($key in @('path', 'file_path', 'filePath', 'filename', 'fileName', 'target_file', 'targetFile')) {
+                    $raw = $entries[$index][$key]
+                    if ($raw -isnot [string] -or -not $raw) { continue }
+                    $found = $true
+                    $null = $callPaths.Add($raw)
+                    if ($callPaths.Count -gt 128) { return $false }
+                }
+                if ($index -gt 0 -and -not $found) { return $false }
+            }
+            if ($write.name -ceq 'apply_patch') {
+                $foundPatch = $false
+                foreach ($field in @('input', 'patch', 'command')) {
+                    if (-not $args.ContainsKey($field)) { continue }
+                    $patch = $args[$field]
+                    if ($patch -isnot [string] -or $patch.Length -gt 131072 -or
+                        $patch -cnotmatch '\A\*\*\* Begin Patch\r?\n[\s\S]*\r?\n\*\*\* End Patch(?:\r?\n)?\z') {
+                        return $false
+                    }
+                    $headers = [regex]::Matches($patch, $patchTarget, 'Multiline')
+                    if (-not $headers.Count) { return $false }
+                    $foundPatch = $true
+                    foreach ($header in $headers) {
+                        $raw = $header.Groups[1].Value
+                        if ($raw.EndsWith("`r")) { $raw = $raw.Substring(0, $raw.Length - 1) }
+                        $null = $callPaths.Add($raw)
+                        if ($callPaths.Count -gt 128) { return $false }
+                    }
+                }
+                if (-not $foundPatch) { return $false }
+            }
+            if (-not $callPaths.Count) { return $false }
+            foreach ($raw in $callPaths) {
+                $null = $rawPaths.Add($raw)
+                if ($rawPaths.Count -gt 128) { return $false }
+            }
+        }
+        $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($raw in $rawPaths) {
+            if ($raw.Length -gt 4096 -or ($raw -notmatch '^[A-Za-z]:[\\/]' -and
+                ($raw.Contains(':') -or $raw -match '^[\\/]'))) { return $false }
+            $target = Get-PreparedWorktreesPath ([IO.Path]::Combine($cwd, $raw))
+            if (-not $target.StartsWith($root + '\', [StringComparison]::Ordinal)) { return $false }
+            $ancestor = $target
+            while ($ancestor -cne $root) {
+                foreach ($marker in @('.git', 'HEAD', 'objects', 'refs')) {
+                    try {
+                        $null = [IO.File]::GetAttributes([IO.Path]::Combine($ancestor, $marker))
+                        return $false
+                    } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+                    }
+                }
+                $ancestor = [IO.Path]::GetDirectoryName($ancestor)
+            }
+            $null = $paths.Add($target)
+        }
+        if (-not (Test-NativePreToolSources -WriteProof $true)) { return $false }
+        $configPath = [IO.Path]::Combine($root, '.agent-worktrees', 'config.yaml')
+        $null = Get-PreparedWorktreesPath $configPath
+        $stateless = $false
+        try {
+            $attributes = [IO.File]::GetAttributes($configPath)
+            if ($attributes -band [IO.FileAttributes]::Directory) { return $false }
+            $text = (Read-NativePreToolText $configPath 16384).Replace("`r`n", "`n").Replace("`r", "`n")
+            # Python's guard also recognizes the four information-separator whitespace characters.
+            $stateless = [regex]::IsMatch($text,
+                '^[\s\x1c-\x1f]*(?:stateless|requires_external_state_root)[\s\x1c-\x1f]*:[\s\x1c-\x1f]*true[\s\x1c-\x1f]*(?:#.*)?$', 'Multiline')
+        } catch [IO.FileNotFoundException], [IO.DirectoryNotFoundException] {
+        }
+        if ($stateless) {
+            foreach ($target in $paths) {
+                $relative = $target.Substring($root.Length + 1).Replace('\', '/').TrimStart([char[]]'./')
+                if ($relative -match '^(?:efforts|logs|weekly-updates|icm)(?:/|$)' -or
+                    [IO.Path]::GetFileName($relative) -cin @('ownership.yml', 'dev-assignments.yml')) {
+                    return $false
+                }
+            }
+        }
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try {
+            $key = ([BitConverter]::ToString($hash.ComputeHash($utf8.GetBytes($root)))).Replace('-', '').ToLowerInvariant()
+        } finally { $hash.Dispose() }
+        $map = ConvertFrom-PreToolJson (Read-NativePreToolText (
+            [IO.Path]::Combine($Facts.registry, 'guarded-anchors', $key + '.json')) 1048576)
+        if ($map -isnot [Collections.IDictionary]) { return $false }
+        foreach ($field in @('schema', 'source_root', 'registry_root', 'inventory_authority', 'posture_authority')) {
+            if ($map[$field] -isnot [string]) { return $false }
+        }
+        if ($map.schema -cne 'agent-worktrees.guarded-anchors' -or
+            ($map.version -isnot [int] -and $map.version -isnot [long]) -or $map.version -ne 1 -or
+            $map.source_root -cne $root -or $map.registry_root -cne $Facts.registry -or
+            $map.inventory_authority -cne 'complete' -or $map.posture_authority -cne 'complete' -or
+            $map.generation -isnot [string] -or -not $map.generation -or
+            $map.source_identity -isnot [Collections.IDictionary] -or
+            $map.roots -isnot [Collections.IList] -or $map.postures -isnot [Collections.IList] -or
+            $map.posture_errors -isnot [Collections.IList] -or $map.posture_errors.Count -ne 0 -or
+            $map.roots.Count + $map.postures.Count -gt 4096) { return $false }
+        foreach ($field in @('root', 'git_dir', 'common_dir')) {
+            if ($map.source_identity[$field] -isnot [string] -or
+                $map.source_identity[$field] -cne $Facts.identity[$field]) { return $false }
+        }
+        foreach ($kind in @('roots', 'postures')) {
+            foreach ($row in $map[$kind]) {
+                if ($row -isnot [Collections.IDictionary] -or $row.identity -isnot [Collections.IDictionary]) {
+                    return $false
+                }
+                foreach ($field in @('name', 'delegate', 'path')) {
+                    if ($row[$field] -isnot [string] -or -not $row[$field]) { return $false }
+                }
+                foreach ($field in @('root', 'git_dir', 'common_dir')) {
+                    $value = $row.identity[$field]
+                    # Inventory identities are lexical snapshot data, not live paths to probe.
+                    if ($value -isnot [string] -or $value.Length -gt 4096 -or
+                        $value -cnotmatch '^[a-z]:\\' -or $value.Contains([char]0) -or
+                        $value.Contains('/') -or $value.ToLowerInvariant() -cne $value) {
+                        return $false
+                    }
+                    if ($value.Length -gt 3) {
+                        foreach ($part in $value.Substring(3).Split('\')) {
+                            if ($part -cin @('', '.', '..')) { return $false }
+                        }
+                    }
+                }
+                if ($row.path -cne $row.identity.root) { return $false }
+                if ($kind -ceq 'postures' -and (
+                    $row.posture -isnot [string] -or $row.posture -cnotin @('', 'reference', 'worktree') -or
+                    $row.elevated -isnot [bool])) { return $false }
+                if ($row.identity.common_dir -ceq $Facts.identity.common_dir -and (
+                    $kind -ceq 'roots' -or $row.posture -cne 'worktree' -or $row.elevated -or
+                    $row.identity.root -ceq $root)) { return $false }
+            }
         }
         return $true
     } catch { return $false }
@@ -125,16 +502,28 @@ function Invoke-PreToolPolicy([string]$Python, [string]$Payload, [ref]$Diagnosti
 try {
     $reader = [IO.StreamReader]::new([Console]::OpenStandardInput(), $utf8, $false)
     try { $raw = $reader.ReadToEnd() } finally { $reader.Dispose() }
-    $admission = Join-Path $PSScriptRoot 'managed-session.ps1'
+    $admission = [IO.Path]::Combine($PSScriptRoot, 'managed-session.ps1')
     if (-not [IO.File]::Exists($admission)) { exit 0 }
     . $admission
-    if (-not (Test-ManagedWorktreesSession -Raw $raw)) { exit 0 }
+    $preparedMembership = $false
+    $membershipFacts = $null
+    $supportsFacts = $false
+    foreach ($parameter in ${function:Test-ManagedWorktreesSession}.Ast.Body.ParamBlock.Parameters) {
+        if ($parameter.Name.VariablePath.UserPath -ceq 'Facts') { $supportsFacts = $true; break }
+    }
+    $admitted = if ($supportsFacts) {
+        Test-ManagedWorktreesSession -Raw $raw -Prepared ([ref]$preparedMembership) -Facts ([ref]$membershipFacts)
+    } else {
+        Test-ManagedWorktreesSession -Raw $raw -Prepared ([ref]$preparedMembership)
+    }
+    if (-not $admitted) { exit 0 }
     $stop = Get-NativePreToolStop
     if ($stop -eq $true) { exit 0 }
     $script:preToolBoundary = 'event JSON'
     $payload = ConvertFrom-PreToolJson $raw
     if ($payload -isnot [Collections.IDictionary]) { throw 'Expected an event object' }
-    if ($stop -eq $false -and (Test-NativePreToolRead $payload)) { exit 0 }
+    if ($stop -eq $false -and (Test-NativePreToolRead $payload $preparedMembership)) { exit 0 }
+    if ($stop -eq $false -and $preparedMembership -and (Test-NativePreToolWrite $payload $membershipFacts)) { exit 0 }
     try { Set-Location -LiteralPath $env:USERPROFILE -ErrorAction Stop }
     catch { Set-Location -LiteralPath ([IO.Path]::GetPathRoot($PSScriptRoot)) -ErrorAction Stop }
     [IO.Directory]::SetCurrentDirectory((Get-Location).Path)

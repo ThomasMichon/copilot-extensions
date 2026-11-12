@@ -2,6 +2,14 @@
 
 See the [configuration reference](docs/configuration.md) for coordinator
 environment, reusable registrar/identity fields and configuration boundaries.
+Windows scheduling is optional and separate from service capability; see
+[scheduling and classic-lane readiness](docs/windows-scheduling.md).
+
+`telemetry hourly --hour YYYY-MM-DDTHH:00:00Z` exports a bounded, privacy-reduced
+hour from the existing retained telemetry namespace without starting the
+coordinator, capture or a schedule. Its selected runtime ships the optional
+[hourly reporting declaration and protocol](../../libs/process-telemetry/hourly-reporting.md);
+unknown coverage is not service health or an active-agent count.
 
 Sustained role charters that may use Dispatch as one adapter, such as
 sustained pull-request review (`agent-roles:review-pull-requests`) and fleet
@@ -95,6 +103,13 @@ Task purpose is an orthogonal [work/maintenance category](docs/task-categories.m
 compatible creation defaults, before-limit selection, independent Tasks and
 Maintenance tasks pivots, full evidence inspection and preview-first historical
 classification. Category separation never prunes task history.
+
+## Standing charters
+
+[Standing charters](docs/standing-charters.md) are durable, revision-fenced
+tasks for continuing lanes of responsibility. They are reconciled and governed
+only through control-authorized `agent-dispatch standing` commands, may parent
+ordinary finite tasks, and are never completed or launched by finite paths.
 
 ## Offline CI repair construction
 
@@ -502,6 +517,14 @@ materializes a standalone snapshot with both installer-engine files and all
 declared local libraries; local-checkout stamps use content-addressed snapshot
 identities over the materialized tree. Unchanged stamps reuse one snapshot,
 while source, engine or library edits publish a new immutable identity.
+Ordinary runtime admission also fingerprints the complete package and transitive
+declared local-source graph through the canonical construction helper, including
+executable-source edits without version changes. It uses the existing bootstrap
+TOML parser rather than requiring an additional installed dependency. Missing or
+invalid inputs refuse before construction. Exact healthy completed inputs reuse
+without rewriting completion; conflicting or unverified completed content,
+including historical metadata-only hashes, refuses even under force. Select a
+distinct qualified generation rather than retrofitting a completed slot.
 Windows runtime builds use the snapshot's own dependency-policy helper for
 both the library pre-installs and the selected package extras. This attributes
 the copied sources without widening the caller's trusted roots or relaxing

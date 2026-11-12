@@ -11,9 +11,11 @@ Drivers are discovered (first match wins) from:
    or ``~/.agent-containers/drivers.d`` -- shaped
    ``{"schema_version": 1, "name": "<name>", "command": ["<exe>", ...]}``;
 2. an executable named ``agent-containers-driver-<name>`` on ``PATH``.
+3. the bundled Podman implementation when ``name`` is ``podman``.
 
 Each manifest is its own fault boundary: an invalid entry becomes a finding
-(see ``agent-containers drivers``) and never hides valid ones.
+(see ``agent-containers drivers``) and never hides valid ones. An invalid
+explicit Podman registration refuses rather than selecting another implementation.
 """
 
 from __future__ import annotations
@@ -24,7 +26,9 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +52,7 @@ from .runtime_drivers import (
 log = logging.getLogger("agent-containers")
 
 PROTOCOL_VERSION = 1
+BUNDLED_DRIVERS = {"podman": "agent_containers.podman_driver"}
 MANIFEST_SCHEMA_VERSION = 1
 PATH_PREFIX = "agent-containers-driver-"
 DRIVERS_DIR_ENV = "AGENT_CONTAINERS_DRIVERS_DIR"
@@ -74,7 +79,7 @@ _TIMEOUTS = {
 class DriverSpec:
     name: str
     command: tuple[str, ...]
-    source: str  # manifest path, or "PATH"
+    source: str  # manifest path, "PATH", or "bundled"
 
 
 def drivers_dir() -> Path:
@@ -124,7 +129,11 @@ def scan_drivers() -> tuple[dict[str, DriverSpec], list[dict[str, str]]]:
     findings: list[dict[str, str]] = []
     root = drivers_dir()
     try:
-        entries = sorted(root.glob("*.json")) if root.is_dir() else []
+        entries = sorted(
+            path for path in root.iterdir()
+            if fnmatch(path.name, "*.json")
+            or (path.stem.casefold() == "podman" and path.suffix.casefold() == ".json")
+        ) if root.is_dir() else []
     except OSError as exc:
         return specs, [{"path": str(root), "reason": f"cannot enumerate: {exc}"}]
     for path in entries:
@@ -141,14 +150,23 @@ def find_driver(name: str) -> DriverSpec:
     specs, findings = scan_drivers()
     if name in specs:
         return specs[name]
-    on_path = shutil.which(PATH_PREFIX + name)
-    if on_path:
-        return DriverSpec(name, (on_path,), "PATH")
     detail = "".join(
         f"; {finding['path']}: {finding['reason']}"
         for finding in findings
-        if Path(finding["path"]).stem == name
+        if (
+            Path(finding["path"]).stem == name
+            or (name == "podman" and Path(finding["path"]).stem.casefold() == name)
+            or (name == "podman" and Path(finding["path"]) == drivers_dir())
+        )
     )
+    if name == "podman" and detail:
+        raise RuntimeError(f"invalid explicit Podman registration{detail}")
+    on_path = shutil.which(PATH_PREFIX + name)
+    if on_path:
+        return DriverSpec(name, (on_path,), "PATH")
+    if name in BUNDLED_DRIVERS:
+        return DriverSpec(name, (sys.executable, "-m", BUNDLED_DRIVERS[name]),
+                          "bundled")
     raise RuntimeError(
         f"runtime driver '{name}' is not registered: add "
         f"{drivers_dir() / (name + '.json')} or put {PATH_PREFIX}{name} on "

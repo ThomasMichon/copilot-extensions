@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING
 from aiohttp import ClientWebSocketResponse
 
 from .gateway_service_channel import (
-    BODY_BYTES, CHUNK_BYTES, RESPONSE_HEADERS, TransportError,
+    BODY_BYTES, CHUNK_BYTES, RESPONSE_BYTES, RESPONSE_HEADERS, TransportError,
     check, headers, response_status, send, shape,
 )
 from .gateway_service_context import ServicePolicyError, identifier
@@ -84,6 +84,19 @@ class ServiceRequest:
     headers: tuple[tuple[str, str], ...]
     body: bytes
     lifetime: RequestLifetime = field(default_factory=RequestLifetime, repr=False, compare=False)
+    response_limit: int = field(default=BODY_BYTES, kw_only=True)
+
+
+def _validate_response(
+    status: int, selected: tuple[tuple[str, str], ...], body: bytes, limit: int,
+) -> None:
+    response_status(status)
+    check(type(body) is bytes and len(body) <= limit, "response-limit")
+    check(type(selected) is tuple and all(
+        type(pair) is tuple and len(pair) == 2
+        and all(isinstance(item, str) for item in pair) for pair in selected),
+        "invalid-headers")
+    headers(selected, RESPONSE_HEADERS, strict=True)
 
 
 @dataclass(frozen=True)
@@ -93,13 +106,22 @@ class ServiceResponse:
     body: bytes = b""
 
     def __post_init__(self) -> None:
-        response_status(self.status)
-        check(type(self.body) is bytes and len(self.body) <= BODY_BYTES, "response-limit")
-        check(type(self.headers) is tuple and all(
-            type(pair) is tuple and len(pair) == 2
-            and all(isinstance(item, str) for item in pair) for pair in self.headers),
-            "invalid-headers")
-        headers(self.headers, RESPONSE_HEADERS, strict=True)
+        _validate_response(self.status, self.headers, self.body, BODY_BYTES)
+
+
+@dataclass(frozen=True)
+class BoundedServiceResponse:
+    """Buffered response requiring an explicitly size-qualified outbound binding.
+
+    Construction alone does not select a handler budget or grant caller authority.
+    """
+
+    status: int
+    headers: tuple[tuple[str, str], ...] = ()
+    body: bytes = field(default=b"", repr=False)
+
+    def __post_init__(self) -> None:
+        _validate_response(self.status, self.headers, self.body, RESPONSE_BYTES)
 
 
 @dataclass(frozen=True)
@@ -113,12 +135,15 @@ class HandlerBinding:
 
     fleet: str
     gateway: str
-    handle: Callable[[ServiceRequest], Awaitable[ServiceResponse]]
+    handle: Callable[[ServiceRequest], Awaitable[ServiceResponse | BoundedServiceResponse]]
+    response_limit: int = field(default=BODY_BYTES, kw_only=True)
 
     def __post_init__(self) -> None:
         identifier(self.fleet)
         identifier(self.gateway)
         check(callable(self.handle), "invalid-handler")
+        check(type(self.response_limit) is int
+              and BODY_BYTES <= self.response_limit <= RESPONSE_BYTES, "invalid-response-limit")
 
     def context(self, value: object, slot: str) -> CallerContext:
         context = CallerContext.parse(value)
@@ -134,6 +159,8 @@ async def respond(
     """One bounded response, using the same channel ACK/backpressure contract."""
     request.lifetime.check()
     check(request.context.expires_at > time.time(), "caller-context-expired")
+    check(type(request.response_limit) is int
+          and request.response_limit == binding.response_limit, "response-limit")
     try:
         response = await binding.handle(request)
     except (TransportError, OSError, asyncio.TimeoutError):
@@ -143,10 +170,11 @@ async def respond(
         raise TransportError("handler-failed") from None
     request.lifetime.check()
     check(request.context.expires_at > time.time(), "caller-context-expired")
-    check(type(response) is ServiceResponse, "invalid-backend-response")
-    response_status(response.status)
-    check(type(response.body) is bytes and len(response.body) <= BODY_BYTES,
-          "response-limit")
+    check(type(response) is ServiceResponse or (
+        type(response) is BoundedServiceResponse and binding.response_limit > BODY_BYTES),
+        "invalid-backend-response")
+    limit = BODY_BYTES if type(response) is ServiceResponse else binding.response_limit
+    _validate_response(response.status, response.headers, response.body, limit)
     selected = headers(response.headers, RESPONSE_HEADERS, strict=True)
     await send(ws, {"type": "headers", "id": exchange.id,
                     "status": response.status, "headers": selected})

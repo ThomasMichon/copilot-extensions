@@ -14,6 +14,7 @@ from agent_index.indexing.crawl import collect_source_changes
 from agent_index.indexing.path_index import PathIndex
 from agent_index.indexing.pending_crawl import PendingCrawls, recover_source, recovery_scope
 from agent_index.indexing.state import IndexState, SourceState
+from agent_index.indexing.work_counts import measure_reindex
 from agent_index.sources.github import GitHubConnector
 
 SOURCE = "github:acme/widgets"
@@ -118,11 +119,28 @@ def test_restart_does_not_refetch_plan_or_completed_work_items(tmp_path):
             source_aware=True, full=False, connector=provider, source_scope="config",
         )
 
-    with pytest.raises(RuntimeError, match="interrupted"):
-        collect(connector(handler))
+    @measure_reindex
+    def interrupted():
+        with pytest.raises(RuntimeError, match="interrupted"):
+            collect(connector(handler))
+        return {}
+
+    counts = interrupted()["work_counts"]["acquisition_by_source"]
+    assert counts[SOURCE] == {
+        "identity_records": 2, "item_body_records": 4, "comment_body_records": 0,
+    }
     assert state.sources["alias"].last_commit == BASE
     fail = False
-    manifest = collect(connector(handler))
+
+    @measure_reindex
+    def resumed():
+        return {"manifest": collect(connector(handler))}
+
+    result = resumed()
+    manifest = result["manifest"]
+    assert result["work_counts"]["acquisition_by_source"][SOURCE] == {
+        "identity_records": 0, "item_body_records": 1, "comment_body_records": 0,
+    }
     assert [entry.path for entry in manifest.upserts] == ["issues/1.md", "pulls/2.md"]
     assert requests.count("/repos/acme/widgets/issues/1") == 1
     assert requests.count("/repos/acme/widgets/issues/1/comments") == 1

@@ -9,6 +9,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import TYPE_CHECKING
 
 from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_context import identifier
@@ -16,6 +17,9 @@ from fleet_manager.gateway_service_handler import (
     HandlerBinding, RequestDisconnected, ServiceRequest, ServiceResponse,
 )
 from single_instance_lease import OperationLockedError, OperationOwnershipError
+
+if TYPE_CHECKING:
+    from fleet_manager.gateway_service_handler import BoundedServiceResponse
 
 from .watch_replay import MAX_BATCH, ConsumerScope
 from .watch_notification import positive_seconds
@@ -89,15 +93,29 @@ class WatchGateway:
     """
 
     def __init__(
-        self, store: ReplayStore, *, fleet: str, gateway: str, slot: str,
+        self, store: ReplayStore, *, fleet: str | None, gateway: str | None, slot: str | None,
         bindings: tuple[WatchScopeBinding, ...],
         checkpoint: Callable[[], None] | None = None,
         workspaces=None,
         attention=None,
+        reports=None,
+        local: bool = False,
+        repositories=None,
     ) -> None:
-        for name in (fleet, gateway, slot):
-            identifier(name)
-        if store.service_identity is not None and store.service_identity != ReplayServiceIdentity(
+        if type(local) is not bool:
+            raise ValueError("explicit local profile selection required")
+        self.local, self.repositories = local, repositories
+        if repositories is not None and repositories.store is not store:
+            raise ValueError("repository projection must use the existing storage owner")
+        if local:
+            if (fleet, gateway, slot) != (None, None, None) or store.service_identity is not None:
+                raise ValueError("local ingress cannot synthesize Gateway context")
+            if repositories is None or not store.repository_continuing:
+                raise ValueError("local ingress requires continuing repository storage")
+        else:
+            for name in (fleet, gateway, slot):
+                identifier(name)
+        if not local and store.service_identity is not None and store.service_identity != ReplayServiceIdentity(
             fleet, gateway, slot,
         ):
             raise ValueError("service identity differs from replay storage binding")
@@ -135,13 +153,28 @@ class WatchGateway:
         ):
             raise ValueError("attention must use the admitted consumer and existing workspace owners")
         self.attention = MappingProxyType(attention)
-        self._tasks: set[asyncio.Task[ServiceResponse]] = set()
+        from .report_read import ReportReader
+        reports = {} if reports is None else dict(reports)
+        if any(
+            key not in selected or not isinstance(value, ReportReader)
+            or value.consumer_scope != selected[key]
+            for key, value in reports.items()
+        ):
+            raise ValueError("reports must use the existing admitted scope owner")
+        self.reports = MappingProxyType(reports)
+        self._tasks: set[asyncio.Task[ServiceResponse | BoundedServiceResponse]] = set()
         self._closing = False
 
-    def handler_binding(self) -> HandlerBinding:
-        return HandlerBinding(self.fleet, self.gateway, self.handle)
+    def handler_binding(self, *, response_limit: int = BODY_BYTES) -> HandlerBinding:
+        if self.local:
+            raise ValueError("local ingress has no authenticated Gateway channel")
+        if type(response_limit) is int and response_limit == BODY_BYTES:
+            return HandlerBinding(self.fleet, self.gateway, self.handle)
+        return HandlerBinding(self.fleet, self.gateway, self.handle, response_limit=response_limit)
 
-    async def handle(self, request: ServiceRequest) -> ServiceResponse:
+    async def handle(self, request: ServiceRequest) -> ServiceResponse | BoundedServiceResponse:
+        if self.local:
+            return _response(403, {"error": "gateway_channel_not_selected"})
         if type(request) is not ServiceRequest:
             raise TypeError("expected trusted service request")
         try:
@@ -156,6 +189,9 @@ class WatchGateway:
             return _response(403, {"error": "watch_caller_refused"})
         if request.target.startswith(("/v2/review/", "/v1/attention/")):
             return await self._handle_workspace(request)
+        if request.target.startswith(("/v1/read/", "/v2/read/")):
+            from .report_gateway import handle
+            return await handle(self, request)
         matched = _PATH.fullmatch(request.target)
         if matched is None:
             return _response(404, {"error": "watch_route_not_found"})
@@ -210,6 +246,18 @@ class WatchGateway:
             request.lifetime.close()
             raise
 
+    async def handle_local(self, request):
+        from fleet_manager.local_service_handler import LocalServiceRequest
+        from .repository_gateway import handle, response
+        if type(request) is not LocalServiceRequest or not self.local:
+            return response(403, {"error": "local_profile_not_selected"})
+        self._check(request)
+        if request.context.namespace != self.store.namespace or (
+            request.context.expires_at <= self.store.clock()
+        ):
+            return response(403, {"error": "local_caller_refused"})
+        return await handle(self, request)
+
     def _check(self, request: ServiceRequest) -> None:
         request.lifetime.check()
         if self._checkpoint is not None:
@@ -220,7 +268,7 @@ class WatchGateway:
         is_attention = request.target.startswith("/v1/attention/")
         prefix = "/v1/attention/" if is_attention else "/v2/review/"
         operations = ("capabilities", "read") if is_attention else OPERATIONS
-        matched = re.fullmatch(prefix + r"([a-z0-9][a-z0-9-]{0,63})/([a-z]+)", request.target)
+        matched = re.fullmatch(prefix + r"([a-z0-9][a-z0-9-]{0,63})/([a-z]+(?:-[a-z]+)*)", request.target)
         if matched is None or matched[2] not in operations:
             return _response(404, {"error": "workspace_route_not_found"})
         target, operation = matched.groups()
@@ -236,7 +284,13 @@ class WatchGateway:
             return _response(415, {"error": "workspace_json_required"})
         try:
             payload = json_object(request.body)
-            if set(payload) != {"binding", "request"} or not isinstance(payload["request"], dict):
+            if (
+                not {"binding", "request"} <= payload.keys()
+                or payload.keys() - {"binding", "request"} - (
+                    set() if is_attention else {"workspace_contract"}
+                )
+                or not isinstance(payload["request"], dict)
+            ):
                 raise ValueError
             expected = ReplayBinding.from_document(payload["binding"])
             if self._binding(request, target) != expected:
@@ -249,6 +303,7 @@ class WatchGateway:
             return _response(503, {"error": "workspace_service_unavailable"})
         task = asyncio.create_task(self._execute_workspace(
             workspace, operation, payload["request"], request, target, expected,
+            selection=payload.get("workspace_contract"),
         ))
         self._tasks.add(task)
         task.add_done_callback(self._completed)
@@ -258,7 +313,8 @@ class WatchGateway:
             request.lifetime.close()
             raise
 
-    async def _execute_workspace(self, workspace, operation, payload, request, target, expected):
+    async def _execute_workspace(self, workspace, operation, payload, request, target, expected,
+                                 *, selection=None):
         from .attention_read import AttentionUnavailable, MAX_BATCH_BYTES
         from .generation_cache import CacheInvalid
         from .owner_read import OwnerReadResponseTooLarge
@@ -291,9 +347,13 @@ class WatchGateway:
                 raise OwnerReadResponseTooLarge("prepared preview or submission exceeds transport limit")
 
         try:
+            from .workspace_terminal_read import serve
+            attention = request.target.startswith("/v1/attention/")
             value = await asyncio.to_thread(
-                workspace.execute, operation, payload,
+                workspace.execute if attention else serve,
+                *((operation, payload) if attention else (workspace, operation, payload)),
                 expires_at=request.context.expires_at, checkpoint=checkpoint,
+                **({} if attention else {"selection": selection}),
                 **({"selection_validator": validate_selection} if operation == "allocate" else {}),
             )
             checkpoint()
@@ -335,7 +395,7 @@ class WatchGateway:
         """Withdraw readiness before joining already-owned operations."""
         self._closing = True
 
-    def _completed(self, task: asyncio.Task[ServiceResponse]) -> None:
+    def _completed(self, task: asyncio.Task[ServiceResponse | BoundedServiceResponse]) -> None:
         self._tasks.discard(task)
         if not task.cancelled() and task.exception() is not None:
             _LOG.error("watch-service-failed code=unexpected-operation-failure")

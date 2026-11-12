@@ -1,0 +1,9 @@
+{
+  "comment": "Keep original keyed writer inspection available after native creation reaches terminal state without reopening it",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

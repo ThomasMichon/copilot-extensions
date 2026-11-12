@@ -43,34 +43,9 @@ def _supports_required_read(python: Path) -> bool:
 
 
 def _selected_runtime(*, budget: OwnedExecutionBudget | None = None) -> tuple[list[str], dict[str, str]]:
-    from . import _peer_launch, peer_launch_adapter, reconcile
+    from .machines_runtime import selected
 
-    if "COPILOT_EXTENSIONS_CONTEXT" in os.environ:
-        own = peer_launch_adapter.validate_context()
-        if own is None:
-            raise ValueError("Machines observation requires a valid installation context")
-        prefix, python = _peer_launch.pinned_launch_prefix(
-            "agent-worktrees", Path(own["pluginRoot"]), own["installReceipt"], "agent-machines",
-        )
-        environment = dict(os.environ)
-    else:
-        payload = reconcile.core_installed_payload_dir("agent-machines")
-        if payload is None:
-            raise ValueError("Machines payload is unavailable; use Installation & Updates")
-        selected = reconcile.resolve_runtime_installation(
-            "agent-machines", payload, **({"budget": budget} if budget is not None else {}),
-        )
-        if selected.actual_mode != "legacy" or selected.status != "ready" or selected.context is not None:
-            raise ValueError("Machines observation requires the selected installation's native context")
-        root = selected.runtime_root
-        python = _peer_launch._peer_python_inprocess({
-            "pluginId": "agent-machines", "pluginRoot": str(root),
-            "versionsRoot": str(root / "versions"), "payloadRoot": str(payload),
-        })
-        if python is None:
-            raise ValueError("Machines has no observable completed runtime")
-        prefix = [str(python), "-I", "-B", "-X", "utf8", "-m", "agent_machines"]
-        environment = _peer_launch.legacy_peer_environment(dict(os.environ))
+    prefix, environment, python = selected(budget=budget)
     if not _supports_required_read(python):
         raise ValueError("The selected Machines runtime does not support required application observation")
     return prefix, environment
@@ -134,6 +109,7 @@ def new_application_preflight(config, *, source: str, checked_profile: str | Non
     if not config.default_repo.require_application_readiness:
         return LaunchPreflight()
     reason = "Required application observation is incomplete or not ready."
+    stage = "profile selection"
     try:
         budget = OwnedExecutionBudget.from_timeout(60, cleanup_reserve=5)
         profile_input = tool.observe_for_admission(config, deadline=budget.execution_deadline)
@@ -141,15 +117,18 @@ def new_application_preflight(config, *, source: str, checked_profile: str | Non
             raise KnowledgePluginError("project tool profile changed after application admission")
         if time.monotonic() >= budget.execution_deadline:
             raise TimeoutError("Required application profile selection exhausted its budget")
+        stage = "runtime selection"
         prefix, environment = _selected_runtime(budget=budget)
         remaining = budget.execution_deadline - time.monotonic()
         if remaining <= 0:
             raise TimeoutError("Required application selection exhausted its budget")
+        stage = "observation"
         result = run_caller_owned(
             [*prefix, "installation-repair", "--project-root", source, "--required", "--caller-owned-readiness"],
             timeout=remaining, max_stdout_bytes=1024 * 1024, max_stderr_bytes=65536,
             cwd=source, env=environment, budget=budget,
         )
+        stage = "profile revalidation"
         if (
             _ready(result, source)
             and tool.observe_for_admission(config, deadline=budget.execution_deadline) == profile_input
@@ -160,8 +139,10 @@ def new_application_preflight(config, *, source: str, checked_profile: str | Non
         raise
     except KnowledgePluginError as exc:
         reason = str(exc)
+    except (TimeoutError, subprocess.TimeoutExpired):
+        reason = f"Required application {stage} exceeded the launch admission budget."
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError):
-        reason = "Required application observation is unavailable or unsupported by the selected runtime."
+        reason = f"Required application {stage} is unavailable or unsupported."
     boundary = "launch" if checked_profile is not None else "allocation"
     retry = "this existing worktree" if checked_profile is not None else "New"
     return LaunchPreflight(policy_error=(

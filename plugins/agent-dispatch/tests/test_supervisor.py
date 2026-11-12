@@ -530,6 +530,26 @@ def test_eligible_scopes_the_200_limit_per_own_label_not_globally(q, client):
     assert spawned == [old_task.id]
 
 
+def test_eligible_excludes_standing_charters_before_the_200_limit(q, client):
+    """Standing charters stay queued for explicit attachment admission only.
+    A newest-first page full of them must not starve older finite work."""
+    from agent_dispatch.queue_standing_charters import StandingCharterDeclaration
+
+    finite = q.create("older finite work")
+    for i in range(201):
+        q.reconcile_standing_charter(f"Standing {i}", StandingCharterDeclaration(
+            namespace="owner", charter_key="dispatcher", lane_key=f"lane-{i}",
+            effort_ref="efforts/dispatcher", materialization_ref="roles/dispatcher",
+            source_revision="source-1", expected_materialization_revision="effective-1",
+        ), repo=TEST_REPO)
+    assert finite.id not in {t.id for t in q.list(status=Status.QUEUED, limit=200)}
+
+    spawn = _ok_spawn()
+    sup = Supervisor(client, spawn_fn=spawn, repo=TEST_REPO, max_concurrent=5)
+    assert sup.poll_once() == [finite.id]
+    assert spawn.calls == [finite.id]
+
+
 def test_poll_skips_a_held_queued_task(q, client):
     """PR #2913 review finding: `Supervisor._eligible()` must exclude a
     queued task with a durable operator hold (Phase 1's Pause primitive) --
@@ -6393,6 +6413,45 @@ def test_retired_worktree_cleanup_failure_backs_off_and_becomes_held(q, client):
         assert len(conclusions) == attempts
         now = next_attempt_at
         assert sup.release_requested_bodies(now=now) == 0
+
+
+@pytest.mark.parametrize("settled", [False, True])
+def test_released_attempt_concludes_only_after_relationship_settlement(
+    q, client, monkeypatch, settled,
+):
+    client.attachments = lambda _task: [{
+        "session_id": "session-gone", "worktree_id": "wt-created", "machine": "host-a",
+    }]
+    task = q.create("work")
+    reservation, _ = q.reserve_spawn(task.id)
+    q.record_spawn_worktree(
+        reservation.key, "wt-created", ownership="created",
+        creating_host="host-a", driver="agent-dispatch",
+    )
+    q.record_spawn(reservation.key, session_handle="session-gone", worktree="wt-created")
+    q.request_spawn_release(
+        reservation.key, disposition="settled",
+        finished_startup_revision=q.get_reservation(reservation.key).startup_revision,
+    )
+    settlements = []
+    monkeypatch.setattr(
+        supervisor_module, "settle_completed_relationship",
+        lambda _sup, res, _task: settlements.append(res["key"]) or settled,
+    )
+    conclusions = []
+    sup = Supervisor(
+        client, spawn_fn=_ok_spawn(), repo=TEST_REPO, machine="host-a",
+        verdict_fn=lambda *_args: tracking.GONE,
+        attempt_conclusion_fn=lambda *args: conclusions.append(args) or {
+            "action": "removed", "reason": "concluded",
+        },
+        nudge=False,
+    )
+
+    sup.release_requested_bodies(now=2000.0)
+
+    assert settlements and set(settlements) == {reservation.key}
+    assert bool(conclusions) is settled
 
 
 def test_gone_body_retires_before_session_cleanup_uses_capacity(q, client):

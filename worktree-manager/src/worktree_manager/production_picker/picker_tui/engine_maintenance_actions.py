@@ -10,7 +10,7 @@ from .engine_dialogs import ScopeDlgScreen
 from .engine_live_screens import ProgressScreen
 
 # Local and SSH New prompts share target-owned staging, with or without mux.
-# Bare/Anchor have no supported worktree Copilot prompt handoff.
+# Anchor launches have no supported worktree Copilot prompt handoff.
 _SEED_PROMPT_ENABLED = True
 
 class PickerScreenMaintenanceActionsMixin:
@@ -62,7 +62,9 @@ class PickerScreenMaintenanceActionsMixin:
         ``_key_progress`` confirm gate. The screen mutates engine state directly
         (``self.progress`` / ``self.executor`` / ``self.debug``) and needs no
         callback."""
-        self.app.push_screen(ProgressScreen(self))
+        screen = ProgressScreen(self)
+        self.app.push_screen(screen)
+        return screen
     def _start_stop(self, recs):
         """Stop the Mux/Copilot wrapper of one or more worktrees (the 'Stop'
         action -- solo from the row sub-menu, or in aggregate from the bulk
@@ -202,23 +204,14 @@ class PickerScreenMaintenanceActionsMixin:
                 return
         self.data.append(row)
     def _start_finalize(self, recs):
-        """Finalize one or more conversation-only / unused worktrees (the
-        'Finalize' action -- solo or aggregate, #2258 follow-up).
-
-        Finalize validates that nothing is unpushed (a no-commit worktree has
-        nothing) and removes it -- the sanctioned lifecycle completion. Because
-        it removes the worktree (and any conversation history), it runs behind a
-        confirm gate (``armed=False``): the progress dialog asks before it
-        executes. Only conversation-only / unused worktrees are targeted.
-        """
+        """Confirm canonical Finalize for supported worktrees, preserving
+        conversation history and all engine-owned content/obligation gates."""
         if picker_review.refuse(self):
             return
         recs = [recs] if isinstance(recs, dict) else list(recs)
-        targets = [r for r in recs
-                   if r.get("cleanup_bucket") in ("conversation", "unused")
-                   and self._record_supports(r, "finalize")]
+        targets = [r for r in recs if self._record_supports(r, "finalize")]
         if not targets:
-            self.debug = "no conversation-only / unused worktree to finalize"
+            self.debug = "no supported worktree to finalize (controller or provider boundary)"
             return
         self._run_op_progress("Finalize", "finalize", targets, armed=False)
     def _run_op_progress(self, verb, op, recs, *, armed):
@@ -250,14 +243,21 @@ class PickerScreenMaintenanceActionsMixin:
         if not self.real_ops:
             return  # mock walker advances via _advance_progress
         from . import maintenance
+        executor = None
+        cancelled = threading.Event() if p["op"] == "sync" else None
         tasks = maintenance.build_tasks(
             p["op"], p["recs"], self.src,
             include_unused=p["include_unused"],
             include_conversations=p["include_conversations"],
             local=self._src_local(),
+            on_progress=lambda key, update: executor.report(key, update),
+            cancelled=cancelled,
         )
-        self.executor = maintenance.MaintenanceExecutor(p["op"], tasks)
-        self.executor.start()
+        executor = maintenance.MaintenanceExecutor(
+            p["op"], tasks, **({"cancelled": cancelled} if cancelled is not None else {}),
+        )
+        self.executor = executor
+        executor.start()
     def _poll_executor(self):
         """Pull real per-item states from the maintenance executor."""
         p = self.progress
@@ -265,8 +265,10 @@ class PickerScreenMaintenanceActionsMixin:
         for it in p["items"]:
             key = it.get("key", it["id4"])
             it["state"] = ex.state(key)
-            if p.get("op") == "sync":
+            if p.get("op") in ("sync", "finalize"):
                 it["result"] = ex.result(key)
+            if p.get("op") == "sync":
+                it["progress"] = ex.progress(key)
         if ex.is_done():
             p["done"] = True
     def _scope_union(self, dlg):
@@ -477,8 +479,6 @@ class PickerScreenMaintenanceActionsMixin:
         opts = [
             {"label": "Anchor repo", "on": False,
              "hint": "launch in the main checkout, not a worktree"},
-            {"label": "Bare", "on": False,
-             "hint": "new worktree, no Copilot bootstrap"},
             {"label": "No Mux", "on": False, "hint": "skip PSMux/TMux wrapper"},
         ]
         if (tm, te) == self._src_local():

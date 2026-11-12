@@ -898,6 +898,7 @@ def test_resolve_claim_status_refusal_is_not_downgraded_to_legacy(tmp_path, monk
     assert result == {
         "available": False,
         "reason": "agent-codespaces@copilot-extensions claim-status callback failed",
+        "callback_error": "refused",
     }
 
 
@@ -950,6 +951,7 @@ def test_resolve_claim_status_degrades_when_registered_peer_is_absent(tmp_path, 
     assert result == {
         "available": False,
         "reason": "agent-codespaces@copilot-extensions claim-status callback failed",
+        "callback_error": "agent-codespaces is absent from this cell",
     }
 
 
@@ -1065,3 +1067,30 @@ def test_discovery_retains_provider_declared_provisioning_suppression(tmp_path, 
     assert not findings
     assert providers["raw-docker"].no_self_provision_env == "FIXTURE_NO_SELFPROVISION"
     assert providers["raw-docker"].status_command[1:] == ("raw-docker",)
+
+
+def test_resolve_claim_status_reports_provider_refusal_detail(tmp_path, monkeypatch):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setattr(cp.peer_launch_adapter, "explicit_context", lambda: False)
+
+    def fake_discover(_plugins_root):
+        provider = cp.ClaimProviderManifest(
+            namespace="codespace",
+            plugin="agent-codespaces@copilot-extensions",
+            plugin_root=str(tmp_path),
+            status_command=("agent-codespaces",),
+        )
+        return {"codespace": provider}, ()
+
+    monkeypatch.setattr(
+        cp.subprocess, "run",
+        lambda cmd, **kwargs: subprocess.CompletedProcess(
+            cmd, 2, "", "trace\nerror: claim is still bound to agent " + "x" * 600 + "\n",
+        ),
+    )
+    monkeypatch.setattr(cp, "discover_claim_providers", fake_discover)
+    result = cp.resolve_claim_status("codespace:my-box-1", plugins_root=tmp_path)
+    assert result["available"] is False
+    assert result["reason"] == "agent-codespaces@copilot-extensions claim-status callback failed"
+    assert result["callback_error"].startswith("error: claim is still bound to agent x")
+    assert len(result["callback_error"]) == 512

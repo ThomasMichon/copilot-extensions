@@ -116,7 +116,9 @@ not proof of workload readiness, lifecycle support or actual Actions job use.
 
 ## Plan and validation
 
-- [ ] Review this protocol and source appointment through the ordinary PR gate.
+- [x] Review this protocol and source appointment through the ordinary PR gate.
+  #8931 merged after current-head Copilot approval and required source checks;
+  implementation, provider enforcement and actual adoption remain open.
 - [ ] Extend the existing canonical resource owner with strict custody records,
   mixed-history validation, exact CAS transitions and truthful CLI outcomes.
 - [ ] Integrate the actual provider guards, including forced/legacy paths,
@@ -137,3 +139,117 @@ multi-process, installed, native and live lanes retain their separate portfolio
 owners and explicit results; missing lanes remain open rather than being
 substituted with mocks. Existing broader runner lifecycle and job acceptance
 remain in the parent plan.
+
+## Local implementation checkpoint
+
+Work resumed after the operator's requested pause and machine restart.
+The receiver-only implementation adds
+the distinct service envelope, exact-parent mixed-history validation, explicit
+task-operation refusals and mixed CLI inventory. It deliberately enables no
+service adoption or retirement writer. The canonical-owner checklist item above
+remains open, along with every provider/effect, installed-peer and live gate.
+
+Focused lint and the install-contract check passed. The combined existing-lease
+and receiver packet exhausted its unchanged 300-second group deadline; it did
+not complete and is not a passing result. Further pure CLI/event controls and
+the exact-fence race regression were added after that run's snapshot and have
+not been executed at the pause.
+
+On resumption, all 40 pure lease/custody protocol and CLI controls passed.
+The real Git lane exposed a per-item timeout in a single test containing ten
+mutation/fence combinations; those combinations are now separate parameterized
+items with unchanged assertions and deadlines. Fifteen real Git cases passed.
+The fresh CLI process then correctly refused the fixture's missing project
+context; after adding a synthetic selected project, both process cases passed
+with actual permanent inventory and protected release refusal. This qualifies
+the receiver on Windows, not installed provider compatibility, distributed
+native-effect settlement or live adoption. No live resource, credential,
+controller, capacity or routing change was made.
+
+After pulling forward to current `dev`, the complete receiver packet passed:
+4 original protocol controls, 36 custody protocol/CLI controls and all 17 real
+Git/process cases. The only rebase conflict was the parent's relocated journal;
+upstream history and the custody entry were both preserved. Focused lint,
+changed-module size, final-diff blob size and install-contract checks passed.
+This remains a receiver expansion, not completion of the canonical-owner or
+provider admission plan items.
+
+The custody record retains the actual acceptance margin, making validation of
+the complete custody-headed history independent of inspecting clients'
+clock-skew settings, including predecessor transfer/takeover validation.
+Ordinary task admission still uses its existing policy. Released-only
+acquisition and version-2 return-evidence checks remain enforced.
+
+Current qualification covers all 126 selected cases on the revised source,
+using native Windows and the isolated runner's unchanged 30-second item and
+300-second group limits. All 17 released-only/return-proof task cases passed,
+including four independent real-Git phases for generation stability, successor/
+transfer/renew preservation, final release and stale-fence refusal, and actual
+compaction, reflog expiry and GC. Canonical history prefixes are copied into
+each case's private remote; the effects under test remain real.
+
+The 20 custody Git/process cases passed in independent 14- and 6-case groups,
+including all three inspecting-client margins and fresh CLI inventory/refusal.
+A residual legacy/protocol group timed out after 37 named passing outcomes;
+its unfinished sweep-race case and unstarted controls then passed in a bounded
+52-case group, including the nine new return-proof parser cases. Together these
+cover all 59 pure protocol controls and 30 legacy lease-store/CLI cases.
+The timed-out groups remain failed attempts, not aggregate-budget passes.
+Focused lint, install-contract, changed-module and committed-blob checks passed.
+This evidence still does not qualify installed provider compatibility, native
+effect admission or live adoption, and enables no custody writer.
+
+### 2026-11-08 UTC - Canonical in-flight effect source prepared
+
+The existing local policy authority and node journal do not fence the Git
+coordination slot. The next source slice therefore uses the protocol's approved
+bounded in-flight extension in that same slot, rather than a second journal.
+An exact live task fence can admit one provider attempt; its unsettled state
+blocks task mutations and adoption independently of task expiry or controller
+liveness. Only explicit original-owner settlement restores the unchanged task
+projection. The original effect and terminal receipt remain inspectable after
+later task transitions and are excluded from stale-history compaction.
+
+This is a trusted-embedding source API, not a provider authorization service.
+The embedding still authenticates current authority, exact native identity and
+request scope, and verifies actual native/backend settlement before recording
+terminal evidence. Labels and evidence digests do not do that verification.
+There is no service-effect grant, effect CLI writer, adoption/retirement writer,
+provider deployment, new controller or live transition.
+
+Native Windows qualification covers 128 distinct selected passing cases:
+103 pure effect/custody/task protocol controls, 15 real effect-store/process
+cases and 10 existing mixed-custody/task/compaction regressions. The effect cases
+include both separate-process CAS winners, lost admission/settlement replies,
+fresh-process inventory, explicit native-exit settlement, wrong-owner/stale
+fences and retained receipts after task release. The initial race workers failed
+before their barriers because they imported test-only modules not present on
+their process path. Self-contained workers fixed that fixture; both races then
+passed, and the 13 non-race cases passed with named JUnit outcomes. The failed
+attempt is not credited as a passing aggregate. All runner item/group limits
+remain unchanged.
+
+No parent checklist item closes. Actual provider guards, forced/local/outage
+paths, qualified executing generations and rollback, Gateway/Fleet binding,
+incumbent-preserving ARC admission and authorized live acceptance remain open.
+
+### 2026-11-09 UTC - Review-fix qualification
+
+#11458's current review found that an inspecting client's margin could
+invalidate a previously admitted effect prefix, and that timestamp truncation
+could admit an effect after its actual safe deadline. Local fixes freeze each
+effect's preceding prefix independently, preserve later task policy, and check
+the precise clock before serializing the admission timestamp.
+
+All 113 pure protocol controls and four real-Git cross-margin restart/settlement
+cases pass on the corrected source. The initial cross-margin case exceeded its
+unchanged per-item deadline during repeated full-history reads; a private copy
+of a canonical prefix now avoids rebuilding that prefix in every case while
+retaining real inspection, CAS settlement and readback. A subsequent regression
+packet timed out in a parameterized mutation case that repeated inventory and
+GC for every mutation. Those shared checks are being separated into one focused
+case; all four actual mutation refusals remain. Neither failed attempt is a
+passing packet, and the remaining regression qualification is still open.
+
+This is not a merged review result, provider rollout, installed-peer
+qualification or live-adoption acceptance. The same parent gates remain open.

@@ -4,7 +4,7 @@
 - **Repo:** copilot-extensions
 - **Branch(es):** reviewed proposal, then implementation PRs against `dev`
 - **Created:** 2026-11-07
-- **Status:** Draft
+- **Status:** Done
 - **Vision:** [release qualification](../../../visions/release-pipeline/README.md#configured-feed-construction-and-first-launch), [fresh-machine behavior](../../../visions/clean-room-validation/README.md#fresh-machine-fidelity), [authoritative replacement](../../../visions/installer/README.md#authoritative-runtime-replacement)
 - **Umbrella issue:** #11377
 - **Related owners:** #3336 release control; #7529 configured-feed construction; #5579 installed launcher chain
@@ -24,10 +24,12 @@ qualification, not a return of the general integration portfolio to unit CI.
 | Qualification coordinator | Plan, integration, validation and PR ownership | Managed source `threaded-ledger` |
 | Native witness contributor | Isolated installation and real terminal consumer witness | Same source branch; coordinator-mediated assignment |
 | Promotion contributor | Existing release-lane integration and evidence admission | Same source branch; coordinator-mediated assignment |
+| Main activation coordinator | Workflow-only controller preparation and reviewed adoption | Managed source `quiet-sprocket`; same PR owner |
 
 ## Coordination
 
-- **Topology:** one source worktree; contributors have disjoint edit ownership.
+- **Topology:** one Dev implementation worktree and a separate workflow-only Main
+  activation worktree; Dev contributors have disjoint edit ownership.
 - **Host (owns PRs):** Qualification coordinator; contributors do not commit,
   rebase or publish independently.
 - **Delegates:** Native witness contributor owns the selected native fixture;
@@ -71,50 +73,50 @@ The following realization details are **agent-recommended**.
 
 ### Phase 1 - Review the consumer and gate contract
 
-- [ ] Identify the existing actual-install/native-terminal fixture owners and
+- [x] Identify the existing actual-install/native-terminal fixture owners and
   supported Windows qualification lane; agree exact implementation file ownership.
-- [ ] Review this proposal and the narrowly extended installed-entry vision
+- [x] Review this proposal and the narrowly extended installed-entry vision
   before implementation.
 
 ### Phase 2 - Prove actual installed terminal readiness
 
-- [ ] Install the candidate through its authentic installation owner into fresh,
+- [x] Install the candidate through its authentic installation owner into fresh,
   isolated state with a representative generic adopted harness repository.
-- [ ] Invoke that repository's generated binstub through the supported Windows
+- [x] Invoke that repository's generated binstub through the supported Windows
   terminal path, reaching the installed Manager rather than a source import
   or a substituted direct module invocation.
-- [ ] Assert real visible TUI readiness and input response, then close the
+- [x] Assert real visible TUI readiness and input response, then close the
   fixture through its owner and verify bounded descendant cleanup.
-- [ ] Add a falsifying control where installation succeeds but installed launch
+- [x] Add a falsifying control where installation succeeds but installed launch
   fails; the witness must fail without retries or improvised repair hiding it.
 
 ### Phase 3 - Enforce the result before promotion
 
-- [ ] Reuse the supported native qualification lane with evidence bound to the
+- [x] Reuse the supported native qualification lane with evidence bound to the
   frozen candidate, installation inputs and actual terminal consumer.
-- [ ] Refuse promotion for failed, timed-out, missing, skipped, incomplete or
+- [x] Refuse promotion for failed, timed-out, missing, skipped, incomplete or
   stale qualification; cover these decisions with bounded in-process tests.
-- [ ] Document invocation, input/evidence identity and failure ownership; retain
+- [x] Document invocation, input/evidence identity and failure ownership; retain
   the existing unit coverage, source integrity and publication gates.
-- [ ] Validate and land the implementation through normal review, and verify
+- [x] Validate and land the implementation through normal review, and verify
   actual gate activation without claiming an unperformed host rollout.
 
 ## Validation Plan
 
-- [ ] The actual installer constructs a fresh fixture; it does not reuse the
+- [x] The actual installer constructs a fresh fixture; it does not reuse the
   operator's selected runtime, caches as installation state, or private repository.
-- [ ] The exact generated project binstub launches the installed Manager under
+- [x] The exact generated project binstub launches the installed Manager under
   a real supported Windows TTY and the observed UI responds to a test input.
-- [ ] Positive and install-success/launch-failure controls exercise the actual
+- [x] Positive and install-success/launch-failure controls exercise the actual
   consumer; process existence, `--version`, mount callbacks or synthetic ready
   files cannot satisfy the TTY assertion.
-- [ ] Timeout, cancellation and failure retain diagnostics and settle only
+- [x] Timeout, cancellation and failure retain diagnostics and settle only
   fixture-owned resources without altering host daemons, sessions or selections.
-- [ ] Gate decision tests reject stale candidate identities and every missing
+- [x] Gate decision tests reject stale candidate identities and every missing
   or non-success result; the live/native witness is not reclassified as unit proof.
-- [ ] A supported promotion run or the existing owner's equivalent exact-candidate
+- [x] A supported promotion run or the existing owner's equivalent exact-candidate
   qualification demonstrates that this gate actually blocks publication.
-- [ ] Source review, required CI and installation-contract checks pass; any
+- [x] Source review, required CI and installation-contract checks pass; any
   unavailable validation tier or actual infrastructure blocker is explicit.
 
 ## Proposal
@@ -126,9 +128,6 @@ inventory; unsupported execution must not be reported as a successful gate.
 
 ## Journal
 
-### 2026-11-07 - Request captured and source scope claimed
-
-- Captured the full request, retaining actual installation, a representative
-  harness repository, binstub invocation, TTY readiness and blocking promotion.
-- Claimed #11377; existing construction, native qualification and release-control
-  owners remain authoritative. No implementation or live rollout is claimed.
+- [2026-11-10 - Gate activation and frozen-candidate release](journal/2026/11.10%20Gate%20activation%20and%20frozen-candidate%20release.md)
+- [2026-11-09 - Fixture release and activation preparation](journal/2026/11.09%20Fixture%20release%20and%20activation%20preparation.md)
+- [2026-11-07 - Implementation and native qualification](journal/2026/11.07%20Implementation%20and%20native%20qualification.md)

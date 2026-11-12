@@ -1,0 +1,13 @@
+{
+  "comment": "Connect optional private knowledge creation and recovery to Configuration; pause modal polling and use resolved credential CLI shims",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    },
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

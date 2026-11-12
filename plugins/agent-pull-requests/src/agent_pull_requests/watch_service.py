@@ -9,13 +9,15 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from fleet_manager.gateway_service_connector import ServiceConnector
+from fleet_manager.gateway_service_channel import BODY_BYTES
 from fleet_manager.gateway_service_handler import RequestDisconnected
 from single_instance_lease import OperationLockedError, SingleInstance
 
 from .watch_gateway import WatchGateway, WatchScopeBinding
 from .watch_notification import positive_seconds
 from .watch_observer import NativeObservationBinding, ReplayObserver
-from .watch_replay_store import ReplayStore
+from .watch_replay_store import ReplayCallerExpired, ReplayStore
+from .repository_contract import RepositoryBackpressure
 
 
 class WatchService:
@@ -28,14 +30,17 @@ class WatchService:
     """
 
     def __init__(
-        self, store: ReplayStore, *, fleet: str, gateway: str, slot: str,
+        self, store: ReplayStore, *, fleet: str | None, gateway: str | None, slot: str | None,
         bindings: tuple[WatchScopeBinding, ...],
         observations: tuple[NativeObservationBinding, ...],
-        gateway_origin: str, access_token_callback: Callable[[], Awaitable[str]],
+        gateway_origin: str | None, access_token_callback: Callable[[], Awaitable[str]] | None,
         proof_key: Any, authority: Callable[[], int], checkpoint: Callable[[], None],
         gateway_ca: str | None = None, interval: float = 5,
         workspaces=None,
         attention=None,
+        reports=None,
+        response_limit: int = BODY_BYTES,
+        local_socket=None, local_peers=(), operation_seconds: int = 60,
     ) -> None:
         if not callable(authority) or not callable(checkpoint):
             raise ValueError("current service authority is required")
@@ -53,23 +58,37 @@ class WatchService:
         self._last_cycle: dict | None = None
         self._disk: asyncio.Task | None = None
         self._tasks: tuple[asyncio.Task, ...] = ()
+        self.observer = ReplayObserver(store, bindings=observations)
+        local = local_socket is not None
+        if local and (not store.repository_continuing or self.observer.repositories is None):
+            raise ValueError("local repository profile requires selected continuing storage")
         self.gateway = WatchGateway(
             store, fleet=fleet, gateway=gateway, slot=slot, bindings=bindings,
             checkpoint=self._check,
             workspaces=workspaces,
             attention=attention,
+            reports=reports,
+            local=local, repositories=self.observer.repositories,
         )
-        self.observer = ReplayObserver(store, bindings=observations)
         if any(
             (scope.account, scope.repo) not in self.observer.bindings
             for scope in self.gateway.bindings.values()
         ):
             raise ValueError("serving scope has no native observation binding")
-        self.connector = ServiceConnector(
-            slot=slot, gateway_origin=gateway_origin,
-            access_token_callback=access_token_callback, proof_key=proof_key,
-            gateway_ca=gateway_ca, handler=self.gateway.handler_binding(),
-        )
+        if local:
+            from .watch_local import LocalIngress
+            self.connector = LocalIngress(
+                path=local_socket, namespace=store.namespace, peers=local_peers,
+                handler=self.gateway.handle_local, operation_seconds=operation_seconds,
+            )
+        else:
+            self.connector = ServiceConnector(
+                slot=slot, gateway_origin=gateway_origin,
+                access_token_callback=access_token_callback, proof_key=proof_key,
+                gateway_ca=gateway_ca, handler=self.gateway.handler_binding(
+                    **({"response_limit": response_limit} if response_limit != BODY_BYTES else {}),
+                ),
+            )
 
     def _check(self) -> None:
         if os.getpid() != self._pid or not self._lease.held or self._stopping.is_set():
@@ -90,6 +109,13 @@ class WatchService:
                 self._last_cycle = await asyncio.shield(self._disk)
             except OperationLockedError:
                 self._last_cycle = None
+            except (RepositoryBackpressure, ReplayCallerExpired):
+                if self.observer.repositories is None:
+                    raise
+                self._check()
+                self._last_cycle = {
+                    "status": "observed", "observed": 0, "unavailable": 1, "unbound": 0,
+                }
             except RequestDisconnected:
                 if self._stop.is_set():
                     return
@@ -127,6 +153,11 @@ class WatchService:
                 self.store.observation_targets(
                     expires_at=self._authority(), checkpoint=self._check,
                 )
+                if self.observer.repositories is not None:
+                    from .repository_native import qualify
+                    for binding in self.observer.bindings.values():
+                        if binding.repository_identity is not None:
+                            qualify(binding, checkpoint=self._check)
                 for workspace in self.gateway.workspaces.values():
                     # Attention has its own explicit layout contract; never relabel
                     # those bytes as the older conversation-serving layout.

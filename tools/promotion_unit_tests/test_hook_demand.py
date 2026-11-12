@@ -177,6 +177,14 @@ def test_shell_mutation_uses_original_send_only_boundary(api, case):
     _assert_native_mutation_boundary(api, case, "shellToolMutation")
 
 
+@pytest.mark.parametrize("case", [
+    "current", "generation", "closed", "unavailable", "legacy",
+    "oversized", "version", "deadline", "payload", "declined", "revoked", "contended",
+])
+def test_mixed_batch_mutation_uses_original_send_only_boundary(api, case):
+    _assert_native_mutation_boundary(api, case, "mixedToolBatchMutation")
+
+
 def _assert_native_mutation_boundary(api, case, kind):
     seen = []
     payload = {"toolName": "multi_edit", "toolArgs": {"edits": [{"path": "one"}]}}
@@ -184,6 +192,11 @@ def _assert_native_mutation_boundary(api, case, kind):
         payload = {"toolCalls": [{"name": "multi_edit", "args": payload["toolArgs"]}]}
     elif kind == "shellToolMutation":
         payload = {"toolName": "powershell", "toolArgs": '{"command":"git pull --ff-only"}'}
+    elif kind == "mixedToolBatchMutation":
+        payload = {"toolCalls": [
+            {"name": "multi_edit", "args": payload["toolArgs"]},
+            {"name": "powershell", "args": '{"command":"git pull --ff-only"}'},
+        ]}
 
     def decide(*args):
         if case == "unavailable":

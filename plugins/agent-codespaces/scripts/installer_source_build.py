@@ -40,6 +40,20 @@ if TYPE_CHECKING:
     from installer_engine import FrozenInputs
 
 
+def _build_tools_root(reported, tooling):
+    """Compare physical containment without changing the native I/O spelling."""
+    from versioned_runtime import _normalize_windows_extended_path
+
+    root = Path(reported)
+    if not root.is_absolute():
+        raise WheelError("build tools are outside their private environment")
+    actual = Path(_normalize_windows_extended_path(str(root.resolve())))
+    expected = Path(_normalize_windows_extended_path(str(tooling.resolve())))
+    if not actual.is_relative_to(expected):
+        raise WheelError("build tools are outside their private environment")
+    return root
+
+
 def _selected_extras(plugin: Path, extras: tuple[str, ...]) -> tuple[str, ...]:
     if not isinstance(extras, tuple) or any(
         not isinstance(name, str)
@@ -632,9 +646,7 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                 environment=transaction.environment, cwd=workspace,
             )
             target = json.loads(observed.stdout)
-            tools_root = Path(target.pop("purelib"))
-            if not tools_root.is_relative_to(tooling):
-                raise WheelError("build tools are outside their private environment")
+            tools_root = _build_tools_root(target.pop("purelib"), tooling)
             tools_seconds += time.monotonic() - tools_started
             return python, tools_root, target
 
@@ -710,10 +722,17 @@ def retained_source_wheels(inputs, root: Path, uv: Path, base_python: Path, *, r
                         if requirements:
                             raise _AdditionalBuildRequirements
                         uv_output = workspace / ("build-" + str(index))
+                        # UV leaves a per-source-path setuptools lock in its temp
+                        # directory; keep it inside this disposable workspace.
+                        build_temp = workspace / ("temp-" + str(index))
+                        build_temp.mkdir(exist_ok=True)
                         run(
                             [str(uv), "build", "--wheel", "--no-build-isolation", "--no-sources",
                              "--offline", "--python", str(python), "--out-dir", str(uv_output), str(compact)],
-                            environment=environment, cwd=compact,
+                            environment={**{key: value for key, value in environment.items()
+                                            if key.upper() not in ("TMP", "TEMP", "TMPDIR")},
+                                         **dict.fromkeys(("TMP", "TEMP", "TMPDIR"), str(build_temp))},
+                            cwd=compact,
                         )
                         wheels = tuple(uv_output.glob("*.whl"))
                         if len(wheels) != 1:

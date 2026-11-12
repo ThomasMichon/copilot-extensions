@@ -1,0 +1,9 @@
+{
+  "comment": "Retain open PR state and claims when closure fails after a best-effort reason comment failure.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

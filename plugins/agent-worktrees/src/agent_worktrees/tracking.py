@@ -35,13 +35,9 @@ from .worktree_machine_identity import WorktreeMachineIdentity, parse_machine_id
 from .tracking_session_activations import SessionActivation as SessionActivation
 from . import tracking_session_activations as session_activations
 
-#: Max length of an AGENT-ASSERTED worktree title. Agent titles must fit the mux
-#: status bar (120-col default) and the Worktree Picker's table rows; longer prose
-#: belongs in the disposition ``summary`` (Picker actions menu / ``status
-#: --history``). Enforced by :func:`cap_title` on the ``status --title`` write
-#: paths (NOT on auto-derived session-summary titles, which the bar truncates for
-#: display).
+#: Legacy compact display projection; never the full assertion's storage bound.
 TITLE_MAX = 30
+ASSERTED_TITLE_MAX = 512
 
 #: ``archived`` is post-``finalized`` -- the tombstone `retire_record`
 #: writes for an unpaired reaped worktree instead of deleting it.
@@ -2547,11 +2543,9 @@ def _save_record_contents_unlocked(
     from . import paired_claims
     paired_claims.validate_save(record, current)
 
-    title_val = record.title or "null"
-    # Quote titles that contain YAML-special characters (colons, etc.)
-    if title_val != "null" and any(ch in title_val for ch in ":{}[]#&*!|>',\""):
-        safe_title = title_val.replace("'", "''")
-        title_val = f"'{safe_title}'"
+    title_val = "null" if record.title is None else yaml.safe_dump(
+        str(record.title), default_style='"', allow_unicode=False, width=float("inf"),
+    ).strip()
 
     content = (
         f"worktree_id: {_yaml_scalar(record.worktree_id)}\n"
@@ -3251,6 +3245,9 @@ def retire_record(record: WorktreeRecord, tracking_path: Path) -> bool:
                         logging.getLogger(__name__).warning("Record retirement deferred; record retained: %s", exc)
                         return False
                     path.unlink(missing_ok=True)
+                    # The failed save may not have announced anything; the
+                    # resident must still republish this record's removal.
+                    save_notifications.worktree_changed(record.worktree_path)
                     return True
 
             # Paired -> "finalized" (a sibling-detection signal, #957/#220);
@@ -3325,18 +3322,8 @@ def _strip_control_chars(text: str | None) -> str | None:
 
 
 def cap_title(title: str | None) -> str | None:
-    """Normalize + cap an agent-asserted worktree title at :data:`TITLE_MAX`.
-
-    Agent-written titles must stay short so they fit the mux status bar (120-col
-    default) and the Worktree Picker's table rows -- longer prose belongs in the
-    disposition ``summary`` (shown in the Picker's actions menu and via
-    ``status --history``). Collapses newlines, strips, and truncates to **at
-    most** ``TITLE_MAX`` chars with a trailing ellipsis (an rstrip before the
-    ellipsis can make it slightly shorter). Empty/whitespace -> ``None``.
-    """
-    if not title:
-        return None
-    t = re.sub(r"[\t\r\n]+", " ", _strip_control_chars(title)).strip()
+    """Return a normalized compact display projection, without changing storage."""
+    t = normalize_title(title)
     if not t:
         return None
     if len(t) > TITLE_MAX:
@@ -3356,6 +3343,16 @@ def normalize_title(title: str | None) -> str | None:
         return None
     t = re.sub(r"[\t\r\n]+", " ", _strip_control_chars(title)).strip()
     return t or None
+
+
+def normalize_asserted_title(title: str | None) -> str | None:
+    """Normalize a full assertion, rejecting oversized input rather than losing it."""
+    if title is not None and not isinstance(title, str):
+        raise ValueError("Worktree title must be a string.")
+    normalized = normalize_title(title)
+    if normalized is not None and len(normalized) > ASSERTED_TITLE_MAX:
+        raise ValueError(f"Worktree title exceeds {ASSERTED_TITLE_MAX} normalized characters.")
+    return normalized
 
 
 def set_disposition(
@@ -3379,9 +3376,8 @@ def set_disposition(
     follow-ups*, plus a one-line summary of what it is/left at and (optionally) a
     fresh ``title`` when the worktree's focus changes. ``summary``, ``title``,
     ``activity`` and ``follow_up`` are each applied only when not None, so a
-    caller may update one without disturbing the others. An asserted ``title``
-    is capped at :data:`TITLE_MAX` (:func:`cap_title`) so it fits the status
-    bar / Picker rows.
+    caller may update one without disturbing the others. A title retains its full
+    normalized value within :data:`ASSERTED_TITLE_MAX`; displays cap separately.
 
     The three text fields have deliberately DIFFERENT update cadences (see
     ``status_cli``'s own per-flag help text for the guidance surfaced to a
@@ -3403,12 +3399,13 @@ def set_disposition(
     ``tracking_path`` scopes that sidecar write to an explicit project, not the
     ambient ``cfg.tracking_dir()`` -- for a caller (e.g. a daemon) serving several projects.
     """
+    normalized_title = normalize_asserted_title(title) if title is not None else None
     changed: list[str] = []
     if summary is not None:
         record.summary = _strip_control_chars(summary).replace("\n", " ").strip()
         changed.append("summary")
     if title is not None:
-        record.title = cap_title(title)
+        record.title = normalized_title
         # An explicit --title assertion is authoritative; a cleared (empty)
         # title re-enables auto-derivation from the session summary.
         record.title_asserted = record.title is not None

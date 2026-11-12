@@ -697,7 +697,7 @@ def _execute(transaction: Transaction) -> int:
     # The shim changes cwd/env and directs output before exec. The product
     # invocation itself remains exactly the pinned argv supplied by its adapter.
     command = [
-        sys.executable, "-I", *agent_procutil.python_cache_args(transaction.root),
+        sys.executable, "-I", "-S", *agent_procutil.python_cache_args(transaction.root),
         str(Path(__file__).with_name("_runner.py")),
         str(transaction.root), request.id, witness["UPDATE_DRIVER_WITNESS"],
         str(Path(agent_procutil.__file__).resolve()),
@@ -889,8 +889,11 @@ def run_explicit(
         _assert_foundation_clear(root, include_running=True)
         with _database(root, writable=True) as db:
             db.execute("BEGIN IMMEDIATE")
+            lock.assert_owned()
+            if db.execute("SELECT 1 FROM requests WHERE state='running' LIMIT 1").fetchone() is not None:
+                raise InterruptedError("installation queue has unsettled running work; recovery required")
             if db.execute(
-                "SELECT 1 FROM requests WHERE state IN ('pending','running') LIMIT 1",
+                "SELECT 1 FROM requests WHERE state='pending' LIMIT 1",
             ).fetchone() is not None or _has_fence(db, root):
                 raise StateError("request-local execution requires an idle, unfenced queue; nothing replayed")
             _upgrade_schema(db, root, lock)

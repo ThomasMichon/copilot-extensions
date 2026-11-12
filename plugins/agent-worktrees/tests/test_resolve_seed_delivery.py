@@ -557,12 +557,13 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
     from agent_worktrees import output
 
     monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
-    config = _create_config(tmp_path)
+    platform = cfg.detect_platform()
+    config = _create_config(tmp_path, platform=platform)
     work_dir = tmp_path / "wt-a"
     work_dir.mkdir()
     tracking.create_new_record(
         "wt-a", "worktree/wt-a", str(work_dir), "demo-repo", "test",
-        "windows", tmp_path,
+        platform, tmp_path,
     )
     _stub_launch_plumbing(monkeypatch, config)
     consumer = tmp_path / "capture.ps1"
@@ -598,9 +599,12 @@ def test_cold_resume_plan_obeys_native_evidence_at_powershell_boundary(
         site = runtime / f"lib/python{sys.version_info.major}.{sys.version_info.minor}/site-packages"
     (site / "fixture.pth").write_text(
         "\n".join(str(Path(path).resolve()) for path in sys.path if path) + "\n", encoding="utf-8")
+    # Windows is the unknown-evidence control, independent of host PSMux.
+    probe_kwargs = "probes_ok=False, mux_probe_ok=False" if os.name == "nt" else ""
     (site / "sitecustomize.py").write_text(
         "from agent_worktrees import sessions\n"
-        "sessions.verify_worktree_active = lambda *a: sessions.LiveVerdict()\n", encoding="utf-8")
+        f"sessions.verify_worktree_active = lambda *a: sessions.LiveVerdict({probe_kwargs})\n",
+        encoding="utf-8")
     try:
         proc = run_caller_owned(
             [str(python), *plan["cmd"][1:]],
@@ -959,3 +963,241 @@ def test_positive_live_open_keeps_staged_prompt_despite_secondary_probe_failure(
     assert not plan["seed_pending"] and "--admission-only" in plan["cmd"]
     assert plan["cmd"][-2:] == ["--", "copilot"]
     assert launch_seed_state.peek(record.yaml_path) == saved
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("kind", ["new", "resume"])
+def test_plain_open_preserves_unconfirmed_handoff_without_resubmitting(
+    tmp_path, monkeypatch, capfd, surface, kind,
+):
+    from agent_worktrees import launch_seed_exec
+
+    monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind=kind, text="must not replay")
+    receipt = launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    retained = launch_seed_state.peek(record.yaml_path)
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface=surface,
+        command=["copilot", "--resume=saved-session"],
+    )
+    assert code == 0 and not plan["seed_pending"]
+    assert plan["seed_preserved_id"] == seed.seed_id
+    assert "--admission-only" in plan["cmd"]
+    assert plan["cmd"][plan["cmd"].index("--preserve-seed-id") + 1] == seed.seed_id
+    assert seed.text not in plan["cmd"] and "--interactive" not in plan["cmd"]
+    for name in ("take", "finish", "restore"):
+        monkeypatch.setattr(
+            launch_seed_state, name,
+            lambda *a, **k: pytest.fail("plain Open must not settle or replay a retained prompt"),
+        )
+    prepared = launch_seed_exec._prepare(
+        record.yaml_path, ["copilot", "--resume=saved-session"],
+        invoke=False, seed_id=None, admission_only=True, preserve_seed_id=seed.seed_id,
+    )
+    assert isinstance(prepared, launch_seed_exec.PreparedLaunch)
+    assert prepared.argv == ["copilot", "--resume=saved-session"] and prepared.receipt is None
+    assert launch_seed_state.peek(record.yaml_path) == retained
+    assert retained.handoff_id == receipt["seed"]["handoff_id"]
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("selection", ["seed_id", "stage_launch_seed"])
+def test_explicit_delivery_still_refuses_unconfirmed_handoff(
+    tmp_path, monkeypatch, capfd, surface, selection,
+):
+    monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    retained = launch_seed_state.peek(record.yaml_path)
+    options = {selection: seed.seed_id if selection == "seed_id" else True}
+    code, plan = _resume_plan(config, record, monkeypatch, capfd, surface=surface, **options)
+    assert code == 3 and "handoff is unconfirmed" in plan["error"]
+    assert launch_seed_state.peek(record.yaml_path) == retained
+
+
+def test_plain_open_retained_handoff_still_revalidates_seed_identity(
+    tmp_path, monkeypatch, capfd,
+):
+    from agent_worktrees import launch_seed_exec
+
+    monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    assert resolve_cli.cmd_resolve(_args()) == 0
+    captured = capfd.readouterr()
+    assert "opening without submitting it again" in captured.err
+    assert "must not replay" not in captured.err
+    newer = launch_seed_state.stage(record.yaml_path, kind="resume", text="newer intent")
+    assert launch_seed_exec._prepare(
+        record.yaml_path, ["copilot"], invoke=False, seed_id=None,
+        admission_only=True, preserve_seed_id=seed.seed_id,
+    ) == 3
+    assert launch_seed_state.peek(record.yaml_path) == newer
+
+
+def test_unqualified_caller_cannot_drop_retained_identity_during_delegation(
+    tmp_path, monkeypatch, capfd,
+):
+    monkeypatch.delenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", raising=False)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    retained = launch_seed_state.peek(record.yaml_path)
+    assert resolve_cli.cmd_resolve(_args()) == 3
+    assert "handoff is unconfirmed" in json.loads(capfd.readouterr().out)["error"]
+    assert launch_seed_state.peek(record.yaml_path) == retained
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+def test_delegated_preserved_open_rejects_replacement_before_second_resolve(
+    tmp_path, monkeypatch, capfd, surface,
+):
+    monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    code, original = _resume_plan(config, record, monkeypatch, capfd, surface=surface)
+    assert code == 0
+    replacement = launch_seed_state.stage(record.yaml_path, kind="new", text="replacement")
+    monkeypatch.delenv("AGENT_WORKTREES_RETAINED_SEED_PLANS")
+    if surface == "json":
+        parser = argparse.ArgumentParser()
+        resolve_cli.add_parsers(parser.add_subparsers(dest="command"))
+        args = parser.parse_args([
+            "resolve", "--json", "--worktree-id", record.worktree_id,
+            "--preserve-seed-id", original["seed_preserved_id"],
+        ])
+        code = resolve_cli.cmd_resolve(args)
+        replay = json.loads(capfd.readouterr().out)
+    else:
+        code, replay = _resume_plan(
+            config, record, monkeypatch, capfd, surface=surface,
+            preserve_seed_id=original["seed_preserved_id"],
+        )
+    assert code == 3 and "missing or superseded" in replay["error"]
+    assert launch_seed_state.peek(record.yaml_path) == replacement
+
+
+def test_explicit_preservation_does_not_deliver_a_released_handoff(
+    tmp_path, monkeypatch, capfd,
+):
+    monkeypatch.delenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", raising=False)
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface="json", preserve_seed_id=seed.seed_id,
+    )
+    assert code == 0 and plan["seed_preserved_id"] == seed.seed_id and not plan["seed_pending"]
+    assert launch_seed_state.peek(record.yaml_path) == seed
+
+
+@pytest.mark.parametrize("options", [
+    {"seed": ""},
+    {"seed_id": "delivery"},
+    {"worktree_id": None, "new_worktree": True},
+    {"preserve_seed_id": ""},
+])
+def test_preservation_selector_rejects_conflicting_or_empty_requests_before_seed_io(
+    monkeypatch, capfd, options,
+):
+    for name in ("peek", "stage", "take"):
+        monkeypatch.setattr(launch_seed_state, name, lambda *a, **k: pytest.fail("invalid selector read intent"))
+    args = _args()
+    args.preserve_seed_id = "retained"
+    for name, value in options.items():
+        setattr(args, name, value)
+    assert resolve_cli.cmd_resolve(args) == 3
+    assert "--preserve-seed-id requires" in json.loads(capfd.readouterr().out)["error"]
+
+
+def test_preservation_selector_rejects_restore_before_process_recovery(
+    tmp_path, monkeypatch, capfd,
+):
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    monkeypatch.setattr(
+        resolve_cli, "_restore_before_resume", lambda *a: pytest.fail("stale selector reached process recovery"),
+    )
+    assert resolve_cli.cmd_resolve(_args(
+        json=False, restore=True, preserve_seed_id="stale",
+    )) == 3
+    assert "--preserve-seed-id requires" in json.loads(capfd.readouterr().out)["error"]
+    assert launch_seed_state.peek(record.yaml_path) == seed
+
+
+@pytest.mark.parametrize("surface", ["json", "interactive"])
+@pytest.mark.parametrize("verdict", [
+    LiveVerdict(active=True, mux_live=True),
+    LiveVerdict(active=True, bare=True, live_session_ids=["live"], mux_probe_ok=False, probes_ok=False),
+])
+def test_preserved_open_reattaches_when_target_becomes_live_between_resolves(
+    tmp_path, monkeypatch, capfd, surface, verdict,
+):
+    monkeypatch.setenv("AGENT_WORKTREES_RETAINED_SEED_PLANS", "1")
+    monkeypatch.setattr(cfg, "tracking_dir", lambda: tmp_path)
+    config = _create_config(tmp_path)
+    record = tracking.create_new_record(
+        "wt-a", "worktree/wt-a", str(tmp_path / "wt-a"), "demo-repo", "test",
+        "windows", tmp_path,
+    )
+    _stub_launch_plumbing(monkeypatch, config)
+    seed = launch_seed_state.stage(record.yaml_path, kind="new", text="must not replay")
+    launch_seed_state.take(record.yaml_path, seed_id=seed.seed_id)
+    retained = launch_seed_state.peek(record.yaml_path)
+    code, original = _resume_plan(config, record, monkeypatch, capfd, surface=surface)
+    assert code == 0
+    monkeypatch.setattr(m.sessions, "verify_worktree_active", lambda *a: verdict)
+    for name in ("take", "finish", "restore"):
+        monkeypatch.setattr(launch_seed_state, name, lambda *a, **k: pytest.fail("live Open changed prompt custody"))
+    code, plan = _resume_plan(
+        config, record, monkeypatch, capfd, surface=surface,
+        preserve_seed_id=original["seed_preserved_id"],
+    )
+    assert code == 0 and not plan["seed_pending"] and "--admission-only" in plan["cmd"]
+    assert plan["seed_preserved_id"] == seed.seed_id and "--interactive" not in plan["cmd"]
+    assert launch_seed_state.peek(record.yaml_path) == retained

@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse supported bootstrap Python for Windows command ownership publication",
+  "changes": [
+    {
+      "plugin": "agent-logger",
+      "type": "patch"
+    }
+  ]
+}

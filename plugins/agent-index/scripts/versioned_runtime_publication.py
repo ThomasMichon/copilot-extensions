@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from contextlib import ExitStack, contextmanager
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 import errno
 import hashlib
 import importlib.util
@@ -13,6 +13,7 @@ import re
 import stat
 import sys
 import tempfile
+import time
 import uuid
 from typing import Any, Callable, Iterator
 
@@ -24,6 +25,100 @@ _leases: Any = None
 
 class PublicationProofError(ValueError):
     """Required evidence is absent, invalid, or does not authorize this object."""
+
+
+def _selector_kernel(ctypes, wintypes):
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    return kernel
+
+
+def read_selector(path: Path) -> str:
+    """Share Windows deletes; retain legacy POSIX read-error fallback."""
+    if os.name != "nt":
+        try:
+            return path.read_text(encoding="utf-8")
+        except OSError:
+            return ""
+    import ctypes
+    import msvcrt
+    from ctypes import wintypes
+
+    kernel = _selector_kernel(ctypes, wintypes)
+    # GENERIC_READ with read, write, and delete sharing.
+    handle = kernel.CreateFileW(str(path), 0x80000000, 0x7, None, 3, 0x80, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        fd = msvcrt.open_osfhandle(handle, os.O_RDONLY | os.O_BINARY)
+    except BaseException:
+        kernel.CloseHandle(handle)
+        raise
+    try:
+        stream = os.fdopen(fd, "r", encoding="utf-8")
+    except BaseException:
+        os.close(fd)
+        raise
+    with stream:
+        return stream.read()
+
+
+def _rename_selector_windows(source: Path, destination: Path) -> None:
+    import ctypes
+    from ctypes import wintypes
+
+    class RenameInfo(ctypes.Structure):
+        _fields_ = [("Flags", wintypes.DWORD), ("RootDirectory", wintypes.HANDLE),
+                    ("FileNameLength", wintypes.DWORD), ("FileName", wintypes.WCHAR * 1)]
+
+    kernel = _selector_kernel(ctypes, wintypes)
+    kernel.SetFileInformationByHandle.argtypes = [
+        wintypes.HANDLE, ctypes.c_int, wintypes.LPVOID, wintypes.DWORD,
+    ]
+    kernel.SetFileInformationByHandle.restype = wintypes.BOOL
+    # Open the staged name itself rather than following a substituted reparse point.
+    handle = kernel.CreateFileW(str(source), 0x10000, 0x7, None, 3, 0x00200080, None)
+    if handle == ctypes.c_void_p(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        name = str(destination.absolute()).encode("utf-16-le", errors="surrogatepass")
+        offset = RenameInfo.FileName.offset
+        buffer = ctypes.create_string_buffer(max(ctypes.sizeof(RenameInfo), offset + len(name) + 2))
+        info = RenameInfo.from_buffer(buffer)
+        info.Flags = 0x1 | 0x2  # REPLACE_IF_EXISTS | POSIX_SEMANTICS
+        info.FileNameLength = len(name)
+        ctypes.memmove(ctypes.addressof(buffer) + offset, name, len(name))
+        if not kernel.SetFileInformationByHandle(handle, 22, buffer, len(buffer)):  # FileRenameInfoEx
+            error = ctypes.WinError(ctypes.get_last_error())
+            if error.winerror in {50, 120}:
+                error.selector_rename_unsupported = True
+            raise error
+    finally:
+        kernel.CloseHandle(handle)
+
+
+def replace_selector(source: Path, destination: Path) -> None:
+    """Atomically replace a selector, with bounded Windows sharing retries."""
+    if os.name != "nt":
+        os.replace(source, destination)
+        return
+    for attempt in range(20):
+        try:
+            _rename_selector_windows(source, destination)
+            return
+        except OSError as error:
+            if getattr(error, "selector_rename_unsupported", False):
+                os.replace(source, destination)
+                return
+            if getattr(error, "winerror", None) not in {5, 32, 33} or attempt == 19:
+                raise
+            time.sleep(0.01)
 
 
 def absolute(path: Path) -> Path:
@@ -91,12 +186,14 @@ class PhysicalState:
         return cls(**value)
 
 
-def state_fd(fd: int, *, owned: bool = True) -> PhysicalState:
+def state_fd(fd: int, *, owned: bool = True, max_bytes: int | None = None) -> PhysicalState:
     before = os.fstat(fd)
     if not stat.S_ISREG(before.st_mode) or before.st_nlink != 1:
         raise PublicationProofError("Proof requires a single-link ordinary file")
     if owned and not (_windows_owned(fd) if os.name == "nt" else before.st_uid == os.getuid()):
         raise PublicationProofError("Proof object is not owned by this principal")
+    if max_bytes is not None and before.st_size > max_bytes:
+        raise PublicationProofError("Proof object exceeds the size limit")
     position = os.lseek(fd, 0, os.SEEK_CUR)
     previous_mode = None
     if os.name == "nt":
@@ -106,7 +203,11 @@ def state_fd(fd: int, *, owned: bool = True) -> PhysicalState:
     digest = hashlib.sha256()
     try:
         os.lseek(fd, 0, os.SEEK_SET)
-        while block := os.read(fd, 65536):
+        size = 0
+        while block := os.read(fd, 65536 if max_bytes is None else min(65536, max_bytes - size + 1)):
+            size += len(block)
+            if max_bytes is not None and size > max_bytes:
+                raise PublicationProofError("Proof object exceeds the size limit")
             digest.update(block)
     finally:
         os.lseek(fd, position, os.SEEK_SET)
@@ -120,7 +221,9 @@ def state_fd(fd: int, *, owned: bool = True) -> PhysicalState:
                          after.st_size, after.st_mtime_ns, digest.hexdigest())
 
 
-def state_path(path: Path, *, private: bool = False, owned: bool = True) -> PhysicalState | None:
+def state_path(
+    path: Path, *, private: bool = False, owned: bool = True, max_bytes: int | None = None,
+) -> PhysicalState | None:
     _plain_parents(path)
     try:
         named = path.lstat()
@@ -130,7 +233,7 @@ def state_path(path: Path, *, private: bool = False, owned: bool = True) -> Phys
         raise PublicationProofError(f"Not an ordinary proof object: {path}")
     fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
     try:
-        result = state_fd(fd, owned=owned)
+        result = state_fd(fd, owned=owned, max_bytes=max_bytes)
         if private and os.name != "nt" and result.mode & 0o022:
             raise PublicationProofError(f"Proof file permits untrusted writes: {path}")
         final = path.lstat()
@@ -141,6 +244,63 @@ def state_path(path: Path, *, private: bool = False, owned: bool = True) -> Phys
         return result
     finally:
         os.close(fd)
+
+
+def _protect_incoming_helper(path: Path, *, max_bytes: int) -> PhysicalState | None:
+    original = state_path(path, max_bytes=max_bytes)
+    if original is None:
+        return None
+    protected = original
+    if os.name != "nt" and original.mode & 0o022:
+        fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0))
+        try:
+            if state_fd(fd, max_bytes=max_bytes) != original:
+                raise PublicationProofError("Retained runtime helper changed before protection")
+            os.fchmod(fd, stat.S_IMODE(original.mode) & ~0o022)
+            protected = state_fd(fd, max_bytes=max_bytes)
+            if protected != replace(original, mode=original.mode & ~0o022):
+                raise PublicationProofError("Retained runtime helper changed during protection")
+        finally:
+            os.close(fd)
+    if state_path(path, private=True, max_bytes=max_bytes) != protected:
+        raise PublicationProofError("Retained runtime helper changed after protection")
+    return protected
+
+
+def prepare_retained_generation(slot: Path) -> None:
+    """Publish a retained build identity before its first completion marker."""
+    # Ancestor aliases are valid; the numbered slot itself must remain ordinary.
+    slot = slot.parent.resolve(strict=True) / slot.name
+    bootstrap = slot / ".runtime-bootstrap"
+    if not os.path.lexists(bootstrap):
+        return
+    launcher = bootstrap / "runtime_launcher.py"
+    if _protect_incoming_helper(launcher, max_bytes=1024 * 1024) is None:
+        raise PublicationProofError("Retained runtime launcher is missing")
+    path = bootstrap / "runtime-generation"
+    before = _protect_incoming_helper(path, max_bytes=64)
+    if before is None:
+        with os.fdopen(_created_file(path), "wb") as stream:
+            stream.write((uuid.uuid4().hex + "\n").encode("ascii"))
+            stream.flush()
+            os.fsync(stream.fileno())
+        before = state_path(path, private=True, max_bytes=64)
+    if before is None or before.size > 64:
+        raise PublicationProofError("Retained runtime generation is missing or oversized")
+    fd = os.open(
+        path, os.O_RDONLY | getattr(os, "O_BINARY", 0)
+        | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0),
+    )
+    try:
+        if state_fd(fd, max_bytes=64) != before:
+            raise PublicationProofError("Retained runtime generation changed before read")
+        content = os.read(fd, 65)
+        if state_fd(fd, max_bytes=64) != before:
+            raise PublicationProofError("Retained runtime generation changed during read")
+    finally:
+        os.close(fd)
+    if state_path(path, private=True, max_bytes=64) != before or re.fullmatch(b"[0-9a-f]{32}", content.strip()) is None:
+        raise PublicationProofError("Retained runtime generation is invalid or changed")
 
 
 def group(root: Path, target: Path) -> str:
@@ -325,6 +485,11 @@ def read_receipt(
     path: Path, root: Path, allowed: set[Path], *, recovery_only: bool = False,
 ) -> dict[Path, list[PhysicalState]]:
     """Read created-object proofs; a recovery-only prefix never certifies publication."""
+    return _read_receipt(path, root, allowed, recovery_only=recovery_only)[0]
+
+
+def _read_receipt(path: Path, root: Path, allowed: set[Path], *,
+                  recovery_only: bool = False) -> tuple[dict[Path, list[PhysicalState]], str]:
     records = _read_json(path, lines=True, recovery_only=recovery_only)
     if not records or len(records) > 1024 or (not recovery_only and len(records) < 2):
         raise PublicationProofError("Required proof has no complete producer outcome")
@@ -373,7 +538,7 @@ def read_receipt(
         or finish["sequence"] != len(records) - 2 or finish["outcome"] not in ("success", "error")
     )):
         raise PublicationProofError("Required proof is incomplete")
-    return result
+    return result, header["producer"]
 
 
 def create_context(path: Path, root: Path, bindings: list[list[str]]) -> None:
@@ -433,7 +598,7 @@ def read_context(path: Path) -> tuple[Path, dict[Path, tuple[Path | None, Physic
 
 def _proofs(
     receipts: list[Path], root: Path, entries: dict, expected: list[list[str]], *,
-    recovery_only: bool = False,
+    recovery_only: bool = False, selector_proofs: dict[Path, list[PhysicalState]] | None = None,
 ) -> dict[Path, list[PhysicalState]]:
     result: dict[Path, list[PhysicalState]] = {}
     digests = {target: ({before.digest} if before else set()) for target, (_backup, before) in entries.items()}
@@ -445,10 +610,13 @@ def _proofs(
     if not receipts or len(receipts) != len(set(receipts)):
         raise PublicationProofError("Required producer receipts are missing or duplicated")
     for path in receipts:
-        for target, values in read_receipt(path, root, set(entries), recovery_only=recovery_only).items():
+        records, producer = _read_receipt(path, root, set(entries), recovery_only=recovery_only)
+        for target, values in records.items():
             if any(value.digest not in digests[target] for value in values):
                 raise PublicationProofError(f"Producer bytes were not declared by its caller: {target}")
             result.setdefault(target, []).extend(values)
+            if producer == "activate" and selector_proofs is not None:
+                selector_proofs.setdefault(target, []).extend(values)
     return result
 
 
@@ -502,13 +670,18 @@ def recover_owned(context: Path, receipts: list[Path], required: list[Path], out
     with target_leases(root, required):
         result = Receipt(output, root, required, "outer-recovery")
         try:
-            _recover_locked(root, entries, _proofs(receipts, root, entries, expected), required, result)
+            selector_proofs: dict[Path, list[PhysicalState]] = {}
+            proofs = _proofs(receipts, root, entries, expected, selector_proofs=selector_proofs)
+            _recover_locked(root, entries, proofs, required, result, selector_proofs=selector_proofs)
         except BaseException:
             result.finish("error")
             raise
 
 
-def _recover_locked(root: Path, entries: dict, proofs: dict, required: list[Path], result: Receipt) -> None:
+def _recover_locked(
+    root: Path, entries: dict, proofs: dict, required: list[Path], result: Receipt, *,
+    selector_proofs: dict[Path, list[PhysicalState]] | None = None,
+) -> None:
     try:
         for path in required:
             if state_path(path) not in proofs.get(path, ()):
@@ -532,7 +705,11 @@ def _recover_locked(root: Path, entries: dict, proofs: dict, required: list[Path
                 temporary, created = _stage(root, path, data, before.mode, result)
                 if state_path(backup) != before or state_path(path) != current:
                     raise PublicationProofError("Recovery bindings changed during staging")
-                os.replace(temporary, path)
+                if (path in (root / "current-version", root / "last-known-good")
+                        and current in (selector_proofs or {}).get(path, ())):
+                    replace_selector(temporary, path)
+                else:
+                    os.replace(temporary, path)
                 if state_path(path) != created:
                     raise PublicationProofError(f"Recovery result is not its created stage: {path}")
         result.finish("success")
@@ -556,11 +733,17 @@ def recover_uncontested(
     if set(baseline) != set(entries):
         raise PublicationProofError("Selective recovery baseline differs from its context")
     with target_leases(root, list(entries)):
-        proofs = _proofs(receipts, root, entries, expected, recovery_only=recovery_only)
-        return _recover_uncontested_locked(root, entries, proofs, output, baseline)
+        selector_proofs: dict[Path, list[PhysicalState]] = {}
+        proofs = _proofs(receipts, root, entries, expected, recovery_only=recovery_only,
+                         selector_proofs=selector_proofs)
+        return _recover_uncontested_locked(root, entries, proofs, output, baseline,
+                                          selector_proofs=selector_proofs)
 
 
-def _recover_uncontested_locked(root: Path, entries: dict, proofs: dict, output: Path, baseline: dict) -> list[Path]:
+def _recover_uncontested_locked(
+    root: Path, entries: dict, proofs: dict, output: Path, baseline: dict, *,
+    selector_proofs: dict[Path, list[PhysicalState]] | None = None,
+) -> list[Path]:
     owned, foreign = [], []
     for path, (backup, before) in entries.items():
         if backup and state_path(backup) != before:
@@ -577,7 +760,8 @@ def _recover_uncontested_locked(root: Path, entries: dict, proofs: dict, output:
         else:
             foreign.append(path)
     if owned:
-        _recover_locked(root, entries, proofs, owned, Receipt(output, root, owned, "outer-recovery"))
+        receipt = Receipt(output, root, owned, "outer-recovery")
+        _recover_locked(root, entries, proofs, owned, receipt, selector_proofs=selector_proofs)
     return foreign
 
 
@@ -805,7 +989,7 @@ def publish_selectors(
                 stream.flush()
                 os.fsync(stream.fileno())
                 created = receipt.created(target, stream.fileno(), content=(version + "\n").encode()) if receipt else None
-            os.replace(temporary, target)
+            replace_selector(temporary, target)
             if created is not None and state_path(target) != created:
                 raise PublicationProofError(f"Selector lost its created object: {target}")
         if receipt:

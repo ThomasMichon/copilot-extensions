@@ -1,0 +1,9 @@
+{
+  "comment": "Allow explicitly selected retained comment preparation without a protected writer; keep submission independently unavailable.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

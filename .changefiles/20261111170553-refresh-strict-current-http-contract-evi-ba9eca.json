@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh strict current HTTP contract evidence for the additive recovery journal tracking-writer registration.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

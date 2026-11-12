@@ -175,9 +175,9 @@ jobs:
     - name: Agent Bridge contract source coverage (PR diff only)
       if: steps.code-impact.outputs.run == 'true' && github.event_name == 'pull_request'
       run: python tools/check-agent-bridge-contracts.py --base ${{ github.event.pull_request.base.sha }}
-    - name: Payload invocation generated files
+    - name: Payload invocation canonical source
       if: steps.code-impact.outputs.run == 'true'
-      run: python libs/payload-invocation/generate.py --all --check
+      run: python libs/payload-invocation/generate.py --all --source-check
     - name: Installation context vendoring
       if: steps.code-impact.outputs.run == 'true'
       run: python tools/sync-installation-context.py --check

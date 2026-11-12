@@ -131,6 +131,76 @@ async def test_concurrent_calls_isolate_payload_auth_and_teardown(upstreams):
     assert cfg.routing.targets["alpha"].auth.cache.key == "same"
 
 
+async def test_mixed_upstream_eras_normalize_metadata_at_the_http_boundary(monkeypatch, tmp_path):
+    from agent_mcp import client, protocol
+    from agent_mcp.transports.http import HttpTransport
+
+    monkeypatch.setenv("AGENT_MCP_HOME", str(tmp_path))
+    data = definition()
+    data["routing"]["targets"]["beta"]["server"]["protocol"] = "modern"
+    captured = []
+
+    def transport(cfg, injector):
+        target = cfg.server.url.rsplit("/", 1)[-1]
+        result = HttpTransport(cfg, injector)
+
+        def post(headers, body):
+            message = json.loads(body)
+            captured.append((target, dict(headers), message))
+            if message.get("id") is None:
+                return 202, {}, ""
+            method = message["method"]
+            response_headers = {"content-type": "application/json"}
+            if method == "initialize":
+                response_headers["mcp-session-id"] = target + "-session"
+                payload = {"protocolVersion": protocol.LEGACY, "capabilities": {},
+                           "serverInfo": {"name": "fixture", "version": "1"}}
+            elif method == "tools/list":
+                payload = {"tools": copy.deepcopy(TOOLS)}
+            else:
+                if target == "alpha" and "MCP-Protocol-Version" in headers:
+                    return 400, response_headers, '{"error":{"message":"unsupported protocol"}}'
+                payload = {"content": [], "structuredContent": {"target": target}}
+            return 200, response_headers, json.dumps({
+                "jsonrpc": "2.0", "id": message["id"], "result": payload,
+            })
+
+        result._post = post
+        return result
+
+    monkeypatch.setattr(client, "build_transport", transport)
+    metadata = {**protocol.client_meta("2027-01-01", {"name": "downstream", "version": "1"}),
+                "progressToken": "progress-1", "example/trace": "preserved"}
+    messages = [
+        {"jsonrpc": "2.0", "id": i, "method": "tools/call",
+         "params": {"name": "read", "arguments": {"organization": target}, "_meta": metadata}}
+        for i, target in enumerate(("alpha", "beta"), 1)
+    ]
+    original = copy.deepcopy(messages)
+    async with OneShotSession(parse_config(data)) as session:
+        responses = await asyncio.gather(*(session._router.handle(m) for m in messages))
+    assert [r["result"]["structuredContent"]["target"] for r in responses] == ["alpha", "beta"]
+    assert messages == original
+    calls = [(target, headers, message) for target, headers, message in captured
+             if message["method"] == "tools/call"]
+    assert len(calls) == 2
+    for target, headers, message in calls:
+        meta = message["params"]["_meta"]
+        assert headers["Authorization"] == target
+        assert message["params"]["arguments"] == {}
+        assert meta["progressToken"] == "progress-1"
+        assert meta["example/trace"] == "preserved"
+        if target == "alpha":
+            assert meta == {"progressToken": "progress-1", "example/trace": "preserved"}
+            assert "MCP-Protocol-Version" not in headers
+            assert headers["Mcp-Session-Id"] == "alpha-session"
+        else:
+            assert meta[protocol.META_PROTOCOL_VERSION] == protocol.MODERN
+            assert headers["MCP-Protocol-Version"] == protocol.MODERN
+            assert meta[protocol.META_CLIENT_INFO] == client.CLIENT_INFO
+            assert "Mcp-Session-Id" not in headers
+
+
 async def test_target_authorization_and_action_gate_before_auth(upstreams):
     data = definition()
     target = data["routing"]["targets"]["beta"]

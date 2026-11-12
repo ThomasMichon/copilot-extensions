@@ -65,6 +65,188 @@ def _policy(path, participant):
     return path
 
 
+def test_fresh_repository_projection_cli_uses_only_accepted_state_without_native_owner(tmp_path):
+    state = _policy(tmp_path / "state", "example-receiver")
+    (state / "accepted.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences", "version": 1,
+        "publisher": "example-publisher", "revision": 2, "parent": 1,
+        "domains": {"repositories": {"knowledge": [
+            {"harness_repository_id": "repo-first", "knowledge_repository_id": "repo-shared"},
+            {"harness_repository_id": "repo-second", "knowledge_repository_id": "repo-shared"},
+        ]}},
+        "machines": {"example-worker-wsl": {"repositories": {"knowledge": [
+            {"harness_repository_id": "repo-first", "knowledge_repository_id": "repo-guest"},
+        ]}}},
+    }), encoding="utf-8")
+    before = {path.name: path.read_bytes() for path in state.iterdir()}
+    for harness, machine, target in (
+        ("repo-first", "example-worker", "repo-shared"),
+        ("repo-second", "example-worker", "repo-shared"),
+        ("repo-first", "example-worker-wsl", "repo-guest"),
+    ):
+        result = _cli(
+            "repositories", "--state-dir", state, "--machine", machine, "--harness", harness,
+        )
+        assert result["knowledge_preference"]["knowledge_repository_id"] == target
+        assert result["scope"]["identity_resolution"] == "not-performed"
+        assert result["read_only"] and not result["configuration_applied"] and not result["binding_changed"]
+    invalid = subprocess.run([
+        sys.executable, "-I", "-m", "agent_machines", "preferences", "repositories",
+        "--state-dir", str(state), "--machine", "example-worker", "--harness", "repo-first", "--apply",
+    ], capture_output=True, text=True, timeout=20, **no_window_kwargs())
+    assert invalid.returncode == 2
+    assert "unrecognized arguments: --apply" in invalid.stderr
+    assert {path.name: path.read_bytes() for path in state.iterdir()} == before
+
+
+def _carrier_cli(*arguments, code=0):
+    child = subprocess.run(
+        [sys.executable, "-I", "-m", "agent_machines", "preferences", "carrier", *map(str, arguments)],
+        capture_output=True, text=True, timeout=20, **no_window_kwargs(),
+    )
+    assert child.returncode == code, (child.stdout, child.stderr)
+    return json.loads(child.stderr if code == 2 else child.stdout)
+
+
+def _carrier_state(path, participant, replica):
+    _policy(path, participant)
+    replica.mkdir()
+    (path / "carrier.json").write_text(json.dumps({
+        "schema": "agent-machines.preferences.carrier", "version": 1,
+        "provider": "onedrive", "account": "example-account", "directory": str(replica),
+        "participants": ["example-publisher", "example-receiver"],
+    }), encoding="utf-8")
+    return path
+
+
+def _carrier_inputs(tmp_path):
+    publisher_replica, receiver_replica = tmp_path / "publisher-replica", tmp_path / "receiver-replica"
+    publisher = _carrier_state(tmp_path / "publisher", "example-publisher", publisher_replica)
+    receiver = _carrier_state(tmp_path / "receiver", "example-receiver", receiver_replica)
+    candidate, local = tmp_path / "candidate.json", tmp_path / "local.json"
+    original = {
+        "schema": "agent-machines.preferences", "version": 1,
+        "publisher": "example-publisher", "revision": 1, "parent": None,
+        "domains": {"repositories": {"knowledge": [
+            {"harness_repository_id": "repo-first", "knowledge_repository_id": "repo-shared"},
+            {"harness_repository_id": "repo-second", "knowledge_repository_id": "repo-shared"},
+        ]}},
+    }
+    candidate.write_text(json.dumps(original), encoding="utf-8")
+    local.write_text(json.dumps({
+        "schema": "agent-machines.preferences.local", "version": 1, "machine": "example-worker",
+        "domains": {"repositories": {"knowledge": [
+            {"harness_repository_id": "repo-first", "knowledge_repository_id": "repo-local"},
+        ]}},
+    }), encoding="utf-8")
+    publish = ["publish", "--input", candidate, "--state-dir", publisher]
+    receive = [
+        "receive", "--state-dir", receiver, "--machine", "example-worker",
+        "--harness", "repo-first", "--local-overrides", local,
+    ]
+    return publisher, receiver, publisher_replica, receiver_replica, candidate, original, publish, receive
+
+
+def test_fresh_carrier_cli_two_local_replicas_preserve_mapping_override(tmp_path):
+    publisher, receiver, publisher_replica, receiver_replica, _, _, publish, receive = _carrier_inputs(tmp_path)
+    first = _carrier_cli(*publish)
+    assert not list(publisher_replica.iterdir()) and not list(receiver_replica.iterdir())
+    sent = _carrier_cli(*publish, "--apply", "--expect", first["preview_token"])
+    assert sent["local_published"] and sent["carrier"]["peer_receipt"] == "not-observed"
+    output = publisher_replica / "preferences.json"
+    received = receiver_replica / "preferences.json"
+    # A fixture copies replicas; this does not exercise a synchronization provider.
+    received.write_bytes(output.read_bytes())
+    preview = _carrier_cli(*receive)
+    assert not (receiver / "accepted.json").exists()
+    accepted = _carrier_cli(*receive, "--apply", "--expect", preview["preview_token"])
+    assert accepted["projection"]["knowledge_preference"]["knowledge_repository_id"] == "repo-local"
+    assert accepted["projection"]["provenance"]["repositories.knowledge:repo-first"] == "local-machine"
+    assert accepted["projection"]["values"]["repositories"]["knowledge"] == [
+        {"harness_repository_id": "repo-first", "knowledge_repository_id": "repo-local"},
+        {"harness_repository_id": "repo-second", "knowledge_repository_id": "repo-shared"},
+    ]
+    assert not any(result["configuration_applied"] or result["binding_changed"] for result in (sent, accepted))
+    assert sorted(path.name for path in publisher.iterdir()) == [
+        "carrier.json", "exchange.lock", "policy.json", "publication.json",
+    ]
+    assert sorted(path.name for path in receiver.iterdir()) == [
+        "accepted.json", "carrier.json", "exchange.lock", "policy.json",
+    ]
+
+
+def test_native_carrier_withdrawal_preserves_local_override(tmp_path):
+    publisher, receiver, publisher_replica, receiver_replica, candidate, original, publish, receive = (
+        _carrier_inputs(tmp_path)
+    )
+    (publisher / "publication.json").write_text(json.dumps(original), encoding="utf-8")
+    (receiver / "accepted.json").write_text(json.dumps(original), encoding="utf-8")
+    output = publisher_replica / "preferences.json"
+    received = receiver_replica / "preferences.json"
+    output.write_text(json.dumps(original), encoding="utf-8")
+    candidate.write_text(json.dumps({**original, "revision": 2, "parent": 1, "domains": {}}), encoding="utf-8")
+    plan = _carrier_cli(*publish)
+    _carrier_cli(*publish, "--apply", "--expect", plan["preview_token"])
+    received.write_bytes(output.read_bytes())
+    plan = _carrier_cli(*receive)
+    withdrawn = _carrier_cli(*receive, "--apply", "--expect", plan["preview_token"])
+    assert withdrawn["projection"]["values"]["repositories"]["knowledge"] == [
+        {"harness_repository_id": "repo-first", "knowledge_repository_id": "repo-local"},
+    ]
+    assert not withdrawn["configuration_applied"] and not withdrawn["binding_changed"]
+    assert json.loads((receiver / "accepted.json").read_bytes())["revision"] == 2
+    assert json.loads((publisher / "publication.json").read_bytes())["revision"] == 2
+
+
+def test_native_carrier_offline_and_old_replica_do_not_undo_accepted_withdrawal(tmp_path):
+    _, receiver, _, receiver_replica, _, original, _, receive = _carrier_inputs(tmp_path)
+    withdrawn = {**original, "revision": 2, "parent": 1, "domains": {}}
+    (receiver / "accepted.json").write_text(json.dumps(withdrawn), encoding="utf-8")
+    received = receiver_replica / "preferences.json"
+    receiver_replica.rmdir()
+    offline = _carrier_cli(*receive, code=1)
+    assert offline["status"] == "carrier-unavailable"
+    assert offline["projection"]["projected_revision"] == 2
+    assert offline["projection"]["knowledge_preference"]["knowledge_repository_id"] == "repo-local"
+    receiver_replica.mkdir()
+    received.write_text(json.dumps(original), encoding="utf-8")
+    stale = _carrier_cli(*receive, code=1)
+    assert stale["status"] == "older-revision" and not stale["eligible"]
+    assert json.loads((receiver / "accepted.json").read_bytes())["revision"] == 2
+    assert not any(result["configuration_applied"] or result["binding_changed"] for result in (
+        offline, stale,
+    ))
+    assert sorted(path.name for path in receiver.iterdir()) == [
+        "accepted.json", "carrier.json", "policy.json",
+    ]
+
+
+def test_native_carrier_closed_stdout_keeps_unknown_acknowledgement_and_exit_two(tmp_path):
+    replica = tmp_path / "replica"
+    state = _carrier_state(tmp_path / "publisher", "example-publisher", replica)
+    candidate = tmp_path / "candidate.json"
+    candidate.write_text(json.dumps({
+        "schema": "agent-machines.preferences", "version": 1,
+        "publisher": "example-publisher", "revision": 1, "parent": None, "domains": {},
+    }), encoding="utf-8")
+    arguments = ["publish", "--input", candidate, "--state-dir", state]
+    plan = _carrier_cli(*arguments)
+    reader, writer = os.pipe()
+    os.close(reader)
+    try:
+        child = subprocess.run([
+            sys.executable, "-I", "-m", "agent_machines", "preferences", "carrier",
+            *map(str, arguments), "--apply", "--expect", plan["preview_token"],
+        ], stdout=writer, stderr=subprocess.PIPE, text=True, timeout=20, **no_window_kwargs())
+    finally:
+        os.close(writer)
+    assert child.returncode == 2, child.stderr
+    failure = json.loads(child.stderr)
+    assert failure["error"] == "response-output-unavailable" and failure["applied"] is None
+    assert json.loads((replica / "preferences.json").read_bytes())["revision"] == 1
+    assert json.loads((state / "publication.json").read_bytes())["revision"] == 1
+
+
 def test_fresh_cli_publisher_to_receiver_flow_persists_only_explicit_local_state(tmp_path):
     publisher = _policy(tmp_path / "publisher", "example-publisher")
     receiver = _policy(tmp_path / "receiver", "example-receiver")

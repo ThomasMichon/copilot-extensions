@@ -170,10 +170,62 @@ pending cleanup. The replacement transaction removes only a soft worktree
 affinity matching that declined workspace, preserving other affinities and
 hard targets so later startup retries cannot revive stale carry.
 
+## Retained task-claim ordering
+
+A governed workspace keeps its own outbound task claim until Dispatch confirms
+the unassignment, so finalizing first would wait on itself. When the task has a
+relationship bound to the exact reservation, `decline` therefore uses this
+order, advertised as `worker_decline_readiness_closeout_versions: [1]`:
+
+1. The worker reads `GET /tasks/{task_id}/relationship` before the decision.
+   A coordinator with a retained relationship but no readiness closeout support
+   refuses with an upgrade error before any decision POST. Unresolved or
+   foreign required relationships refuse instead of being ignored.
+2. After preparation, the supervisor's closeout uses the selected runtime's
+   nonfinalizing [`observe-ready`](../../agent-worktrees/docs/dispatch-worker-closeout.md#selected-runtime-readiness-transport)
+   operation in place of the finalized observation. Readiness retains exactly
+   that task claim and refuses any other unsettled obligation, so a requeue is
+   never committed when later finalization would be blocked by unrelated
+   responsibility. A refusal records a blocker and leaves the task `CLAIMED`.
+3. The same SQLite transaction applies the exclusions, releases the
+   assignment, clears the task's worker owner and advances the task to an
+   unbound `QUEUED` generation. Its receipt records the relationship event id.
+4. Only after that commit, the coordinator reconciles that exact claim through
+   the existing relationship owner. Every exact closeout replay retries
+   settlement against the committed receipt, and the data-authenticated
+   `POST /tasks/{task_id}/pool-decline/settlement` exposes the same retry to
+   the worker's own binding. Neither route can requeue again.
+5. The worker waits up to ten minutes for the receipt, requires the settled
+   claim, then runs normal own-worker finalization. Output reports
+   `routing: requeued` and `task_relationship: closed`. A lost task read
+   during the wait (transport failure, server error or invalid response) is
+   unconfirmed, not a refusal: polling continues until the deadline, and the
+   timeout blocker names the last failure. Confirmed client errors stop at once.
+
+A wait timeout, refused or lost reply, or unsettled claim retains the claim
+and checkout, records a visible blocker where the claim is still current, and
+exits nonzero. Rerunning the same command converges: once the task is no longer
+claimed at the declined generation, it settles from the committed receipt and
+finalizes without a second decision or requeue. If Dispatch has already
+placed the requeued task elsewhere, the current task no longer names the
+original decline; the worker then reads
+`GET /tasks/{task_id}/pool-decline/recovery?worker_id=&native_id=&generation=`
+(advertised as `worker_decline_binding_recovery_versions: [1]`), which returns
+the exact original binding and workspace only behind its committed closeout
+receipt, and settles/finalizes that binding. A recovered workspace other than
+the caller's own refuses. The claim is never
+force-released and unrelated obligations are never waived. If another worker
+reclaims the task before settlement, the old claim remains visible as retained
+responsibility for the relationship owner rather than being released.
+
+Tasks without a bound relationship keep the earlier order: finalize the own
+workspace, then let the supervisor observe that finalized closeout.
+
 ## Remaining integration
 
 Selected remote-host transport, no-managed-worktree applicability and the
-complete ordinary/native matrix remain open. Local source controls do not
+complete ordinary/native matrix remain open. The retained task-claim order is
+also local-only. Local source controls do not
 qualify those boundaries or authorize physical cleanup.
 
 Older or rolled-back peers missing preparation support refuse before POST;

@@ -249,6 +249,7 @@ class GoodCitizenSession:
         continuation_param: str = "continuationToken",
         continuation_header: str = "x-ms-continuationtoken",
         purpose: str = "unclassified",
+        on_page: Callable[[ApiResult], None] | None = None,
     ) -> list[ApiResult]:
         """Collect pages using a continuation-token response header."""
         pages: list[ApiResult] = []
@@ -260,6 +261,8 @@ class GoodCitizenSession:
             result = self.get_json(path, params=page_params, purpose=purpose)
             if result.not_modified:
                 return pages
+            if on_page is not None:
+                on_page(result)
             pages.append(result)
             next_token = result.headers.get(continuation_header)
             if not next_token:

@@ -8,15 +8,15 @@ Every configuration option for a repo adopted by agent-worktrees.
 
 Ordinary launch preferences compose **built-in defaults → selected repository
 base → explicitly bound knowledge graft → machine-wide preferences → selected
-repository+machine overrides**. `headless`, `auto_fast_forward` and the atomic
-`copilot_profiles` list use this order. The profile-assignment parser remains a
+repository+machine overrides**. `headless`, `auto_fast_forward`, the
+`agendas` mapping and the atomic `copilot_profiles` list use this order. The profile-assignment parser remains a
 separate admission boundary: committed repository templates cannot arm a pool,
 and knowledge binding does not grant credential, installation, hosting, review,
 merge, or resource-custody authority. The source-specific protected readers
 described below are not replaced by an unrestricted preferences graft.
 
-The four portable knowledge keys are `copilot_profiles`, `profile_assignment`,
-`headless`, and `auto_fast_forward`. Machine paths, `knowledge_repo`, credential
+The five portable knowledge keys are `copilot_profiles`, `profile_assignment`,
+`headless`, `auto_fast_forward`, and `agendas`. Machine paths, `knowledge_repo`, credential
 selection, `repos` blocks, and executable/policy hooks do not become portable
 knowledge preferences. A missing optional binding is different from a named
 binding that cannot resolve: the latter fails configuration-context acquisition.
@@ -82,7 +82,7 @@ Copilot session database remains outside this path.
 | Precedence | Source | Path | Scope | Committed? |
 |------------|--------|------|-------|-----------|
 | **Highest** | **Machine-local** | legacy `~/.{project}/config.yaml`; namespaced `<cell>/repos/<repository-id>/agent-worktrees/config.yaml` | Per-machine overrides + machine paths (anchor, custom worktree_root). The **adapter** that makes a *foreign* repo compatible. | No |
-| **Repository graft** | **Knowledge overlay** | explicitly bound knowledge repo's config | Portable preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`); a standalone or converged repo may bind too. Machine-specifics and the binding never graft. Profile assignment retains its separate admission parser. | Yes |
+| **Repository graft** | **Knowledge overlay** | explicitly bound knowledge repo's config | Portable preference keys only (`copilot_profiles`, `profile_assignment`, `headless`, `auto_fast_forward`, `agendas`); a standalone or converged repo may bind too. Machine-specifics and the binding never graft. Profile assignment retains its separate admission parser. | Yes |
 | **Middle** | **In-repo** | `<anchor>/.copilot-extensions/agent-worktrees/config.yaml` | The repo's **own** committed settings — the base, shared by every machine. Legacy `<anchor>/.agent-worktrees/config.yaml` and `<anchor>/.agent-worktrees.yaml` remain readable. | Yes |
 | **Machine tier** | **Global** | `~/.agent-worktrees/config.yaml` | Machine-wide preferences, above portable repository/knowledge preferences; protected machine identity and paths retain their native readers. | No |
 
@@ -94,8 +94,8 @@ specific machine, or to adopt a *foreign* repo (work product, external GitHub)
 that carries no in-repo config.
 
 - **Portable top-level fields** (`srcroot`/`machine`/`platform`/
-  `copilot_profiles`/`profile_assignment`/`headless`/`auto_fast_forward`)
-  resolve **machine-local > global > knowledge overlay (portable prefs
+  `copilot_profiles`/`profile_assignment`/`headless`/`auto_fast_forward`/
+  `agendas`) resolve **machine-local > global > knowledge overlay (portable prefs
   only) > selected repository > detected/default** for ordinary preferences.
 - **Per-repo settings** merge **in-repo flat settings < machine-local
   `repos.<name>` block**. The global tier carries *only* machine-wide top-level
@@ -188,6 +188,9 @@ reads remain offline, keep the same candidate order and one-hop branch policy,
 and use the same bounded batch/presence/ordered-read fallback. An empty committed
 mapping still permits the existing disk fallback. Reporting adds no Git probes,
 parses, source rescans or hashes.
+Every committed-policy Git read selects the explicit anchor through the existing
+repository-isolation helper. Inherited repository/configuration selectors cannot
+redirect those reads to another checkout's policy.
 
 Reports separate the operational `value` from ordered, metadata-only
 `observations` and sanitized `findings`:
@@ -408,6 +411,40 @@ lifecycle behavior. Distinct registered keys nevertheless do not become local
 merely through shared hostname metadata. Keys cannot contain whitespace, path
 separators or reference delimiters and must be unique without regard to case.
 
+## Default-on agendas
+
+`agendas.default` is a portable preference (`off` by default) that composes
+through every tier like `auto_fast_forward`: built-in default → repository base
+→ bound knowledge graft → machine-wide → repository+machine, and is accepted in
+`config.d` drop-ins. To enable it for every project bound to a knowledge
+repository, commit it to that repository's
+`.copilot-extensions/agent-worktrees/config.yaml`:
+
+```yaml
+# <knowledge-repo>/.copilot-extensions/agent-worktrees/config.yaml
+agendas:
+  default: expected
+```
+
+A machine (or a single repository on a machine) can still opt out with
+`agendas: {default: "off"}`. Quote `"off"` when convenient; YAML reads a bare
+`off` as boolean false, which is accepted as `off`. Any other value (including
+`true`) is rejected with `agendas.default must be one of off, expected`.
+
+With `expected`, each session start (including resume) adds an `Agenda:` block
+to the bound-session guidance and publishes the effective value for that
+worktree's post-tool hooks. The hooks re-check on the same call/minute cadence
+as the disposition nudge (`AGENT_WORKTREES_NUDGE_CALLS` /
+`AGENT_WORKTREES_NUDGE_MINUTES`) without resolving configuration themselves, so
+a changed setting reaches a running session at its next start, resume or
+`agent-worktrees status` disposition write. The
+reminder is emitted only while no agenda lane is detected, and
+`AGENT_WORKTREES_AGENDA_NUDGE=off` silences it. These switches are read from
+the Copilot session's own environment and forwarded to the resident hook
+service, so a session-level opt-out applies even when the resident was started
+by another session. See
+[Worktree agendas](worktree-agendas.md#default-on-policy).
+
 ## Machine-local config — `~/.{project}/config.yaml`
 
 Optional. Only what is specific to **this machine**, or overrides. The installer
@@ -418,6 +455,8 @@ global config.
 repo_name: my-project             # which repos.<name> is the active/default repo
 headless: false                   # CLI-only project (bare binstub lists worktrees)
 auto_fast_forward: true           # FF a stale, clean worktree on resume (override)
+agendas:
+  default: expected               # ask sessions to adopt an effort agenda (default: off)
 
 repos:
   my-project:
@@ -488,6 +527,7 @@ repos:
 | `repo_name` | string | `""` | Which `repos.<name>` is the default repo. Optional when exactly one repo is defined. |
 | `headless` | bool | `false` | CLI-only project: the bare binstub lists worktrees instead of launching an interactive Copilot session. |
 | `auto_fast_forward` | bool | `true` | On resume, fast-forward a clean worktree that is strictly behind upstream. Only ever a FF — never touches dirty / ahead / diverged worktrees. |
+| `agendas.default` | string | `off` | `off` or `expected`. `expected` makes session-start guidance carry an `Agenda:` block (lane present/absent/unknown plus the next adoption commands from the `driving-effort-agendas` skill) and enables a throttled post-tool reminder while no agenda lane is detected. Adoption and every agenda edit stay agent-controlled; nothing is adopted automatically. Unknown keys or values are rejected. See [Default-on agendas](#default-on-agendas). |
 | `default_copilot_account` | string | `""` | This machine's default **Copilot CLI** login for a repo with no explicit `copilot_account` override (see `repos.<name>.copilot_account`). Machine-local policy, not a portable knowledge-repo preference. Resolves selected project's machine-local `config.yaml` > active `config.d` drop-ins > global `~/.agent-worktrees/config.yaml`. Empty means no machine-wide preference (ambient Copilot login). [Repositories Configuration](repositories-configuration.md) supports revisioned local override set/reset without logging in. |
 | `copilot_identity_switch_enabled` | bool | `false` | Master switch for the Copilot CLI identity-enforcement feature (`copilot-identity ensure`, run automatically at the start of every session launch, and available manually). **Off by default** — when false, `ensure` is a pure no-op regardless of `default_copilot_account`/a repo's `copilot_account`: it never mints a `gh` token, shells out to `copilot login`, or reads `~/.copilot/config.json`. Deliberately config-file based (not an environment-variable opt-out) so the choice is durable and visible in `config.yaml`. Same tiering as `default_copilot_account`. |
 | `copilot_profiles` | list | `[]` | Selectable Copilot backend profiles (Tab-cycle in the picker). |
@@ -676,6 +716,14 @@ another health database or an executable found on PATH. It is caller-contained
 and bounded to one 60-second selection/observation/cleanup budget, reserving five
 seconds for settlement. A refused, interrupted, changed, unsupported or
 not-ready result cannot pass. A fully observed empty required set can pass.
+The caller-owned observation qualifies readiness inputs only, not a repair
+plan or every unrelated file in an enabled payload. Its digest cannot authorize
+an installer apply. Required-owner qualification and inventory completeness
+remain mandatory; an unavailable enabled contribution is not silently optional.
+Failures distinguish profile selection, runtime selection, observation and
+profile revalidation. A budget exhaustion names that stage rather than implying
+that a qualified runtime lacks support; raw child arguments and output are not
+included in that diagnostic.
 When `copilot_plugin_profile` changes the intended roster, re-register the
 project to stage it before retrying New. Admission compares that owner's
 prospective settings with the staged anchor without writing them, checks again
@@ -1259,6 +1307,7 @@ profile_assignment:
 | `copilot_profiles` | list | Machine-wide backend profiles. |
 | `profile_assignment` | map | Optional user-owned balanced assignment policy. |
 | `auto_fast_forward` / `headless` | bool | Machine-wide top-level defaults. |
+| `agendas` | map | Machine-wide `agendas.default` (`off`/`expected`). |
 | `default_copilot_account` | string | Machine-wide default Copilot CLI login for repos with no explicit override (see the top-level keys table). |
 | `copilot_identity_switch_enabled` | bool | Machine-wide master switch for the Copilot identity-enforcement feature. **Off by default.** |
 

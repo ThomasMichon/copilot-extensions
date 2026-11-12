@@ -29,14 +29,17 @@ _CAPABILITIES = {
 }
 
 
-def command_prefix(value):
+def command_prefix(value, *, require_available=True):
     if (
         not isinstance(value, tuple) or not 1 <= len(value) <= 64
         or any(not isinstance(item, str) or not item or "\0" in item for item in value)
         or sum(len(item.encode("utf-8")) for item in value) > 16384
     ):
         raise ValueError("native read requires an immutable bounded command prefix")
-    command_path(value[0])
+    if type(require_available) is not bool or not Path(value[0]).is_absolute():
+        raise ValueError("native read requires an absolute command prefix")
+    if require_available:
+        command_path(value[0])
     if Path(value[0]).suffix.lower() in (".cmd", ".bat", ".ps1"):
         raise ValueError("native read requires an explicit executable/interpreter")
     return value

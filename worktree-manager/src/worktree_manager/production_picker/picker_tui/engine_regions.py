@@ -176,7 +176,7 @@ class _PickerButtons(_FocusRegion):
         return scr._join_lines([vr.text for vr in buttons], W)
 
 class _PickerNotices(Widget):
-    """Fixed-height notices never become OptionList entries or reflow siblings."""
+    """Compact notices stay outside the native list and its cursor."""
 
     can_focus = False
 

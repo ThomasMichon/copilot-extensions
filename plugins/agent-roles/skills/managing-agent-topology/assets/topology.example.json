@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "id": "synthetic-topology-not-a-live-fleet",
+  "revision": 1,
+  "dispatcher": {
+    "owner": {"machine": "alpha", "project": "example-control", "worktree": "dispatcher"},
+    "charter": {
+      "revision": 1,
+      "authorityRef": "synthetic:no-live-authority",
+      "objective": "Demonstrate allocation and recovery using fixtures only.",
+      "scope": "synthetic-fleet",
+      "acceptance": "Derive coverage and same-owner routing from saved observations.",
+      "permittedActions": "Read and validate this synthetic document.",
+      "exclusions": "No native allocation, messaging, launch, deployment or retirement.",
+      "resourceLimits": "One bounded offline invocation; no network or new processes.",
+      "supervision": "Inspect saved observations once; no schedule.",
+      "exitPolicy": "Stop after the report; native owners retain any real obligations."
+    }
+  },
+  "observationMaxAgeSeconds": 300,
+  "machines": [
+    {
+      "id": "alpha", "registryRef": "synthetic:machines/alpha",
+      "purpose": "Control and review workloads.",
+      "allowedRoles": ["reviewer", "scratch"],
+      "allowedKinds": ["standing", "temporary"],
+      "capabilities": ["review"], "capacitySlots": 4, "constraints": []
+    },
+    {
+      "id": "beta", "registryRef": "synthetic:machines/beta",
+      "purpose": "Review workloads only.",
+      "allowedRoles": ["reviewer"], "allowedKinds": ["standing"],
+      "capabilities": ["review"], "capacitySlots": 2, "constraints": []
+    },
+    {
+      "id": "gamma", "registryRef": "synthetic:machines/gamma",
+      "purpose": "Temporary analysis only; never repurpose for review.",
+      "allowedRoles": ["scratch"], "allowedKinds": ["temporary"],
+      "capabilities": [], "capacitySlots": 2, "constraints": []
+    }
+  ],
+  "roles": [
+    {
+      "id": "reviewer", "meaning": "Review the selected repository's eligible changes.",
+      "scope": "example/project", "minimum": 1,
+      "requiredCapabilities": ["review"], "constraints": []
+    },
+    {
+      "id": "scratch", "meaning": "Perform one unrelated bounded analysis.",
+      "scope": "synthetic/scratch", "minimum": 0,
+      "requiredCapabilities": [], "constraints": []
+    }
+  ],
+  "assignments": [
+    {
+      "id": "review-a", "requestId": "request-review-a", "kind": "standing",
+      "role": "reviewer", "machine": "beta", "state": "active",
+      "creationKey": "synthetic-review-a",
+      "charter": {
+        "revision": 1,
+        "authorityRef": "synthetic:no-live-authority",
+        "objective": "Represent a reviewer for the synthetic repository.",
+        "scope": "example/project",
+        "acceptance": "Report fixture findings and retain the assigned review lane.",
+        "permittedActions": "Read fixture material only.",
+        "exclusions": "No real repository, provider or fleet effects.",
+        "resourceLimits": "One synthetic lane; no background work.",
+        "supervision": "One saved observation, not an installed watch.",
+        "exitPolicy": "Synthetic completion does not release a real native owner."
+      },
+      "nativeWorktree": {"machine": "beta", "project": "example-control", "worktree": "review-a"},
+      "nativeTask": null,
+      "effects": [
+        {
+          "id": "allocation-a", "kind": "allocate", "state": "confirmed",
+          "charterRevision": 1,
+          "target": {"machine": "beta", "project": "example-control", "worktree": "review-a"},
+          "nativeRequest": null,
+          "nativeRef": "synthetic:allocation-a"
+        },
+        {
+          "id": "launch-a", "kind": "launch", "state": "accepted",
+          "charterRevision": 1,
+          "target": {"machine": "beta", "project": "example-control", "worktree": "review-a"},
+          "nativeRequest": {
+            "mode": "bridge-existing-worktree-create",
+            "envelopeRef": "synthetic:immutable-launch-a-envelope-v1"
+          },
+          "nativeRef": "synthetic:acceptance-a"
+        }
+      ],
+      "followups": []
+    }
+  ],
+  "observations": {
+    "discovery": {
+      "observedAt": "2026-01-01T00:00:00Z",
+      "sourceRef": "synthetic:complete-selected-scope", "complete": true
+    },
+    "dispatcher": {
+      "observedAt": "2026-01-01T00:00:00Z", "sourceRef": "synthetic:dispatcher-custody",
+      "owner": {"machine": "alpha", "project": "example-control", "worktree": "dispatcher"},
+      "custody": "exclusive"
+    },
+    "machines": [
+      {"machine": "alpha", "observedAt": "2026-01-01T00:00:00Z", "sourceRef": "synthetic:alpha-load", "state": "ready", "usedSlots": 3},
+      {"machine": "beta", "observedAt": "2026-01-01T00:00:00Z", "sourceRef": "synthetic:beta-load", "state": "ready", "usedSlots": 1},
+      {"machine": "gamma", "observedAt": "2026-01-01T00:00:00Z", "sourceRef": "synthetic:gamma-load", "state": "ready", "usedSlots": 0}
+    ],
+    "owners": [
+      {
+        "owner": {"machine": "beta", "project": "example-control", "worktree": "review-a"},
+        "head": "synthetic-head-a", "observedAt": "2026-01-01T00:00:00Z",
+        "sourceRef": "synthetic:current-head-and-charter", "state": "idle",
+        "assignmentId": "review-a", "role": "reviewer", "scope": "example/project",
+        "acceptedCharterRevision": 1, "acceptanceRef": "synthetic:acceptance-a",
+        "progress": {
+          "observedAt": "2026-01-01T00:00:00Z", "sourceRef": "synthetic:progress-a",
+          "state": "advancing", "workRef": "synthetic:review-task-a",
+          "lastAdvancedAt": "2026-01-01T00:00:00Z", "blockingOwner": null
+        }
+      }
+    ]
+  }
+}

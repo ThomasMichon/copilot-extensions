@@ -1,5 +1,71 @@
 # Repository authentication inspection
 
+## Portable GitHub account slots
+
+An adopter can keep non-secret login choices in the bound knowledge repository's
+`.agent-worktrees/github-accounts.json`:
+
+```json
+{
+  "version": 1,
+  "accounts": {"work": "operator-work", "public": "operator-public"},
+  "repositories": {"Publisher/tool": "public"}
+}
+```
+
+Slot names are operator-defined labels, not authenticated account types.
+This optional file is selected through the native knowledge-binding owner.
+It is not a credential store, a shared harness configuration or a
+`copilot_account` preference. Edit it through the knowledge repository's normal
+writable-worktree/publication flow; reconciliation never writes it.
+
+The independent native CLI projects these choices into its machine-local
+registry. Preview is the default; `--apply` opts into writing:
+
+```text
+agent-worktrees repos account reconcile --capabilities --json
+agent-worktrees repos account reconcile --default-slot work --bootstrap-from-context --repository-slot Publisher/tool=public --json
+agent-worktrees repos account reconcile --default-slot work --bootstrap-from-context --repository-slot Publisher/tool=public --apply --json
+```
+
+Run inside a registered project, or supply `--context-project <name>` to select
+it explicitly without changing the caller's directory. Adopters choose the
+default slot and optional exact repository exceptions; this engine supplies no
+organization-specific defaults. When the default slot is absent,
+`--bootstrap-from-context` may use only an existing explicit account or owner
+mapping for the selected project. `--identity-source <registered-name-or-owner/repo>`
+selects another explicit source instead. Namespace spelling, account suffixes,
+ambient login and the global preferred account are not bootstrap evidence.
+
+Existing repository, owner-map and preferred-default choices win. Reconciliation
+records its own projections alongside the registry, so a later knowledge-slot
+change or removal refreshes only that owner's unchanged managed values.
+Native explicit `repos account default` and `repos add --account` take over
+their fields, even when the value is unchanged; manual value changes are also
+preserved. Warm reconciliation does not rewrite an unchanged registry.
+Repository slots apply to matching registered repositories, not every repository
+under their owner. An unregistered target remains `not-registered`; registration
+is a separate native operation. Missing slots and conflicts are actionable
+partial results, never a request to invent a login.
+
+The response identifies `schema: agent-worktrees.account-reconciliation` and
+integer `version: 1`. The effect-free `--capabilities --json` operation advertises
+integer `portable_account_slots: 1`; callers must confirm support on their
+selected executable before sending projection syntax. Older runtimes report
+unsupported: keep all old account commands available and do not replay another
+writer or install an update automatically. This is additive provider expansion,
+not retirement of an existing operation.
+
+The policy is strict, bounded JSON (64 KiB); invalid or concurrently changed
+policy refuses projection. Existing native registry locking, read-baseline
+comparison and atomic replacement protect concurrent local choices.
+Exit 0 with `status: ready` means configuration composition only, not verified
+identity or access. No operation contacts GitHub, reads credentials, signs in,
+changes global authentication or provisions a runtime. Verify the selected
+repository-scoped identity separately before publication.
+
+## Read-only authentication observation
+
 The native engine owns this optional, read-only observation. It is separate
 from registration, future-launch Copilot preferences and credential acquisition:
 
@@ -9,7 +75,8 @@ agent-worktrees repos authentication contract --json
 ```
 
 `inspect` requires both exact registered names. One strict registry snapshot
-selects the canonical remote and configured `account` or owner `account_map`.
+selects the canonical remote and configured repo, owner-map or preferred
+`default_account` policy.
 An inferred remote owner is not an explicitly selected account: without a
 configured account the result is `selection-required`, with no credential read.
 Version 1 supports only the exact `github.com` host. Other providers/hosts return
@@ -37,10 +104,10 @@ includes its native Configuration `target`, `registry_revision`, UTC
 
 | Field | Meaning |
 |---|---|
-| `selection` | Provider, selected host, canonical repository, configured account and `repository`/`account-map`/`unconfigured` account provenance |
+| `selection` | Provider, selected host, canonical repository, configured account and `repository`/`account-map`/`default-account`/`unconfigured` provenance |
 | `credential` | Existing GitHub CLI credential `available`, or `not-observed`; availability alone verifies neither identity nor access |
 | `identity` | Selected login `verified`, `mismatch`, or `not-observed` |
-| `repository_access` | Exact `repository-metadata-read` verified, or `not-observed`; never write permission |
+| `repository_access` | Exact `repository-metadata-read` verified, or `not-observed`; optional `owner_kind` is `user` or `organization`, never operator identity or write permission |
 | `status` | `observed`, `selection-required`, `unsupported`, `unavailable`, or a sanitized request/registry `failed` |
 | `failure` | When present, bounded `stage`/`code`, and actual child `exit_code`/HTTP `http_status` when available |
 | `unobserved` | Git transport, GCM, write permission, CodeSpaces, MCP and Copilot are explicitly outside this observation |
@@ -53,6 +120,10 @@ output limit, invalid response, identity mismatch and unconfirmed access through
 their stage and observation fields. A 401/403/404 or missing metadata is not
 diagnosed as an expired credential: denial, hidden repositories, scope limits
 and transient failures can be ambiguous.
+Owner kind comes only from the same repository metadata response's `owner.type`,
+with no additional request. Missing or unfamiliar type is omitted and displayed as `unknown`.
+Neither a user nor an organization namespace changes the configured account;
+a user-owned upstream repository does not identify its consumer's public login.
 
 Tokens, credential output, raw provider stderr, API bodies and private headers
 never enter the response. The three stages share one 18-second execution and

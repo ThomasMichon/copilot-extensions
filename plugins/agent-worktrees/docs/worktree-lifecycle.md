@@ -503,6 +503,41 @@ it alone. Two common cases:
 For an effort-bound worktree, use `effort-focus release` rather than treating
 the derived flag as stale.
 
+**Full asserted titles.** `status --title`, `push-changes --title-only` and
+the legacy `mark-complete` title paths retain the full normalized assertion in
+the existing `title` field and its new disposition-history entry. Normalization
+removes illegal controls, collapses tabs/newlines and strips outer whitespace;
+allowed Unicode is retained. The bound is 512 normalized characters.
+An oversized assertion returns an explicit error before changing the record,
+history or other requested disposition fields, rather than silently truncating.
+An empty normalized assertion clears the title and its asserted marker.
+Non-title writes preserve the existing value without revalidating it.
+Title serialization explicitly quotes strings, so numeric assertions remain
+strings and Unicode line separators round-trip through YAML. New history
+escapes Unicode in its JSON line for legacy-reader compatibility; current
+history readers use LF delimiters and also preserve older literal Unicode.
+
+Ordinary record/list/status/history JSON carries the full value. Compact
+consumers shorten at display time: the status bar keeps its own 48-character
+projection and the Picker fits the available row width without changing the
+record. Existing records/history are not migrated or reconstructed; text lost
+through an older short writer remains unavailable. Publication-title
+normalization is a separate, unchanged contract.
+
+The status mutation's running receiver advertises
+`status_disposition_write` version 3 for the explicit
+`retain_full_title: true` request semantic. A qualified title caller requires
+that support; non-title writes also require version 3 because they reserialize
+the existing title. Requests
+without the selector retain the legacy 30-character projection, including
+empty-title clearing, so old callers are not claimed to provide full retention.
+The existing per-verb discovery selects the running generation, not a package
+version. An incompatible receiver is never sent the new request: only the
+existing logged, same-code, locked pre-send fallback is allowed. A sent request
+with an unknown outcome is not replayed. Both request forms remain supported
+through the prior/current-generation upgrade and rollback window; no form,
+daemon or runtime is retired by this change.
+
 **Title sigils.** The picker prefixes scannable glyphs onto a worktree's title,
 independent of the state column:
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Add receiver-only permanent service custody records, mixed-history validation, protected task refusals and explicit resource inventory without enabling adoption writers.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

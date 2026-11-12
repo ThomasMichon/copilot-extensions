@@ -8,7 +8,7 @@ import json
 from collections.abc import Callable
 from pathlib import Path
 
-from . import finalize as fin, git_ops, output, prune, reap_cli, sessions, tracking
+from . import finalize as fin, finalize_local, git_ops, output, prune, reap_cli, sessions, tracking
 from . import claimant as claimant_mod
 from . import config as cfg
 from .retirement_safety import retirement_blocker
@@ -379,6 +379,16 @@ def _revalidate_cleanup_safety(
                 blockers = _closure_blockers(latest, fresh_info, disp, turn_count=turns)
                 reason = _enrich_reason_with_blockers(disp.reason, blockers)
                 return RevalidationResult(False, reason, disp.bucket)
+            if (
+                latest.status == "finalized" and latest.checkout_managed
+                and latest.worktree_path
+            ):
+                try:
+                    error = finalize_local.cleanup_error(repo, latest.worktree_path, latest.branch)
+                except ValueError as exc:
+                    return RevalidationResult(False, str(exc), "unmerged")
+                if error:
+                    return RevalidationResult(False, error, "unmerged")
             return _do_reap(latest, fresh_info, disp.reason, disp.bucket)
     except TimeoutError:
         return RevalidationResult(

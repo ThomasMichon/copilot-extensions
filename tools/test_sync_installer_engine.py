@@ -67,14 +67,42 @@ def test_human_output_declarations_bind_real_packaged_entrypoints():
 @pytest.mark.parametrize("plugin", (
     "agent-mcp", "agent-machines", "agent-containers", "budget-guidance", "agent-worktrees",
 ))
-def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str) -> None:
+def test_native_cleanup_ships_its_engine_and_finite_process_supervisor(plugin: str, tmp_path) -> None:
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
     assert consumer in contract.native_adopter_dirs(REPO)
+    candidate = _materialized_consumer(consumer, tmp_path, contract.STANDALONE_NATIVE_FILES)
     for name in contract.STANDALONE_NATIVE_FILES:
-        assert (consumer / "scripts" / name).read_bytes() == (
+        assert (candidate / "scripts" / name).read_bytes() == (
             REPO / "libs" / "installer-engine" / name
         ).read_bytes()
+
+
+def test_native_machines_materializes_its_declared_retained_gui_bootstrap(tmp_path):
+    import materialize_installer_engine
+
+    scripts = tmp_path / "plugins" / "agent-machines" / "scripts"
+    scripts.mkdir(parents=True)
+    log = materialize_installer_engine.materialize_derived_files(
+        tmp_path, canonical_root=REPO, file_names=frozenset({"runtime_launcher.py"}),
+    )
+    assert not any(line.startswith("SKIP") for line in log), log
+    launcher = scripts / "runtime_launcher.py"
+    assert launcher.read_bytes() == (REPO / "libs" / "installer-engine" / launcher.name).read_bytes()
+    assert not (tmp_path / "plugins" / "agent-containers" / "scripts" / launcher.name).exists()
+
+
+def _materialized_consumer(consumer: Path, tmp_path: Path, names) -> Path:
+    import materialize_installer_engine as materializer
+
+    candidate = tmp_path / consumer.name
+    candidate.mkdir()
+    log = materializer.materialize_derived_files(
+        candidate, canonical_root=REPO, copied_consumer=(consumer, candidate),
+        file_names=frozenset(names),
+    )
+    assert log and not any(line.startswith("SKIP") for line in log), log
+    return candidate
 
 
 @pytest.mark.parametrize("shell", ["pwsh", "powershell"])
@@ -552,6 +580,11 @@ def test_whole_payload_human_contract(
     source_root = Path("source")
     destination = Path("payload")
     _copy_real_installer_engine(source_root)
+    for name in contract.PYTHON_FILES:
+        shutil.copyfile(
+            REPO / "libs" / "installer-engine" / name,
+            source_root / "libs" / "installer-engine" / name,
+        )
     manager = source_root / "worktree-manager"
     manager.mkdir()
     (manager / "pyproject.toml").write_text(
@@ -600,6 +633,60 @@ def test_whole_payload_human_contract(
         assert (script.parent / contract.HUMAN_HELPER).read_bytes() == (
             REPO / "libs" / "installer-engine" / contract.HUMAN_HELPER
         ).read_bytes()
+
+
+@pytest.mark.parametrize("plugin", ["agent-bridge", "agent-mcp"])
+@pytest.mark.parametrize("initial", ["stale", "absent"])
+def test_promotion_refreshes_declared_human_helper_preimages(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plugin: str, initial: str,
+) -> None:
+    import materialize_installer_engine
+
+    contract = sync_installer_engine.ier
+    root = tmp_path / "source"
+    _copy_real_installer_engine(root)
+    for name in contract.PYTHON_FILES:
+        shutil.copyfile(
+            REPO / "libs" / "installer-engine" / name,
+            root / "libs" / "installer-engine" / name,
+        )
+    interpreter = Path("libs/agent-procutil/src/agent_procutil/_interpreter.py")
+    (root / interpreter).parent.mkdir(parents=True)
+    shutil.copyfile(REPO / interpreter, root / interpreter)
+    consumer = _real_human_consumer(root, plugin, "canonical")
+    script = contract.human_output_entrypoint(consumer)
+    helper = script.parent / contract.HUMAN_HELPER
+    if initial == "stale":
+        helper.write_bytes(b"# admitted older human-output initializer\n")
+        script.with_suffix(".human-output.json").write_text(
+            contract.human_output_json(script), encoding="utf-8",
+        )
+    else:
+        helper.unlink()
+    monkeypatch.setattr(sync_installer_engine, "REPO", root)
+    monkeypatch.setattr(sync_installer_engine, "CANONICAL_DIR", root / "libs" / "installer-engine")
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", (plugin,) if plugin == "agent-bridge" else ())
+    monkeypatch.setattr(contract, "ADOPTERS", sync_installer_engine.ADOPTERS)
+    monkeypatch.setattr(sync_installer_engine, "PYTHON_ADOPTERS", ())
+    assert sync_installer_engine.verify(phase="development") == []
+    assert sync_installer_engine.verify(phase="materialized")
+    before = {path: path.read_bytes() for path in root.rglob("*") if path.is_file()}
+    candidate = tmp_path / "candidate"
+    shutil.copytree(root, candidate)
+    human_sources = materialize_installer_engine.validate_human_output_sources(root)
+    log = materialize_installer_engine.materialize_refs(
+        candidate, canonical_root=root, human_sources=human_sources,
+    )
+    log.extend(materialize_installer_engine.materialize_human_output_declarations(
+        candidate, canonical_root=root, human_sources=human_sources,
+    ))
+    assert not any(line.startswith("SKIP") for line in log), log
+    emitted = contract.human_output_entrypoint(candidate / "plugins" / plugin)
+    assert (emitted.parent / contract.HUMAN_HELPER).read_bytes() == (
+        root / "libs" / "installer-engine" / contract.HUMAN_HELPER
+    ).read_bytes()
+    assert _human_admission()(emitted)
+    assert {path: path.read_bytes() for path in root.rglob("*") if path.is_file()} == before
 
 
 @pytest.mark.parametrize(
@@ -722,12 +809,14 @@ def test_python_engine_ships_and_checks_all_owned_process_files(fake_repo, monke
 
 
 @pytest.mark.parametrize("plugin", ["agent-pull-requests", "agent-ssh", "agent-codespaces", "agent-bridge"])
-def test_first_use_input_freezer_uses_canonical_projection_owner(plugin):
+def test_first_use_input_freezer_uses_canonical_projection_owner(plugin, tmp_path):
     contract = sync_installer_engine.ier
     consumer = REPO / "plugins" / plugin
     assert consumer in contract.python_adopter_dirs(REPO)
-    for name in (*contract.PYTHON_FILES, *contract.SUPPORT_FILES):
-        assert (consumer / "scripts" / name).read_bytes() == (
+    names = (*contract.PYTHON_FILES, *contract.SUPPORT_FILES)
+    candidate = _materialized_consumer(consumer, tmp_path, names)
+    for name in names:
+        assert (candidate / "scripts" / name).read_bytes() == (
             REPO / "libs" / "installer-engine" / name
         ).read_bytes()
 
@@ -745,24 +834,18 @@ def test_standalone_native_engine_uses_existing_sync_owner(fake_repo, monkeypatc
     monkeypatch.setattr(contract, "STANDALONE_PYTHON_ADOPTERS", ())
     consumer = fake_repo / "libs" / "update-driver"
     consumer.mkdir()
-    for name in (
-        "installer_engine_uninstall.py", "installer_engine_uninstall_darwin.py",
-        "installer_engine_uninstall_windows.py",
-        "installer_engine_footprint.py",
-        "installer_engine_uninstall_controllers.py",
-        "installer_engine_commands.py", "installer_engine_stop.py",
-    ):
+    for name in contract.SUPPORT_FILES:
         (sync_installer_engine.CANONICAL_DIR / name).write_text(
-            "canonical uninstall\n", encoding="utf-8",
+            "canonical native support\n", encoding="utf-8",
         )
     assert len(sync_installer_engine.verify()) == len(contract.STANDALONE_NATIVE_FILES)
     assert len(sync_installer_engine.sync()) == len(contract.STANDALONE_NATIVE_FILES)
     assert sync_installer_engine.verify() == []
-    for name in contract.STANDALONE_NATIVE_FILES:
+    for name in (*contract.STANDALONE_NATIVE_FILES, *contract.SUPPORT_FILES):
         assert (consumer / "scripts" / name).read_bytes() == (
             sync_installer_engine.CANONICAL_DIR / name
         ).read_bytes()
-    (consumer / "scripts" / "installer-engine.ps1").write_text("drift", encoding="utf-8")
+    (consumer / "scripts" / "installer_dependency_config.py").write_text("drift", encoding="utf-8")
     assert len(sync_installer_engine.verify()) == 1
     assert len(sync_installer_engine.sync()) == 1
     assert sync_installer_engine.verify() == []
@@ -1103,6 +1186,383 @@ def test_sync_repairs_python_support_in_both_wrapper_modes(fake_repo, mode, init
         assert (scripts / name).exists() == (mode == "local")
     assert sync_installer_engine.verify() == []
     assert sync_installer_engine.sync() == []
+
+
+def _promotion_installer_source(
+    root: Path, *, stale: bool, consumer_names: set[str] | None = None,
+) -> set[Path]:
+    contract = sync_installer_engine.ier
+    _copy_real_installer_engine(root)
+    canonical = root / "libs" / "installer-engine"
+    for name in contract.PYTHON_FILES:
+        (canonical / name).write_bytes((REPO / "libs" / "installer-engine" / name).read_bytes())
+    consumers = {root / "plugins" / name for name in (*contract.ADOPTERS, *contract.PYTHON_ADOPTERS)}
+    consumers.update(root / name for name in (
+        *contract.STANDALONE_PYTHON_ADOPTERS, *contract.STANDALONE_NATIVE_ADOPTERS,
+    ))
+    if consumer_names is not None:
+        consumers = {consumer for consumer in consumers if consumer.name in consumer_names}
+    for consumer in consumers:
+        scripts = consumer / "scripts"
+        scripts.mkdir(parents=True, exist_ok=True)
+        if consumer.parent.name == "plugins" and consumer.name in contract.ADOPTERS:
+            _write_canonical_refs(scripts)
+        if stale:
+            (scripts / "installer_engine_commands.py").write_bytes(b"# reviewed old derived helper\n")
+    (root / "unrelated.txt").write_bytes(b"retain")
+    foreign = root / "plugins" / "foreign" / "scripts"
+    foreign.mkdir(parents=True)
+    (foreign / "installer_engine_commands.py").write_bytes(b"# foreign command owner\n")
+    return consumers
+
+
+@pytest.mark.parametrize("stale", [False, True], ids=["absent", "stale"])
+def test_promotion_materializes_all_declared_installer_consumers_without_source_writes(tmp_path, stale):
+    import materialize_installer_engine as materializer
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    consumers = _promotion_installer_source(source, stale=stale)
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    shutil.copytree(source, candidate)
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert not any(line.startswith("SKIP") for line in log), log
+    assert len(consumers) == 15
+    for consumer in consumers:
+        actual = candidate / consumer.relative_to(source) / "scripts" / "installer_engine_commands.py"
+        assert actual.read_bytes() == before[Path("libs/installer-engine/installer_engine_commands.py")]
+    for plugin in sync_installer_engine.ier.ADOPTERS:
+        for ext in ("ps1", "sh"):
+            consumer = candidate / "plugins" / plugin
+            ref = sync_installer_engine.ier.find_engine_ref(consumer / "scripts" / f"install.{ext}", ext)
+            assert sync_installer_engine.ier.is_local_ref(ref, consumer)
+    assert (candidate / "unrelated.txt").read_bytes() == b"retain"
+    assert (candidate / "plugins/foreign/scripts/installer_engine_commands.py").read_bytes() == b"# foreign command owner\n"
+    assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+
+
+def test_hosted_candidate_verifier_uses_candidate_canonical_helpers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ast
+    import yaml
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    canonical = source / "libs/installer-engine"
+    canonical.mkdir(parents=True)
+    for name in ("installer-engine.ps1", "installer-engine.sh", "installer_engine_process.py"):
+        (canonical / name).write_bytes(b"# fixture\n")
+    helper_name = "installer_engine_commands.py"
+    (canonical / helper_name).write_bytes(b"# canonical helper\n")
+    scripts = _mk_plugin_scripts(source, "agent-python")
+    shutil.copyfile(canonical / helper_name, scripts / helper_name)
+    monkeypatch.setattr(sync_installer_engine, "ADOPTERS", ())
+    monkeypatch.setattr(sync_installer_engine, "PYTHON_ADOPTERS", ("agent-python",))
+    monkeypatch.setattr(sync_installer_engine.ier, "PYTHON_FILES", (helper_name,))
+    monkeypatch.setattr(sync_installer_engine.ier, "SUPPORT_FILES", ())
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    shutil.copytree(source, candidate)
+    monkeypatch.setattr(sync_installer_engine, "CANONICAL_DIR", source / "libs/installer-engine")
+    monkeypatch.setattr(sync_installer_engine, "REPO", source)
+    workflow = yaml.safe_load(
+        (REPO / ".github/workflows/bootstrap-update-native-acceptance.yml").read_text(),
+    )
+    program = workflow["jobs"]["promotion-copies"]["steps"][-1]["run"]
+    program = program.split("python -B - <<'PY'\n", 1)[1].rsplit("\nPY", 1)[0]
+    bindings = [
+        node for node in ast.walk(ast.parse(program))
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+            and target.value.id == "sync" and target.attr in {"REPO", "CANONICAL_DIR"}
+            for target in node.targets
+        )
+    ]
+    exec(compile(ast.Module(body=bindings, type_ignores=[]), "<hosted-candidate-bindings>", "exec"), {
+        "sync": sync_installer_engine, "candidate": candidate,
+    })
+    assert sync_installer_engine.verify() == []
+    helper = candidate / "libs/installer-engine" / helper_name
+    helper.write_bytes(helper.read_bytes() + b"\n# candidate canonical drift\n")
+    assert any("differs from canonical Python engine" in problem
+               for problem in sync_installer_engine.verify())
+    assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("change", ["foreign", "directory", "shared-inode"])
+def test_promotion_refuses_foreign_or_nonordinary_derived_slots_before_writes(tmp_path, change):
+    import materialize_installer_engine as materializer
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    _promotion_installer_source(source, stale=True)
+    shutil.copytree(source, candidate)
+    target = candidate / "plugins/agent-vault/scripts/installer_engine_commands.py"
+    target.unlink()
+    if change == "foreign":
+        target.write_bytes(b"# unreviewed candidate replacement\n")
+    elif change == "directory":
+        target.mkdir()
+    else:
+        os.link(source / "libs/installer-engine/installer_engine_commands.py", target)
+    untouched = candidate / "plugins/agent-bridge/scripts/installer_engine_commands.py"
+    before = untouched.read_bytes()
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert any(line.startswith("SKIP") for line in log), log
+    assert untouched.read_bytes() == before
+
+
+@pytest.mark.parametrize("same_root", [True, False], ids=["same-root", "separate-root"])
+@pytest.mark.parametrize("stale", [False, True], ids=["absent", "stale"])
+def test_promotion_refreshes_locally_referenced_native_writers(tmp_path, same_root, stale):
+    import materialize_installer_engine as materializer
+
+    source = tmp_path / "source"
+    _promotion_installer_source(source, stale=False, consumer_names={"agent-vault"})
+    scripts = source / "plugins/agent-vault/scripts"
+    for ext in ("ps1", "sh"):
+        (scripts / f"install.{ext}").write_text(
+            sync_installer_engine.ier.local_line(ext) + "\n", encoding="utf-8",
+        )
+        if stale:
+            (scripts / f"installer-engine.{ext}").write_bytes(b"# reviewed previous writer\n")
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    candidate = source if same_root else tmp_path / "candidate"
+    if not same_root:
+        shutil.copytree(source, candidate)
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert not any(line.startswith("SKIP") for line in log), log
+    for ext in ("ps1", "sh"):
+        relative = Path(f"libs/installer-engine/installer-engine.{ext}")
+        assert (candidate / f"plugins/agent-vault/scripts/installer-engine.{ext}").read_bytes() == before[relative]
+        assert (source / relative).read_bytes() == before[relative]
+        assert sync_installer_engine.ier.is_local_ref(
+            sync_installer_engine.ier.find_engine_ref(candidate / f"plugins/agent-vault/scripts/install.{ext}", ext),
+            candidate / "plugins/agent-vault",
+        )
+    if not same_root:
+        assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+
+
+@pytest.mark.parametrize("initial", ["absent", "dev-copy"])
+def test_materialized_vault_copied_recognizer_preserves_foreign_commands(tmp_path, monkeypatch, initial):
+    import materialize_installer_engine as materializer
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    _promotion_installer_source(source, stale=False, consumer_names={"agent-vault"})
+    source_payload = source / "plugins/agent-vault"
+    scripts = source_payload / "scripts"
+    actual_scripts = REPO / "plugins/agent-vault/scripts"
+    (source_payload / "plugin.json").write_bytes((actual_scripts.parent / "plugin.json").read_bytes())
+    for name in ("install.sh", "install.ps1", "install.human-output.json", "installer-human-output.ps1"):
+        (scripts / name).write_bytes((actual_scripts / name).read_bytes())
+    if initial == "dev-copy":
+        (scripts / "installer_engine_commands.py").write_bytes(
+            (actual_scripts / "installer_engine_commands.py").read_bytes(),
+        )
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    payload = candidate / "plugins/agent-vault"
+    shutil.copytree(source_payload, payload)
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert not any(line.startswith("SKIP") for line in log), log
+    assert not (candidate / "libs").exists()
+    assert (payload / "plugin.json").read_bytes() == before[Path("plugins/agent-vault/plugin.json")]
+    canonical = source / "libs/installer-engine"
+    commands_path = payload / "scripts/installer_engine_commands.py"
+    assert commands_path.read_bytes() == before[Path("libs/installer-engine/installer_engine_commands.py")]
+    for name in ("installer_engine_uninstall.py", "installer-engine.sh", "installer-engine.ps1"):
+        assert (payload / "scripts" / name).read_bytes() == (canonical / name).read_bytes()
+
+    spec = importlib.util.spec_from_file_location(
+        "materialized_vault_uninstall_consumer", payload / "scripts/installer_engine_uninstall.py",
+    )
+    assert spec is not None and spec.loader is not None
+    subject = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, spec.name, subject)
+    spec.loader.exec_module(subject)
+    assert subject._local_bindings.__code__.co_filename == str(payload / "scripts/installer_engine_uninstall.py")
+    assert subject._dependency(payload, commands_path.name) == commands_path
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+    root = home / ".agent-vault"
+    profile = subject.profile_for(payload, "agent-vault")
+    directory = home / ".local/bin"
+    directory.mkdir(parents=True)
+    stub = directory / "agent-vault"
+    content = f'# old resolve-runtime {root} {profile.module}\nexec operator-tool "$@"\n'
+    stub.write_text(content, encoding="utf-8")
+    assert subject._local_bindings(payload, root, profile) == (directory, ())
+    assert stub.read_text(encoding="utf-8") == content
+
+    loaded = [
+        module for name, module in sys.modules.items()
+        if name.startswith("_finite_uninstall_") and getattr(module, "__file__", None) == str(commands_path)
+    ]
+    assert len(loaded) == 1
+    commands = loaded[0]
+    assert commands.owned_local_names.__code__.co_filename == str(commands_path)
+    templates = commands._templates(payload, root, "agent-vault")
+    owned_text = templates["agent-vault"][0]
+    assert "_scope_requested=0" in owned_text
+    stub.write_text(owned_text, encoding="utf-8")
+    assert subject._local_bindings(payload, root, profile) == (directory, ("agent-vault",))
+    assert stub.read_text(encoding="utf-8") == owned_text
+    assert before == {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+
+
+def test_promotion_refuses_linked_derived_slot(tmp_path, native_file_symlink):
+    import materialize_installer_engine as materializer
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    _promotion_installer_source(source, stale=False)
+    shutil.copytree(source, candidate)
+    outside = tmp_path / "foreign.py"
+    outside.write_bytes(b"# retain foreign bytes\n")
+    target = candidate / "plugins/agent-vault/scripts/installer_engine_commands.py"
+    native_file_symlink(target, outside)
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert any(line.startswith("SKIP") for line in log), log
+    assert outside.read_bytes() == b"# retain foreign bytes\n"
+
+
+def test_promotion_checks_actual_postwrite_bytes_before_reporting_success(tmp_path, monkeypatch):
+    import materialize_installer_engine as materializer
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    _promotion_installer_source(source, stale=True, consumer_names={"agent-vault"})
+    shutil.copytree(source, candidate)
+    target = candidate / "plugins/agent-vault/scripts/installer_engine_commands.py"
+    canonical = source / "libs/installer-engine/installer_engine_commands.py"
+    expected = canonical.read_bytes()
+    original = Path.write_bytes
+    written = []
+
+    def corrupt_after_real_write(path, content):
+        result = original(path, content)
+        if path == target:
+            written.append(content)
+            original(path, b"# changed after the real canonical write\n")
+        return result
+
+    monkeypatch.setattr(Path, "write_bytes", corrupt_after_real_write)
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert written == [expected]
+    assert target.read_bytes() != expected
+    assert canonical.read_bytes() == expected
+    assert any(line.startswith("SKIP") and "postwrite bytes" in line for line in log), log
+    assert not any(line.startswith("OK") for line in log), log
+
+
+@pytest.mark.parametrize("initial", ["absent", "stale", "foreign"])
+@pytest.mark.parametrize("reference", ["local", "canonical"])
+def test_single_consumer_release_wrapper_refreshes_local_reference_assets(tmp_path, initial, reference):
+    import materialize_main
+    import materialize_installer_engine as materializer
+
+    source = tmp_path / "source"
+    _promotion_installer_source(source, stale=initial != "absent", consumer_names={"agent-vault"})
+    consumer = source / "plugins/agent-vault"
+    if reference == "local":
+        _write_local_refs(consumer / "scripts")
+    candidate = tmp_path / "preview"
+    shutil.copytree(consumer, candidate)
+    target = candidate / "scripts/installer_engine_commands.py"
+    if initial == "foreign":
+        target.write_bytes(b"# foreign replacement\n")
+    before = {path.relative_to(source): path.read_bytes() for path in source.rglob("*") if path.is_file()}
+    candidate_before = {path.relative_to(candidate): path.read_bytes()
+                        for path in candidate.rglob("*") if path.is_file()}
+    log = materialize_main.materialize_installer_engine_ref_into(
+        source_consumer_dir=consumer, dest_consumer_dir=candidate, canonical_root=source,
+    )
+    if initial == "foreign":
+        assert any(line.startswith("SKIP") and "foreign content" in line for line in log), log
+        assert candidate_before == {path.relative_to(candidate): path.read_bytes()
+                                    for path in candidate.rglob("*") if path.is_file()}
+    else:
+        assert log and not any(line.startswith("SKIP") for line in log), log
+        for canonical, emitted in materializer.derived_file_pairs(
+            source, candidate, copied_consumer=(consumer, candidate),
+        ):
+            assert emitted.read_bytes() == canonical.read_bytes()
+    assert before == {path.relative_to(source): path.read_bytes()
+                      for path in source.rglob("*") if path.is_file()}, log
+
+
+def test_promotion_checks_postwrite_single_link_identity(tmp_path, monkeypatch):
+    import materialize_installer_engine as materializer
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    _promotion_installer_source(source, stale=True, consumer_names={"agent-vault"})
+    shutil.copytree(source, candidate)
+    target = candidate / "plugins/agent-vault/scripts/installer_engine_commands.py"
+    extra_link = candidate / "shared-copy.py"
+    original = Path.write_bytes
+    written = []
+
+    def share_after_real_write(path, content):
+        result = original(path, content)
+        if path == target:
+            written.append(content)
+            os.link(path, extra_link)
+        return result
+
+    monkeypatch.setattr(Path, "write_bytes", share_after_real_write)
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert len(written) == 1 and extra_link.read_bytes() == written[0]
+    assert any(line.startswith("SKIP") and "single-link" in line for line in log), log
+    assert not any(line.startswith("OK") for line in log), log
+
+
+def test_promotion_rechecks_canonical_drift_after_all_candidate_writes(tmp_path, monkeypatch):
+    import materialize_installer_engine as materializer
+
+    source, candidate = tmp_path / "source", tmp_path / "candidate"
+    _promotion_installer_source(source, stale=True, consumer_names={"agent-vault"})
+    shutil.copytree(source, candidate)
+    pairs = materializer.derived_file_pairs(source, candidate)
+    last_target = pairs[-1][1]
+    canonical = source / "libs/installer-engine/installer_engine_commands.py"
+    target = candidate / "plugins/agent-vault/scripts/installer_engine_commands.py"
+    expected = canonical.read_bytes()
+    original_write, original_read = Path.write_bytes, Path.read_bytes
+    reads, written = [], []
+
+    def observe_read(path):
+        if path == canonical:
+            reads.append(path)
+        return original_read(path)
+
+    def change_source_after_last_write(path, content):
+        result = original_write(path, content)
+        if path == last_target:
+            written.append(path)
+            original_write(canonical, expected + b"\n# changed during candidate writes\n")
+        return result
+
+    monkeypatch.setattr(Path, "read_bytes", observe_read)
+    monkeypatch.setattr(Path, "write_bytes", change_source_after_last_write)
+    log = materializer.materialize_refs(candidate, canonical_root=source)
+    assert written == [last_target]
+    assert reads == [canonical, canonical, canonical]
+    assert original_read(target) == expected
+    assert original_read(canonical) != expected
+    assert any(line.startswith("SKIP") and "canonical source changed during composition" in line for line in log), log
+    assert not any(line.startswith("OK") for line in log), log
+
+
+def test_development_layout_is_not_materialized_copy_qualification(fake_repo, monkeypatch):
+    contract = sync_installer_engine.ier
+    monkeypatch.setattr(contract, "ADOPTERS", sync_installer_engine.ADOPTERS)
+    scripts = _mk_plugin_scripts(fake_repo, "agent-registered")
+    _write_local_refs(scripts)
+    for name in contract.FILES:
+        (scripts / name).write_bytes(b"# stale derived native writer\n")
+    assert sync_installer_engine.verify(phase="development") == []
+    assert sync_installer_engine.verify(phase="materialized")
+    (scripts / contract.FILES[0]).unlink()
+    (scripts / contract.FILES[0]).mkdir()
+    assert sync_installer_engine.verify(phase="development")
 
 
 def test_sync_refuses_symlinked_canonical_engine_in_local_mode(fake_repo, native_file_symlink):

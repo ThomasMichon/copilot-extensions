@@ -29,6 +29,48 @@ function fixture(options = {}) {
   };
 }
 
+test("auth wait freezes sends without laundering native control or uncertain operations", async () => {
+  const states = [];
+  const f = fixture({ observeState: (state) => states.push(state) });
+  try {
+    const operation = f.prompt();
+    const frozen = f.adapter.authWait();
+    assert.equal(frozen.pending, true);
+    assert.equal(frozen.waiting, true);
+    assert.match((await f.prompt(2)).error.message, /unavailable/);
+    f.event("user.message", { content: "native input while stopping" });
+    assert.match((await operation).error.message, /Native input took control/);
+    assert.equal(f.adapter.authWait().controlled, false);
+    assert.equal(f.sent.length, 1);
+    assert.ok(states.some((state) => state.pending && state.waiting));
+  } finally { f.adapter.close(); }
+  assert.equal(states.at(-1).closed, true);
+});
+
+test("idle auth wait is reversible only through a new receiving incarnation", async () => {
+  const f = fixture();
+  try {
+    assert.deepEqual(f.adapter.authWait(), {
+      controlled: true, closed: false, pending: false,
+      sending: false, outstanding: false, waiting: true,
+    });
+    assert.match((await f.prompt()).error.message, /unavailable/);
+    assert.equal(f.sent.length, 0);
+    assert.equal(typeof f.adapter.authRenew, "undefined");
+  } finally { f.adapter.close(); }
+});
+
+test("an unobserved launch seed remains outstanding at auth stop", () => {
+  const f = fixture({ startupPrompt: "original seed" });
+  try {
+    assert.equal(f.adapter.authWait().outstanding, true);
+    f.event("user.message", { content: "original seed" });
+    assert.equal(f.adapter.authWait().outstanding, true);
+    f.event("session.idle");
+    assert.equal(f.adapter.authWait().outstanding, false);
+  } finally { f.adapter.close(); }
+});
+
 test("literal text goes to one native session and stale idle cannot complete it", async () => {
   const f = fixture();
   try {
@@ -224,7 +266,7 @@ test("unknown native send or intervening human input permanently holds delivery 
   }
 });
 
-test("a missed startup observation cannot exempt later identical human input after controlled admission", async () => {
+test("startup observation gates dispatch without revoking control or exempting later human input", async () => {
   for (const method of ["session/prompt", "copilot-driver/native-send"]) {
     const f = fixture({ startupPrompt: "original seed" });
     f.session.send = async (options) => {
@@ -233,7 +275,7 @@ test("a missed startup observation cannot exempt later identical human input aft
       return "actual-native-id";
     };
     try {
-      const request = f.adapter.handle({
+      const request = () => f.adapter.handle({
         jsonrpc: "2.0", id: 1, method,
         params: {
           sessionId: f.session.sessionId,
@@ -242,11 +284,79 @@ test("a missed startup observation cannot exempt later identical human input aft
             : { prompt: "remote work", mode: "enqueue" }),
         },
       });
-      if (method === "copilot-driver/native-send") assert.ok((await request).result);
+      const early = await Promise.race([request(), tick().then(() => null)]);
+      assert.ok(early?.error, "Startup must refuse before dispatch, not leave a native prompt pending");
+      assert.match(early.error.message, /startup.*not ready/i);
+      assert.equal(f.sent.length, 0);
+      f.event("session.idle");
+      assert.match((await request()).error.message, /startup.*not ready/i);
+      assert.equal(f.sent.length, 0);
+      f.event("user.message", { source: "user", content: "original seed" }, { id: "original" });
+      f.event("session.idle");
+      const admitted = request();
+      if (method === "copilot-driver/native-send") assert.ok((await admitted).result);
       f.event("user.message", { source: "user", content: "original seed" });
-      if (method === "session/prompt") assert.match((await request).error.message, /Native input took control/);
+      if (method === "session/prompt") assert.match((await admitted).error.message, /Native input took control/);
       assert.match((await f.prompt(2)).error.message, /unavailable/);
       assert.equal(f.sent.length, 1);
     } finally { f.adapter.close(); }
   }
+});
+
+test("seed acceptance permits native enqueue but not an ACP turn mixed with the original turn", async () => {
+  const f = fixture({ startupPrompt: "original seed" });
+  const status = () => f.adapter.handle({
+    jsonrpc: "2.0", id: "status", method: "copilot-driver/input-status",
+    params: { sessionId: f.session.sessionId },
+  });
+  f.session.send = async (options) => {
+    f.sent.push(options);
+    f.event("user.message", { source: options.source, content: options.prompt });
+    return "native-message-id";
+  };
+  try {
+    const initialized = await f.adapter.handle({
+      jsonrpc: "2.0", id: "init", method: "initialize", params: { protocolVersion: 1 },
+    });
+    assert.equal(initialized.result._meta.inputReadiness.version, 1);
+    assert.equal((await status()).result.startupSeed, "pending");
+    f.event("user.message", { content: "original seed" }, { id: "startup" });
+    assert.deepEqual((await status()).result, {
+      sessionId: f.session.sessionId, startupSeed: "observed", startupTurn: "active",
+      nativeSend: "ready", prompt: "pending",
+    });
+    assert.match((await f.prompt()).error.message, /startup.*not ready/i);
+    assert.equal(f.sent.length, 0);
+    assert.equal((await f.adapter.handle({
+      jsonrpc: "2.0", id: "enqueue", method: "copilot-driver/native-send",
+      params: { sessionId: f.session.sessionId, prompt: "queued work", mode: "enqueue" },
+    })).result.messageId, "native-message-id");
+    assert.equal((await status()).result.startupTurn, "active");
+    f.event("session.idle");
+    assert.equal((await status()).result.startupTurn, "idle-observed");
+    const prompt = f.prompt();
+    f.event("session.idle");
+    assert.equal((await prompt).result.stopReason, "end_turn");
+    assert.equal(f.sent.length, 2);
+  } finally { f.adapter.close(); }
+});
+
+test("no seed is not a restoration or idle claim, and status cannot thaw an auth freeze", async () => {
+  const f = fixture();
+  const status = (sessionId = f.session.sessionId) => f.adapter.handle({
+    jsonrpc: "2.0", id: "status", method: "copilot-driver/input-status", params: { sessionId },
+  });
+  try {
+    assert.deepEqual((await status()).result, {
+      sessionId: f.session.sessionId, startupSeed: "not-requested", startupTurn: "not-requested",
+      nativeSend: "ready", prompt: "ready",
+    });
+    assert.ok((await status("different-native")).error);
+    f.adapter.authWait();
+    assert.equal((await status()).result.nativeSend, "unavailable");
+    assert.equal((await status()).result.prompt, "unavailable");
+    assert.match((await f.prompt()).error.message, /unavailable/);
+    assert.equal(f.sent.length, 0);
+  } finally { f.adapter.close(); }
+  assert.equal((await status()).result.nativeSend, "unavailable");
 });

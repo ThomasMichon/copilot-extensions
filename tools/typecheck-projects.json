@@ -8,6 +8,12 @@
   "requirements": "tools/typecheck-requirements.txt",
   "projects": [
     {
+      "name": "lib-pr-filters",
+      "include": ["libs/pr-filters"],
+      "exclude": [],
+      "level": "strict"
+    },
+    {
       "name": "checker",
       "include": [
         "tools/typecheck.py",
@@ -478,7 +484,7 @@
         "plugins/agent-roles"
       ],
       "exclude": [],
-      "level": "pending"
+      "level": "strict"
     },
     {
       "name": "agent-ssh",
@@ -597,6 +603,7 @@
     },
     {
       "name": "service-pr",
+      "import_roots": ["plugins/ai-attribution/scripts"],
       "include": [
         "services/pr"
       ],

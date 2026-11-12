@@ -29,6 +29,7 @@ CLUSTER_FREE_MODULES: frozenset[str] = frozenset({
     "plugin_preparation",
     "pr_author_cli",
     "pr_state_cli",
+    "python_cache_prune",
     "reap_cli",
     "reclaim_cli",
     "record_cli",

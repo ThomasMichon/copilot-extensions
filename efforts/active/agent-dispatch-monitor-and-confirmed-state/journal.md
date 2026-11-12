@@ -6,6 +6,7 @@ Canonical append-only history of [this same Active effort](README.md). Relocatio
 
 ## Dated entries
 
+- [11.07-worker-decline-settlement](journal/2026/11.07-worker-decline-settlement.md)
 - [11.06-retained-acquisition](journal/2026/11.06-retained-acquisition.md)
 - [11.05-submission-resubmission](journal/2026/11.05-submission-resubmission.md)
 - [11.04-container-native-source](journal/2026/11.04-container-native-source.md)

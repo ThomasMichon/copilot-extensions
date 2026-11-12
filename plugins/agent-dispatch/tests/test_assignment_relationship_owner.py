@@ -986,3 +986,38 @@ def test_unsupported_retry_keeps_settlement_callback_undelivered() -> None:
     with pytest.raises(RuntimeError, match="no complete retry"):
         failure.retry_cleanup(deadline=time.monotonic() + 1)
     notify.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr", "expected"),
+    [
+        (1, json.dumps({"ok": False, "error": "relationship token is stale"}), "",
+         "(close: relationship token is stale)"),
+        (1, json.dumps({"error": "rejected", "message": "token does not match"}), "",
+         "(close: rejected: token does not match)"),
+        (2, "", "trace\nagent-worktrees: owner lock held\n", "(close: agent-worktrees: owner lock held)"),
+    ],
+)
+def test_refused_relationship_write_retains_the_owners_bounded_reason(
+    monkeypatch, tmp_path, returncode, stdout, stderr, expected,
+):
+    workspace = AssignmentWorkspace("host", "project", "worktree", str(tmp_path), "original")
+
+    def capture(argv, **kwargs):
+        if "capabilities" in argv:
+            return subprocess.CompletedProcess(argv, 0, json.dumps(support()), "")
+        if "record" in argv:
+            value = {"ok": True, "worktree": {
+                "id": workspace.worktree, "repo": workspace.project,
+                "path": workspace.path, "creation_nonce": workspace.creation_nonce,
+            }}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(value), "")
+        return subprocess.CompletedProcess(argv, returncode, stdout, stderr)
+
+    monkeypatch.setattr(module, "run_background_capture", capture)
+    writer = module.WorktreeRelationshipWriter(
+        ["/selected/python", "-m", "agent_worktrees"], admit_workspace=lambda *_: None,
+    )
+    with pytest.raises(TaskError) as raised:
+        writer(workspace, "close", {"token": "t"})
+    assert str(raised.value) == f"selected Worktrees relationship result is unconfirmed {expected}"

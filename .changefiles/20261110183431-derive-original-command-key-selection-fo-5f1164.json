@@ -1,0 +1,9 @@
+{
+  "comment": "Derive original command-key selection for prepared exact-literal reads",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

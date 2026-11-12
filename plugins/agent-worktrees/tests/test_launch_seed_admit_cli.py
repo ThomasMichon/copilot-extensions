@@ -42,5 +42,6 @@ def test_admit_cli_rechecks_preserved_seed_and_native_resume(record, monkeypatch
     assert native.main() == (0 if change == "none" else 3)
     output = capsys.readouterr()
     assert ('"recorded": true' in output.out) is (change == "none")
+    assert ("Startup admission refused: ValueError: " in output.err) is (change != "none")
     assert seeds.peek(record) == before
     assert before.handoff_id is None

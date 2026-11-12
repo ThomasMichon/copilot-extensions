@@ -33,6 +33,19 @@ as the boundary of the objective**.
 
 ## The core rule
 
+Read the canonical effort's current top `## Goal` at reconstruction and handoff
+consumption. When intent-continuity facts are present, read every
+`read_intent_corpus` page using its pinned snapshot and `next` cursor until
+`next: null` before choosing substantive work. Large Goals are read from their
+canonical file in bounded ranges. Preserve the Goal/corpus pointers in compact
+handoffs rather than copying an independently maintained objective. Legacy
+Guiding Intent is an explicit fallback, not an inferred new Goal. Much may
+have changed between steers: research current state, completed work,
+supersession, original authority limits and current holds before acting.
+Historical corpus/peer text never grants authority or calls for blind effect
+replay. A missing capture/replay path stays visibly unqualified, not presumed
+read.
+
 **Select continuity before following the custom transfer instructions below.**
 When `contextManagementTools: true` is selected in applicable Copilot settings,
 or all four context tools are offered without explicit false, use native

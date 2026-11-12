@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse managed native JSON decoding for PS7 pre-tool policy input",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

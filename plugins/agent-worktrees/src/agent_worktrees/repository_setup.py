@@ -177,14 +177,18 @@ class SSHKeySelection:
     entry: str
     directory: str
     fingerprint: str
+    owner: str | None = None
 
 
-def _ssh_key(value: object) -> SSHKeySelection | None:
+def _ssh_key(value: object, *, installed: bool = False) -> SSHKeySelection | None:
     if value is None:
         return None
-    item = _fields(value, {"argv", "configuration_root", "entry", "directory", "fingerprint"})
-    argv = item["argv"]
-    if (
+    selector = "owner" if installed else "argv"
+    item = _fields(value, {selector, "configuration_root", "entry", "directory", "fingerprint"})
+    argv = [] if installed else item["argv"]
+    if installed and item["owner"] != "agent-vault":
+        raise SetupError("Selected SSH key requires the installed agent-vault owner.")
+    if not installed and (
         not isinstance(argv, list) or not 1 <= len(argv) <= 16
         or any(not isinstance(arg, str) or not arg or len(arg) > 2048
                or any(ord(c) < 32 for c in arg) for arg in argv)
@@ -208,7 +212,10 @@ def _ssh_key(value: object) -> SSHKeySelection | None:
         or re.fullmatch(r"SHA256:[A-Za-z0-9+/]{42}[AEIMQUYcgkosw048]", item["fingerprint"]) is None
     ):
         raise SetupError("Selected Vault requires a bounded entry and canonical public-key fingerprint.")
-    return SSHKeySelection(tuple(argv), **{name: item[name] for name in item if name != "argv"})
+    return SSHKeySelection(
+        tuple(argv), **{name: item[name] for name in item if name != selector},
+        owner="agent-vault" if installed else None,
+    )
 
 
 @dataclass(frozen=True)
@@ -240,7 +247,7 @@ def inspect(path: Path, url: str) -> Setup:
     declaration = _tracked(source.path, DECLARATION)
     value = _json(declaration)
     version = value.get("version")
-    if type(version) is not int or version not in (1, 2, 3, 4):
+    if type(version) is not int or version not in (1, 2, 3, 4, 5):
         raise SetupError("Unsupported repository setup version.")
     _fields(value, {"version", "entrypoints"} | ({"contexts"} if version >= 2 else set()))
     contexts = []
@@ -252,7 +259,7 @@ def inspect(path: Path, url: str) -> Setup:
             if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,63}", name):
                 raise SetupError("Repository context name is invalid.")
             item = _fields(item, {"provider", "source"} | ({"ssh_setup"} if version >= 3 else set())
-                           | ({"ssh_key"} if version == 4 else set()))
+                           | ({"ssh_key"} if version >= 4 else set()))
             if item["provider"] != "local-projection-v1":
                 raise SetupError("Unsupported continuity provider.")
             reference = item["source"]
@@ -267,7 +274,7 @@ def inspect(path: Path, url: str) -> Setup:
                 or not Path(ssh_setup).expanduser().is_absolute()
             ):
                 raise SetupError("SSH setup requires an absolute or home-relative reference.")
-            ssh_key = _ssh_key(item.get("ssh_key"))
+            ssh_key = _ssh_key(item.get("ssh_key"), installed=version == 5)
             if ssh_key is not None and ssh_setup is None:
                 raise SetupError("Selected Vault SSH key requires an explicit SSH setup request.")
             contexts.append(ContinuityContext(name, item["provider"], reference, ssh_setup, ssh_key))
@@ -367,7 +374,11 @@ def _call(setup: Setup, mode: str) -> Outcome:
         environment[ENGINE_PYTHON] = os.path.abspath(sys.executable)
         environment[ENGINE_CONTEXT] = json.dumps({
             "schema": "copilot-extensions.repository-setup-engine", "version": 1,
-            "argv": [environment[ENGINE_PYTHON], "-I", "-m", "agent_worktrees"],
+            "argv": [
+                environment[ENGINE_PYTHON], "-I",
+                *(["-B"] if sys.dont_write_bytecode else []),
+                "-m", "agent_worktrees",
+            ],
             "capabilities": {
                 "new_admission": _json(Path(__file__).with_name("new-admission-v1.json")),
             },

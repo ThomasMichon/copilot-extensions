@@ -380,3 +380,41 @@ def test_failure_does_not_finish_the_turn_and_probes_name_credentials() -> None:
     assert "a reported failure does not finish the turn" in checks
     assert "| Turn end after failure |" in checks
     assert "names the exact credential reference" in loop
+
+
+def test_fleet_run_learnings_keep_reads_passive_and_receipts_exact() -> None:
+    skill = " ".join(_read(SKILL / "SKILL.md").split())
+    charter = " ".join(_read(SKILL / "assets" / "CHARTER.md").split())
+    readers = " ".join(_read(SKILL / "references" / "fabric-readers.md").split())
+    steering = " ".join(_read(SKILL / "references" / "steering.md").split())
+    checks = " ".join(_read(SKILL / "references" / "watchdog-checks.md").split())
+    assert "`AGENT_BRIDGE_NO_ENSURE=1`" in readers
+    assert "A reader run without the switch is not read-only" in readers
+    assert "read the bound topology manifest by its explicit path" in readers
+    assert "not stopped or complete" in readers
+    assert "never selects an alternate steering recipient" in readers
+    for requirement in (
+        "the original body file",
+        "including any trailing newline",
+        "not that delivery failed; correct the binding, never resend",
+        "not that the requested action ran",
+        "record the stage and observation time, reobserve, never replay",
+    ):
+        assert requirement in steering, requirement
+    for requirement in (
+        "Hold work to the original acceptance gate, not a stricter one",
+        "does not prove a wedged process",
+        "Do not rerun an unavailable question reader",
+        "can name a constituent model while the selected model is unchanged",
+    ):
+        assert requirement in checks, requirement
+    assert "Model requirement:" in charter
+    assert "Adaptive cadence:" in charter
+    assert "replacing the one owned schedule" in skill
+    assert "never run two" in skill
+    scenarios = json.loads(_read(SKILL / "assets" / "scenarios.json"))
+    assert {
+        "receipt-binding-conflict-not-failure",
+        "constituent-model-notice",
+        "adaptive-cadence-single-schedule",
+    } <= {case["id"] for case in scenarios["cases"]}

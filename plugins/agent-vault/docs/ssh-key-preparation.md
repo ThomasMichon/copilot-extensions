@@ -7,10 +7,28 @@ selected existing KeePass database. It returns **only public metadata**:
 {"version":1,"status":"reused","public_key":"ssh-ed25519 <base64>","fingerprint":"SHA256:<digest>"}
 ```
 
-Use the owning payload's session-catalog command. The optional `ssh` extra
-(`agent-vault[ssh]`) supplies cryptographic generation and pair validation;
-missing support produces `crypto_unavailable`, not a replacement key or
+Use the owning payload's session-catalog command. Select the native installer's
+[`ssh` dependency profile](../README.md#dependency-profiles), which installs
+the optional `agent-vault[ssh]` extra in a separate immutable runtime. It supplies
+PyCryptodome (`pycryptodomex`, isolated `Cryptodome` namespace) for Ed25519
+generation and pair validation, including native Windows ARM64 wheels.
+The schema-v1 record and unencrypted OpenSSH private-key format are unchanged;
+existing keys are imported and validated without conversion or rotation.
+Missing support produces `crypto_unavailable`, not a replacement key or
 fallback implementation. Other Vault commands do not require the extra.
+
+The focused `tests/test_ssh_key.py` and `tests/test_protected_crypto.py` controls
+cover OpenSSH interoperability, independent Fernet/AES-GCM vectors, malformed
+records, wrong keys and tampering. Cross-backend controls additionally use
+`cryptography` where that test dependency has a supported wheel.
+The opt-in native `tests/native/test_runtime_profile.py` packet uses disposable
+installed runtimes and protected fixtures, not a production database or service.
+Select the complete `TestNativeProfileSequence` class: its ordered stages share
+one installation and retain base-to-SSH, repeat, upgrade and byte-preservation
+assertions under the runner's file-group limit. The separate
+`test_native_profile_failed_dependency_preserves_installed_consumer` case
+verifies refusal and continued use of the incumbent. These are functional
+contracts, not installation-performance or live-enrollment acceptance.
 
 ```text
 <agent-vault catalog argv[0]> ssh-key prepare --entry SSH/node-a --json
@@ -111,6 +129,10 @@ directories and `0600` files. Existing locations must already meet that contract
 installation never repairs or broadens their permissions. Links, special files,
 different keys and noncanonical contents are refused without overwriting them.
 Files are flushed and published exclusively, not truncated or replaced.
+Concurrent publication is serialized for the same physical directory: Windows
+uses a cross-session TokenUser/SYSTEM-protected global kernel mutex; POSIX uses
+its directory flock.
+Both waits are bounded, and no persistent lock file is added beside the keys.
 
 Success returns schema version 1, public key/fingerprint, `private_key_path`,
 `public_key_path` and `status` (`installed`, `reused` or `recovered`).
@@ -126,6 +148,24 @@ declarative-setup/provider-custody contract. It does not make Vault a dependency
 of ordinary agent-ssh transports or change their in-band key lifecycle.
 
 ## Qualification
+
+The explicitly selected `tests/native/test_runtime_profile.py` packet enters the
+real native installer and canonical constructor with actual UV, isolated homes
+and a loopback artifact-index fixture carrying explicit upload timestamps.
+It checks separate base/SSH slots, unchanged completed base bytes, reuse,
+preserved selection on update and actual installed-runtime key prepare/install.
+A prepared-source stamp/provision control removes its publisher, preserves the
+original source receipt separately from the profiled slot and refuses corrupted
+retained helpers without rewriting the completed runtime.
+It also checks ordinary Windows stamp/provision followed by same-version update
+from the original payload, completed-slot immutability, PATH/pruning finalization
+and unselected legacy-base source compatibility. Worktrees' explicitly selected
+`tests/native/test_vault_profile_update.py` passes a collected prepared-source
+step through the real native updater, verifies the profiled completion receipt
+and checks that the next collected plan reports current.
+The copied third-party artifacts and build backend are fixtures; credential IPC
+is substituted. This does not qualify a release feed's artifact age, an operator
+database, installed service, remote enrollment or live synchronization.
 
 `tests/test_ssh_key.py` covers validation, explicit initialization, ordinary
 reuse, failures, uncertain completion, same-service concurrency and the actual

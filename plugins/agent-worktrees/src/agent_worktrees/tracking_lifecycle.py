@@ -474,6 +474,10 @@ def conclude_session(
             f"session {session_id} is not tracked on worktree {record.worktree_id}"
         )
     current = record.resolved_head_session
+    # A yielded head is hidden from resolved_head_session but still owns the
+    # latest transition; concluding it must fence that lineage with a
+    # null-head transition just like an active head.
+    ending_head = current == session_id or yielded_head_session(record) == session_id
     prior_state = entry.state
     _ensure_head_ledger(record)
     entry.state = state
@@ -482,7 +486,7 @@ def conclude_session(
         for handoff in record.handoffs
     ):
         open_handoff(record, session_id, handoff_token, save=False)
-    if current == session_id:
+    if ending_head:
         pending = next(
             (
                 handoff
@@ -496,6 +500,7 @@ def conclude_session(
             None,
             reason=state,
             handoff_ordinal=pending.ordinal if pending else None,
+            related_session_ids=(session_id,),
         )
     elif prior_state != state:
         _next_lifecycle_revision(record, session_id)

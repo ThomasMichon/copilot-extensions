@@ -43,6 +43,11 @@ from rich.segment import Segment, Segments
 DEFAULT_SIZE = (118, 40)
 
 
+def validate_wait_pivot(wait_pivot: float) -> None:
+    if not math.isfinite(wait_pivot) or wait_pivot < 0:
+        raise ValueError("pivot wait must be finite and non-negative")
+
+
 async def _wait_for_initial_setup(scr: Any, pilot: Any, *, timeout: float = 5.0) -> None:
     """Wait until a non-live picker's initial async setup epoch has applied."""
     if not math.isfinite(timeout) or timeout < 0:
@@ -182,7 +187,8 @@ async def capture_async(
       target any tab, including a contributed one.
     - ``wait_pivot`` -- when on a registered pivot, poll (up to this many seconds)
       for its background ``list`` load to finish before capturing, so the snapshot
-      shows real rows instead of a "loading…" spinner. ``0`` disables the wait.
+      shows real rows instead of a "loading…" spinner. Must be finite and
+      non-negative; ``0`` disables the wait.
     - ``update_state`` -- force the engine/marketplace topbar update indicator
       (e.g. ``"current"`` for a clean ✓ instead of a transient "update available").
     - ``manager_update_state`` -- force the Manager's OWN update indicator
@@ -194,6 +200,7 @@ async def capture_async(
     - ``setup_timeout`` -- total bound for initial non-live setup, including
       registry verification and source loading, not a render-speed target.
     """
+    validate_wait_pivot(wait_pivot)
     from .engine import PickerApp, PickerScreen
 
     app = PickerApp(source, live=live)

@@ -13,6 +13,7 @@ from pathlib import Path
 from agent_procutil import no_window_kwargs
 
 from . import config, launch, rendezvous
+from .cache_recovery import status_command as cmd_cache_status
 from .config import IS_WINDOWS, SOCKET_PATH, ResolvedVault
 from .credential_reads import cmd_get
 from .prompt import prompt_password as gui_prompt_password
@@ -296,18 +297,17 @@ def send_command(
     if result is not None:
         return result
 
-    # A discovered Windows named pipe (rung 2) is dialed ahead of TCP; any pipe
-    # failure falls through to the legacy TCP path below.
+    # Strict selection never falls back to another daemon after a failed dial.
     if discovered_pipe is not None and IS_WINDOWS:
         result = pipe_send(discovered_pipe, request, timeout)
-        if result is not None:
+        if result is not None or strict_endpoint:
             return _tag(result, "discovered-pipe")
 
     # A discovered Unix socket (native, possibly non-default path) is dialed
     # ahead of the legacy fixed socket.
     if discovered_unix is not None and not IS_WINDOWS:
         result = _send_socket(request, timeout, path=discovered_unix)
-        if result is not None:
+        if result is not None or strict_endpoint:
             return _tag(result, "discovered-unix")
 
     if discovered_unix is None and not IS_WINDOWS and context.sources.get("port") == "default":
@@ -316,7 +316,7 @@ def send_command(
             return _tag(result, "unix-socket")
 
     result = _send_tcp(request, host, port, timeout)
-    if result is not None:
+    if result is not None or strict_endpoint and discovered is not None:
         is_disc_tcp = discovered is not None and discovered.transport == "tcp"
         return _tag(result, "discovered-tcp" if is_disc_tcp else "tcp")
 
@@ -373,14 +373,14 @@ def start_service(tcp_port: int | None = None) -> bool:
         return False
     if tcp_port is None:
         context = config.resolve_context()
-        if not IS_WINDOWS and context.sources.get("port") == "default" and _start_service_systemd():
+        default_target = context.sources.get("port") == "default"
+        if not IS_WINDOWS and default_target and config.BIND_PORT_ENV not in os.environ and _start_service_systemd():
             return True
-        tcp_port = context.port
+        tcp_port = config.daemon_bind_port(context)
 
     # spawn_daemon already detaches the service; --foreground keeps POSIX's
     # self-daemonize (cwd HOME, stdio to /dev/null) from undoing that launch.
-    args = ["--tcp-port", str(tcp_port)] if tcp_port else []
-    launch.spawn_service([*args, "--foreground"])
+    launch.spawn_service(["--tcp-port", str(tcp_port), "--foreground"])
 
     for _ in range(20):
         time.sleep(0.25)
@@ -783,6 +783,12 @@ def cmd_start(args):
             return 0
     print("Error: failed to start vault service", file=sys.stderr)
     return 1
+
+
+def cmd_source_start(args):
+    from .source_start import command
+
+    return command(args)
 
 
 def cmd_stop(args):
@@ -1368,6 +1374,15 @@ def cmd_cache_populate(args):
     from .cache import get_cache
 
     cache = get_cache()
+    if not args.verify:
+        try:
+            adoption = cache.prepare()
+        except (OSError, RuntimeError, ValueError, ImportError):
+            print("Error: protected cache adoption failed; originals retained", file=sys.stderr)
+            return 1
+        if adoption["state"] == "recovering":
+            print("Protected cache is recovering; originals retained. Only missing live entries are populated.",
+                  file=sys.stderr)
     ok = 0
     failures: list[str] = []
     for entry, field in pairs:
@@ -1383,29 +1398,36 @@ def cmd_cache_populate(args):
             else contextlib.nullcontext()
         )
         failure = None
-        with read_lock:
-            resp = send_command(request, timeout=None if args.prompt else 15.0)
-            present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
-            if (
-                present
-                and not args.verify
-                and cache.enabled
-                and resp.get("value") is not None
-            ):
-                cache_entry = config.normalize_entry(
-                    entry,
-                    config.resolve_context().group,
+        try:
+            with read_lock:
+                resp = send_command(
+                    request, timeout=None if args.prompt else 15.0,
+                    **({"strict_endpoint": True} if cache._recovery else {}),
                 )
-                cache.migrate_entry(entry, cache_entry, field)
-                generation = resp.get("generation")
-                if not cache.reconcile_authoritative(
-                    cache_entry,
-                    field,
-                    resp["value"],
-                    int(generation) if generation is not None else None,
+                present = bool(resp and resp.get("ok") and (resp.get("exists", True)))
+                if (
+                    present
+                    and not args.verify
+                    and cache.enabled
+                    and resp.get("value") is not None
                 ):
-                    present = False
-                    failure = f"cache update failed: {entry} [{field}]"
+                    cache_entry = config.normalize_entry(
+                        entry,
+                        config.resolve_context().group,
+                    )
+                    cache.migrate_entry(entry, cache_entry, field)
+                    generation = resp.get("generation")
+                    update = cache.recover_missing if cache._recovery else cache.reconcile_authoritative
+                    if not update(
+                        cache_entry,
+                        field,
+                        resp["value"],
+                        generation if cache._recovery or generation is None else int(generation),
+                    ):
+                        present = False
+                        failure = f"cache update failed: {entry} [{field}]"
+        except (OSError, RuntimeError, ValueError):
+            present, failure = False, f"cache update failed: {entry} [{field}]"
         if present:
             ok += 1
         else:
@@ -1415,7 +1437,10 @@ def cmd_cache_populate(args):
     if args.verify:
         print(f"Present: {ok}/{len(pairs)}")
     else:
-        print(f"Cached {ok} credential(s), {fail} failed")
+        if cache._recovery:
+            print(f"Current credential records: {ok}, {fail} failed; live recovery remains required")
+        else:
+            print(f"Cached {ok} credential(s), {fail} failed")
     for failure in failures:
         print(f"  {failure}", file=sys.stderr)
     return 1 if fail > 0 else 0
@@ -1431,27 +1456,6 @@ def cmd_cache_clear(args):
         return 0
     print("Error: could not clear cache", file=sys.stderr)
     return 1
-
-
-def cmd_cache_status(args):
-    """Show persistent-cache status (enabled, location, counts, staleness)."""
-    from .cache import get_cache
-
-    status = get_cache().status()
-    if getattr(args, "json", False):
-        print(json.dumps(status, indent=2, sort_keys=True))
-        return 0
-    state = "enabled" if status["enabled"] else "disabled"
-    if not status["available"]:
-        state += " (cryptography unavailable)"
-    print(f"cache: {state}")
-    print(f"dir: {status['cache_dir']}")
-    print(f"entries: {status['entry_count']} ({status['field_count']} field(s))")
-    if status["oldest"]:
-        print(f"oldest: {status['oldest']}")
-    if status["newest"]:
-        print(f"newest: {status['newest']}")
-    return 0
 
 
 def cmd_cache_verify(args):
@@ -1496,7 +1500,7 @@ def cmd_cache_verify(args):
     present = 0
     missing: list[str] = []
     for entry, field in pairs:
-        if cache.get(entry, field) is not None:
+        if cache.get(entry, field, readonly=True) is not None:
             present += 1
         else:
             missing.append(f"{entry} [{field}]")
@@ -1680,9 +1684,9 @@ def _main(argv: list[str] | None = None):
     p.add_argument("--json", action="store_true")
     p.set_defaults(func=ssh_key_install_command)
 
-    from .batch_reads import add_commands as add_read_commands
-
-    add_read_commands(sub, cmd_get)
+    from . import authenticated_curl, batch_reads
+    batch_reads.add_commands(sub, cmd_get)
+    authenticated_curl.add_commands(sub)
 
     p = sub.add_parser("has", help="Check if an entry exists")
     p.add_argument("entry", help="Entry path")
@@ -1703,6 +1707,9 @@ def _main(argv: list[str] | None = None):
 
     p = sub.add_parser("start", help="Start the vault service")
     p.set_defaults(func=cmd_start)
+
+    p = sub.add_parser("__source-start", help=argparse.SUPPRESS, allow_abbrev=False)
+    p.set_defaults(func=cmd_source_start)
 
     p = sub.add_parser("stop", help="Stop the vault service")
     p.set_defaults(func=cmd_stop)

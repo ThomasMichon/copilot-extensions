@@ -61,6 +61,61 @@ def test_capability_matrix(clean_context, monkeypatch, coordinator, owner):
     assert prefix is not None if spec else prefix is None
 
 
+@pytest.mark.parametrize("root_form", ["canonical", "redundant_segments"])
+def test_legacy_default_install_root_negotiates(
+    clean_context, monkeypatch, tmp_path, root_form,
+):
+    from contextlib import nullcontext
+    from agent_dispatch.delegated_waiter_context import capture
+
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    root = str(tmp_path / ".agent-dispatch")
+    if root_form == "redundant_segments":
+        root = str(tmp_path / "unused" / ".." / ".agent-dispatch")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", root)
+    client = SimpleNamespace(health=lambda: {"delegated_run_waiters": {
+        "protocol": PROTOCOL, "coordinator_id": "queue",
+    }})
+    monkeypatch.setattr(procutil, "agent_pull_requests_launch_prefix", lambda: ["attributable"])
+    monkeypatch.setattr(delegation, "owner_request", lambda *_: {
+        "pid": 3, "capabilities": [NOTIFICATIONS],
+    })
+
+    assert capture() == (None, {"AGENT_DISPATCH_INSTALL_DIR": root})
+    spec, prefix, reason = delegation.negotiate(
+        args(), ("real-wait",), lambda _: nullcontext(client),
+    )
+    assert reason == "negotiated"
+    assert prefix == ["attributable"]
+    assert "installation" not in spec
+
+
+@pytest.mark.parametrize("context", ["foreign_root", "relative_root", "default_with_token"])
+def test_legacy_install_override_falls_back_before_probe(
+    clean_context, monkeypatch, tmp_path, context,
+):
+    monkeypatch.delenv("COPILOT_EXTENSIONS_CONTEXT", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+    monkeypatch.chdir(tmp_path)
+    root = str(tmp_path / ".agent-dispatch")
+    if context == "foreign_root":
+        root = str(tmp_path / "custom-dispatch")
+    elif context == "relative_root":
+        root = ".agent-dispatch"
+    else:
+        monkeypatch.setenv("AGENT_DISPATCH_TOKEN", "synthetic-token")
+    monkeypatch.setenv("AGENT_DISPATCH_INSTALL_DIR", root)
+    monkeypatch.setattr(
+        procutil, "agent_pull_requests_launch_prefix", lambda: pytest.fail("no owner probe"),
+    )
+    assert delegation.negotiate(args(), ("real-wait",), None) == (
+        None, None, "caller_context_requires_process",
+    )
+
+
 @pytest.mark.parametrize("capability", [None, [], "future"])
 def test_malformed_coordinator_capability_falls_back(clean_context, monkeypatch, capability):
     from contextlib import nullcontext

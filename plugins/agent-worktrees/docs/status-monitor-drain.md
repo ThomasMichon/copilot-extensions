@@ -65,7 +65,9 @@ prevent reuse; an unavailable segment retains the explicit UNKNOWN reason.
    Native helper-publication callbacks use the plan owner's base interpreter,
    not an independently selected bootstrap Python. Windows file-device identity
    representations differ across Python versions; the exact copy-inventory
-   identity check remains required.
+   identity check remains required. On Windows, a PowerShell Core callback uses
+   an ordinary `-File` spelling while retaining native long-path inputs for
+   Python and the authenticated copy inventory. Execution policy is unchanged.
 2. The cutover helper starts a passive monitor, waits for its bound endpoint,
    then publishes the successor route. Bound readiness is not elected serving
    readiness.
@@ -229,3 +231,27 @@ predecessor received the request nor that its busy oracle was reached. A
 the successor's promotion trace. Generic daemon `ready` also does not prove
 current-roster readiness or agreement among selected slot, manifest, route and
 monitor lock.
+
+## Read-only identity observation
+
+`runtime_monitor_identity.candidate_serving` and `routed_identity` read an
+existing control token from the captured route's runtime root. They never
+create, replace or change permissions on that token. Missing or blank tokens
+make candidate readiness false and ordinary routed identity unavailable.
+Other token-read errors propagate without repair. Explicit service startup
+and mutation paths retain `load_or_create_control_token`; the default
+`ControlClient` constructor is not a read-only API.
+
+Asynchronous-retirement identity may still use the existing native PID/birth,
+unchanged route and matching lock-prefix fallback when authentication is
+unavailable. That fallback is not readiness or an authenticated capability
+claim: `require_capabilities=True` still requires authenticated health.
+
+The provider module advertises `READ_ONLY_OBSERVATION_CAPABILITY` with value
+`worktrees-monitor-observation/read-only-v1` for these two operations only.
+An independently deployed caller that requires non-mutating observation must
+check this capability on its selected provider before invoking either
+operation, and refuse an older provider without it. This is a local provider
+capability, not a new wire request or daemon-health capability. It does not
+certify other probes, authorize replacement, or complete the serving-convergence
+work tracked by [#6389](https://github.com/ThomasMichon/copilot-extensions/issues/6389).

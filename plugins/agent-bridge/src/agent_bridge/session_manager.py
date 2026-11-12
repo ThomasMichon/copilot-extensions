@@ -34,6 +34,7 @@ from .session_recovery_dormancy import (
 )
 from .spawn_target import REQUEST_OVERRIDES_KEY as _REQUEST_OVERRIDES_KEY
 from .transport import SpawnTarget, spawn
+from .startup_progress import _AcpLaunchTiming as _AcpLaunchTiming
 
 if TYPE_CHECKING:
     from .acp_client import AcpClient
@@ -60,42 +61,6 @@ log = logging.getLogger("agent-bridge")
 # after this many rounds all fail is the resume surfaced as a failure (the
 # caller's end+create is then the last resort).
 _MAX_RESUME_ROUNDS = 3
-
-class _AcpLaunchTiming:
-    """Collect low-noise ACP launch sub-step timings for one session launch."""
-
-    def __init__(self, *, session_id: str, mode: str, boundary: str) -> None:
-        self.session_id = session_id
-        self.mode = mode
-        self.boundary = boundary
-        self._started = time.monotonic()
-        self._steps: list[tuple[str, float]] = []
-
-    def add(self, label: str, elapsed_s: float) -> None:
-        self._steps.append((label, max(0.0, float(elapsed_s))))
-
-    def total_s(self) -> float:
-        return max(0.0, time.monotonic() - self._started)
-
-    def step_map_ms(self) -> dict[str, int]:
-        return {
-            label: int(round(elapsed_s * 1000.0))
-            for label, elapsed_s in self._steps
-        }
-
-    def summary(self) -> str:
-        parts = [
-            f"session={self.session_id}",
-            f"mode={self.mode}",
-            f"boundary={self.boundary}",
-        ]
-        parts.extend(
-            f"{label}={int(round(elapsed_s * 1000.0))}ms"
-            for label, elapsed_s in self._steps
-        )
-        parts.append(f"total={int(round(self.total_s() * 1000.0))}ms")
-        return " ".join(parts)
-
 
 def _format_optional_hours(value_s: float | None) -> str:
     """Render an optional age in hours for compact GC observability."""
@@ -798,6 +763,7 @@ class Session:
             migrate_selected_instance(target)
         self.client: AcpClient | None = None
         self._local_launch_owner: LocalLaunchOwner | None = None
+        self._retained_recovery_owner: Any = None
         self._native_turn_transport: NativeTurnTransport | AcquisitionHostTransport | None = None
         self._handoff_in_progress = False
         self._remote_affinity_cookies: Any = None

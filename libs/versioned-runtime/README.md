@@ -16,6 +16,69 @@ as the stable runtime-facing path. See
 [`docs/patterns/README.md`](../../docs/patterns/README.md) §"Runtime installs are
 immutable and versioned".
 
+## Windows filesystem paths
+
+Version inventory, garbage collection and incomplete-slot cleanup accept ordinary
+or extended-length Windows paths, without a machine-wide long-path setting. Filesystem
+access uses the canonical native-path helper. Process-image and launch-path
+matching normalize both forms without resolving symlinks. Current and
+last-known-good selections, explicit keeps, live processes, construction and
+retention leases, and durable references remain deletion barriers.
+Completed deep slots remain complete when `gc --toss-incomplete` follows an
+age-preserving collection pass.
+
+## Selector sharing on Windows
+
+The slot-local `runtime_launcher.py` retains a completed generation before site
+imports. Its additive Windows `--gui-runtime` mode requires an exact
+`--runtime-identity` and a physical base `pythonw.exe` matching the slot's
+`pyvenv.cfg`. It binds the selected environment before `site.main()`; Task
+Scheduler need not carry `__PYVENV_LAUNCHER__`, a payload path or a venv
+console redirector. Existing console invocations are unchanged.
+Callers qualify `GUI_BOOTSTRAP_VERSION == 1` before preparing this launch.
+It is a finite launch mechanism, not scheduling or enrollment authority.
+
+Selector publication uses `FileRenameInfoEx` with replace and POSIX semantics.
+Cooperating Python and PowerShell resolvers open `current-version` and
+`last-known-good` with read, write and delete sharing: a held reader keeps its
+old bytes while a fresh reader sees the replacement. On Windows, selector read
+errors other than absence propagate instead of selecting a fallback; POSIX
+retains its previous fallback on read errors. Write sharing failures are
+retried briefly. Primary-selector and receipt-backed write failures are
+reported; without a receipt, `last-known-good` remains best-effort on every
+platform and activation may succeed with the previous fallback still present.
+If the native rename operation itself reports `ERROR_NOT_SUPPORTED` (50) or
+`ERROR_CALL_NOT_IMPLEMENTED` (120), the writer falls back once to `os.replace`.
+That fallback retains atomic replacement but can fail while a delete-sharing
+reader holds the old file; its failures retain the normal publication policy.
+Other errors, including ambiguous `ERROR_INVALID_PARAMETER` (87), do not
+select this fallback.
+
+Guarded recovery uses the same replacement only for root selectors whose
+current objects have activation-receipt proofs. Generic copy recovery keeps
+`os.replace`, even for selector-named files. Recovery-created objects without
+an activation-object proof also keep `os.replace`; a held reader can therefore
+still cause a visible recovery failure with evidence retained.
+
+This is a cooperative compatibility contract, not a conditional or
+foreign-object compare-and-swap. Previously installed resolvers and distinct
+launchers that still open selectors without delete sharing are not upgraded
+by a source change and can block or miss a concurrent publication. Some
+cleanup/construction probes and generated binstubs in this source tree also
+still use ordinary opens and are not qualified by this change. Newly generated
+CMD launchers from `runtime_application_binstubs.py::global_binstubs` and
+`worktree_manager/runtime_launchers.py::_cmd_binstub` retry the existing
+`set /p` read up to 4,096 times, then make one final diagnostic read. The bound
+is by attempts, not wall-clock time. They still do not share delete, can delay
+a writer, and can fail if contention
+outlasts the retry budget. Their parsing and failure semantics remain those of
+`set /p`; this does not change installed shims or a read already in flight.
+`worktree_manager/runtime_launchers.py::_ps1_binstub` still uses an ordinary
+PowerShell read. An explicit
+incoming installation must not treat an old runtime's provenance or recovery
+state as authority over the new selection; guarded publication still reports
+I/O failures.
+
 ## Package releases and runtime generations
 
 The [immutable development pattern](../../docs/patterns/mutable-dev-slot.md)
@@ -59,8 +122,8 @@ stays out of runtime dependency resolution and ships as plain stdlib files:
 `versioned_runtime_leases.py` owns kernel construction/retention/publication
 ownership; `versioned_runtime_construction.py` owns the finite attached protocol
 and shell adapters; `versioned_runtime_source.py` owns complete-input fingerprints, source receipts and exact
-source-qualified recovery; `versioned_runtime_publication.py` owns created-file
-proofs and caught-failure recovery. The protocol receives explicit typed runtime operations,
+source-qualified recovery; `versioned_runtime_publication.py` owns selector I/O,
+created-file proofs and caught-failure recovery. The protocol receives explicit typed runtime operations,
 never reverse-imports a compatibility root. Each marketplace payload carries the
 complete adjacent family and is independently usable before any venv exists.
 
@@ -182,6 +245,8 @@ The persistent lock file is never deleted, and is not evidence of a live owner.
 Version case aliases always share a lease, including on case-insensitive macOS
 volumes; distinct case-only names on a case-sensitive volume conservatively
 serialize too.
+Windows lease-file access uses extended-length paths; ordinary and extended
+spellings retain the same kernel ownership.
 Normal return, exceptions, cancellation, and process death close the descriptor
 and release ownership.
 
@@ -279,6 +344,27 @@ barriers under publication custody, including after the writer process dies.
 Only an absent record means no references; malformed, linked, oversized or
 unreadable evidence refuses deletion. References never expire by PID or age
 and do not provide a new mutation lock, recovery queue or force-release path.
+Reference reads, atomic writes, target checks and recovery use native Windows
+paths internally. Ordinary and extended-length spellings address the same
+evidence even when a root, referenced slot or atomic temporary filename exceeds
+`MAX_PATH`; an inaccessible long spelling is not treated as absent evidence.
+
+For a cohort that spans several bounded owners, hold the external lifecycle
+lock and `reference_transaction_custody(root)` through reconciliation. Use
+`begin_runtime_reference_transaction(root, owner)` to persist a deletion fence,
+then `commit_runtime_reference_transaction(root, owner, token, updates,
+expected=previous)` to atomically publish the owner's complete set. Updates
+may address that owner or its slash-delimited children; each value retains the
+64-generation bound. A pending fence is rejected by ordinary readers, including
+older reference-aware cleanup code, so it cannot authorize GC. If the process
+dies, the same lifecycle owner reacquires its locks and resumes the pending
+transaction. Another owner holding the same transaction custody may request
+`recover_foreign=True`: the runtime atomically replaces the abandoned fence with
+bounded conservative references to every extant ordinary slot before proceeding.
+The original owner can later reconcile those references using
+`reference_recovery_prefix(owner)`. An invalid inventory, target or failed
+commit leaves the fence in place. This does not qualify older cleanup code that
+never read runtime references.
 
 Canonical `gc`, `toss_incomplete`, and incomplete `slot` cleanup acquire
 construction, exclusive retention, then selector-publication ownership and
@@ -526,6 +612,20 @@ failures refuse publication without an overwrite fallback. Temporary files
 are removed on normal/error paths. A crash before publication leaves no
 completion assertion; a crash after linking leaves the complete marker intact.
 Only an explicitly claimed `dev` slot permits atomic marker replacement.
+For a numbered slot with a retained bootstrap, first completion also validates
+the ordinary launcher and creates its private `runtime-generation` identity
+before publishing the marker. The actual retained reader can then bind that
+generation and exact completion bytes. Invalid or linked incoming identity
+metadata refuses without overwriting it. Publication removes group/other write
+permission from its owned incoming launcher and any existing generation file
+through revalidated descriptors, preserving content and identity without changing
+the caller's umask. Proof capture bounds opened files and growing reads to 1 MiB
+for the launcher and 64 bytes for the generation file. Generation validation uses
+binary reads on every platform, matching the retained reader. Exact completed
+reuse never backfills missing legacy metadata; use a distinct admitted construction instead of
+mutating an immutable completed generation.
+Ancestor aliases resolve to their physical path before helper proofs; redirects at
+the numbered slot or inside its retained bootstrap remain refused.
 Completion publication does not itself authorize package writers or retain a
 candidate after the call returns: adopting installers still need admission
 before construction and retention through their promotion/drain lifecycle.

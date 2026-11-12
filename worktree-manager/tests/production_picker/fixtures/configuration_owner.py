@@ -45,7 +45,8 @@ def serialized(root):
 def main():
     command, directory, operation, value, supplied = sys.argv[1:]
     root = Path(directory)
-    override = root / "local" / "override.json"
+    remote = operation in ("create", "protect-default", "future-create")
+    override = root / "local" / ("remote.json" if remote else "override.json")
     if command == "list":
         effective = json.loads((root / "preset" / "config.json").read_text())["mode"]
         if override.exists():
@@ -61,15 +62,19 @@ def main():
                      ]},
         }]}))
         return 0
-    if operation not in ("set", "reset") or not value:
+    if operation not in ("set", "reset") and not remote or not value:
         print("Invalid preference operation or value", file=sys.stderr)
         return 2
     expected = token(root, operation, value)
     if command == "preview":
         print(json.dumps({
-            "version": 1, "token": expected, "target": TARGET, "scope": "machine-local",
-            "operation": operation, "summary": f"{operation} local preference",
-            "effects": ["Only the local override changes; no agents or services start."],
+            "version": 3 if operation == "future-create" else 2 if remote else 1,
+            "token": expected, "target": TARGET,
+            "scope": "remote-repository" if remote else "machine-local",
+            "operation": "create" if operation == "future-create" else operation,
+            "summary": f"{operation} fixture change",
+            "effects": ["Fixture remote repository change" if remote else
+                        "Only the local override changes; no agents or services start."],
             "findings": [{"code": "future-launch-only", "severity": "warning",
                           "message": "Existing sessions are unchanged."}],
         }))
@@ -81,11 +86,12 @@ def main():
         if not supplied or supplied != token(root, operation, value):
             print("Preview conflict: obtain a fresh preview and consent", file=sys.stderr)
             return 3
-        if operation == "set":
+        if operation == "set" or remote:
             override.write_text(json.dumps({"mode": value}), encoding="utf-8")
         else:
             override.unlink(missing_ok=True)
-    print(f"{operation} completed; local override only")
+    print(f"{operation} completed; fixture remote marker only" if remote else
+          f"{operation} completed; local override only")
     print("owner diagnostic", file=sys.stderr)
     return 0
 

@@ -220,7 +220,10 @@ def run(root: Path, directory: Path, request_id: str | None = None) -> int:
         if copy_deadline is None:
             copy_deadline = time.monotonic() + DEFAULT_TIMEOUT_S
         result = refresh_local_cache(root, timeout=max(0.0, copy_deadline - time.monotonic()))
-        restart_required |= bool(result.changed or result.removed)
+        restart_required |= (
+            result.restart_required
+            if result.restart_required is not None else bool(result.changed or result.removed)
+        )
         try:
             if not directory.is_dir():
                 raise OSError("guidance workspace metadata was removed")

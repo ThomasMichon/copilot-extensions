@@ -6,7 +6,7 @@ from datetime import datetime
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from .acquisition_contract import WorktreeWriterRequirement
 
@@ -208,12 +208,24 @@ TurnInfo.model_rebuild()
 
 
 
+class RetainedRecoveryRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    version: StrictInt = Field(default=1, ge=1, le=1)
+    operation_id: str = Field(min_length=1, max_length=1024, pattern=r"^[^\s\x00-\x1f]+$")
+    journal_key: str = Field(pattern=r"^[0-9a-f]{64}$")
+    native_session_id: str = Field(min_length=1, max_length=1024)
+    head_revision: StrictInt = Field(gt=0)
+    bridge_installation: str = Field(min_length=1, max_length=4096)
+
+
 class ResumeSessionRequest(BaseModel):
     """Request to resume a stopped session."""
 
     model_config = ConfigDict(extra="forbid")
 
     worktree_writer: WorktreeWriterRequirement | None = None
+    retained_recovery: RetainedRecoveryRequest | None = None
 
 
 class AnswerAskUserRequest(BaseModel):
@@ -732,6 +744,7 @@ class ServiceConfig(ExecutionSpaceConfigFields):
     # an ignored extra) so it round-trips through model_dump / save_config. Keep
     # in sync with agent_bridge.config_migrations.CONFIG_VERSION.
     schema_version: int = 2
+    windows_scheduled_task: Literal["preserve", "enabled", "absent"] = "preserve"
     session_modes: SessionModes = Field(default_factory=SessionModes)
     remote_acp: dict[str, RemoteAcpTarget] = Field(default_factory=dict)
     remote_acp_bindings: dict[str, RemoteAcpBinding] = Field(default_factory=dict)

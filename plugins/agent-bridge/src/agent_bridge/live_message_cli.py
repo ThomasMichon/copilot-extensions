@@ -45,6 +45,13 @@ def deliver_to_live_session(client, args: argparse.Namespace, session_id: str, p
                 client, args, remote_address, sender=sender, reply_to=reply_to,
                 kind=kind, delivery=delivery, prompt=prompt,
             )
+        elif getattr(args, "wait_delivery", False):
+            from .live_delivery_client import send_and_wait
+
+            result = send_and_wait(
+                client, session_id, timeout=args.wait_timeout, sender=sender, body=prompt,
+                reply_to=reply_to, kind=kind, delivery=delivery, **delivery_options,
+            )
         else:
             result = client.send_live_message(
                 session_id,
@@ -85,6 +92,16 @@ def deliver_to_live_session(client, args: argparse.Namespace, session_id: str, p
     )
     receipt = result.get("receipt") or {}
     print(f"    receipt: {receipt.get('stage') or 'unavailable (delivery evidence unavailable)'}")
+    observation = result.get("delivery_observation")
+    if observation:
+        attention = observation["attention"]
+        print(f"    delivery wait: {observation['outcome']}")
+        if attention["reasons"]:
+            print("    pending: " + ", ".join(attention["reasons"]))
+        elif attention["availability"] != "available":
+            print(f"    attention unknown: {attention['reason']}")
+        if observation["outcome"] != "consumed":
+            print("    (send remains accepted; observe the same receipt, do not resend)")
     if result.get("receipt_error"):
         print(f"    receipt evidence unavailable: {result['receipt_error']}", file=sys.stderr)
     observe = (

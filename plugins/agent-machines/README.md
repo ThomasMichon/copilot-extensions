@@ -93,6 +93,16 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   Machine-specific harness-to-knowledge values remain suggestions; no native
   apply, binding change or cloud enrollment occurs.
   See [the exchange contract](docs/portable-preferences.md).
+- **Accepted repository defaults.** `preferences repositories` reads local
+  accepted state and explicit overrides without invoking a binder. Worktrees
+  may offer the scoped knowledge default for separate native confirmation.
+  See [the projection contract](docs/portable-preferences.md#read-accepted-repository-defaults).
+- **Selected local carrier replicas.** `preferences carrier publish|receive`
+  reuse that exchange with explicit account-labelled replica configuration
+  and approved participants. A bounded dedicated-namespace census blocks
+  unexpected entries; offline receipt preserves accepted data and local
+  overrides. No provider API, synchronization or peer-delivery proof is implied.
+  See [the replica contract](docs/portable-preferences.md#selected-onedrive-local-replica).
 - **Explicit Copilot scalar-floor adoption.** `preferences copilot` previews
   accepted `model`/`effortLevel` data in the qualified native scope; a separate
   confirmed apply uses the existing settings merge. Native defaults, live
@@ -106,7 +116,9 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   See [the telemetry preference contract](docs/portable-preferences.md#confirmed-retained-telemetry-defaults).
 - **Bounded local telemetry reports.** `health report` projects explicit local
   typed telemetry into 168 UTC-hour buckets and an optional static chart,
-  preserving unknown coverage. It starts no collector or periodic job and never
+  and conditionally collects explicit installed services' qualified hourly
+  contributions in separate namespaces, preserving unknown coverage.
+  It starts no collector or periodic job and never
   activates telemetry. See [the report contract](docs/health-report.md).
 - **Explicit hourly health storage.** `health record` confirms typed local
   observations into 168 absolute-hour slots; `health inspect` reports ages,
@@ -116,6 +128,12 @@ so an inherited finite guardian is not unlocked by the caller's exit trap.
   selected loopback Bridge `/health` endpoint once and emits a typed observation
   for the local record flow. It starts nothing, uses no credentials and does
   not infer authentication or agent counts from listener health.
+- **Inert hourly job preparation.** `health prepare-job` returns limited-user
+  Windows task or Linux systemd-user definitions as text, without installing,
+  registering or enabling them. The normal payload launcher qualifies
+  collection support from the exact selected runtime before forwarding.
+  Native qualification and explicit enrollment remain separate; see
+  [job preparation](docs/health-report.md#inert-native-job-preparation).
 - **Live Copilot CLI controls.** `copilot-cli` inspects native update preferences
   and cached versions, previews/applies live on/off and native update operations,
   and deliberately launches a cached version without another installer or
@@ -291,7 +309,27 @@ ownership. This mode is not install authority or permission to borrow an
 unowned scope. An old runtime lacking support is incompatible; do not retry
 without containment.
 
-Review the returned closure and `planDigest`, then apply that exact selection:
+This caller-owned form observes readiness, not an installer plan. It binds the
+enabled-owner declarations, selected module closure and exact readiness action
+and executable, then revalidates them after observation. It does not recursively
+hash unrelated payload files or qualify installer executables. Its purpose-bound
+digest cannot authorize ordinary repair apply, including for an empty required
+set. Full repair planning and apply retain their existing payload hashes,
+per-leaf path checks and installer qualification.
+Declaration and action paths are checked in their original form, including
+payload-relative ancestors, before resolving a target. Symlinks and reparse
+points remain refused even when their destinations stay inside the payload.
+
+Known capability-only payloads without application declarations or runtime
+claims need no application-owner qualification for this read. Unselected optional
+owners do not add a required readiness protocol; a selected prerequisite still
+needs its qualified owner. Unknown enabled payloads, malformed declarations and
+incomplete inventory still refuse. Generic payload command/plugin names use the
+same grammar as the canonical payload-invocation generator, not an `agent-` prefix
+restriction.
+
+For ordinary repair planning, without `--caller-owned-readiness`, review the
+returned closure and `planDigest`, then apply that exact selection:
 
 ```text
 agent-machines installation-repair --project-root <project> --module <marketplace-id>::<plugin>/<module> --apply --expected-plan-digest <digest>
@@ -355,7 +393,12 @@ restart confirmation. Inspect interrupted/failed actions before attesting;
 their conservatively retained obligations must not be dismissed as a retry.
 
 Ordinary downstream owners need declared no-self-provision and legacy-root
-protocols; inherited core-cell control variables are cleared. Linked/reparse
+protocols, either the existing `payload-invocation.json` or a script-only
+[`installerRuntime` declaration](../../docs/patterns/installer-readiness-modules.md#script-only-runtime-ownership).
+The latter never creates a command or Python module and cannot coexist with
+the former. Older consumers refuse script-only owners before effects; do not
+remove them from the required census. Inherited core-cell control variables
+are cleared. Linked/reparse
 targets, ambiguous owners and migration/deactivation/maintenance states refuse
 repair rather than guessing an installer. A legacy runtime root must have one
 qualified plugin owner, even when the competing plugins share a marketplace.

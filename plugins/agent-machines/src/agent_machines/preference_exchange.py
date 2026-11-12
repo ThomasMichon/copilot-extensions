@@ -97,16 +97,30 @@ def _state(state: Path):
 
 
 def _plan(
-    operation: str, *, state: Path, source: Path, output: Path | None = None,
+    operation: str, *, state: Path, source: Path | None = None, output: Path | None = None,
     machine: str = "", harness: str = "", local: Path | None = None,
-    conflict: bool = False, full_snapshot: bool = False,
-) -> tuple[dict, dict | None, dict | None, Path]:
+    conflict: bool = False, full_snapshot: bool = False, carrier: bool = False,
+) -> tuple[dict, dict | None, dict | None, Path, Path | None]:
     policy, protected = _state(state)
+    state = protected[0].parent
+    selection = None
+    if carrier:
+        from .preference_carrier import select
+
+        selection = select(state, policy, [path for path in (source, local) if path is not None])
+        protected.append(selection["config_path"])
+        if operation == "accept":
+            source = selection["document"]
+        else:
+            output = selection["document"]
+        conflict = conflict or selection["conflict"]
+    if source is None:
+        raise codec.PreferenceError("input-required")
     source = _plain_path(source, missing_parents=True)
     selected = protected[2] if operation == "accept" else protected[3]
     paths = [*protected, source]
     if output is not None:
-        output = _plain_path(output)
+        output = _plain_path(output, missing_parents=carrier)
         paths.append(output)
     if local is not None:
         local = _plain_path(local)
@@ -148,12 +162,19 @@ def _plan(
                 status, eligible = "untracked-output", False
             elif accepted is None:
                 status, eligible = "untracked-output", False
+    if selection is not None:
+        if not selection["available"]:
+            status, eligible = "carrier-unavailable", False
+        elif selection["conflict"]:
+            status, eligible = "carrier-conflict", False
     inputs = {
         "operation": operation, "paths": [str(path) for path in paths],
         "policy": policy, "candidate": candidate, "accepted": accepted,
         "output": remote, "local": overrides, "machine": machine, "harness": harness,
         "conflict": conflict, "full_snapshot": full_snapshot,
     }
+    if selection is not None:
+        inputs["carrier"] = selection["inputs"]
     result = {
         "schema": "agent-machines.preferences.exchange", "version": 1,
         "operation": operation, "status": status, "eligible": eligible,
@@ -164,13 +185,21 @@ def _plan(
         "remote_receipt": "not-observed",
         "configuration_applied": False, "binding_changed": False,
     }
+    if selection is not None:
+        result["carrier"] = {
+            "provider": "onedrive", "binding": "configured-not-provider-verified",
+            "namespace": "available" if selection["available"] else "unavailable",
+            "conflict": selection["conflict"], "synchronization": "not-observed",
+            "local_replica_observed": remote is not None if operation == "publish" else candidate is not None,
+            "peer_receipt": "not-observed",
+        }
     if operation == "accept":
         if not eligible and projection["candidate_eligible"]:
             projection = codec.preview(
                 None, accepted, publisher=publisher, machine=machine, harness=harness, local=overrides,
             )
         result["projection"] = projection
-    return result, candidate, accepted, selected
+    return result, candidate, accepted, selected, output
 
 
 def exchange(operation: str, *, apply=False, expected="", **arguments) -> dict:
@@ -179,11 +208,11 @@ def exchange(operation: str, *, apply=False, expected="", **arguments) -> dict:
         raise codec.PreferenceError("unknown-operation")
     if apply and re.fullmatch(r"[a-f0-9]{64}", expected) is None:
         raise codec.PreferenceError("preview-token-required")
-    result, candidate, accepted, selected = _plan(operation, **arguments)
+    result, candidate, accepted, selected, output = _plan(operation, **arguments)
     if not apply:
         return result
     with mutation_lock(selected.parent / "exchange"):
-        result, candidate, accepted, selected = _plan(operation, **arguments)
+        result, candidate, accepted, selected, output = _plan(operation, **arguments)
         if result["preview_token"] != expected:
             raise codec.PreferenceError("preview-changed")
         if not result["eligible"]:
@@ -198,7 +227,7 @@ def exchange(operation: str, *, apply=False, expected="", **arguments) -> dict:
             # Record intent before output: a failed replacement can retry this revision,
             # but a missing/stale carrier can never lower the publisher's local watermark.
             try:
-                _write(Path(arguments["output"]), candidate)
+                _write(output, candidate)
             except OSError as error:
                 raise codec.PreferenceError("publication-pending") from error
             result["local_published"] = True

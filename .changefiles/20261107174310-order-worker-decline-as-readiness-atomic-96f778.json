@@ -1,0 +1,13 @@
+{
+  "comment": "Order worker decline as readiness, atomic requeue, then claim settlement and finalization so a workspace's own task claim no longer blocks its decline",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    },
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

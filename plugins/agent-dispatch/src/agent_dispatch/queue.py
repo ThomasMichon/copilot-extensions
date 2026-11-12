@@ -112,6 +112,7 @@ from .queue_schema_migrations import run_queue_schema_migrations
 from .queue_pool_catalog import QueuePoolCatalogMixin
 from .queue_pool_decline import PoolDeclineMixin
 from .queue_schedule_registry import ScheduleRegistrationMixin
+from .queue_spawn_history import SpawnHistoryMixin
 from .queue_spawn_rearm import SpawnRearmMixin
 from .queue_spawn_conclusion import SpawnConclusionMixin
 from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existing call sites/tests
@@ -119,7 +120,11 @@ from .queue_spawn_reservations import (  # noqa: F401 -- re-exported for existin
     spawn_key,
 )
 from .queue_storage import QueueStorageMixin
+from .queue_standing_charters import QueueStandingChartersMixin
+from .queue_standing_recovery import QueueStandingRecoveryMixin
+from .queue_standing_sources import QueueStandingSourcesMixin
 from .queue_task_recovery import TaskRecoveryMixin
+from .queue_relevance import QueueRelevanceMixin
 from .queue_task_relationships import QueueTaskRelationshipsMixin
 from .assignment_workspace import RelationshipWriter
 from .queue_steering import QueueSteeringMixin
@@ -164,10 +169,14 @@ class _ClosingConnection(sqlite3.Connection):
 
 
 class TaskQueue(
+    QueueStandingRecoveryMixin,
+    QueueStandingSourcesMixin,
+    QueueStandingChartersMixin,
     QueueSubmissionPreparationMixin,
     QueueTaskRelationshipsMixin,
     PoolDeclineMixin,
     TaskRecoveryMixin,
+    QueueRelevanceMixin,
     QueuePoolCatalogMixin,
     QueueExecutionWakesMixin,
     QueueExecutionRuntimesMixin,
@@ -180,6 +189,7 @@ class TaskQueue(
     SpawnReservationMixin,
     SpawnConclusionMixin,
     SpawnRearmMixin,
+    SpawnHistoryMixin,
     ProducerFenceMixin,
     QueueStorageMixin,
     AgentBackedRepoMixin,
@@ -235,6 +245,7 @@ class TaskQueue(
         worker_admission: Callable[[], None] | None = None,
         relationship_writer: RelationshipWriter | None = None,
         relationship_authority: str | None = None,
+        standing_relationship_writer: RelationshipWriter | None = None,
     ):
         self.db_path = str(db_path)
         self.lease_seconds = lease_seconds
@@ -245,6 +256,7 @@ class TaskQueue(
         self._worker_admission = worker_admission
         self._relationship_writer = relationship_writer
         self._relationship_authority = relationship_authority
+        self._standing_relationship_writer = standing_relationship_writer
         if relationship_writer is not None and relationship_authority not in {"local", "central"}:
             raise ValueError("relationship writer requires its original local or central queue authority")
         self._wake_notifier: Callable[[], None] | None = None
@@ -298,11 +310,16 @@ class TaskQueue(
             self._migrate_execution_runtimes(conn)
             self._migrate_execution_wakes(conn)
             self._migrate_task_recovery(conn)
+            self._migrate_task_relevance(conn)
             self._migrate_pool_catalog(conn)
             from .queue_relationship_schema import migrate_relationships
             migrate_relationships(conn)
             from .queue_submission_preparation import migrate_submission_preparation
             migrate_submission_preparation(conn)
+            from .queue_standing_schema import migrate_standing_charters
+            migrate_standing_charters(conn)
+            from .queue_standing_sources import migrate_standing_sources
+            migrate_standing_sources(conn)
             conn.execute(
                 "CREATE TABLE IF NOT EXISTS coordinator_fencing ("
                 " singleton INTEGER PRIMARY KEY CHECK (singleton = 1),"

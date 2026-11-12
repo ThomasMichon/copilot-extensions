@@ -46,7 +46,8 @@ try {
     $Manifest = Join-Path $InstallDir 'deploy-manifest.json'
     $installerAction = 'stamp'
     if (Test-Path -LiteralPath $Manifest) {
-        $deployed = ([IO.File]::ReadAllText($Manifest) | ConvertFrom-Json).source.version
+        $deployment = [IO.File]::ReadAllText($Manifest) | ConvertFrom-Json
+        $deployed = $deployment.source.version
         if ($deployed -isnot [string] -or -not $deployed) {
             throw 'The deployed runtime version is unavailable.'
         }
@@ -54,16 +55,50 @@ try {
             -Pattern '^\s*version\s*=' | Select-Object -First 1
         if (-not $versionLine) { throw 'The owning payload version is unavailable.' }
         $current = $versionLine.Line -replace '.*=\s*"([^"]+)".*', '$1'
+        $profilePresent = $false
+        try {
+            [void][IO.File]::GetAttributes((Join-Path $InstallDir 'runtime-profile.json'))
+            $profilePresent = $true
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] {
+        }
+        $sourcePresent = $false
+        try {
+            [void][IO.File]::GetAttributes((Join-Path $PluginDir 'runtime-source.json'))
+            $sourcePresent = $true
+        } catch [IO.FileNotFoundException] {
+        } catch [IO.DirectoryNotFoundException] {
+        }
+        $sourceSelected = $sourcePresent -or (Test-Path Env:COPILOT_EXTENSIONS_RUNTIME_SOURCE_PIN)
+        $wheelSelected = $deployment.runtime_version -cmatch '\.profile\.[0-9a-f]{16}'
+        $expectedRuntime = $current
+        if ($profilePresent -or $sourceSelected -or $wheelSelected) {
+            . (Join-Path $PSScriptRoot 'versioned_runtime_native.ps1')
+            $minimumMinor = if ($profilePresent -or $wheelSelected) { 11 } else { 10 }
+            $profilePython = Resolve-NativeBootstrapPython -MinimumMinor $minimumMinor
+            if (-not $profilePython) { throw 'Vault source/profile inspection requires a bootstrap Python interpreter.' }
+            [void](Invoke-Hidden -FilePath $profilePython -ArgList @(
+                '-I', '-B', (Join-Path $PSScriptRoot 'runtime_profile.py'),
+                '--root', $InstallDir, 'current', '--package-version', $current
+            ))
+            if ($LASTEXITCODE -eq 0) { Exit-SessionStart }
+            if ($LASTEXITCODE -ne 1) { throw 'Vault source/profile metadata could not be read.' }
+        }
         $provisioned = Test-Path -LiteralPath (Join-Path $InstallDir '.venv')
         $marker = Join-Path $InstallDir 'current-version'
         if (-not $provisioned -and (Test-Path -LiteralPath $marker)) {
             $selected = [IO.File]::ReadAllText($marker).Trim()
-            if ($selected -and $selected -ceq $current -and (
+            if ($selected -and $selected -ceq $expectedRuntime -and (
                 (Test-Path -LiteralPath (Join-Path $InstallDir "versions\$selected\Scripts\python.exe")) -or
                 (Test-Path -LiteralPath (Join-Path $InstallDir "versions/$selected/bin/python"))
             )) { $provisioned = $true }
         }
-        if ($provisioned -and $deployed -ceq $current) { Exit-SessionStart }
+        if (-not $profilePresent -and -not $sourceSelected -and $provisioned -and
+            $deployed -ceq $current -and (-not $deployment.runtime_profile -or
+            $deployment.runtime_profile -ceq 'base') -and -not $deployment.runtime_source -and
+            (-not $deployment.runtime_version -or $deployment.runtime_version -ceq $current)) {
+            Exit-SessionStart
+        }
         $installerAction = 'provision'
     }
     if ($env:AGENT_VAULT_NO_SELFPROVISION -or (Test-Path Env:AGENT_VAULT_PINNED_CONTEXT)) {

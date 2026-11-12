@@ -53,8 +53,8 @@ def _bash() -> str | None:
 def test_every_native_installer_has_one_explicit_action_guard(name, entry, extension):
     text = (REPO / "plugins" / name / "scripts" / f"{entry}.{extension}").read_text()
     invocation = (
-        "Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot"
-        if extension == "ps1" else 'reconcile_installer_instances "$SCRIPT_DIR"'
+        "Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir"
+        if extension == "ps1" else 'reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"'
     )
     assert text.count(invocation) == (2 if name == "agent-machines" else 1)
     position = text.rindex(invocation)
@@ -86,8 +86,9 @@ def test_native_bash_adapter_has_bounded_calls_and_preserves_install_success(tmp
     registry.mkdir()
     (helper_root / "daemon_instances.sh").write_text(
         """
+daemon_instance_reconcile_contract() { printf '%s\\n' 'copilot-daemon-reconcile-v1'; }
 reconcile_daemon_instances() {
-    [[ "$1" == 128 && "$2" == 5 && -d "$3" ]] || return 9
+    [[ "$1" == 128 && "$2" == 5 && -d "$3" && "$4" == "$3" && "$5" == false ]] || return 9
     printf '%s\\n' one >> "$3/calls"
     printf '%s\\n' 'held proof-changed synthetic'
     printf '%s\\n' '[instance-gc] held: proof-changed' >&2
@@ -100,7 +101,7 @@ reconcile_daemon_instances() {
         [
             shell, "--noprofile", "--norc", "-c",
             '. "$1/installer-instance-reconcile.sh"; '
-            'for state in fresh repeat healthy; do reconcile_installer_instances "$1" "$2"; done; '
+            'for state in fresh repeat healthy; do reconcile_installer_instances "$1" "$2" "$2"; done; '
             "printf installer-success",
             "adapter-test", str(helper_root), str(registry),
         ],
@@ -136,6 +137,81 @@ def test_implicit_contained_reconciliation_never_invokes_a_shell(monkeypatch):
     assert adapter.reconcile_installer_instances(ENGINE)
 
 
+def test_missing_runtime_scope_never_invokes_a_shell(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(
+        adapter.subprocess, "run", lambda *_a, **_k: pytest.fail("unscoped collection"),
+    )
+    assert adapter.reconcile_installer_instances(ENGINE, registry_root=tmp_path)
+    assert "runtime-scope-unavailable" in capsys.readouterr().err
+
+
+def test_legacy_native_helper_defers_without_replaying_global_collection(tmp_path):
+    helper_root = tmp_path / "legacy-helper"
+    helper_root.mkdir()
+    calls = helper_root / "must-not-collect"
+    if os.name == "nt":
+        text = (
+            "function Invoke-DaemonInstanceReconcile { param($RegistryRoot,$Limit,$MaxSeconds)\n"
+            f"[IO.File]::WriteAllText('{str(calls)}','global cleanup')\n"
+            "}\n"
+        )
+        extension = "ps1"
+    else:
+        text = f'reconcile_daemon_instances() {{ printf unsafe > "{calls}"; }}\n'
+        extension = "sh"
+    (helper_root / f"daemon_instances.{extension}").write_text(text, encoding="utf-8")
+
+    assert adapter.reconcile_installer_instances(
+        helper_root, registry_root=tmp_path / "registry", runtime_root=tmp_path,
+    )
+
+    assert not calls.exists()
+
+
+@pytest.mark.parametrize("helper_kind", ("legacy", "marker-only", "readonly-marker"))
+def test_bash_rollback_cannot_reuse_inherited_native_contract(tmp_path, helper_kind):
+    shell = _bash()
+    if shell is None:
+        pytest.skip("native Bash unavailable (never substitute WSL)")
+    helper_root = tmp_path / "rollback-helper"
+    helper_root.mkdir()
+    calls = tmp_path / "must-not-collect"
+    legacy = 'reconcile_daemon_instances() { printf unsafe > "$FIXTURE_LEGACY_CALLS"; }\n'
+    marker = (
+        "daemon_instance_reconcile_contract() { "
+        "printf '%s\\n' 'copilot-daemon-reconcile-v1'; }\n"
+    )
+    (helper_root / "daemon_instances.sh").write_text(
+        marker if helper_kind == "marker-only" else legacy, encoding="utf-8",
+    )
+    setup = legacy if helper_kind == "marker-only" else ""
+    if helper_kind == "readonly-marker":
+        setup += "readonly -f daemon_instance_reconcile_contract;\n"
+    command = (
+        '. "$1"; . "$2/installer-instance-reconcile.sh"; ' + setup
+        + 'before="$(declare -f daemon_instance_reconcile_contract; '
+        'declare -f reconcile_daemon_instances)"; '
+        'reconcile_installer_instances "$3" "$4" "$4"; '
+        'after="$(declare -f daemon_instance_reconcile_contract; '
+        'declare -f reconcile_daemon_instances)"; '
+        '[[ "$before" == "$after" ]] || exit 92; printf caller-retained'
+    )
+    result = subprocess.run(
+        [
+            shell, "--noprofile", "--norc", "-c", command, "rollback-test",
+            str(REPO / "libs/agent-procutil/src/agent_procutil/daemon_instances.sh"),
+            str(ENGINE), str(helper_root), str(tmp_path),
+        ],
+        env={**os.environ, "FIXTURE_LEGACY_CALLS": calls.as_posix()},
+        text=True, capture_output=True, timeout=15,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+    assert not calls.exists()
+    assert result.stdout == "caller-retained"
+    assert "native-contract-unavailable" in result.stderr
+
+
 def test_explicit_root_and_budget_use_one_native_call(tmp_path, monkeypatch):
     calls = []
 
@@ -144,10 +220,13 @@ def test_explicit_root_and_budget_use_one_native_call(tmp_path, monkeypatch):
         return subprocess.CompletedProcess(argv, 0)
 
     monkeypatch.setattr(adapter.subprocess, "run", execute)
-    assert adapter.reconcile_installer_instances(ENGINE, registry_root=tmp_path)
+    assert adapter.reconcile_installer_instances(
+        ENGINE, registry_root=tmp_path, runtime_root=tmp_path / "installation",
+    )
     assert len(calls) == 1
     argv, options = calls[0]
     assert str(tmp_path) in " ".join(argv)
+    assert str(tmp_path / "installation") in " ".join(argv)
     assert options["timeout"] == 15
     assert options["stdin"] == subprocess.DEVNULL
     assert options["stdout"] == subprocess.DEVNULL
@@ -163,7 +242,9 @@ def test_python_adapter_loads_its_own_wrapper_not_a_procutil_package_wrapper(tmp
     )
     assert not (root / "installer-instance-reconcile.sh").exists()
     assert not (root / "installer-instance-reconcile.ps1").exists()
-    assert adapter.reconcile_installer_instances(root, registry_root=tmp_path / "registry")
+    assert adapter.reconcile_installer_instances(
+        root, registry_root=tmp_path / "registry", runtime_root=tmp_path / "installation",
+    )
     command = " ".join(calls[0])
     wrapper = ENGINE / ("installer-instance-reconcile.ps1" if os.name == "nt" else "installer-instance-reconcile.sh")
     assert str(wrapper) in command
@@ -179,7 +260,9 @@ def test_native_failure_does_not_become_install_failure(tmp_path, monkeypatch, c
         raise failure("private error details must not be printed")
 
     monkeypatch.setattr(adapter.subprocess, "run", execute)
-    assert not adapter.reconcile_installer_instances(ENGINE, registry_root=tmp_path)
+    assert not adapter.reconcile_installer_instances(
+        ENGINE, registry_root=tmp_path, runtime_root=tmp_path / "installation",
+    )
     diagnostic = capsys.readouterr().err
     assert "deferred: native-reconcile-failed" in diagnostic
     assert "private error details" not in diagnostic
@@ -198,8 +281,8 @@ def test_python_adapter_invokes_binding_only_root_and_preserves_unrelated_proof(
     (helpers / "daemon_instances.ps1").write_text(
         """
 function Invoke-DaemonInstanceReconcile {
-    param([string]$RegistryRoot, [int]$Limit, [double]$MaxSeconds)
-    if ($Limit -ne 128 -or $MaxSeconds -ne 5) { throw 'invalid bounds' }
+    param([string]$RegistryRoot, [int]$Limit, [double]$MaxSeconds, [string]$RuntimeRoot, [bool]$Terminate)
+    if ($Limit -ne 128 -or $MaxSeconds -ne 5 -or $Terminate -or -not $RuntimeRoot) { throw 'invalid bounds' }
     [IO.File]::Delete((Join-Path $RegistryRoot 'owned-artifact'))
     return @{status='settled';reason='synthetic-routing-proof';instance_id='synthetic'}
 }
@@ -207,7 +290,7 @@ function Invoke-DaemonInstanceReconcile {
         encoding="utf-8",
     )
     assert not (helpers / "installer-instance-reconcile.ps1").exists()
-    assert adapter.reconcile_installer_instances(helpers, registry_root=registry)
+    assert adapter.reconcile_installer_instances(helpers, registry_root=registry, runtime_root=helpers)
     assert not owned.exists()
     assert proof.read_text() == "preserve"
 
@@ -227,8 +310,8 @@ def test_real_powershell_adapter_fresh_repeat_healthy_and_partial_outcomes(tmp_p
     (helper_root / "daemon_instances.ps1").write_text(
         """
 function Invoke-DaemonInstanceReconcile {
-    param([string]$RegistryRoot, [int]$Limit, [double]$MaxSeconds)
-    if ($Limit -ne 128 -or $MaxSeconds -ne 5) { throw 'unbounded invocation' }
+    param([string]$RegistryRoot, [int]$Limit, [double]$MaxSeconds, [string]$RuntimeRoot, [bool]$Terminate)
+    if ($Limit -ne 128 -or $MaxSeconds -ne 5 -or $Terminate -or -not $RuntimeRoot) { throw 'unbounded invocation' }
     [IO.File]::AppendAllText((Join-Path $RegistryRoot 'calls'), "one`n")
     $state = [IO.File]::ReadAllText((Join-Path $RegistryRoot 'state')).Trim()
     if ($state -eq 'error') { throw 'private registry error details' }
@@ -248,7 +331,7 @@ function Invoke-DaemonInstanceReconcile {
         "foreach ($state in @('fresh','repeat','healthy','partial','error')) { "
         f"[IO.File]::WriteAllText({quote(registry / 'state')}, $state); "
         f"Invoke-InstallerInstanceReconcile -HelperRoot {quote(helper_root)} "
-        f"-RegistryRoot {quote(registry)}; "
+        f"-RegistryRoot {quote(registry)} -RuntimeRoot {quote(helper_root)}; "
         "if ($global:LASTEXITCODE -ne 37) { throw 'installer status changed' } }; "
         "[Console]::Out.Write('installer-success')"
     )
@@ -286,14 +369,14 @@ def test_actual_native_missing_registry_is_readonly_and_unknown_proof_is_held(tm
         f". {quote(helper_root / 'installer-instance-reconcile.ps1')}; "
         "1..2 | ForEach-Object { "
         f"Invoke-InstallerInstanceReconcile -HelperRoot {quote(helper_root)} "
-        f"-RegistryRoot {quote(registry)} }}; "
+        f"-RegistryRoot {quote(registry)} -RuntimeRoot {quote(helper_root)} }}; "
         f"if (@(Invoke-DaemonInstanceReconcile -RegistryRoot {quote(registry)}).Count -ne 0) "
         "{ throw 'missing registry reconciliation did not complete successfully' }; "
         f"if (Test-Path -LiteralPath {quote(registry)}) {{ throw 'missing registry was created' }}; "
         f"[void][IO.Directory]::CreateDirectory({quote(registry)}); "
         f"[IO.File]::WriteAllText({quote(unknown)}, 'unowned-proof'); "
         f"Invoke-InstallerInstanceReconcile -HelperRoot {quote(helper_root)} "
-        f"-RegistryRoot {quote(registry)}; "
+        f"-RegistryRoot {quote(registry)} -RuntimeRoot {quote(helper_root)}; "
         f"$outcomes=@(Invoke-DaemonInstanceReconcile -RegistryRoot {quote(registry)}); "
         "if ($outcomes.Count -ne 1 -or $outcomes[0].status -cne 'held' -or "
         "$outcomes[0].reason -cne 'invalid-record') { throw 'held reconciliation did not complete' }; "
@@ -355,8 +438,9 @@ def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkey
     events = []
     payload = tmp_path / "payload"
 
-    def reconcile(root):
+    def reconcile(root, *, runtime_root):
         assert root == payload / "scripts"
+        assert runtime_root == tmp_path
         events.append("reconcile")
 
     def candidate(*args, **kwargs):
@@ -368,10 +452,18 @@ def test_manager_install_reconciles_once_before_candidate_reuse(tmp_path, monkey
     monkeypatch.setitem(sys.modules, "installer_instance_reconcile", SimpleNamespace(
         reconcile_installer_instances=reconcile,
     ))
+    monkeypatch.setitem(sys.modules, "fixture_manager.runtime_identity", SimpleNamespace(
+        running_application_slot=lambda: None,
+    ))
+    monkeypatch.setitem(sys.modules, "fixture_manager._installation_context", SimpleNamespace(
+        path_is_within=lambda *_: False, paths_equal=lambda a, b: a == b,
+    ))
     namespace = {
+        "__name__": "fixture_manager.self_install", "__package__": "fixture_manager",
         "Path": Path, "SelfInstallResult": SimpleNamespace,
         "os": os, "subprocess": subprocess, "ExitStack": ExitStack,
         "running_payload_dir": lambda: payload,
+        "_runtime_scripts": lambda: payload / "scripts",
         "payload_version": lambda path: "1.0",
         "version_slot": lambda version, root: root / "versions" / version,
         "current_version": lambda root: None if state == "fresh" else "1.0",
@@ -410,7 +502,7 @@ def test_manager_bootstrap_does_not_sweep_for_ordinary_commands(command, expecte
         )
     )
     consumer = next(
-        node for node in functions["_install"].body if isinstance(node, ast.Assign)
+        node for node in functions["_install_payload"].body if isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == "reconcile" for target in node.targets)
     )
     namespace = {"command": command, "args": SimpleNamespace(skip_instance_reconcile=False)}

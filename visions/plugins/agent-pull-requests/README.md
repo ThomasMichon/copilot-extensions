@@ -3,7 +3,7 @@
 - **Subject:** The first-class pull-request plugin and independently operable PR service.
 - **Scope:** leaf (child of agent-fabric)
 - **Status:** Active
-- **Last revised:** 2026-11-06
+- **Last revised:** 2026-11-11
 - **Reality docs:** [PR plugin](../../../plugins/agent-pull-requests/README.md)
 
 ## Purpose & Intent
@@ -99,6 +99,21 @@ criteria-selected PR populations. The service maintains discovery and shared
 observation as matching PRs enter, change or leave a selection. Independent
 subscribers retain their own lifetime, baseline and durable delivery state,
 even when their selected targets overlap.
+
+### driver-aware-filters-and-owned-demand
+
+Common selection concepts cover repositories, authors and groups, reviewer or
+assignment relationships, age, native tags and draft/publication state.
+Drivers preserve their native meanings and explicitly declare supported
+selection semantics; incomplete identities or provider evidence remain
+unknown, and unsupported requirements never silently broaden a population.
+
+Reusable named filter definitions are distinct from active demand. Both
+configured startup sponsors and dynamic callers activate selections through
+the same subscription owner. Every interest has an accountable owner and
+explicit lifetime; overlapping interests share acquisition without sharing
+delivery positions. Losing one interest stops its unneeded acquisition, not
+another consumer's watch or reconciliation of already delivered events.
 
 ### author-and-reviewer-service-consumers
 

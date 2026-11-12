@@ -17,7 +17,7 @@ import time
 from concurrent.futures import FIRST_COMPLETED, Future, ThreadPoolExecutor, wait
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Mapping, Sequence, TypeVar
+from typing import Any, Callable, Mapping, Sequence, TypeVar
 
 if __package__:
     from .plugin_test_environment import (
@@ -722,6 +722,7 @@ def _run_contained_process(
     limits: Limits,
     qualification: Qualification | None = None,
     native_application: bool = False,
+    native_observer: Callable[[], None] | None = None,
 ) -> int:
     """Run ``command`` in an owned process tree and return its exit code."""
     limits.validate()
@@ -813,6 +814,8 @@ def _run_contained_process(
         next_temp_check = started
         next_usage_check = started
         while True:
+            if native_observer is not None:
+                native_observer()
             if os.name == "nt":
                 returncode = proc.poll()
             else:

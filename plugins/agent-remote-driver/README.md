@@ -48,6 +48,32 @@ Explicit authorized stop addresses the retained native child, never a mux name.
 Native creation, SDK binding, input readiness, prompt acceptance and restoration
 are distinct; complete history restoration is not qualified by this entrypoint.
 
+For the common headed broker, `running` means authenticated SDK binding, not
+startup input readiness. A capable executing adapter advertises
+`_meta.inputReadiness: { version: 1, method: "copilot-driver/input-status" }`
+in `initialize`. That read-only request requires the bound `sessionId` and
+returns the same identity, `startupSeed` (`pending`, `observed`, or
+`not-requested`), `startupTurn` (`pending`, `active`, `idle-observed`, or
+`not-requested`), and separate `nativeSend`/`prompt` readiness states
+(`pending`, `ready`, `busy`, or `unavailable`). An observed seed permits native
+enqueue/steer; an ACP prompt additionally requires a subsequent native idle
+observation to avoid mixing its output with the original turn. These are
+startup admission observations, not successful turn completion, complete
+pending-work evidence or history restoration. No requested seed means
+`not-requested`, not a claim that a resumed conversation is empty or idle.
+
+Unresolved startup refuses controlled input before dispatch with code `-32002`,
+without revoking control or consuming the one-time launch-seed observation.
+Later human input still revokes control, including identical seed text.
+The retained client observes advertised readiness for up to five seconds
+before its one send; a startup-only timeout reports that no prompt was
+dispatched and permits a later explicit request on that same connection.
+It never replays a possibly accepted send. Missing readiness metadata preserves
+the legacy native-send contract for retained peers, whose startup ordering
+remains unqualified; unknown versions, malformed status and identity changes
+refuse before dispatch. The auth-state v1 snapshot and freeze/expiry semantics
+are unchanged, and reading readiness cannot thaw a frozen controller.
+
 Local launches export the core into their retained runtime directory
 and execute it with a physical base interpreter, independently of the caller's
 venv. The same core can export a compact receiving zipapp without Bridge,
@@ -71,6 +97,54 @@ local startup custody. No installed or retained session is migrated.
 The legacy receiving entrypoint advertises only legacy lifetime and TCP.
 An explicit ACP lifetime or WebSocket request refuses before launch rather
 than being silently reinterpreted as legacy execution.
+
+### Optional headless SDK provider
+
+The ordinary application's explicit `sdk` dependency extra adds the public
+Python SDK provider. It requires an already-selected Python 3.11+ interpreter;
+the base core and native-ACP default retain Python 3.10 support. Construct the
+extra through the existing wheel-first application/profile owner. No interpreter
+or SDK is downloaded at launch. The currently qualified dependency is SDK
+1.0.27; the extra does not silently select a newer, unqualified SDK.
+
+```powershell
+agent-remote-driver --backend sdk --cwd <execution-workspace> --state-file <private-state-file> -- copilot --headless
+```
+
+Select the actual optional application's entrypoint, not the compact export or
+the base-interpreter local launch helper. `--support-json` reports
+`headless_backends`; only an eligible executing application includes `sdk`.
+The compact receiver remains native-ACP-only and refuses SDK selection before
+child creation. Headed mode, legacy lifetime, native argv seeds/resume and native
+idle-timeout flags cannot be combined with this provider.
+
+The same Session Host owns sequencing, acknowledgements and frontend reconnect.
+The adapter connects the public SDK to its exact owned native process, then
+binds one conversation through ACP `session/new` or `session/load`. The launch
+workspace and native MCP configuration are retained; nonempty ACP `mcpServers`
+overrides are unsupported. Text prompts, streamed assistant/tool updates,
+explicit cancellation and text-history restoration are supported. Restoration
+with message attachments refuses instead of silently omitting those inputs.
+Unknown native acceptance or observation loss disables further effects without
+replay, fallback or another conversation. Existing callers are not migrated.
+
+Native permission requests use ACP `session/request_permission`; only the
+matching controller's explicit `allow-once` selection approves one request.
+Managed-approval requirements remain pending rather than being bypassed.
+`initialize._meta.userInput` is `unavailable`: this adapter does not invent an
+ACP mapping for SDK user-input prompts. Such unsupported native interactions
+can require explicit owner intervention; there is no approve-all default.
+
+`initialize._meta.activity` advertises the additive read-only
+`copilot-driver/activity` method, requiring the bound `sessionId`. Its result
+separates `foreground: {known, state}`, `tasks: {known, items}` and
+`schedules: {known, items}`. Items retain the public SDK's native fields,
+including retained terminal tasks. Events invalidate cached inventory;
+callbacks coalesce bounded work and racing/failed reads remain unknown.
+A known read is not an atomic native idle boundary or proof of complete
+observation. `automaticIdleRetirement` remains `unavailable`, including when
+both lists are empty. Explicit transport close is not an observer-drain or
+whole-session-settlement receipt, and does not qualify headed auth recovery.
 
 ## SDK extension
 

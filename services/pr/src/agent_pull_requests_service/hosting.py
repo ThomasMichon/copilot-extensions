@@ -19,10 +19,15 @@ from types import FrameType
 from typing import Any, Callable, TypeVar
 
 from agent_pull_requests.watch_service import WatchService
+from agent_pull_requests.watch_replay_store import ReplayStore
+from agent_pull_requests.workspace_operations import WorkspaceOperations
 from fleet_manager.credential_references import load_service_credentials
 from fleet_manager.gateway_service_handler import RequestDisconnected
 
-from .config import HostConfig
+from .config import HostConfig, WorkspaceConfig
+from .local_config import LocalHostConfig
+
+ServiceConfig = HostConfig | LocalHostConfig
 
 _Entry = TypeVar("_Entry", bound=Callable[..., object])
 
@@ -123,36 +128,52 @@ def ready(path: Path, *, now: float | None = None) -> bool:
         return False
 
 
-async def run(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
+async def run(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> None:
     """Start only while the caller has not already withdrawn the request."""
     if stop is not None and stop.is_set():
         return
     await _run_service(config, stop=stop)
 
 
+async def _workspace_operations(
+    config: ServiceConfig, workspace: WorkspaceConfig, store: ReplayStore,
+    scope: LaunchScope, stop: asyncio.Event,
+) -> dict[tuple[str, str], WorkspaceOperations] | None:
+    pending = asyncio.create_task(asyncio.to_thread(
+        workspace.operations, store, scope.check, config.operation_seconds,
+    ))
+    stopped = asyncio.create_task(stop.wait())
+    try:
+        done, _ = await asyncio.wait({pending, stopped}, return_when=asyncio.FIRST_COMPLETED)
+        if stopped in done:
+            scope.stopping.set()
+            return None
+        return pending.result()
+    finally:
+        if not pending.done():
+            scope.stopping.set()
+            stop.set()
+
+        async def settle() -> None:
+            try:
+                # Cancellation cannot abandon the synchronous native cleanup owner.
+                await asyncio.gather(pending, return_exceptions=True)
+            finally:
+                stopped.cancel()
+                await asyncio.gather(stopped, return_exceptions=True)
+
+        await _join_settlement(asyncio.create_task(settle()))
+
+
 @daemon_entrypoint(
     "agent-pull-requests-service", source=__file__, purpose="production",
 )
-async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None) -> None:
+async def _run_service(config: ServiceConfig, *, stop: asyncio.Event | None = None) -> None:
     """Adopt existing state, then own exactly the existing WatchService lifetime."""
     stop = stop if stop is not None else asyncio.Event()
     if stop.is_set():
         return
     scope = LaunchScope(config.operation_seconds)
-    credentials = load_service_credentials(
-        proof_key_file=config.proof_key_file, access_token_file=config.access_token_file,
-    )
-    store = config.store()
-    service = WatchService(
-        store, fleet=config.fleet, gateway=config.gateway, slot=config.slot,
-        bindings=config.bindings, observations=config.observations,
-        gateway_origin=config.gateway_origin, access_token_callback=credentials.access_token,
-        proof_key=credentials.proof_key, authority=scope.deadline, checkpoint=scope.check,
-        gateway_ca=str(config.gateway_ca) if config.gateway_ca else None,
-        interval=config.interval,
-        workspaces=config.workspaces.operations(store, scope.check, config.operation_seconds)
-        if config.workspaces is not None else None,
-    )
     loop = asyncio.get_running_loop()
     previous = {}
 
@@ -168,6 +189,51 @@ async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None)
         for selected, handler in previous.items():
             signal.signal(selected, handler)
         previous.clear()
+
+    try:
+        await _serve(config, scope, stop)
+    finally:
+        scope.stopping.set()
+        stop.set()
+        for selected, handler in previous.items():
+            signal.signal(selected, handler)
+
+
+async def _serve(config: ServiceConfig, scope: LaunchScope, stop: asyncio.Event) -> None:
+    store = config.store()
+    workspaces = await _workspace_operations(config, config.workspaces, store, scope, stop) if (
+        config.workspaces is not None
+    ) else None
+    if stop.is_set():
+        return
+    scope.check()
+    report_options: dict[str, Any] = {}
+    if config.reports is not None:
+        report_options = {
+            "reports": config.reports.readers(config.operation_seconds),
+            "response_limit": config.reports.response_bytes,
+        }
+    if isinstance(config, LocalHostConfig):
+        service = WatchService(
+            store, fleet=None, gateway=None, slot=None,
+            bindings=config.bindings, observations=config.observations,
+            gateway_origin=None, access_token_callback=None, proof_key=None,
+            authority=scope.deadline, checkpoint=scope.check, interval=config.interval,
+            local_socket=config.repositories.socket_path, local_peers=config.repositories.peers,
+            operation_seconds=config.operation_seconds,
+        )
+    else:
+        credentials = load_service_credentials(
+            proof_key_file=config.proof_key_file, access_token_file=config.access_token_file,
+        )
+        service = WatchService(
+            store, fleet=config.fleet, gateway=config.gateway, slot=config.slot,
+            bindings=config.bindings, observations=config.observations,
+            gateway_origin=config.gateway_origin, access_token_callback=credentials.access_token,
+            proof_key=credentials.proof_key, authority=scope.deadline, checkpoint=scope.check,
+            gateway_ca=str(config.gateway_ca) if config.gateway_ca else None,
+            interval=config.interval, workspaces=workspaces, **report_options,
+        )
 
     async def observe() -> None:
         while True:
@@ -201,8 +267,6 @@ async def _run_service(config: HostConfig, *, stop: asyncio.Event | None = None)
             finally:
                 observer.cancel()
                 await asyncio.gather(observer, return_exceptions=True)
-                for selected, handler in previous.items():
-                    signal.signal(selected, handler)
 
         # Task completion can be a bounded-drain failure, not writer settlement.
         await _join_settlement(asyncio.create_task(settle()))

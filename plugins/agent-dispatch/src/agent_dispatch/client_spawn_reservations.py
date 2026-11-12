@@ -1,4 +1,5 @@
-"""``list_reservations``/``get_reservation`` for :class:`DispatchClient`.
+"""Spawn-reservation reads, lifecycle records and legacy-history
+reconciliation (fence/adopt) for :class:`DispatchClient`.
 
 Split out of ``client.py`` to keep that module under its module-size cap
 (same pattern as :mod:`agent_dispatch.client_suspend` /
@@ -23,6 +24,8 @@ class SpawnReservationClientMixin:
 
     _http: Any
     _unwrap: Callable[[Any], Any]
+    _control_headers: Callable[[], dict]
+    pool_placement_contract: Callable[[], dict]
 
     def fence_spawn_startup(self, key: str, *, startup_revision: int) -> dict:
         """Close completed startup admission while retaining resource ownership."""
@@ -197,6 +200,77 @@ class SpawnReservationClientMixin:
             ):
                 raise DispatchError(426, "coordinator did not apply pool-accountable/v1 reservation query")
         return reservations
+
+    def fence_legacy_history(
+        self, *, before: float, apply: bool = False, permitted: bool = False,
+        confirmed_no_live_holder: bool = False, reason: str = "",
+        reservation_keys: list[str] | None = None, expected_preview: str | None = None,
+    ) -> dict:
+        from .client_errors import DispatchError
+
+        body: dict[str, Any] = {
+            "before": before, "apply": apply, "permitted": permitted,
+            "confirmed_no_live_holder": confirmed_no_live_holder, "reason": reason,
+        }
+        if reservation_keys is not None or expected_preview is not None:
+            if (
+                not isinstance(reservation_keys, list) or not reservation_keys
+                or any(not isinstance(key, str) or not key or key.strip() != key for key in reservation_keys)
+                or len(set(reservation_keys)) != len(reservation_keys)
+                or (apply and not expected_preview)
+            ):
+                raise ValueError("selected history requires explicit keys and an apply preview revision")
+            versions = self.pool_placement_contract().get("selected_legacy_history_versions")
+            if not isinstance(versions, list) or not any(type(v) is int and v == 1 for v in versions):
+                raise DispatchError(426, "coordinator lacks selected-legacy-history/v1")
+            body.update({"reservation_keys": reservation_keys, "expected_preview": expected_preview})
+        headers = self._control_headers()
+        try:
+            result = self._unwrap(self._http.post(
+                "/spawn-reservations/history/fence", headers=headers, json=body,
+            ))
+        except (ValueError, httpx.HTTPError) as exc:
+            if reservation_keys is not None and apply:
+                raise DispatchError(
+                    502, "selected legacy history apply outcome is unknown: response unavailable or undecodable; "
+                    "inspect the original reservations and audit before retrying",
+                ) from exc
+            raise
+        except DispatchError as exc:
+            if reservation_keys is not None and apply and exc.status_code >= 500:
+                raise DispatchError(
+                    502, "selected legacy history apply outcome is unknown: provider response failed; "
+                    "inspect the original reservations and audit before retrying",
+                ) from exc
+            raise
+        if reservation_keys is not None:
+            selection = result.get("selection") if isinstance(result, dict) else None
+            sample = result.get("sample") if isinstance(result, dict) else None
+            if (
+                not isinstance(selection, dict)
+                or selection.get("reservation_keys") != sorted(reservation_keys)
+                or not isinstance(selection.get("revision"), str)
+                or len(selection["revision"]) != 64
+                or (apply and selection["revision"] != expected_preview)
+                or not isinstance(sample, list)
+                or any(not isinstance(key, str) or key not in reservation_keys for key in sample)
+            ):
+                if apply:
+                    raise DispatchError(
+                        502, "selected legacy history apply outcome is unknown: invalid scope response; "
+                        "inspect the original reservations and audit before retrying",
+                    )
+                raise DispatchError(426, "coordinator did not preserve selected-legacy-history/v1")
+        return result
+
+    def adopt_legacy_capacity(
+        self, *, apply: bool = False, permitted: bool = False, reason: str = "",
+    ) -> dict:
+        return self._unwrap(self._http.post(
+            "/spawn-reservations/history/adopt",
+            headers=self._control_headers(),
+            json={"apply": apply, "permitted": permitted, "reason": reason},
+        ))
 
     def get_reservation(self, key: str) -> dict:
         return self._unwrap(self._http.get(f"/spawn-reservations/{key}"))

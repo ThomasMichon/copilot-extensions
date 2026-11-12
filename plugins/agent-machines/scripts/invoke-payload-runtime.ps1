@@ -2,6 +2,8 @@ $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $forwardArgs = @($args)
 $configurationEntry = $forwardArgs.Count -gt 0 -and $forwardArgs[0] -ceq 'installation-configuration'
+$healthRunEntry = $forwardArgs.Count -gt 1 -and $forwardArgs[0] -ceq 'health' -and $forwardArgs[1] -cin @('run', 'prepare-job', 'job')
+$readOnlyRuntimeEntry = $configurationEntry -or $healthRunEntry
 
 $payloadRoot = [Environment]::GetEnvironmentVariable(
     'AGENT_MACHINES_PAYLOAD_ROOT',
@@ -174,7 +176,7 @@ if (-not $hostExe) {
 function Resolve-AgentMachinesRuntime {
     $AgentRtPy = $null
     $env:AGENT_RT_ROOT = $runtimeRoot
-    if ($configurationEntry) { . $runtimeResolver -TraceMode read-only }
+    if ($readOnlyRuntimeEntry) { . $runtimeResolver -TraceMode read-only }
     else { . $runtimeResolver }
     return $AgentRtPy
 }
@@ -188,7 +190,11 @@ function Invoke-AgentMachinesRuntime([string]$Python) {
     $previousEap = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        & $Python -m agent_machines @forwardArgs
+        if ($healthRunEntry) {
+            & $Python -I (Join-Path $scriptDir 'health-collection-entry.py') @forwardArgs
+        } else {
+            & $Python -m agent_machines @forwardArgs
+        }
     } finally {
         $ErrorActionPreference = $previousEap
     }
@@ -355,9 +361,10 @@ function Invoke-AgentMachinesInstaller([string]$InstallerPath, [string]$Action) 
 
 $python = Resolve-AgentMachinesRuntime
 if ($python) { Invoke-AgentMachinesRuntime $python }
-if ($configurationEntry) {
+if ($readOnlyRuntimeEntry) {
+    $operation = if ($healthRunEntry) { 'Health collection' } else { 'Configuration' }
     [Console]::Error.WriteLine(
-        '[agent-machines] Configuration requires an already provisioned runtime; use the native setup owner.'
+        "[agent-machines] $operation requires an already provisioned runtime; use the native setup owner."
     )
     exit 1
 }

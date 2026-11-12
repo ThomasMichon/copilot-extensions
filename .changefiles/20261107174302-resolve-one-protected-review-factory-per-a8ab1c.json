@@ -1,0 +1,9 @@
+{
+  "comment": "Resolve one protected review factory per workspace execution without changing legacy embeddings or read-only hosts",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

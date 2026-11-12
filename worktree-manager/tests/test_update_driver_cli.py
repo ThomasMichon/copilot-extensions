@@ -144,6 +144,25 @@ def test_request_context_never_persists_credentials(monkeypatch):
     assert context["AGENT_WORKTREES_UPDATE_CONTEXT"] == "example-context"
 
 
+def test_relative_home_is_captured_from_execution_directory_not_source_anchor(
+    tmp_path, monkeypatch,
+):
+    from worktree_manager.source_config import SOURCE_ANCHOR_ENV
+
+    caller, anchor = tmp_path / "caller", tmp_path / "anchor"
+    caller.mkdir()
+    anchor.mkdir()
+    monkeypatch.chdir(caller)
+    monkeypatch.setenv("AGENT_HOME", "state")
+    monkeypatch.setenv(SOURCE_ANCHOR_ENV, str(anchor))
+    context = driver.request_context()
+    assert context["AGENT_HOME"] == str(caller / "state")
+    assert driver.request_source_anchor() == str(anchor)
+    monkeypatch.chdir(anchor)
+    with driver._request_environment(context, cwd=str(anchor)):
+        assert driver.request_context()["AGENT_HOME"] == str(caller / "state")
+
+
 def test_cold_bootstrap_context_requires_no_uninstalled_manager_dependencies():
     import os
     import subprocess
@@ -228,7 +247,8 @@ def test_installed_cli_retains_inherited_source_anchor_separately_from_runner_cw
     tmp_path, monkeypatch,
 ):
     import update_driver
-    from worktree_manager import source_config
+    from update_driver.authority import UpdateAuthority
+    from worktree_manager import engine_client, source_config
 
     root, anchor, caller, worker = (tmp_path / name for name in (
         "manager", "source-anchor", "caller", "worker",
@@ -250,11 +270,13 @@ def test_installed_cli_retains_inherited_source_anchor_separately_from_runner_cw
         )
 
     monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "current_authority", lambda **_kwargs: UpdateAuthority())
     monkeypatch.setattr(update_driver, "enqueue", enqueue)
     monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
         ("synthetic-python", "-m", module, *args), {},
     ))
     monkeypatch.setattr(update_driver, "ensure_worker", lambda *args, **kwargs: None)
+    monkeypatch.setattr(engine_client, "get_value", lambda *_args: "")
     assert driver.cmd_update_request(["--detach"]) == 0
     spec, runner = seen["spec"], seen["runner"]
     assert spec.cwd == str(anchor) and runner.cwd == str(caller)
@@ -340,6 +362,26 @@ def test_standalone_authority_skips_controller_before_manager_enqueue(queued, mo
     assert driver.cmd_update_request(["--project", "example"]) == 6
     assert "--no-project-controller" in seen["spec"].argv
     assert "--no-project-controller" in seen["runner"].argv
+
+
+def test_public_submission_and_status_report_superseded_request(queued, monkeypatch, tmp_path, capsys):
+    import json
+    import update_driver
+    from update_driver import core
+
+    monkeypatch.setattr(core, "default_root", lambda: tmp_path / "queue")
+    monkeypatch.setattr(update_driver, "enqueue", core.enqueue)
+    monkeypatch.setattr(update_driver, "status", core.status)
+    assert driver.cmd_update_request(["--detach", "--json", "--force"]) == 0
+    first = json.loads(capsys.readouterr().out)["request_id"]
+    assert driver.cmd_update_request(["--detach", "--json", "--no-manager"]) == 0
+    second = json.loads(capsys.readouterr().out)["request_id"]
+    assert first != second
+    assert driver.cmd_update_request(["--request-status", first, "--json"]) == 0
+    result = json.loads(capsys.readouterr().out)
+    assert result["state"] == "completed" and result["exit_code"] == 125
+    assert second in result["error"] and "nothing ran" in result["error"]
+    assert core.status(second).state == "pending"
 
 
 def test_downlevel_driver_refuses_cleanly_without_queueing(queued, monkeypatch, capsys):
@@ -483,10 +525,10 @@ def test_project_controller_preserves_explicit_manager_skip(queued, monkeypatch)
 
 @pytest.mark.parametrize("project", [None, "missing"])
 def test_neutral_controller_probe_does_not_block_manager_update(queued, monkeypatch, project):
-    from worktree_manager import engine_client
+    from worktree_manager import engine_client, project_update_controller
 
     def missing_project(*_args):
-        raise engine_client.EngineError("Could not resolve a project for 'get'.")
+        raise project_update_controller._NoProjectResolved("Could not resolve a project for 'get'.")
 
     seen, _request = queued
     monkeypatch.setattr(engine_client, "get_value", missing_project)
@@ -1180,6 +1222,8 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
     root = home / ".copilot-extensions" / "update-driver"
     requests = update_driver.status(root=root)
     assert len(requests) == 3
+    assert [request.state for request in requests] == ["completed", "completed", "pending"]
+    assert all(request.exit_code == 125 and request.started_at is None for request in requests[:-1])
     monkeypatch.setenv(engine_client.ENGINE_CMD_ENV, "wrong-worker-provider")
     monkeypatch.setenv(budget_key, "180")
     result = run_owned(
@@ -1189,10 +1233,8 @@ def test_actual_queued_manager_isolates_explicit_and_absent_engine_overrides(
     assert result.returncode == 0, result.stderr
     records = [json.loads(line) for line in events.read_text().splitlines()]
     starts = [record for record in records if record["phase"] == "start"]
-    assert [record["provider"] for record in starts] == [
-        ["synthetic-first-provider"], ["synthetic-second-provider"], accepted,
-    ]
-    assert [record["acquisition_budget"] for record in starts] == ["600.0", "1200.0", None]
+    assert [record["provider"] for record in starts] == [accepted]
+    assert [record["acquisition_budget"] for record in starts] == [None]
 
 
 @pytest.mark.timeout(4 * _NATIVE_QUEUE_TIMEOUT)

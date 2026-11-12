@@ -275,6 +275,32 @@ def test_shared_artifact_owner_preserves_selected_uv_and_deadline(
     assert calls == ([] if phase == "preflight-expired" else ["resolve", "build"])
 
 
+@pytest.mark.parametrize("changed", [False, True])
+def test_pr_preparation_resources_refuse_substitution_without_runtime_primitives(tmp_path, changed):
+    from build_toolchain_lock import ArtifactBuildError
+
+    root = Path(__file__).resolve().parents[2]
+    helper = tmp_path / "libs/versioned-runtime/standalone_build.py"
+    helper.parent.mkdir(parents=True)
+    helper.write_bytes((root / "libs/versioned-runtime/standalone_build.py").read_bytes())
+    canonical = tmp_path / "plugins/ai-attribution/scripts"
+    canonical.mkdir(parents=True)
+    expected = {}
+    for name in ("attribution_profile.py", "comment_preparation.py"):
+        source = canonical / name
+        source.write_bytes(b"# canonical preparation fixture\n")
+        member = "agent_pull_requests_service/_attribution/" + name
+        included = tmp_path / "services/pr/src" / member
+        included.parent.mkdir(parents=True, exist_ok=True)
+        included.write_bytes(b"# substituted\n" if changed else source.read_bytes())
+        expected[member] = source
+    if changed:
+        with pytest.raises(ArtifactBuildError, match="differs from canonical"):
+            injected_resources("pr-service", tmp_path)
+    else:
+        assert injected_resources("pr-service", tmp_path) == expected
+
+
 @pytest.mark.parametrize("member", ["__init__.py", "_job_scopes.py", "_windows_job_types.py",
                                    "_output_relay.py", "streaming.py"])
 @pytest.mark.parametrize("changed", [False, True])

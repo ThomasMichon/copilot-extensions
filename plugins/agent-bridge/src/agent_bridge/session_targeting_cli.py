@@ -92,6 +92,21 @@ def _send(args: argparse.Namespace) -> None:
 
     validate_options(args)
     core = _core()
+    if getattr(args, "wait_delivery", False):
+        from .live_message_models import validate_live_reply_timeout
+
+        try:
+            validate_live_reply_timeout(args.wait_timeout)
+        except ValueError as exc:
+            raise SendRefused("refused_invalid", reason="invalid_wait_timeout", retryable=False,
+                              target=args.target, error=f"--wait-timeout {exc}") from exc
+        if any(getattr(args, field, False) for field in (
+            "live_exact_notify", "live_receipt_only", "live_exact", "native_invocation_file",
+            "receipt_only", "expected_native_session_id",
+            "plugin_context_stdin",
+        )):
+            raise SendRefused("refused_invalid", reason="delivery_wait_target", retryable=False,
+                              target=args.target, error="--wait requires an ordinary live-session send")
     if getattr(args, "no_resume", False) and (
         not getattr(args, "expected_native_session_id", None)
         or not getattr(args, "idempotency_key", None)
@@ -222,6 +237,9 @@ def _send(args: argparse.Namespace) -> None:
         _deliver_to_live_session(client, args, live["session_id"], prompt)
         return
     if address is not None:
+        if getattr(args, "wait_delivery", False):
+            raise SendRefused("refused_unavailable", reason="delivery_wait_remote", retryable=False,
+                              target=target, error="remote delivery waiting is not supported; no message sent")
         if getattr(args, "plugin_context_stdin", False):
             raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
                               target=target, error="prepared startup requires the registered native session")
@@ -233,6 +251,9 @@ def _send(args: argparse.Namespace) -> None:
             error=f"Target {target!r} has no live session matching {args.expected_session_id!r}.",
         )
 
+    if getattr(args, "wait_delivery", False):
+        raise SendRefused("refused_unavailable", reason="delivery_wait_target", retryable=False,
+                          target=target, error="--wait requires a registered live session; no message sent")
     if getattr(args, "plugin_context_stdin", False):
         raise SendRefused("refused_unavailable", reason="startup_target", retryable=False,
                           target=target, error="prepared startup cannot fall back to ACP or create a session")
@@ -846,6 +867,12 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     reply_group = send_p.add_mutually_exclusive_group()
     reply_group.add_argument("--no-wait", action="store_true", help="Return immediately without waiting for response")
     reply_group.add_argument("--wait-reply", action="store_true", help="For live sessions, opt into a bounded post-consumption reply wait (default: return the send receipt immediately)")
+    reply_group.add_argument("--wait", dest="wait_delivery", action="store_true",
+                             help="Wait finitely for exact model-facing consumption or observed pending input, not turn completion (live sessions only)")
+    from .live_delivery_client import wait_seconds
+
+    send_p.add_argument("--wait-timeout", type=wait_seconds, default=120.0, metavar="SECONDS",
+                        help="With --wait, maximum delivery wait (0..600 seconds; default 120). Accepted timeout/blocked is not failed send.")
     send_p.add_argument("--reply-timeout", type=float, default=120.0, metavar="SECONDS", help="With --wait-reply, maximum reply wait (0..600 seconds; default 120). A timeout is not a failed send.")
     from .startup_observation import add_arguments as add_startup_arguments
     add_startup_arguments(send_p)
@@ -863,6 +890,13 @@ def register_session_targeting_commands(sub: argparse._SubParsersAction) -> None
     add_native_keyed_arguments(send_p)
     core._add_stream_args(send_p)
     send_p.set_defaults(func=_cmd_send)
+    from .live_delivery_client import command as delivery_receipt
+
+    receipt_p = sub.add_parser("delivery-receipt", help="Observe an existing message without resending")
+    receipt_p.add_argument("target", help="Original live session id")
+    receipt_p.add_argument("message_id", type=int)
+    receipt_p.add_argument("--timeout", type=wait_seconds, default=0.0, help="Finite wait, 0..600 seconds")
+    receipt_p.set_defaults(func=delivery_receipt)
 
     create_p = sub.add_parser("create", help="Create a fresh session for an agent (optionally send a first prompt). Refuses if a one-session-per-CodeSpace agent is busy.")
     add_hosting_argument(create_p)

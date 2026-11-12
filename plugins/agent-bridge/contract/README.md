@@ -4,7 +4,35 @@ This directory freezes observed bridge contracts so compatibility changes are
 reviewed against independent evidence rather than producer-generated snapshots.
 The registry is repository-side evidence; no runtime component reads it.
 
+The H1 prior-runtime corpus also retains the exact `0.4.0-dev150` frontend
+source beside its existing protocol source. Both come from the same immutable
+release commit and retain their original bytes and Git blob identities.
+Driver's relocated-core controls execute that actual frontend against the
+current modern and legacy compact exports, preserving cursors, literal frames,
+lifetime distinctions and exact child cleanup. This does not substitute a
+current compatibility alias for an older implementation, and does not qualify
+an old installed Host, historical binary rollback or an SDK runtime.
+
+The corpus also retains that release's exact Host source. A reverse control
+uses the current frontend with the unmodified historical Host and a real
+test-owned Python ACP child. It proves literal framing, cursor-preserving
+reattachment, explicit termination and historical idle-detach shutdown.
+The test owner independently settles its listener, frontend handlers and child;
+this is source compatibility, not modern lifetime/authentication support,
+historical binary rollback or native SDK evidence.
+
 ## Current HTTP-52 owner-membership evidence
+
+The optional `live_delivery_observation: 1` expansion retains HTTP generation
+52 and every prior introduction floor. Eighteen additional source cases cover
+fresh/partial/stale pending input, SDK acceptance versus root consumption,
+post-admission evidence loss, strict timeout and mixed-mode refusal, actual
+parser/HTTP and module-process loopback reads, and model-free extension event
+and capability behavior. The capture owner registers the delivery store,
+client, router, CLI and extension helper as semantic sources. This is not
+proof of native model transmission, installed extension reload or deployment.
+Prepare the expanded source declarations before the genuine current-generation
+capture; hashes alone are not new execution evidence.
 
 Owner membership introduces HTTP generation 52 and
 `OWNER_MEMBERSHIP_PROTOCOL_VERSION = 52`. Its named
@@ -13,7 +41,7 @@ retained: generation-aware clients can recognize the endpoint's introduction,
 while passive callers still require its exact named capability. Minimum HTTP
 support and every earlier feature's introduction floor remain unchanged.
 
-The current capture owner is `tools/capture_bridge_http52.py`, using 45 actual
+The current capture owner is `tools/capture_bridge_http52.py`, using the declared
 parser, authenticated ASGI, canonical producer, transport and payload cases
 with a new independent HTTP-52 vector. Retained test-function names do not
 select capture identity: the owning generation, source-bound request, protocol
@@ -132,6 +160,28 @@ bound; a long caller `TMPDIR` can correctly refuse before creating the mocked
 consumer. Use the runner's default managed temporary namespace for this capture,
 not a long task-directory override. Pre-launch assertions retain the original
 CLI diagnostics even when no consumer exists.
+
+Two fixture-lifetime controls bring the current portfolio to 343 cases.
+Constructor and post-construction stop timeouts settle the real test-owned
+process tree, listener and streams. POSIX observation retains the unreaped
+Host until its group is retired and confirmed; Windows retains the owned Job.
+These controls do not change HTTP generation, capability floors or native
+product qualification.
+
+Retained native recovery adds 59 cases, bringing the current portfolio to 402.
+The optional `retained_native_session_recovery: 1` capability does not change
+HTTP generation 52 or prior floors. Source-bound controls cover exact original
+journals, the actual parser/client/HTTP join, first-use and terminal inspection,
+deliberate stops, retained Host/ACP timeout custody, held permissions, daemon
+loss without implicit startup, one-shot native load and original-handle
+retention through startup, periodic collection, force-end admission and legacy
+transactional deletion, including successor handles sharing an original journal.
+The portfolio also checks malformed terminal-entry retention, versioned preparation
+of pre-change databases and SQLite work growth for both retention queries.
+The existing core live startup-owner protocol is used without inventing
+acquisition-runtime custody. Host and native process I/O remain controlled
+fixtures, not installed-runtime or native Copilot evidence. Historical
+generations and their captures remain unchanged.
 
 Commit source and the generation declaration, run the new owner's `--prepare`,
 commit and publish that checkpoint, then run `--write`, no-write verification
@@ -795,6 +845,17 @@ capture itself runs the existing contained plugin runner with an exact
 model-free ASGI/owned-process probe portfolio. A missing, skipped, failed or
 duplicated required probe refuses publication. No real model, workspace owner,
 service installer or production target is used.
+
+The expanded HTTP-52 portfolio shares one 20-minute Windows aggregate deadline
+across both contained-runner groups, including preparation and cleanup. Its
+individual pytest cases retain their 120-second limit. Earlier capture owners
+retain their existing deadlines; no probe is omitted to fit the budget.
+The Windows source-audited retained-writer fixtures allow 30 seconds for
+their cold lineage subprocesses. Production retains its ten-second deadline;
+these fixtures prove serializer/custody behavior, not production latency.
+Each contained runner receives only the remaining aggregate budget for its
+sub-suite and plugin limits. The receipt portfolio includes an actual module
+CLI subprocess, whose launch and source entrypoint are bound as the `cli` role.
 
 Independent expected cases are in `inputs/http47/capture-cases.json`.
 The generated primary packet records actual observations, including graceful,

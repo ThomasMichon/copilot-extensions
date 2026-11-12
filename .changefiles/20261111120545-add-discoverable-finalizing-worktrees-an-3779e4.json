@@ -1,0 +1,9 @@
+{
+  "comment": "Add discoverable finalizing-worktrees and cleaning-worktrees wrappers over the canonical closeout and cleanup guidebooks.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

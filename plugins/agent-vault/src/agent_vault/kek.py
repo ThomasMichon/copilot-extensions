@@ -186,13 +186,14 @@ def delete_kek(name: str) -> bool:
 
 def _aesgcm(kek: bytes):
     try:
-        from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+        from .protected_crypto import AesGcm
     except ImportError as exc:  # pragma: no cover - env-dependent
         raise KekError(
-            "the 'cryptography' package is required for seal/unseal -- install it "
-            "(e.g. `uv pip install cryptography`) or the agent-vault 'kek' extra"
+            "the 'pycryptodomex' package is required for seal/unseal -- select "
+            "the agent-vault 'ssh' installer profile; package-based installations "
+            "can use the 'kek' extra"
         ) from exc
-    return AESGCM(kek)
+    return AesGcm(kek)
 
 
 def seal(name: str, plaintext: bytes) -> str:

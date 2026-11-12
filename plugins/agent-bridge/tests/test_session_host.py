@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import types
 from unittest.mock import MagicMock
 
 import pytest
@@ -1174,6 +1175,121 @@ def test_launch_session_host_surfaces_crash_tail(tmp_path, monkeypatch):
     assert "exited early (code=7)" in message
     assert "simulated session host startup crash" in message
     assert "diagnosable detail line" in message
+
+
+@pytest.mark.parametrize("cleanup_outcome", ["settled", "held", "error"])
+def test_launch_session_host_fallback_scratch_is_labeled_and_removed_on_crash(
+    tmp_path, monkeypatch, cleanup_outcome,
+):
+    """Without ``state_dir`` the fallback lives in labeled scratch and a
+    failed launch leaves no ``agbridge-host-*`` directory behind."""
+    crash_script = tmp_path / "crash.py"
+    crash_script.write_text("import sys\nsys.exit(3)\n")
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch_root))
+    seen: list[str] = []
+    real_popen = subprocess.Popen
+
+    def _fake_popen(argv, **kwargs):
+        seen.extend(
+            entry.name for entry in scratch_root.iterdir()
+            if (entry / "scratch-owner.json").is_file()
+        )
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
+        return real_popen([sys.executable, str(crash_script)], **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+    if cleanup_outcome != "settled":
+        from agent_procutil import daemon_instances
+
+        def cleanup(*args, **kwargs):
+            if cleanup_outcome == "error":
+                raise OSError("cleanup unavailable")
+            return types.SimpleNamespace(status="held")
+
+        monkeypatch.setattr(daemon_instances, "cleanup_instance", cleanup)
+
+    error, message = (
+        (OSError, "cleanup unavailable") if cleanup_outcome == "error"
+        else (RuntimeError, "exited early")
+    )
+    with pytest.raises(error, match=message):
+        launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
+    assert seen and all(name.startswith("agbridge-host-") for name in seen)
+    remaining = list(scratch_root.iterdir())
+    if cleanup_outcome != "settled":
+        assert len(remaining) == 1 and (remaining[0] / "scratch-owner.json").is_file()
+    else:
+        assert remaining == []
+
+
+@pytest.mark.parametrize("refusal", ["cwd", "environment"])
+def test_launch_session_host_fallback_scratch_removed_when_creation_refused(
+    tmp_path, monkeypatch, refusal,
+):
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch_root))
+    real_popen = subprocess.Popen
+    refused = []
+
+    def refusing_popen(argv, **kwargs):
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
+        refused.extend(scratch_root.iterdir())
+        if refusal == "cwd":
+            kwargs["cwd"] = str(tmp_path / "missing")
+        else:
+            kwargs["env"] = {**kwargs["env"], "INVALID": "embedded\0null"}
+        return real_popen(argv, **kwargs)
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", refusing_popen)
+    with pytest.raises((FileNotFoundError, NotADirectoryError, ValueError)):
+        launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=5.0)
+    assert len(refused) == 1
+    assert not refused[0].exists()
+    assert list(scratch_root.iterdir()) == []
+
+
+def test_launch_session_host_fallback_scratch_kept_when_interrupted_after_spawn(
+    tmp_path, monkeypatch,
+):
+    """An interruption while a spawned host may still be running keeps the
+    labeled fallback directory, since that host may still use its records."""
+    hang_script = tmp_path / "hang.py"
+    hang_script.write_text("import time\ntime.sleep(30)\n")
+    scratch_root = tmp_path / "scratch"
+    scratch_root.mkdir()
+    monkeypatch.setenv("AGENT_SCRATCH_ROOT", str(scratch_root))
+    real_popen = subprocess.Popen
+    spawned: dict[str, subprocess.Popen] = {}
+
+    def _fake_popen(argv, **kwargs):
+        if "--support-json" in argv:
+            return real_popen(argv, **kwargs)
+        spawned["proc"] = real_popen([sys.executable, str(hang_script)], **kwargs)
+        return spawned["proc"]
+
+    def _interrupt(_seconds):
+        if "proc" in spawned:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr(launcher.subprocess, "Popen", _fake_popen)
+    monkeypatch.setattr(
+        launcher._core, "time", types.SimpleNamespace(time=time.time, sleep=_interrupt),
+    )
+    try:
+        with pytest.raises(KeyboardInterrupt):
+            launcher.launch_session_host(["irrelevant-child-argv"], ready_timeout=30.0)
+        kept = [entry for entry in scratch_root.iterdir() if entry.name.startswith("agbridge-host-")]
+        assert len(kept) == 1 and (kept[0] / "scratch-owner.json").is_file()
+    finally:
+        proc = spawned.get("proc")
+        if proc is not None:
+            proc.kill()
+            proc.wait(timeout=10)
 
 
 def test_launch_session_host_timeout_kills_hung_process(tmp_path, monkeypatch):
@@ -2671,10 +2787,49 @@ async def test_start_session_host_mode_end_to_end(tmp_path, monkeypatch, hosted_
         db.close()
 
 
+def _retain_manual_recovery_permission(db, session):
+    from agent_bridge.creation_worktree_writer import JOURNAL_KEY
+    from agent_bridge.models import RetainedRecoveryRequest
+
+    key = "a" * 64
+    session.target.venue = {**(session.target.venue or {}), JOURNAL_KEY: key}
+    db.update_session_target(session.session_id, session.target.to_json(), session.target.cwd)
+    request = RetainedRecoveryRequest(
+        operation_id="original", journal_key=key, native_session_id=session.acp_session_id,
+        head_revision=1, bridge_installation="fixture-installation",
+    )
+    db.execute_write(
+        "INSERT INTO workspace_embodiments "
+        "(key_digest,facts_digest,state,session_id,creation_recoveries_json) "
+        "VALUES (?,'facts','allocated',?,?)",
+        (key, session.session_id, json.dumps({"original": {"request": request.model_dump(), "state": "complete"}})),
+    )
+
+
+async def _assert_reattached_permission_waits(client, native):
+    from acp.schema import PermissionOption, ToolCallUpdate
+
+    assert client.auto_approve is False
+    pending = asyncio.create_task(client._handle_permission_request(
+        [PermissionOption(option_id="allow", name="Allow", kind="allow_once")],
+        ToolCallUpdate(tool_call_id="fixture-tool", title="Fixture tool"),
+        session_id=native,
+    ))
+    try:
+        await asyncio.sleep(0)
+        assert not pending.done()
+        assert client._pending_permission_future is not None
+    finally:
+        pending.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await pending
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("late_identity", [False, True])
+@pytest.mark.parametrize("retained_permission_hold", [False, True])
 async def test_reattach_session_hosts_on_restart(
-    tmp_path, monkeypatch, hosted_workspace, late_identity,
+    tmp_path, monkeypatch, hosted_workspace, late_identity, retained_permission_hold,
 ):
     import os
     import sys
@@ -2703,6 +2858,8 @@ async def test_reattach_session_hosts_on_restart(
         mgr1 = SessionManager(db1, session_host_state_dir=statedir)
         target = SpawnTarget(type="local", cwd=str(tmp_path))
         session = await asyncio.wait_for(mgr1.start_session(target), timeout=30)
+        if retained_permission_hold:
+            _retain_manual_recovery_permission(db1, session)
         sid = session.session_id
         rec = mgr1._host_index.all()[0]
         host_pid, child_pid = rec.host_pid, rec.child_pid
@@ -2742,6 +2899,8 @@ async def test_reattach_session_hosts_on_restart(
         assert s2.client is not None
         assert s2.acp_session_id == "host-mode-sess"      # session adopted, not re-created
         assert s2.client.pid == child_pid                 # same surviving child
+        if retained_permission_hold:
+            await _assert_reattached_permission_waits(s2.client, s2.acp_session_id)
         await s2.client.shutdown()
         db2.close()
     finally:
@@ -2857,7 +3016,10 @@ async def test_recovery_settles_attached_client_after_child_exit(
 
 
 @pytest.mark.asyncio
-async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkeypatch, hosted_workspace):
+@pytest.mark.parametrize("retained_permission_hold", [False, True])
+async def test_recover_disconnected_hosts_reattaches_in_session(
+    tmp_path, monkeypatch, hosted_workspace, retained_permission_hold,
+):
     """In-session liveness-driven reattach: a RUNNING host-backed session whose
     transport dropped (host + child alive) is redialed and resumed by cursor by
     ``recover_disconnected_hosts`` -- no restart, same child, same ACP session.
@@ -2889,6 +3051,8 @@ async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkey
     try:
         target = SpawnTarget(type="local", cwd=str(tmp_path))
         session = await asyncio.wait_for(mgr.start_session(target), timeout=30)
+        if retained_permission_hold:
+            _retain_manual_recovery_permission(db, session)
         sid = session.session_id
         rec = mgr._host_index.all()[0]
         host_pid, child_pid = rec.host_pid, rec.child_pid
@@ -2907,6 +3071,8 @@ async def test_recover_disconnected_hosts_reattaches_in_session(tmp_path, monkey
         assert s.client.pid == child_pid                      # same surviving child
         assert s.status == SessionStatus.RUNNING              # turn status preserved
         assert osutil_pid_alive(host_pid)                     # host never respawned
+        if retained_permission_hold:
+            await _assert_reattached_permission_waits(s.client, s.acp_session_id)
 
         # Idempotent: a healthy session needs no further reattach.
         assert await asyncio.wait_for(mgr.recover_disconnected_hosts(), timeout=30) == 0

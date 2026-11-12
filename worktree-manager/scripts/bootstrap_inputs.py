@@ -12,22 +12,25 @@ import installer_engine as engine
 import versioned_runtime as runtime
 
 
-def _preparation_assets(payload: Path) -> dict[Path, Path]:
-    manifest = payload / "packaged-assets.json"
+def _preparation_asset_group(
+    payload: Path, manifest_name: str, schema: str, canonical: str, destination: str,
+    *, targets: set[Path] | None = None, directories: set[Path] | None = None,
+) -> dict[Path, Path]:
+    manifest = payload / manifest_name
     if not manifest.is_file():
         return {}
     declaration = json.loads(manifest.read_text(encoding="utf-8"))
     if (
         not isinstance(declaration, dict)
-        or declaration.get("schema") != "copilot-extensions.packaged-assets"
+        or declaration.get("schema") != schema
         or type(declaration.get("version")) is not int
     ):
         raise ValueError("Unsupported Manager source preparation assets")
     legacy = declaration["version"] == 1
     if legacy:
         if (
-            declaration.get("canonicalDir") != "tools"
-            or declaration.get("payloadDir") != "scripts/runtime-source-tools"
+            declaration.get("canonicalDir") != canonical
+            or declaration.get("payloadDir") != destination
         ):
             raise ValueError("Unsupported Manager source preparation assets")
         groups = [declaration]
@@ -58,18 +61,18 @@ def _preparation_assets(payload: Path) -> dict[Path, Path]:
         return Path(value)
 
     assets = {}
-    targets = set()
-    directories = set()
+    targets = set() if targets is None else targets
+    directories = set() if directories is None else directories
     for group in groups:
         if not isinstance(group, dict) or not isinstance(group.get("files"), list) or not group["files"]:
             raise ValueError("Unsupported Manager source preparation assets")
-        canonical = relative(group.get("canonicalDir"), allow_root=not legacy)
-        destination = relative(group.get("payloadDir"))
+        canonical_directory = relative(group.get("canonicalDir"), allow_root=not legacy)
+        destination_directory = relative(group.get("payloadDir"))
         for name in group["files"]:
             member = relative(name)
             if legacy and member.name != name:
                 raise ValueError("Invalid Manager source preparation asset name")
-            target = destination / member
+            target = destination_directory / member
             key = target.as_posix()
             parents = [parent.as_posix() for parent in target.parents]
             if not legacy or os.name == "nt":
@@ -81,11 +84,28 @@ def _preparation_assets(payload: Path) -> dict[Path, Path]:
             directories.update(parents)
             if (payload / target).is_file():
                 continue
-            source = payload.parent / canonical / member
+            source = payload.parent / canonical_directory / member
             if source.resolve() != source or not source.is_file():
                 raise ValueError(f"Manager source preparation asset is unavailable: {name}")
             assets[target] = source
     return assets
+
+
+def _preparation_assets(payload: Path) -> dict[Path, Path]:
+    targets: set[Path] = set()
+    directories: set[Path] = set()
+    return {
+        **_preparation_asset_group(
+            payload, "packaged-assets.json", "copilot-extensions.packaged-assets",
+            "tools", "scripts/runtime-source-tools",
+            targets=targets, directories=directories,
+        ),
+        **_preparation_asset_group(
+            payload, "launch-wrapper-assets.json", "copilot-extensions.launch-wrapper-assets",
+            "libs/payload-invocation", "scripts/libs/payload-invocation",
+            targets=targets, directories=directories,
+        ),
+    }
 
 
 def retain(

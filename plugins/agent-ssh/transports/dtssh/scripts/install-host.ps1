@@ -919,7 +919,7 @@ switch ($Action) {
     { $_ -in @('install', 'update') } {
         $helperRoot = Get-DaemonInstanceHelperRoot
         . (Join-Path $helperRoot 'installer-instance-reconcile.ps1')
-        Invoke-InstallerInstanceReconcile -HelperRoot $helperRoot
+        Invoke-InstallerInstanceReconcile -HelperRoot $helperRoot -RuntimeRoot $InstallDir
         # Validation requires ssh-keygen. Provision it while the existing host
         # is still running so a rebuilt machine can restore before any outage.
         Install-HostIdentityValidationTools

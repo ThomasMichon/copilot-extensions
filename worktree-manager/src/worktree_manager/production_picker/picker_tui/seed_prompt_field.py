@@ -30,7 +30,7 @@ class SeedPromptField(_AutoExpandTextArea):
         self, *, options: Iterable[str] = (), refusal_reason: str | None = None,
     ) -> str | None:
         """Validate a snapshot without persisting or changing the draft."""
-        unsupported = {"Anchor repo", "Bare", "AHP", "Local model"} & set(options)
+        unsupported = {"Anchor repo", "AHP", "Local model"} & set(options)
         if unsupported and not refusal_reason:
             refusal_reason = (
                 "Prompt launch is unsupported with " + ", ".join(sorted(unsupported))

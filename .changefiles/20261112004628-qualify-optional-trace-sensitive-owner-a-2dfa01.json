@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify optional trace-sensitive owner adoption against the running keeper before startup",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

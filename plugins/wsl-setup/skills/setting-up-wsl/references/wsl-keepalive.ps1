@@ -112,7 +112,7 @@ function Invoke-Install {
     $tn = Resolve-TaskName
     $vbsPath = Join-Path $InstallDir "$tn.vbs"
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
     Publish-KeepaliveInstanceHelpers
 
     Write-Step "Deploying windowless launcher -> $vbsPath"

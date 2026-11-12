@@ -169,7 +169,8 @@ class ServiceConnector:
         if self.handler:
             context = self.handler.context(value["context"], self.slot)
             request = ServiceRequest(
-                context, value["method"], path + query, tuple(selected.items()), body)
+                context, value["method"], path + query, tuple(selected.items()), body,
+                response_limit=self.handler.response_limit)
         return value["method"], path + query, selected, body, timeout, request
 
     async def _proxy(self, ws: aiohttp.ClientWebSocketResponse,

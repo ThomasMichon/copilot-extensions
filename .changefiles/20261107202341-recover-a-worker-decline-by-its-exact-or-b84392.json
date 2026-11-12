@@ -1,0 +1,9 @@
+{
+  "comment": "Recover a worker decline by its exact original binding after replacement placement so reruns converge",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

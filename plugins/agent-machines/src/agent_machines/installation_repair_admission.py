@@ -115,6 +115,7 @@ class OwnerBinding:
     legacy_root: Path | None = field(default=None, repr=False)
     refusal: str | None = None
     execution_bindings: Mapping[str, str] = field(default_factory=dict, repr=False, compare=False)
+    readiness_only: bool = False
 
     def evidence(self) -> dict[str, object]:
         return {
@@ -123,7 +124,7 @@ class OwnerBinding:
             "sourceFingerprint": self.installation.provenance.source_fingerprint,
             "mode": self.mode,
             "payloadVersion": self.version,
-            "payloadDigest": self.content_digest,
+            ("readinessDeclarationDigest" if self.readiness_only else "payloadDigest"): self.content_digest,
             "modeDigest": self.mode_binding,
             "refusal": self.refusal,
         }
@@ -136,6 +137,7 @@ class HostAdmission:
     refused: Mapping[str, str]
     activation_digest: str
     activation_complete: bool
+    readiness_only: bool = False
 
 
 def _load(path: Path) -> dict[str, object]:
@@ -165,18 +167,51 @@ def _legacy_root(invocation: Mapping[str, object], home: Path) -> Path:
     return root
 
 
-def _runtime_claim(root: Path, home: Path) -> Path | None:
+def _runtime_declaration(
+    root: Path, manifest: Mapping[str, object],
+) -> dict[str, object] | None:
     invocation_path = root / "payload-invocation.json"
+    has_invocation = True
     try:
         invocation_path.lstat()
     except FileNotFoundError:
-        return None
-    return _legacy_root(_load(invocation_path), home)
+        has_invocation = False
+    if "installerRuntime" not in manifest:
+        return _load(invocation_path) if has_invocation else None
+    if has_invocation:
+        raise RepairAdmissionError("repair owner declares two runtime protocols")
+    reference = manifest["installerRuntime"]
+    if (
+        not isinstance(reference, str) or not reference
+        or "\\" in reference or ":" in reference or "\0" in reference
+        or any(part in {"", ".", ".."} for part in reference.split("/"))
+        or Path(reference).is_absolute()
+    ):
+        raise RepairAdmissionError("repair installer-runtime path is invalid")
+    declaration = _load(root / reference)
+    if (
+        set(declaration) != {"schema", "version", "runtimeRoot", "noSelfProvisionEnv"}
+        or declaration["schema"] != "copilot-extensions.installer-runtime"
+        or type(declaration["version"]) is not int or declaration["version"] != 1
+    ):
+        raise RepairAdmissionError("repair installer-runtime declaration is invalid")
+    no_provision = declaration["noSelfProvisionEnv"]
+    if not isinstance(no_provision, str) or not _ENVIRONMENT.fullmatch(no_provision):
+        raise RepairAdmissionError("repair owner has no declared no-self-provision protocol")
+    return declaration
+
+
+def _runtime_claim(root: Path, home: Path) -> Path | None:
+    manifest_path = root / "plugin.json"
+    if not manifest_path.exists():
+        manifest_path = root / ".claude-plugin" / "plugin.json"
+    declaration = _runtime_declaration(root, _load(manifest_path))
+    return _legacy_root(declaration, home) if declaration is not None else None
 
 
 def _binding(
     installation: PluginInstallation, *, source: str, home: Path,
-    project_root: Path, environment: Mapping[str, str],
+    project_root: Path, environment: Mapping[str, str], readiness_only: bool = False,
 ) -> OwnerBinding:
     root = installation.payload_root
     manifest_path = root / "plugin.json"
@@ -187,12 +222,11 @@ def _binding(
     if not isinstance(version, str) or not version or len(version) > 128:
         raise RepairAdmissionError("repair payload version is missing or invalid")
     clean = ordinary_environment(environment, home=home, payload=root)
-    invocation_path = root / "payload-invocation.json"
     no_provision = payload_environment = None
+    invocation = _runtime_declaration(root, manifest)
     mode, refusal, mode_data = "ordinary", "owner-readonly-protocol-not-declared", {}
     legacy_root = None
-    if invocation_path.exists():
-        invocation = _load(invocation_path)
+    if invocation is not None:
         no_provision = invocation.get("noSelfProvisionEnv")
         payload_environment = invocation.get("payloadRootEnv")
         if not isinstance(no_provision, str) or not _ENVIRONMENT.fullmatch(no_provision):
@@ -225,17 +259,25 @@ def _binding(
             refusal = "ordinary-owner-mutation-not-admitted"
         else:
             refusal = None
+    if readiness_only:
+        content_digest = digest({"manifest": manifest, "invocation": invocation})
+    else:
+        content_digest = payload_identity(root)
+        if "installerRuntime" in manifest:
+            content_digest = digest({"payload": content_digest, "installerRuntime": invocation})
     return OwnerBinding(
         installation=installation, source=source, mode=mode, version=version,
-        content_digest=payload_identity(root), mode_binding=digest(mode_data),
+        content_digest=content_digest,
+        mode_binding=digest(mode_data),
         no_self_provision=no_provision, payload_root_environment=payload_environment,
         environment=clean, legacy_root=legacy_root, refusal=refusal,
+        readiness_only=readiness_only,
     )
 
 
 def admit_host(
     project_root: Path, *, home: Path | None = None,
-    environment: Mapping[str, str] | None = None,
+    environment: Mapping[str, str] | None = None, readiness_only: bool = False,
 ) -> HostAdmission:
     """Resolve enabled owners through the existing host authority, without installing anything."""
     home = (home or Path.home()).absolute()
@@ -265,6 +307,21 @@ def admit_host(
         claim_resolved = False
         try:
             ordinary(root, directory=True)
+            if readiness_only:
+                manifest_path = root / "plugin.json"
+                if not manifest_path.exists():
+                    manifest_path = root / ".claude-plugin" / "plugin.json"
+                manifest = _load(manifest_path)
+                if (
+                    manifest.get("name") == active.name
+                    and manifest.get("runtimeScope", "none") == "none"
+                    and "installerReadiness" not in manifest
+                    and "installerRuntime" not in manifest
+                ):
+                    try:
+                        (root / "payload-invocation.json").lstat()
+                    except FileNotFoundError:
+                        continue
             resolved = context.resolve_payload_source(
                 payload_root=root, plugin_id=active.name, copilot_home=home / ".copilot",
                 project_root=project_root, environment=clean,
@@ -292,7 +349,7 @@ def admit_host(
                 continue
             binding = _binding(
                 installation, source=source, home=home, project_root=project_root,
-                environment=environment,
+                environment=environment, readiness_only=readiness_only,
             )
             if binding.legacy_root != legacy_root:
                 unresolved_claims.add(source)
@@ -317,6 +374,7 @@ def admit_host(
             bindings[owner_id] = replace(binding, refusal="ordinary-legacy-writer-ambiguous")
     return HostAdmission(
         report=discover_modules(installations), bindings=bindings, refused=refused,
+        readiness_only=readiness_only,
         activation_complete=activation.authority is not ScanAuthority.INDETERMINATE,
         activation_digest=digest({
             "authority": activation.authority.value,

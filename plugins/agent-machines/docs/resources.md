@@ -62,6 +62,36 @@ opt-in, so an unsatisfied required account cannot become a successful skip.
 
 ## Resource types
 
+### `health-job`
+
+```yaml
+resources:
+  - type: health-job
+    state: present
+    platforms: [windows]
+    maintenance_safe: true
+```
+
+Converge an already adopted **local** Windows health job through its installed
+runtime owner. An absent local opt-in is a no-op, not enrollment. This resource
+accepts only common resource fields and `state`; store/policy, account,
+enabled intent and execution fields cannot be supplied by a package.
+`state: absent` settles/removes the owned task and withdraws local adoption,
+preserving health history and unrelated tasks. Linux enrollment is unsupported.
+Use [`health job configure`](health-report.md#installed-windows-enrollment)
+for local preview/confirmation, and that page for replacement, rollback,
+unknown-outcome custody and status. This job is not the self-update watchdog.
+
+Ordinary `file` resources cannot write the reserved
+`agent-machines.health.enrollment.json` local consent/recovery filename,
+regardless of installation location, including custom roots, resolved aliases
+and Win32 trailing-dot/space or default-stream filename aliases.
+This applies to JSON, text and managed-block strategies;
+use the dedicated lifecycle rather than manufacturing opt-in with a package.
+Unrelated file resources are unchanged. This restriction is not a sandbox for
+arbitrary scripts or a replacement for filesystem permissions and trusted
+requirement-package admission.
+
 ### `git-config`
 
 Converge explicitly declared keys in the current user's `.gitconfig`, using one

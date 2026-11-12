@@ -115,6 +115,36 @@ def test_bare_deploy_runs_reviewed_installer_not_active_worktree(repository, bat
     assert source.exists()  # Redirector/source provenance remains usable after return.
 
 
+@pytest.mark.parametrize(
+    ("machine", "platform", "environment"),
+    [
+        ("myhost", "wsl", "myhost-wsl"),
+        ("myhost-wsl", "wsl", "myhost-wsl"),
+        ("myhost", "windows", "myhost-windows"),
+        ("myhost-windows", "windows", "myhost-windows"),
+        ("myhost", "linux", "myhost"),
+        ("myhost-wsl", "linux", "myhost-wsl"),
+    ],
+)
+def test_deploy_resolves_platform_suffix_once(repository, machine, platform, environment):
+    r = repository
+    r.config.machine = machine
+    r.config.platform = platform
+    manifest = r.upstream / "services" / "example" / "service.yaml"
+    manifest.write_text(
+        manifest.read_text(encoding="utf-8").replace("testenv:", f"{environment}:"),
+        encoding="utf-8",
+    )
+    _git(r.upstream, "add", ".")
+    _git(r.upstream, "commit", "-qm", "Declare selected deployment environment")
+    reviewed = _git(r.upstream, "rev-parse", "HEAD")
+
+    assert services_cli.cmd_services_dispatch(["example", "install"]) == 0
+    receipt = json.loads(r.receipt.read_text())
+    assert receipt["action"] == "install"
+    assert _git(Path(receipt["cwd"]), "rev-parse", "HEAD") == reviewed
+
+
 def test_resolve_normalizes_linked_worktree_to_bare_anchor(repository):
     """#7088: `resolve()` must normalize a linked worktree of a pure bare
     anchor to the anchor itself before anything else -- not stubbing

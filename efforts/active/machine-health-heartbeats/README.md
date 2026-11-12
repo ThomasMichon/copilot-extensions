@@ -74,11 +74,46 @@ The operator subsequently endorsed Agent Machines ownership. The detailed
 division and first-slice sequencing below remain **agent recommendations**
 submitted for review, not additional operational authority.
 
+The 2026-11-09 continuation adds a by-convention way for installable services to
+surface hourly data and telemetry for aggregation. The verbatim follow-up is in
+the [request capture](inception-transcript.md#installable-service-contribution-follow-up);
+the proposed [service contribution contract](service-contributions.md) is a
+review-before-code amendment, not a new resident collector or activation grant.
+
+The [unattended validation follow-up](inception-transcript.md#unattended-desktop-validation-follow-up)
+removes mandatory operator-attended desktop observation, not the automated
+functional, launch-mechanism, result or cleanup checks.
+
+### Current delivery lane
+
+The current host owner continues beyond source qualification to an installed,
+reversible Windows hourly job and real inbound SSH/Bridge verification.
+Complete these observable outcomes in dependency order:
+
+1. Retain the job's complete installed execution closure independently of the
+   source checkout and replaceable marketplace payload. Prove supported
+   runtime selection, replacement and rollback through the existing owner.
+2. Converge the explicitly adopted local policy and native registration through
+   Agent Machines, preserving unrelated tasks/data and providing exact
+   disable/remove/readback behavior. Qualification is not an enrollment API;
+   the currently rendered disabled definitions cannot be installed ad hoc.
+3. Qualify first install, repeat convergence, failed replacement/rollback and
+   native periodic execution, then deploy only within the separately authorized
+   host scope. Verify actual local hourly results and real peer inbound access.
+
+The [enrollment amendment](local-collection.md#installed-windows-job-enrollment)
+defines the next review-before-code slice. Keep release availability, installed
+adoption, active execution and peer verification distinct. A missing additional
+CODEOWNER vote does not hold a Maintainer-authorized merge after the configured
+review and required CI pass; unresolved feedback, failed/missing CI and task
+holds still do. This lane neither completes the broader preference/carrier
+campaign nor authorizes another host or synchronized storage.
+
 ## Scope Approvals
 
 The operator authorizes source planning, review and implementation. The adopter
 has separately selected default configuration and an initial visible Windows
-cohort. Its explicit latest boundary is **configuration-only: ask before
+cohort. That initial boundary was **configuration-only: ask before
 activating any running service**.
 
 No live service reload/restart, scheduled-job enrollment, Linux rollout,
@@ -86,6 +121,33 @@ credential acquisition, new collector, transport setup, cloud-storage selection
 or remote recovery follows from plan approval. Existing custom sinks and active
 sessions must survive. Exact deployment selectors and original private approval
 evidence remain with the adopter; this public plan does not manufacture a grant.
+
+A subsequent explicit answer, `windows-fixtures-only`, authorizes bounded
+isolated Windows scheduler qualification: create, run and delete only uniquely
+named temporary limited-interactive-user test tasks, using fixture-owned
+data/processes, two accelerated periodic cycles and overlap/deadline/storage/
+exact-cleanup controls. Each action is limited to 60 seconds and a test run
+targets about ten minutes. No elevation, existing-task changes, service/runtime
+updates, production enrollment, credential work or OneDrive writes are covered.
+Linux and actual hourly cohort/carrier qualification remain separate gates.
+
+A later adopter direction delegates expected validation and deployment runs for
+the current host to its fleet monitor, without per-step approval forms. Within
+that host only, this includes native scheduler qualification, health-gated
+installer-owned carrier/job runtime replacement, enrollment after qualification,
+and live inbound Bridge/SSH verification from another host. Every deployment
+retains before-state, reversible rollback and post-change health evidence;
+regression requires rollback. New credentials/secrets, unavailable noninteractive
+elevation, other machines' services or rollout, and destructive changes to
+non-test data remain excluded. Exact private direction and resource selectors
+remain in adopter records, not this public approval summary.
+
+The later validation decision permits an already active console or RDP desktop
+and makes visual observation opportunistic and non-gating. Unavailable or
+inconclusive observation records a reason; it does not require operator
+attendance or block publication, CI or an enrollment decision. No admin/CI
+bypass or fabricated visual pass is permitted. Independent deployment and
+enrollment authority/holds remain unchanged.
 
 ## Plan
 
@@ -127,6 +189,8 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
   without provisioning, activation or projected-task authority bypass.
 - [x] Prove capability-selected telemetry adoption with accepted-input
   revalidation at the producer's write boundary, preserving custom sinks.
+- [x] Prove configured local-replica preference exchange through the normal
+  CLI and existing transaction, without claiming selected-provider delivery.
 - [ ] Extend the existing Agent Machines configuration owner to publish and
   receive explicitly supported nonsecret core preferences through the selected
   carrier, not through the health-record parser.
@@ -138,15 +202,34 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 ### Phase 5 - Hourly health engine and carrier qualification
 - [x] Prove explicit typed observation -> local hourly slot -> age-qualified
   reader through the normal CLI (#11119), without claiming probe execution.
-- [ ] Prove the first passive local owner-listener observation through the
+- [x] Prove the first passive local owner-listener observation through the
   normal CLI and existing local record/reader flow (#11157), keeping all other
   domains unknown and installed-provider qualification separate.
+- [x] Review the installable-service hourly contribution/discovery amendment.
+- [x] Prove a bounded versioned contribution through an actual service-owned
+  export, selected-runtime declaration and normal machine report consumer (#11823).
+- [x] Compose the existing age-qualified local health reader alongside telemetry
+  and service namespaces in the normal report/chart, without a new writer or job (#11843).
+- [x] Review the [bounded local collection/staging amendment](local-collection.md)
+  before implementing the combined hourly operation or native job.
+- [x] Prove the complete explicit local collect -> stage -> reread/report flow,
+  keeping present health and prior-hour telemetry correctly attributed.
+- [x] Review and prove the [adopted one-shot operation](local-collection.md#adopted-one-shot-operation)
+  over current health and prior-hour telemetry, with explicit policy-scoped
+  local staging authority and one shared admission/deadline.
 - [ ] Refine diagnosed-outage controls with operator input; retain symptoms,
   hypotheses and confirmed causes separately.
 - [ ] Implement bounded domain probes and the 168-slot store, using exact
   existing owners and no remediation or new resident process.
-- [ ] Add independent native scheduled execution through Agent Machines after
-  source review, retaining a separate explicit enrollment/activation gate.
+- [x] Add independently enrolled Windows native execution through Agent Machines
+  after source review (#12188), retaining separate release/activation gates.
+  Linux enrollment remains in the open platform qualification item.
+- [x] Prepare inert Windows/Linux job definitions and qualify collection
+  support from the exact selected runtime before forwarding new operations;
+  keep scheduler registration and native execution unqualified.
+- [x] Qualify isolated Windows scheduler execution, results, launch mechanism,
+  overlap, deadlines, Unicode paths and exact cleanup; merge the reviewed source.
+  Keep installed-runtime retention/replacement and production enrollment separate.
 - [ ] Qualify the selected carrier's delayed delivery, weekly slot reuse,
   conflicts, offline catch-up and reader-side outage reporting.
 - [ ] Obtain activation authority for the selected cohort, prove actual hourly
@@ -165,12 +248,17 @@ evidence remain with the adopter; this public plan does not manufacture a grant.
 - [ ] Outages: exercise the [design controls](design.md#outage-derived-controls),
   including a live process with an unresponsive SSH path and an impaired carrier.
 - [ ] Platforms: portable unit contracts plus isolated Windows/Linux native
-  one-shot, scheduling, headlessness and cleanup qualification before enrollment.
+  one-shot, scheduling, launch-mechanism and cleanup qualification before
+  enrollment; record opportunistic visual coverage separately without an
+  operator-attendance gate.
 - [x] Deployment: default configuration round-trip, custom-sink preservation,
   real readback, no running-service activation and explicit unavailable hosts.
 - [ ] Preferences: separate typed input, permitted settings only, existing
   validation/precedence and local authority, with visible conflicts rather than
   last-write-wins or command execution from synchronized data.
+- [ ] Service contributions: installed-owner capability, schema/time/metric
+  semantics, partial/unsupported coverage, bounded export/cleanup, privacy
+  reduction, namespaced aggregation and a real producer-to-report flow.
 - [ ] Acceptance: required review/CI, source merge, release availability,
   configured state, active capture and carrier receipt remain separate facts.
 
@@ -738,3 +826,859 @@ The [owner comparison](architecture.md#owner-decision) explains this choice.
   controls, overflow/trickle limits, source CLI/store readback and output
   failure. Fresh current-head review and CI remain required. No operational
   activation or carrier effect occurred.
+
+### 2026-11-06 - Passive listener merged; parent continues
+- #11163 merged as `c0d31cd50161e93ec2c231111bdb310b571892a4`
+  after actual current-head Copilot approval, all three findings resolved and
+  required green CI. A transient provider merge error was reconciled as
+  unmerged before one successful supported retry; success was verified.
+- The completed checkpoint is listener-only source collection through the
+  local record/reader flow. No installed daemon, SSH authentication, Gateway,
+  credential provider or logical-agent census is qualified by that result.
+  Bridge's known-session observation contract explicitly does not establish
+  a current actor census; host/process counts remain unusable substitutes.
+- Every owned file matched the confirmed merge and the fetched base before
+  non-destructive history reconciliation, with a retained backup. No unmerged
+  source delta was discarded.
+- Continue the still-open core-preference carrier phase through the existing
+  Agent Machines configuration/exchange owner, deduplicating the next bounded
+  source objective first. Preserve native adoption, local overrides and
+  existing binding authority. Source tests must not become real carrier writes.
+- Other domain observations, diagnosed-outage qualification, Linux/installed
+  evidence, native scheduling, carrier delivery, enrollment and activation
+  remain open. No runtime was updated, job enrolled or service activated;
+  the parent remains Active and its worktree must not be finalized.
+
+### 2026-11-07 - Selected local preference-carrier adapter
+- Continued #10928 with an explicit local OneDrive replica adapter under
+  `preferences carrier publish|receive`. It reuses the existing policy,
+  revision/withdrawal rules, local watermarks and confirmed atomic exchange.
+  The strict local carrier configuration selects a preprovisioned dedicated
+  namespace, account label and participant list; it grants no native adoption.
+- A bounded nonrecursive namespace census blocks every unexpected entry.
+  Configuration, census, candidate and local state are rechecked under the
+  existing local writer lock. Local policy, watermarks, candidates and overrides
+  remain outside the synchronized namespace; only the admitted snapshot leaves.
+  No discovery, account login, provider API, watcher or enrollment is added.
+- The initial codec/exchange packet passed 96 tests. The final carrier/native
+  packet passed 35 tests without skips, including fresh separate CLI processes,
+  two fixture-owned replicas, shared-knowledge mappings, local overrides,
+  withdrawal, offline use, older replicas and closed-output unknown
+  acknowledgement. Earlier oversized aggregate tests were split into bounded
+  first-use and reconcile controls without increasing deadlines.
+- A preceding run passed its tests but failed the host-environment drift audit.
+  No host state was rolled back and the audit was not relaxed; the final
+  unchanged-audit run passed. This does not establish the drift's cause.
+- The fixture explicitly copies local replicas. It is not OneDrive delivery,
+  authenticated audience, cloud-placeholder, installed-runtime or native Linux
+  qualification. Runtime rollout, real carrier writes and activation remain
+  separately held. Other native domains, health probes and scheduling remain
+  open; this is a source slice, not completion of Phase 4 or the parent effort.
+- Documentation, Ruff, installation contracts and whitespace passed.
+  Required exact-source CI, review and source merge still gate this slice.
+
+### 2026-11-07 - Local carrier source merged; qualification remains open
+- #11438 merged as `515275f8507609fd48a27dcaae5bf7dcffa36fdb`
+  after actual current-head Copilot approval with no findings and green
+  required checks. The published description preserved source attribution
+  and contained no closing reference to #10928 or the parent #10873.
+- Completed only the new local-replica source checkpoint. The selected
+  provider's actual publication, synchronization and peer receipt remain
+  unqualified. Receiving preferences still does not apply them; native
+  maintenance/venue adoption, other domain observations, diagnosis, scheduling
+  and platform/installed validation remain open.
+- The earlier source and adopter PR claims are terminal. The retained source
+  and controller worktrees still own the active parent effort and its
+  configuration-only scope. No updater, carrier write, schedule enrollment
+  or service activation occurred.
+- Next source work is native maintenance-preference preview, using the existing
+  resource/authority owner without turning `automatic` data into execution
+  consent. The existing independent live-carrier and activation holds remain.
+
+### 2026-11-09 - Resume hourly service contributions
+- The operator resumed the parent effort and requested a by-convention way
+  for installable services to surface hourly data and telemetry for aggregation.
+  The verbatim follow-up is preserved in the request capture.
+- This reorders the next source slice from maintenance preferences to
+  Phase 5 service contributions; the remaining Phase 4 items are not dropped.
+  The Health implementation owner retains custody in the same source worktree.
+- The proposed service-contribution amendment reuses installation and native
+  service owners, retained telemetry and the bounded report consumer. It defines
+  selected-runtime capability, a common hourly data envelope and a real
+  producer-to-report acceptance flow, without a second registry, collector,
+  writer or service lifecycle authority.
+- Claimed this continuation on #10873 after checking open reporting work.
+  Existing producer and process-registry owners retain their scope; no
+  still-open contributor PR is superseded or pre-patched.
+- This is a review-before-code source amendment. Its first protocol/provider
+  implementation follows review and required CI; scheduling, real carrier
+  writes, installed adoption, service activation and the rest of the parent
+  completion gate remain open.
+
+### 2026-11-09 - Contribution convention reviewed; implement the real flow
+- #11793 merged as `a0172e394ae3e997ca38c8a692fa03f221193bd9`
+  after actual current-head Copilot approval with no findings, green required
+  CI, and no closing reference to the still-open parent.
+- Completed only the design-review checkbox. The next acceptance criterion
+  is an actual service-owned hourly export, qualified selected-runtime support
+  and normal Agent Machines report consumer, with missing/partial evidence
+  preserved. A protocol validator alone does not satisfy this checkpoint.
+- Existing telemetry library, retained service inventory and pinned native
+  invocation seams are implementation candidates, not a second telemetry bus,
+  service registry or authority. Keep independent owner work and all remaining
+  platform, scheduling, carrier and activation gates open.
+
+### 2026-11-09 - First native service contribution implemented locally
+- Added the closed hourly protocol and bounded retained-file reducer in the
+  existing telemetry library. Dispatch owns the first privacy-reduced native
+  export and optional installed-package reporting declaration.
+- The normal Machines report reuses same-cell installation selection and
+  immutable-runtime retention, qualifies installed metadata before invoking the
+  normal service parser, and preserves independent namespaced contributions
+  in JSON and the static chart. Missing/newer support stays unsupported without
+  a trial new command. Repeated installation selections are not executed twice.
+- Dispatch's focused packet passed 57 cases, including actual retained producer
+  events, the native export, fixture-selected package metadata, normal report/
+  chart, version skew, rollback to absent metadata and unchanged legacy sinks.
+  Machines passed 35 existing/new report controls and then 16 focused collection/
+  native cleanup controls after strict byte capture was added. Nine actor-free
+  wire-codec cases also pass and have explicit required-CI source/node admission.
+- The first cleanup experiment did not explicitly inherit the descendant's
+  pipes on Windows. The corrected fixture passes actual stdout/stderr handles,
+  separately observes root exit versus stream completion, and confirms the
+  existing native settlement callback on timeout and output-bound paths.
+- This is source/fixture qualification, not a deployed installation inventory,
+  a built-wheel release, running capture or activated publication. The full
+  clean-room installer and live external lanes were not exercised: this slice
+  changes package data and read-only source operations, not install/lifecycle
+  machinery; no enrolled external service venue is authorized for this effort.
+  The fresh fixture interpreter proves first export/consumer use only.
+- Install-contract, touched-Python lint, documentation consistency and headless
+  launch guards pass. Final admitted type/unit gates, review and merge remain
+  in progress. No service update/reload, schedule, credentials or carrier write
+  occurred; all independent parent gates remain open.
+
+### 2026-11-09 - Exact source gates and package delivery
+- The final Machines report/native-cleanup packet passed 41 cases. The
+  canonical wire/collection policy packet now passes 13 actor-free cases,
+  including task-scope refusal, independent namespaces, duplicate installation
+  identity and preservation of unsettled native custody.
+- All 41 admitted strict typing projects pass for both their Linux and
+  Windows target configurations. This is static target checking, not Linux
+  native execution. Shared-library release metadata includes every current
+  telemetry consumer and the canonical library; changefile presence passes.
+- Built the actual Dispatch wheel without build-environment installation and
+  independently verified that its reporting declaration matches source bytes
+  and that the native exporter is included. This is package-content proof, not
+  an installed service update or release.
+- The full local Windows unit runner refused six checkout-CRLF template files
+  before test execution. Their committed Git blobs match the admitted hashes.
+  The ongoing full-packet run uses a canonical committed-source snapshot;
+  no source admission hash or machine Git configuration was changed to accept
+  those checkout transformations. Required PR CI remains an independent gate.
+
+### 2026-11-09 - Native history priority and deadline corrections
+- #11823 opened on the rebased source. Its first current-head required CI was
+  green, while two Medium findings correctly blocked review acceptance.
+- Archive ordering and early file truncation could hide the active source;
+  an old prefix within that active file could likewise exhaust record work.
+  Selection now reserves the known active source before archive/directory
+  limits, prioritizes archive rotation near the requested hour, and reduces
+  bounded snapshot windows newest-line first. Only source event time assigns
+  the hour; clipped/partial/oversized fragments remain excluded and explicit.
+- Native execution timeout alone did not include retirement/pipe waits.
+  Collection now passes the existing absolute `OwnedExecutionBudget`, capped
+  by child and aggregate deadlines with cleanup and response reserves inside
+  those limits. Unconfirmed native custody still propagates unchanged.
+- The corrected Dispatch packet passed 60 cases, including saturated archives
+  and active prefixes. Machines passed 19 focused policy/native-cleanup cases;
+  native settlement callbacks occurred before their actual absolute deadlines.
+  Eighteen actor-free codec/selection/collection/snapshot controls pass, and
+  the changed shared library passes both strict target configurations.
+- The full prior Windows source packet produced 4,705 passes and three skips;
+  its no-skip evidence gate correctly refused completion. A minimal control
+  identified exactly the intentionally POSIX-only filesystem/kernel-lease and
+  existing-mode cases. No skip, hash or permission was changed to claim a
+  Windows all-pass result. Current-head Linux PR CI is the independent full
+  unit gate; the new source head still needs fresh CI and review acceptance.
+
+### 2026-11-09 - Duration producer/reducer qualification
+- The corrected-head review confirms both runtime fixes and their resolved
+  threads. Its remaining Medium observation identifies missing qualification
+  of the advertised duration path, not another runtime change.
+- Added actual adapter admission cases for missing/boolean/negative/overflow
+  timing, foreign components and unsupported stage/outcome/kind; completion
+  time rather than start or emit time determines the absolute source hour.
+- The required packet now executes the actual span adapter, snapshot reducer
+  and shared percentile primitive on raw events with successful, error,
+  cancelled and unavailable outcomes. Only the successful population affects
+  p50/p95/maximum; a span completing immediately before the hour is excluded.
+  All 28 actor-free cases pass.
+- The targeted Dispatch adapter/native packet passes 35 cases. The existing
+  measurement producer reaches the normal machine report/chart, and native
+  retained mixed-outcome export independently confirms the duration summary
+  without leaking correlation fields. Fixture source hours are controlled;
+  no production performance, service activation or deployed adoption is claimed.
+
+### 2026-11-09 - Native service contribution merged; continue hourly composition
+- #11823 merged as `336f55e7f2c3021db482915390af5367dcb33acc`
+  after actual current-head Copilot approval with no active issues, resolved
+  review threads and green required CI, including freshly executed admitted
+  units with coverage. No parent closing reference was present; #10873 remains
+  open.
+- Completed only the first service-owned contribution/export/consumer source
+  checkpoint. Installed-host inventory/adoption, broader native domains,
+  scheduling, the selected carrier, hourly publication and peer receipt remain
+  open. A built wheel and fixture-resolved installation are not running adoption.
+- Pull-forward encountered overlapping commits already integrated by the squash
+  merge. All owned runtime/test/effort paths were verified preserved; the only
+  differences were independently landed documentation and another module's
+  source admission. A local recovery reference was retained and the clean
+  worktree advanced without discarding any unmerged change.
+- Next source stretch is bounded one-shot hourly health composition through the
+  existing observation/slot and native-owner seams, starting with their current
+  contracts rather than another collector or registry. Scheduling and carrier
+  enrollment remain separate review/qualification and explicit activation gates.
+  The remaining Phase 4 preference work and every parent validation item retain
+  their existing owners and completion criteria.
+
+### 2026-11-09 - Age-qualified health composed into the normal report
+- Implemented the existing-design read-only composition checkpoint:
+  `health report --store-dir` reuses the bounded local reader alongside retained
+  telemetry and service namespaces. Available means readable, not healthy.
+  Stale source evidence, unknown domains, missing/invalid slots and unverified
+  input qualification survive; health never becomes an event count or uptime.
+- The static chart adds separate slot/domain rows and proof-age details. A chart
+  destination inside the exclusive health store refuses before effects.
+  Invalid/unavailable store evidence remains an independent gap rather than
+  suppressing valid telemetry or service contributions.
+- Six actor-free cases cover actual projection, parser/report composition,
+  missing evidence, old syntax and namespace preservation. The focused report/
+  service/native packet passed 46 cases with one optional producer skip;
+  selecting the existing source-bound Bridge interpreter then passed all nine
+  native observation cases, including the actual Bridge handler through HTTP,
+  confirmed slot storage, normal report/chart and unchanged-store readback.
+- This is not a combined observe/record job or a new publication envelope.
+  Native job overlap/storage/lifetime, broader domain adapters, installed
+  adoption, scheduling, selected carrier, peer receipt and activation remain
+  parent gates; no source result authorizes enrollment or service changes.
+
+### 2026-11-09 - Preserve independent output for unresolvable stores
+- A cyclic store path can fail canonical resolution before the qualified
+  reader runs. Store-resolution failures now remain unavailable evidence for
+  a valid external chart; lexical and resolved namespace overlap still refuse.
+  An unresolvable chart remains a bounded output refusal rather than an
+  uncaught path-bearing exception.
+- All nine actor-free composition cases pass, including both runtime and OS
+  resolution errors. Three focused native cases pass without skips: an actual
+  cyclic filesystem path with independent telemetry/external chart, the
+  normal qualified local-listener flow and the actual Bridge-owner flow.
+  The existing storage and chart-namespace protections remain intact.
+
+### 2026-11-09 - Read-only composition merged; bounded job remains
+- #11843 merged as `fa743aaa4896a7477aa9948c78423a5a97960a89`
+  after actual current-head Copilot approval with no active issues, a resolved
+  thread and green required CI. The updated head's units executed freshly with
+  coverage; the later metadata-triggered run also completed before merge.
+  An earlier merge attempt correctly refused its still-pending required gate.
+  No CI bypass was used, no parent closing reference was present, and #10873
+  remains open.
+- Re-read the parent Plan/Validation Plan: this completes read-only report
+  composition only. It does not collect all domains, stage a combined hourly
+  block, run independently on a schedule or qualify installed/carrier adoption.
+  The remaining preference, outage, platform and activation gates are unchanged.
+- Normal pull-forward auto-aborted on already-squashed overlapping commits.
+  Every owned file was verified present upstream; only an independent testing
+  section differed. A recovery reference was retained and the worktree advanced
+  over the verified already-merged range without discarding unmerged content.
+- Next: inspect the existing Agent Machines one-shot/native-job and health-slot
+  owners, then refine the bounded local collection/staging contract before any
+  new job or publication-envelope code. Reuse those owners and the new service
+  contributions, not another collector, registry or writer. Actual enrollment,
+  service changes and carrier publication remain separately authorized.
+
+### 2026-11-09 - Bounded local collection/staging amendment
+- Inspected the existing Windows Scheduled Task and Linux systemd-user
+  definitions, retained-runtime service collector, observation and slot owners.
+  Update jobs use update actions and unbounded execution settings; reuse their
+  platform patterns, not their execution/opt-in policy.
+- Proposed separate read, collect/preview and stage operations, a reader-first
+  versioned envelope through the existing transaction owner, explicit local
+  policy, bounded overlap/execution/storage and separately enrolled native jobs.
+  Present health and prior-complete-hour telemetry update different absolute
+  slots rather than backdating a check or claiming an early snapshot is a total.
+- The amendment is pending review. Runtime, native qualification, carrier and
+  activation remain unimplemented/unqualified by this design-only change.
+
+### 2026-11-09 - Local collection design reviewed; consumer implementation next
+- #11850 merged as `a45651933a` after current-head Copilot approval with no
+  active issues and green required CI. No parent closing reference was present;
+  #10873 remains open. The source worktree pulled forward successfully.
+- Re-read the parent Plan/Validation Plan. Only the amendment's review gate is
+  complete: explicit local collection/staging, native/platform and storage
+  qualification, broader domains, preferences, carrier and activation remain.
+- Next implement the explicit local consumer flow through the existing health
+  owner. Preserve strict v1 behavior, attribute current health and prior-hour
+  telemetry separately, and prove collect -> confirmed stage -> reread/report.
+  Do not register a native job or touch installed services/carrier state.
+
+### 2026-11-09 - Explicit one-hour collection consumer implemented
+- Added opt-in local-store v2 and a closed hourly-envelope reader/writer through
+  the existing health transaction. Strict observation/store v1 remains unchanged.
+  The new explicit collect command emits one candidate, never stages it or
+  registers a job. Current health and historical service export use separate
+  invocations/hours; automatic two-target execution remains future job work.
+- Retained/unselected components and revision checks are enforced at the record
+  mutation boundary, not just by the collector. Collection uses a preprovisioned
+  nonblocking native run lock and inherited service deadlines. Old/unsupported
+  stores refuse without creating state.
+- The focused collection/slot/service/native packet passed 66 cases, including
+  actual retained producer -> native export -> candidate -> confirmed slot ->
+  report/chart, distinct source hours and two-process normal/crash lock release.
+  Fifteen actor-free development controls pass separately. Their exact source
+  and node admission is expanded without weakening the unit portfolio.
+- Native scheduling, installed adoption, broader domain adapters, carrier,
+  preferences and activation remain parent gates. Review and final source
+  checks for this implementation are pending.
+- Final selected native controls pass three cases, including retained service
+  evidence after incompatible provider metadata and normal/crash overlap release.
+  The combined actor-free development packets pass 43 cases; Ruff, all 41
+  admitted strict projects on both target platforms, install contracts and
+  documentation consistency pass. Agent Machines' broader type-admission scope
+  remains unchanged.
+- The local full raw-byte admission check refuses six untouched template files
+  with Windows CRLF bytes; every mismatch matches the admitted hash after LF
+  normalization. No template or acceptance rule was changed to manufacture a
+  pass. Canonical full unit/coverage evidence remains owed by required CI.
+
+### 2026-11-09 - Preserve actual evidence, not merely its wrapper
+- Fresh canonical unit/coverage CI passed the implementation head. Review then
+  identified two concrete preservation gaps: native exporters can return a
+  valid empty contribution, and a directly supplied candidate can do the same.
+  The shared rule now checks actual metric, native-health or diagnostic evidence
+  at both collection and confirmed-write boundaries.
+- Explicit empty hours now refuse instead of becoming current-hour collection;
+  the same explicit-hour distinction is retained in the report path.
+  Added pure empty-hour/empty-evidence controls and an actual native exporter
+  configuration-loss case that must retain the accepted contribution.
+  Follow-up validation and current-head review remain pending.
+
+### 2026-11-09 - Explicit collection flow merged; one-shot execution next
+- #11857 merged as `ab4cf39dd9` after current-head Copilot approval with no open
+  findings, all resolved threads and fresh green required unit/coverage and
+  guard CI. #10873 remains open; this completes only the explicit local
+  collect -> confirmed stage -> reread/report checkpoint.
+- Final targeted controls pass 37 cases plus 44 actor-free controls. Review
+  corrections preserve actual service evidence, retained SSH/session domains
+  and original source timestamps at collection and write boundaries. Native
+  admission remains held through unconfirmed exporter cleanup; its existing
+  lock byte preserves refusal after an unsettled CLI exits. Final budget/hour
+  checks include successful fence settlement.
+- The merged source matches the owned local implementation and tests. Routine
+  sync could not replay the squashed branch; preserved a local backup and
+  reconciled only the four provider-confirmed merged commits onto current
+  `dev`, retaining intervening contributors' changes.
+- Next deliver the reviewed current-health/prior-hour one-shot path through
+  the existing transaction owner and explicit local staging authority, then
+  prepare separately selected native job definitions. Keep exact-runtime
+  capability qualification, platform/headlessness, installed adoption,
+  preferences, carrier and activation as distinct remaining gates.
+- Proposed the exact one-shot CLI/approval/result boundary as an amendment to
+  the existing collection design. It remains review-before-code: neither
+  automatic staging nor scheduler enrollment is implemented by this update.
+
+### 2026-11-09 - Adopted one-shot design reviewed
+- #11869 merged as `ed098e92aa` after current-head Copilot approval with no open
+  findings and green required CI. The parent remains open and the source
+  worktree pulled forward onto the reviewed amendment.
+- Next implement the optional pure policy preview and explicitly approved
+  two-target one-shot through the existing collection/transaction owners.
+  One run admission and parent budget cover both targets; independent outcome
+  reporting must preserve a committed first slot after later failure.
+- This clears design review only. Runtime consumer proof, exact installed
+  capability selection, native job/platform qualification, carrier,
+  preferences and activation remain open; no installed runtime was updated.
+
+### 2026-11-09 - Policy-approved one-shot consumer implemented
+- The optional `health run` command previews only the explicit store/policy.
+  Apply shares one existing admission and 45-second parent budget across
+  current health and prior-hour services, using an in-memory entry into the
+  existing revision planner, mutation lock and atomic writer.
+- Approval is revalidated at each commit. Empty selections remain not-requested;
+  policy/revision conflicts, late committed writes and independent target
+  failures remain explicit. Unknown writes leave the existing admission fence
+  set rather than automatically replaying a potentially committed target.
+  Unconfirmed exporter cleanup retains its original native settlement owner.
+- The final focused packet passed 119 cases. The managed Windows collection,
+  transaction and native-consumer packet passed 84 cases with one skip for
+  the separately configured original Bridge-owner interpreter. Real fixture
+  listener and retained Dispatch data reached distinct slots and the ordinary
+  report/chart; a failed second export preserved the first confirmed commit.
+  Two CLI subprocess timeout controls from an earlier broader run passed at
+  their original limits in isolation and in the final managed packet.
+- Ruff, documentation/install contracts and all 41 admitted strict projects
+  passed both Linux and Windows type targets. Required actor-free CI receives
+  four focused composition controls, not the native subprocess matrix.
+- The packaged collection-v1 declaration expands the provider only. This is
+  fresh isolated local-store/fixture evidence, not installed runtime selection,
+  native Linux/job qualification, cold/warm scheduled cost or carrier receipt.
+  Required exact-source review/CI still gate the implementation; the parent
+  stays Active and enrollment, deployment and activation remain held.
+
+### 2026-11-09 - Interrupted-write and cleanup ownership corrections
+- An interruption after replacement but before transaction return must retain
+  an unknown target, not clear admission as though no write began. One-shot
+  staging now marks uncertainty before writer entry; original interruption
+  errors retain the bounded partial result and the durable fence stays set.
+- Unconfirmed native cleanup propagates the original retry owner with
+  `health_run_result`. Python callers can settle that exact owner; CLI callers
+  receive partial JSON while process exit leaves the durable fence unchanged.
+  The regression constructs the cleanup exception inside the exporter, not in
+  an external test reference.
+- A two-request fixture must remain available during a valid first run's
+  export/commit work. Its finite listener lifetime spans both operation budgets,
+  with explicit teardown cancellation rather than an eight-second second
+  accept deadline. Native controls delay the second request and cancel unused
+  cycles without abandoning a thread.
+- The new command's cold payload route also selects the existing runtime
+  read-only on both platforms. Preview/apply refuse a missing runtime before
+  installer execution, diagnostic stamping or directory creation, preserving
+  ordinary command provisioning and existing configuration entry behavior.
+- The focused packet passed 123 cases. The managed corrected collection,
+  cold-payload and native-consumer packet passed 64 cases with one expected
+  original Bridge-interpreter skip. Ruff, install and documentation checks
+  passed. Six focused actor-free composition nodes cover the orchestration;
+  native matrices remain opt-in. Fresh exact-source CI and review still gate
+  #11880; no enrollment, installed update, carrier write or activation occurred.
+
+### 2026-11-09 - Preserve facts through final admission checks
+- Interruption-result handling now covers the complete apply/finalization
+  boundary, including the final post-admission guard. Confirmed commits are
+  retained; an outstanding original cleanup owner still propagates with its
+  retry handle and the interruption as its cause. Cancellation before planning
+  propagates normally, without replacing it with an attribute error or an
+  invented operation result.
+- Focused controls passed 128 cases, including Python/CLI final-guard
+  interruption and final interruption while native cleanup remains retained.
+  The managed collection/native-consumer packet passed all 46 cases.
+- One native preparation run exhausted its unchanged test deadline copying the
+  entire coordinator package, before collection started. The fixture now copies
+  the real early CLI/export dependency closure only; the passing rerun uses the
+  same test and collection deadlines, real exporter and selected metadata.
+- Seven bounded actor-free composition nodes cover the new operation.
+  Review and fresh exact-source CI still gate #11880. Parent/platform,
+  installed-adoption, scheduling, carrier and activation gates remain open.
+
+### 2026-11-10 - Adopted one-shot merged; native job preparation next
+- #11880 merged as `52b200b156` after actual current-head Copilot approval with
+  no open issues, all four resolved review threads and green required CI,
+  including the actor-free units/coverage lane.
+- A superseded attribution check was reconciled through the supported
+  metadata-only workflow scoped to this PR. Its successful result preserved the
+  approved source head; no source push, review bypass of findings or CI bypass
+  was used to repair it.
+- The final focused packet passed 128 cases and the final managed
+  collection/native-consumer packet passed all 46 cases. Earlier cold payload,
+  delayed listener and native CLI-exit controls remain recorded above.
+- Pull-forward aborted safely on squash-history conflicts. All implementation
+  paths matched the confirmed merge; the only difference was four unrelated
+  upstream documentation lines. A retained backup allowed reconciliation of
+  only the three confirmed merged commits, preserving those upstream lines.
+  The source worktree is now on the merged default branch.
+- Completed only the one-shot source checkbox. Next prepare independent native
+  job definitions through Agent Machines, qualifying the exact selected
+  runtime's collection-v1 declaration before any caller can use the operation.
+  Keep preparation separate from enrollment, retain the shared bounded
+  one-shot action, and do not revive the update watchdog.
+- The parent remains Active. Native/platform and installed mixed-version
+  qualification, broader domains, preferences, carrier delivery and explicitly
+  authorized enrollment/activation remain open. No runtime was installed,
+  service activated, task enrolled or carrier written by this source slice.
+
+### 2026-11-10 - Inert native job preparation
+- Added read-only `health prepare-job` output through the normal parser. It
+  reads the selected v2 policy and owning payload launcher and returns proposed
+  definition text only. Windows task/trigger remain disabled; Linux user-unit
+  text is not installed or enabled. macOS remains unsupported.
+- Proposals use hourly UTC delayed triggers, late-run coalescing, no restart
+  storm, overlap suppression and bounded native action settings. The action
+  reuses normal policy-approved `health run`, not the update watchdog.
+- Both payload entries now execute a stdlib compatibility adapter under the
+  exact selected interpreter, reading its immutable-slot collection declaration
+  before provider import. Missing, invalid and rollback support refuse without
+  trialing new syntax; preview/apply-only runtimes cannot prepare jobs.
+- Focused source/parser/composition controls passed 75 tests. The managed
+  fresh-runtime/cold-payload packet passed all 20 tests on Windows PowerShell
+  and Bash entry paths, including zero provider calls when unsupported and
+  qualification again after rollback. Bash here does not qualify Linux.
+- Install, headless-source and documentation contracts passed. Native scheduler
+  definitions, two-cycle window/focus observation, real overlap/late wake,
+  deadline/storage/cleanup, installed adoption, carrier and explicit activation
+  remain unqualified. No registration, installed runtime change or carrier
+  effect was performed; the parent remains Active.
+- Review corrections keep the 45-second collection budget inside the reviewed
+  60-second outer containment ceiling: Windows uses 60 seconds; Linux uses
+  55 seconds before stop plus five seconds for settlement. Linux WorkingDirectory
+  now uses directive-specific literal path rendering rather than command quotes,
+  retaining dollar/backslash/quote characters and escaping percent specifiers.
+  Edge whitespace refuses instead of silently selecting a different directory.
+  The focused post-correction preparation/composition packet passed all 36
+  cases; required source pins and documentation were refreshed together.
+- A follow-up review correction passes the original store path directly to the
+  existing policy owner, preserving its absolute/plain/traversal rejection
+  before token generation or rendering. Normal CLI controls reject both
+  traversal and relative paths without changing the store; an actor-free
+  contract ensures the original path reaches that owner unchanged.
+
+### 2026-11-10 - Native preparation merged; fixture qualification gate
+- #11903 merged as `5312b784ba` after current-head Copilot approval with no open
+  issues, all three resolved review threads and green required CI, including
+  actor-free units/coverage. The final focused preparation/composition packet
+  passed 37 cases; the earlier 20 managed cold/payload controls remain valid.
+- Pull-forward safely aborted on the squash-history conflict. All three local
+  commits were confirmed included in the merge, with no difference in their
+  changed paths. A retained backup allowed reconciliation of only those merged
+  commits while preserving unrelated upstream changes, then normal sync passed.
+- Completed only inert native preparation. Native registration/execution,
+  two-cycle headlessness, overlap/late wake, deadline/storage and exact cleanup
+  still require a separately authorized fixture lane; configuration-only
+  approval is not permission to register even a temporary scheduled task.
+- Next seek bounded isolated Windows fixture qualification, without changing
+  existing tasks, installed runtimes, running services, production enrollment
+  or carrier data. Linux qualification, broader domains, preferences, selected
+  carrier evidence and cohort activation remain independent open parent gates.
+  The effort remains Active and the umbrella issue remains open.
+
+### 2026-11-10 - Bounded Windows scheduler fixtures and launch correction
+- Started the separately authorized limited-user fixture lane, using only
+  unique create-only task names, fixture-owned runtime/data, finite trigger
+  expiry, 60-second actions and ownership-checked stop/delete receipts.
+- The desktop observer refused before registration because a shell/foreground
+  window was unobservable. Keep two-cycle window/focus qualification open;
+  no functional scheduler result substitutes for that evidence.
+- The first scheduler readback normalized RegistrationInfo.URI to the task
+  path and omitted the default LeastPrivilege value. Cleanup failed closed
+  rather than deleting by name alone. Exact readback proved the retained task
+  disabled, instance-free and pointed at its fixture action; exact guarded
+  deletion was confirmed. Later fixtures use a retained description marker.
+- Real calendar execution then passed two accelerated one-minute cycles through
+  the copied public payload, selected fresh runtime, actual listener, local
+  record revisions and exact cleanup, preserving policy and sentinel data.
+- Native negative controls exposed two real definition defects: terminating
+  the console host at its limit left the PowerShell descendant alive, and the
+  console host returned success after collection failure. Exact retained
+  process handles settled fixture survivors; no production task was enrolled.
+- Replaced that boundary with a GUI-subsystem finite root and the existing
+  caller-owned Job/stream executor. The root propagates collection failure,
+  bounds execution plus settlement within 55 seconds, and closes its child Job
+  when the scheduler terminates it. The payload still independently selects and
+  qualifies the collection runtime on each invocation.
+- Focused source controls passed 15 cases. The revised native packet passed
+  two calendar cycles, overlap suppression, the inner deadline and forced
+  outer scheduler termination with exact descendant settlement. Failed storage
+  also returned failure and preserved its sentinel; its fixture's HTTP-count
+  assertion incorrectly expected a request despite rejection before I/O.
+  Corrected that assertion and retained an explicit final rerun gate.
+- The final focused source/native packet passed all 22 selected cases, including
+  the corrected failed-storage control and both exact descendant-stop paths.
+  The separate actor-free composition packet passed all 26 cases. Only the
+  productive-desktop case was excluded from the final native selection; its
+  failed prerequisite remains open, not a passing headlessness result.
+- Install, headless-source, documentation, lint and enforced typing gates passed.
+  The typing run covered all 41 existing strict projects on both platform
+  targets; it does not claim new admission for the 32 pending project scopes.
+- Native late wake, productive-desktop observation, Linux, retained-closure
+  replacement/rollback, installed adoption, live peer connectivity and actual
+  hourly carrier receipt remain separate open gates. The parent stays Active;
+  no running service, installed runtime, production job or carrier was changed.
+
+### 2026-11-10 - Independent inbound reachability and desktop admission
+- Returned to the independent inbound-connectivity branch while productive
+  desktop qualification remained unavailable. An enrolled peer completed
+  three fresh, host-pinned SSH commands proving the expected SID, interactive
+  session and non-admin token, followed by a real framed Bridge read and an
+  actual message/reply roundtrip.
+- These prove current reachability after earlier intermittent resets and
+  carrier startup timeouts, not their historical cause or a service repair.
+  No restart, runtime replacement, credential work, security-policy change or
+  other host's service mutation was performed.
+- Compared the selected native owners rather than the unrelated system SSH
+  service. The current target already has authenticated inbound proof,
+  stalled-Bastion recovery and timestamped history. The peer's older
+  generation lacks those observations/recovery but retains the bounded banner
+  cache. Untimestamped historical exits cannot establish causation; the
+  reporting loopback endpoint can propagate an upstream reset too.
+- Prepared an RDP-admission proposal locally, but it had not cleared review
+  or operator approval. The operator selected console-only qualification;
+  removed that unpublished proposal rather than treating it as accepted.
+  The original SDK console-only admission and unfiltered capture remain
+  unchanged. Added actual task-child/session equality without relaxing those
+  checks, and retained correct record expectations across an hour boundary.
+- A readiness cue was followed by an explicit WTS check, which showed an
+  active RDP session rather than Console. No desktop test or task registration
+  was started for that attempt. Console qualification and enrollment stay held.
+- The operator subsequently approved active RDP admission and explicitly
+  removed the forced desktop requirement. Observation is now an opportunistic,
+  non-gating diagnostic on an already observable console/RDP session; absence
+  or inconclusive coverage is recorded, never represented as a visual pass.
+  Automated periodic execution, result, deadline, launch-mechanism and exact
+  cleanup controls remain required, with no admin/CI bypass.
+- Added unattended checks of the actual GUI-subsystem entrypoint and native
+  console state in controlled Python processes. These address the launch
+  boundary without making operator attendance a hidden prerequisite. Other
+  enrollment/deployment holds remain independent.
+- The revised native/source packet passed 26 checks: 21 focused source cases
+  and five real Windows scheduler controls. The separate visual case skipped
+  with recorded `unobserved` reason `own WTS session inactive: state=4`; this
+  did not fail the packet or claim zero visual events. The native controls
+  verified the actual GUI executable and zero console allocation across both
+  cycles, along with results, overlap, both deadline owners and exact cleanup.
+  Pure composition/admission passed 27 cases; two guidance-projection controls
+  and the skill, install, headless-source and documentation guards also passed.
+- Subsequent focused corrections distinguish unavailable/inconclusive capture
+  from confirmed task-owned violations: native PID/birth identity checks and
+  sampled focus identities can prove a violation even with incomplete coverage,
+  and that result fails. Unrelated or reused-PID activity is not attributed to
+  the task. The storage-failure fixture now blocks both adjacent hourly slots
+  across its launch window rather than depending on the controller's hour.
+- The post-correction packet passed 25 selected cases with one optional desktop
+  skip; three unchanged overlap/deadline cases were deliberately deselected
+  after their earlier full pass. The 27-case pure packet additionally proves
+  positive violation classification, reused-PID refusal and closed process pins.
+- Expanded the same positive-focus rule to both pinned endpoints of an
+  enumeration-time focus change and to enumeration identity mismatches, rather
+  than dropping those confirmed observations. Windows PowerShell XML/JSON
+  handling is explicitly UTF-8, generated scripts carry a BOM, and fixture
+  dependency paths use ASCII-safe Python escapes.
+- The final focused encoding/focus packet passed all 26 selected cases,
+  including a real scheduler action under a non-ASCII payload/store path;
+  five unchanged native cases were deselected. The 27-case pure packet passed
+  all pinned focus kinds and the earlier ownership/admission controls.
+
+### 2026-11-11 - Windows scheduler qualification merged
+- #11974 merged as `93dfbd7c15d19a3c60da5fe5c61d2a3718e52e7c` after
+  current-head Copilot approval, green required checks and all three resolved
+  review threads. The authorized Maintainer CODEOWNER-review exception was
+  used per operator direction and documented on the PR. No CI, change request,
+  unresolved thread or deployment hold was bypassed.
+- Reconciled the four local commits only after their combined stable patch
+  matched the squash merge exactly. Pull-forward preserved independent
+  upstream testing documentation and manifest changes. The umbrella issue
+  remains open and this effort remains Active.
+- The isolated Windows fixture gate is complete; optional visual observation
+  remains a recorded diagnostic rather than an attendance requirement.
+  This does not qualify Linux, an installed runtime closure, replacement/
+  rollback, production registration, actual hourly execution or carrier receipt.
+- Next qualify retained installed-runtime closure and reversible replacement
+  through the existing lifecycle owner before current-host job enrollment.
+  Source merge, release availability, installed adoption and live connectivity
+  remain separate evidence. No production task, service or carrier was changed
+  by this merge.
+- #12059 merged as `1375dcef5d46f7f2148c7d0c5f52fa5ca4ad4d0f` after
+  current-head Copilot approval with no findings, green required checks and no
+  open threads, using the same authorized Maintainer CODEOWNER exception.
+  The installed Windows enrollment amendment and current delivery lane are
+  reviewed; this is not implementation or deployment evidence.
+- Continue with the configuration-owned enrollment implementation and its real
+  installed-closure/replacement/rollback consumer flow. Keep the parent Active;
+  broader carrier/preferences, Linux and actual host activation remain open.
+
+### 2026-11-11 - Installed enrollment implementation and first native proof
+- Implemented local preview/confirmation, installed collection support
+  qualification, create-disabled/readback/enable, matching no-op, reversible
+  replacement, disable and removal under the existing runtime-reference owner.
+  The declared `health-job` resource only converges a prior local opt-in.
+- The finite installed GUI root no longer depends on a checkout or replaceable
+  marketplace payload. The canonical retained bootstrap binds the exact build
+  identity and Windows virtual environment before site imports.
+- Focused native fixtures proved two calendar cycles, immutable build-input
+  removal, matching convergence, replacement and rollback, failed-replacement
+  restoration, successor execution and exact task/reference cleanup. Windows
+  default-field/UTC serialization and observer sharing/settlement races found
+  during qualification now have focused controls. Visual attendance was not
+  required. Forty-nine focused consent/schema controls passed as well.
+- Declaration/materialization and source checks remain part of the unpublished
+  implementation gate. These are isolated fixture results, not release,
+  production enrollment, actual hourly host results or peer access evidence.
+  The parent remains Active; no production task, service or carrier was changed.
+- Final source checks passed for install contract, headless launch,
+  documentation consistency, lint and module size; all 41 existing enforced
+  typing projects passed on both targets without expanding admission.
+- Recovery now compares cached actions with the qualified selected runtime's
+  definition before any rollback enable. Lifecycle management uses its
+  executing retained manager independently of current collector readiness.
+  Focused unit/actor-free controls and the native CLI flow verify refusal of an
+  unsupported collector while retaining safe disable/removal; native cleanup
+  settled every fixture task and retained consumer lease.
+- Withdrawal recovery retains removal intent after a failed native deletion;
+  it never restores an enabled incumbent. Repeated absence converges without
+  mutation once task, adoption and references are cleared. Disabled enrollment
+  retains an enabled trigger and changes only the task-level setting, so
+  interrupted disable recovers without replacement. CLI/resource boundaries
+  report subprocess timeout/cleanup failures without clearing recovery state.
+  The focused native withdrawal plus unit packet passed 21 cases, and the
+  actor-free packet plus runner controls passed 41.
+- A broader replacement rerun reached its unchanged test deadline while
+  observing successor completion, before the new withdrawal assertions. The
+  exact abandoned fixture task was identity-checked, removed and read back.
+  Changed withdrawal behavior was then isolated under the original bounds;
+  this does not promote the timed-out rerun into a passing result.
+- Pending recovery now persists replace/disable/remove intent independently of
+  the definitions retained for ownership. Removal during pending replacement
+  survives interruption, and disable recovery stops and reads back the exact
+  owned task without collector readiness, refusing settlement with live
+  instances. Failed disabled configuration follows the same no-enabled-rollback
+  rule. Before/after-effect controls, native pre-effect disable interruption and
+  deletion recovery passed; the focused unit suite passed 25 cases and the
+  native-plus-unit selection passed 25 before the final additional unit case.
+- Native mutations now fence their unsettled phase in the existing pending
+  record before launch. Unconfirmed cleanup retains the original native
+  retry/callback owner; later lifecycle owners cannot mutate until its confirmed
+  settlement. Withdrawal may tighten recorded intent while fenced, without
+  claiming completion. Late-enable and successor-owner controls pass.
+  Initial disabled-registration failure reports rollback instead of successful
+  enrollment, and confirmed disabled configuration overrides pending enabled
+  replacement intent. The focused native/unit packet passed 30 cases; the
+  actor-free packet and runner controls passed 41.
+- CLI/resource boundaries retain the original native cleanup owner through one
+  bounded settlement attempt before returning; successful cleanup clears only
+  its native fence, never blindly replays the operation. Failed settlement
+  preserves the fence and error. The boundary controls cover both confirmed
+  and unconfirmed cleanup on both surfaces; all 33 focused unit cases passed.
+- Native shutdown disables future admission and waits for the installed finite
+  root's normal child-Job settlement result, rather than force-stopping the root
+  and treating an empty scheduler list as tree termination. Unknown/crash/
+  native-timeout outcomes remain fenced. An actual delayed collector control
+  proved its final write and normal result precede successful disable, followed
+  by exact task/lease cleanup. Fresh COM readback preserves the intended Enabled
+  change while detecting all other definition drift during bounded waiting.
+- Ordinary file-resource convergence now reserves health enrollment consent/
+  recovery state in selected, legacy and canonical cell installations, closing
+  the generic JSON adoption path while preserving unrelated file behavior.
+  This is a built-in convergence restriction, not a sandbox for arbitrary
+  filesystem-authorized code. The enrollment/resource packet passed 210 cases;
+  actor-free classification and existing composition/runner controls passed 42.
+- A non-selected custom-install control reproduced the discovery-based
+  reservation gap. Enrollment now uses the product-namespaced
+  `agent-machines.health.enrollment.json` filename, reserved independently of
+  installation location and resolved aliases without inventory scans.
+  Unrelated generic filenames remain available. The final enrollment/resource/
+  native withdrawal selection passed 214 cases; the actor-free packet and
+  runner controls passed 42.
+- Win32 trailing-dot, trailing-space and default-stream aliases are normalized
+  before file-resource effects, including when the reserved state does not yet
+  exist. The focused real file-resource location/alias packet passed 15 cases.
+- Confirmation compares the settled desired state with the newly requested
+  store/policy after pending recovery. Recovering a previous configuration
+  cannot imply that the new confirmation was applied; mismatches return
+  `configuration-not-applied` and CLI exit 2, requiring a fresh preview.
+  Changed-store and changed-policy CLI controls passed with the full 50-case
+  enrollment unit packet.
+- Preview and recovery now share pending-definition ownership classification
+  for the recorded incumbent and candidate, including disabled forms. Interrupted
+  candidate definitions no longer block a legitimate preview as foreign;
+  unrelated definitions still refuse. Before/after-enable response-loss controls
+  passed with the full 52-case enrollment unit packet.
+
+### 2026-11-12 - Installed Windows enrollment source merged
+- #12188 merged as `0accca16ceb7926a974552257e7b5b6b0a07b474` after
+  exact-head Copilot approval on `c5d98fb7dcb4790f5fff92f7e747e9ec0e45f1ab`,
+  green required CI, all ten resolved review threads and no draft, hold or
+  conflict. The authorized Maintainer CODEOWNER-review exception was recorded
+  on the PR; no CI or blocking-feedback gate was bypassed.
+- The complete local patch matched the accepted squash's stable patch exactly
+  before source reconciliation. Pull-forward preserved all independent upstream
+  content, and the umbrella issue remains open.
+- Windows installed closure, local consent, reversible native lifecycle and
+  focused failure/settlement controls are source-complete. This does not claim
+  a promoted release, installed host adoption, active hourly publication,
+  post-deployment inbound verification or carrier receipt.
+- Release availability was verified at Main
+  `3679dd8263f2c0f89bf0d76094396220247aaf0c`: all 34 affected/derived file
+  blobs matched the accepted source exactly after promotion completed.
+  This is release evidence, not installed or running-state evidence.
+- Continue with the authorized current-host installer-owned rollout using
+  before-state, rollback and health evidence.
+  Only after qualification and installed support may that host's job be
+  enrolled. Broader preference/carrier and Linux gates remain open; the effort
+  stays Active and its worktrees remain owned.
+
+### 2026-11-12 - First installed local-only Windows adoption
+- The separately authorized host completed its normal target-only Machines
+  update, with a healthy retained previous runtime, preserved installer inputs
+  and a usable canonical selector rollback. Installed CLI health, collection-v1
+  `installed-job` capability and retained GUI bootstrap passed; six installed
+  job modules and the retained launcher matched the accepted implementation.
+- The adopter's configuration owner prepared a new unsynchronized v2 store
+  through exact `ensure-present` resources. Existing policy and admission/fence
+  bytes remain untouched on repeat convergence. The optional health-job resource
+  converges only the separately confirmed local opt-in; it grants no enrollment
+  or unattended-maintenance authority.
+- A real installed one-shot run recorded both current observation and prior-hour
+  service targets within budget. The selected listener was healthy; three
+  selected installed service exports were unavailable, not healthy zeroes.
+  Other health domains remain unknown and no carrier publication was requested.
+- Explicit local confirmation enrolled an enabled hourly native task, reported
+  ready collection support and no recovery/cleanup uncertainty. Both direct and
+  resource repeat convergence were unchanged. The first actual hourly execution
+  remains pending; registration is not execution evidence.
+- A real peer completed authenticated inbound SSH and resolved the exact active
+  session through the existing Bridge carrier. This is current inbound evidence,
+  not proof the historical intermittency was repaired. A separate local daemon
+  initialization-readiness failure remains distinct from listener liveness and
+  successful peer lookup; no service restart was used to hide it.
+- The adopter's private configuration/evidence change is merged. Continue with
+  actual hourly readback, retaining all broader domain, export, preference,
+  carrier and platform gates. The canonical effort remains Active.
+- The first unaccelerated hourly execution subsequently returned native result
+  zero, recorded the current-hour listener observation and preceding-hour
+  service target, and settled all instances and the admission byte. The current
+  listener is healthy; unavailable exports and the previous observation's stale
+  age remain explicit rather than being refreshed.
+- Native readback exposed a status-only timestamp defect: the COM last-run
+  value is UTC-valued but has an unspecified DateTime kind, while its next-run
+  value is local. Applying the same local-to-UTC conversion to both reports a
+  future last-run time outside UTC. The native information provider and stored
+  collection timestamps agree on the real execution time. Correct this below-
+  altitude adapter defect and add a real execution-window regression before
+  treating timestamp presentation as qualified. Collection, cadence and native
+  settlement succeeded; the active job is not a partial installation.
+- The new execution-window assertion reproduced the shifted future time on the
+  original adapter after two real native cycles. The corrected native timing
+  reader and existing enrollment controls pass 53 selected tests, including
+  replacement, rollback and exact withdrawal with unavailable timing metadata.
+  A read-only baseline/candidate comparison agrees with the native execution
+  time. The added query costs approximately 1.4 seconds per explicit management
+  read on that host, not on the hourly collector path. Release and installed
+  adoption of this correction remain separate from this source qualification.
+
+### 2026-11-12 - Corrected runtime adopted and real collection preserved
+- #12264 merged as `8bf93a7ad949e32b8cca1e564bb468b139b34d8a` after
+  exact-head Copilot approval, required green CI and no open review issues.
+  The unit admission update changed only the corrected adapter's fingerprint;
+  node, effect, coverage and budget admission remained unchanged.
+- Promoted Main `20106e78eff5a8e95fc8e46e71a36ec0c1c75d14` matched the
+  accepted implementation, native regression and documentation. The separately
+  authorized target-only update installed the exact correction; native
+  convergence refreshed the retained job and repeat convergence was unchanged.
+- The current host's independently diagnosed frontend initialization failure
+  was recovered through its existing same-code lifecycle. A clean non-forcing
+  drain protected accepted work before health-gated cutover and native
+  predecessor retirement. Post-caller-cleanup readiness and configuration
+  preservation were verified; no package or other-host rollout was required.
+- The configuration owner changed only the selected listener endpoint,
+  preserving publisher, continuity, services and history. Fresh local
+  confirmation restored the hourly job. Its actual next UTC execution returned
+  result zero with correct timestamps, both target slots and settled instances
+  and admission. No missed-hour replay or fabricated historical coverage occurred.
+- Peer SSH, exact lookup and notification storage are observed separately from
+  native SDK consumption. The selected retained receiver still refuses
+  negotiation after serving readiness recovered. Its installation prerequisites
+  and the headed launch selection require separate owner/operator steering;
+  no receipt, binding or consumer guard was bypassed.
+- The normal report/chart consumer rendered the real local health history but
+  rejected the selected producer's valid conversation/tool transition records.
+  Schema-only inspection confirmed a consumer vocabulary gap, not missing
+  durations to invent. Extend only the bounded content-free transition decoder,
+  preserve homogeneous groups and unknown timing/population, then prove the
+  genuine producer-to-report path. Broader effort gates remain open.

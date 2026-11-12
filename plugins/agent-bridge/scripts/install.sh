@@ -1848,6 +1848,10 @@ _install_slot_build() {
     if ! _uv_pip_install_resilient "" --python "$VENV_DIR/bin/python" \
             --reinstall-package agent-bridge --refresh-package agent-bridge \
             --reinstall-package agent-procutil --refresh-package agent-procutil \
+            --reinstall-package agent-copilot-driver-core --refresh-package agent-copilot-driver-core \
+            --reinstall-package agent-configuration-layers --refresh-package agent-configuration-layers \
+            --reinstall-package agent-repository-policy --refresh-package agent-repository-policy \
+            --reinstall-package agent-venue-copilot --refresh-package agent-venue-copilot \
             --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
             --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
             --reinstall-package agent-plugin-activation --refresh-package agent-plugin-activation \
@@ -2586,6 +2590,10 @@ _update_core() {
     # exactly this gap.
     if ! _uv_pip_install_resilient "" --python "$VENV_DIR/bin/python" --reinstall-package agent-bridge --refresh-package agent-bridge \
             --reinstall-package agent-procutil --refresh-package agent-procutil \
+            --reinstall-package agent-copilot-driver-core --refresh-package agent-copilot-driver-core \
+            --reinstall-package agent-configuration-layers --refresh-package agent-configuration-layers \
+            --reinstall-package agent-repository-policy --refresh-package agent-repository-policy \
+            --reinstall-package agent-venue-copilot --refresh-package agent-venue-copilot \
             --reinstall-package agent-plugin-resolve --refresh-package agent-plugin-resolve \
             --reinstall-package agent-dropin-registry --refresh-package agent-dropin-registry \
             --reinstall-package agent-plugin-activation --refresh-package agent-plugin-activation \
@@ -2919,7 +2927,7 @@ _initialize_source_runtime || exit 1
 case "$ACTION" in
     install|update|provision)
         . "$SCRIPT_DIR/installer-instance-reconcile.sh"
-        reconcile_installer_instances "$SCRIPT_DIR"
+        reconcile_installer_instances "$SCRIPT_DIR" "" "$INSTALL_DIR"
         ;;
 esac
 case "$ACTION" in

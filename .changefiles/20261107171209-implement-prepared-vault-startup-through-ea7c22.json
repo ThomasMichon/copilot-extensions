@@ -1,0 +1,9 @@
+{
+  "comment": "Implement prepared Vault startup through selected-generation readiness and explicit activation.",
+  "changes": [
+    {
+      "plugin": "agent-vault",
+      "type": "patch"
+    }
+  ]
+}

@@ -94,6 +94,36 @@ def _phase_args(phase, plugins=None):
     )
 
 
+def test_engine_planning_does_not_preload_packaging_in_isolated_process(tmp_path):
+    from agent_worktrees import update_runtime_plan
+
+    script = textwrap.dedent("""
+        import json, sys
+        from pathlib import Path
+        sys.path[:0] = json.loads(sys.argv[1])
+        from agent_worktrees import reconcile, update_runtime, update_runtime_plan
+        assert Path(update_runtime_plan.__file__).resolve() == Path(sys.argv[2]).resolve()
+        root = Path(sys.argv[3])
+        reconcile.runtime_installer_environment = lambda *_args: ({}, root)
+        reconcile.payload_version = lambda *_args: "2.0"
+        reconcile.runtime_deployed_version = lambda *_args, **_kwargs: "1.0"
+        update_runtime._installer_timeout = lambda *_args: 600
+        update_runtime_plan._shell_prefix = lambda *_args, **_kwargs: (["fixture-shell"], True)
+        assert "packaging" not in sys.modules
+        result = update_runtime_plan.plan_engine(root, "windows", force=False, check_footprint=False)
+        assert result.eligible and not result.status
+        assert "packaging" not in sys.modules
+    """)
+    result = subprocess.run(
+        [sys.executable, "-I", "-S", "-B", "-c", script,
+         json.dumps([path for path in sys.path if path]), str(Path(update_runtime_plan.__file__).resolve()),
+         str(tmp_path)],
+        capture_output=True, text=True, timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
+    )
+    assert result.returncode == 0, result.stderr
+
+
 @pytest.mark.parametrize("outcome", [
     "success", "failed-engine", "failed-peer", "failed-integration", "newer-stage", "already-current",
 ])

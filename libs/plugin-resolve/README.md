@@ -152,6 +152,19 @@ Its private native cache uses the existing short-lived neutral acquisition
 directory, avoiding deeply nested native Git cache paths on Windows. Native
 catalog metadata is read before that cache is removed and retained in the
 completed operation receipt; legacy persisted caches remain readable.
+The acquisition-only `plugin_resolve.preparation.prepare_payload` entry reuses
+that same per-source installer without calling repository registration. Its
+caller supplies the staging root, cancellation check and owned process runner;
+an optional authentication callback applies caller policy before credential
+lookup, while the default retains standalone credential selection. The normal
+venue preparation retains its existing default runner. A consumer
+of an acquisition-only payload must carry its isolated `COPILOT_HOME` through
+source resolution and native command-catalog emission rather than infer
+provenance from its path or activate it in the target checkout.
+An exceptional exit from the supplied owned runner retains its exact native
+working directory and reports that path: unknown descendant settlement must
+not trigger automatic cache removal. Normal completion cleans the temporary
+cache; the original venue installer's default cleanup behavior is unchanged.
 On Windows the private installation home is
 `copilot-venue-plugins/marketplaces/<full-source-definition-sha256>`; POSIX
 retains the marketplace/installation subdirectories. The full digest still
@@ -175,7 +188,12 @@ normalization as local reflection (including removal of relocated `pluginRoot`).
 Each immediate cached clone contributes only its existing native-priority
 marketplace manifest; an alternative Claude catalog in the same clone is not a
 second marketplace. Nested plugin/test catalogs and cache bookkeeping files are
-not candidates. Multiple matching clone roots still fail as ambiguous, and
+not candidates. When several clone roots carry the same marketplace name, only
+those whose cached `origin` matches the registered source remain candidates, and
+a GitHub source then prefers the clone named with Copilot's native
+`owner-repo` slug; the ignored stale copies are logged as
+`stale_marketplace_cache`. Any remaining ambiguity still fails and names the
+candidate directories, and
 linked/escaping clone or manifest paths remain refused.
 Marketplace ownership is not inferred from optional plugin authorship or a
 GitHub account. The operation's installation receipt retains the actual catalog

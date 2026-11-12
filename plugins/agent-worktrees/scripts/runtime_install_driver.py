@@ -7,6 +7,7 @@ import importlib.util
 import json
 import math
 import os
+import stat
 from pathlib import Path
 import subprocess
 import sys
@@ -21,11 +22,45 @@ CONTEXT_KEYS = (
     "COPILOT_EXTENSIONS_CONTEXT", "COPILOT_PLUGIN_ROOT", "WORKTREE_MANAGER_ROOT",
     "WORKTREE_MANAGER_ENGINE_ARGV", "WORKTREE_MANAGER_ENGINE_CMD", "CE_UPDATE_AUTH",
     "COPILOT_EXTENSIONS_INSTALL_PROJECT_ROOT", "COPILOT_PROJECT_DIR",
+    "COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION",
 )
 TRANSIENT_KEYS = (
     "COPILOT_EXTENSIONS_COMMAND_LIFECYCLE", "COPILOT_PLUGIN_INSTALL_STAGED",
     "COPILOT_PLUGIN_STAGED_FROM", "COPILOT_EXTENSIONS_RUNTIME_PUBLICATION", NATIVE_ENV,
+    "AGENT_WORKTREES_FIRST_USE_NO_WAIT", "AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT",
 )
+
+
+def native_construction_options(plugin: Path, inputs) -> tuple[str, dict]:
+    from install_source import wheel_selection
+
+    selection = wheel_selection(plugin, "agent-worktrees", inputs)
+    return selection["runtime_version"], {
+        "wheel_inputs": inputs,
+        "local_packages": tuple(selection["local_packages"]),
+        "extras": tuple(selection["extras"]),
+    }
+
+
+def selected_repair(root: Path, version: str, previous: str | None, source_identity, governance) -> str:
+    """Choose the selected repair; the constructor still admits its exact inputs."""
+    import re
+    import installer_engine as engine
+
+    if not previous or re.fullmatch(
+        re.escape(version) + r"(?:[.+]repair\.[0-9a-f]{32})?", previous,
+    ) is None:
+        return version
+    manifest = governance.helper.read_deployment_manifest(root / "deploy-manifest.json")
+    if (
+        manifest.get("runtime_source") == (source_identity.document() if source_identity is not None else None)
+        and manifest.get("runtime_version") == previous
+        and isinstance(manifest.get("venv"), str)
+        and Path(manifest["venv"]) == engine.runtime.version_dir(root, previous)
+        and engine.runtime.is_complete(root, previous)
+    ):
+        return previous
+    return version
 
 
 def positive_input_timeout(value: str) -> float:
@@ -35,17 +70,35 @@ def positive_input_timeout(value: str) -> float:
     return seconds
 
 
-def bootstrap(payload: Path):
-    import installer_engine as engine
-
+def bootstrap(payload: Path, *, stamp: bool = False):
     required = {"agent-update-driver", "agent-single-instance-lease", "agent-procutil", "agent-zdd"}
-    packages = {
-        engine._package_name(package): package for package in engine._package_roots(payload)
-        if engine._package_name(package) in required
-    }
-    if packages.keys() != required:
-        raise RuntimeError("Worktrees installation requires its complete execution-driver source closure")
-    sys.path[:0] = [str(packages[name] / "src") for name in sorted(required)]
+    if stamp:
+        base = payload / "scripts" / "_runtime_admission" / "libs"
+        paths = [base / name / "src" for name in (
+            "update-driver", "single-instance-lease", "agent-procutil", "zdd",
+        )]
+        for path in paths:
+            try:
+                info = path.lstat()
+                resolved = path.resolve(strict=True)
+            except (OSError, RuntimeError) as error:
+                raise RuntimeError("Worktrees stamp requires ordinary admission sources") from error
+            if (
+                not stat.S_ISDIR(info.st_mode) or resolved != path
+                or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+            ):
+                raise RuntimeError("Worktrees stamp requires ordinary admission sources")
+    else:
+        import installer_engine as engine
+
+        packages = {
+            engine._package_name(package): package for package in engine._package_roots(payload)
+            if engine._package_name(package) in required
+        }
+        if packages.keys() != required:
+            raise RuntimeError("Worktrees installation requires its complete execution-driver source closure")
+        paths = [packages[name] / "src" for name in sorted(required)]
+    sys.path[:0] = [str(path) for path in paths]
     from update_driver import core
 
     return core
@@ -147,9 +200,66 @@ def _source_digest(payload: Path) -> str:
     return engine.runtime.fingerprint_source(engine._source_files(engine._package_roots(payload)))
 
 
+def _admission_digest(args) -> str:
+    if args.action != "stamp":
+        return _source_digest(args.payload)
+    import versioned_runtime_source as source
+
+    for name in (source.SOURCE_FILE, "snapshot-provenance.json"):
+        path = args.payload / name
+        if not os.path.lexists(path):
+            continue
+        info = path.lstat()
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        ):
+            raise RuntimeError("Worktrees stamp source metadata is not an ordinary file")
+    qualified = os.path.lexists(args.payload / source.SOURCE_FILE)
+    excluded = {".git", "__pycache__", ".venv", "node_modules", "build", "dist",
+                ".pytest_cache", ".mypy_cache", "tests"}
+    files = []
+
+    def scan_error(error):
+        raise error
+
+    def require_ordinary(path, *, directory):
+        info = path.lstat()
+        if (
+            not (stat.S_ISDIR(info.st_mode) if directory else stat.S_ISREG(info.st_mode))
+            or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        ):
+            raise RuntimeError("Worktrees stamp source contains a nonordinary entry")
+
+    require_ordinary(args.payload, directory=True)
+    for current, directories, names in os.walk(args.payload, onerror=scan_error, followlinks=False):
+        parent = Path(current)
+        # Match the ordinary stamp copier; source-qualified snapshots copy the entire tree.
+        if not qualified:
+            directories[:] = [
+                name for name in directories
+                if name.casefold() != "__pycache__"
+                and not (parent == args.payload and name.casefold() in excluded)
+            ]
+            if parent == args.payload:
+                names = [name for name in names if name.casefold() not in excluded]
+        for name in directories:
+            require_ordinary(parent / name, directory=True)
+        for name in names:
+            path = parent / name
+            require_ordinary(path, directory=False)
+            files.append(path)
+    if not files:
+        raise RuntimeError("Worktrees stamp source is empty")
+    return source._runtime().fingerprint_source(files)
+
+
 def _native_arguments(args) -> list[str]:
     values = ["-Action", args.action, "-InstallDir", str(args.root.resolve())]
-    for option in ("project_name", "bootstrap_python", "owner", "install_source", "input_timeout"):
+    for option in (
+        "project_name", "bootstrap_python", "owner", "install_source", "input_timeout",
+        "wheel_profile", "wheel_directory", "wheel_python", "wheel_uv",
+    ):
         value = getattr(args, option, None)
         if value is not None:
             values.extend(["-" + "".join(word.title() for word in option.split("_")), str(value)])
@@ -196,6 +306,34 @@ def _uninstall_runtime(args, owner) -> int:
     return 0
 
 
+def _selected_snapshot_current(args) -> bool:
+    selected = getattr(args, "selected_snapshot", None)
+    absent = getattr(args, "expect_no_snapshot", False)
+    if selected is None and not absent:
+        return True
+    pointer = args.root / "payload-dir"
+    try:
+        info = pointer.lstat()
+    except FileNotFoundError:
+        return absent
+    except OSError:
+        return False
+    if absent:
+        return False
+    try:
+        if (
+            not stat.S_ISREG(info.st_mode)
+            or getattr(info, "st_file_attributes", 0) & getattr(stat, "FILE_ATTRIBUTE_REPARSE_POINT", 0)
+        ):
+            return False
+        current = Path(pointer.read_text(encoding="utf-8-sig").strip())
+        if not current.is_absolute() or not selected.is_absolute():
+            return False
+        return current.resolve(strict=True) == selected.resolve(strict=True) == args.payload.resolve(strict=True)
+    except (OSError, RuntimeError, ValueError):
+        return False
+
+
 def _execute(args) -> int:
     from update_driver import ParticipantError, core
 
@@ -207,7 +345,7 @@ def _execute(args) -> int:
         if request.spec.backend == "engine-native-install":
             if (
                 request.spec.argv != tuple(arguments)
-                or request.spec.source != _source_digest(args.payload)
+                or request.spec.source != _admission_digest(args)
                 or request.spec.project != str(args.root.resolve())
             ):
                 raise RuntimeError("Native installation changed after driver admission")
@@ -217,11 +355,16 @@ def _execute(args) -> int:
         }:
             raise RuntimeError("Execution owner does not authorize native Worktrees installation")
         owner.assert_owned()
+        if not _selected_snapshot_current(args):
+            print("::agent-worktrees-driver-reselect::", file=sys.stderr, flush=True)
+            return 75
         if args.check_native:
             return 0
         if getattr(args, "check_removal", False) or getattr(args, "remove_runtime", False):
             return _uninstall_runtime(args, owner)
         environment = child_environment()
+        environment.pop("AGENT_WORKTREES_FIRST_USE_NO_WAIT", None)
+        environment.pop("AGENT_WORKTREES_FIRST_USE_EXPECTED_SNAPSHOT", None)
         environment[NATIVE_ENV] = "1"
         process = subprocess.Popen(
             [str(args.shell), "-NoLogo", "-NoProfile", "-NonInteractive",
@@ -253,32 +396,59 @@ def _foreground(args, driver) -> int:
     )):
         raise RuntimeError("Native driver admission must precede publication custody")
     arguments = _native_arguments(args)
-    digest = _source_digest(args.payload)
+    digest = _admission_digest(args)
     command = [
         sys.executable, "-I", "-S", "-B", "-X", "utf8", str(SCRIPTS / "runtime_install_driver.py"),
         "--payload", str(args.payload), "--root", str(args.root),
         "--shell", str(args.shell), "--action", args.action, "--participant",
     ]
-    for option in ("project_name", "bootstrap_python", "owner", "install_source", "input_timeout"):
+    for option in (
+        "project_name", "bootstrap_python", "owner", "install_source", "input_timeout",
+        "wheel_profile", "wheel_directory", "wheel_python", "wheel_uv",
+    ):
         value = getattr(args, option, None)
         if value is not None:
             command.extend(["--" + option.replace("_", "-"), str(value)])
+    if getattr(args, "selected_snapshot", None) is not None:
+        command.extend(["--selected-snapshot", str(args.selected_snapshot)])
+    if getattr(args, "expect_no_snapshot", False):
+        command.append("--expect-no-snapshot")
     for option in ("force", "zero_downtime", "provision_missing_runtime", "remove_config", "runtime_only"):
         if getattr(args, option, False):
             command.append("--" + option.replace("_", "-"))
     if getattr(args, "source_descriptor", None) is not None:
         command.extend(["--source-descriptor", json.dumps(args.source_descriptor, sort_keys=True)])
     context = {key: os.environ[key] for key in CONTEXT_KEYS if key in os.environ}
-    request = driver.enqueue(
-        driver.RequestSpec(
-            "engine-native-install", tuple(arguments), project=str(args.root.resolve()),
-            cwd=str(Path.cwd().resolve()), source=digest, context=tuple(context.items()),
-        ),
-        runner=driver.TrustedRunner(
-            tuple(command), str(Path.cwd().resolve()), context_keys=(*CONTEXT_KEYS, *TRANSIENT_KEYS),
-        ),
+    spec = driver.RequestSpec(
+        "engine-native-install", tuple(arguments), project=str(args.root.resolve()),
+        cwd=str(Path.cwd().resolve()), source=digest, context=tuple(context.items()),
     )
-    driver.drain()
+    runner = driver.TrustedRunner(
+        tuple(command), str(Path.cwd().resolve()), context_keys=(*CONTEXT_KEYS, *TRANSIENT_KEYS),
+    )
+    if getattr(args, "fail_if_busy", False):
+        try:
+            request = driver.run_explicit(spec, runner=runner)
+        except driver.StateError as error:
+            reason = str(error)
+            if reason not in {
+                "request-local execution is busy; no request admitted",
+                "request-local execution requires an idle queue; nothing replayed",
+                "request-local execution requires an idle, unfenced queue; nothing replayed",
+            }:
+                raise
+            if reason.startswith("request-local execution requires") and any(
+                item.state in {"pending", "interrupted", "blocked"} and item.unresolved
+                for item in driver.status()
+            ):
+                raise driver.InterruptedError(
+                    "first-use installation is fenced by unsettled prior work",
+                ) from error
+            print("::agent-worktrees-driver-busy::", file=sys.stderr, flush=True)
+            return 75
+    else:
+        request = driver.enqueue(spec, runner=runner)
+        driver.drain()
     if hasattr(sys.stderr, "reconfigure"):
         # The durable log already contains native Windows line endings.
         sys.stderr.reconfigure(newline="")
@@ -294,13 +464,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--root", required=True, type=Path)
     parser.add_argument("--shell", required=True, type=Path)
     parser.add_argument("--action", required=True, choices=(
-        "install", "update", "provision", "repair", "dev", "dev-release", "uninstall",
+        "install", "update", "provision", "stamp", "repair", "dev", "dev-release", "uninstall",
     ))
     parser.add_argument("--project-name")
     parser.add_argument("--runtime-only", action="store_true")
     parser.add_argument("--bootstrap-python", type=Path)
     parser.add_argument("--owner", type=Path)
     parser.add_argument("--install-source", type=Path)
+    for name in ("wheel-profile", "wheel-directory", "wheel-python", "wheel-uv"):
+        parser.add_argument("--" + name, type=Path)
     parser.add_argument("--input-timeout", type=positive_input_timeout)
     parser.add_argument("--source-descriptor", type=json.loads, help=argparse.SUPPRESS)
     parser.add_argument("--force", action="store_true")
@@ -308,6 +480,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provision-missing-runtime", action="store_true")
     parser.add_argument("--remove-config", action="store_true")
     parser.add_argument("--participant", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--fail-if-busy", action="store_true", help=argparse.SUPPRESS)
+    selection = parser.add_mutually_exclusive_group()
+    selection.add_argument("--selected-snapshot", type=Path, help=argparse.SUPPRESS)
+    selection.add_argument("--expect-no-snapshot", action="store_true", help=argparse.SUPPRESS)
     inspection = parser.add_mutually_exclusive_group()
     inspection.add_argument("--check-native", action="store_true", help=argparse.SUPPRESS)
     inspection.add_argument("--check-removal", action="store_true", help=argparse.SUPPRESS)
@@ -317,8 +493,15 @@ def main(argv: list[str] | None = None) -> int:
         args.action not in ("install", "update") or args.project_name is not None
     ):
         parser.error("--runtime-only requires install/update without --project-name")
-    if args.input_timeout is not None and not args.install_source:
-        parser.error("--input-timeout requires --install-source")
+    if args.fail_if_busy and args.action not in ("stamp", "provision", "install"):
+        parser.error("--fail-if-busy requires a first-use installation action")
+    if (args.expect_no_snapshot or args.selected_snapshot is not None) and (
+        args.action != "provision"
+        or (args.selected_snapshot is not None and not args.selected_snapshot.is_absolute())
+    ):
+        parser.error("--selected-snapshot requires an absolute first-use provision source")
+    if args.input_timeout is not None and not (args.install_source or args.wheel_profile):
+        parser.error("--input-timeout requires an explicit installation input")
     if args.install_source and args.action not in ("install", "update", "provision", "repair"):
         parser.error("--install-source selects only installation, update, provisioning or independent repair")
     if args.install_source and not args.install_source.is_absolute():
@@ -347,6 +530,26 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("Native Worktrees installation requires an exact PowerShell executable")
     if args.payload != SCRIPTS.parent:
         parser.error("Native installation uses only this executing payload")
+    wheel_values = (args.wheel_profile, args.wheel_directory, args.wheel_python, args.wheel_uv)
+    if any(value is not None for value in wheel_values):
+        if (
+            not all(wheel_values) or args.install_source is not None
+            or args.action not in ("install", "update", "provision", "repair")
+            or any(not value.is_absolute() for value in wheel_values)
+            or args.wheel_python.resolve(strict=True) != Path(sys.executable).resolve(strict=True)
+        ):
+            parser.error("closed wheels require complete independent native inputs")
+        from install_source import wheel_inputs, wheel_selection
+
+        with wheel_inputs(args.wheel_profile, args.wheel_directory) as inputs:
+            selected_wheels = json.dumps(
+                wheel_selection(args.payload, "agent-worktrees", inputs),
+                sort_keys=True, separators=(",", ":"),
+            )
+        key = "COPILOT_EXTENSIONS_NATIVE_WHEEL_SELECTION"
+        if key in os.environ and os.environ[key] != selected_wheels:
+            raise RuntimeError("Native wheel selection changed after driver admission")
+        os.environ[key] = selected_wheels
     if args.install_source:
         from install_source import select_project
         import versioned_runtime_source as sources
@@ -361,7 +564,7 @@ def main(argv: list[str] | None = None) -> int:
         ) != selected.identity:
             parser.error("invocation payload differs from selected installation source")
         args.source_descriptor = selected.source_descriptor
-    driver = bootstrap(args.payload)
+    driver = bootstrap(args.payload, stamp=args.action == "stamp")
     with custody() as owner:
         if owner is None:
             if args.participant or args.check_native or args.check_removal or args.remove_runtime:

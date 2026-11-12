@@ -226,7 +226,7 @@ coordination store for a distinct permanent service-custody record, rather than
 another store or an extended task lease. The
 [custody realization proposal](runner-service-custody.md) preserves provider
 admission, exact accepted transfer and incumbent-safe reconciliation. Its
-protocol details are agent-recommended and await source review; live adoption
+protocol details cleared source review in #8931; live adoption
 and temporary-obligation discharge remain separately gated.
 
 The [runner-loadout realization plan](runner-loadouts.md) extends this
@@ -708,6 +708,64 @@ not to the vision. This effort does not acquire or migrate live capacity.
 
 ## Journal
 
+### 2026-11-09 UTC - Provider-effect review fixes under the existing source gate
+
+The resumed bounded outcome remains source/provider-effect enforcement under
+#7192/#6030/#6236, followed by separately authorized adoption. The next observable
+completion is #11458's reviewed, CI-qualified merge, not a rollout. Its current
+review found two concrete blockers: inspecting-client skew could invalidate an
+effect's task prefix, and whole-second rounding could admit an effect after its
+actual safe deadline. The source fixes freeze each effect's own predecessor
+prefix while preserving subsequent task policy, and compare the precise clock
+before encoding. Focused cross-margin recovery and fractional-boundary
+qualification is in progress. The return path is the same canonical resource
+owner and existing Gateway/provider owners; no new workstream is introduced.
+Live adoption, rollout, credentials, controller changes and temporary-obligation
+discharge remain separately gated. No Plan or Validation checkbox closes.
+
+### 2026-11-08 UTC - Canonical provider-effect source prepared
+
+The [custody checkpoint](runner-service-custody.md#2026-11-08-utc---canonical-in-flight-effect-source-prepared)
+records the same-slot in-flight extension and 128 distinct selected passing
+controls, including real separate-process effect/adoption races. Unsettled
+native responsibility cannot expire into borrowing or adoption; explicit
+original-owner settlement preserves the original task generation and retained
+receipt. The failed initial worker fixture and passing corrected selections
+are recorded separately.
+
+This remains source preparation, not provider integration or adoption. The
+local admission authority and node journal are not a distributed resource
+fence. Actual provider enforcement, current/prior installed compatibility,
+Gateway/Fleet and incumbent-preserving ARC binding, fresh live authorization
+and verified obligation discharge remain open. No broad Plan or Validation
+item closes, and no controller, resource, credential, capacity or routing
+change was made.
+
+### 2026-11-08 UTC - Permanent custody receiver source accepted
+
+#11267 merged at `72aae10da1dd53ff06eb1f3d797152aeeba441e6` after
+current-head Copilot approval, resolution of both findings and required green
+CI, including the PR gate. The receiver recognizes strict permanent custody
+in the existing resource CAS slot, freezes its historical admission margin,
+refuses task mutations and preserves mixed history during task compaction.
+No adoption or retirement writer is enabled.
+
+The [custody qualification checkpoint](runner-service-custody.md#local-implementation-checkpoint)
+records all 126 passing individual outcomes, separate native Git/process
+partitions, actual return-proof GC and retained failed aggregate attempts.
+Recorded margins prevent inspecting-client policy from invalidating permanent
+history; ordinary task admission and newly added return-evidence checks remain
+unchanged. The documentation correction keeps current invariants separate from
+review discussion.
+
+The full Request, Plan and Validation Plan were reread. No broad checkbox or
+resource obligation closes. The next stretch integrates actual provider
+admission and competing-effect settlement with the existing canonical owner,
+then binds the existing Gateway/Fleet and incumbent-preserving ARC owners.
+Installed-peer compatibility, native effect races, controller-independent
+protection and live adoption remain open. Eventual live acceptance requires
+fresh valid ownership admission; source merge is not deployment or discharge.
+
 ### 2026-11-04 - Managed legacy client integration accepted
 
 #10509 merged at `be98510a8f4e98b4377de29f756111a05f89027f` after both native
@@ -823,5 +881,17 @@ See the [preserved source history and unresolved acceptance boundaries](journal/
 - [2026-11-04 - Incoming client selection qualification](journal/2026/11.04-client-incoming-selection.md)
 - [2026-10-23 - Forward client generations](journal/2026/10.23-forward-generations.md)
 - [2026-10-22 through 2026-10-23 - Client retained recovery](journal/2026/10.22-client-recovery.md)
+- #8931 merged the permanent service-custody protocol proposal after actual
+  current-head Copilot approval, complete conversation inspection and required
+  source checks. The managed provider confirmed merge using the authorized
+  exception to an additional code-owner vote, without a CI bypass.
+  Re-read this full Request, Plan and Validation Plan and the custody sub-plan.
+  The next stretch implements distinct canonical custody records and provider
+  admission interlocks in the existing resource owner, then binds the existing
+  Gateway and incumbent-preserving ARC owner. No permanent record or live
+  transition exists yet; all provider, installed, native and adoption acceptance
+  remains open. Temporary protection and the parent's active responsibility
+  are retained. Controller deployment, credentials, capacity and routing did
+  not change.
 - [2026-10-22 - Client lifecycle](journal/2026/10.22-client-lifecycle.md)
 - [2026-10-10 through 2026-10-21 - Foundation and client admission](journal/2026/10.10-foundation.md)

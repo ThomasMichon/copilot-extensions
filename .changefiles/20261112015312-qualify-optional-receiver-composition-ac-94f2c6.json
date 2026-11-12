@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify optional receiver composition across physical handover and rollback.",
+  "changes": [
+    {
+      "plugin": "agent-mcp",
+      "type": "patch"
+    }
+  ]
+}

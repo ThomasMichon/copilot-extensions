@@ -141,6 +141,8 @@ class SelectionIndex:
                     memberships[scope].append(wid)
                     scope = Selection(status, platform, False).scope
                     memberships.setdefault(scope, [])
+                    if row.get("status") == "archived":
+                        continue
                     if type(row.get("checkout_present")) is not bool:
                         unready.add(scope)
                     elif row["checkout_present"]:

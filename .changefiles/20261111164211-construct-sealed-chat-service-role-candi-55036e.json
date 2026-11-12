@@ -1,0 +1,9 @@
+{
+  "comment": "Construct sealed Chat service-role candidates without activation",
+  "changes": [
+    {
+      "plugin": "services/chat",
+      "type": "patch"
+    }
+  ]
+}

@@ -233,6 +233,10 @@ Explicit HTTP/client `qualified_peer: true` opts into tuple-only resolution
 and the new protocol; qualified CLI forwarding supplies it. Prefix text alone
 never upgrades a legacy exact-ID request to a newer carrier operation.
 Qualified peer sends return their admission receipt without waiting by default.
+Local represented sends may use `--wait` for finite model-facing consumption or
+fresh pending-input evidence, independently of turn completion. Re-observe an
+existing message with `delivery-receipt`; see
+[delivery observations](docs/delegation-contract.md#model-facing-delivery-and-pending-input).
 `--wait-reply` opts into receipt-backed post-consumption reply evidence, requiring
 HTTP protocol 39 at both bridges and remote operation version 5. Qualified
 addressing without a reply wait retains protocol-35/version-4 compatibility.
@@ -995,6 +999,32 @@ host/child PIDs and process-start identities, host port, protocol/build version,
 working directory, and credential-relay reverse forwards. It also carries the
 private ATTACH nonce; diagnostics must redact that field.
 
+Fresh remote hosts use the current compact Driver core with native ACP
+lifetime, matching fresh local hosts. Before provisioning or child launch,
+Bridge executes the staged archive's `--support-json` with isolated Python
+and requires headless native ACP, TCP-frame transport and ACP lifetime.
+Disconnect and legacy reap hints do not expire these hosts; automatic idle
+retirement remains unavailable without qualified structured pending-work
+evidence. Explicit owner termination remains supported. The compatibility
+receiving export and already-running legacy hosts keep their original
+disconnect-reaping contract; reconnect never replaces them just to change
+lifetime policy.
+
+Fresh portable mux receiving also carries that canonical compact core in its
+existing support archive. Packaging builds it in a fresh private directory,
+not the shared temporary cache; reproducible archive metadata keeps unchanged
+support byte-identical across retries. The receiver requires declared headed execution,
+TCP-frame transport, CLI lifetime and native-child receipts before preparing
+prerequisites or creating the private mux. The pane runs the common broker,
+which injects its scoped extension into the same native conversation alongside
+the selected Bridge/Driver extensions. The original attempt retains the core,
+broker state, socket and registration; unsupported support never falls back
+to direct Copilot creation. Reuse observes the retained mux without another
+broker or seed. Already-running portable attempts keep their original custody.
+Fresh execution refuses `--no-experimental` before prerequisite, registration
+or mux effects because the broker requires its launch-injected extension;
+retained reuse does not change the original session's options.
+
 After a frontend restart, agent-bridge first reattaches from its local HostIndex.
 If that row was lost but the session DB survived, it inspects the far-side
 record for an already-running CodeSpace, validates boot/PID identity, rebuilds
@@ -1003,6 +1033,17 @@ inconclusive and blocks duplicate spawn; only confirmed host death permits
 pruning, with an explicit process-group reap if the owned child survived.
 Startup inspection never wakes a stopped CodeSpace; explicit resume may wake
 and revalidate it.
+
+Plain `stop` retains a reattachable Host. Explicit `stop --reap-host` instead
+waits for remote Host/child retirement confirmation before reporting success
+and removing the Host record. A failed or unverifiable reap returns an error
+and retains the conversation, record and target ownership for recovery. A
+missing Host record with retained connection custody is also inconclusive,
+not evidence of retirement. After confirmation, the connection lock is freed;
+the resumable conversation and its provider claim remain reserved. Active
+background work still blocks non-forced stopping, and unrelated sessions are
+not retired. This does not change redeploy detach or authorize a fresh
+conversation when same-session recovery fails.
 
 For a stopped trusted-container session, resume first re-resolves the provider's
 current serving generation. If credential relay is enabled, it replaces the

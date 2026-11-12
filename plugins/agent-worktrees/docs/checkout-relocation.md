@@ -14,6 +14,7 @@ Use the selected executable's existing read-only query surface:
 ```text
 agent-worktrees get checkout-relocation
 agent-worktrees move <id> --to "<absolute destination ending in the same id>" --json
+agent-worktrees move <id> --to "<same destination>" --check-live --json
 agent-worktrees move <id> --to "<same destination>" --apply --json
 ```
 
@@ -25,11 +26,49 @@ running sibling's readiness. A published resident must also advertise
 refuses without starting or replacing a service. No resident is required for
 standalone operation.
 
-Without `--apply` or `--abort`, the command is read-only. It never backfills
-missing receiving receipts, prepares a journal, recovers databases, or creates
-launch/record sidecars. Unknown owner proof is an explicit refusal.
+Without `--check-live`, `--apply` or `--abort`, the command is read-only. It parses a bounded,
+identity-stable original ledger, checks existing ordinary-shape and launch
+evidence, and refuses missing original receiving proof or lifecycle markers
+without recovering or acquiring their owners. It never backfills receiving
+receipts, prepares a journal, recovers databases, creates launch/record
+sidecars, or issues strict action-time mux/Copilot/process probes.
+
+The current Windows provider has no qualified passive native-owner coverage
+contract. An otherwise ordinary record therefore receives an explicit
+unconfirmed-owner refusal, not a positive plan. Empty registered sessions,
+cached mux negatives and readable CWD holders are not substitutes. Original
+proof inspection and complete CWD coverage are distinct contracts. Retained
+receiving proof is inspected as described below, without changing the
+unconfirmed native-owner result.
+`--apply` retains its existing serialized strict mutation preflight and
+recovery behavior; a passive refusal is not authorization to invoke it.
 Operational and checkout inventories propagate directory-enumeration failures;
 an unreadable subtree is never treated as proof that no references/data exist.
+
+### Explicit bounded live admission
+
+The selected runtime's `live_admission` capability must advertise
+`agent-worktrees.checkout-live-admission`, version 1 and `check_live: true`
+before sending `--check-live`. Older providers reject the unknown option;
+there is no fallback to PSMux CLI reads.
+
+`--check-live` explicitly enters the existing receiving/lifecycle/launch and
+relocation owners, acquires their participating operation locks, and runs the
+same action-time admission as apply without creating a move journal, copying,
+publishing or recovering an original operation. It requires an unstarted move.
+It can query existing native owners and refresh mux activity timestamps, so
+callers need authority for those effects. It never starts, stops or reaps a
+server. Pure planning is unchanged.
+
+The result identifies its observation time and `apply_rechecks: true`; it is
+not a reusable authorization token. Apply rechecks current owner/identity and
+content evidence, including immediately before destination publication and
+source retirement. Active/dependent or ambiguous candidates refuse individually.
+Native mux census coverage, registered Copilot bindings, launch/lifecycle
+evidence and process/CWD checks retain their separate scopes. Readable CWD
+inspection is not a complete census of unreadable individual processes; do
+not treat this check as universal unmanaged-process absence or widen the
+supported checkout class from a successful result.
 
 ## Initial supported scope
 
@@ -58,8 +97,10 @@ an unreadable subtree is never treated as proof that no references/data exist.
 Links/junctions/reparse points, hardlinks, special storage attributes, alternate
 streams, POSIX extended attributes/sparse storage, path-bound venvs, submodules,
 checkout-local agendas and configured index participation are not qualified in
-v1. Missing/malformed operational metadata and immutable creation receipts also
-refuse. These restrictions do not finalize, abandon, clean or rewrite anything.
+v1. Missing/malformed operational metadata and unsupported creation receipts also
+refuse. The narrowly concluded receiving case below preserves its original
+receipt rather than replacing it. These restrictions do not finalize,
+abandon, clean or rewrite anything.
 They are staged support boundaries, not a permanent exclusion of inactive WIP.
 POSIX admission and retirement require a bounded native mount-table inventory;
 mounted checkout roots/subtrees (including same-device bind mounts) refuse.
@@ -85,8 +126,117 @@ Unrelated live rows are untouched. Copilot session-reference matches are a
 refusal until their reader/writer semantics are qualified.
 Reference inspection has a 10,000-entry budget and a three-second database
 inventory budget; an incomplete inventory refuses.
+Known literal metadata names, such as each session's `workspace.yaml`, are
+looked up directly. The bounded wildcard namespace still includes every
+session directory; unrelated event/cache/lock files do not consume its
+reference-discovery budget. Missing or changing directories, redirected
+components and unavailable metadata remain refusals. This does not increase
+the checkout-data limit or omit any workspace/session-database reference check.
 Permission files must remain ordinary, single-link files at capture and under
 the mutation locks. File links are refused without replacing their linkage.
+
+### Generic creator relationships are not receiving receipts
+
+An ordinary checkout can retain a generic parent `worktree` claim and creation
+nonce without ever participating in the receiving-allocation protocol.
+Neither field alone implies a lost receiving receipt. Read-only classification
+checks the original creation database without recovery, index upgrades or
+sidecars. When present it must be a stable, quiescent rollback-mode snapshot,
+at most 16 MiB, under a three-second query deadline.
+
+An original receiving-operation hint still requires its missing receipt to be
+resolved explicitly through its owner. Unknown, unsupported, malformed, busy
+or changing evidence stays held. Otherwise the exact local parent's bounded,
+stable ledger must retain one matching, nonopaque, nonproducer generic claim,
+at rest or released and without handoff reservation. Missing or unsettled
+responsibility refuses. Parent and child identities and the claim are retained;
+classification neither invents a receiving conclusion nor settles responsibility.
+All ordinary inactivity, follow-up, Git, immutable-creation-receipt and
+publication checks still apply. Pure planning remains unconfirmed for native
+liveness, and explicit apply performs fresh admission rather than reusing a
+classification as clearance.
+The same bounded generic-parent classification is repeated at the existing
+owner rechecks before publication and source retirement; a newly unsettled
+creator claim cannot reuse earlier admission.
+The existing relocation-owner context also keeps record rebinding non-recovering:
+an unrelated, unindexed original database is not upgraded by the record saver.
+Generic parents may be ordinary worktrees or retained anchors, including an
+original session qualifier. Their stored reference is preserved verbatim;
+that qualifier is historical provenance, not a live-session clearance.
+Any opaque parent resource keeps responsibility ambiguous, even beside an
+otherwise matching settled claim. Malformed parent mappings produce a
+structured refusal rather than escaping as a parser traceback.
+Reservation inspection uses the handoff owner's stable, read-only snapshot,
+bounded to 1 MiB and 10,000 bundles; incomplete or changing history is held,
+never truncated into an absence result. Explicit live admission and apply
+hold a native Windows read lock across SQLite's lock-byte range while reading
+the immutable rollback snapshot. An exclusive transaction without sidecars
+therefore remains busy without permitting SQLite to create recovery files.
+Pure planning does not acquire that lock: its committed metadata inspection
+still ends in unconfirmed native-owner refusal, never positive admission.
+
+## First receiving current-location revision
+
+The selected runtime's `get checkout-relocation` response additionally declares
+`receiving_location.version: 1`. This is a receiving-continuity contract, not
+qualified native-owner coverage. The absence of that declaration does not
+establish support; older code retains its ordinary-checkout contract.
+The declaration names `agent-worktrees.receiving-checkout-relocation.v1`,
+the receiving result/journal schema. Ordinary v1 journals are unchanged.
+Prior writer-generation-1 code rejects the unfamiliar receiving schema before
+record mutation or stage retirement instead of ignoring mandatory new proof.
+
+The first receiving case is finalized, clean, sessionless and unpaired, with:
+
+- The original complete receipt, nonce, branch, project/execution identity and
+  terminal creation conclusion still present and exactly matching.
+- An exactly closed, released creator obligation retained in the same project
+  and execution space. Its original token, request, target, child identity and
+  closeout must agree. Foreign/unavailable origins and ambiguous, unsettled or
+  handoff-reserved responsibility remain unsupported.
+- A quiescent, nonredirected rollback-mode creation database, at most 16 MiB,
+  with bounded original facts/result. WAL, hot-journal, missing, changed,
+  malformed and unsupported snapshots refuse. Passive inspection uses
+  read-only immutable SQLite access only after checking that shape; it never
+  creates sidecars, upgrades an index, recovers a receipt or finishes a tail.
+
+The existing receiving creation-operation lock serializes explicit apply with
+the original owner, alongside the lifecycle, launch, tracking and relocation
+owners. The relocation journal retains a versioned `receiving_location` proof
+and original settled closeout before transfer. Original allocation identity,
+creation coordinates and terminal conclusion are unchanged. `worktree_path`
+is the current operational location; receiving allocation inspection continues
+to return its original concluded identity, not a replacement allocation.
+
+Current receiving mutation readers validate that journaled location against
+the unchanged receipt. Generic/stale saves cannot roll it backward. Older
+receiving readers reject the changed location rather than infer support or
+rewrite provenance. Original-location records still work with those readers.
+Missing or unsupported retained proof fences current lifecycle/mutation
+consumers without recovering metadata or creating another creation journal.
+When the location journal is absent, shared lifecycle admission uses the
+existing read-only record cache to detect an original/current receiving-path
+mismatch. Ordinary records need no receiving-owner or backend query.
+The first contract supports one receiving location revision, including replay,
+prepublication cancellation and interrupted forward recovery. Another receiving
+revision is refused before leases; ordinary-checkout revision history is
+unchanged. Retain the completed journal as current-location authority.
+
+The independently selectable receiving-only source packet is:
+
+```text
+python tools/run-plugin-tests.py agent-worktrees --test-file tests/native/test_receiving_relocation.py --allow-explicit-tiers
+```
+
+Its positive tests supply admission only for newly owned fixture identities and
+exercise actual receiving creation/closeout, copy, Git repair, rebinding and
+consumer/recovery paths. Native owner probes are poisoned, not replaced with a
+producer claiming real-host absence. This qualifies the receiving component,
+**not** a real move or the missing complete native inactivity contract.
+`AGENT_WORKTREES_RELOCATION_PRIOR_PYTHON` optionally selects an existing physical
+prior runtime for the unchanged-state old-reader acceptance/refusal control;
+without it that particular compatibility control is explicitly unqualified.
+No runtime is installed by the packet.
 
 ## Transfer and recovery
 

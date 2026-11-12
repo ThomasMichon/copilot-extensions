@@ -143,7 +143,7 @@ def test_fresh_source_recovery_uses_existing_custody_without_requeue(tmp_path, m
 
     monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
     monkeypatch.setattr(update_driver, "status", lambda *args, **kw: SimpleNamespace(
-        state="running", spec=SimpleNamespace(backend="source-recovery", context=()),
+        state="running", spec=SimpleNamespace(backend="source-recovery", context=(), cwd=str(tmp_path)),
     ))
     monkeypatch.setattr(update_driver, "enqueue", lambda *args, **kw: pytest.fail("no second request"))
     monkeypatch.setattr(update_cli, "cmd_update", lambda args: calls.append("native-suite") or 17)
@@ -158,6 +158,68 @@ def test_ordinary_update_queues_before_manager_discovery(queued):
     assert seen["spec"].project == "example"
     assert seen["runner"].argv[-4:] == ("--project", "example", "update", "--force")
     assert seen["wait"] == request.id
+
+
+def test_project_directory_relative_home_survives_queue_and_borrowed_reentry(
+    tmp_path, monkeypatch,
+):
+    from dataclasses import replace
+    from pathlib import Path
+    import sys
+    import update_driver
+    from update_driver.authority import UpdateAuthority
+    from agent_worktrees import __main__ as engine, project_update_controller
+
+    caller, project = tmp_path / "caller", tmp_path / "project"
+    caller.mkdir()
+    project.mkdir()
+    monkeypatch.chdir(project)
+    monkeypatch.setenv("AGENT_HOME", "state")
+    monkeypatch.setattr(engine, "_INVOCATION_CWD", caller)
+    monkeypatch.setattr(boundary.cfg, "active_project", lambda: "example")
+    monkeypatch.setattr(update_driver, "current_authority", lambda **_kw: UpdateAuthority())
+    monkeypatch.setattr(update_driver, "borrowed_custody", lambda: None)
+    monkeypatch.setattr(update_driver, "ensure_worker", lambda *_a, **_kw: None)
+    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda *_a, **_kw: False)
+    monkeypatch.setattr(update_driver, "runtime_command", lambda module, args=(): (
+        (sys.executable, "-m", module, *args), {},
+    ))
+    enqueue = update_driver.enqueue
+    rows = []
+
+    def capture(spec, *, runner):
+        row = enqueue(spec, runner=runner, root=tmp_path / "queue")
+        rows.append(row)
+        return row
+
+    monkeypatch.setattr(update_driver, "enqueue", capture)
+    source = str(boundary.cfg.install_dir().resolve())
+    assert boundary.cmd_update_request(_args(detach=True)) == 0
+    row, = rows
+    assert dict(row.spec.context)["AGENT_HOME"] == str(project / "state")
+    assert row.spec.source == source
+    assert Path(row.spec.cwd) == caller
+
+    class Custody:
+        request_id, root = row.id, tmp_path / "queue"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def assert_owned(self):
+            pass
+
+    monkeypatch.setattr(update_driver, "borrowed_custody", Custody)
+    monkeypatch.setattr(update_driver, "status", lambda *_a, **_kw: replace(row, state="running"))
+    monkeypatch.setattr(update_cli, "cmd_update", lambda _args: (
+        17 if boundary.cfg.install_dir().resolve() == Path(source) else 99
+    ))
+    for directory in (project, caller):
+        monkeypatch.chdir(directory)
+        assert boundary.cmd_update_request(_args()) == 17
 
 
 def test_downlevel_driver_refuses_cleanly_without_queueing(queued, monkeypatch, capsys):
@@ -211,6 +273,42 @@ def test_project_authority_routes_to_the_selected_project(queued, monkeypatch):
     assert seen["spec"].project == "harness"
     assert seen["spec"].authority == "project"
     assert seen["runner"].argv[-3:] == ("--project", "harness", "update")
+
+
+def test_explicit_runtime_backend_is_bound_to_the_project_request(queued, monkeypatch):
+    import update_driver
+    from agent_worktrees import project_update_controller
+    from update_driver.authority import selection
+
+    seen, _request = queued
+    monkeypatch.setattr(
+        update_driver, "current_authority", lambda **_kwargs: selection("project", "harness"),
+    )
+    monkeypatch.setattr(boundary, "_request_context", lambda **_kwargs: ())
+    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda *_a, **_kw: True)
+    monkeypatch.setattr(project_update_controller, "supports_runtime_backend", lambda _project: True)
+    assert boundary.cmd_update_request(_args(runtime_backend=["agent-worktrees=cpu"])) == 4
+    assert seen["spec"].argv == ("--runtime-backend", "agent-worktrees=cpu")
+    assert seen["runner"].argv[-2:] == ("--runtime-backend", "agent-worktrees=cpu")
+
+
+def test_explicit_runtime_backend_is_not_queued_for_an_unadvertised_controller(queued, monkeypatch):
+    from agent_worktrees import project_update_controller
+
+    seen, _request = queued
+    monkeypatch.setattr(project_update_controller, "probe_for_submission", lambda *_a, **_kw: True)
+    monkeypatch.setattr(project_update_controller, "supports_runtime_backend", lambda _project: False)
+    assert boundary.cmd_update_request(_args(runtime_backend=["agent-worktrees=cpu"])) == 1
+    assert "spec" not in seen
+
+
+@pytest.mark.parametrize("internal_hint", [False, True])
+def test_explicit_runtime_backend_is_not_queued_without_a_project_controller(queued, monkeypatch, internal_hint):
+    seen, _request = queued
+    if internal_hint:
+        monkeypatch.setenv("AGENT_WORKTREES_INTERNAL_PROJECT_CONTROLLER", "1")
+    assert boundary.cmd_update_request(_args(runtime_backend=["agent-worktrees=cpu"])) == 1
+    assert "spec" not in seen
 
 
 @pytest.mark.parametrize("options", [{}, {"no_project_controller": True}, {"target": "agent-bridge"},

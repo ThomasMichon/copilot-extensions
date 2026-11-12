@@ -1,0 +1,9 @@
+{
+  "comment": "Refresh the canonical caller-lifetime archive with attributed cleanup and native launch diagnostics",
+  "changes": [
+    {
+      "plugin": "libs/installation-context",
+      "type": "patch"
+    }
+  ]
+}

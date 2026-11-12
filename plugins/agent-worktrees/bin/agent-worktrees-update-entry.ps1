@@ -30,8 +30,9 @@ if ($_updateArgs.Count -ge 3 -and $_updateArgs[0] -cin @('--project', '-p')) {
 }
 if ($_updateArgs.Count -eq 0 -or $_updateArgs[0] -cne 'update') { return }
 if (@($_updateArgs | Where-Object {
-    $_ -cin @('--phase', '--plugin', '--inventory', '--target') -or
-    $_.StartsWith('--phase=') -or $_.StartsWith('--plugin=') -or $_.StartsWith('--target=')
+    $_ -cin @('--phase', '--plugin', '--inventory', '--target', '--runtime-backend') -or
+    $_.StartsWith('--phase=') -or $_.StartsWith('--plugin=') -or $_.StartsWith('--target=') -or
+    $_.StartsWith('--runtime-backend=')
 }).Count) {
     $_awUpdateDiagnostic = $true
     return
@@ -176,6 +177,13 @@ if (-not $_probeExcluded -and $_probePossible -and $_awUpdateCaller) {
     $_probeWorker = if ($_probePayload) {
         Join-Path $_probePayload 'scripts\update_controller_probe.py'
     } else { '' }
+    if (-not $_awUpdatePayload -and (
+        -not $_probeHelper -or -not (Test-Path -LiteralPath $_probeHelper -PathType Leaf) -or
+        -not $_probeWorker -or -not (Test-Path -LiteralPath $_probeWorker -PathType Leaf)
+    )) {
+        $_probeHelper = Join-Path $_runtimeRoot 'bin\installation-context\shell-caller-owned.ps1'
+        $_probeWorker = Join-Path $_runtimeRoot 'bin\update_controller_probe.py'
+    }
     $_controller = ''
     if ($_probeHelper -and (Test-Path -LiteralPath $_probeHelper -PathType Leaf) -and
         (Test-Path -LiteralPath $_probeWorker -PathType Leaf)) {

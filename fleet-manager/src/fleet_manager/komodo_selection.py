@@ -53,7 +53,7 @@ class KomodoSelection:
         fingerprint(self.release_digest)
         ordinary_path(self.host_runtime)
         info = self.host_runtime.stat()
-        if (not self.host_runtime.is_dir() or info.st_uid != os.getuid() or info.st_mode & 0o077):
+        if (not self.host_runtime.is_dir() or info.st_uid != os.geteuid() or info.st_mode & 0o077):
             raise PlanError("Komodo host runtime must already have private host-owner custody")
         if type(self.compatible_with) is not tuple or len(self.compatible_with) > 16:
             raise PlanError("Komodo requires bounded explicit data compatibility assertions")

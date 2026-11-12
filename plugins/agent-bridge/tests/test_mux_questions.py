@@ -12,7 +12,7 @@ import pytest
 from agent_bridge.auth import BearerAuthMiddleware
 from agent_bridge.live_questions import LiveQuestions
 from agent_bridge.live_representation import LiveEventStore
-from agent_bridge.mux_question_forms import MuxQuestionError, answer_text, completion_echo, parse_form
+from agent_bridge.mux_question_forms import MuxQuestionError, answer_text, completion_echo, parse_form, stable_screen
 from agent_bridge.mux_questions import MuxQuestions
 from agent_bridge.routes.mux_questions import router
 
@@ -289,3 +289,66 @@ def test_completion_requires_a_new_exact_answer_echo_not_old_history():
     assert completion_echo("", old.replace("Asked user", "● Asked user"), form, "Blue")
     assert completion_echo(old, old + old, form, "Blue")
     assert answer_text("-literal option-looking text") == "-literal option-looking text"
+
+
+def test_completion_accepts_only_right_aligned_native_duration_annotations():
+    form = parse_form(panel())
+    old = "● Asked user Choose a fixture color\n  └ Color: Blue\n"
+    for suffix in ("     5s", "     1m 34s"):
+        completed = old.replace("color\n", "color" + suffix + "\n")
+        assert completion_echo("", completed, form, "Blue")
+        assert not completion_echo(old, completed, form, "Blue")
+        assert not completion_echo("", completed, form, "Green")
+    for suffix in (" 5s", "     unrelated", " for another deployment     5s", "     5s extra"):
+        assert not completion_echo("", old.replace("color\n", "color" + suffix + "\n"), form, "Blue")
+
+
+def test_only_known_native_decorations_are_volatile():
+    pending = panel().removeprefix("Current turn\n")
+    screen = " ○ Asking user Waiting for response7s\n\n────\n" + pending
+    expected = stable_screen(screen)
+    for elapsed in ("", "8s", "10s", "1m 34s"):
+        assert stable_screen(screen.replace("7s", elapsed)) == expected
+    for changed in (
+        screen.replace("response7s", "permission8s"),
+        screen.replace("7s", "8s extra"),
+        screen.replace("────", "Changed history"),
+        screen.replace("❯ Blue", "Blue"),
+        screen.replace("Choose", "Different"),
+        screen.replace("Blue", "Edited"),
+    ):
+        assert stable_screen(changed) != expected
+    quoted = " ○ Asking user Waiting for response7s\nQuoted history\n" + pending
+    assert stable_screen(quoted) != stable_screen(quoted.replace("7s", "8s"))
+    inside = panel().replace("Choose", "○ Asking user Waiting for response7s")
+    assert stable_screen(inside) != stable_screen(inside.replace("7s", "8s"))
+    greeting = "│  █ ▘▝ █  Check for mistakes.│  Other text│\n" + screen
+    assert stable_screen(greeting) == stable_screen(greeting.replace("▘▝", "╴╶"))
+    assert stable_screen(greeting) != stable_screen(greeting.replace("Other text", "Changed"))
+    assert stable_screen(greeting) != stable_screen(greeting.replace("▘▝", "??"))
+
+
+def test_http_clock_ticks_preserve_the_same_one_use_inspected_screen(mux_api, monkeypatch):
+    capture = mux_api.backend.capture
+    ticks = iter(range(7, 100))
+
+    def ticking_capture(*args):
+        value = capture(*args)
+        if mux_api.backend.done:
+            return value
+        return (
+            f" ○ Asking user Waiting for response{next(ticks)}s\n\n────\n"
+            + value.removeprefix("Current turn\n")
+        )
+
+    monkeypatch.setattr(mux_api.backend, "capture", ticking_capture)
+    first, second = inspect(mux_api), inspect(mux_api)
+    inspections = mux_api.state.mux_questions.inspections
+    assert inspections[first].fingerprint == inspections[second].fingerprint
+    body = {"inspection_id": first, "sender": "controller", "option": 1}
+    response = mux_api.client.post(BASE, json=body)
+    assert response.status_code == 200 and response.json()["accepted"] is True, response.text
+    assert mux_api.backend.keys == [("Enter", False)]
+    body["inspection_id"] = second
+    assert mux_api.client.post(BASE, json=body).status_code == 409
+    assert mux_api.backend.keys == [("Enter", False)]

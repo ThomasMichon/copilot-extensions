@@ -133,11 +133,23 @@ def apply_service_env_overlay(
     return env
 
 
+def coordinator_service_environment(
+    inherited: dict[str, str], root: Path, *, strict: bool = False,
+) -> dict[str, str]:
+    """Select the coordinator registrar independently of its initiating profile."""
+    env = dict(inherited)
+    key = "AGENT_DISPATCH_REGISTRAR_DIR"
+    if os.name == "nt":
+        env = {name: value for name, value in env.items() if name.upper() != key}
+    env[key] = str(root.expanduser().absolute() / "registrar")
+    return apply_service_env_overlay(env, root, strict=strict)
+
+
 def capture_service_environment(root: Path) -> dict[str, str]:
     from . import config
 
     original = dict(os.environ)
-    effective = apply_service_env_overlay(dict(original), root, strict=True)
+    effective = coordinator_service_environment(original, root, strict=True)
     if effective.get(INSTALL_DIR_ENV) != original.get(INSTALL_DIR_ENV) and (
         not effective.get(INSTALL_DIR_ENV) or Path(effective[INSTALL_DIR_ENV]).expanduser() != root
     ):

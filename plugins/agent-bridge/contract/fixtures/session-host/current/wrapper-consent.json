@@ -1,13 +1,13 @@
 {
   "captured_from": {
-    "commit": "c0e0743fbd379b98822056fdeceded8551bd2204",
+    "commit": "b4255373643e7358c090f94ecdedd1e0afb2afd6",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 1,
     "source_path": "libs/copilot-driver-core/src/agent_remote_driver/session_host/preference_spawn.py",
     "source_git_blob": "000d146879fa543d74c0742ec53ee0285143857e",
     "source_sha256": "124e8f701e0994dd4ca588bd6db90eb78a257c36c15200a35eef5a553c87243e"
   },
-  "component_digest": "e69f6466031f5c48fb65f5fc1a83028f73e3fbf8cdf4d5d302d51efd682553c3",
+  "component_digest": "08fff3fcdd79ee0039f744bf93726d0831a388d508ed5cbd6590f6b90910541a",
   "release_metadata_normalized": "agent_remote_driver._FALLBACK_VERSION and agent_remote_driver.__version__",
   "authority_modules": [
     "agent_remote_driver",

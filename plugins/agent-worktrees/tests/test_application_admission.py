@@ -36,6 +36,38 @@ def test_unselected_repository_does_not_resolve_or_run_machines(tmp_path, monkey
     assert admission.new_application_error(_config(tmp_path), source=str(tmp_path)) is None
 
 
+@pytest.mark.parametrize("stage,timeout", [
+    ("profile selection", True), ("runtime selection", False),
+    ("runtime selection", True), ("observation", True),
+])
+def test_refusal_identifies_the_failed_stage_without_raw_diagnostics(
+    tmp_path, monkeypatch, stage, timeout,
+):
+    from agent_worktrees import copilot_plugin_profile as tool
+
+    config = _required(_config(tmp_path))
+
+    def fail(*args, **kwargs):
+        if timeout:
+            raise subprocess.TimeoutExpired(["private-argument"], 55, stderr="private-output")
+        raise ValueError("private-output")
+
+    monkeypatch.setattr(tool, "observe_for_admission", lambda *a, **k: "profile")
+    monkeypatch.setattr(admission, "_selected_runtime", lambda **k: (["owner"], {}))
+    monkeypatch.setattr(admission, "run_caller_owned", lambda *a, **k: pytest.fail("unexpected observation"))
+    if stage == "profile selection":
+        monkeypatch.setattr(tool, "observe_for_admission", fail)
+    elif stage == "runtime selection":
+        monkeypatch.setattr(admission, "_selected_runtime", fail)
+    else:
+        monkeypatch.setattr(admission, "run_caller_owned", fail)
+    error = admission.new_application_error(config, source=config.default_repo.anchor)
+    assert stage in error
+    assert ("exceeded the launch admission budget" in error) is timeout
+    assert "private-" not in error
+    assert "before allocation" in error
+
+
 @pytest.mark.parametrize("change", [
     {"requiredSatisfied": False}, {"interrupted": True},
     {"selectionRefusal": "required-inventory-changed"},

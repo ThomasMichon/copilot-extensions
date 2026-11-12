@@ -3,6 +3,14 @@
 Canonical contract: [README.md](README.md). Entries are append-only; this thin
 index lists dated checkpoints newest-first.
 
+- [2026-11-12 - Oldest-cohort qualification and governed-build intake](journal/2026/11.12-oldest-cohort-qualification-and-receiving.md)
+
+- [2026-11-12 - Standing research and native proof boundaries](journal/2026/11.12-standing-research-and-native-proof.md)
+
+- [2026-11-12 - Retained delivery and comment refinements](journal/2026/11.12-retained-delivery-and-comment-refinements.md)
+
+- [2026-11-12 - Verified completions and retained inflow](journal/2026/11.12-verified-completions-and-retained-inflow.md)
+
 - [2026-11-07 - Serving-owner and attribution-event research](<journal/2026/11.07 serving-owner-and-attribution-events.md>)
 
 - [2026-11-07 - Provider merge and inflow study](<journal/2026/11.07 provider-merge-and-inflow-study.md>)

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
+import os
 import socket
+import time
+import uuid
 from typing import Any
 
 import yaml
@@ -184,7 +187,176 @@ def _pr_summary(config: Any) -> str:
     )
 
 
+def agenda_lane_state(project: str, record: Any) -> str:
+    """Return ``present``/``absent``/``unknown`` for this worktree's agenda lane.
+
+    Cheap, local and read-only: a managed ``agendas`` placement in the
+    worktree-data inventory, or a non-empty worktree-local ``.effort-agenda/``.
+    Any refusal or error yields ``unknown`` rather than failing session start.
+    """
+    from pathlib import Path
+
+    from . import worktree_data_store
+    from .worktree_data_contract import WorktreeDataError
+
+    try:
+        inventory = worktree_data_store.read_worktree_data(
+            project, str(getattr(record, "worktree_id", "") or ""),
+        )
+    except (WorktreeDataError, OSError, ValueError):
+        return "unknown"
+    if inventory is not None and any(
+        placement.domain == "agendas" for placement in inventory.placements
+    ):
+        return "present"
+    try:
+        home = Path(str(getattr(record, "worktree_path", "") or "")) / ".effort-agenda"
+        if home.is_dir() and any(child.is_dir() for child in home.iterdir()):
+            return "present"
+    except OSError:
+        return "unknown"
+    return "absent"
+
+
+def render_agenda_guidance(
+    config: Any, record: Any, *, session_id: str | None = None,
+) -> str:
+    """Render the ``Agenda:`` block when ``agendas.default`` is ``expected``.
+
+    Returns ``""`` when the policy is off. Guidance only: nothing is adopted or
+    mutated here, and the agent keeps full control of whether and how to adopt.
+    """
+    if getattr(config, "agenda_default", cfg.AGENDA_DEFAULT_OFF) != cfg.AGENDA_DEFAULT_EXPECTED:
+        return ""
+    project = cfg.active_project() or _clean(getattr(record, "repo", ""))
+    try:
+        lane = agenda_lane_state(project, record)
+    except Exception:
+        lane = "unknown"
+    check = f"agent-worktrees --project {project} worktree-data-read --inventory --json"
+    session_folder = (
+        f"~/.copilot/session-state/{session_id}" if session_id else "<session-folder>"
+    )
+    lines = [
+        "Agenda: expected for this session (agendas.default: expected); "
+        f"lane={lane}.",
+    ]
+    if lane == "present":
+        lines.append(
+            "- Resume and keep the existing agenda current via the "
+            "`driving-effort-agendas` skill."
+        )
+    else:
+        if lane == "unknown":
+            lines.append(f"- Check for an existing lane: `{check}`.")
+        lines.append(
+            "- Adopt one via the `driving-effort-agendas` skill (its `scripts/`): "
+            "`agenda_outline.py from-effort <effort README.md>`, or "
+            f"`agenda_backfill.py preview {session_folder}` to rebuild from this "
+            "session, or author an outline; then `agenda_outline.py preview <outline>` and "
+            "`agenda_outline.py adopt <outline> --state-home .effort-agenda/<lane>/`."
+        )
+    lines.append(
+        "- You own and edit the agenda; adoption is never automatic and it is "
+        "a guide, not a lock."
+    )
+    return "\n".join(lines)
+
+
+AGENDA_POLICY_SUFFIX = ".agenda-policy.json"
+
+
+def _agenda_policy_roots() -> list[Any]:
+    from pathlib import Path
+
+    roots: list[Any] = []
+    # legacy_install_dir honors AGENT_HOME, so a sandboxed session never writes
+    # into the real home's runtime tree.
+    for factory in (cfg.install_dir, cfg.legacy_install_dir):
+        try:
+            root = Path(os.path.abspath(factory()))
+        except Exception:
+            continue
+        if root not in roots:
+            roots.append(root)
+    return roots
+
+
+def publish_agenda_policy(config: Any, record: Any, *, now: float | None = None) -> None:
+    """Publish this worktree's effective ``agendas.default`` for post-tool hooks.
+
+    Writes ``<runtime>/nudge-state/<worktree>.agenda-policy.json`` (``off`` is
+    published explicitly) under the selected runtime root and the per-user
+    legacy root the Python hook reads, so the stdlib/PowerShell reminder paths
+    never load configuration themselves. Refreshed on every session start or
+    resume; best-effort and never raises into session start.
+    """
+    worktree_id = str(getattr(record, "worktree_id", "") or "")
+    if not worktree_id or os.sep in worktree_id or "/" in worktree_id or worktree_id in {".", ".."}:
+        return
+    policy = (
+        cfg.AGENDA_DEFAULT_EXPECTED
+        if getattr(config, "agenda_default", None) == cfg.AGENDA_DEFAULT_EXPECTED
+        else cfg.AGENDA_DEFAULT_OFF
+    )
+    body = json.dumps({
+        "version": 1, "policy": policy,
+        "written_at": time.time() if now is None else now,
+    })
+    for root in _agenda_policy_roots():
+        target = root / "nudge-state" / f"{worktree_id}{AGENDA_POLICY_SUFFIX}"
+        temporary = target.with_name(f".{target.name}.{os.getpid()}.{uuid.uuid4().hex}.tmp")
+        try:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            temporary.write_text(body, encoding="utf-8")
+            os.replace(temporary, target)
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
+
+def with_agenda_guidance(
+    message: str, config: Any, record: Any, *, session_id: str | None = None,
+) -> str:
+    """Append :func:`render_agenda_guidance`; never raises into session start."""
+    try:
+        publish_agenda_policy(config, record)
+    except Exception:
+        pass
+    try:
+        agenda = render_agenda_guidance(config, record, session_id=session_id)
+    except Exception:
+        return message
+    return f"{message}\n{agenda}" if agenda else message
+
+
 def render_registry_context(
+    config: Any,
+    record: Any,
+    *,
+    cwd: str,
+    pane_id: str | None = None,
+    mux_session: str | None = None,
+    plugin_related_anchors: list[str] | None = None,
+) -> str:
+    """Render the bounded registry context.
+
+    Agenda guidance is appended by ``related_briefing.augment_session_message``,
+    which receives the hook payload's session id.
+    """
+    return _render_registry_core(
+        config,
+        record,
+        cwd=cwd,
+        pane_id=pane_id,
+        mux_session=mux_session,
+        plugin_related_anchors=plugin_related_anchors,
+    )
+
+
+def _render_registry_core(
     config: Any,
     record: Any,
     *,

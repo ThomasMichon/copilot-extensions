@@ -236,6 +236,30 @@ def test_copy_payload_preserves_bundled_dbus_next_wheel(tmp_path):
     assert (slot / si._SLOT_COMPLETE_MARKER).is_file()
 
 
+@pytest.mark.skipif(os.name != "nt", reason="Windows extended-length payload paths")
+@pytest.mark.parametrize("with_progress", [False, True])
+def test_copy_payload_preserves_long_windows_members(tmp_path, with_progress):
+    payload = _fake_payload(tmp_path, "1.2.3")
+    native = si._runtime_installer().engine._native_retained_path
+    member = Path("resources") / ("nested-" * 12) / ("retained-" * 12) / "data.bin"
+    source = Path(native(payload / member))
+    source.parent.mkdir(parents=True)
+    source.write_bytes(b"retained native payload resource")
+    slot = tmp_path / ("destination-" * 8) / "slot"
+    Path(native(slot.parent)).mkdir(parents=True)
+    assert len(str(slot / member)) > 260
+    progress = []
+
+    si._copy_payload(
+        Path(native(payload)), slot,
+        on_progress=(lambda: progress.append(True)) if with_progress else None,
+    )
+
+    assert Path(native(slot / member)).read_bytes() == source.read_bytes()
+    assert Path(native(slot / si._SLOT_COMPLETE_MARKER)).is_file()
+    assert bool(progress) is with_progress
+
+
 @pytest.mark.parametrize("failed_sink", [False, True])
 def test_completed_copy_progress_preserves_atomic_payload_publication(tmp_path, failed_sink):
     payload = _fake_payload(tmp_path, "1.2.3")

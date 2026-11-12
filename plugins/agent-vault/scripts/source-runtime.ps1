@@ -16,6 +16,7 @@ function Get-SourceRuntimeIdentity {
 
 function Initialize-SourceRuntime {
     $script:PackageVersion = $SrcVersion
+    $script:SourceRuntimeVersion = $SrcVersion
     $script:SourceRuntimeIdentity = $null
     $script:SourceRuntimeSnapshot = $null
     $metadata = Join-Path $PluginDir 'runtime-source.json'
@@ -28,6 +29,7 @@ function Initialize-SourceRuntime {
     }
     $script:SourceRuntimeIdentity = Get-SourceRuntimeIdentity
     $script:SrcVersion = ($SourceRuntimeIdentity | ConvertFrom-Json).runtime_version
+    $script:SourceRuntimeVersion = $SrcVersion
     $script:VenvDir = Join-Path (Join-Path $InstallDir 'versions') $SrcVersion
     $script:VenvPython = Join-Path $VenvDir 'Scripts\python.exe'
     $script:LinkDir = $VenvDir
@@ -37,7 +39,7 @@ function Initialize-SourceRuntime {
 function Assert-SourceRuntime {
     if ($script:SourceRuntimeIdentity -or
         (Test-Path -LiteralPath (Join-Path $PluginDir 'runtime-source.json'))) {
-        $identity = Get-SourceRuntimeIdentity -ExpectedVersion $SrcVersion
+        $identity = Get-SourceRuntimeIdentity -ExpectedVersion $script:SourceRuntimeVersion
         if ($identity -ne $script:SourceRuntimeIdentity) {
             throw 'Source runtime identity changed after runtime selection; refusing publication'
         }
@@ -59,7 +61,7 @@ function Publish-SourceSnapshot {
     if (-not $py) { throw 'Source snapshot publication requires a bootstrap Python interpreter' }
     $arguments = @('-I', '-B', (Join-Path $ScriptDir 'versioned_runtime_source.py'),
         '--payload', $PluginDir, '--package-version', $PackageVersion,
-        '--plugin', 'agent-vault', '--expected-runtime-version', $SrcVersion,
+        '--plugin', 'agent-vault', '--expected-runtime-version', $script:SourceRuntimeVersion,
         '--expected-source-identity', $script:SourceRuntimeIdentity,
         '--snapshot-root', $InstallDir)
     $nativeError = ''
@@ -81,7 +83,7 @@ function Publish-SourcePayload {
     $result = Invoke-Hidden -FilePath $py -ArgList @(
         '-I', '-B', (Join-Path $ScriptDir 'versioned_runtime.py'),
         '--root', $InstallDir, 'publish-redirects',
-        '--payload-dir', $snapshot, '--version', $SrcVersion,
+        '--payload-dir', $snapshot, '--version', $script:SourceRuntimeVersion,
         '--expected-source-identity', $script:SourceRuntimeIdentity
     ) -ErrorOutput ([ref]$nativeError)
     if ($LASTEXITCODE -ne 0) {
@@ -93,9 +95,18 @@ function Publish-SourcePayload {
 function Get-SourceRuntimeFields {
     Assert-SourceRuntime
     $fields = @{}
+    if (Get-Variable -Name NativeWheelSelection -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
+        $fields['runtime_version'] = $SrcVersion
+    }
     if ($script:SourceRuntimeIdentity) {
         $data = $script:SourceRuntimeIdentity | ConvertFrom-Json
         foreach ($property in $data.PSObject.Properties) { $fields[$property.Name] = $property.Value }
+    }
+    if ($script:RuntimeProfile) {
+        $fields['runtime_profile'] = $script:RuntimeProfile
+        $fields['runtime_version'] = $SrcVersion
+    } elseif ($script:SourceRuntimeIdentity) {
+        $fields['runtime_profile'] = 'base'
     }
     return $fields
 }

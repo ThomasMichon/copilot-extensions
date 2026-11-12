@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse complete prepared native guard proof for bounded structured create/edit targets",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

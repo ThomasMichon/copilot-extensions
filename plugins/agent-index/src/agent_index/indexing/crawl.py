@@ -39,6 +39,7 @@ def collect_source_changes(
         raise RuntimeError("connector has no canonical stored family")
     scope = recovery_scope(source_scope or source_name, connector)
     state.require_acquisition_scope(source_name, scope, full=full)
+    state.require_family_cursor(source_name, connector.source_name, full=full)
     cancel_check = progress_cb.check_cancelled if progress_cb else None
     src_state = state.sources.get(source_name)
     last_commit = src_state.last_commit if src_state else None

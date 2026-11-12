@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import subprocess
 import sys
@@ -14,6 +15,14 @@ from agent_worktrees import config, project_update_controller, update_cli, updat
 
 def args(**values):
     return argparse.Namespace(**values)
+
+
+def advertise_runtime_backends(script):
+    script.with_name(script.name + ".capabilities.json").write_text(json.dumps({
+        "schema": "copilot-extensions.project-update-controller-capabilities",
+        "version": 1,
+        "capabilities": ["project-runtime-backend-intent/v1"],
+    }), encoding="utf-8")
 
 
 @pytest.fixture
@@ -102,6 +111,206 @@ def test_explicit_runtime_sources_are_forwarded_to_controller(project, monkeypat
     )
     assert result == 0
     assert calls[0][-3:] == ["--no-manager", "--runtime-sources", "{}"]
+
+
+def test_explicit_runtime_backends_are_forwarded_to_controller(project, monkeypatch):
+    import update_driver
+    from agent_worktrees import __main__ as engine
+
+    _repo, script = project
+    advertise_runtime_backends(script)
+    selected = engine.build_parser().parse_args([
+        "update",
+        "--runtime-backend", "agent-worktrees=cpu",
+        "--runtime-backend", "agent-index=cuda12",
+    ])
+    update_options.validate_auth_flags(selected)
+    monkeypatch.setattr(
+        update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "test"},
+    )
+    calls = []
+    monkeypatch.setattr(
+        project_update_controller.subprocess, "run",
+        lambda argv, **_kwargs: calls.append(argv) or SimpleNamespace(returncode=0),
+    )
+    assert project_update_controller.run_project_update(selected) == 0
+    assert calls[0][-4:] == [
+        "--runtime-backend", "agent-worktrees=cpu",
+        "--runtime-backend", "agent-index=cuda12",
+    ]
+
+
+@pytest.mark.parametrize("values", [
+    ["missing-equals"], ["agent-worktrees="], ["AGENT-worktrees=cpu"],
+    ["agent-worktrees=cpu", "agent-worktrees=cuda12"],
+])
+def test_runtime_backend_rejects_malformed_or_duplicate_owners(values):
+    parser = argparse.ArgumentParser()
+    update_options.add_update_options(parser)
+    argv = [part for value in values for part in ("--runtime-backend", value)]
+    with pytest.raises(SystemExit):
+        update_options.validate_auth_flags(parser.parse_args(argv))
+
+
+@pytest.mark.parametrize("option", ["--no-project-controller", "--inventory", "--auth-report"])
+def test_runtime_backend_rejects_non_controller_modes(option):
+    parser = argparse.ArgumentParser()
+    update_options.add_update_options(parser)
+    with pytest.raises(SystemExit):
+        update_options.validate_auth_flags(parser.parse_args([
+            "--runtime-backend", "agent-worktrees=cpu", option,
+        ]))
+
+
+def test_request_backend_extraction_handles_equals_and_rejects_missing_values():
+    assert update_options.request_runtime_backends((
+        "--runtime-backend=agent-worktrees=cpu", "--runtime-backend", "agent-index=cuda12",
+    )) == ("agent-worktrees=cpu", "agent-index=cuda12")
+    with pytest.raises(ValueError):
+        update_options.request_runtime_backends(("--runtime-backend", "--auto"))
+
+
+def test_backend_capability_is_read_from_the_selected_project(project, monkeypatch):
+    repo, script = project
+    seen = []
+    monkeypatch.setattr(
+        config, "load_project_config",
+        lambda name: seen.append(name) or SimpleNamespace(default_repo=repo),
+    )
+    assert not project_update_controller.supports_runtime_backend("example")
+    advertise_runtime_backends(script)
+    assert project_update_controller.supports_runtime_backend("example")
+    assert seen == ["example", "example"]
+
+
+def test_backend_capability_uses_selected_project_machine_config(tmp_path, monkeypatch):
+    from agent_worktrees import pr_related_binding, repos
+
+    monkeypatch.setenv("AGENT_HOME", str(tmp_path))
+    monkeypatch.setattr(config, "_ACTIVE_PROJECT", "caller")
+    monkeypatch.setattr(config, "detect_platform", lambda: "windows")
+    monkeypatch.setattr(config, "global_config_path", lambda: tmp_path / "global-missing.yaml")
+    monkeypatch.setattr(
+        config, "project_dir",
+        lambda name=None: tmp_path / f".{name or config.project_name()}",
+    )
+    monkeypatch.setattr(pr_related_binding, "control_plane_pr_map", lambda: {})
+    monkeypatch.setattr(repos, "read_registry", lambda: repos.ReposRegistry(repos={}))
+    scripts = {}
+    for name in ("caller", "selected"):
+        anchor = tmp_path / name
+        script = anchor / "tools" / "update.py"
+        script.parent.mkdir(parents=True)
+        script.write_text("pass\n", encoding="utf-8")
+        directory = tmp_path / f".{name}"
+        directory.mkdir()
+        (directory / "config.yaml").write_text(json.dumps({
+            "repo_name": name,
+            "platform": "windows",
+            "repos": {name: {
+                "anchor": str(anchor), "worktree_root": str(tmp_path / f"{name}-worktrees"),
+                "update_controller": {"windows": "tools/update.py"},
+            }},
+        }), encoding="utf-8")
+        scripts[name] = script
+    advertise_runtime_backends(scripts["selected"])
+
+    assert not project_update_controller.supports_runtime_backend("caller")
+    assert project_update_controller.supports_runtime_backend("selected")
+    assert config.active_project() == "caller"
+
+
+def test_runtime_backend_never_falls_back_without_a_controller(project, monkeypatch):
+    repo, _script = project
+    monkeypatch.setattr(
+        config, "load_config", lambda: SimpleNamespace(default_repo=config.RepoConfig(
+            anchor=repo.anchor, worktree_root=repo.worktree_root,
+        )),
+    )
+    result = project_update_controller.dispatch_update(
+        args(runtime_backend=["agent-worktrees=cpu"]),
+        lambda _args: pytest.fail("unexpected authentication report"),
+        lambda _args: pytest.fail("backend intent fell back to Manager"),
+        lambda: pytest.fail("backend intent fell back to standalone"),
+    )
+    assert result == 1
+
+
+def test_legacy_controller_rejects_backend_before_effects(project, monkeypatch, tmp_path):
+    import update_driver
+
+    _repo, script = project
+    marker = tmp_path / "ran"
+    script.write_text(
+        "import argparse\nfrom pathlib import Path\n"
+        "argparse.ArgumentParser().parse_args()\n"
+        f"Path({str(marker)!r}).write_text('ran')\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "test"},
+    )
+    monkeypatch.setattr(
+        project_update_controller.subprocess, "run",
+        lambda *_args, **_kwargs: pytest.fail("unadvertised controller was launched"),
+    )
+    result = project_update_controller.dispatch_update(
+        args(runtime_backend=["agent-worktrees=cpu"]),
+        lambda _args: pytest.fail("unexpected authentication report"),
+        lambda _args: pytest.fail("legacy controller fell back to Manager"),
+        lambda: pytest.fail("legacy controller fell back to standalone"),
+    )
+    assert result != 0
+    assert not marker.exists()
+
+
+@pytest.mark.parametrize("backend", [None, "agent-worktrees=cuda12"])
+def test_runtime_backend_cannot_change_after_submission(project, monkeypatch, backend):
+    import update_driver
+    from update_driver import RequestSpec
+    from update_driver.authority import selection
+
+    _repo, script = project
+    advertise_runtime_backends(script)
+    monkeypatch.setattr(
+        update_driver, "participant_environment", lambda: {"UPDATE_DRIVER_WITNESS": "test"},
+    )
+    monkeypatch.setattr(
+        project_update_controller.subprocess, "run",
+        lambda *_args, **_kwargs: pytest.fail("changed intent reached the controller"),
+    )
+    request = RequestSpec(
+        "engine", ("--runtime-backend", "agent-worktrees=cpu"),
+        project="example", authority="project",
+    )
+    result = project_update_controller.dispatch_update(
+        args(runtime_backend=[backend] if backend else None, _controller_request=request,
+             _controller_authority=selection("project", "example")),
+        lambda _args: 0, lambda _args: pytest.fail("unexpected Manager"),
+        lambda: pytest.fail("unexpected standalone update"),
+    )
+    assert result == 1
+
+
+@pytest.mark.parametrize("record", [
+    {"schema": "wrong", "version": 1, "capabilities": ["project-runtime-backend-intent/v1"]},
+    {"schema": "copilot-extensions.project-update-controller-capabilities", "version": 2,
+     "capabilities": ["project-runtime-backend-intent/v1"]},
+    {"schema": "copilot-extensions.project-update-controller-capabilities", "version": 1,
+     "capabilities": []},
+])
+def test_unadvertised_backend_never_launches_the_controller(project, monkeypatch, record):
+    _repo, script = project
+    script.with_name(script.name + ".capabilities.json").write_text(
+        json.dumps(record), encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        project_update_controller.subprocess, "run",
+        lambda *_args, **_kwargs: pytest.fail("unsupported controller was launched"),
+    )
+    assert project_update_controller.run_project_update(
+        args(runtime_backend=["agent-worktrees=cpu"]),
+    ) == 1
 
 
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows inherited stream handling")
@@ -225,14 +434,17 @@ def test_partial_parent_request_cannot_claim_controller_delegation(project, pare
 
 
 @pytest.mark.parametrize("legacy_schema", [False, True])
+@pytest.mark.parametrize("backend", [None, "agent-worktrees=cpu"])
 def test_project_authority_reaches_controller_under_real_driver_custody(
-    project, monkeypatch, tmp_path, legacy_schema,
+    project, monkeypatch, tmp_path, legacy_schema, backend,
 ):
     import update_driver
     from agent_worktrees import update_driver_cli
 
     tmp_path = tmp_path.resolve()
     _repo, script = project
+    if backend:
+        advertise_runtime_backends(script)
     driver_root = tmp_path / "driver"
     engine = tmp_path / "engine"
     result = tmp_path / "controlled.txt"
@@ -255,7 +467,8 @@ def test_project_authority_reaches_controller_under_real_driver_custody(
     )
     request = update_driver.enqueue(
         update_driver.RequestSpec(
-            "engine", project="example", cwd=str(tmp_path), source=str(engine.resolve()),
+            "engine", ("--force", *(("--runtime-backend", backend) if backend else ())),
+            project="example", cwd=str(tmp_path), source=str(engine.resolve()),
             authority="project",
         ),
         runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
@@ -274,19 +487,23 @@ def test_project_authority_reaches_controller_under_real_driver_custody(
             update_driver, "borrowed_custody",
             lambda: borrow(root=driver_root, environ=transaction.participant_env()),
         )
-        return update_driver_cli.cmd_update_request(args(force=True))
+        return update_driver_cli.cmd_update_request(args(
+            force=True, runtime_backend=[backend] if backend else None,
+        ))
 
     assert update_driver.drain(root=driver_root, executor=execute) == 0
     assert update_driver.status(request.id, root=driver_root).exit_code == 0
-    assert result.read_text(encoding="utf-8") == "--force"
+    expected = "--force" + (f" --runtime-backend {backend}" if backend else "")
+    assert result.read_text(encoding="utf-8") == expected
 
 
 @pytest.mark.parametrize(("delegation", "expected"), [
     ("phase", "runtimes"), ("standalone", "standalone"), ("target", "agent-bridge"),
     ("integration", "integration:owned"),
 ])
+@pytest.mark.parametrize("legacy", [False, True])
 def test_project_controller_can_delegate_under_real_custody(
-    project, monkeypatch, tmp_path, delegation, expected,
+    project, monkeypatch, tmp_path, delegation, expected, legacy,
 ):
     import update_driver
     from agent_worktrees import update_driver_cli
@@ -336,14 +553,24 @@ def test_project_controller_can_delegate_under_real_custody(
     monkeypatch.setenv("USERPROFILE", str(home))
     monkeypatch.setattr(Path, "home", classmethod(lambda cls: home))
     monkeypatch.setattr(config, "install_dir", lambda: engine)
-    update_driver.change_authority(
-        "project", project="example", root=driver_root, timeout=5,
-        verify_capabilities=lambda _deadline: True,
-    )
+    configuration = home / ".example"
+    configuration.mkdir()
+    (configuration / "config.yaml").write_text(json.dumps({
+        "repo_name": "example", "platform": "windows",
+        "repos": {"example": {
+            "anchor": str(tmp_path), "worktree_root": str(tmp_path / "worktrees"),
+            "update_controller": {"windows": "tools/update.py", "linux": "tools/update.py"},
+        }},
+    }), encoding="utf-8")
+    if not legacy:
+        update_driver.change_authority(
+            "project", project="example", root=driver_root, timeout=5,
+            verify_capabilities=lambda _deadline: True,
+        )
     request = update_driver.enqueue(
         update_driver.RequestSpec(
             "engine", ("--force",), project="example", cwd=str(tmp_path),
-            source=str(engine.resolve()), authority="project",
+            source=str(engine.resolve()), authority="" if legacy else "project",
         ),
         runner=update_driver.TrustedRunner((sys.executable, "-c", "pass"), str(tmp_path)),
         root=driver_root,
@@ -358,6 +585,7 @@ def test_project_controller_can_delegate_under_real_custody(
     assert update_driver.drain(root=driver_root, executor=execute) == 0
     assert update_driver.status(request.id, root=driver_root).exit_code == 0
     assert result.read_text(encoding="utf-8") == expected
+    assert update_driver.current_authority(root=driver_root).configured is not legacy
 
 
 def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
@@ -381,11 +609,17 @@ def test_standalone_authority_is_forwarded_to_manager(project, monkeypatch):
 
 
 @pytest.mark.parametrize(("phase", "expected"), [("integration", True), ("runtimes", False)])
+@pytest.mark.parametrize("legacy", [False, True])
 def test_delegated_project_phase_exposes_manager_ownership_only_during_integration(
-    project, phase, expected,
+    project, phase, expected, legacy,
 ):
-    request = SimpleNamespace(authority="project", project="example", argv=())
-    authority = SimpleNamespace(configured=True, mode="project", project="example")
+    request = SimpleNamespace(
+        backend="engine", authority="" if legacy else "project", project="example", argv=(),
+    )
+    authority = SimpleNamespace(
+        configured=not legacy, mode="standalone" if legacy else "project",
+        project="" if legacy else "example",
+    )
     selected = args(phase=phase, _controller_request=request, _controller_authority=authority)
     observed = []
     result = project_update_controller.dispatch_update(
@@ -401,9 +635,15 @@ def test_delegated_project_phase_exposes_manager_ownership_only_during_integrati
     assert not hasattr(selected, "_controller_owns_manager")
 
 
-def test_delegated_integration_restores_manager_marker_after_error(project):
-    request = SimpleNamespace(authority="project", project="example", argv=())
-    authority = SimpleNamespace(configured=True, mode="project", project="example")
+@pytest.mark.parametrize("legacy", [False, True])
+def test_delegated_integration_restores_manager_marker_after_error(project, legacy):
+    request = SimpleNamespace(
+        backend="engine", authority="" if legacy else "project", project="example", argv=(),
+    )
+    authority = SimpleNamespace(
+        configured=not legacy, mode="standalone" if legacy else "project",
+        project="" if legacy else "example",
+    )
     selected = args(
         phase="integration", _controller_request=request, _controller_authority=authority,
         _controller_owns_manager="previous",
@@ -416,6 +656,44 @@ def test_delegated_integration_restores_manager_marker_after_error(project):
     with pytest.raises(RuntimeError, match="integration failed"):
         project_update_controller.dispatch_update(selected, lambda _args: 0, lambda _args: 0, fail)
     assert selected._controller_owns_manager == "previous"
+
+
+def test_legacy_delegation_without_a_controller_keeps_manager_with_standalone_owner(
+    project,
+):
+    repo, _script = project
+    repo.update_controller.clear()
+    request = SimpleNamespace(backend="engine", authority="", project="example", argv=())
+    authority = SimpleNamespace(configured=False, mode="standalone", project="")
+    selected = args(
+        phase="integration", _controller_request=request, _controller_authority=authority,
+    )
+    observed = []
+    assert project_update_controller.dispatch_update(
+        selected, lambda _args: pytest.fail("auth report ran"),
+        lambda value: observed.append(getattr(value, "_controller_owns_manager", None)) or 7,
+        lambda: pytest.fail("standalone owner was skipped"),
+    ) == 7
+    assert observed == [None]
+
+
+@pytest.mark.parametrize("selection", [
+    {"no_project_controller": True}, {"phase": "integration"}, {"target": "agent-bridge"},
+])
+def test_unselected_partial_parent_keeps_standalone_routing(project, selection):
+    flags = tuple(
+        part
+        for key, value in selection.items()
+        for part in (["--" + key.replace("_", "-")] + ([] if value is True else [value]))
+    )
+    request = SimpleNamespace(backend="engine", authority="", project="example", argv=flags)
+    authority = SimpleNamespace(configured=False, mode="standalone", project="")
+    selected = args(**selection, _controller_request=request, _controller_authority=authority)
+    assert project_update_controller.dispatch_update(
+        selected, lambda _args: pytest.fail("auth report ran"), lambda _args: 7,
+        lambda: pytest.fail("standalone owner was skipped"),
+    ) == 7
+    assert not hasattr(selected, "_controller_owns_manager")
 
 
 def test_automatic_controller_rechecks_policy_when_enabled_after_submission(

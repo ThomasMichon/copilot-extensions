@@ -278,6 +278,24 @@ original queue's retained request, not just a matching task id.
 Submission and rejection keep the claim; only `COMPLETED` or confirmed
 unassignment to unbound `QUEUED` permit its verified close. Abandonment,
 dead-letter state, lease expiry and runner exit remain non-settling.
+The supervisor's terminal reconcile settles a `COMPLETED` task's exact retained
+relationship through the existing reconcile route before releasing its
+reservation. A failure or a non-closed answer retains both the reservation and
+the claim and retries next cycle, so dispatch-attempt workspace conclusion never
+runs against a still-live task claim. Submitted tasks are not settled here.
+Bodies whose reservation is already releasing settle the same way before
+attempt conclusion. A retired attempt whose workspace cleanup was held only for
+outstanding obligations is re-armed to pending, with a fresh attempt budget,
+once its task is `COMPLETED` and the relationship closes; other holds stay held.
+The re-arm is an atomic compare-and-swap on the exact held detail that refuses an
+unexpired cleanup lease and clears a spent one. The coordinator derives the
+pending detail from the stored hold and, in the same transaction, refuses any
+other hold reason or a reservation whose exact retained relationship is not
+closed or absent. Each cycle revisits a bounded number of candidates, counting
+failures, and resumes after the last one visited. The supervisor first requires
+the coordinator's `/health` to advertise `claim_held_cleanup_rearm`; against an
+older coordinator it settles nothing and the cleanup stays held, recoverable
+through `recover-held-cleanup`. Roll out the coordinator before supervisors.
 When cancellation finds no claim, reconciliation replays the original reserve
 and closes it, retaining its tombstone. Absence alone cannot fence a delayed
 in-flight reserve.
@@ -499,8 +517,9 @@ or rejected/reassigned binding cannot reuse it. Legacy direct writes and late-re
 enrichment refuse prepared tasks, including after restart; SQL also preserves
 the submitted proposal against older backfill code. Internal rejected-proposal
 resubmission uses the lineage below. Post-stop same-native recovery,
-non-circular decline, manual/absent-workspace applicability and full native
-qualification remain open. The ordinary completion consumer above does not
+manual/absent-workspace applicability and full native qualification remain
+open. Decline settles a retained task claim only after its committed requeue;
+see [retained task-claim ordering](pool-worker-decline.md#retained-task-claim-ordering). The ordinary completion consumer above does not
 enable assignment writer construction or qualify an installed cohort.
 
 The immutable preparation retains the original native/generation even after

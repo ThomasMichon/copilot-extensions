@@ -13,16 +13,18 @@ from pathlib import Path
 import pytest
 from agent_procutil import owned_process
 from native_shell_support import bash_path
-from test_update_entry import PLUGIN, _arguments
+from test_update_entry import PLUGIN, _arguments, _copy_native_global_tools
 from test_update_entry import update_entry_case as shared_update_entry_case
 
 update_entry_case = shared_update_entry_case
 
 
 @pytest.mark.parametrize("project_position", ["before", "after"])
-@pytest.mark.parametrize("selection", ["configured", "old-engine", "unconfigured", "broken-helper"])
+@pytest.mark.parametrize("selection", [
+    "configured", "native-configured", "old-engine", "unconfigured", "broken-helper",
+])
 def test_posix_project_controller_precedes_manager_bootstrap(
-    tmp_path, native_bash, project_position, selection,
+    tmp_path, native_bash, project_position, selection, monkeypatch,
 ) -> None:
     home = tmp_path / "home"
     tools = tmp_path / "tools"
@@ -82,20 +84,91 @@ def test_posix_project_controller_precedes_manager_bootstrap(
             native_bash, home / "providers",
         ),
     })
+    entry = PLUGIN / "bin" / "agent-worktrees"
+    if selection == "native-configured":
+        entry = _copy_native_global_tools(home, monkeypatch, "sh") / "agent-worktrees"
     result = owned_process.run_owned(
-        [native_bash, bash_path(native_bash, PLUGIN / "bin" / "agent-worktrees"), *arguments],
+        [native_bash, bash_path(native_bash, entry), *arguments],
         timeout=40, env=env,
     )
-    expected = {"configured": 47, "old-engine": 126, "unconfigured": 126, "broken-helper": 125}
+    expected = {
+        "configured": 47, "native-configured": 47,
+        "old-engine": 126, "unconfigured": 126, "broken-helper": 125,
+    }
     assert result.returncode == expected[selection], result.stderr
     if selection != "broken-helper":
         assert _arguments(tmp_path / "probe.args")[-4:] == [
             "--project", "sample", "get", "update-controller",
         ]
-    if selection == "configured":
+    if selection in ("configured", "native-configured"):
         assert _arguments(tmp_path / "update.args")[-len(arguments):] == arguments
     else:
         assert not (tmp_path / "update.args").exists()
+
+
+@pytest.mark.parametrize("flags", [
+    ["--runtime-backend", "agent-worktrees=cpu"],
+    ["--runtime-backend=agent-worktrees=cpu"],
+])
+def test_posix_runtime_backend_reaches_engine_before_bootstrap(tmp_path, native_bash, flags):
+    home, tools = tmp_path / "home", tmp_path / "tools"
+    runtime = home / ".agent-worktrees"
+    (runtime / "bin").mkdir(parents=True)
+    tools.mkdir()
+    (runtime / "current-version").write_text("selected\n", encoding="utf-8")
+    engine = tools / "engine"
+    engine.write_text(
+        '#!/bin/sh\n'
+        'case " $* " in\n'
+        '  *" -c "*) case "$*" in *"json.loads"*) printf "/tmp/probe-cache" ;; '
+        '*) printf \'"%s"\\n\' "/tmp/probe-cache" ;; esac; exit 0 ;;\n'
+        '  *" get update-controller "*) exit 0 ;;\n'
+        'esac\n'
+        'printf "%s\\0" "$@" > "$UPDATE_ARGS"\nexit 29\n',
+        encoding="utf-8",
+    )
+    engine.chmod(0o755)
+    (runtime / "bin" / "resolve-runtime.sh").write_text(
+        "AW_PY=" + shlex.quote(bash_path(native_bash, engine)) + "\n", encoding="utf-8",
+    )
+    for name in ("curl", "git"):
+        command = tools / name
+        command.write_text('#!/bin/sh\nprintf touched > "$BOOTSTRAP_CALLED"\nexit 91\n', encoding="utf-8")
+        command.chmod(0o755)
+    startup = tmp_path / "bash-env"
+    startup.write_text(
+        'uname() { printf "Linux\\n"; }\n'
+        'curl() { printf touched > "$BOOTSTRAP_CALLED"; return 91; }\n'
+        'git() { printf touched > "$BOOTSTRAP_CALLED"; return 91; }\n',
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    for key in tuple(env):
+        if any(part in key.upper() for part in ("TOKEN", "SECRET", "PASSWORD", "CREDENTIAL", "AUTHORIZATION")):
+            env.pop(key)
+    env.update({
+        "HOME": bash_path(native_bash, home), "USERPROFILE": str(home), "AGENT_HOME": str(home),
+        "COPILOT_HOME": str(home / ".copilot"),
+        "PATH": os.pathsep.join([str(tools), str(Path(native_bash).parent), env["PATH"]]),
+        "BASH_ENV": bash_path(native_bash, startup),
+        "UPDATE_ARGS": bash_path(native_bash, tmp_path / "update.args"),
+        "BOOTSTRAP_CALLED": bash_path(native_bash, tmp_path / "bootstrap-called"),
+        "AGENT_SCRATCH_ROOT": bash_path(native_bash, tmp_path),
+        "TMPDIR": bash_path(native_bash, tmp_path),
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": os.devnull, "GIT_TERMINAL_PROMPT": "0",
+        "AGENT_WORKTREES_NO_SELFPROVISION": "1",
+        "WORKTREE_MANAGER_BOOTSTRAP_REPO": "-disabled-for-test",
+        "WORKTREE_MANAGER_ROOT": bash_path(native_bash, home / ".worktree-manager"),
+        "AGENT_WORKTREES_CONTROL_PLANE_PROVIDERS_DIR": bash_path(native_bash, home / "providers"),
+    })
+    arguments = ["--project", "sample", "update", *flags]
+    result = owned_process.run_owned(
+        [native_bash, bash_path(native_bash, PLUGIN / "bin" / "agent-worktrees"), *arguments],
+        timeout=40, env=env,
+    )
+    assert result.returncode == 29, result.stderr
+    assert _arguments(tmp_path / "update.args")[-len(arguments):] == arguments
+    assert not (tmp_path / "bootstrap-called").exists()
 
 
 @pytest.mark.skipif(sys.platform == "darwin", reason="native identity pin fixture requires pidfd or Windows")

@@ -22,6 +22,8 @@ def standalone_build_resources(component: str, *, source_root: Path) -> tuple[Pa
         resources += (source_root / "libs" / "installer-engine",)
     if component in {"fleet-manager", "services/pr", "services/ssh"}:
         resources += (source_root / "libs" / "agent-procutil" / "src" / "agent_procutil",)
+    if component == "services/pr":
+        resources += (source_root / "plugins" / "ai-attribution" / "scripts",)
     return resources
 
 

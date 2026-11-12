@@ -546,17 +546,14 @@ async def test_closed_transport_with_live_local_task_cannot_verify_retirement(ma
     assert manager._db.get_relationship(session.session_id)["phase"] == "closed"
 
 
-@pytest.mark.parametrize("declared_owner", [None, "", OWNER, "bare"])
-def test_cli_declared_managed_owner_cannot_become_unowned_when_probes_fail(monkeypatch, declared_owner):
+@pytest.mark.parametrize("caller", [None, "managed-caller"])
+def test_cli_managed_cwd_cannot_become_unowned_when_owner_probe_fails(monkeypatch, caller):
     from agent_bridge import session_start_cli
     from agent_bridge.client import BridgeClientError
 
-    if declared_owner is None:
-        monkeypatch.delenv("AGENT_WORKTREES_OWNER_REF", raising=False)
-    else:
-        monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", declared_owner)
+    monkeypatch.setenv("AGENT_WORKTREES_OWNER_REF", "stale/other/wt#parent")
     core = session_start_cli._core()
-    monkeypatch.setattr(core, "_get_caller_id", lambda: None)
+    monkeypatch.setattr(core, "_get_caller_id", lambda: caller)
     monkeypatch.setattr(core, "_worktrees_get", lambda key: None)
     monkeypatch.setattr(core, "_get_caller_session_id", lambda: None)
     monkeypatch.setattr(core, "_startup_request_timeout", lambda: 1)
@@ -567,7 +564,7 @@ def test_cli_declared_managed_owner_cannot_become_unowned_when_probes_fail(monke
         start_session=Mock(return_value={"session_id": "unowned", "name": "unowned", "status": "idle"}),
     )
     preference = session_start_cli._SenderPreference("remote-acp:example", "example")
-    if declared_owner is None:
+    if caller is None:
         assert session_start_cli._start_agent_session(
             client, "remote-acp:example", sender_preference=preference,
         ) == "unowned"

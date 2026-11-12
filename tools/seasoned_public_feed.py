@@ -36,6 +36,8 @@ import json
 import math
 import re
 import socket
+import subprocess
+import sys
 import threading
 import time
 import urllib.error
@@ -44,6 +46,7 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 
 #: Default seasoning window, in days, applied when a caller doesn't name
 #: one explicitly. Not derived from this effort's own Phase 1 lag
@@ -205,7 +208,7 @@ def _deadline_opener(deadline: float):
     return urllib.request.build_opener(HTTPHandler(), HTTPSHandler())
 
 
-def _default_fetch(url: str, *, deadline: float | None = None) -> bytes:
+def _fetch_response(url: str, *, deadline: float | None = None) -> bytes:
     """The real network fetch -- isolated behind the injectable ``fetch``
     parameter below so every test exercises the actual selection logic
     against a fixed, synthetic response instead of real network calls to
@@ -227,6 +230,61 @@ def _default_fetch(url: str, *, deadline: float | None = None) -> bytes:
     except urllib.error.HTTPError as error:
         error.close()
         raise
+
+
+def _default_fetch(url: str, *, deadline: float | None = None) -> bytes:
+    if deadline is None:
+        return _fetch_response(url)
+    if isinstance(deadline, bool) or not isinstance(deadline, (int, float)) or not math.isfinite(deadline):
+        raise SeasonedVersionError("public toolchain requires a finite monotonic deadline")
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+    # Socket timeouts cannot cancel DNS or bound all address/proxy attempts.
+    # This child owns only the request; run() kills and waits for it on expiry.
+    command = [
+        sys.executable, "-I", "-B", str(Path(__file__).resolve()),
+        "--fetch-deadline", str(deadline), url,
+    ]
+    options = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+    try:
+        result = subprocess.run(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            timeout=remaining, **options,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded") from exc
+    if time.monotonic() >= deadline:
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+    if result.returncode == 0:
+        return result.stdout
+    try:
+        failure = json.loads(result.stderr)
+    except (ValueError, UnicodeError) as exc:
+        raise SeasonedVersionError("public toolchain metadata worker failed") from exc
+    if isinstance(failure, dict) and failure.get("kind") == "http" and type(failure.get("code")) is int:
+        raise urllib.error.HTTPError(url, failure["code"], failure.get("message", ""), None, None)
+    if isinstance(failure, dict) and failure.get("kind") == "deadline":
+        raise SeasonedVersionError("public toolchain resolution deadline exceeded")
+    raise SeasonedVersionError("public toolchain metadata request failed")
+
+
+def _fetch_main(arguments: list[str]) -> int:
+    if len(arguments) != 3 or arguments[0] != "--fetch-deadline":
+        raise SeasonedVersionError("unsupported metadata worker arguments")
+    try:
+        data = _fetch_response(arguments[2], deadline=float(arguments[1]))
+    except urllib.error.HTTPError as exc:
+        sys.stderr.write(json.dumps({"kind": "http", "code": exc.code, "message": str(exc.reason)}))
+        return 1
+    except SeasonedVersionError:
+        sys.stderr.write(json.dumps({"kind": "deadline"}))
+        return 1
+    except Exception:
+        sys.stderr.write(json.dumps({"kind": "request"}))
+        return 1
+    sys.stdout.buffer.write(data)
+    return 0
 
 
 def _resolve_seasoned_release(
@@ -410,3 +468,7 @@ def resolve_seasoned_public_release(
             raise SeasonedVersionError(f"{package} {version}: missing or invalid file SHA-256")
         hashes.add(digest.lower())
     return SeasonedPublicRelease(version, tuple(sorted(hashes)))
+
+
+if __name__ == "__main__":
+    raise SystemExit(_fetch_main(sys.argv[1:]))

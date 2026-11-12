@@ -284,7 +284,29 @@ def test_reconcile_carries_original_shell_self_cleanup_boundary(session, monkeyp
     reconcile = Mock(return_value=[])
     monkeypatch.setattr(store, "reconcile", reconcile)
     assert session.dispatch({"command": "reconcile"}) == []
-    reconcile.assert_called_once_with(None, 128, 5, _caller_pid=4200)
+    reconcile.assert_called_once_with(
+        None, 128, 5, _caller_pid=4200, terminate=False, runtime_root=None,
+    )
+
+
+def test_reconcile_shell_forwards_explicit_runtime_and_termination(session, monkeypatch, tmp_path):
+    reconcile = Mock(return_value=[])
+    monkeypatch.setattr(store, "reconcile", reconcile)
+    assert session.dispatch({"command": "reconcile", "parameters": {
+        "runtime_root": str(tmp_path), "terminate": False,
+    }}) == []
+    reconcile.assert_called_once_with(
+        None, 128, 5, _caller_pid=4200, terminate=False, runtime_root=tmp_path,
+    )
+
+
+@pytest.mark.parametrize("terminate", ["false", 0, None])
+def test_reconcile_shell_refuses_nonboolean_termination_before_collection(
+    session, monkeypatch, terminate,
+):
+    monkeypatch.setattr(store, "reconcile", lambda *_a, **_k: pytest.fail("invalid collection"))
+    with pytest.raises(ValueError, match="termination"):
+        session.dispatch({"command": "reconcile", "parameters": {"terminate": terminate}})
 
 
 def test_wire_sequences_requests_and_preserves_explicit_errors(session, monkeypatch):
@@ -343,7 +365,9 @@ def test_reconcile_outcomes_survive_bounded_fragmentation_and_next_request(
 
     def reconcile(*args, **kwargs):
         assert args == (None, 4096, 5)
-        assert kwargs == {"_caller_pid": session.owner.identity.pid}
+        assert kwargs == {
+            "_caller_pid": session.owner.identity.pid, "terminate": False, "runtime_root": None,
+        }
         cursor.write_text("committed", encoding="ascii")
         return rows
 

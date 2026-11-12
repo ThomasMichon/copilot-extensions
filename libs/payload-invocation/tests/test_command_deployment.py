@@ -173,8 +173,8 @@ def test_command_binding_deployment_rechecks_after_real_lock_acquisition(
     original = lifecycle._lock
 
     @contextmanager
-    def changed_policy(*args: Any) -> Iterator[Any]:
-        with original(*args) as lock:
+    def changed_policy(*args: Any, **kwargs: Any) -> Iterator[Any]:
+        with original(*args, **kwargs) as lock:
             _policy(binding_fixture)
             yield lock
 

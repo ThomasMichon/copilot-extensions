@@ -130,6 +130,24 @@ def test_strict_json_and_findings():
     assert parse_configuration_preview(json.dumps(data), TARGET).blocked
 
 
+@pytest.mark.parametrize("operation", ["create", "protect-default"])
+def test_remote_proposal_has_distinct_version_scope_and_operation(operation):
+    data = {
+        **_payload(), "version": 2, "scope": "remote-repository",
+        "operation": operation, "effects": ["Explicit remote repository change"],
+    }
+    preview = parse_configuration_preview(json.dumps(data), TARGET)
+    assert preview.operation == operation
+    assert "Scope: remote-repository" in preview.describe()
+    assert "Scope: machine-local" not in preview.describe()
+    for changed in (
+        {"version": 1}, {"version": 3}, {"version": True},
+        {"scope": "machine-local"}, {"operation": "set"},
+    ):
+        with pytest.raises(ValueError):
+            parse_configuration_preview(json.dumps({**data, **changed}), TARGET)
+
+
 def test_missing_preview_disables_only_affected_contract_action(tmp_path):
     data = _manifest()
     data["actions"][0]["run"] = [sys.executable]
@@ -155,7 +173,7 @@ def test_unusable_preview_is_not_retried_through_an_unattributed_runtime_path(tm
     assert _parse(resolved).actions[0].preview_error
 
 
-def _owner(tmp_path, monkeypatch):
+def _owner(tmp_path, monkeypatch, operations=("set", "reset")):
     monkeypatch.setattr(picker_context, "_project", "fixture-project")
     monkeypatch.setattr(picker_context, "_bootstrap", None)
     root = tmp_path / "owner"
@@ -171,7 +189,7 @@ def _owner(tmp_path, monkeypatch):
     prefix = [sys.executable, "-I", str(fixture)]
     data = _manifest()
     data["list"] = [*prefix, "list", str(root), "set", "unused", "unused"]
-    for operation in ("set", "reset"):
+    for index, operation in enumerate(operations):
         action = deepcopy(data["actions"][0])
         action.update(key=operation, label=f"{operation} preference")
         action["preview"] = [
@@ -180,7 +198,7 @@ def _owner(tmp_path, monkeypatch):
         action["run"] = [
             *prefix, "apply", str(root), operation, "{field.value}", "{configuration_preview}",
         ]
-        if operation == "set":
+        if index == 0:
             data["actions"][0] = action
         else:
             data["actions"].append(action)
@@ -230,6 +248,47 @@ async def _preview(app, pilot, value="chosen"):
     await _wait(pilot, lambda: isinstance(app.screen, ConfigurationPreviewScreen)
                 and not app.screen.query_one("#config-preview-retry", Button).disabled)
     return app.screen
+
+
+def test_periodic_catalog_refresh_waits_for_configuration_editor_preview_and_result(tmp_path, monkeypatch):
+    from worktree_manager.production_picker.picker_tui import engine as engine_module
+
+    _owner(tmp_path, monkeypatch)
+    monkeypatch.setattr(engine_module, "POLL_SECS", .001)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            engine = await _ready(app, pilot)
+            runtime = engine._pivot_runtime(engine._reg_pivot())
+            await _wait(pilot, lambda: runtime.actions_ready(("",)))
+            polls = []
+            monkeypatch.setattr(runtime, "repoll", polls.append)
+
+            def periodic():
+                polls.clear()
+                engine._last_pivot_poll = 0
+                engine._maybe_repoll_pivot()
+                return list(polls)
+
+            assert periodic() == [""]
+            _edit(engine)
+            await pilot.pause()
+            assert isinstance(app.screen, ConfigurationFormScreen)
+            assert periodic() == []
+            await _preview(app, pilot)
+            assert app.screen.preview and not app.screen.preview.blocked
+            assert periodic() == []
+            await pilot.click("#config-preview-apply")
+            await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen) and not app.screen.pending)
+            assert "set completed; local override only" in str(app.screen.query_one("#config-result").render())
+            assert polls == [""], "completion must still refresh its originating scope"
+            assert periodic() == []
+            app.screen.action_close()
+            await pilot.pause()
+            assert periodic() == [""]
+
+    asyncio.run(run())
 
 
 @pytest.mark.parametrize("stage", ["cancel", "set", "reset"])
@@ -290,6 +349,52 @@ def test_production_ui_real_owner_set_reset_cancel_and_unchanged_sources(tmp_pat
             assert after_set == {**original, override: after_set[override]}
             app.screen.action_close()
             await _wait(pilot, lambda: engine._task_rows()[0]["effective"] == "literal-{configuration_preview}")
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("operation,cancel", [
+    ("create", False), ("protect-default", False), ("create", True), ("future-create", False),
+])
+def test_production_ui_remote_preview_confirmation_and_unknown_version_refusal(
+    tmp_path, monkeypatch, operation, cancel,
+):
+    root = _owner(tmp_path, monkeypatch, (operation,))
+    original = _tree(root)
+
+    async def run():
+        app = PickerApp(_fixture_source(), live=False)
+        async with app.run_test(size=(118, 40)) as pilot:
+            engine = await _ready(app, pilot)
+            _edit(engine, operation)
+            screen = await _preview(app, pilot)
+            rendered = str(screen.query_one("#config-preview").render())
+            assert _tree(root) == original
+            assert app.focused.id == "config-preview-cancel"
+            if operation == "future-create":
+                assert screen.preview is None
+                assert screen.query_one("#config-preview-apply", Button).disabled
+                assert "Unsupported Configuration preview version" in rendered
+                await pilot.press("enter")
+                assert _tree(root) == original
+                return
+            assert "Scope: remote-repository" in rendered
+            assert "Scope: machine-local" not in rendered
+            assert "Fixture remote repository change" in rendered
+            if cancel:
+                await pilot.press("enter")
+                await pilot.pause()
+                assert _tree(root) == original
+                return
+            await pilot.click("#config-preview-apply")
+            await _wait(pilot, lambda: isinstance(app.screen, ConfigurationResultScreen)
+                        and not app.screen.pending)
+            receipt = str(app.screen.query_one("#config-result").render())
+            assert f"{operation} completed" in receipt
+            marker = str(Path("local") / "remote.json")
+            changed = _tree(root)
+            assert changed == {**original, marker: changed[marker]}
+            assert json.loads((root / marker).read_text()) == {"mode": "chosen"}
 
     asyncio.run(run())
 

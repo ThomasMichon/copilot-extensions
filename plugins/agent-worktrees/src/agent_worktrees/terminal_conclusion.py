@@ -17,9 +17,16 @@ from typing import Any
 from . import config as cfg
 from . import finalize, git_ops, paired_claims, sessions, tracking
 from . import terminal_pair_progress
+from .terminal_ownership import (  # noqa: F401 -- re-exported policy names
+    BRIDGE_CREATION_POLICY,
+    CONCLUSION_POLICIES,
+    DISPATCH_ATTEMPT_POLICY,
+    DISPOSABLE_CLI_POLICY,
+    _bridge_creation_reason,
+    _creator_ownership_confirmed,
+    _dispatch_ownership_confirmed,
+)
 
-DISPOSABLE_CLI_POLICY = "disposable-cli"  # Historical wire name; interface-neutral.
-DISPATCH_ATTEMPT_POLICY = "dispatch-attempt"
 
 def _normalized(path: str | Path) -> str:
     return os.path.normcase(os.path.normpath(str(path)))
@@ -85,33 +92,6 @@ def _save_session_conclusion(
         "action": "already-concluded" if already else "concluded",
         "session": session_id,
     }, not already
-
-
-def _dispatch_ownership_confirmed(
-    record: tracking.WorktreeRecord,
-    *,
-    reservation_key: str | None,
-    owner: str,
-) -> bool:
-    """Whether ``record``'s own ``dispatch_attempt`` provenance exactly
-    matches the caller's claimed reservation/owner identity -- the same
-    match the ``dispatch-attempt`` policy gate already requires before
-    priming. Reused right before releasing this worktree's own ``session``
-    claim(s) (see :func:`_release_dispatch_session_claims`) so that release
-    is never granted on provenance the two-phase lock's unlocked
-    git-inspection window could have let drift underneath -- defense in
-    depth; the policy gate's own earlier check already enforces this for
-    the ordinary path, this just avoids trusting a now-stale in-memory
-    ``record`` a second time.
-    """
-    allocation = record.dispatch_attempt
-    return (
-        allocation is not None
-        and reservation_key is not None
-        and allocation.reservation_key == reservation_key
-        and allocation.creator_machine.casefold() == record.execution_machine.casefold()
-        and allocation.driver == owner
-    )
 
 
 def _release_dispatch_session_claims(
@@ -304,12 +284,14 @@ def _pair_progress_valid(record, sibling, path) -> bool:
     return snapshot is not None and _reciprocal_pair_valid(record, snapshot, path)
 
 
-def _pair_shape_unresolved(record, *, policy, reservation_key, owner) -> bool:
+def _pair_shape_unresolved(record, *, policy, reservation_key, owner, creation_nonce=None) -> bool:
     return (
         record.is_paired
-        and policy == DISPATCH_ATTEMPT_POLICY
         and (record.pair_kind or "").strip() != "anchor"
-        and _dispatch_ownership_confirmed(record, reservation_key=reservation_key, owner=owner)
+        and _creator_ownership_confirmed(
+            record, policy=policy, reservation_key=reservation_key, owner=owner,
+            creation_nonce=creation_nonce,
+        )
         and _resolve_pair_sibling(record) is None
     )
 
@@ -413,6 +395,7 @@ def _dispatch_pair_clearance(
     *,
     policy: str,
     reservation_key: str | None,
+    creation_nonce: str | None = None,
     owner: str,
 ) -> tuple[bool, str | None]:
     """Whether THIS dispatch attempt may dispose of its own paired
@@ -437,9 +420,10 @@ def _dispatch_pair_clearance(
     """
     if not record.is_paired:
         return False, None
-    if policy != DISPATCH_ATTEMPT_POLICY:
-        return False, None
-    if not _dispatch_ownership_confirmed(record, reservation_key=reservation_key, owner=owner):
+    if not _creator_ownership_confirmed(
+        record, policy=policy, reservation_key=reservation_key, owner=owner,
+        creation_nonce=creation_nonce,
+    ):
         return False, None
     if (record.pair_kind or "").strip() == "anchor":
         # An anchor-kind pair (a non-worktree-class/singleton knowledge
@@ -568,6 +552,7 @@ def conclude_disposable_worktree(
     owner: str,
     policy: str,
     reservation_key: str | None = None,
+    creation_nonce: str | None = None,
 ) -> dict[str, Any]:
     """Prime one exact disposable worktree for the existing managed GC.
 
@@ -575,7 +560,7 @@ def conclude_disposable_worktree(
     failures raise so a higher layer can distinguish a failed conclusion from a
     deliberate preservation decision.
     """
-    if policy not in {DISPOSABLE_CLI_POLICY, DISPATCH_ATTEMPT_POLICY}:
+    if policy not in CONCLUSION_POLICIES:
         raise ValueError(f"unsupported terminal conclusion policy: {policy!r}")
 
     record_path = Path(record_path)
@@ -591,7 +576,9 @@ def conclude_disposable_worktree(
         "managed_gc_eligible": False,
     }
     # Read-only preservation preflight; eligible paths are revalidated under lock.
-    if _pair_shape_unresolved(record, policy=policy, reservation_key=reservation_key, owner=owner):
+    if _pair_shape_unresolved(
+        record, policy=policy, reservation_key=reservation_key, owner=owner, creation_nonce=creation_nonce,
+    ):
         result.update(action="skipped", reason="pair-sibling-unresolved")
         return result
 
@@ -617,6 +604,11 @@ def conclude_disposable_worktree(
                     "tracking record identity changed during conclusion"
                 )
             if reason := _identity_reason(record, record_path):
+                result.update(action="skipped", reason=reason)
+                return result
+            if policy == BRIDGE_CREATION_POLICY and (
+                reason := _bridge_creation_reason(record, creation_nonce)
+            ):
                 result.update(action="skipped", reason=reason)
                 return result
             if policy == DISPATCH_ATTEMPT_POLICY:
@@ -651,7 +643,10 @@ def conclude_disposable_worktree(
                         reason="driver-owner-mismatch",
                     )
                     return result
-            if _pair_shape_unresolved(record, policy=policy, reservation_key=reservation_key, owner=owner):
+            if _pair_shape_unresolved(
+                record, policy=policy, reservation_key=reservation_key, owner=owner,
+                creation_nonce=creation_nonce,
+            ):
                 result.update(action="skipped", reason="pair-sibling-unresolved")
                 return result
             live_reason = _session_is_live(record)
@@ -692,8 +687,9 @@ def conclude_disposable_worktree(
                 }
                 return result
 
-            if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
-                record, reservation_key=reservation_key, owner=owner
+            if _creator_ownership_confirmed(
+                record, policy=policy, reservation_key=reservation_key, owner=owner,
+                creation_nonce=creation_nonce,
             ):
                 # In-memory only here -- deliberately NOT persisted. This
                 # first phase is a preliminary gate that decides whether the
@@ -709,6 +705,7 @@ def conclude_disposable_worktree(
 
             pair_clear, pair_block_reason = _dispatch_pair_clearance(
                 record, policy=policy, reservation_key=reservation_key, owner=owner,
+                creation_nonce=creation_nonce,
             )
             if pair_block_reason:
                 result.update(action="skipped", reason=pair_block_reason)
@@ -837,6 +834,11 @@ def conclude_disposable_worktree(
             if reason := _identity_reason(record, record_path):
                 result.update(action="skipped", reason=reason)
                 return result
+            if policy == BRIDGE_CREATION_POLICY and (
+                reason := _bridge_creation_reason(record, creation_nonce)
+            ):
+                result.update(action="skipped", reason=reason)
+                return result
             if live_reason := _session_is_live(record):
                 result.update(action="skipped", reason=live_reason)
                 return result
@@ -847,11 +849,12 @@ def conclude_disposable_worktree(
             ):
                 result.update(action="skipped", reason="lifecycle-changed")
                 return result
-            if policy == DISPATCH_ATTEMPT_POLICY and _dispatch_ownership_confirmed(
-                record, reservation_key=reservation_key, owner=owner
+            if _creator_ownership_confirmed(
+                record, policy=policy, reservation_key=reservation_key, owner=owner,
+                creation_nonce=creation_nonce,
             ):
                 _release_dispatch_session_claims(record, session_id=session_id)
-            if record.is_paired and policy == DISPATCH_ATTEMPT_POLICY:
+            if record.is_paired and policy in {DISPATCH_ATTEMPT_POLICY, BRIDGE_CREATION_POLICY}:
                 try:
                     pair_fence.enter_context(paired_claims.lifecycle_guard(record))
                 except ValueError:
@@ -859,6 +862,7 @@ def conclude_disposable_worktree(
                     return result
             pair_clear, pair_block_reason = _dispatch_pair_clearance(
                 record, policy=policy, reservation_key=reservation_key, owner=owner,
+                creation_nonce=creation_nonce,
             )
             if pair_block_reason:
                 result.update(action="skipped", reason=pair_block_reason)
@@ -954,6 +958,7 @@ def conclude_disposable_worktree(
 
 
 __all__ = [
+    "BRIDGE_CREATION_POLICY",
     "DISPATCH_ATTEMPT_POLICY",
     "DISPOSABLE_CLI_POLICY",
     "conclude_disposable_worktree",

@@ -1,0 +1,9 @@
+{
+  "comment": "Expose a read-only accepted repository preference projection with selected-runtime support metadata.",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

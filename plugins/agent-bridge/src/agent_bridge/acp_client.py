@@ -77,6 +77,7 @@ if TYPE_CHECKING:
     from .local_launch_owner import LocalLaunchOwner
     from .acquisition_host_transport import AcquisitionHostTransport
     from .native_turn_transport import NativeTurnTransport
+    from .retained_session_recovery import RetainedRecovery
 
 log = logging.getLogger("agent-bridge")
 
@@ -626,6 +627,7 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         mcp_servers: list[dict[str, Any]] | None = None,
         timing_callback: Callable[[str, float], None] | None = None,
         acquisition_launch: LocalLaunchOwner | None = None,
+        recovery_operation: RetainedRecovery | None = None,
     ) -> None:
         """Reload a previously persisted ACP session (for resume).
 
@@ -664,6 +666,8 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
             method = self._connection.load_session
             if acquisition_launch is not None:
                 method = acquisition_launch.native_method(self, "load", method)
+            if recovery_operation is not None:
+                method = recovery_operation.native_method(self, session_id, method)
             result = await lifecycle_rpc(self,
                 method,
                 cwd=cwd, session_id=session_id,
@@ -684,7 +688,9 @@ class AcpClient(RemoteAcpClientMixin, AcpHostStreamsMixin, AcpPreferencesMixin, 
         await self._apply_model_config(
             getattr(result, "config_options", None), resuming=True,
             **({"before_effect": lambda: acquisition_launch.require_configuration(self)}
-               if acquisition_launch is not None else {}),
+               if acquisition_launch is not None else
+               {"before_effect": lambda: recovery_operation.require_native(self, session_id)}
+               if recovery_operation is not None else {}),
         )
         if timing_callback is not None:
             timing_callback("session_load_model_config", time.monotonic() - started)

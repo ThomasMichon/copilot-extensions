@@ -1,5 +1,8 @@
 # Agent Worktrees
 
+Read-only [selected PR populations](docs/pr-population.md) use the existing
+native observation credential boundary; inventory and snapshot defaults remain unchanged.
+
 Copilot CLI plugin for worktree-isolated sessions. Every Copilot CLI
 session gets its own git worktree -- no branch conflicts, no stale state,
 no stepping on parallel sessions.
@@ -210,6 +213,13 @@ for its bounded scope and remaining takeover/foundation limitations.
 `--supervised-debug` uses the same exclusive authority under foreground
 supervision, never a second installation writer.
 
+The installed global front door probes a configured project controller before
+Manager bootstrap. Native installation publishes the existing probe worker and
+its finite-process helpers under `~/.agent-worktrees/bin/`, alongside the
+runtime resolvers. This keeps controller routing independent of the legacy
+`payload-dir` snapshot marker. Payload-local commands retain their own helpers;
+older or unconfigured runtimes retain the existing Manager fallback.
+
 `update --inventory --json` advertises
 `project_controller_delegation` version 1 only when the running engine and
 its driver belong to the selected installed slot and support a full project
@@ -228,6 +238,25 @@ missing installation, without permanently changing the user's activation.
 The caller still owns source admission, child settlement and verification.
 This is not evidence that other installed or running update writers are
 capable or quiescent, and it does not select an authority.
+
+An operator may pass repeatable `--runtime-backend NAME=CAPABILITY` selections
+to a configured project controller. The driver records and forwards each
+selection unchanged; Worktrees does not infer a backend or persist profile
+settings. Invalid or duplicate names, standalone/phase requests, and a missing
+project controller are refused. `runtime_backend_intent` in the delegation
+capability reports support by the selected engine, not by the project
+controller. A supporting controller places a sibling
+`<script>.capabilities.json` beside the selected script:
+
+```json
+{"schema":"copilot-extensions.project-update-controller-capabilities","version":1,"capabilities":["project-runtime-backend-intent/v1"]}
+```
+
+Worktrees checks that declaration before queuing and again before launch.
+Missing or unsupported declarations refuse this option without launching the
+controller; ordinary updates remain unchanged. The option bypasses implicit
+Manager bootstrap and runtime provisioning, so an unavailable engine is
+reported rather than installed. Older engines reject the option.
 
 Runtime installers may execute from a delivered or prepared payload directory.
 The collected plan preserves the resolved invoking repository separately in
@@ -417,6 +446,12 @@ trace phases. This protects these native entrypoints, not every installer or lau
 publication path. The [canonical deployment policy contract](../../libs/installation-context/README.md)
 owns the policy schema and decision semantics.
 
+On Windows, an unprovisioned command honors an existing `payload-dir` selection
+and rechecks it under the provision lock. Without a saved selection, a
+payload-local command uses its adjacent `scripts\install.ps1` before installed-plugin
+discovery, so relocating an intact payload does not require a saved pointer.
+Global shims without an adjacent plugin manifest retain installed-plugin discovery.
+
 Cell installers also check before self-staging and runtime-input writes. The
 Python lifecycle repeats admission at entry, under the existing genesis/install
 locks, on candidate handover and in helper callbacks, including when invoked
@@ -490,6 +525,9 @@ The plugin installs via the Copilot CLI marketplace. The runtime installs
 via init/install scripts (or first-use provisioning from the global binstub)
 and provides the `agent-worktrees` CLI and per-project binstubs.
 
+The Windows first-use relay preserves empty stderr lines as whitespace, not
+exception type names, while retaining nonempty diagnostics and failure status.
+
 Structured installs capture the payload and canonical development libraries
 in one staging tree, preserving their relative dependency paths. Packaged
 releases retain their local library copies. Dependency builds use the captured
@@ -554,13 +592,20 @@ inventories. Point-of-use execution and mutation admission remain separate.
 
 Worktree Manager's [Repositories Configuration section](docs/repositories-configuration.md)
 uses the native read/preview/apply CLI to inspect registration, routes, state
-binding and tracked pairs. Its only editable setting is the machine-local
-future-launch Copilot login preference; it does not log in or launch agents.
+binding and tracked pairs. It edits the machine-local future-launch Copilot
+login preference and offers separately confirmed remote-checkout acquisition,
+local knowledge registration and binding actions. It does not log in, execute
+downloaded setup code or launch agents.
 
 The standalone [repository authentication inspection](docs/repository-authentication.md)
 separately observes an explicitly configured GitHub account and repository API
 access. It does not acquire credentials or certify Git, Copilot, MCP or complete
 onboarding readiness.
+
+The standalone [registration/provider preflight](docs/repository-registration-preflight.md)
+adds canonical/discovered selection and bounded server default-branch policy
+observations. Unknown or inaccessible policy never implies direct publication;
+this optional read does not add a gate to local binding.
 
 ## Independent Execution Spaces
 
@@ -632,6 +677,11 @@ owners, including already-running daemons. Removing that compatibility barrier
 requires separately qualified peer support; source publication alone does not
 activate different-worktree launch parallelism. The new lease is distinct from
 seed/native admission and the Windows mux check/create lease.
+
+Deferred Windows launches serialize the final canonical PowerShell setup argv
+through the same one-shot manifest used by mux startup. This preserves literal
+drive-qualified arguments and option-leading prompts across `pwsh -File`;
+it does not change the selected admission, seed or conversation owner.
 
 ### Explicit restart Resume
 
@@ -920,6 +970,8 @@ standalone-behavior changes.
 | Skill | Description |
 |-------|-------------|
 | [worktree](skills/worktree/SKILL.md) | Worktree lifecycle -- creation, finalization, cleanup, safety rules |
+| [finalizing-worktrees](skills/finalizing-worktrees/SKILL.md) | Focused closeout entrypoint; completion/disposition versus physical removal |
+| [cleaning-worktrees](skills/cleaning-worktrees/SKILL.md) | Explicit cleanup-pass entrypoint; retained children, history and owner-qualified removal |
 | [git-collaboration](skills/git-collaboration/SKILL.md) | Pull-forward and shared feature-branch git primitives |
 | [service-lifecycle](skills/service-lifecycle/SKILL.md) | Service installer patterns -- deploy, update, status |
 | [copilot-extensions-setup](skills/copilot-extensions-setup/SKILL.md) | Bootstrap agent-worktrees and optional sibling plugins |

@@ -1,0 +1,9 @@
+{
+  "comment": "Expose no-effect comment-origin discovery and exact managed producer selection without ambient CWD.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

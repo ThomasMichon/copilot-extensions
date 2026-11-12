@@ -13,7 +13,9 @@ from .events import EventBus, sse_format
 from .queue import TaskQueue
 from .coordinator_task_recovery import RECOVERY_CONTRACT
 from .coordinator_pool_catalog import pool_catalog_contract
+from .coordinator_standing import standing_capability
 from .queue_pool_placement import pool_placement_contract
+from .queue_spawn_conclusion import CLAIM_HELD_REARM_CAPABILITY
 
 
 def _slot_descriptor(app_state: Any) -> dict:
@@ -123,6 +125,8 @@ def register_status_routes(
                 "version": 1, "enabled": queue._relationship_writer is not None,
                 "assignment_request": 2, "authority": queue._relationship_authority,
             },
+            "standing_charters": standing_capability(queue),
+            CLAIM_HELD_REARM_CAPABILITY: 1,
             "pool_cohort": {"version": 1, "revision": queue.pool_configured_cohort().revision},
             "task_recovery": RECOVERY_CONTRACT,
             "delegated_run_waiters": {

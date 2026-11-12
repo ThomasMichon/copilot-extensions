@@ -104,6 +104,14 @@ bash plugins/agent-vault/scripts/install.sh install --no-service
 
 Even without a supervised service, the CLI can cold-start the daemon on demand.
 
+For SSH key preparation/install, select the native `ssh` dependency profile
+(`-Profile ssh` / `--profile ssh`) rather than adding packages to a completed
+venv. `stamp`, `provision` and `update` support the same selection; ordinary
+updates preserve it. Explicit profiles require an existing Python 3.11+
+bootstrap interpreter and do not enable Vault or authorize credential changes.
+Use the [native profile reference](../../README.md#dependency-profiles) for
+selection, immutable-slot and failure behavior.
+
 ## Update after a payload refresh
 
 If the plugin payload version changes, `bootstrap-check.*` detects drift on a
@@ -164,7 +172,7 @@ Common findings:
 | `KeePass database path is not configured` | Set `KPDB`, add a named vault, or create `.agent-vault.json`; inspect with the payload-local `which`. |
 | `keepassxc-cli` missing | Install KeePassXC or add `keepassxc-cli` to PATH. |
 | Locked read fails fast | Run the payload-local `unlock`, `unlock --terminal`, or retry `get` with `--prompt`. |
-| Cache commands are disabled | Set `AGENT_VAULT_CACHE=1` or `AGENT_VAULT_CACHE_DIR`; install `cryptography` into the runtime venv. |
+| Cache commands are disabled | Set `AGENT_VAULT_CACHE=1` or `AGENT_VAULT_CACHE_DIR`; select the `ssh` profile for Fernet support through `pycryptodomex`. New Windows caches also support native DPAPI. Preserve unreadable existing caches. |
 
 ## First-run database config
 

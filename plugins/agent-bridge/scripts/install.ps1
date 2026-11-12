@@ -20,7 +20,8 @@
     config, auth, and DB.
 
 .PARAMETER Action
-    Lifecycle action to perform.
+    Lifecycle action to perform. schedule reconciles only task policy without
+    installing, starting or stopping the service.
 
 .PARAMETER Purge
     On uninstall: also delete config, DB, and auth token.
@@ -32,7 +33,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update', 'stamp', 'provision')]
+    [ValidateSet('install', 'uninstall', 'start', 'stop', 'status', 'update', 'stamp', 'provision', 'schedule')]
     [string]$Action = 'status',
 
     [string]$InstallDir,
@@ -49,6 +50,10 @@ param(
     # existing working non-interactive task is preserved across updates.
     [switch]$NonInteractive,
 
+    # Retained repair entry: refresh task settings even when its action matches.
+    # Does not bypass scheduling policy, ownership, holds or the install lock.
+    [switch]$ForceTaskRepair,
+
     # DEPRECATED / no-op (Thread B): the graceful ZDD cutover is now the DEFAULT on
     # `update` whenever a live daemon is running -- activation always cuts over
     # automatically (invariant #1), so this opt-in is no longer required. The switch
@@ -59,7 +64,11 @@ param(
     # Preview mode for the 'uninstall' action: print what WOULD be removed (or
     # preserved) without touching the filesystem, scheduled task, or registry.
     # No other action honors this switch.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -72,8 +81,20 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
 }
 
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision') -or $ForceTaskRepair) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
+
 if ($RequireGracefulCutover -and $Action -ne 'update') {
     throw '-RequireGracefulCutover requires update'
+}
+if ($ForceTaskRepair -and $Action -ne 'provision') {
+    throw '-ForceTaskRepair requires provision'
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -103,6 +124,7 @@ function Copy-InstallerStageDirectory {
 
 if ($env:OS -eq 'Windows_NT' -and
     $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    -not $ForceTaskRepair -and
     $Action -in @('install', 'update', 'provision', 'uninstall') -and
     -not ($Action -eq 'uninstall' -and $DryRun)) {
     $driverPayload = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -115,7 +137,8 @@ if ($env:OS -eq 'Windows_NT' -and
         }
     }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
-        -Plugin 'agent-bridge' -Action $Action -Options $driverOptions
+        -Plugin 'agent-bridge' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
     $driverArguments = $driverEntry.Arguments
@@ -546,6 +569,7 @@ function Ensure-RuntimeSlotRetention {
 }
 
 function Get-BootstrapPython {
+    if ($WheelProfile) { return $WheelPython }
     <# A python to run the stdlib-only versioned_runtime.py helper BEFORE the
        slot venv exists (e.g. the pre-build toss). Prefers a signed base python,
        then python3/python on PATH. Returns $null if none found. #>
@@ -647,6 +671,7 @@ function Invoke-UvVenvResilient {
 }
 
 function Ensure-Uv {
+    if ($WheelProfile) { return [bool](Get-Command $WheelUv -CommandType Application -ErrorAction Stop) }
     if (-not ($env:AGENT_BRIDGE_UV_BOOTSTRAP_URL -or $env:AGENT_BRIDGE_UV_BOOTSTRAP_SHA256)) {
         return [bool](Ensure-UvShared -InstallRoot $InstallDir -ToolDirectory 'tool' -AcquireIfMissing $true)
     }
@@ -839,6 +864,12 @@ function Get-PayloadLibRoots {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-bridge' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     <# Content fingerprint of EVERY source this installer installs into the
        runtime slot (#935/#776/ce#811, #5472): pyproject.toml, src/, the
        plugin-local libs/, and each shared library resolved outside $PluginDir
@@ -938,9 +969,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-bridge' `
+        -Uv $WheelUv -HealthModule 'agent_bridge'
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash $PayloadHash -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash $PayloadHash -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     return $true
 }
 
@@ -1733,6 +1770,7 @@ function Write-DeployManifest {
     # the manifest records the same content the slot was admitted/built for.
     param([string]$PayloadHash = '')
     $fields = @{}
+    if ($NativeWheelSelection) { $fields['runtime_version'] = $SrcVersion }
     $selectedIdentity = Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue
     if ($selectedIdentity) {
         $data = $selectedIdentity | ConvertFrom-Json
@@ -1847,6 +1885,67 @@ function Remove-RegisteredTask {
     $ErrorActionPreference = $prevEAP
 }
 
+function Get-WindowsScheduledTaskPolicy {
+    # Read retained native configuration even when the incumbent schema predates
+    # this field. Do not let an old model silently discard an absence selection.
+    $path = Join-Path $InstallDir 'config.yaml'
+    $policy = 'preserve'
+    if (Test-Path -LiteralPath $path) {
+        $policy = & $LinkPython -I -B -c "import pathlib,sys,yaml; d=yaml.safe_load(pathlib.Path(sys.argv[1]).read_text(encoding='utf-8-sig')); print(({} if d is None else d).get('windows_scheduled_task','preserve'))" $path
+        if ($LASTEXITCODE -ne 0) { throw 'Cannot read Bridge scheduling policy' }
+    }
+    if ($policy -isnot [string] -or $policy -cnotin @('preserve', 'enabled', 'absent')) {
+        throw 'windows_scheduled_task must be preserve, enabled or absent'
+    }
+    if ($policy -eq 'preserve' -and ($NonInteractive -or
+        $env:AGENT_BRIDGE_NONINTERACTIVE -in @('1', 'true', 'yes', 'on'))) {
+        return 'enabled'
+    }
+    return $policy
+}
+
+function Assert-OwnedBridgeTask {
+    param($Task)
+    if (@($Task.Actions).Count -ne 1) { throw 'Refusing ambiguous Bridge scheduled task actions' }
+    $taskAction = @($Task.Actions)[0]
+    $launcher = [regex]::Escape((Join-Path $InstallDir 'start-agent-bridge.ps1'))
+    $executor = [string]$taskAction.Execute
+    $arguments = [string]$taskAction.Arguments
+    # Accept only the generated shell options, then the actual script operand.
+    # Anything after -File is script input, never another shell option.
+    $shell = '(?:"(?:[^"]*\\)?(?:pwsh|powershell)\.exe"|(?:[^\s"]*\\)?(?:pwsh|powershell)\.exe)'
+    if ((Split-Path -Leaf $executor) -ieq 'conhost.exe') {
+        if ($arguments -notmatch "^\s*--headless\s+$shell\s+(?<shellArguments>.*)$") {
+            throw "Refusing foreign scheduled task: $TaskName"
+        }
+        $arguments = $Matches.shellArguments
+    } elseif ((Split-Path -Leaf $executor) -notin @('pwsh.exe', 'powershell.exe')) {
+        throw "Refusing foreign scheduled task: $TaskName"
+    }
+    $options = '(?:(?:-NoProfile|-NonInteractive|-NoLogo)\s+|-ExecutionPolicy\s+Bypass\s+|-WindowStyle\s+Hidden\s+)*'
+    $operand = "`"$launcher`""
+    if ((Join-Path $InstallDir 'start-agent-bridge.ps1') -notmatch '\s') { $operand += "|$launcher" }
+    if ($arguments -notmatch "^\s*$options-File\s+(?:$operand)\s*$") {
+        throw "Refusing foreign scheduled task: $TaskName"
+    }
+}
+
+function Get-SchedulingPolicyTask {
+    param([string]$Policy)
+    if (-not (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue)) {
+        if ($Policy -eq 'preserve') { return $null }
+        throw 'Cannot reconcile Bridge scheduling: ScheduledTasks module unavailable'
+    }
+    try {
+        return (Get-ScheduledTask -TaskName $TaskName -ErrorAction Stop)
+    } catch {
+        if (($_.FullyQualifiedErrorId -split ',')[0] -ceq 'CmdletizationQuery_NotFound_TaskName') {
+            return $null
+        }
+        throw
+    }
+}
+
 function Ensure-ScheduledTask {
     <# Routine-safe scheduled-task step for the `update` path (the decoupled
        model, dotfiles#227).
@@ -1863,14 +1962,27 @@ function Ensure-ScheduledTask {
          * task PRESENT -> leave it entirely untouched (adopt whatever mode it has,
            never flip/Set/purge/re-register). Zero Task Scheduler writes, so no
            elevation is ever required and a healthy auto-start is never disturbed.
-         * task ABSENT  -> provision it ONCE, in the default non-elevated
-           interactive AtLogOn mode (first install, or after a manual removal).
+         * task ABSENT -> leave absent unless native configuration opts in.
+         * policy absent -> remove only a validated owned, enabled registration;
+           never stop the service or remove runtime/state.
 
        Deliberate (re)provisioning, mode flips (interactive <-> S4U), and repair of
        a broken/never-ran task are the explicit, elevation-aware `provision`
        action's job (Invoke-Provision -> Register-ScheduledTask_), never a routine
        update. #>
-    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $policy = Get-WindowsScheduledTaskPolicy
+    $existing = Get-SchedulingPolicyTask -Policy $policy
+    if ($policy -eq 'absent') {
+        if ($existing) {
+            Assert-OwnedBridgeTask -Task $existing
+            if ($existing.State -eq 'Disabled') {
+                throw 'Disabled Bridge task retains a startup hold; clear that intent explicitly before task retirement'
+            }
+            Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
+        }
+        Write-Ok 'Bridge scheduling absent; service and state preserved'
+        return
+    }
     if ($existing) {
         $mode = if ($existing.Principal.LogonType -in @('S4U', 'Password')) {
             'headless boot'
@@ -1878,17 +1990,22 @@ function Ensure-ScheduledTask {
         Write-Ok "Scheduled task present ($mode) -- left untouched (version updates never rewrite it; run 'install.ps1 provision' elevated to change/repair it)"
         return
     }
-    # No task yet -> create it once (default interactive mode; non-elevated).
-    Register-ScheduledTask_
+    if ($policy -eq 'enabled') { Register-ScheduledTask_ }
+    else { Write-Skip 'Bridge scheduling not selected; on-demand service remains available' }
 }
 
 function Register-ScheduledTask_ {
+    param([switch]$ForceTaskRepair)
     if (-not (Test-Path $LinkPython)) {
         Write-Warn "agent-bridge venv not found -- skipping scheduled task"
         return
     }
 
-    Resolve-DaemonLogonMode
+    if ($ForceTaskRepair) {
+        $Script:UseNonInteractive = $false
+    } else {
+        Resolve-DaemonLogonMode
+    }
 
     # Create launcher script
     $launcherPath = Join-Path $InstallDir 'start-agent-bridge.ps1'
@@ -1947,6 +2064,14 @@ if (Test-Path `$pidFile) {
 if (-not `$cache.StartsWith('\\?\')) {
     `$cache = if (`$cache.StartsWith('\\')) { '\\?\UNC\' + `$cache.Substring(2) } else { '\\?\' + `$cache }
 }
+# Reuse the sealed installed-<digest> bytecode cache when install evidence is valid.
+try {
+    `$_selectedCache = & `$launchPy -I -B -X ('pycache_prefix=' + `$cache) -c "import json,os,sys; from agent_procutil.python_cache import cache_arguments as c; p=c(sys.argv[1],runtime=sys.executable)[1].split('=',1)[1]; print(json.dumps(p if os.path.basename(p).startswith('installed-') else ''))" `$runtimeHome 2>`$null
+    if (`$LASTEXITCODE -eq 0 -and @(`$_selectedCache).Count -eq 1) {
+        `$_selectedCache = [string](`$_selectedCache | ConvertFrom-Json)
+        if (`$_selectedCache) { `$cache = `$_selectedCache }
+    }
+} catch {}
 `$cacheOption = '"pycache_prefix=' + `$cache + '"'
 `$proc = Start-Process -FilePath `$launchPy -ArgumentList '-X',`$cacheOption,'-m','agent_bridge','start' ``
     -WorkingDirectory `$runtimeHome ``
@@ -2044,7 +2169,7 @@ Set-Content -Path `$pidFile -Value `$proc.Id
             ($curAct.Execute -eq $action.Execute) -and
             ($curAct.Arguments -eq $action.Arguments) -and
             (("" + $curAct.WorkingDirectory) -eq ("" + $action.WorkingDirectory))
-        if ($sameAction) {
+        if ($sameAction -and -not $ForceTaskRepair) {
             Write-Ok "Scheduled task already configured ($modeLabel) -- unchanged, left as-is"
             return
         }
@@ -2223,6 +2348,8 @@ $_root = '__ROOT__'
 $_pipelineInput = $MyInvocation.ExpectingInput -and $MyInvocation.Line
 $_source = '__SOURCE__'
 $_qualifiedSource = __QUALIFIED_SOURCE__
+$_previousRuntimeRoot = $env:AGENT_RT_ROOT
+try {
 $_snap = ''
 try { $_snap = ([IO.File]::ReadAllText((Join-Path $_root 'payload-dir'))).Trim() } catch {}
 $_payload = $_snap
@@ -2274,6 +2401,9 @@ $env:AGENT_BRIDGE_CONFIG_DIR = $_root
 $env:AGENT_BRIDGE_PAYLOAD_ROOT = $_payload
 if ($_pipelineInput) { (Get-Variable input -ValueOnly) | & $_gate @args } else { & $_gate @args }
 exit $LASTEXITCODE
+} finally {
+    $env:AGENT_RT_ROOT = $_previousRuntimeRoot
+}
 '@
     $ps1 = $ps1.Replace('__ROOT__', $rootLit).Replace('__SOURCE__', $sourceLit).Replace('__QUALIFIED_SOURCE__', $qualifiedSource)
     [System.IO.File]::WriteAllText($BinstubPs1, $ps1, (New-Object System.Text.UTF8Encoding($true)))
@@ -2308,6 +2438,9 @@ function Materialize-SnapshotVendoredLibs {
     $libsDir = Join-Path $SnapshotDir 'libs'
     if (-not (Test-Path $libsDir)) { New-Item -ItemType Directory -Path $libsDir -Force | Out-Null }
     $sources = [ordered]@{
+        'copilot-driver-core'  = (Resolve-VendoredLib -LibName 'copilot-driver-core')
+        'configuration-layers' = (Resolve-VendoredLib -LibName 'configuration-layers')
+        'venue-copilot'        = (Resolve-VendoredLib -LibName 'venue-copilot')
         'ssh-manager'          = (Resolve-SshManager)
         'credential-relay'     = (Resolve-CredentialRelay)
         'zdd'                  = (Resolve-Zdd)
@@ -2334,13 +2467,16 @@ function Materialize-SnapshotVendoredLibs {
             continue
         }
         Remove-Item -LiteralPath $destination -Recurse -Force -ErrorAction SilentlyContinue
-        Copy-Item -LiteralPath $source -Destination $destination -Recurse -Force
+        Copy-InstallerStageDirectory -Source $source -Destination $destination
     }
 
     $snapshotPyproject = Join-Path $SnapshotDir 'pyproject.toml'
     if (Test-Path -LiteralPath $snapshotPyproject) {
         $pyprojectText = [System.IO.File]::ReadAllText($snapshotPyproject)
         $rewrites = [ordered]@{
+            'agent-copilot-driver-core'  = 'copilot-driver-core'
+            'agent-configuration-layers' = 'configuration-layers'
+            'agent-venue-copilot'        = 'venue-copilot'
             'agent-ssh-manager'          = 'ssh-manager'
             'agent-credential-relay'     = 'credential-relay'
             'agent-zdd'                  = 'zdd'
@@ -2609,7 +2745,11 @@ function Invoke-InstallSlotBuild {
     # else. uv's local-path build cache is keyed by source path, not source
     # content -- see the matching install.sh comment / #2863 for the
     # confirmed incident this class of gap caused.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--reinstall-package', 'agent-update-driver', '--refresh-package', 'agent-update-driver', '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, "$PluginDir", '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-copilot-driver-core', '--refresh-package', 'agent-copilot-driver-core',
+        '--reinstall-package', 'agent-configuration-layers', '--refresh-package', 'agent-configuration-layers',
+        '--reinstall-package', 'agent-repository-policy', '--refresh-package', 'agent-repository-policy',
+        '--reinstall-package', 'agent-venue-copilot', '--refresh-package', 'agent-venue-copilot',
+        '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--reinstall-package', 'agent-update-driver', '--refresh-package', 'agent-update-driver', '--quiet')
     $bridgeOut = $bridgeResult.Output
     $installResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -2646,8 +2786,12 @@ function Invoke-Install {
     if (-not (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) -and
         (Test-SlotContentCurrent -PayloadHash $preLockHash)) {
         Ensure-RuntimeSlotRetention -PayloadHash $preLockHash
-        Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
-        Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
+        if (-not (Enter-InstallLock)) { throw 'Bridge installer lock is held' }
+        try {
+            Ensure-ScheduledTask
+            Write-Ok "agent-bridge $SrcVersion already installed and healthy (content match) -- no-op (no venv rebuild, no restart)."
+            Write-DeployManifest -PayloadHash $preLockHash   # re-assert the manifest so version drift clears and this never re-triggers every session
+        } finally { Exit-InstallLock }
         return
     }
 
@@ -2669,6 +2813,7 @@ function Invoke-Install {
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         Ensure-RuntimeSlotRetention -PayloadHash $payloadHash
         Write-Ok "agent-bridge $SrcVersion already installed and healthy after lock wait -- no-op."
+        Ensure-ScheduledTask
         Write-DeployManifest -PayloadHash $payloadHash
         Exit-InstallLock
         return
@@ -2753,8 +2898,7 @@ function Invoke-Install {
     # unresolved -- which would otherwise re-trigger the reconcile every session.
     Write-DeployManifest -PayloadHash $payloadHash
 
-    # Register scheduled task
-    Register-ScheduledTask_
+    Ensure-ScheduledTask
 
     # Ensure ~/.local/bin is on user PATH
     $userPath = Get-CopilotPersistentEnvironmentVariable -Name 'PATH' -Target 'User'
@@ -2785,7 +2929,7 @@ function Invoke-Install {
 function Invoke-Provision {
     Write-Step 'agent-bridge provision'
 
-    if (-not (Test-Path $LinkPython)) {
+    if (-not $ForceTaskRepair -and -not (Test-Path $LinkPython)) {
         # Preserve the self-provisioning binstub contract: `provision` is the
         # first-use full install when no runtime exists. The task-only path below
         # applies once a healthy runtime is already present.
@@ -2793,31 +2937,69 @@ function Invoke-Provision {
         return
     }
 
-    Ensure-RuntimeSlotRetention -PayloadHash (Get-PayloadHash)
+    if (-not $ForceTaskRepair) {
+        Ensure-RuntimeSlotRetention -PayloadHash (Get-PayloadHash)
+    }
 
-    # A never-ran S4U task cannot be flipped to the default interactive
-    # principal from a normal shell. Route that exact recovery through the
-    # existing self-elevating repair instead of rebuilding or restarting the
-    # already-healthy runtime.
-    $explicitNonInteractive = $NonInteractive -or
-        ($env:AGENT_BRIDGE_NONINTERACTIVE -in @('1', 'true', 'yes', 'on'))
-    $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if (-not $explicitNonInteractive -and $existing -and
-        ($existing.Principal.LogonType -eq 'S4U') -and
-        ((Get-ScheduledTaskLastResult -Name $TaskName) -eq $ScheduledTaskHasNotRunResult)) {
-        $repair = Get-ScheduledTaskRepairScript
-        if (-not (Test-Path -LiteralPath $repair)) {
-            Write-Fail "Scheduled-task repair script not found: $repair"
-            exit 1
+    if (-not (Enter-InstallLock)) { throw 'Bridge installer lock is held' }
+    $repair = $null
+    try {
+        if ($ForceTaskRepair) {
+            # Repair is task-only: select the incumbent, not the incoming slot.
+            $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+            if (-not (Test-Path -LiteralPath $resolver)) { throw 'Bridge runtime resolver is unavailable' }
+            $previousRoot = $env:AGENT_RT_ROOT
+            try {
+                $env:AGENT_RT_ROOT = $InstallDir
+                $AgentRtPy = $null
+                . $resolver
+                if (-not $AgentRtPy -or -not (Test-Path -LiteralPath $AgentRtPy)) {
+                    throw 'Bridge selected runtime is unavailable'
+                }
+                $LinkPython = $AgentRtPy
+            } finally { $env:AGENT_RT_ROOT = $previousRoot }
+        }
+        if ((Get-WindowsScheduledTaskPolicy) -ne 'enabled') {
+            Ensure-ScheduledTask
+            return
         }
 
+        # A never-ran S4U task needs elevation to become interactive. The
+        # elevated child re-enters provision, rechecking policy under this lock.
+        $explicitNonInteractive = $NonInteractive -or
+            ($env:AGENT_BRIDGE_NONINTERACTIVE -in @('1', 'true', 'yes', 'on'))
+        $existing = Get-SchedulingPolicyTask -Policy 'enabled'
+        if ($existing -and $existing.State -eq 'Disabled') {
+            Write-Skip 'Bridge scheduled task is disabled; startup hold preserved'
+            return
+        }
+        if ($existing) { Assert-OwnedBridgeTask -Task $existing }
+        $isAdmin = ([Security.Principal.WindowsPrincipal] `
+            [Security.Principal.WindowsIdentity]::GetCurrent()
+        ).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+        if (-not $isAdmin -and -not $explicitNonInteractive -and $existing -and
+            ($existing.Principal.LogonType -eq 'S4U') -and
+            ((Get-ScheduledTaskLastResult -Name $TaskName) -eq $ScheduledTaskHasNotRunResult)) {
+            $repair = Get-ScheduledTaskRepairScript
+            if (-not (Test-Path -LiteralPath $repair)) {
+                Write-Fail "Scheduled-task repair script not found: $repair"
+                exit 1
+            }
+        } else {
+            Register-ScheduledTask_ -ForceTaskRepair:$ForceTaskRepair
+            return
+        }
+    } finally { Exit-InstallLock }
+
+    # Never wait for an elevation/repair child while owning its install lock.
+    if ($repair) {
         Write-Step 'Repairing never-ran S4U scheduled task as the default interactive AtLogOn task...'
         $pwsh = Get-PwshPath
         $repairHostArguments = @()
         if ([Environment]::GetCommandLineArgs() -icontains '-NonInteractive') {
             $repairHostArguments += '-NonInteractive'
         }
-        & $pwsh -NoProfile -ExecutionPolicy Bypass @repairHostArguments -File $repair
+        & $pwsh -NoProfile -ExecutionPolicy Bypass @repairHostArguments -File $repair -InstallDir $InstallDir -TaskName $TaskName
         $repairExit = $LASTEXITCODE
         if ($repairExit -ne 0) {
             Write-Fail "Scheduled-task repair failed (exit $repairExit)"
@@ -2825,11 +3007,6 @@ function Invoke-Provision {
         }
         return
     }
-
-    # Missing tasks, action/trigger drift, and explicitly requested S4U mode all
-    # use the normal reconciliation path. This intentionally does not touch the
-    # immutable runtime slot or daemon lifecycle.
-    Register-ScheduledTask_
 }
 
 function Invoke-Uninstall {
@@ -2909,13 +3086,7 @@ function Invoke-Uninstall {
     $ownedProcesses = @(Get-BridgeUninstallProcesses)
     $existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($existing) {
-        if (@($existing.Actions).Count -ne 1) { throw 'Refusing ambiguous Bridge scheduled task actions' }
-        foreach ($taskAction in $existing.Actions) {
-            if ((Split-Path -Leaf ([string]$taskAction.Execute)) -notin @('conhost.exe', 'pwsh.exe', 'powershell.exe') -or
-                -not ([string]$taskAction.Arguments).Contains((Join-Path $InstallDir 'start-agent-bridge.ps1'))) {
-                throw "Refusing foreign scheduled task: $TaskName"
-            }
-        }
+        Assert-OwnedBridgeTask -Task $existing
     }
     if ($DryRun) {
         if ($ownedProcesses.Count) { Write-Host "[dry-run] would stop owned agent-bridge processes" }
@@ -3042,6 +3213,13 @@ function Invoke-Start {
         return
     }
 
+    $task = if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+        Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    }
+    if ($task -and $task.State -eq 'Disabled') {
+        throw 'Bridge scheduled task is disabled; refusing direct-start fallback'
+    }
+
     # From here on every path genuinely disrupts something (a fresh drain, a
     # wedged-process replace, or a clean cold start) -- mark the lifecycle
         # before any of that begins. try/finally (not a trap, which PowerShell
@@ -3072,7 +3250,6 @@ function Invoke-Start {
     # the logged-on user's interactive session; if nobody is logged on -- e.g. an
     # SSH install with no desktop session -- the task can't run, so we fall
     # through to a best-effort direct spawn and advise -NonInteractive.)
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     if ($task) {
         $headless = $task.Principal.LogonType -in @('S4U', 'Password')
         $mode = if ($headless) { 'headless' } else { 'logon session' }
@@ -3437,7 +3614,11 @@ function Invoke-UpdateSlotBuild {
     }
     # --refresh-package agent-procutil: see the matching comment in the
     # initial-install path above.
-    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--reinstall-package', 'agent-update-driver', '--refresh-package', 'agent-update-driver', "$PluginDir", '--quiet')
+    $bridgeResult = Invoke-UvPipInstallResilient @('--python', $VenvPython, '--reinstall-package', 'agent-bridge', '--refresh-package', 'agent-bridge', '--reinstall-package', 'agent-procutil', '--refresh-package', 'agent-procutil', '--reinstall-package', 'agent-copilot-driver-core', '--refresh-package', 'agent-copilot-driver-core',
+        '--reinstall-package', 'agent-configuration-layers', '--refresh-package', 'agent-configuration-layers',
+        '--reinstall-package', 'agent-repository-policy', '--refresh-package', 'agent-repository-policy',
+        '--reinstall-package', 'agent-venue-copilot', '--refresh-package', 'agent-venue-copilot',
+        '--reinstall-package', 'agent-plugin-resolve', '--refresh-package', 'agent-plugin-resolve', '--reinstall-package', 'agent-dropin-registry', '--refresh-package', 'agent-dropin-registry', '--reinstall-package', 'agent-plugin-activation', '--refresh-package', 'agent-plugin-activation', '--reinstall-package', 'agent-remote-login-shell', '--refresh-package', 'agent-remote-login-shell', '--reinstall-package', 'agent-machine-transport', '--refresh-package', 'agent-machine-transport', '--reinstall-package', 'agent-worktree-identity', '--refresh-package', 'agent-worktree-identity', '--reinstall-package', 'agent-process-telemetry', '--refresh-package', 'agent-process-telemetry', '--reinstall-package', 'agent-update-driver', '--refresh-package', 'agent-update-driver', "$PluginDir", '--quiet')
     $bridgeOut = $bridgeResult.Output
     $updateResult = $bridgeResult.ExitCode
     $ErrorActionPreference = $prevEAP
@@ -3524,6 +3705,7 @@ function Invoke-Update {
     if (Test-SlotContentCurrent -PayloadHash $payloadHash) {
         try {
             Ensure-RuntimeSlotRetention -PayloadHash $payloadHash
+            Ensure-ScheduledTask
             # Slot/import health proves reusable bytes, not the serving version.
             # This guarded seam never rebuilds, cold-starts or falls back to stop.
             Invoke-ServingRuntimeReconcile
@@ -3730,8 +3912,8 @@ function Invoke-Update {
     # supervisor, which resolves the live runtime from the `current-version`
     # marker at boot), so a version update carries zero task changes. Rewriting an
     # existing (esp. S4U/boot) task needs elevation and churns/breaks a working
-    # auto-start -- so `update` only *creates* the task when it is absent and
-    # otherwise leaves it entirely untouched. Deliberate (re)provisioning and
+    # auto-start -- missing tasks require explicit opt-in; absence retires only
+    # validated owned tasks. Deliberate (re)provisioning and
     # repair are the explicit, elevation-aware `provision` action's job.
     Ensure-ScheduledTask
 
@@ -3821,15 +4003,20 @@ function Write-InstallerLifecycle {
     }
 }
 
-$script:InstallerLifecycleAction = if ($Action -in @('install', 'provision')) { 'install' }
+$script:InstallerLifecycleAction = if ($ForceTaskRepair) { '' }
+    elseif ($Action -in @('install', 'provision')) { 'install' }
     elseif ($Action -in @('update', 'start', 'stop')) { $Action } else { '' }
 $script:InstallerLifecycleOutcome = 'fail'
 if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 try {
-    Initialize-SourceRuntime
-    if ($Action -in @('install', 'update', 'provision')) {
+    if ($Action -ne 'schedule' -and -not $ForceTaskRepair) { Initialize-SourceRuntime }
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-bridge' -Root $InstallDir
+    }
+    if ($Action -in @('install', 'update', 'provision') -and -not $ForceTaskRepair) {
         . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+        Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
     }
     switch ($Action) {
         'install'   { Invoke-Install }
@@ -3840,6 +4027,22 @@ try {
         'update'    { Invoke-Update }
         'stamp'     { Invoke-Stamp }
         'provision' { Invoke-Provision }
+        'schedule'  {
+            if (-not (Enter-InstallLock)) { throw 'Bridge installer lock is held' }
+            # Task-only reconciliation must use the installed selection, never
+            # assume this incoming payload's version has already been built.
+            $resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+            if (-not (Test-Path -LiteralPath $resolver)) { throw 'Bridge runtime resolver is unavailable' }
+            $previousRoot = $env:AGENT_RT_ROOT
+            try {
+                $env:AGENT_RT_ROOT = $InstallDir
+                $AgentRtPy = $null
+                . $resolver
+                if (-not $AgentRtPy) { throw 'Bridge selected runtime is unavailable' }
+                $LinkPython = $AgentRtPy
+            } finally { $env:AGENT_RT_ROOT = $previousRoot }
+            Ensure-ScheduledTask
+        }
     }
     $script:InstallerLifecycleOutcome = 'ok'
 } finally {

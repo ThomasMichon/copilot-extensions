@@ -1,0 +1,9 @@
+{
+  "comment": "Cover running-session agenda policy refresh",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "dev"
+    }
+  ]
+}

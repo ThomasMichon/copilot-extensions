@@ -1,0 +1,9 @@
+{
+  "comment": "Correlate retained prepared receipts with existing cached native comment observations without effects.",
+  "changes": [
+    {
+      "plugin": "agent-pull-requests",
+      "type": "patch"
+    }
+  ]
+}

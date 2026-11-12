@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import json
 
+import pytest
+from configuration_context import RepositoryContextRequired
+
 from agent_mcp import __main__ as cli
-from agent_mcp import config
+from agent_mcp import config, configuration, cutover
 from agent_mcp.config import ConfigError, normalize_bridge_name
 from agent_mcp.installer_readiness import emit, evaluate
 
@@ -27,6 +30,63 @@ def test_configured_bridges_are_validated_without_starting_them(tmp_path):
     assert loaded == [str(bridge.resolve())]
 
 
+def test_readiness_without_repository_preserves_request_context_requirement(
+    tmp_path, monkeypatch,
+):
+    bridge = tmp_path / "demo.yaml"
+    bridge.write_text(
+        "server:\n  type: http\n  url: https://example.invalid/mcp\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_machine_overlay", lambda *_: {"timeout": 15})
+    monkeypatch.setattr(config, "BRIDGES_DIR", tmp_path)
+    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda **_: [])
+    calls = []
+
+    def missing_context(root):
+        calls.append(root)
+        raise RepositoryContextRequired()
+
+    monkeypatch.setattr(configuration, "owner_report", missing_context)
+    with pytest.raises(RepositoryContextRequired):
+        config.load_config(str(bridge))
+
+    assert evaluate([("demo", bridge)])["state"] == "ready"
+    assert cutover._configured_readiness()["state"] == "ready"
+    assert calls == [tmp_path]
+
+
+@pytest.mark.parametrize(
+    ("declaration", "machine", "error_field"),
+    (
+        ("server:\n  type: http\n", {}, "url"),
+        (
+            "server:\n  type: http\n  url: https://example.invalid/mcp\n",
+            {"timeout": -1},
+            "timeout",
+        ),
+    ),
+)
+def test_readiness_without_repository_still_refuses_invalid_native_configuration(
+    tmp_path, monkeypatch, declaration, machine, error_field,
+):
+    bridge = tmp_path / "demo.yaml"
+    bridge.write_text(declaration, encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(config, "_machine_overlay", lambda *_: machine)
+
+    def missing_context(_root):
+        raise RepositoryContextRequired()
+
+    monkeypatch.setattr(configuration, "owner_report", missing_context)
+    result = evaluate([("demo", bridge)])
+
+    assert result["state"] == "failed"
+    assert error_field in result["detail"]
+    assert "Repository context is missing" not in result["detail"]
+
+
 def test_invalid_bridge_is_failed_not_empty(capsys, tmp_path):
     bridge = tmp_path / "broken.yaml"
     bridge.write_text("fixture\n", encoding="utf-8")
@@ -47,7 +107,7 @@ def test_payload_command_does_not_create_bridge_configuration(
 ):
     bridges = tmp_path / "bridges"
     monkeypatch.setattr(config, "BRIDGES_DIR", bridges)
-    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda: [])
+    monkeypatch.setattr(config, "discover_plugin_bridge_candidates", lambda **_: [])
 
     assert cli.main(["installer-readiness"]) == 0
     assert not bridges.exists()

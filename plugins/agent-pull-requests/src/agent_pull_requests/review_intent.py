@@ -153,7 +153,7 @@ def confirms(value, selected, scope):
     return selected["verdict"] != "COMMENTED" and ids.get("reviewer_id") == scope["principal_id"]
 
 
-def new_operation(selected: dict, *, created_at: float, receipt_bytes: int) -> dict:
+def new_operation(selected: dict, *, created_at: float, receipt_bytes: int, mappings: bool = False) -> dict:
     """Reserve one final intent and its eventual attempt/receipt growth."""
     operation = {
         "intent": copy.deepcopy(selected), "intent_id": _digest(selected), "created_at": created_at,
@@ -163,16 +163,21 @@ def new_operation(selected: dict, *, created_at: float, receipt_bytes: int) -> d
     operation["reserved_bytes"] = (
         len(encoded(operation)) + len(selected["actions"]) * (receipt_bytes + 512) + 1024
     )
+    if mappings:
+        from .review_comment_mapping import reserve
+        reserve(operation)
     return operation
 
 
-def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,), selections=False):
+def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,), selections=False, mappings=False):
     if not isinstance(operations, list) or len(operations) > MAX_OPERATIONS:
         raise ValueError("invalid persisted review operations")
     identities = set()
     write_ids = set()
     for operation in operations:
         names = {"intent", "intent_id", "reserved_bytes", "created_at", "actions"}
+        if mappings and isinstance(operation, dict) and "comment_observations" in operation:
+            names.add("comment_observations")
         selection = operation.get("selection") if isinstance(operation, dict) else None
         if selections and isinstance(operation, dict) and "selection" in operation:
             names.add("selection")
@@ -226,6 +231,9 @@ def validate_operations(operations, *, receipt_bytes, review_bytes, versions=(1,
         if selection is not None:
             reserved["selection"] = selection
         required = len(encoded(reserved)) + len(actions) * (receipt_bytes + 512) + 1024
+        if mappings:
+            from .review_comment_mapping import validate
+            required += validate(operation, enabled=True)
         if type(operation["reserved_bytes"]) is not int or operation["reserved_bytes"] < required:
             raise ValueError("review operation lost its receipt reservation")
         if len(encoded(operation)) > operation["reserved_bytes"]:

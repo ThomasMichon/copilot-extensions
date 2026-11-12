@@ -19,6 +19,7 @@ def observe(api, manager, session, body, vector, monkeypatch, capsys, *, client_
     advertised = api.get("/health").json()
     observed = {"capability": advertised["capabilities"]["native_send_receipt"]}
     original_status = session.status
+    manager.db.flush()
     before = (
         manager.db.execute_read("SELECT * FROM turns"),
         manager.db.execute_read("SELECT * FROM events"),
@@ -165,18 +166,27 @@ def observe(api, manager, session, body, vector, monkeypatch, capsys, *, client_
             )
         forbidden.assert_not_awaited()
     session.status = original_status
+    manager.db.flush()
+    after = (
+        manager.db.execute_read("SELECT * FROM turns"),
+        manager.db.execute_read("SELECT * FROM events"),
+        manager.db.execute_read("SELECT * FROM sessions"),
+        manager.db.execute_read("SELECT * FROM pending_prompts"),
+        manager.db.execute_read("SELECT * FROM live_messages"),
+        session.turn_count,
+    )
     observed["no_effects"] = (
-        before == (
-            manager.db.execute_read("SELECT * FROM turns"),
-            manager.db.execute_read("SELECT * FROM events"),
-            manager.db.execute_read("SELECT * FROM sessions"),
-            manager.db.execute_read("SELECT * FROM pending_prompts"),
-            manager.db.execute_read("SELECT * FROM live_messages"),
-            session.turn_count,
-        )
+        before == after
         and manager.resume_session.await_count == saved_resume
         and manager.handoff_session.await_count == saved_handoff
     )
+    assert observed["no_effects"], {
+        name: {"before": previous, "after": current}
+        for name, previous, current in zip(
+            ("turns", "events", "sessions", "pending_prompts", "live_messages", "turn_count"),
+            before, after,
+        ) if previous != current
+    }
     with monkeypatch.context() as patch:
         patch.delitem(api.headers, "Authorization")
         observed["unauthenticated"] = api.post(route, json=body).status_code

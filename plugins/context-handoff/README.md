@@ -2,6 +2,14 @@
 
 Context window monitoring and session handoff for GitHub Copilot CLI.
 
+## Durable Goal and steer continuity
+
+The extension preserves root operator prompts and peer-origin steers in a local,
+worktree-scoped corpus and supplies current Goal plus paged historical evidence
+at reconstruction boundaries. Historical text never becomes new authority.
+See [durable intent continuity](docs/intent-continuity.md) for filtering,
+persistence, paging, privacy and explicit native-host/model-reading limits.
+
 The complete six-file Python helper/test scope is checked with strict MyPy
 on the declared Linux and Windows analysis targets:
 `python tools/typecheck.py context-handoff` from the repository root.

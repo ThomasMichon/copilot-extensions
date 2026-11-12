@@ -1,0 +1,9 @@
+{
+  "comment": "Let venv-less native action readers import without agent-procutil so guarded update/stamp admits maintenance",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

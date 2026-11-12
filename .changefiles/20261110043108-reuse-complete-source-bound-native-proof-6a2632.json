@@ -1,0 +1,9 @@
+{
+  "comment": "Reuse complete source-bound native proof for prepared read batches and validate dictionary keys without shadowing",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

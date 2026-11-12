@@ -69,8 +69,9 @@ def eventually(check, timeout=10):
     raise AssertionError("fixture observation timed out")
 
 
+@pytest.mark.parametrize("reject_site", [False, True])
 def test_executor_shim_reuses_external_bytecode_without_mutating_source(
-    area: Path, monkeypatch: pytest.MonkeyPatch,
+    area: Path, monkeypatch: pytest.MonkeyPatch, reject_site: bool,
 ) -> None:
     from update_driver import core
 
@@ -82,6 +83,13 @@ def test_executor_shim_reuses_external_bytecode_without_mutating_source(
     procutil.mkdir()
     for name in ("_runner.py", "participant.py"):
         shutil.copyfile(Path(core.__file__).with_name(name), driver / name)
+    if reject_site:
+        participant = driver / "participant.py"
+        participant.write_text(participant.read_text(encoding="utf-8").replace(
+            "from __future__ import annotations\n",
+            'from __future__ import annotations\nimport sys\nassert "site" not in sys.modules\n',
+            1,
+        ), encoding="utf-8")
     shutil.copyfile(agent_procutil.__file__, procutil / "__init__.py")
     record = packages / "fixture.dist-info" / "RECORD"
     record.parent.mkdir()
@@ -149,6 +157,67 @@ def test_two_process_workers_have_no_transaction_overlap(area):
     assert all(lines[i].startswith("start ") and lines[i + 1].startswith("end ")
                for i in range(0, 8, 2))
     assert all(wait(request.id, root=root, timeout=1).exit_code == 0 for request in requests)
+
+
+def test_concurrent_update_submitters_replace_one_waiter_without_touching_active_work(area):
+    root = area / "state"
+    gate, started = area / "release-active", area / "active-started"
+    program = (
+        "import pathlib,sys,time\n"
+        "from update_driver import borrowed_custody\n"
+        "with borrowed_custody(root=pathlib.Path(sys.argv[1])) as custody:\n"
+        " pathlib.Path(sys.argv[2]).touch()\n"
+        " deadline=time.monotonic()+20\n"
+        " while not pathlib.Path(sys.argv[3]).exists():\n"
+        "  assert time.monotonic()<deadline\n"
+        "  time.sleep(.02)\n"
+        " custody.assert_owned()\n"
+    )
+    active = enqueue(
+        RequestSpec("manager", source="active", cwd=str(area), repair=True),
+        runner=TrustedRunner(
+            (sys.executable, "-c", program, str(root), str(started), str(gate)),
+            str(area), timeout=30,
+        ), root=root,
+    )
+    owner = worker(area)
+    callers = []
+    try:
+        eventually(started.exists)
+        submitter = (
+            "import sys\nfrom pathlib import Path\n"
+            "from update_driver import RequestSpec,TrustedRunner,enqueue\n"
+            "area=Path(sys.argv[1])\n"
+            "enqueue(RequestSpec('manager',source=sys.argv[2],cwd=str(area),repair=True),"
+            "runner=TrustedRunner((sys.executable,'-c','pass'),str(area)),root=area/'state')\n"
+        )
+        for index in range(5):
+            callers.append(subprocess.Popen(
+                [sys.executable, "-c", submitter, str(area), str(index)],
+                cwd=area, env=environment(), stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                **agent_procutil.no_window_kwargs(),
+            ))
+        for process in callers:
+            collect(process)
+        rows = status(root=root)
+        assert status(active.id, root=root).state == "running"
+        pending = [row for row in rows if row.state == "pending"]
+        assert len(pending) == 1
+        superseded = [row for row in rows if row.exit_code == 125]
+        assert len(superseded) == 4
+        assert all(row.started_at is None and "superseded by update request" in row.error
+                   for row in superseded)
+        gate.touch()
+        collect(owner)
+        assert status(active.id, root=root).exit_code == 0
+        assert status(pending[0].id, root=root).exit_code == 0
+        assert all(status(row.id, root=root).exit_code == 125 for row in superseded)
+    finally:
+        gate.touch()
+        for process in [*callers, owner]:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
 
 
 def test_same_boot_native_timeout_retains_failure_but_allows_later_execution(area):

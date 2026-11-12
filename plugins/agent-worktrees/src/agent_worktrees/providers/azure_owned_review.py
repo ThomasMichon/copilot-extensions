@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 import math
+import re
+from collections.abc import Callable
 from urllib.parse import quote, urlencode
 
 from .azure_observation_reads import AdoReader, MAX_RESPONSE_BYTES
@@ -85,6 +87,7 @@ class AdoReviewContext:
             raise ValueError("an actual private credential binding reference is required")
         self.reader = _BoundReader(self)
         self.remaining = None
+        self._permission_url = None
 
     @property
     def scope(self):
@@ -110,6 +113,7 @@ class AdoReviewContext:
             url == self.reader.base + "?api-version=7.1"
             or url.startswith(self.reader.base + "/")
             or method == "GET" and url == policy_url
+            or method == "GET" and url == self._permission_url
         ):
             raise ValueError("review request is outside the selected native PR")
         result = self.request(
@@ -183,6 +187,30 @@ class AdoReviewContext:
                 "complete": evaluations.complete, "data": list(evaluations.records), "error": evaluations.error,
             },
         }
+
+    def require_review_permissions(self, current: dict) -> None:
+        """Evaluate native effective caller permission through the pinned read owner."""
+        from .azure_review_permissions import require_review_permissions
+
+        def read(url: str) -> dict:
+            previous = self._permission_url
+            self._permission_url = url
+            try:
+                result = self.call("GET", url, None)
+            finally:
+                self._permission_url = previous
+            if result.status != 200 or result.continuation:
+                raise ReviewContextUnavailable("native permission read is incomplete")
+            return result.body
+
+        try:
+            require_review_permissions(read, scope=self.scope, pr=current["pr"])
+        except (ValueError, KeyError, TypeError, UnicodeError):
+            raise ReviewContextUnavailable("native review permission information is unavailable") from None
+
+    def check_review(self, operation: dict, action: dict, current: dict) -> None:
+        """Check the selected owner's policy; native factories extend its prerequisites."""
+        self.review_check(operation, action, current, context=self)
 
     @staticmethod
     def marker(operation, action):
@@ -259,6 +287,31 @@ class AdoReviewContext:
         """Native create-thread markers only; current vote/content is never proof."""
         if action["kind"] != "comment":
             return None
+        return self._reconcile_comment(operation, action, lambda content: content == action["body"])
+
+    def reconcile_comment_identity(
+        self, *, operation_id: str, intent_id: str, action_id: str, body_id: str,
+    ) -> dict | None:
+        """Read only: original marker plus exact content digest, never a sendable body."""
+        for value in (operation_id, action_id):
+            if not isinstance(value, str) or not 1 <= len(value) <= 128 or any(ord(c) < 32 for c in value):
+                raise ValueError("original compact operation/action identity required")
+        for value in (intent_id, body_id):
+            if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+                raise ValueError("original compact intent/content digest required")
+        operation = {"intent": {"scope": self.scope, "operation_id": operation_id}, "intent_id": intent_id}
+
+        def matches(content: object) -> bool:
+            if not isinstance(content, str):
+                return False
+            encoded = json.dumps(content, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+            return hashlib.sha256(encoded).hexdigest() == body_id
+
+        return self._reconcile_comment(operation, {"id": action_id}, matches)
+
+    def _reconcile_comment(
+        self, operation: dict, action: dict, matches_content: Callable[[object], bool],
+    ) -> dict | None:
         threads = self.reader.threads()
         if not threads.complete:
             return None
@@ -276,7 +329,7 @@ class AdoReviewContext:
                     not thread.get("isDeleted") and len(comments) == 1
                     and _native_id(thread.get("id"), numeric=True)
                     and _native_id(comments[0].get("id"), numeric=True)
-                    and comments[0].get("content") == action["body"]
+                    and matches_content(comments[0].get("content"))
                     and isinstance(comments[0].get("author"), dict)
                     and comments[0]["author"].get("id") == self.scope["principal_id"]
                     and not comments[0].get("isDeleted")

@@ -213,6 +213,7 @@ def test_python_engine_scoped_sync_preserves_unrelated_support_edits(tmp_path, m
 
 
 def test_session_host_capsule_contains_instance_closure_without_site_packages(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(ROOT / "libs" / "copilot-driver-core" / "src"))
     source = ROOT / "plugins" / "agent-bridge" / "src" / "agent_bridge" / "session_host" / "bundle.py"
     spec = importlib.util.spec_from_file_location("native_capsule_distribution", source)
     assert spec and spec.loader

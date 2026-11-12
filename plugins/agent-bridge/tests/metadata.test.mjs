@@ -1,12 +1,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
-import { mkdtempSync, writeFileSync, chmodSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { registrationMetadata, resolveMetadataAsync, runCliAsync } from "../extensions/agent-bridge/metadata.mjs";
+import {
+  METADATA_REFRESH_CLI_TIMEOUT_MS, metadataRefresher, readSessionBinding, registrationMetadata,
+  resolveMetadataAsync, runCliAsync,
+} from "../extensions/agent-bridge/metadata.mjs";
 
 test("selected receiving metadata keeps its provider scope without inventing guest ownership", async () => {
   const { metadataRefresher } = await import("../extensions/agent-bridge/metadata.mjs");
@@ -283,4 +287,180 @@ test("incomplete project or worktree metadata also clears the old lineage", () =
       machine: null, repo: null, worktree_id: null, clear_targeting_metadata: true,
     });
   }
+});
+
+// --- sessionStart worktree binding (the identity agent-worktrees' hook
+// already stamped into this session's state folder) ---
+
+// A disposable Copilot home (COPILOT_HOME) and user home, so the binding
+// lookup never touches the real profile.
+function makeBindingHomes(t) {
+  const root = mkdtempSync(join(tmpdir(), "agent-bridge-binding-test-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  const copilotHome = join(root, "copilot-home");
+  const userHome = join(root, "user-home");
+  const env = { COPILOT_HOME: copilotHome, HOME: userHome, USERPROFILE: userHome };
+  const write = (sessionId, content, { underUserHome = false } = {}) => {
+    const dir = underUserHome
+      ? join(userHome, ".copilot", "session-state", sessionId)
+      : join(copilotHome, "session-state", sessionId);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "worktree-binding.json"), typeof content === "string" ? content : JSON.stringify(content));
+  };
+  return { env, write };
+}
+
+const bindingFor = (sessionId, overrides = {}) => ({
+  sessionId, worktreeId: "wt-bound", worktreeDir: "/fixture/wt-bound", machine: "host-bound",
+  registeredAt: "2026-01-01T00:00:00", project: "proj-bound", creationNonce: "abc123", ...overrides,
+});
+
+// `git` answers at once; `agent-worktrees` records each call and then hangs
+// far past the lookup timeout, like a CLI starved on a contended host.
+function useHangingAgentWorktrees(t) {
+  const dir = mkdtempSync(join(tmpdir(), "agent-bridge-metadata-hang-"));
+  const marker = join(dir, "agent-worktrees.calls");
+  const isWin = process.platform === "win32";
+  const script = (name, body) => {
+    const path = join(dir, isWin ? `${name}.cmd` : name);
+    writeFileSync(path, isWin ? `@echo off\r\n${body.join("\r\n")}\r\n` : `#!/bin/sh\n${body.join("\n")}\n`);
+    if (!isWin) chmodSync(path, 0o755);
+  };
+  script("git", ["echo main"]);
+  script("agent-worktrees", isWin
+    ? [`echo %*>>"${marker}"`, `"${process.execPath}" -e "setTimeout(() => {}, 10000)"`, "echo late"]
+    : [`echo "$*" >> "${marker}"`, "exec sleep 10"]);
+  const originalPath = process.env.PATH;
+  process.env.PATH = `${dir}${isWin ? ";" : ":"}${originalPath}`;
+  t.after(() => { process.env.PATH = originalPath; });
+  return { cwd: dir, called: () => existsSync(marker) };
+}
+
+test("a timed-out CLI lookup no longer leaves the session untargetable when its binding exists", async (t) => {
+  const { env, write } = makeBindingHomes(t);
+  const cli = useHangingAgentWorktrees(t);
+  const sessionId = randomUUID();
+
+  // Without a binding, every `agent-worktrees get` times out: no identity.
+  const before = await resolveMetadataAsync({ cwd: cli.cwd, env, sessionId, timeoutMs: 1_000 });
+  assert.equal(cli.called(), true);
+  assert.deepEqual([before.machine, before.worktree_id, before.repo], [null, null, null]);
+  assert.equal(registrationMetadata(before).clear_targeting_metadata, true);
+
+  write(sessionId, bindingFor(sessionId));
+  const after = await resolveMetadataAsync({ cwd: cli.cwd, env, sessionId, timeoutMs: 1_000 });
+  assert.equal(after.worktree_id, "wt-bound");
+  assert.equal(after.machine, "host-bound");
+  assert.equal(after.repo, "proj-bound");
+  assert.equal(after.branch, "main");
+  const wire = registrationMetadata(after);
+  assert.equal(wire.clear_targeting_metadata, undefined);
+  assert.equal(wire.worktree_id, "wt-bound");
+});
+
+test("a fully bound session spawns no agent-worktrees lookup at all", async (t) => {
+  const { env, write } = makeBindingHomes(t);
+  const cli = useHangingAgentWorktrees(t);
+  const sessionId = randomUUID();
+  write(sessionId, bindingFor(sessionId), { underUserHome: true });
+
+  const meta = await resolveMetadataAsync({ cwd: cli.cwd, env, sessionId });
+
+  assert.deepEqual([meta.machine, meta.worktree_id, meta.repo], ["host-bound", "wt-bound", "proj-bound"]);
+  assert.equal(cli.called(), false);
+});
+
+test("a binding that lands after registration is picked up by the refresher within its backoff", async (t) => {
+  const { env, write } = makeBindingHomes(t);
+  const lateId = randomUUID();
+  const state = {
+    sessionId: randomUUID(),
+    meta: { machine: null, cwd: "/w", worktree_id: null, repo: null, branch: "b" },
+  };
+  const lookups = [];
+  const refresh = metadataRefresher(state, async (options) => {
+    lookups.push(options);
+    return { machine: null, worktree_id: null, repo: null }; // the CLI keeps timing out
+  }, () => 0, { env });
+
+  assert.equal(await refresh(), false); // no binding yet, and the CLI found nothing: back off
+  assert.equal(lookups.length, 1);
+  assert.equal(lookups[0].timeoutMs, METADATA_REFRESH_CLI_TIMEOUT_MS);
+  assert.equal(lookups[0].sessionId, state.sessionId);
+  assert.equal(registrationMetadata(state.meta).clear_targeting_metadata, true);
+
+  // The hook writes the binding for the id the session is resumed under; it
+  // only counts once the extension follows that id.
+  write(lateId, bindingFor(lateId), { underUserHome: true });
+  assert.equal(await refresh(), false);
+  state.sessionId = lateId;
+  assert.equal(await refresh(), true);
+
+  assert.equal(lookups.length, 1); // filled from the file, inside the CLI backoff
+  assert.deepEqual(state.meta, {
+    machine: "host-bound", cwd: "/w", worktree_id: "wt-bound", repo: "proj-bound", branch: "b",
+  });
+  assert.equal(registrationMetadata(state.meta), state.meta);
+  assert.equal(await refresh(), false);
+});
+
+test("a binding for another session, or a malformed one, is ignored", async (t) => {
+  const { env, write } = makeBindingHomes(t);
+  const sessionId = randomUUID();
+
+  write(sessionId, bindingFor(randomUUID()));
+  assert.equal(await readSessionBinding(sessionId, { env }), null);
+
+  for (const malformed of ["{not json", "[]", "null", `"${sessionId}"`, " ".repeat(17 * 1024)]) {
+    write(sessionId, malformed);
+    assert.equal(await readSessionBinding(sessionId, { env }), null);
+  }
+
+  // Unusable fields are dropped one by one; an anchor's identity stays the CLI's.
+  write(sessionId, bindingFor(sessionId, { worktreeId: "@anchor", project: "../escape" }));
+  assert.deepEqual(await readSessionBinding(sessionId, { env }),
+    { worktree_id: null, machine: "host-bound", repo: null });
+
+  assert.equal(await readSessionBinding("../outside", { env }), null);
+  assert.equal(await readSessionBinding(null, { env }), null);
+
+  const state = { sessionId, meta: { machine: null, worktree_id: null, repo: null } };
+  write(sessionId, bindingFor("someone-else"));
+  const refresh = metadataRefresher(state, async () => null, () => 0, { env });
+  assert.equal(await refresh(), false);
+  assert.deepEqual(state.meta, { machine: null, worktree_id: null, repo: null });
+});
+
+test("AGENT_BRIDGE_SCOPE_ID still outranks the binding's worktree", async (t) => {
+  const { env: homes, write } = makeBindingHomes(t);
+  const cli = useHangingAgentWorktrees(t);
+  const env = { ...homes, AGENT_BRIDGE_SCOPE_ID: "anchor-example-web@cs-1" };
+  const sessionId = randomUUID();
+  write(sessionId, bindingFor(sessionId));
+
+  const meta = await resolveMetadataAsync({ cwd: cli.cwd, env, sessionId });
+  assert.equal(meta.worktree_id, "anchor-example-web@cs-1");
+  assert.equal(meta.machine, "host-bound");
+  assert.equal(meta.repo, "proj-bound");
+  assert.equal(cli.called(), false);
+
+  const state = { sessionId, meta: { machine: null, worktree_id: null, repo: null } };
+  const refresh = metadataRefresher(state, async () => null, () => 0, { env });
+  assert.equal(await refresh(), true);
+  assert.equal(state.meta.worktree_id, "anchor-example-web@cs-1");
+});
+
+test("an identity still incomplete after a few lookups is logged once", async () => {
+  const state = { sessionId: null, meta: { machine: "m1", worktree_id: null, repo: null } };
+  let clock = 0;
+  const logs = [];
+  const refresh = metadataRefresher(state, async () => null, () => clock, {
+    env: {}, log: (line) => logs.push(line), warnAfter: 3,
+  });
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    assert.equal(await refresh(), false);
+    clock += 60 * 60_000; // past any backoff
+  }
+  assert.equal(logs.length, 1);
+  assert.match(logs[0], /after 3 lookups \(missing: worktree_id, repo\)/);
 });

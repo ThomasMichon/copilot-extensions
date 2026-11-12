@@ -1,0 +1,9 @@
+{
+  "comment": "Avoid path/output cmdlet initialization in the Windows publication-guard wrapper while preserving the original evaluator and failure contract.",
+  "changes": [
+    {
+      "plugin": "copilot-extensions-harness",
+      "type": "patch"
+    }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "comment": "Add bounded selected-session guidance inspection without shell serialization or child readers",
+  "changes": [
+    {
+      "plugin": "agent-roles",
+      "type": "patch"
+    }
+  ]
+}

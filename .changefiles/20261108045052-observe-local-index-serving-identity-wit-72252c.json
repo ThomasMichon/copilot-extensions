@@ -1,0 +1,9 @@
+{
+  "comment": "Observe local Index serving identity without starting a host",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

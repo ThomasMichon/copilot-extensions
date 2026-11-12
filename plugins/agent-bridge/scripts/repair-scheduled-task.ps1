@@ -14,12 +14,9 @@
 
     This script:
       1. Requests elevation via UAC automatically (relaunches itself elevated).
-      2. Removes the stale/broken primary 'Agent Bridge' task.
-      3. Registers the clean default **interactive AtLogOn** task, reusing the
-         existing task's action verbatim when present (it points at the stable
-         `start-agent-bridge.ps1` supervisor, which resolves the live runtime from
-         the `current-version` marker) so nothing about the runtime contract
-         drifts. Only the logon mode changes (S4U/boot -> interactive).
+      2. Re-enters the retained installer's provision action after elevation.
+      3. Rechecks native scheduling policy, task ownership and startup holds
+         under the install lock before repairing the interactive AtLogOn task.
 
     It deliberately does NOT start the daemon: starting it from this elevated
     context would leave an ELEVATED daemon running (wrong -- the daemon must run
@@ -30,9 +27,7 @@
     task untouched.
 
 .NOTES
-    The task's action/contract is owned by install.ps1's Register-ScheduledTask_;
-    this script reuses the live action rather than re-declaring it, so the two
-    never diverge.
+    The task action and serialized reconciliation are owned by install.ps1.
 #>
 [CmdletBinding()]
 param(
@@ -42,19 +37,51 @@ param(
 
     # Force a re-register even when the task is already a healthy non-elevated
     # interactive AtLogOn task (normally that is a no-op that skips UAC).
-    [switch]$Force
+    [switch]$Force,
+
+    [string]$InstallDir,
+
+    [string]$TaskName
 )
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
-$TaskName = 'Agent Bridge'
-$InstallDir = if ($env:AGENT_BRIDGE_CONFIG_DIR) {
+if (-not $InstallDir) { $InstallDir = if ($env:AGENT_BRIDGE_CONFIG_DIR) {
     $env:AGENT_BRIDGE_CONFIG_DIR
 } else {
     Join-Path $env:USERPROFILE '.agent-bridge' # marketplace-isolation: allow legacy-compatibility
+} }
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
+$legacyInstallDir = [IO.Path]::GetFullPath((Join-Path $env:USERPROFILE '.agent-bridge'))
+$isLegacyInstall = [StringComparer]::OrdinalIgnoreCase.Equals($InstallDir, $legacyInstallDir)
+$resolver = Join-Path $InstallDir 'bin\resolve-runtime.ps1'
+if (Test-Path -LiteralPath $resolver) {
+    $previousRoot = $env:AGENT_RT_ROOT
+    try {
+        $env:AGENT_RT_ROOT = $InstallDir
+        $AgentRtPy = $null
+        . $resolver
+        if (-not $AgentRtPy) { throw 'Bridge selected runtime is unavailable for task binding' }
+        $boundTaskName = & $AgentRtPy -I -B -c `
+            'import sys; from pathlib import Path; from agent_bridge.install_paths import scheduled_task_name; print(scheduled_task_name(Path(sys.argv[1])))' `
+            $InstallDir
+        if ($LASTEXITCODE -ne 0 -or $boundTaskName -isnot [string] -or -not $boundTaskName) {
+            throw 'Bridge installation task binding could not be resolved'
+        }
+        if ($TaskName -and -not [StringComparer]::OrdinalIgnoreCase.Equals($TaskName, $boundTaskName)) {
+            throw 'Bridge repair task selector disagrees with the selected installation'
+        }
+        $TaskName = $boundTaskName
+    } finally { $env:AGENT_RT_ROOT = $previousRoot }
+} elseif ($isLegacyInstall) {
+    if ($TaskName -and $TaskName -ne 'Agent Bridge') {
+        throw 'Bridge repair task selector disagrees with the legacy installation'
+    }
+    $TaskName = 'Agent Bridge'
+} elseif (-not $TaskName -or $TaskName -eq 'Agent Bridge') {
+    throw 'Scoped Bridge repair requires its installation task name; no legacy task was queried'
 }
-$Supervisor = Join-Path $InstallDir 'start-agent-bridge.ps1'
 
 function Test-IsAdmin {
     try {
@@ -117,7 +144,9 @@ if ($needsElevation -and -not (Test-IsAdmin)) {
     if (-not $exe) { $exe = Resolve-PwshPath }
     $relaunchArgs = @(
         '-NoProfile', '-ExecutionPolicy', 'Bypass',
-        '-File', $PSCommandPath, '-Elevated'
+        '-File', ('"' + $PSCommandPath + '"'), '-Elevated',
+        '-InstallDir', ('"' + $InstallDir + '"'),
+        '-TaskName', ('"' + $TaskName + '"')
     )
     if ($Force) { $relaunchArgs += '-Force' }
     try {
@@ -139,82 +168,11 @@ if ($needsElevation -and -not (Test-IsAdmin)) {
 # Stage 2: do the repair (elevated if we needed to be; otherwise non-elevated).
 # Never starts the daemon.
 # ---------------------------------------------------------------------------
-Write-Host "Repairing the '$TaskName' scheduled task (target: non-elevated interactive AtLogOn)..." -ForegroundColor Cyan
-
-# Capture the existing task's action so the rebuilt task keeps the exact same,
-# version-stable launch contract (only the logon mode changes).
-$existing = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-$oldAction = if ($existing) { @($existing.Actions)[0] } else { $null }
-if ($existing) {
-    Write-Host ("  existing task: LogonType={0}" -f $existing.Principal.LogonType)
+$installer = Join-Path $PSScriptRoot 'install.ps1'
+if (-not (Test-Path -LiteralPath $installer)) {
+    throw 'Retained Bridge installer is unavailable; task left unchanged'
 }
-
-# Remove the stale registration (COM view first, then the on-disk store -- the
-# two can desync, and schtasks.exe /Delete clears a file Unregister missed).
-$removed = $false
-try {
-    Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false -ErrorAction Stop
-    $removed = $true
-} catch {}
-try {
-    & schtasks.exe /Delete /TN $TaskName /F *> $null
-    if ($LASTEXITCODE -eq 0) { $removed = $true }
-} catch {}
-if ($removed) {
-    Write-Host "  removed the stale '$TaskName' task"
-} else {
-    Write-Host "  no existing '$TaskName' task to remove -- provisioning fresh"
-}
-
-# Rebuild the action: reuse the captured one verbatim, else reconstruct it to
-# point at the stable supervisor (present on any provisioned box).
-if ($oldAction -and $oldAction.Execute) {
-    $action = New-ScheduledTaskAction `
-        -Execute $oldAction.Execute `
-        -Argument $oldAction.Arguments `
-        -WorkingDirectory $oldAction.WorkingDirectory
-} else {
-    if (-not (Test-Path -LiteralPath $Supervisor)) {
-        Write-Error "Supervisor script not found at '$Supervisor'. Install agent-bridge first (`install.ps1 install`), then re-run this repair."
-        exit 2
-    }
-    $pwshPath = Resolve-PwshPath
-    $action = New-ScheduledTaskAction `
-        -Execute 'conhost.exe' `
-        -Argument "--headless `"$pwshPath`" -WindowStyle Hidden -NoProfile -ExecutionPolicy Bypass -File `"$Supervisor`"" `
-        -WorkingDirectory $InstallDir
-}
-
-# The clean default: interactive AtLogOn, current user, Limited (no elevation --
-# the daemon does not need it), 15s delay. This is the mode a headless S4U task
-# fails at on a box with no reliable logon-token acquisition (the 267011 case).
-$trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$trigger.Delay = 'PT15S'
-$settings = New-ScheduledTaskSettingsSet `
-    -AllowStartIfOnBatteries `
-    -DontStopIfGoingOnBatteries `
-    -StartWhenAvailable `
-    -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
-    -MultipleInstances IgnoreNew
-
-try {
-    Register-ScheduledTask `
-        -TaskName $TaskName `
-        -Action $action `
-        -Trigger $trigger `
-        -Settings $settings `
-        -Description 'Agent-Bridge -- inter-agent communication service (auto-start at logon).' `
-        -Force | Out-Null
-} catch {
-    Write-Error "Failed to register the interactive '$TaskName' task: $($_.Exception.Message.Trim())"
-    exit 3
-}
-
-$task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-if ($task) {
-    Write-Host ("[OK] '{0}' registered (LogonType={1}, AtLogOn +15s)." -f $TaskName, $task.Principal.LogonType) -ForegroundColor Green
-    Write-Host "     It starts the daemon at your next logon. Not started now (that would run it elevated); the daemon self-heals on demand meanwhile." -ForegroundColor DarkGray
-    exit 0
-}
-Write-Error "Registration reported success but '$TaskName' is not present."
-exit 3
+# The elevated provision path does not launch this repair again. It acquires
+# its own lock and re-reads current policy after the elevation gap.
+& $installer provision -InstallDir $InstallDir -ForceTaskRepair
+exit $LASTEXITCODE

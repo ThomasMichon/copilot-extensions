@@ -9,38 +9,45 @@
     machine-gated) and `test-chamber services agent-dispatch <action>` both
     drive it.
 
-    Creates the runtime at ~/.agent-dispatch/ (venv + package), a
-    ~/.local/bin/agent-dispatch.cmd binstub, and -- on its deploy machines --
-    an auto-starting Windows Scheduled Task running the FULL coordinator. The
+    Creates the runtime at ~/.agent-dispatch/ (venv + package) and a
+    ~/.local/bin/agent-dispatch.cmd binstub. Windows scheduling is optional:
+    installation.json defaults to preserving existing tasks without creating
+    missing ones. Independently enabled services use their user-mode owners. The
     always-on Windows host owns the coordinator (Phase 2, issue #2818); it binds
     adaptively by WSL networking mode (mirrored -> 127.0.0.1; NAT -> the
     vEthernet(WSL) IP, resolved at startup, never 0.0.0.0/LAN). This reverses the
     #2777 model where WSL owned the coordinator and Windows was a client.
 
-    On a coordinator host it ALSO installs the embody SUPERVISOR
-    (Scheduled Task 'agent-dispatch-supervisor'), which runs
+    On a coordinator host it also reconciles the embody SUPERVISOR, which runs
     `agent-dispatch supervise --all-repos` so dispatched, LABELED tasks are
     turned into host embody autopilots unattended -- the Windows peer of the
     Linux systemd supervisor unit (cross-platform-parity). It is label-gated
     for safety (a label-less supervisor would embody every queued task): the
-    task is enabled only when AGENT_DISPATCH_SUPERVISE_LABELS is set in
-    supervisor.env; with none set the task is registered but left DISABLED
-    (inert), and the generated launcher hard-refuses a label-less run (#2869).
+    classic loop runs only when AGENT_DISPATCH_SUPERVISE_LABELS is set in
+    supervisor.env; its generated launcher hard-refuses a label-less run.
+    Explicit enabled scheduling retains the compatibility task lifecycle.
 
 .PARAMETER Action
-    install (default) | prepare | update | status | start | stop | uninstall.
+    install (default) | prepare | update | status | start | stop | uninstall | task-retire.
     prepare constructs and health-gates a candidate without adopting it.
+    task-retire only removes explicitly absent, identity-validated registrations.
+
+.PARAMETER InstallationConfig
+    Optional installation-bound policy selector, resolved before staging.
+
+.PARAMETER ScheduledTaskNames
+    Exact coordinator/supervisor-family names for task-retire only.
 
 .PARAMETER InstallDir
     Override the runtime install directory (default: ~/.agent-dispatch).
 
 .PARAMETER NoService
     Install/update the client (venv + binstub) only; do NOT install/start the
-    coordinator Scheduled Task (a deliberately client-only host). Also skips the
+    coordinator capability (a deliberately client-only host). Also skips the
     embody supervisor (it needs a local coordinator).
 
 .PARAMETER NoSupervisor
-    Install everything EXCEPT the embody supervisor Scheduled Task (the
+    Install everything EXCEPT supervisor reconciliation (the
     coordinator still installs on an eligible host).
 
 .PARAMETER Purge
@@ -66,9 +73,11 @@
 #>
 [CmdletBinding()]
 param(
-    [ValidateSet('install', 'prepare', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision', 'restore')]
+    [ValidateSet('install', 'prepare', 'update', 'status', 'start', 'stop', 'uninstall', 'stamp', 'provision', 'restore', 'task-retire')]
     [string]$Action = 'install',
     [string]$InstallDir,
+    [string]$InstallationConfig,
+    [string[]]$ScheduledTaskNames,
     [switch]$NoService,
     [switch]$NoSupervisor,
     [switch]$Interactive,
@@ -90,7 +99,11 @@ param(
 
     # Preview mode for the 'uninstall' action: print what WOULD be removed
     # without touching the filesystem, scheduled task, autostart, or firewall.
-    [switch]$DryRun
+    [switch]$DryRun,
+    [string]$WheelProfile,
+    [string]$WheelDirectory,
+    [string]$WheelPython,
+    [string]$WheelUv
 )
 
 Set-StrictMode -Version 2.0
@@ -101,6 +114,65 @@ if ($env:COPILOT_EXTENSIONS_HUMAN_UTF8 -eq '1') {
         throw 'Required installer human-output initializer is unavailable.'
     }
     . (Join-Path $PSScriptRoot 'installer-human-output.ps1')
+}
+
+if ($WheelProfile -or $WheelDirectory -or $WheelPython -or $WheelUv) {
+    if (-not $WheelProfile -or -not $WheelDirectory -or -not $WheelPython -or -not $WheelUv -or
+        $Action -notin @('install', 'update', 'provision')) {
+        throw 'Closed wheels require profile, directory, Python and UV for install, update or provision'
+    }
+}
+$NativeWheelSelection = $null
+
+
+# Resolve selectors before the driver or marketplace self-stage changes CWD.
+if ($InstallationConfig) {
+    $InstallationConfig = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallationConfig)
+    $PSBoundParameters['InstallationConfig'] = $InstallationConfig
+    $env:AGENT_DISPATCH_INSTALLATION_CONFIG = $InstallationConfig
+} elseif ($env:AGENT_DISPATCH_INSTALLATION_CONFIG) {
+    $env:AGENT_DISPATCH_INSTALLATION_CONFIG = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath(
+        $env:AGENT_DISPATCH_INSTALLATION_CONFIG)
+}
+if ($InstallDir) {
+    $InstallDir = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($InstallDir)
+    $PSBoundParameters['InstallDir'] = $InstallDir
+}
+. (Join-Path $PSScriptRoot '..\src\agent_dispatch\windows-scheduling.ps1')
+if ($Action -eq 'task-retire') {
+    foreach ($option in @('NoService', 'NoSupervisor', 'Interactive', 'Purge', 'Force',
+        'RequireGracefulCutover', 'PreserveSupervisors', 'RetainedRuntime',
+        'RetainedRuntimeSha256', 'ZeroDowntime', 'DryRun')) {
+        if ($PSBoundParameters.ContainsKey($option)) { throw "$option is not valid with task-retire" }
+    }
+    if (-not $InstallDir -or -not $ScheduledTaskNames) {
+        throw 'task-retire requires an explicit installation root and exact task names'
+    }
+    $policy = Read-DispatchInstallationPolicy -Root $InstallDir -Config $InstallationConfig
+    $legacy = (Join-Path $env:USERPROFILE '.agent-dispatch')
+    $suffix = ''
+    if (-not $InstallDir.Equals($legacy, [StringComparison]::OrdinalIgnoreCase)) {
+        $hash = [Security.Cryptography.SHA256]::Create()
+        try {
+            $suffix = '-' + ([BitConverter]::ToString($hash.ComputeHash(
+                [Text.Encoding]::UTF8.GetBytes($InstallDir.ToLowerInvariant())
+            ))).Replace('-', '').Substring(0, 12).ToLowerInvariant()
+        } finally { $hash.Dispose() }
+    }
+    Remove-DispatchScheduledTaskOnly -Root $InstallDir -Coordinator "agent-dispatch$suffix" `
+        -Supervisor "agent-dispatch-supervisor$suffix" -Names $ScheduledTaskNames -Policy $policy
+    exit 0
+}
+if ($ScheduledTaskNames) { throw '-ScheduledTaskNames is only valid with task-retire' }
+if ($env:AGENT_DISPATCH_INSTALLATION_CONFIG -and $env:OS -eq 'Windows_NT' -and
+    $env:COPILOT_EXTENSIONS_TEST_CONTAINED -ne '1' -and
+    $Action -in @('install', 'update', 'provision', 'uninstall', 'restore')) {
+    $driverSource = [IO.File]::ReadAllText((Join-Path $PSScriptRoot 'installer_driver.py'))
+    $contextDeclaration = [regex]::Match($driverSource, '(?ms)^CONTEXT_KEYS\s*=\s*\((.*?)^\)')
+    if (-not $contextDeclaration.Success -or
+        $contextDeclaration.Groups[1].Value -notmatch '["'']AGENT_DISPATCH_INSTALLATION_CONFIG["'']') {
+        throw 'Installer driver cannot carry this configuration selector; use the installation-root installation.json until provider support is available'
+    }
 }
 
 # === install-contract:v4 payload-copy -- keep byte-identical across plugins ===
@@ -159,6 +231,7 @@ if ($env:OS -eq 'Windows_NT' -and
     }
     $driverEntry = Enter-NativeInstallerDriver -Payload $driverPayload -Root $driverRoot `
         -Plugin 'agent-dispatch' -Action $Action -Options $driverOptions `
+        -WheelProfile $WheelProfile -WheelDirectory $WheelDirectory -WheelPython $WheelPython -WheelUv $WheelUv `
         -RetainedRuntime $RetainedRuntime -RetainedRuntimeSha256 $RetainedRuntimeSha256
     if (-not $driverEntry.Participant -or $driverEntry.ExitCode -ne 0) { exit $driverEntry.ExitCode }
     $driverPython = $driverEntry.Python
@@ -720,6 +793,7 @@ function Invoke-VersionedActivate {
             Write-Fail "Failed to activate versioned venv (.venv -> versions/$SrcVersion)"
             return $false
         }
+        $script:ReplacedServiceGeneration = $currentActive
         Write-Ok "Runtime version $SrcVersion active (.venv -> versions/$SrcVersion)"
         return $true
     } finally {
@@ -800,6 +874,7 @@ function Remove-ConsoleTrampolines {
 # === install-contract:v4 marker/toss helpers (#935) ===
 function Get-BootstrapPython {
     param([switch]$ExternalOnly)
+    if ($WheelProfile) { return $WheelPython }
     # A valid signed 3.10 runtime selection need not support the 3.11
     # source/construction helpers; keep those choices independent.
     $probe = @'
@@ -958,6 +1033,12 @@ function Assert-InstallActions {
 }
 
 function Get-PayloadHash {
+    if ($NativeWheelSelection) {
+        return (Get-NativeWheelSelection -Python $WheelPython `
+            -Helper (Join-Path $PSScriptRoot 'install_source.py') -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-dispatch' `
+            -Expected $NativeWheelSelection).payload_hash
+    }
     if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
         Assert-SourceRuntime
         $sha = [Security.Cryptography.SHA256]::Create()
@@ -966,22 +1047,25 @@ function Get-PayloadHash {
                 ForEach-Object { $_.ToString('x2') }))
         } finally { $sha.Dispose() }
     }
-    <# Cheap payload fingerprint for the completion marker (#935): sha256 of
-       pyproject.toml + the vendored-lib version set. Never throws -> '' on error. #>
-    try {
-        $parts = @()
-        $pp = Join-Path $PluginDir 'pyproject.toml'
-        if (Test-Path $pp) { $parts += (Get-Content $pp -Raw) }
-        $libs = Join-Path $PluginDir 'libs'
-        if (Test-Path $libs) {
-            Get-ChildItem $libs -Recurse -Filter 'pyproject.toml' -ErrorAction SilentlyContinue |
-                Sort-Object FullName | ForEach-Object { $parts += (Get-Content $_.FullName -Raw) }
-        }
-        $joined = [string]::Join("`n", $parts)
-        $sha = [System.Security.Cryptography.SHA256]::Create()
-        $bytes = $sha.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($joined))
-        return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
-    } catch { return '' }
+    $python = Get-BootstrapPython -ExternalOnly
+    if (-not $python) { throw 'Input fingerprint requires the construction bootstrap Python' }
+    $probe = @'
+import sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import installer_dependency_policy as policy
+sys.modules["tomllib"] = policy._toml_parser()
+import installer_engine as engine
+print(engine.runtime.fingerprint_source(engine._source_files(engine._package_roots(Path(sys.argv[2])))))
+'@
+    $nativeError = ''
+    $output = Invoke-Hidden -FilePath $python -ArgList @(
+        '-I', '-B', '-c', $probe, $ScriptDir, $PluginDir
+    ) -ErrorOutput ([ref]$nativeError)
+    if ($LASTEXITCODE -ne 0) { throw "Runtime input fingerprint failed: $output$nativeError" }
+    $digest = ($output | Out-String).Trim()
+    if ($digest -cnotmatch '^[0-9a-f]{64}$') { throw 'Invalid runtime input fingerprint' }
+    return $digest
 }
 
 function Invoke-VersionedSlotClean {
@@ -995,9 +1079,15 @@ function Invoke-VersionedSlotClean {
         if ($LASTEXITCODE -ne 0) { throw 'Canonical construction adapter is unavailable' }
         Invoke-Expression $helpers
     }
+    $wheelOptions = Get-NativeWheelConstructionOptions -Profile $WheelProfile `
+        -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-dispatch' `
+        -Uv $WheelUv -HealthModule 'agent_dispatch' -Repair:$Force
     $script:RuntimeConstructionReuse = Start-RuntimeConstruction `
         -Python $py -Helper $vr -Root $InstallDir -Version $SrcVersion `
-        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir)
+        -PayloadHash (Get-PayloadHash) -LinkName (Split-Path -Leaf $LinkDir) @wheelOptions
+    if ($NativeWheelSelection) {
+        Set-NativeWheelRuntimeVersion -Root $InstallDir -Version $script:RuntimeConstructionSession.Version
+    }
     Assert-SourceRuntime
 }
 
@@ -1289,6 +1379,59 @@ function Publish-FileAtomically {
             if ($attempt -ge 20) { throw }
             Start-Sleep -Milliseconds 15
         }
+    }
+}
+
+function Publish-ServiceLauncher {
+    param(
+        [Parameter(Mandatory)][string]$Path,
+        [Parameter(Mandatory)][string]$Content
+    )
+    $fullPath = [IO.Path]::GetFullPath($Path)
+    # Serialize comparison and replacement with other installer publications.
+    # An unchanged script may be held open without write/delete sharing.
+    $mutex = Enter-PluginSnapshotLock -InstallDir ([IO.Path]::GetDirectoryName($fullPath)) `
+        -TimeoutSeconds $script:GlobalActivationLockTimeoutSeconds
+    try {
+        $encoding = New-Object Text.UTF8Encoding($false)
+        if ([IO.File]::Exists($fullPath) -and
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($fullPath)) -ceq
+            [Convert]::ToBase64String($encoding.GetBytes($Content))) {
+            return
+        }
+        try {
+            Publish-FileAtomically -Path $fullPath -Content $Content -Encoding $encoding
+        } catch {
+            $publicationError = $_
+            $ioError = $_.Exception
+            while ($ioError.InnerException) { $ioError = $ioError.InnerException }
+            if (($ioError.HResult -band 0xffff) -notin @(32, 33) -or
+                -not $script:ReplacedServiceGeneration -or -not $SrcVersion -or
+                $script:ReplacedServiceGeneration -eq $SrcVersion -or
+                -not (Test-Path -LiteralPath $VenvPython)) {
+                throw $publicationError
+            }
+            # The activation mutex remains held across native identity/role/
+            # generation checks, exact central retirement and actual publication.
+            $previousPreference = $ErrorActionPreference
+            try {
+                $ErrorActionPreference = 'Continue'
+                $result = @(& $VenvPython -I -m agent_dispatch.launcher_replacement `
+                    --install-dir $InstallDir --launcher $fullPath --incoming $SrcVersion `
+                    --outgoing $script:ReplacedServiceGeneration 2>&1)
+                $retirementCode = $LASTEXITCODE
+            } finally { $ErrorActionPreference = $previousPreference }
+            if ($retirementCode -ne 0) {
+                Write-Warn "Service launcher conflict remains at ${fullPath}: $($result -join ' ')"
+                throw $publicationError
+            }
+            Publish-FileAtomically -Path $fullPath -Content $Content -Encoding $encoding
+        }
+    } catch {
+        throw "Service launcher publication failed at ${fullPath}: $($_.Exception.Message)"
+    } finally {
+        $mutex.ReleaseMutex()
+        $mutex.Dispose()
     }
 }
 
@@ -1849,7 +1992,7 @@ function Install-Runtime {
     }
     if ($RetainedRuntime) { Install-RetainedRuntime; return }
     Assert-SourceRuntime
-    $selectedBasePython = Resolve-DispatchBasePython
+    $selectedBasePython = if ($WheelProfile) { $WheelPython } else { Resolve-DispatchBasePython }
     if (-not (Test-Path $PkgSrcDir)) {
         Write-Fail "Package source not found at $PkgSrcDir"
         exit 1
@@ -1901,7 +2044,7 @@ function Install-Runtime {
     }
     Write-Ok "Python: $pythonCmd"
 
-    $UvCommand = Ensure-Uv -InstallRoot $InstallDir
+    $UvCommand = if ($WheelProfile) { $WheelUv } else { Ensure-Uv -InstallRoot $InstallDir }
     if (-not $UvCommand) {
         Write-Warn 'uv acquisition failed -- using Python venv/pip fallback'
     }
@@ -2366,6 +2509,7 @@ function Write-Manifest {
     $sourcePath = if ($env:COPILOT_PLUGIN_STAGED_FROM) { $env:COPILOT_PLUGIN_STAGED_FROM } else { $PluginDir }
     $gitInfo = { param($Path) Get-GitInfo -Path (Split-Path -Parent $Path) }
     $extra = @{}
+    if ($NativeWheelSelection) { $extra['runtime_version'] = $SrcVersion }
     if (Get-Variable -Name SourceRuntimeIdentity -Scope Script -ValueOnly -ErrorAction SilentlyContinue) {
         $PluginDir = Join-Path (Join-Path $InstallDir 'snapshots') $SrcVersion
         $ScriptDir = Join-Path $PluginDir 'scripts'
@@ -2797,23 +2941,27 @@ function Install-CoordinatorTask {
     # Start-ScheduledTask here would race a SECOND coordinator (Thread B).
     param([switch]$NoStart)
     Assert-DispatchActions @('coordinator-replacement')
-    if ($NoService) {
-        # Remove a coordinator task left from a prior full install so a host asked
-        # to be client-only stops running one. Removal may be blocked without
-        # elevation -- log and continue.
-        switch (Remove-CoordinatorTask) {
-            'removed' { Write-Ok   'Removed local coordinator Scheduled Task (-NoService: client-only host)' }
-            'blocked' { Write-Skip 'Coordinator task present but not removable without elevation (-NoService) -- run elevated to remove it' }
-            default   { Write-Skip 'Coordinator service skipped (-NoService: client-only host)' }
+    $schedulingPolicy = Get-DispatchSchedulingPolicy
+    if ($env:OS -eq 'Windows_NT' -and
+        ($schedulingPolicy.windows_scheduled_task -ne 'enabled' -or -not $schedulingPolicy.start_coordinator)) {
+        if ($schedulingPolicy.windows_scheduled_task -eq 'absent') {
+            Remove-DispatchScheduledTaskOnly -Root $InstallDir -Coordinator $TaskName `
+                -Supervisor $SupervisorTaskName -Names @($TaskName) -Policy $schedulingPolicy
         }
+        $ownedLauncher = Join-Path $InstallDir 'serve-service.ps1'
+        Assert-DispatchOrdinaryPath $ownedLauncher
+        $refreshOwned = [IO.File]::Exists($ownedLauncher) -and
+            (([IO.File]::ReadLines($ownedLauncher) | Select-Object -First 1) -like '# agent-dispatch coordinator launcher (generated by install.ps1)*')
+        if (-not $refreshOwned) {
+            if (-not $NoService -and -not $NoStart) { Invoke-DispatchCoordinatorEnsure }
+            return
+        }
+    }
+    if ($NoService) {
+        Write-Skip 'Coordinator service skipped; task retirement requires explicit absence'
         return
     }
     if ($env:OS -ne 'Windows_NT') { return }
-    $haveSchedMod = [bool](Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)
-    if (-not $haveSchedMod -and (Get-ServiceMode) -ne 'interactive') {
-        Write-Skip 'ScheduledTasks module unavailable -- skipping service (run: agent-dispatch serve)'
-        return
-    }
     $envFile = Join-Path $InstallDir 'service.env'
     if (-not (Test-Path $envFile)) {
         $envDefault = @"
@@ -2832,7 +2980,7 @@ function Install-CoordinatorTask {
 "@
         [System.IO.File]::WriteAllText($envFile, $envDefault, $utf8NoBom)
         Write-Ok "Service env: $envFile (defaults; edit to pin the bind host / add a token)"
-    } else {
+    } elseif ($schedulingPolicy.windows_scheduled_task -eq 'enabled') {
         # Migrate stale old-default pins so dynamic resolution/binding takes over,
         # leaving any operator-chosen value untouched:
         #  - AGENT_DISPATCH_HOST=127.0.0.1 (#2888): early (dev39) installs pinned an
@@ -2889,6 +3037,20 @@ if ((Split-Path -Leaf `$_root) -eq 'versions') { `$_root = Split-Path `$_root }
 try { `$_ver = ([IO.File]::ReadAllText((Join-Path `$_root 'current-version'))).Trim() } catch {}
 `$_slot = if (`$_ver) { Join-Path `$_root ('versions\' + `$_ver) } else { '' }
 `$_py = if (`$_slot) { Join-Path `$_slot 'Scripts\python.exe' } else { '' }
+if (`$_slot -and -not [IO.File]::Exists(`$_py)) {
+    # Nested immutable slots use the co-deployed resolver's marker/reparse checks.
+    `$_savedRtRoot = `$env:AGENT_RT_ROOT
+    try {
+        `$env:AGENT_RT_ROOT = `$_root
+        `$_resolver = Join-Path `$_root 'bin\resolve-runtime.ps1'
+        `$_py = ''
+        if ([IO.File]::Exists(`$_resolver)) {
+            . `$_resolver -TraceMode read-only
+            `$_py = `$AgentRtPy
+            if (`$_py) { `$_slot = Split-Path (Split-Path `$_py) }
+        }
+    } finally { `$env:AGENT_RT_ROOT = `$_savedRtRoot }
+}
 if (-not (`$_py -and (Test-Path -LiteralPath `$_py))) {
     # #742: marker missing/stale -> prefer last-known-good (the last version
     # activate() published) over a raw newest-slot guess, which could bind a
@@ -2904,69 +3066,23 @@ if (`$ResolveOnly) {
     Write-Output `$_py
     exit 0
 }
-`$_cacheId = [Guid]::NewGuid().ToString('N')
-`$_cache = [IO.Path]::GetFullPath((Join-Path `$_root "cache\python\unsealed-`$_cacheId"))
-if (-not `$_cache.StartsWith('\\?\')) {
-    `$_cache = if (`$_cache.StartsWith('\\')) { '\\?\UNC\' + `$_cache.Substring(2) } else { '\\?\' + `$_cache }
-}
-`$env:PYTHONUTF8 = '1'
-`$env:AGENT_DISPATCH_INSTALL_DIR = '$($InstallDir -replace "'","''")'
-Set-Location -LiteralPath `$PSScriptRoot
-`$envFile = Join-Path `$PSScriptRoot 'service.env'
-if (Test-Path `$envFile) {
-    foreach (`$line in Get-Content `$envFile) {
-        `$t = `$line.Trim()
-        if (`$t -eq '' -or `$t.StartsWith('#')) { continue }
-        `$kv = `$t -split '=', 2
-        if (`$kv.Count -eq 2) {
-            [Environment]::SetEnvironmentVariable(`$kv[0].Trim(), [Environment]::ExpandEnvironmentVariables(`$kv[1].Trim()), 'Process')
-        }
-    }
-}
-# A busy/locked log must NEVER block the coordinator launch. Prefer the canonical
-# serve-service.log; if it cannot be opened for append (a stale or concurrent
-# process still holds the handle), fall back to a VERSION- and pid-aware file so
-# startup always has a writable log. (Previously a locked log threw under
-# -ErrorActionPreference Stop and killed the launch before serve ever ran.)
-function Resolve-WritableLog([string]`$primary, [string]`$slot) {
-    `$ver = if (`$slot) { Split-Path -Leaf `$slot } else { 'unknown' }
-    `$alt = (`$primary -replace '\.log`$', "-`$ver-`$PID.log")
-    foreach (`$cand in @(`$primary, `$alt)) {
-        try { `$fs = [System.IO.File]::Open(`$cand, 'Append', 'Write', 'ReadWrite'); `$fs.Close(); return `$cand } catch { }
-    }
-    return `$alt
-}
-`$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'serve-service.log') `$_slot
-try {
-    if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
-        Move-Item -Force `$logFile "`$logFile.1"
-    }
-} catch { }
-`$pinned = if (`$env:AGENT_DISPATCH_HOST) { `$env:AGENT_DISPATCH_HOST } else { 'auto (resolved by serve)' }
-`$portShown = if (`$env:AGENT_DISPATCH_PORT) { `$env:AGENT_DISPATCH_PORT } else { 'default' }
-# Banner write is best-effort -- a logging hiccup must not be fatal (wrapped so a
-# late lock on the resolved path still can't kill startup).
-try {
-    "[`$(Get-Date -Format o)] agent-dispatch coordinator launch (host=`$pinned port=`$portShown log=`$logFile)" |
-        Out-File -FilePath `$logFile -Append -Encoding utf8
-} catch { }
-# Tee every stream (stdout/stderr/warning/info) to the log while still writing
-# through, so the retry lines from serve's bind-host resolution are captured.
-# serve logs via uvicorn to STDERR; under `$ErrorActionPreference = 'Stop'`
-# PowerShell wraps a native command's stderr as a terminating NativeCommandError
-# and would kill the long-lived coordinator on its very first log line (observed
-# on Anomalous-Potato: task launched, banner written, no listener). Drop to
-# 'Continue' for the serve invocation so stderr is captured, never fatal.
-`$ErrorActionPreference = 'Continue'
-try {
-    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch serve 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
-} catch {
-    # Teeing to the log failed (e.g. it got locked after resolution) -- keep the
-    # coordinator alive without the tee rather than let logging kill the service.
-    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch serve *> `$null
-}
+`$_service = Join-Path `$_slot 'Lib\site-packages\agent_dispatch\service_launchers\coordinator.ps1'
+if (-not [IO.File]::Exists(`$_service)) { throw "Selected Dispatch runtime has no slot-local coordinator launcher: `$_service" }
+& `$_service -InstallDir `$PSScriptRoot -RuntimePython `$_py -RuntimeSlot `$_slot
+exit `$LASTEXITCODE
 "@
-    [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
+    Publish-ServiceLauncher -Path $launcher -Content $launcherBody
+    if ($schedulingPolicy.windows_scheduled_task -ne 'enabled') {
+        if (-not $NoStart) { Invoke-DispatchCoordinatorEnsure }
+        return
+    }
+    if (-not (Test-DispatchStartIntent -Kind coordinator -Name $TaskName)) { return }
+    if (Get-DispatchNativeTask -Name $TaskName -Root $InstallDir) {
+        if (-not $NoStart) { Invoke-DispatchCoordinatorEnsure }
+        return
+    }
+    $haveSchedMod = [bool](Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)
+    if (-not $haveSchedMod) { throw 'Explicit coordinator scheduling requires ScheduledTasks registration support' }
 
     # -- Interactive-required host: prefer an Interactive-logon Scheduled Task --
     # Same desktop access as the HKCU Run auto-start it replaces (an interactive
@@ -2980,6 +3096,7 @@ try {
         Set-ServiceEnvLoopback
         if ($haveSchedMod -and (Install-InteractiveScheduledTask -Name $TaskName -Launcher $launcher `
                 -Description 'agent-dispatch -- portable agent task-queue coordinator (interactive)' -NoStart:$NoStart)) {
+            if (-not $NoStart) { Invoke-DispatchCoordinatorEnsure }
             if (Remove-CoordinatorAutostart) {
                 Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
             }
@@ -3002,8 +3119,7 @@ try {
                 default   { }
             }
         }
-        Start-CoordinatorNonElevatedFallback -Launcher $launcher -Primary
-        return
+        throw 'Explicit coordinator scheduling failed; no alternate startup registration was installed'
     }
 
     # Use conhost --headless to prevent Windows Terminal from capturing the
@@ -3052,20 +3168,9 @@ try {
     # logon-scoped coordinator via the fallback, racing the surviving boot task. So
     # if an existing task already matches the desired action AND is already S4U,
     # leave it untouched (and clear any stale logon fallback so nothing races it).
-    $existingTask = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($existingTask -and ($existingTask.Principal.LogonType -in @('S4U', 'Password'))) {
-        $curAct = @($existingTask.Actions)[0]
-        $sameAction = $curAct -and
-            ($curAct.Execute -eq $action.Execute) -and
-            ($curAct.Arguments -eq $action.Arguments) -and
-            (("" + $curAct.WorkingDirectory) -eq ("" + $action.WorkingDirectory))
-        if ($sameAction) {
-            Write-Ok "Coordinator boot task already configured (Scheduled Task '$TaskName') -- unchanged, left as-is"
-            if (Remove-CoordinatorAutostart) {
-                Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
-            }
-            return
-        }
+    if (Get-DispatchNativeTask -Name $TaskName -Root $InstallDir) {
+        if (-not $NoStart) { Invoke-DispatchCoordinatorEnsure }
+        return
     }
 
     $prevEAP = $ErrorActionPreference
@@ -3080,13 +3185,13 @@ try {
     $regOk = $false
     try {
         Register-ScheduledTask -TaskName $TaskName -Action $action -Trigger $trigger `
-            -Settings $settings -Principal $principal -Force `
+            -Settings $settings -Principal $principal `
             -Description 'agent-dispatch -- portable agent task-queue coordinator' | Out-Null
         $regOk = $?
     } catch {
         $regOk = $false
     }
-    if ($regOk) { if (-not $NoStart) { Start-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue } }
+    if ($regOk) { if (-not $NoStart) { Invoke-DispatchCoordinatorEnsure } }
     $ErrorActionPreference = $prevEAP
 
     if ($regOk) {
@@ -3101,7 +3206,7 @@ try {
             Write-Step "Removed the non-elevated logon fallback -- the Scheduled Task supersedes it"
         }
     } else {
-        Start-CoordinatorNonElevatedFallback -Launcher $launcher
+        throw 'Explicit coordinator scheduling failed; no alternate startup registration was installed'
     }
 }
 
@@ -3320,14 +3425,9 @@ function Install-InteractiveScheduledTask {
       activated launcher slot, which resolves the current version itself. First
       registration needs ONE elevated run.
 
-      Returns $true when the task ends up registered+enabled (whether by this
-      call or a prior one); $false when elevation is unavailable (first
-      install, non-elevated) and the caller should fall back to its own
-      non-elevated logon auto-start path -- unchanged, degrade-gracefully
-      behavior for a host where elevation truly cannot be obtained. Also
-      returns $false (never throws) when the ScheduledTasks cmdlets themselves
-      are unavailable, so a caller that skips the `$haveSchedMod` guard still
-      degrades gracefully instead of crashing the install.
+      Existing tasks are preserved without enabling, restarting or rewriting
+      them. Missing-task registration is explicit; unavailable cmdlets and
+      registration failures throw rather than installing alternate startup.
     #>
     param(
         [Parameter(Mandatory)][string]$Name,
@@ -3338,31 +3438,11 @@ function Install-InteractiveScheduledTask {
     )
 
     if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
-        return $false
+        throw 'Explicit interactive scheduling requires ScheduledTasks registration support'
     }
 
-    $existingTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-    $matchingType = $existingTask -and ($existingTask.Principal.LogonType -eq 'Interactive')
-    if ($matchingType -and (-not (Test-Elevated))) {
-        Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
-        if ($NoStart) {
-            # The caller explicitly asked not to (re)start anything right now
-            # (e.g. the coordinator's graceful-cutover path, where a NEW
-            # coordinator has already been brought up out-of-band and
-            # stopping/restarting this task would race or kill it) -- leave an
-            # already-running task's process completely untouched.
-            Write-Ok "$Description already registered (Scheduled Task '$Name'; left running as-is, -NoStart)"
-        } else {
-            # Start-ScheduledTask on an already-Running task is a no-op in Task
-            # Scheduler, so picking up a freshly activated launcher slot needs
-            # an explicit stop before the restart.
-            Stop-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-            Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-            Write-Ok "$Description refreshed in place (Scheduled Task '$Name'; restarted onto the new build -- no re-register, no elevation)"
-        }
-        return $true
-    }
-
+    $existingTask = Get-DispatchNativeTask -Name $Name -Root $InstallDir -Required
+    if ($existingTask) { return $true }
     $action = New-ScheduledTaskAction -Execute 'conhost.exe' `
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`"" `
         -WorkingDirectory $WorkingDirectory
@@ -3379,7 +3459,7 @@ function Install-InteractiveScheduledTask {
     $regOk = $false
     try {
         Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger `
-            -Settings $settings -Principal $principal -Force `
+            -Settings $settings -Principal $principal `
             -Description $Description | Out-Null
         $regOk = $?
     } catch {
@@ -3387,29 +3467,33 @@ function Install-InteractiveScheduledTask {
     }
     $ErrorActionPreference = $prevEAP
     if (-not $regOk) {
-        return $false
+        throw 'Explicit interactive task registration failed; no alternate startup was installed'
     }
-    Enable-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue | Out-Null
-    if (-not $NoStart) { Start-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue }
-    Write-Ok "$Description installed + started (Scheduled Task '$Name'; interactive logon, self-restarting)"
+    Write-Ok "$Description registered (Scheduled Task '$Name'; runtime readiness is independent)"
     return $true
 }
 
 function Start-DispatchDetachedLogonLauncher {
     param(
         [Parameter(Mandatory)][string]$Launcher,
-        [string[]]$LauncherArguments = @()
+        [string[]]$LauncherArguments = @(),
+        [switch]$Ensure,
+        [string]$Python = $LinkPython
     )
     $spawn = @'
 import base64
+import hashlib
 import json
 import sys
 from pathlib import Path
 from agent_procutil import spawn_daemon
 from agent_procutil.owned_process import run_caller_owned
 
-command = sys.argv[2:]
+ensure = sys.argv[2] == 'ensure'
+command = sys.argv[3:]
 launcher = Path(command[command.index('-File') + 1])
+profile = Path(command[command.index('-EnvFile') + 1]) if ensure else None
+generation = hashlib.sha256(profile.read_bytes()).hexdigest() if profile is not None else None
 with launcher.open(encoding='utf-8-sig') as stream:
     if stream.readline().strip() != '# agent-dispatch-supervisor-launch-v1':
         raise ValueError('Supervisor launcher does not support launch description v1')
@@ -3435,6 +3519,12 @@ if (
     or not isinstance(description['log_path'], str)
 ):
     raise ValueError('Invalid supervisor launch description v1')
+if ensure:
+    from agent_dispatch.supervisor_lane_status import ensure as ensure_profile
+    arguments = description['arguments']
+    module = arguments.index('agent_dispatch')
+    ensure_profile(Path(sys.argv[1]), profile, arguments[module + 1:], generation=generation)
+    raise SystemExit(0)
 spawn_daemon(
     [description['executable'], '-X', 'agent_dispatch_install_dir=' + sys.argv[1],
      *description['arguments']], cwd=sys.argv[1],
@@ -3451,7 +3541,9 @@ spawn_daemon(
         throw 'Could not resolve a usable Windows PowerShell application (powershell.exe)'
     }
     $windowsPowerShell = (Get-Item -LiteralPath $windowsPowerShell -ErrorAction Stop).FullName
-    & $LinkPython -c $spawn $InstallDir $windowsPowerShell -NoProfile -ExecutionPolicy Bypass `
+    $launchMode = if ($Ensure) { 'ensure' } else { 'launch' }
+    $pythonPrefix = if ($Ensure) { @('-I', '-B') } else { @() }
+    & $Python @pythonPrefix -c $spawn $InstallDir $launchMode $windowsPowerShell -NoProfile -ExecutionPolicy Bypass `
         -File $Launcher @LauncherArguments
     if ($LASTEXITCODE -ne 0) {
         throw "Could not launch durable service '$Launcher' outside the installer Job"
@@ -3589,126 +3681,12 @@ if (`$ResolveOnly) {
     Write-Output `$_py
     exit 0
 }
-`$_cacheId = [Guid]::NewGuid().ToString('N')
-`$_cache = [IO.Path]::GetFullPath((Join-Path `$_root "cache\python\unsealed-`$_cacheId"))
-if (-not `$_cache.StartsWith('\\?\')) {
-    `$_cache = if (`$_cache.StartsWith('\\')) { '\\?\UNC\' + `$_cache.Substring(2) } else { '\\?\' + `$_cache }
-}
-`$env:PYTHONUTF8 = '1'
-`$env:AGENT_DISPATCH_INSTALL_DIR = '$($InstallDir -replace "'","''")'
-Set-Location -LiteralPath `$PSScriptRoot
-`$envFile = `$EnvFile
-`$labels = ''
-`$interval = '30'
-`$maxConcurrent = '1'
-`$maxAttempts = '3'
-`$labelMaxAttempts = ''
-`$embodyBackend = ''
-`$cliLabels = ''
-`$headlessLabels = ''
-`$headlessAgent = ''
-`$extra = ''
-`$mode = ''
-`$sMachine = ''
-if (Test-Path `$envFile) {
-    foreach (`$line in Get-Content `$envFile) {
-        `$t = `$line.Trim()
-        if (`$t -eq '' -or `$t.StartsWith('#')) { continue }
-        `$kv = `$t -split '=', 2
-        if (`$kv.Count -ne 2) { continue }
-        `$k = `$kv[0].Trim(); `$v = `$kv[1].Trim()
-        switch (`$k) {
-            'AGENT_DISPATCH_SUPERVISE_LABELS'         { `$labels = `$v }
-            'AGENT_DISPATCH_SUPERVISE_INTERVAL'       { if (`$v) { `$interval = `$v } }
-            'AGENT_DISPATCH_SUPERVISE_MAX_CONCURRENT' { if (`$v) { `$maxConcurrent = `$v } }
-            'AGENT_DISPATCH_SUPERVISE_MAX_ATTEMPTS'   { if (`$v) { `$maxAttempts = `$v } }
-            'AGENT_DISPATCH_SUPERVISE_LABEL_MAX_ATTEMPTS' { `$labelMaxAttempts = `$v }
-            'AGENT_DISPATCH_SUPERVISE_EMBODY_BACKEND'  { `$embodyBackend = `$v }
-            'AGENT_DISPATCH_SUPERVISE_CLI_LABELS'      { `$cliLabels = `$v }
-            'AGENT_DISPATCH_SUPERVISE_HEADLESS_LABELS' { `$headlessLabels = `$v }
-            'AGENT_DISPATCH_SUPERVISE_HEADLESS_AGENT'  { `$headlessAgent = `$v }
-            'AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS'     { `$extra = `$v }
-            'AGENT_DISPATCH_SUPERVISE_MODE'           { `$mode = `$v }
-            'AGENT_DISPATCH_SUPERVISE_MACHINE'        { `$sMachine = `$v }
-        }
-    }
-}
-if (`$mode -eq 'serve') {
-    # MODE=serve (opt-in): run the single MASTER registrar daemon instead of the
-    # classic direct embody loop. The daemon reconciles declared pools (discovered
-    # pointers) + this host's legacy env profiles (--legacy-env: supervisor.env +
-    # supervisors/*.env), each in its own subprocess. It is self-gating (only
-    # labeled declarations/profiles run), so it needs no label opt-in here.
-    `$argsList = @('supervise', 'serve', '--legacy-env', '--interval', `$interval)
-    # Explicit machine scope (recommended for a service context, where CWD-based
-    # identity resolution can fail and leave the daemon unable to scope
-    # machine-pinned declarations -- the downstream tracker). Falls back to the host
-    # node name at runtime when unset.
-    if (`$sMachine) { `$argsList += @('--machine', `$sMachine) }
-    if (`$extra) { `$argsList += (`$extra -split '\s+') }
-} else {
-`$argsList = @('supervise', '--all-repos', '--interval', `$interval,
-    '--max-concurrent', `$maxConcurrent, '--max-attempts', `$maxAttempts)
-`$haveLabel = `$false
-foreach (`$l in (`$labels -split '[\s,]+')) {
-    if (`$l) { `$argsList += @('--label', `$l); `$haveLabel = `$true }
-}
-if (-not `$haveLabel) {
-    Write-Error "agent-dispatch-supervisor: refusing to run with no opt-in label. A label-less supervisor would embody EVERY queued task. Set AGENT_DISPATCH_SUPERVISE_LABELS in `$envFile."
-    exit 78  # EX_CONFIG
-}
-foreach (`$lm in (`$labelMaxAttempts -split '[\s,]+')) {
-    if (`$lm) { `$argsList += @('--label-max-attempts', `$lm) }
-}
-if (`$embodyBackend) { `$argsList += @('--embody-backend', `$embodyBackend) }
-foreach (`$cl in (`$cliLabels -split '[\s,]+')) {
-    if (`$cl) { `$argsList += @('--cli-label', `$cl) }
-}
-foreach (`$hl in (`$headlessLabels -split '[\s,]+')) {
-    if (`$hl) { `$argsList += @('--headless-label', `$hl) }
-}
-if (`$headlessAgent) { `$argsList += @('--headless-agent', `$headlessAgent) }
-if (`$extra) { `$argsList += (`$extra -split '\s+') }
-}
-# A busy/locked log must NEVER block the supervisor launch -- prefer the canonical
-# supervise-service.log, else a VERSION- and pid-aware fallback (see serve-service).
-function Resolve-WritableLog([string]`$primary, [string]`$slot) {
-    `$ver = if (`$slot) { Split-Path -Leaf `$slot } else { 'unknown' }
-    `$alt = (`$primary -replace '\.log`$', "-`$ver-`$PID.log")
-    foreach (`$cand in @(`$primary, `$alt)) {
-        try { `$fs = [System.IO.File]::Open(`$cand, 'Append', 'Write', 'ReadWrite'); `$fs.Close(); return `$cand } catch { }
-    }
-    return `$alt
-}
-`$logFile = Resolve-WritableLog (Join-Path `$PSScriptRoot 'supervise-service.log') `$_slot
-try {
-    if ((Test-Path `$logFile) -and ((Get-Item `$logFile).Length -gt 1MB)) {
-        Move-Item -Force `$logFile "`$logFile.1"
-    }
-} catch { }
-if (`$DescribeLaunch) {
-    `$description = @{
-        version = 1
-        executable = `$_py
-        arguments = @('-X', ('pycache_prefix=' + `$_cache), '-m', 'agent_dispatch') + `$argsList
-        log_path = `$logFile
-    } | ConvertTo-Json -Compress -Depth 4
-    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(`$description))
-    exit 0
-}
-try {
-    "[`$(Get-Date -Format o)] agent-dispatch supervisor launch (env=`$envFile labels=`$labels interval=`$interval log=`$logFile)" |
-        Out-File -FilePath `$logFile -Append -Encoding utf8
-} catch { }
-`$ErrorActionPreference = 'Continue'
-try {
-    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch @argsList 2>&1 | Out-File -FilePath `$logFile -Append -Encoding utf8
-} catch {
-    # Teeing to the log failed -- keep the supervisor alive without the tee.
-    & `$_py -X ('pycache_prefix=' + `$_cache) -m agent_dispatch @argsList *> `$null
-}
+`$_service = Join-Path `$_slot 'Lib\site-packages\agent_dispatch\service_launchers\supervisor.ps1'
+if (-not [IO.File]::Exists(`$_service)) { throw "Selected Dispatch runtime has no slot-local supervisor launcher: `$_service" }
+& `$_service -InstallDir `$PSScriptRoot -RuntimePython `$_py -RuntimeSlot `$_slot -EnvFile `$EnvFile -DescribeLaunch:`$DescribeLaunch
+exit `$LASTEXITCODE
 "@
-    [System.IO.File]::WriteAllText($launcher, $launcherBody, $utf8NoBom)
+    Publish-ServiceLauncher -Path $launcher -Content $launcherBody
     return $launcher
 }
 
@@ -3753,6 +3731,12 @@ function Install-SupervisorTaskInstance {
         [Parameter(Mandatory)][string]$Launcher,
         [Parameter(Mandatory)][string]$DisplayName
     )
+    $existingNative = Get-DispatchNativeTask -Name $Name -Root $InstallDir
+    if ($existingNative) {
+        Invoke-DispatchSupervisorEnsure -Name $Name -EnvFile $EnvFile -Launcher $Launcher
+        if ($existingNative.State -ne 'Disabled') { $script:SupervisorReconciledNames[$Name] = $true }
+        return
+    }
 
     # MODE=serve runs the self-gating master daemon, so it is enabled
     # unconditionally (no label opt-in); the direct loop stays label-gated.
@@ -3777,8 +3761,8 @@ function Install-SupervisorTaskInstance {
             Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile
             if (Install-InteractiveScheduledTask -Name $Name -Launcher $Launcher `
                     -Description 'agent-dispatch -- embody + companion supervisor (interactive)') {
-                $startedTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-                if ($startedTask -and $startedTask.State -eq 'Running') {
+                Invoke-DispatchSupervisorEnsure -Name $Name -EnvFile $EnvFile -Launcher $Launcher
+                if (Test-DispatchStartIntent -Kind supervisor -Name $Name) {
                     $script:SupervisorReconciledNames[$Name] = $true
                     Invoke-SupervisorAudit -Event restart -Reason interactive-task-refresh -Name $Name -EnvFile $EnvFile -Outcome ok
                 } else {
@@ -3798,8 +3782,7 @@ function Install-SupervisorTaskInstance {
                 'removed' { Write-Step "Removed prior supervisor Scheduled Task '$Name' (interactive mode)" }
                 default   { }
             }
-            Install-SupervisorLogonAutostart -Name $Name -Launcher $Launcher -EnvFile $EnvFile
-            return
+            throw 'Explicit supervisor scheduling failed; no alternate startup registration was installed'
         }
         switch (Remove-SupervisorTask -Name $Name) {
             'removed' { Write-Step "Removed prior supervisor Scheduled Task '$Name' (interactive mode)" }
@@ -3814,34 +3797,10 @@ function Install-SupervisorTaskInstance {
         -Argument "--headless powershell.exe -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$Launcher`" -EnvFile `"$EnvFile`"" `
         -WorkingDirectory $InstallDir
 
-    # Register-ONCE model (#689 / #1837): re-registering (Register -Force, which
-    # needs elevation) is reserved for first install or an ACTUAL task-definition
-    # change -- never a routine update, elevated or not. Compare the
-    # already-registered task's action against the one this update would
-    # produce; the launcher/env-file/install-dir paths are all stable across
-    # ordinary updates, so a match here means "already correct", regardless of
-    # the caller's elevation state. Only a genuine drift (a real migration, e.g.
-    # an install-dir move) falls through to re-register.
-    $existingTask = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
-    if ($existingTask) {
-        $existingAction = $existingTask.Actions | Select-Object -First 1
-        $matchesDesired = $existingAction -and
-            $existingAction.Execute -eq $action.Execute -and
-            $existingAction.Arguments -eq $action.Arguments -and
-            $existingAction.WorkingDirectory -eq $action.WorkingDirectory
-        if ($matchesDesired) {
-            Restart-SupervisorTaskInPlace -Name $Name -EnvFile $EnvFile -Mode $mode -DisplayName $DisplayName
-            return
-        }
-        if (-not (Test-Elevated)) {
-            # A genuine definition drift, but we cannot re-register without
-            # elevation -- keep the existing (stale) task registration rather
-            # than losing it, and just cycle the running process onto the new
-            # slot; say so instead of silently no-op'ing the migration.
-            Write-Warn "$DisplayName task definition changed but elevation is unavailable to migrate it -- run elevated once to update the task; refreshing the running process onto the new slot meanwhile"
-            Restart-SupervisorTaskInPlace -Name $Name -EnvFile $EnvFile -Mode $mode -DisplayName $DisplayName
-            return
-        }
+    # A task that appeared during preparation is preserved too.
+    if (Get-DispatchNativeTask -Name $Name -Root $InstallDir) {
+        Invoke-DispatchSupervisorEnsure -Name $Name -EnvFile $EnvFile -Launcher $Launcher
+        return
     }
 
     $trigger = New-ScheduledTaskTrigger -AtLogOn
@@ -3849,6 +3808,7 @@ function Install-SupervisorTaskInstance {
         -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
         -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) `
         -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
+    $settings.Enabled = ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile))
     $currentUser = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
     $principal = New-ScheduledTaskPrincipal -UserId $currentUser -LogonType Interactive -RunLevel Limited
 
@@ -3857,7 +3817,7 @@ function Install-SupervisorTaskInstance {
     $regOk = $false
     try {
         Register-ScheduledTask -TaskName $Name -Action $action -Trigger $trigger `
-            -Settings $settings -Principal $principal -Force `
+            -Settings $settings -Principal $principal `
             -Description 'agent-dispatch -- embody spawn supervisor (labeled queued tasks -> host embody autopilots)' | Out-Null
         $regOk = $?
     } catch {
@@ -3866,14 +3826,13 @@ function Install-SupervisorTaskInstance {
     if (-not $regOk) {
         $script:SupervisorReconcileFailed = $true
         $ErrorActionPreference = $prevEAP
-        Write-Warn "$DisplayName not registered (first-time task registration needs elevation) -- run elevated ONCE to install the task; subsequent updates refresh it in place, no elevation"
-        return
+        throw "$DisplayName explicit task registration failed; no alternate startup was installed"
     }
 
     if ($mode -eq 'serve' -or (Test-SupervisorLabelsConfigured -EnvFile $EnvFile)) {
-        Invoke-SupervisorTaskAction -Operation enable -Name $Name -Reason configured-opt-in
-        $enabled = $script:SupervisorActionSucceeded
-        Invoke-SupervisorTaskAction -Operation start -Name $Name -Reason configured-opt-in
+        Invoke-DispatchSupervisorEnsure -Name $Name -EnvFile $EnvFile -Launcher $Launcher
+        $enabled = Test-DispatchStartIntent -Kind supervisor -Name $Name
+        if ($enabled) { $script:SupervisorReconciledNames[$Name] = $true }
         $ErrorActionPreference = $prevEAP
         if (-not $enabled -or -not $script:SupervisorReconciledNames[$Name]) {
             $script:SupervisorReconcileFailed = $true
@@ -3886,9 +3845,8 @@ function Install-SupervisorTaskInstance {
     } else {
         # No opt-in label -> leave the task registered but DISABLED (inert), the
         # Windows analogue of an installed-but-not-enabled systemd unit.
-        Invoke-SupervisorTaskAction -Operation disable -Name $Name -Reason installer-inert
         $ErrorActionPreference = $prevEAP
-        if ($script:SupervisorActionSucceeded) { Write-Ok "$DisplayName installed (INERT: no opt-in label; task disabled). To enable: set" }
+        Write-Ok "$DisplayName installed (INERT: no opt-in label; task disabled). To enable: set"
         Write-Step "AGENT_DISPATCH_SUPERVISE_LABELS in $EnvFile, then explicitly enable the native task:"
         Write-Step "Enable-ScheduledTask -TaskName $Name; Start-ScheduledTask -TaskName $Name"
     }
@@ -3896,6 +3854,43 @@ function Install-SupervisorTaskInstance {
 
 function Install-SupervisorTask {
     Assert-DispatchActions @('supervisor-reconcile')
+    $schedulingPolicy = Get-DispatchSchedulingPolicy
+    if ($env:OS -eq 'Windows_NT' -and
+        ($schedulingPolicy.windows_scheduled_task -ne 'enabled' -or -not $schedulingPolicy.start_supervisor)) {
+        if (($NoSupervisor -or $NoService) -and $schedulingPolicy.windows_scheduled_task -eq 'preserve') {
+            Write-Skip 'Supervisor capability skipped; existing registrations preserved'
+            return
+        }
+        if (-not (Test-Path $SupervisorProfileDir)) {
+            New-Item -ItemType Directory -Force -Path $SupervisorProfileDir | Out-Null
+        }
+        $envFile = Write-SupervisorDefaultEnv
+        $launcher = Write-SupervisorLauncher
+        $instances = @(@{ Name = $SupervisorTaskName; EnvFile = $envFile })
+        if ((Get-SupervisorMode -EnvFile $envFile) -ne 'serve' -or
+            (-not $NoSupervisor -and -not $NoService -and
+                -not (Test-DispatchStartIntent -Kind supervisor -Name $SupervisorTaskName))) {
+            foreach ($profile in @(Get-SupervisorProfileFiles)) {
+                $instances += @{ Name = (Get-SupervisorTaskName -ProfileName $profile.BaseName); EnvFile = $profile.FullName }
+            }
+        }
+        if ($schedulingPolicy.windows_scheduled_task -eq 'absent') {
+            $names = @($instances | ForEach-Object { $_.Name })
+            if (Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) {
+                $names += @(Get-ScheduledTask -ErrorAction Stop | Where-Object {
+                    $_.TaskName -like "$SupervisorTaskName-*"
+                } | ForEach-Object { $_.TaskName })
+            }
+            Remove-DispatchScheduledTaskOnly -Root $InstallDir -Coordinator $TaskName `
+                -Supervisor $SupervisorTaskName -Names $names -Policy $schedulingPolicy
+        }
+        if (-not $NoSupervisor -and -not $NoService) {
+            foreach ($instance in $instances) {
+                Invoke-DispatchSupervisorEnsure -Name $instance.Name -EnvFile $instance.EnvFile -Launcher $launcher
+            }
+        }
+        return
+    }
     $script:SupervisorReconcileFailed = $false
     $script:SupervisorReconciledNames = @{}
     Invoke-SupervisorAudit -Event service-reconcile -Reason configured-supervisor-pass
@@ -3903,15 +3898,6 @@ function Install-SupervisorTask {
     # local coordinator for the supervisor to talk to). -NoSupervisor opts a full
     # host out; -NoService (client-only) skips it too. Remove stale primary and
     # profile tasks in either case so a host that became client-only stops supervising.
-    if ($env:OS -eq 'Windows_NT') {
-        # Stop service-manager roots first so restart-on-failure cannot race the
-        # inventory reap, then retire all detached generations exactly once.
-        Invoke-SupervisorsStop
-        $retired = Retire-SupervisorProcesses
-        if ($retired -gt 0) {
-            Write-Step "Retired $retired prior supervisor wrapper/master/child process(es)"
-        }
-    }
     if ($NoSupervisor -or $NoService) {
         $reason = if ($NoSupervisor) { 'explicit-no-supervisor' } else { 'explicit-client-only' }
         Invoke-SupervisorAudit -Event selection -Reason $reason -Name $SupervisorTaskName -Outcome skipped
@@ -3919,7 +3905,6 @@ function Install-SupervisorTask {
             & $driverPython @driverArguments --remove-broker
             if ($LASTEXITCODE -ne 0) { throw 'Owned broker removal failed; runtimes preserved' }
         }
-        Remove-AllSupervisorTasks
         Invoke-SupervisorAudit -Event service-reconcile -Reason sequence-complete -Name $SupervisorTaskName -Outcome $(if ($script:SupervisorReconcileFailed) { 'fail' } else { 'ok' })
         Write-Skip 'Embody supervisor skipped (client-only / -NoSupervisor)'
         return
@@ -3927,8 +3912,7 @@ function Install-SupervisorTask {
     if ($env:OS -ne 'Windows_NT') { return }
     if (-not (Get-Command Register-ScheduledTask -ErrorAction SilentlyContinue)) {
         Invoke-SupervisorAudit -Event service-reconcile -Reason platform-unavailable -Outcome skipped
-        Write-Skip 'ScheduledTasks module unavailable -- run "agent-dispatch supervise --all-repos --label <L>" manually'
-        return
+        throw 'Explicit supervisor scheduling requires ScheduledTasks registration support'
     }
 
     if (-not (Test-Path $SupervisorProfileDir)) {
@@ -3953,14 +3937,14 @@ function Install-SupervisorTask {
                 $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
                 Invoke-SupervisorStart -Name $name -EnvFile $profile.FullName -Label "Embody supervisor profile '$($profile.BaseName)'"
             }
-        } else { Remove-ProfileSupervisorTasks }
+        } else { Write-Skip 'Existing profile registrations preserved; explicit absence owns retirement' }
     } else {
         foreach ($profile in @(Get-SupervisorProfileFiles)) {
             $name = Get-SupervisorTaskName -ProfileName $profile.BaseName
             Install-SupervisorTaskInstance -Name $name -EnvFile $profile.FullName `
                 -Launcher $launcher -DisplayName "Embody supervisor profile '$($profile.BaseName)'"
         }
-        Remove-OrphanSupervisorProfiles
+        Write-Skip 'Existing orphan registrations preserved; explicit absence owns retirement'
     }
     Invoke-SupervisorAudit -Event service-reconcile -Reason sequence-complete -Name $SupervisorTaskName -EnvFile $envFile -Outcome $(if ($script:SupervisorReconcileFailed) { 'fail' } else { 'ok' })
 }
@@ -4016,7 +4000,7 @@ function Write-SupervisorStatus {
         [Parameter(Mandatory)][string]$EnvFile,
         [Parameter(Mandatory)][string]$Label
     )
-    $task = Get-ScheduledTask -TaskName $Name -ErrorAction SilentlyContinue
+    $task = Get-DispatchNativeTask -Name $Name -Root $InstallDir
     if ($task) {
         if (Test-SupervisorLabelsConfigured -EnvFile $EnvFile) {
             Write-Ok "$Label task: $Name $($task.State)"
@@ -4239,7 +4223,7 @@ function Invoke-Install {
     Install-CoordinatorTask
     Remove-CoordinatorFirewallRule
     Install-SupervisorTask
-    if (-not $NoService) { Confirm-CoordinatorRunning }
+    if (-not $NoService -and (Test-DispatchStartIntent -Kind coordinator -Name $TaskName)) { Confirm-CoordinatorRunning }
     Invoke-SupervisorAudit -Event installer-reconcile -Reason invocation-returned -Outcome ok
     Write-Ok 'agent-dispatch install'
 }
@@ -4347,12 +4331,9 @@ function Invoke-Update {
     # serving the old slot, stand the new slot up passive, flip the routing table,
     # drain the old coordinator at its safe cutover point (between task claims),
     # and retire it -- in-process, automatic, no operator step. Spawned task
-    # workers outlive the coordinator swap. Install-SupervisorTask then retires
-    # every prior supervisor service generation and starts exactly the configured
-    # current generation, preventing old autonomous emitters/lanes from surviving
-    # a runtime update. Falls back to a normal start only when no live coordinator
-    # exists to cut over from, or the cutover cannot run.
-    if (-not $NoService) {
+    # workers outlive the coordinator swap. Supervisor readiness is independent
+    # of schedule reconciliation; no generation-wide worker sweep precedes it.
+    if (-not $NoService -and (Test-DispatchStartIntent -Kind coordinator -Name $TaskName)) {
         $didCutover = $false
         # Hold the SAME global (version-independent) lock
         # Invoke-VersionedActivate itself uses to publish current-version,
@@ -4393,11 +4374,7 @@ function Invoke-Update {
                     # Pre-Thread-B coordinator (unrouted, no /drain): one-time
                     # stop-and-swap (invariant #2 fallback). Every future update from a
                     # Thread-B build is graceful. The supervisor is left running.
-                    Assert-DispatchActions @('coordinator-replacement')
-                    $stopped = Stop-DispatchProcess -Subcommand serve
-                    if ($stopped -gt 0) {
-                        Write-Step "Stopped $stopped pre-cutover coordinator process(es) -- one-time transition to graceful cutover"
-                    }
+                    Write-Skip 'Unrouted incumbent retained; the existing deploy owner establishes incoming readiness'
                 }
             }
             if ($RequireGracefulCutover -and -not $didCutover) {
@@ -4432,25 +4409,21 @@ function Invoke-Start {
     # Mark the live-service start lifecycle as in-progress (ce#5066).
     Write-UpdateMarker
     try {
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
-    if ($task) {
-        Start-ScheduledTask -TaskName $TaskName
-        Write-Ok 'Coordinator started'
-    } else {
-        # Non-elevated host: no Scheduled Task was registrable, so the coordinator
-        # runs from the detached fallback launcher. Start that rather than hard-
-        # failing (the client is installed; #3602).
-        $launcher = Join-Path $InstallDir 'serve-service.ps1'
-        if (Test-Path $launcher) {
-            Start-CoordinatorNonElevatedFallback -Launcher $launcher -Primary:((Get-ServiceMode) -eq 'interactive')
-        } else {
-            Write-Fail "No coordinator task or launcher installed -- run: install.ps1 -Action install"; exit 1
+    if (-not $NoService) { Invoke-DispatchCoordinatorEnsure }
+    if (-not $NoSupervisor -and -not $NoService) {
+        $launcher = Join-Path $InstallDir 'supervise-service.ps1'
+        $primary = Join-Path $InstallDir 'supervisor.env'
+        $instances = @(@{ Name = $SupervisorTaskName; EnvFile = $primary })
+        if ((Get-SupervisorMode -EnvFile $primary) -ne 'serve' -or
+            -not (Test-DispatchStartIntent -Kind supervisor -Name $SupervisorTaskName)) {
+            $instances += @(Get-SupervisorProfileFiles | ForEach-Object {
+                @{ Name = (Get-SupervisorTaskName -ProfileName $_.BaseName); EnvFile = $_.FullName }
+            })
+        }
+        foreach ($instance in $instances) {
+            Invoke-DispatchSupervisorEnsure -Name $instance.Name -EnvFile $instance.EnvFile -Launcher $launcher
         }
     }
-    # Start every supervisor that is enabled (label-gated). Disabled/inert
-    # primary/profile supervisors are left alone.
-    Invoke-SupervisorsStart
-    Confirm-CoordinatorRunning
     } finally {
         Clear-UpdateMarker
     }
@@ -4464,7 +4437,8 @@ function Invoke-Stop {
     $killedSup = Retire-SupervisorProcesses
     if ($killedSup -gt 0) { Write-Ok "Embody supervisor stopped ($killedSup process(es))" }
 
-    if (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue) {
+    if ((Get-Command Get-ScheduledTask -ErrorAction SilentlyContinue) -and
+        (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue)) {
         Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
     }
     $killedCoord = Stop-DispatchProcess -Subcommand serve
@@ -4487,7 +4461,7 @@ function Invoke-Status {
         Write-Skip 'No deploy manifest -- not installed?'
     }
     Write-Ok "Service mode: $(Get-ServiceMode)"
-    $task = Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
+    $task = Get-DispatchNativeTask -Name $TaskName -Root $InstallDir
     if ($task) {
         Write-Ok "Coordinator task: $($task.State)"
     } else {
@@ -4496,7 +4470,7 @@ function Invoke-Status {
         if ($auto) {
             Write-Ok 'Coordinator: interactive logon auto-start (HKCU Run; no boot task)'
         } else {
-            Write-Skip 'No coordinator task (client-only host)'
+            Write-Skip 'No coordinator Scheduled Task (user-mode capability is independent)'
         }
     }
     Write-SupervisorsStatus
@@ -4796,11 +4770,15 @@ if ($script:InstallerLifecycleAction) { Write-InstallerLifecycle begin }
 Assert-InstallActions
 if ($Action -in @('install', 'update', 'provision', 'stamp', 'prepare')) {
     Initialize-SourceRuntime
+    if ($WheelProfile) {
+        Initialize-NativeWheelRuntime -Python $WheelPython -Profile $WheelProfile `
+            -Directory $WheelDirectory -Payload $PluginDir -Plugin 'agent-dispatch' -Root $InstallDir
+    }
     Assert-SourceRuntime
 }
 if ($Action -in @('install', 'update', 'provision') -and -not $PreserveSupervisors) {
     . (Join-Path $PSScriptRoot 'installer-instance-reconcile.ps1')
-    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot
+    Invoke-InstallerInstanceReconcile -HelperRoot $PSScriptRoot -RuntimeRoot $InstallDir
 }
 switch ($Action) {
     'install'   { Invoke-Install }

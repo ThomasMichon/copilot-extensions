@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from . import output, repos
 
+CAPABILITIES = {"repository_registration_preflight": 1, "knowledge_repository_creation": 1}
+
 
 def command(argv: list[str]) -> int:
     """List registry entries; strict failures never become a healthy empty list."""
@@ -25,6 +27,7 @@ def command(argv: list[str]) -> int:
     if "--json" in argv:
         payload = {
             "platform": repos._current_platform(),
+            "capabilities": dict(CAPABILITIES),
             "repos": [
                 {
                     "name": entry.name,

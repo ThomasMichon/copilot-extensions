@@ -37,6 +37,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import installer_engine_ref as ier
+import materialize_installer_engine as materializer
 import uv_editable_ref as uer
 
 REPO = ier.REPO
@@ -267,7 +268,41 @@ def unregistered_adopters() -> list[str]:
     )
 
 
-def verify() -> list[str]:
+def _development_layout_problems() -> list[str]:
+    problems = []
+    for plugin in ADOPTERS:
+        mode, _states, structural = _wrapper_mode(plugin)
+        problems.extend(structural)
+        for name in FILES:
+            source = CANONICAL_DIR / name
+            destination = REPO / "plugins" / plugin / "scripts" / name
+            for path, required in ((source, True), (destination, False)):
+                if problem := materializer.derived_path_problem(path, REPO, required=required):
+                    problems.append(problem)
+            if mode == "canonical" and (destination.exists() or destination.is_symlink()):
+                problems.append(f"{destination}: canonical-reference Dev layout must not carry a native writer copy")
+    for source, destination in materializer.derived_file_pairs(REPO, REPO):
+        for path, required in ((source, True), (destination, False)):
+            if problem := materializer.derived_path_problem(path, REPO, required=required):
+                problems.append(problem)
+    return problems
+
+
+def _canonical_engine_links() -> list[str]:
+    return [
+        f"{linked} is a symlink -- refusing"
+        for name in FILES
+        if (linked := uer._find_symlinked_ancestor(CANONICAL_DIR / name, REPO.resolve())) is not None
+    ]
+
+
+def verify(*, phase: str = "materialized") -> list[str]:
+    """Source layout is not packaged qualification; default keeps exact copies."""
+    if phase not in {"development", "materialized"}:
+        raise ValueError(f"Unknown installer validation phase: {phase}")
+    if links := _canonical_engine_links():
+        return links
+    development = phase == "development"
     problems: list[str] = []
     try:
         projected = ier.native_executable_config(CANONICAL_DIR)
@@ -281,7 +316,9 @@ def verify() -> list[str]:
             f"plugins/{plugin} uses installer-engine but is not listed in "
             "ADOPTERS, so the tool does not track its expected dev-time form"
         )
-    for plugin in ADOPTERS:
+    if development:
+        problems.extend(_development_layout_problems())
+    for plugin in (() if development else ADOPTERS):
         problems.extend(_adopter_problems(plugin))
     if ier.human_output_enabled(CANONICAL_DIR):
         source = CANONICAL_DIR / ier.HUMAN_HELPER
@@ -291,6 +328,11 @@ def verify() -> list[str]:
             script = ier.human_output_entrypoint(scripts.parent)
             declaration = script.with_suffix(".human-output.json")
             try:
+                if development:
+                    if problem := materializer.derived_path_problem(declaration, REPO, required=True):
+                        raise ValueError(problem)
+                    materializer.validate_human_output_sources(REPO, consumers=(scripts.parent,))
+                    continue
                 for path in (source, helper, script, declaration):
                     if uer._find_symlinked_ancestor(path, REPO.resolve()) is not None:
                         raise ValueError(f"{path}: linked human-output asset refused")
@@ -300,7 +342,7 @@ def verify() -> list[str]:
                     raise ValueError(f"{declaration}: native human-output declaration drift")
             except (OSError, ValueError) as error:
                 problems.append(str(error))
-    for consumer in ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS):
+    for consumer in (() if development else ier.python_adopter_dirs(REPO, plugins=PYTHON_ADOPTERS)):
         for name in (*ier.PYTHON_FILES, *ier.SUPPORT_FILES):
             source = CANONICAL_DIR / name
             destination = consumer / "scripts" / name
@@ -313,8 +355,8 @@ def verify() -> list[str]:
                 problems.append(f"{indirect} is a symlink -- refusing")
             elif not destination.is_file() or destination.read_bytes() != source.read_bytes():
                 problems.append(f"{destination.relative_to(REPO)} differs from canonical Python engine")
-    for consumer in ier.native_adopter_dirs(REPO):
-        for name in ier.STANDALONE_NATIVE_FILES:
+    for consumer in (() if development else ier.native_adopter_dirs(REPO)):
+        for name in ier.native_files(consumer, REPO):
             source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())
@@ -339,7 +381,7 @@ def verify() -> list[str]:
     plugins = REPO / "plugins"
     for candidate in plugins.iterdir() if plugins.is_dir() else ():
         native_files = (
-            ier.STANDALONE_NATIVE_FILES if candidate in ier.native_adopter_dirs(REPO) else ()
+            ier.native_files(candidate, REPO) if candidate in ier.native_adopter_dirs(REPO) else ()
         )
         if candidate.name not in PYTHON_ADOPTERS and any(
             (candidate / "scripts" / name).exists()
@@ -350,6 +392,8 @@ def verify() -> list[str]:
 
 
 def sync() -> list[str]:
+    if links := _canonical_engine_links():
+        raise RuntimeError("\n".join(links))
     written: list[str] = []
     projected = ier.native_executable_config(CANONICAL_DIR)
     config = CANONICAL_DIR / "installer_dependency_config.py"
@@ -424,7 +468,7 @@ def sync() -> list[str]:
             shutil.copyfile(source, destination)
             written.append(destination.relative_to(REPO).as_posix())
     for consumer in ier.native_adopter_dirs(REPO):
-        for name in ier.STANDALONE_NATIVE_FILES:
+        for name in ier.native_files(consumer, REPO):
             source, destination = CANONICAL_DIR / name, consumer / "scripts" / name
             for path in (source, destination):
                 indirect = uer._find_symlinked_ancestor(path, REPO.resolve())

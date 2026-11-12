@@ -55,6 +55,29 @@ def test_symlink_scan_falls_back_after_native_scan_error(
     monkeypatch.setattr(uer.os, "scandir", scan)
     assert uer._find_symlink(root) == "link"
     assert len(calls) > 1
+    assert calls and calls[0] == root
+
+
+def test_symlink_scan_falls_back_without_native_symlink_support(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    root = tmp_path / "source"
+    root.mkdir()
+    link = root / "link"
+    link.write_text("link fixture\n", encoding="utf-8")
+    monkeypatch.setattr(Path, "is_symlink", lambda path: path == link)
+    scandir = uer.os.scandir
+    calls = []
+
+    def scan(path):
+        calls.append(path)
+        if len(calls) == 1:
+            raise PermissionError("native scan unavailable")
+        return scandir(path)
+
+    monkeypatch.setattr(uer.os, "scandir", scan)
+    assert uer._find_symlink(root) == "link"
+    assert calls and calls[0] == root
 
 
 def test_uv_editable_relpath_is_always_forward_slashed(tmp_path: Path, monkeypatch):

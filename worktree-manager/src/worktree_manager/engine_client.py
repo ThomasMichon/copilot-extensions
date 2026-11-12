@@ -17,6 +17,8 @@ from worktree_identity import parse_machine_identity
 
 from . import agent_plugin_runtime, picker_review
 from .engine_sessions import list_worktree_session_snapshot as list_worktree_session_snapshot
+from .engine_progress import error_from_envelope as _error_from_envelope
+from .engine_progress import json_with_failure_detail
 from .engine_posix_process import EngineCleanupError as EngineCleanupError
 from .worktree_rows_contract import (
     _int_field as _int_field,
@@ -50,11 +52,8 @@ ENGINE_ARGV_ENV = "WORKTREE_MANAGER_ENGINE_ARGV"
 _DEFAULT_TIMEOUT = 120
 _REMOTE_ADMISSION_TIMEOUT = 300
 class EngineError(RuntimeError):
-    """The agent-worktrees engine is absent, failed, or returned no valid JSON.
-
-    ``install_hint`` is True when the engine binstub could not be found at all --
-    the caller should point the user at ``worktree-manager setup`` (which drives
-    the core install) rather than treat it as a hard error.
+    """The engine is absent, failed, or returned invalid JSON.
+    ``install_hint`` requests ``worktree-manager setup`` for a missing engine.
     """
 
     def __init__(self, message: str, *, install_hint: bool = False) -> None:
@@ -204,6 +203,7 @@ def _run(
     stream_progress: bool = False,
     environment: dict[str, str] | None = None,
     engine_command: list[str] | None = None,
+    preserve_failure_detail: bool = False,
 ) -> str:
     """Run ``agent-worktrees [--project <p>] <args>`` and return stdout.
 
@@ -227,7 +227,7 @@ def _run(
             proc = runner(cmd, timeout)
         else:
             kwargs = {
-                "capture_output": True, "text": True, "timeout": timeout,
+                "capture_output": True, "text": True, "encoding": "utf-8", "timeout": timeout,
                 "check": False, "env": _engine_environment(environment),
                 "stdin": subprocess.DEVNULL,
                 **({"cwd": cwd} if cwd else {}),
@@ -254,6 +254,13 @@ def _run(
         raise EngineError(f"{ENGINE_BIN} {' '.join(args)} timed out") from e
     except OSError as e:
         raise EngineError(f"could not run {ENGINE_BIN}: {e}") from e
+    if args == ["get", "update-controller"]:
+        from .project_update_controller import legacy_controller_error
+        legacy_error = legacy_controller_error(project, proc)
+        if legacy_error is not None:
+            raise legacy_error
+    if preserve_failure_detail and allow_nonzero:
+        return json_with_failure_detail(proc.stdout, proc.stderr, failed=proc.returncode != 0)
     if proc.returncode != 0 and allow_nonzero:
         try:
             json.loads(proc.stdout)
@@ -270,17 +277,6 @@ def _run(
     return proc.stdout
 
 
-def _error_from_envelope(stdout: str) -> str | None:
-    """Pull the ``error`` field out of a JSON error envelope, if stdout is one."""
-    try:
-        obj = json.loads(stdout)
-    except (ValueError, TypeError):
-        return None
-    if isinstance(obj, dict) and obj.get("error"):
-        return str(obj["error"])
-    return None
-
-
 def run_json(project: str | None, args: list[str], *,
              timeout: int | None = _DEFAULT_TIMEOUT,
              allow_nonzero: bool = False,
@@ -288,6 +284,7 @@ def run_json(project: str | None, args: list[str], *,
              stream_progress: bool = False,
              environment: dict[str, str] | None = None,
              engine_command: list[str] | None = None,
+             preserve_failure_detail: bool = False,
              max_bytes: int | None = None) -> dict:
     """Run a ``--json`` verb; bound its UTF-8 stdout to ``max_bytes``, then parse it."""
     raw = _run(
@@ -295,6 +292,7 @@ def run_json(project: str | None, args: list[str], *,
         stream_progress=stream_progress,
         **({"environment": environment} if environment is not None else {}),
         **({"engine_command": engine_command} if engine_command is not None else {}),
+        **({"preserve_failure_detail": True} if preserve_failure_detail else {}),
     )
     if max_bytes is not None and len(raw.encode("utf-8", errors="surrogatepass")) > max_bytes:
         raise EngineError(
@@ -405,7 +403,7 @@ def run_project_passthrough(
         raise EngineError(f"could not run project binstub {project}: {e}") from e
 
 
-def get_value(project: str, key: str, *, timeout: int = _DEFAULT_TIMEOUT) -> str:
+def get_value(project: str | None, key: str, *, timeout: int = _DEFAULT_TIMEOUT) -> str:
     """Read a pinned scalar value from ``agent-worktrees get <key>``."""
     return _run(project, ["get", key], timeout=timeout).strip()
 
@@ -646,6 +644,7 @@ def resolve_launch_plan(
 
     args = ["resolve", "--json"]
     require_staging = bool(seed) or bool(defer_new_seed)
+    retained_seed_plans = bool(worktree_id and not require_staging and not bare_resume and not target_machine)
     if require_staging:
         args += ["--stage-launch-seed", "--require-native-seed"]
     if base:
@@ -675,8 +674,12 @@ def resolve_launch_plan(
                 if target_machine and seed and timeout is not None else timeout
             ),
             stream_progress=True,
-            environment={**os.environ, "AGENT_WORKTREES_DEFER_PROJECTIONS": "1"} if defer_projections else None,
-            engine_command=engine_base_command() if defer_projections else None,
+            environment={
+                **os.environ,
+                **({"AGENT_WORKTREES_DEFER_PROJECTIONS": "1"} if defer_projections else {}),
+                **({"AGENT_WORKTREES_RETAINED_SEED_PLANS": "1"} if retained_seed_plans else {}),
+            } if defer_projections or retained_seed_plans else None,
+            engine_command=engine_base_command() if defer_projections or retained_seed_plans else None,
         )
     except EngineError as e:
         detail = _engine_error_detail(e)

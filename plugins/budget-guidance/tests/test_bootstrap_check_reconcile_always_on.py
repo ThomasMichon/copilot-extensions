@@ -68,6 +68,14 @@ def test_sh_has_no_opt_in_gate():
     assert "background reconcile SKIPPED" not in text
 
 
+@pytest.mark.skipif(os.name != "nt", reason="native Windows generation selection")
+def test_ps1_profile_generation_uses_its_deployed_package_version(tmp_path, monkeypatch):
+    monkeypatch.syspath_prepend(str(_PLUGIN_ROOT.parents[1] / "tools"))
+    from test_native_wheel_installers import assert_native_bootstrap
+
+    assert_native_bootstrap(tmp_path, monkeypatch, _PLUGIN_NAME)
+
+
 def _make_fake_install(home: Path, name: str) -> Path:
     """A minimally 'drifted' install dir: deployed=1.0.0, payload=1.0.1.
 

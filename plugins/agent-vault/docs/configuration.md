@@ -14,12 +14,90 @@ unlock a vault, start a daemon, fetch a credential, or install anything.
 The global file is selected by `AGENT_VAULT_CONFIG`, otherwise
 `%APPDATA%/agent-vault/config.json` on Windows or
 `${XDG_CONFIG_HOME:-~/.config}/agent-vault/config.json` elsewhere.
+The Windows installer resolves an explicit relative selector against its original
+filesystem invocation directory before activation or staging changes cwd. The
+absolute selection is retained for task-only actions and staged child invocations;
+an invalid present file never becomes a missing-file/default-policy result.
 `_discover_repo_config` walks the calling directory's parents for the first
 `.agent-vault.json`. Registered extension configuration is collected separately
 by `extensions.py`; it is not a knowledge-binding or repository-identity engine.
 Missing files contribute nothing. Strict readers refuse malformed-present JSON,
 non-object documents and invalid known fields rather than using defaults.
 Non-strict legacy reads tolerate malformed configuration as empty.
+
+Native `http_bindings` selects the opt-in credential-injection policy for
+[authenticated HTTP requests](authenticated-http.md); repository preferences
+cannot replace that policy. Its complete schema and matching rules live in the
+HTTP reference.
+
+## Dependency selection
+
+The native installer's `-Profile base|ssh` / `--profile base|ssh` selection is
+installation policy, not a database selector or portable `.agent-vault.json`
+field. It is persisted under the selected runtime home as `runtime-profile.json`:
+
+```json
+{"schema":"agent-vault.runtime-profile","version":1,"profile":"ssh"}
+```
+
+Omitting the option preserves this desired state; with no file, ordinary setup
+keeps its existing base behavior. Explicit source-owned driver handoff retains
+`AGENT_VAULT_INSTALL_PROFILE` for this installation request. Neither that input
+nor the persisted profile enables Vault, selects a database, starts a credential
+operation or authorizes enrollment. Malformed/unsupported profile files refuse
+rather than being overwritten. The same transaction lock protects selection
+and construction. A failed build retains desired state but leaves the active
+runtime unchanged.
+
+The deploy manifest's `source.version` remains the package version.
+`runtime_profile` and `runtime_version` identify the selected dependency slot.
+Bootstrap compares desired and deployed profiles, the exact incoming runtime
+generation, its full source receipt and the active marker, not package version
+alone. A newer prepared source at the same package version is not skipped,
+and a healthy SSH runtime is not repeatedly rebuilt as base.
+Start/status use the active runtime even when a later desired update failed.
+Prepared-source updates bind the selected target through the existing
+`COPILOT_EXTENSIONS_RUNTIME_SOURCE_TARGET` contract and verify immutable slot
+profile/completion evidence before reporting current. Explicit profile drift
+is refused before desired-state publication.
+See [native profile setup](../README.md#dependency-profiles).
+
+## Windows scheduling is separate from activation
+
+The **global native settings file** (selected above) accepts
+`"windows_scheduled_task": "preserve"`, `"enabled"` or `"absent"`. This is
+machine deployment policy, not a portable `.agent-vault.json` preference.
+
+`preserve` is the new default: install/update/first-use never create a missing
+task and do not rewrite existing/custom registrations. `enabled` explicitly
+provisions the logon task through the existing installer. `absent` removes
+only a validated task owned by this installation; foreign/ambiguous tasks and
+removal failures refuse rather than purge. The selection persists across updates.
+Task-query permission/CIM failures or an unavailable ScheduledTasks module also
+refuse retirement rather than report absence. Default `preserve` still works
+without that module.
+
+Run `scripts\install.ps1 schedule` after changing the setting to reconcile task
+policy alone. With `absent`, no daemon is stopped or started, no runtime/state
+is deleted, and nothing else is enabled.
+Task-only absence reads retained configuration without requiring an interpreter,
+even when the incoming payload's version has not been built. Task-only opt-in
+resolves the selected installed runtime instead of assuming the incoming slot.
+It retains the original project selection across payload staging for both runtime
+activation and the service configuration snapshot; a repository-only activation
+opt-in remains effective. Task ownership validates the actual PowerShell script
+operand, including supported conhost wrapping, never a later forwarded path.
+Normal install/update still prepare
+the native launcher and ensure the selected service generation independently
+of task registration. Without a task, `agent-vault start` retains the existing
+on-demand user-mode startup path.
+
+An existing disabled task keeps its independent startup hold: it is not
+re-enabled or bypassed by installer startup, and `absent` refuses to retire it until that intent is
+deliberately cleared. Runtime `enabled`, maintenance inhibition and `-NoService`
+remain independent; do not use client-only `-NoService` to select task absence.
+No administrative account, Task Scheduler registration or substitute supervisor
+is required by the default scheduling policy.
 
 ## Runtime activation
 
@@ -241,6 +319,24 @@ constants require process restart to change their inherited environment.
 ownership. `AGENT_VAULT_SOCKET`, `AGENT_VAULT_PIPE`, `AGENT_VAULT_PID`,
 `AGENT_VAULT_LOG`, `AGENT_VAULT_RUN_DIR`, `AGENT_VAULT_ENDPOINT` select runtime
 transport/state paths. They do not become repository preferences.
+
+`AGENT_VAULT_BIND_PORT` supplies a daemon-start default in `0..65535`, where
+`0` requests an OS-assigned ephemeral listener. It does not change client
+discovery or the strictly validated client `port`. An explicit start argument
+or selected client port takes precedence; an invalid bind default refuses
+before launching a daemon. Launchers needing ephemeral startup should use this
+separate default rather than injecting an unqualified client port of `0`.
+The selected executable advertises support as `daemon-bind-default-v1` in
+`invocation-contract --json`. A launcher requiring this behavior must inspect
+that runtime's capability before migrating; older runtimes ignore the new
+environment default and are not compatible providers. Deploy the provider
+first, then the launcher. Roll back the launcher and provider together, or
+refuse a missing capability instead of silently reverting to a fixed listener.
+Daemon children still use the existing `--tcp-port` argument, including an
+explicit `0`; no new daemon-side protocol or live-service metadata is required.
+The shared generation-start boundary also applies and validates the default
+before taking custody or binding endpoints, covering direct service invocations
+and selected-generation startup as well as CLI-triggered startup.
 
 `AGENT_VAULT_PINNED_CONTEXT` uses the strict `identity_context.py` parser and
 installation identity; it additionally requires `AGENT_VAULT_CACHE=1` and an

@@ -370,11 +370,11 @@ def test_resolve_account_explicit_wins():
     assert repos.resolve_account(entry) == "host-acct"
 
 
-def test_resolve_account_derives_owner():
+def test_resolve_account_does_not_infer_login_from_owner():
     entry = repos.RepoEntry(
         name="proj", remote="https://github.com/example-org/proj.git",
     )
-    assert repos.resolve_account(entry) == "example-org"
+    assert repos.resolve_account(entry) is None
 
 
 def test_resolve_account_none_for_non_github():
@@ -413,9 +413,8 @@ def test_account_map_case_insensitive(home: Path):
     assert repos.account_from_map("example-org") == "example-operator"
 
 
-def test_owner_fallback_when_unmapped(home: Path):
-    """Unmapped owner falls back to itself (owner == login for personal repos)."""
-    assert repos.account_for_github_slug("example-operator/dotfiles") == "example-operator"
+def test_unmapped_personal_namespace_is_not_an_account_choice(home: Path):
+    assert repos.account_for_github_slug("example-operator/dotfiles") is None
 
 
 def test_explicit_repo_account_beats_map(home: Path):
@@ -426,7 +425,8 @@ def test_explicit_repo_account_beats_map(home: Path):
         remote="https://github.com/example-org/proj.git",
         account="explicit-login", plat="windows",
     )
-    assert repos.account_for_github_owner("example-org") == "explicit-login"
+    assert repos.account_for_github_slug("example-org/proj") == "explicit-login"
+    assert repos.account_for_github_owner("example-org") == "map-login"
 
 
 def test_resolve_account_uses_map_over_owner(home: Path):
@@ -466,18 +466,19 @@ def test_registration_org_owner_needs_clarify(home: Path):
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
             "https://github.com/github/example-private-runtime.git")
-    assert r.source == "owner-fallback"
+    assert r.source == "none"
     assert r.owner == "github"
+    assert r.login is None
     assert r.needs_clarify is True
 
 
-def test_registration_personal_owner_is_clean(home: Path):
+def test_registration_personal_namespace_does_not_select_an_account(home: Path):
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
             "https://github.com/example-operator/dotfiles.git")
-    assert r.login == "example-operator"
-    assert r.needs_clarify is False
+    assert r.login is None
+    assert r.needs_clarify is True
 
 
 def test_registration_account_map_resolves(home: Path):
@@ -500,7 +501,7 @@ def test_registration_explicit_account_is_clean(home: Path):
     assert r.needs_clarify is False
 
 
-def test_registration_sibling_explicit_resolves(home: Path):
+def test_registration_does_not_copy_a_siblings_explicit_account(home: Path):
     repos.add_repo(
         "sib", str(home / "sib"), repo_class="worktree",
         remote="https://github.com/github/other.git",
@@ -510,9 +511,9 @@ def test_registration_sibling_explicit_resolves(home: Path):
          patch("agent_worktrees.repos.shutil.which", return_value="gh"):
         r = repos.resolve_registration_account(
             "https://github.com/github/example-private-runtime.git")
-    assert r.source == "sibling"
-    assert r.login == "ThomasMichon"
-    assert r.needs_clarify is False
+    assert r.source == "none"
+    assert r.login is None
+    assert r.needs_clarify is True
 
 
 def test_registration_non_github_is_none(home: Path):
@@ -522,29 +523,27 @@ def test_registration_non_github_is_none(home: Path):
     assert r.needs_clarify is False
 
 
-def test_registration_no_gh_never_nags(home: Path):
-    # gh unavailable -> can't verify -> assume authenticated -> no clarify.
+def test_registration_without_gh_does_not_guess_an_identity(home: Path):
     with patch("agent_worktrees.repos.shutil.which", return_value=None):
         r = repos.resolve_registration_account(
             "https://github.com/github/example-private-runtime.git")
-    assert r.needs_clarify is False
+    assert r.login is None
+    assert r.needs_clarify is True
 
 
-def test_account_for_github_slug_derives(home: Path):
-    # No override registered -> the account is the slug owner.
-    assert repos.account_for_github_slug("example-org/proj") == "example-org"
+def test_account_for_github_slug_without_policy_is_unpinned(home: Path):
+    assert repos.account_for_github_slug("example-org/proj") is None
 
 
 def test_account_for_github_slug_honors_override(home: Path):
-    # A registered repo with an explicit account whose remote owner matches the
-    # slug owner overrides the derived owner (EMU accounts can span orgs).
     repos.add_repo(
         "proj", "D:/Src/proj", repo_class="worktree",
         remote="https://github.com/example-org/proj.git",
         account="host-acct", plat="windows",
     )
-    assert repos.account_for_github_slug("example-org/other") == "host-acct"
-    assert repos.account_for_github_slug("unrelated/repo") == "unrelated"
+    assert repos.account_for_github_slug("example-org/proj") == "host-acct"
+    assert repos.account_for_github_slug("example-org/other") is None
+    assert repos.account_for_github_slug("unrelated/repo") is None
     assert repos.account_for_github_slug("") is None
 
 
@@ -568,16 +567,13 @@ def test_resolve_slug_owner_bare_registered_repo_name_derives_owner(home: Path):
     assert repos.resolve_slug_owner("copilot-extensions") == "ThomasMichon"
 
 
-def test_account_for_github_slug_bare_registered_repo_name_resolves_owner(home: Path):
-    # The reported bug: `account_for_github_slug("copilot-extensions")` used to
-    # return the literal string "copilot-extensions" (an invalid login) instead
-    # of resolving the repo's actual owner.
+def test_bare_registered_dependency_does_not_select_its_publisher(home: Path):
     repos.add_repo(
         "copilot-extensions", "D:/Src/copilot-extensions", repo_class="reference",
         remote="https://github.com/ThomasMichon/copilot-extensions.git",
         plat="windows",
     )
-    assert repos.account_for_github_slug("copilot-extensions") == "ThomasMichon"
+    assert repos.account_for_github_slug("copilot-extensions") is None
 
 
 def test_resolve_slug_owner_registered_non_github_remote_is_none(home: Path):
@@ -653,9 +649,7 @@ def test_account_for_github_slug_unoverridden_entry_ignores_sibling_override(
 ):
     # The reported follow-up bug: an entry with NO account: of its own must
     # not silently borrow a *different* registered sibling's explicit
-    # override just because they share a github owner -- it should fall
-    # through to the owner itself (no account_map entry configured here),
-    # exactly as `resolve_account` documents.
+    # override just because they share a github owner.
     repos.add_repo(
         "proj-a", "D:/Src/proj-a", repo_class="worktree",
         remote="https://github.com/shared-owner/proj-a.git",
@@ -666,7 +660,7 @@ def test_account_for_github_slug_unoverridden_entry_ignores_sibling_override(
         remote="https://github.com/shared-owner/proj-b.git",
         account="account-b", plat="windows",
     )
-    assert repos.account_for_github_slug("proj-a") == "shared-owner"
+    assert repos.account_for_github_slug("proj-a") is None
 
 
 def test_account_for_github_slug_unoverridden_entry_still_honors_account_map(
@@ -720,10 +714,57 @@ def test_add_repo_persists_account(home: Path):
     assert repos.resolve_account(reg.repos["proj"]) == "host-acct"
 
 
+@pytest.mark.parametrize("interactive", [False, True])
+def test_cli_reregistration_preserves_saved_account_and_git_pin(
+    home: Path, monkeypatch, capsys, interactive,
+):
+    from agent_procutil import no_window_kwargs
+    from agent_worktrees import __main__ as cli, git_ops
+
+    work = home / "pinned"
+    _init_config_repo(work)
+    remote = "https://github.com/publisher/pinned.git"
+    monkeypatch.setattr(git_ops, "_active_gh_account", lambda: None)
+    monkeypatch.setattr(git_ops.shutil, "which", lambda name: name)
+    monkeypatch.setattr(git_ops, "gh_token_for_account", lambda login: "fixture")
+    monkeypatch.setattr(git_ops, "list_gh_accounts", lambda: ["other-work"])
+    monkeypatch.setattr(cli.sys.stdin, "isatty", lambda: interactive)
+    prompts = []
+    monkeypatch.setattr("builtins.input", lambda message: prompts.append(message) or "other-work")
+    repos.add_repo(
+        "pinned", str(work), remote=remote, account="operator-public",
+    )
+
+    def credential_pin():
+        result = subprocess.run(
+            ["git", "-C", str(work), "config", "--local", "--get-regexp", "^credential\\."],
+            check=True, capture_output=True, text=True, **no_window_kwargs(),
+        )
+        values = {}
+        for line in result.stdout.splitlines():
+            key, _, value = line.partition(" ")
+            values.setdefault(key, []).append(value)
+        return values
+
+    original_pin = credential_pin()
+    assert original_pin["credential.https://github.com.username"] == ["operator-public"]
+    assert "--user 'operator-public'" in original_pin["credential.https://github.com.helper"][-1]
+    capsys.readouterr()
+    assert cli.cmd_repos_dispatch(["add", "pinned", str(work), "--remote", remote]) == 0
+    assert repos.read_registry().repos["pinned"].account == "operator-public"
+    assert credential_pin() == original_pin
+    assert not prompts
+    captured = capsys.readouterr()
+    assert "does not select an operator account" not in captured.out + captured.err
+
+
 # --- backfill_credential_pins ------------------------------------------------
 
 
 def test_backfill_pins_a_resolvable_repo(home: Path, tmp_path: Path):
+    registry = repos.read_registry()
+    registry.default_account = "example-operator"
+    repos.write_registry(registry)
     work = tmp_path / "pin-me"
     _init_config_repo(work)
     repos.add_repo(
@@ -850,6 +891,7 @@ def test_backfill_pins_with_derived_host_not_hardcoded_github_com(home: Path, tm
     repos.add_repo(
         "www-repo", str(work), repo_class="worktree",
         remote="https://www.github.com/example-operator/www-repo.git", plat="windows",
+        account="example-operator",
     )
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
@@ -891,10 +933,11 @@ def test_add_repo_pins_credential_for_a_resolvable_owner(home: Path, tmp_path: P
     _init_config_repo(work)
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
-         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops._active_gh_account", return_value=None):
         repos.add_repo(
             "auto-pin", str(work), repo_class="worktree",
-            remote="https://github.com/example-operator/auto-pin.git", plat="windows",
+            remote="https://github.com/example-operator/auto-pin.git", plat="windows", account="example-operator",
         )
     username = subprocess.run(
         ["git", "-C", str(work), "config", "--local",
@@ -955,14 +998,21 @@ def test_add_repo_pin_expands_home_relative_path(home: Path, tmp_path: Path, mon
         repos.os.path, "expanduser",
         lambda p: str(work) if p == "~/home-rel" else os.path.expanduser(p),
     )
-    entry = repos.add_repo(
-        "home-rel", "~/home-rel", repo_class="worktree",
-        remote="https://github.com/example-operator/home-rel.git", plat="windows",
-    )
-    assert entry.local_path("windows") == str(work)
+
+    def unexpected_auth(*args, **kwargs):
+        pytest.fail("The pin fixture must not inspect ambient authentication.")
+
+    monkeypatch.setattr("agent_worktrees.git_ops.gh_token_for_account", unexpected_auth)
+    monkeypatch.setattr("agent_worktrees.git_ops._active_gh_account", unexpected_auth)
     with patch("agent_worktrees.git_ops.gh_token_for_account", side_effect=_fake_token), \
          patch("agent_worktrees.repos.shutil.which", return_value="gh"), \
-         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"):
+         patch("agent_worktrees.git_ops.shutil.which", return_value="gh"), \
+         patch("agent_worktrees.git_ops._active_gh_account", return_value=None):
+        entry = repos.add_repo(
+            "home-rel", "~/home-rel", repo_class="worktree",
+            remote="https://github.com/example-operator/home-rel.git", plat="windows", account="example-operator",
+        )
+        assert entry.local_path("windows") == str(work)
         repos._best_effort_pin_credential(entry, "windows")
     username = subprocess.run(
         ["git", "-C", str(work), "config", "--local",

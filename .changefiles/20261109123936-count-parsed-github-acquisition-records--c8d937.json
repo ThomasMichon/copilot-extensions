@@ -1,0 +1,9 @@
+{
+  "comment": "Count parsed GitHub acquisition records separately from HTTP purposes",
+  "changes": [
+    {
+      "plugin": "agent-index",
+      "type": "patch"
+    }
+  ]
+}

@@ -8,7 +8,7 @@ import tempfile
 import time
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -16,6 +16,7 @@ from agent_procutil import no_window_kwargs
 
 from . import git_ops
 from .lease_config import LeaseSettings
+from .lease_history import ResourceHistory, validate_history
 from .lease_protocol import (
     LeaseRecord,
     PROOF_SCHEMA_VERSION,
@@ -34,6 +35,19 @@ from .lease_protocol import (
     validate_context,
     validate_holder,
     validate_oid,
+)
+from .service_custody_protocol import (
+    CoordinationRecord,
+    SENTINEL as CUSTODY_SENTINEL,
+    ServiceCustodyRecord,
+    parse_custody,
+)
+from .provider_effect_protocol import (
+    SENTINEL as EFFECT_SENTINEL,
+    ProviderEffectRecord,
+    parse_effect,
+    serialize_effect,
+    validate_begin,
 )
 
 
@@ -57,6 +71,28 @@ class LeaseLost(RuntimeError):
     """The supplied fencing token is no longer the resource's current OID."""
 
 
+class ServiceCustodyConflict(LeaseLost):
+    """Task operations cannot reinterpret or replace permanent service custody."""
+
+    def __init__(self, snapshot: ServiceCustodySnapshot) -> None:
+        self.snapshot = snapshot
+        super().__init__(
+            f"{snapshot.record.resource['identity']} has permanent service custody "
+            f"{snapshot.record.custody_id}; task lease operations are forbidden"
+        )
+
+
+class ProviderEffectConflict(LeaseLost):
+    """Unsettled native responsibility cannot expire into a task acquisition."""
+
+    def __init__(self, snapshot: ProviderEffectSnapshot) -> None:
+        self.snapshot = snapshot
+        super().__init__(
+            f"{snapshot.record.resource['identity']} has unsettled provider effect "
+            f"{snapshot.record.effect_id}; owner settlement is required"
+        )
+
+
 class _CASConflict(RuntimeError):
     """Internal exact-ref compare-and-swap failure."""
 
@@ -70,6 +106,7 @@ class LeaseSnapshot:
     record: LeaseRecord
     live: bool
     safe_deadline: str
+    has_effect_history: bool = False
 
     def to_dict(self) -> dict[str, object]:
         result = record_payload(self.record)
@@ -82,6 +119,44 @@ class LeaseSnapshot:
             }
         )
         return result
+
+
+@dataclass(frozen=True)
+class ServiceCustodySnapshot:
+    """Permanent protection has no task TTL, deadline or renewable holder."""
+
+    ref: str
+    oid: str
+    record: ServiceCustodyRecord
+
+    def to_dict(self) -> dict[str, object]:
+        result = asdict(self.record)
+        result.update({"ref": self.ref, "token": self.oid, "custody_type": "service"})
+        return result
+
+
+@dataclass(frozen=True)
+class ProviderEffectSnapshot:
+    ref: str
+    oid: str
+    record: ProviderEffectRecord
+
+    def to_dict(self) -> dict[str, object]:
+        result = asdict(self.record)
+        result.update({"ref": self.ref, "token": self.oid, "custody_type": "provider-effect"})
+        return result
+
+
+ResourceSnapshot = LeaseSnapshot | ServiceCustodySnapshot | ProviderEffectSnapshot
+
+
+def parse_coordination_record(message: str, expected: Resource) -> CoordinationRecord:
+    """Keep task codec admission with its existing store owner."""
+    if message.startswith(CUSTODY_SENTINEL + "\n"):
+        return parse_custody(message, expected)
+    if message.startswith(EFFECT_SENTINEL + "\n"):
+        return parse_effect(message, expected)
+    return parse_record(message, expected)
 
 
 class GitLeaseStore:
@@ -164,7 +239,8 @@ class GitLeaseStore:
             expected = current.oid if current is not None else ""
             try:
                 oid = self._transition(item, expected, record)
-                return self._snapshot(item, oid, record, now)
+                return self._snapshot(item, oid, record, now,
+                                      has_effect_history=bool(current and current.has_effect_history))
             except _CASConflict:
                 if attempt >= retry_count:
                     raise LeaseLost(
@@ -217,7 +293,7 @@ class GitLeaseStore:
             oid = self._transition(item, token, record)
         except _CASConflict:
             raise LeaseLost("renewal compare-and-swap failed; the lease is lost") from None
-        return self._snapshot(item, oid, record, now)
+        return self._snapshot(item, oid, record, now, has_effect_history=current.has_effect_history)
 
     def transfer(
         self,
@@ -271,7 +347,7 @@ class GitLeaseStore:
             oid = self._transition(item, token, record)
         except _CASConflict:
             raise LeaseLost("transfer compare-and-swap failed; the lease is lost") from None
-        return self._snapshot(item, oid, record, now)
+        return self._snapshot(item, oid, record, now, has_effect_history=current.has_effect_history)
 
     def release(
         self, kind: str, key: str, token: str, *, retain_return_proof: bool = False,
@@ -308,7 +384,7 @@ class GitLeaseStore:
             oid = self._transition(item, token, record)
         except _CASConflict:
             raise LeaseLost("release compare-and-swap failed; the lease is lost") from None
-        return self._snapshot(item, oid, record, now)
+        return self._snapshot(item, oid, record, now, has_effect_history=current.has_effect_history)
 
     def squash_stale(
         self, *, retention_days: int, kind: str | None = None, dry_run: bool = False,
@@ -328,7 +404,9 @@ class GitLeaseStore:
         renew/takeover/transfer events stop making the ref's history grow
         forever (worktree-claims-transitive-finalization Phase 5).
 
-        Only a ``released`` ref is ever touched -- a live/stale ``leased``
+        Only a ``released`` ref without provider-effect history is ever touched;
+        effect responsibilities and their terminal receipts remain recoverable.
+        A live/stale ``leased``
         ref is never squashed, regardless of age (its own TTL expiry is
         the only thing that ever makes it re-acquirable). Best-effort per
         ref: a lost CAS race (a concurrent ``acquire()`` on the same
@@ -348,9 +426,10 @@ class GitLeaseStore:
         """
         cutoff = self._utc_now() - timedelta(days=retention_days)
         squashed: list[dict[str, str]] = []
-        for snapshot in self.list(kind=kind):
+        for snapshot in self.list_resources(kind=kind):
             record = snapshot.record
-            if record.state != "released":
+            if (not isinstance(snapshot, LeaseSnapshot) or snapshot.has_effect_history
+                    or record.state != "released"):
                 continue
             if parse_timestamp(record.renewed_at) > cutoff:
                 continue
@@ -452,40 +531,155 @@ class GitLeaseStore:
             return oid
 
     def inspect(self, kind: str, key: str) -> LeaseSnapshot | None:
+        """Read a task lease; service custody is an explicit protected conflict."""
+        snapshot = self.inspect_resource(kind, key)
+        if isinstance(snapshot, ServiceCustodySnapshot):
+            raise ServiceCustodyConflict(snapshot)
+        if isinstance(snapshot, ProviderEffectSnapshot):
+            raise ProviderEffectConflict(snapshot)
+        return snapshot
+
+    status = inspect
+
+    def inspect_resource(self, kind: str, key: str) -> ResourceSnapshot | None:
         """Read and validate the resource's current ref directly from the remote."""
-        item = resource(kind, key)
+        selected = self._inspect_history(resource(kind, key))
+        if selected is None:
+            return None
+        ref, oid, history = selected
+        record = history.current
+        if isinstance(record, ServiceCustodyRecord):
+            return ServiceCustodySnapshot(ref=ref, oid=oid, record=record)
+        if isinstance(record, ProviderEffectRecord):
+            return ProviderEffectSnapshot(ref=ref, oid=oid, record=record)
+        return self._snapshot(resource(kind, key), oid, record, self._utc_now(),
+                              has_effect_history=bool(history.effects))
+
+    def _inspect_history(self, item: Resource) -> tuple[str, str, ResourceHistory] | None:
         ref = ref_for(self.settings.ref_prefix, item)
         for attempt in range(3):
             oid = self._remote_oid(ref)
             if oid is None:
                 return None
             try:
-                record = self._read_record(ref, oid, item)
+                history = self._read_record(ref, oid, item)
             except _CASConflict:
                 if attempt == 2:
                     raise LeaseLost("lease ref changed repeatedly while reading") from None
                 continue
-            return self._snapshot(item, oid, record, self._utc_now())
+            return ref, oid, history
         raise AssertionError("unreachable")
 
-    status = inspect
-
     def list(self, *, kind: str | None = None) -> list[LeaseSnapshot]:
+        """Read task leases without silently omitting protected service records."""
+        snapshots: list[LeaseSnapshot] = []
+        for snapshot in self.list_resources(kind=kind):
+            if isinstance(snapshot, ServiceCustodySnapshot):
+                raise ServiceCustodyConflict(snapshot)
+            if isinstance(snapshot, ProviderEffectSnapshot):
+                raise ProviderEffectConflict(snapshot)
+            snapshots.append(snapshot)
+        return snapshots
+
+    def list_resources(self, *, kind: str | None = None) -> list[ResourceSnapshot]:
         """List and strictly validate every resource ref in the namespace."""
         if kind is not None:
             resource(kind, "_validation_only")
         prefix = self.settings.ref_prefix
         rows = self._ls_remote(f"{prefix}/*")
-        snapshots: list[LeaseSnapshot] = []
+        snapshots: list[ResourceSnapshot] = []
         for _oid, ref in rows:
             item = resource_from_ref(prefix, ref)
             if kind is not None and item.kind != kind:
                 continue
-            snapshot = self.inspect(item.kind, item.key)
+            snapshot = self.inspect_resource(item.kind, item.key)
             if snapshot is None:
                 raise LeaseLost(f"lease ref {ref} disappeared while listing")
             snapshots.append(snapshot)
         return sorted(snapshots, key=lambda value: value.record.resource["identity"])
+
+    def begin_effect(self, kind: str, key: str, token: str, *,
+                     effect_id: str, owner_id: str, provider_id: str,
+                     provider_resource_id: str, action: str,
+                     request_digest: str) -> ProviderEffectSnapshot:
+        """Trusted provider only: persist responsibility before one native attempt.
+
+        The embedding authenticates current authority, immutable native identity
+        and exact request scope. Neither labels nor this record authenticate it.
+        No retry, timer-based release or service-owner effect grant is provided.
+        """
+        item = resource(kind, key)
+        token = validate_oid(token)
+        selected = self._inspect_history(item)
+        if selected is None:
+            raise LeaseLost("provider effect requires current task custody")
+        ref, oid, history = selected
+        if isinstance(history.current, ServiceCustodyRecord):
+            raise ServiceCustodyConflict(ServiceCustodySnapshot(ref, oid, history.current))
+        if isinstance(history.current, ProviderEffectRecord):
+            raise ProviderEffectConflict(ProviderEffectSnapshot(ref, oid, history.current))
+        if oid != token:
+            raise LeaseLost("provider effect task fence is stale")
+        now = self._utc_now(precise=True)
+        if now > history.current.expires() - timedelta(seconds=self.settings.clock_skew_seconds):
+            raise LeaseLost("provider effect admission is after the task safe deadline")
+        record = ProviderEffectRecord(
+            schema_version=1, resource=history.current.resource,
+            state="effect-unsettled", event="begin", effect_id=effect_id,
+            owner_id=owner_id, provider_id=provider_id,
+            provider_resource_id=provider_resource_id, action=action,
+            request_digest=request_digest, task_token=token, predecessor=token,
+            started_at=format_timestamp(now),
+            admission_margin_seconds=self.settings.clock_skew_seconds,
+        )
+        parse_effect(serialize_effect(record), item)
+        if any(prior.effect_id == effect_id for _, prior in history.effects):
+            raise ProtocolError("provider effect_id cannot be reused")
+        validate_begin(history.current, record, parent_oid=token)
+        try:
+            claimed = self._transition(item, token, record)
+        except _CASConflict:
+            raise LeaseLost("provider effect admission compare-and-swap failed") from None
+        return ProviderEffectSnapshot(ref, claimed, record)
+
+    def settle_effect(self, kind: str, key: str, token: str, *,
+                      effect_id: str, owner_id: str, outcome: str,
+                      settlement_digest: str) -> ProviderEffectSnapshot:
+        """Exact original owner supplies verified native settlement, not a timeout.
+
+        The embedding verifies termination/non-start of the original native
+        operation, including any independently running backend action. An
+        uncertain subprocess exit or a digest alone cannot establish settlement.
+        Recover a lost reply with inspect_effect; never replay the native effect.
+        """
+        item = resource(kind, key)
+        token = validate_oid(token)
+        current = self.inspect_resource(kind, key)
+        if (not isinstance(current, ProviderEffectSnapshot) or current.oid != token
+                or current.record.effect_id != effect_id or current.record.owner_id != owner_id):
+            raise LeaseLost("provider effect settlement does not own the current responsibility")
+        record = replace(
+            current.record, state="effect-settled", event="settle", predecessor=token,
+            settled_at=format_timestamp(self._utc_now()), outcome=outcome,
+            settlement_digest=settlement_digest,
+        )
+        parse_effect(serialize_effect(record), item)
+        try:
+            oid = self._transition(item, token, record)
+        except _CASConflict:
+            raise LeaseLost("provider effect settlement compare-and-swap failed") from None
+        return ProviderEffectSnapshot(current.ref, oid, record)
+
+    def inspect_effect(self, kind: str, key: str, effect_id: str) -> ProviderEffectSnapshot | None:
+        """Inspect the original attempt after lost replies or later task transitions."""
+        selected = self._inspect_history(resource(kind, key))
+        if selected is None:
+            return None
+        ref, _, history = selected
+        for oid, record in reversed(history.effects):
+            if record.effect_id == effect_id:
+                return ProviderEffectSnapshot(ref, oid, record)
+        return None
 
     def _require_token(self, item: Resource, token: str) -> LeaseSnapshot:
         current = self.inspect(item.kind, item.key)
@@ -503,6 +697,8 @@ class GitLeaseStore:
         oid: str,
         record: LeaseRecord,
         now: datetime,
+        *,
+        has_effect_history: bool = False,
     ) -> LeaseSnapshot:
         grace = timedelta(seconds=self.settings.clock_skew_seconds)
         live = record.state == "leased" and now <= record.expires() + grace
@@ -513,13 +709,15 @@ class GitLeaseStore:
             record=record,
             live=live,
             safe_deadline=format_timestamp(safe),
+            has_effect_history=has_effect_history,
         )
 
-    def _utc_now(self) -> datetime:
+    def _utc_now(self, *, precise: bool = False) -> datetime:
         now = self._now()
         if now.tzinfo is None:
             raise ProtocolError("clock returned a naive datetime")
-        return now.astimezone(timezone.utc).replace(microsecond=0)
+        utc = now.astimezone(timezone.utc)
+        return utc if precise else utc.replace(microsecond=0)
 
     def _remote_oid(self, ref: str) -> str | None:
         rows = self._ls_remote(ref)
@@ -542,7 +740,7 @@ class GitLeaseStore:
             rows.append((validate_oid(parts[0]), parts[1]))
         return rows
 
-    def _read_record(self, ref: str, expected_oid: str, item: Resource) -> LeaseRecord:
+    def _read_record(self, ref: str, expected_oid: str, item: Resource) -> ResourceHistory:
         with tempfile.TemporaryDirectory(prefix="agent-leases-read-") as temp:
             repo = Path(temp) / "repo.git"
             self._git(["init", "--bare", str(repo)])
@@ -573,13 +771,13 @@ class GitLeaseStore:
         repo: Path,
         head_oid: str,
         item: Resource,
-    ) -> LeaseRecord:
+    ) -> ResourceHistory:
         """Validate the complete linear, empty-tree lease history."""
         empty_tree = self._git(
             [f"--git-dir={repo}", "hash-object", "-t", "tree", "--stdin"],
             input_text="",
         ).stdout.strip()
-        chain: list[tuple[str, LeaseRecord]] = []
+        chain: list[tuple[str, CoordinationRecord]] = []
         oid = head_oid
         while True:
             raw = self._git(
@@ -604,102 +802,16 @@ class GitLeaseStore:
                 raise ProtocolError("lease commits must use the empty tree")
             if len(parents) > 1:
                 raise ProtocolError("lease history must be linear")
-            chain.append((oid, parse_record(message, item)))
+            chain.append((oid, parse_coordination_record(message, item)))
             if not parents:
                 break
             oid = validate_oid(parents[0])
 
-        previous: LeaseRecord | None = None
-        for _oid, current in reversed(chain):
-            self._validate_transition(previous, current)
-            previous = current
-        return chain[0][1]
+        return validate_history(list(reversed(chain)),
+                                clock_skew_seconds=self.settings.clock_skew_seconds)
 
-    def _validate_transition(
-        self,
-        previous: LeaseRecord | None,
-        current: LeaseRecord,
-    ) -> None:
-        """Validate one event against its exact parent record."""
-        if previous is None:
-            if current.event != "acquire":
-                raise ProtocolError("the root lease commit must be an acquire event")
-            return
-        if current.schema_version < previous.schema_version:
-            raise ProtocolError("a lease cannot downgrade retained return evidence")
-        if current.schema_version != previous.schema_version and current.event != "release":
-            raise ProtocolError("only an explicit release can opt into retained return evidence")
-        expected_returns = previous.returned_generations
-        if current.event == "release" and current.schema_version == PROOF_SCHEMA_VERSION:
-            expected_returns = (*expected_returns, ReturnedGeneration(
-                previous.lease_id, previous.holder, current.renewed_at,
-            ))[-RETURN_PROOF_LIMIT:]
-        if current.returned_generations != expected_returns:
-            raise ProtocolError("lease transition changed retained return evidence")
-
-        issued = datetime.strptime(
-            current.issued_at, "%Y-%m-%dT%H:%M:%SZ"
-        ).replace(tzinfo=timezone.utc)
-        renewed = datetime.strptime(
-            current.renewed_at, "%Y-%m-%dT%H:%M:%SZ"
-        ).replace(tzinfo=timezone.utc)
-        prior_renewed = datetime.strptime(
-            previous.renewed_at, "%Y-%m-%dT%H:%M:%SZ"
-        ).replace(tzinfo=timezone.utc)
-
-        if current.event == "acquire":
-            if previous.state != "released":
-                raise ProtocolError("a non-root acquire must follow a release tombstone")
-            if current.lease_id == previous.lease_id:
-                raise ProtocolError("a new acquisition must use a new lease_id")
-            if issued < prior_renewed:
-                raise ProtocolError("acquisition time precedes its release parent")
-            return
-
-        if previous.state != "leased":
-            raise ProtocolError(f"{current.event} must follow leased state")
-        if current.event == "takeover":
-            deadline = previous.expires() + timedelta(
-                seconds=self.settings.clock_skew_seconds
-            )
-            if current.lease_id == previous.lease_id:
-                raise ProtocolError("a takeover must use a new lease_id")
-            if issued <= deadline:
-                raise ProtocolError("takeover occurred before expiry plus clock skew")
-            return
-        if current.event == "transfer":
-            deadline = previous.expires() - timedelta(
-                seconds=self.settings.clock_skew_seconds
-            )
-            if current.lease_id == previous.lease_id:
-                raise ProtocolError("a transfer must use a new lease_id")
-            if current.holder == previous.holder:
-                raise ProtocolError("transfer must change the holder")
-            if current.issued_at != current.renewed_at:
-                raise ProtocolError("transfer must issue and renew together")
-            if issued < prior_renewed:
-                raise ProtocolError("transfer moved renewed_at backward")
-            if issued > previous.expires():
-                raise ProtocolError("transfer occurred after lease expiry")
-            if issued > deadline:
-                # Once the old holder has crossed its own safe deadline, the
-                # transfer must be treated like a lost lease and restarted by
-                # acquisition/takeover.
-                raise ProtocolError("transfer occurred after the prior safe deadline")
-            return
-
-        if current.lease_id != previous.lease_id:
-            raise ProtocolError(f"{current.event} changed the lease_id")
-        if current.holder != previous.holder:
-            raise ProtocolError(f"{current.event} changed the holder")
-        if current.issued_at != previous.issued_at:
-            raise ProtocolError(f"{current.event} changed issued_at")
-        if renewed < prior_renewed:
-            raise ProtocolError(f"{current.event} moved renewed_at backward")
-        if current.event == "release" and current.context != previous.context:
-            raise ProtocolError("release changed diagnostic context")
-
-    def _transition(self, item: Resource, expected_oid: str, record: LeaseRecord) -> str:
+    def _transition(self, item: Resource, expected_oid: str,
+                    record: LeaseRecord | ProviderEffectRecord) -> str:
         ref = ref_for(self.settings.ref_prefix, item)
         with tempfile.TemporaryDirectory(prefix="agent-leases-write-") as temp:
             repo = Path(temp) / "repo.git"
@@ -741,7 +853,8 @@ class GitLeaseStore:
             }
             oid = self._git(
                 args,
-                input_text=serialize_record(record) + "\n",
+                input_text=(serialize_effect(record) if isinstance(record, ProviderEffectRecord)
+                            else serialize_record(record)) + "\n",
                 extra_env=env,
             ).stdout.strip()
             validate_oid(oid)

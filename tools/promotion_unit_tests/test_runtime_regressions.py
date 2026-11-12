@@ -251,6 +251,34 @@ def test_strict_native_batch_rejects_incomplete_inputs_instead_of_skipping():
             )
 
 
+def test_mixed_batch_validates_all_calls_before_original_classifiers():
+    valid = {"name": "powershell", "args": {"command": "git pull --ff-only"}}
+    for tail in (None, {"name": "unknown"}, {"name": "edit", "cwd": "/other"}):
+        with pytest.raises(ValueError):
+            forms.mixed_mutation_targets(
+                {"toolCalls": [valid, tail]},
+                allowed_tools=frozenset({"edit", "powershell"}),
+                classify=lambda _event: pytest.fail("partial batch classification"),
+            )
+
+
+def test_mixed_batch_aggregates_original_targets_and_conservative_unknowns():
+    payload = {"toolCalls": [
+        {"name": "edit", "args": {"paths": ["one", "two"]}},
+        {"name": "powershell", "args": {"paths": []}},
+        {"name": "edit", "args": {"paths": ["two", "three"]}},
+    ]}
+    arguments = dict(
+        allowed_tools=frozenset({"edit", "powershell"}),
+        classify=lambda event: event["toolArgs"]["paths"],
+    )
+    assert forms.mixed_mutation_targets(payload, **arguments) == ["one", "two", "three"]
+    payload["toolCalls"][1]["args"]["paths"] = None
+    assert forms.mixed_mutation_targets(payload, **arguments) is None
+    payload["toolCalls"] = [{"name": "edit", "args": {"paths": list(map(str, range(129)))}}]
+    assert forms.mixed_mutation_targets(payload, **arguments) is None
+
+
 def test_native_batch_target_limit_is_shared_and_unknowns_keep_workspace():
     workspace = "/synthetic/workspace"
     writes = frozenset({"edit", "multi_edit"})
@@ -290,6 +318,18 @@ def test_native_execution_check_is_project_independent():
     assert argv == ["reconcile-plugins", "--check-update"]
 
 
+def test_comment_origin_routing_does_not_borrow_ambient_project():
+    for options, allowed in [
+        (["--comment-origin", "--capabilities"], True),
+        (["--comment-origin", "--source-root", "/source", "--config", "/config"], True),
+        (["--comment-origin", "--source-root=/source", "--config=/config"], True),
+        (["--comment-origin"], False),
+        (["--comment-origin", "--source-root", "/source"], False),
+        (["--source-root", "/source", "--config", "/config"], False),
+    ]:
+        assert routing._is_no_project_invocation(["attribution-prepare", *options]) is allowed
+
+
 @pytest.mark.parametrize(
     "argv,allowed",
     [
@@ -317,6 +357,10 @@ def test_native_execution_check_is_project_independent():
         (["update", "--supervised-debug"], False),
         (["update", "--not-recovery-status"], False),
         (["update", "--recover-for-repair"], True),
+        (["pr-watch", "diff", "example/project", "7", "--json"], True),
+        (["pr-watch", "difference", "example/project", "7", "--json"], False),
+        (["pr-watch", "population", "--contract", "--json"], True),
+        (["pr-watch", "populations", "--contract", "--json"], False),
     ],
 )
 def test_other_project_routing_contracts_are_preserved(argv, allowed):

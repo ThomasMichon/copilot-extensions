@@ -58,6 +58,31 @@ policy or authorize a direct push. Repository/provider PR and review requirement
 still apply; unavailable policy evidence remains unknown, not permission to
 trial-push a default branch.
 
+## Provider policy read
+
+Before selecting authentication or proposing default-branch publication, the
+binding payload can consume the native owner's
+[registration/provider preflight](../agent-worktrees/docs/repository-registration-preflight.md):
+
+```text
+python skills/binding-knowledge/scripts/bind_knowledge.py --preflight --knowledge <name> --agent-worktrees-path "<catalog argv[0]>" --json
+```
+
+This mode performs only the bounded read. It does not call the binding writer,
+register/clone/create a repository, change credentials or mutate Git. Binding
+and other effect options cannot be combined with it. Ordinary binding retains
+its existing behavior and does not automatically request this observation.
+The exact payload's existing `--capabilities` read advertises
+`repository_registration_preflight: 1` for callers selecting this mode.
+
+The consumer reads the exact selected native command's existing inventory
+capability before emitting the optional new operation. Missing/unsupported old
+support returns an explicit unknown policy without probing new syntax.
+A failed, malformed, wrong-target or rolled-back native read is not replayed
+through another account or effectful fallback. Partial policy remains separate
+from independently valid local binding; repository publication rules still
+govern every later effect.
+
 ## Machine-local artifacts
 
 Manager's native Repositories contribution can invoke this same owner for a
@@ -91,6 +116,13 @@ It rechecks the confirmed portable resolution, including logical machine scope,
 after registry-lock waits. Workers require this capability before portable apply;
 older name-based version-2 callers retain their existing behavior.
 
+`binding_precondition_freshness: 1` additionally guarantees that the writer
+rechecks the exact captured configuration bytes after that callback and just
+before replacement. Concurrent unrelated edits or file creation/removal refuse
+without a pointer-commit receipt, including an otherwise already-matching
+binding. Accepted-default consumers require this additive capability; existing
+explicit callers keep their previous capability contract.
+
 `bind_knowledge.py` writes or refreshes these local artifacts:
 
 | Artifact | What it contains |
@@ -118,7 +150,7 @@ agent-worktrees' single managed-overlay implementation. The agent-worktrees
 ## Development checks
 
 The `harness-knowledge` typecheck project covers the configurator scripts
-including the extracted `binding_commands.py` adapter, and all four test modules,
+including the extracted `binding_commands.py` adapter and its test modules,
 without exclusions. Run
 `python tools/typecheck.py harness-knowledge` from the repository root for
 strict Python 3.10 checks on both Linux and Windows targets; use `--prepare`

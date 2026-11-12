@@ -192,17 +192,7 @@ elseif (
         )
         exit 126
     }
-    $normalizedRoot = [IO.Path]::GetFullPath($runtimeRoot).ToLowerInvariant()
-    $sha = [Security.Cryptography.SHA256]::Create()
-    try {
-        $serviceSuffix = (
-            [BitConverter]::ToString(
-                $sha.ComputeHash([Text.Encoding]::UTF8.GetBytes($normalizedRoot))
-            )
-        ).Replace('-', '').Substring(0, 12).ToLowerInvariant()
-    } finally {
-        $sha.Dispose()
-    }
+    $serviceSuffix = Get-RuntimeServiceSuffix -RuntimeRoot $runtimeRoot
     $installationId = if ($marketplaceId) { "$marketplaceId/agent-vault" } else { '' }
     $validationDurableHome = $context
     1..5 | ForEach-Object {

@@ -6,9 +6,11 @@ import time
 from pathlib import Path
 
 import httpx
+import pytest
 
 from agent_index.sources import get_connector
 from agent_index.sources.azure_devops import AzureDevOpsConnector
+from agent_index.indexing.work_counts import measure_reindex
 
 
 def _json_response(
@@ -429,3 +431,470 @@ def test_ado_registry_aliases(monkeypatch) -> None:
 
     assert isinstance(get_connector("ado:acme/widgets"), AzureDevOpsConnector)
     assert isinstance(get_connector("azure-devops:acme/widgets"), AzureDevOpsConnector)
+
+
+@pytest.mark.parametrize("changed_ids", [[], [2, 201]])
+def test_ado_incremental_filters_metadata_before_hydrating_bodies(
+    changed_ids: list[int],
+) -> None:
+    wiql = "SELECT [System.Id] FROM WorkItemLinks WHERE Arbitrary Operator Predicate"
+    ids = list(range(1, 202))
+    metadata_batches: list[list[int]] = []
+    body_ids: list[int] = []
+    comment_ids: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if path.endswith("/_apis/wit/wiql"):
+            assert json.loads(request.content)["query"] == wiql
+            return _json_response(200, {"workItems": [{"id": number} for number in ids]})
+        if path.endswith("/_apis/wit/wiql/saved-query"):
+            return _json_response(200, {"workItems": [{"id": 2}, {"id": 201}]})
+        if path.endswith("/workitemsbatch"):
+            payload = json.loads(request.content)
+            batch = payload["ids"]
+            if "fields" in payload:
+                assert payload == {
+                    "ids": batch,
+                    "fields": ["System.Id", "System.ChangedDate"],
+                    "errorPolicy": "fail",
+                }
+                metadata_batches.append(batch)
+                return _json_response(200, {"value": [
+                    {"id": number, "fields": {
+                        "System.ChangedDate": (
+                            "2026-01-03T00:00:00Z" if number in changed_ids
+                            else "2026-01-01T00:00:00Z"
+                        ),
+                    }}
+                    for number in reversed(batch)
+                ]})
+            assert payload == {"ids": batch, "$expand": "all"}
+            body_ids.extend(batch)
+            return _json_response(200, {"value": [
+                _work_item_payload(number, changed="2026-01-03T00:00:00Z")
+                for number in batch
+            ]})
+        if path.endswith("/comments"):
+            number = int(path.split("/")[-2])
+            assert number in changed_ids
+            comment_ids.append(number)
+            return _json_response(200, {"comments": [{"text": "Updated comment"}]})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[
+            {"wiql": wiql}, {"saved_query_id": "saved-query"},
+        ],
+        pull_request_queries=[],
+    )
+
+    @measure_reindex
+    def run():
+        return {"entries": connector.discover_changed("2026-01-03T00:01:00Z")}
+
+    result = run()
+    entries = result["entries"]
+    counts = result["work_counts"]
+    assert counts["acquisition_by_source"] == {
+        "ado:acme/widgets:workitems": {
+            "identity_records": 203,
+            "item_body_records": len(changed_ids),
+            "comment_body_records": len(changed_ids),
+        },
+    }
+    assert counts["http_by_purpose"]["identity_page"]["attempts"] == 2
+    assert counts["http_by_purpose"]["metadata"]["attempts"] == 2
+    assert "unclassified" not in counts["http_by_purpose"]
+
+    assert metadata_batches == [ids[:200], ids[200:]]
+    assert body_ids == changed_ids
+    assert comment_ids == changed_ids
+    assert [entry.path for entry in entries] == [
+        f"workitems/{number}.md" for number in changed_ids
+    ]
+    assert all("Updated comment" in entry.content for entry in entries)
+
+
+@pytest.mark.parametrize("fault", ["missing", "duplicate", "unexpected", "invalid-date"])
+def test_ado_incremental_refuses_incomplete_metadata_before_body_fetch(fault: str) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/wiql"):
+            return _json_response(200, {"workItems": [{"id": 1}, {"id": 2}]})
+        if request.url.path.endswith("/workitemsbatch"):
+            payload = json.loads(request.content)
+            assert payload.get("fields") == ["System.Id", "System.ChangedDate"]
+            items = [
+                {"id": 1, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
+                {"id": 2, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
+            ]
+            if fault == "missing":
+                items.pop()
+            elif fault == "duplicate":
+                items[1] = items[0]
+            elif fault == "unexpected":
+                items[1]["id"] = 3
+            else:
+                items[1]["fields"]["System.ChangedDate"] = "not-a-timestamp"
+            return _json_response(200, {"value": items})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[{"wiql": "SELECT [System.Id] FROM WorkItems"}],
+        pull_request_queries=[],
+    )
+
+    with pytest.raises(ValueError, match="work-item metadata"):
+        connector.discover_changed("2026-01-03T00:01:00Z")
+
+
+@pytest.mark.parametrize("cancel_after_metadata", [False, True])
+def test_ado_incremental_checks_cancellation_and_body_timestamp(
+    cancel_after_metadata: bool,
+) -> None:
+    metadata_done = False
+    body_requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal metadata_done, body_requests
+        if request.url.path.endswith("/wiql"):
+            return _json_response(200, {"workItems": [{"id": 1}]})
+        if request.url.path.endswith("/workitemsbatch"):
+            payload = json.loads(request.content)
+            if "fields" in payload:
+                metadata_done = True
+                return _json_response(200, {"value": [
+                    {"id": 1, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}},
+                ]})
+            body_requests += 1
+            return _json_response(200, {"value": [
+                _work_item_payload(1, changed="2026-01-01T00:00:00Z"),
+            ]})
+        raise AssertionError(f"unexpected request: {request.url}")
+
+    def cancel_check() -> None:
+        if metadata_done and cancel_after_metadata:
+            raise RuntimeError("cancelled after metadata")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[{"wiql": "SELECT [System.Id] FROM WorkItems"}],
+        pull_request_queries=[],
+    )
+    if cancel_after_metadata:
+        with pytest.raises(RuntimeError, match="cancelled after metadata"):
+            connector.discover_changed("2026-01-03T00:01:00Z", cancel_check=cancel_check)
+    else:
+        assert connector.discover_changed(
+            "2026-01-03T00:01:00Z", cancel_check=cancel_check,
+        ) == []
+    assert body_requests == (0 if cancel_after_metadata else 1)
+
+
+@pytest.mark.parametrize(
+    "outcome", ["complete", "later-404", "cycle", "missing-token", "bad-page", "cancel"],
+)
+def test_ado_work_item_comment_pages_are_complete_or_refused(outcome: str) -> None:
+    tokens: list[str | None] = []
+    token = "opaque +/&token"
+    first_page_seen = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal first_page_seen
+        path = request.url.path
+        if path.endswith("/wiql"):
+            return _json_response(200, {"workItems": [{"id": 42}]})
+        if path.endswith("/workitemsbatch"):
+            return _json_response(200, {"value": [_work_item_payload(42)]})
+        assert path.endswith("/workItems/42/comments")
+        current = request.url.params.get("continuationToken")
+        tokens.append(current)
+        if current is None:
+            first_page_seen = True
+            page = {
+                "comments": [{"id": 1, "text": "First page"}],
+                "continuationToken": token,
+                "nextPage": "https://foreign.example/never-follow-this-url",
+            }
+            if outcome == "missing-token":
+                del page["continuationToken"]
+            return _json_response(200, page)
+        assert current == token
+        if outcome == "later-404":
+            return _json_response(404, {"message": "interrupted continuation"})
+        if outcome == "bad-page":
+            return _json_response(200, {"comments": {"invalid": "not a list"}})
+        return _json_response(200, {
+            "comments": [{"id": 2, "text": "Last page"}],
+            "continuationToken": token if outcome == "cycle" else None,
+        })
+
+    def cancel_check() -> None:
+        if outcome == "cancel" and first_page_seen:
+            raise RuntimeError("cancelled between comment pages")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[{"wiql": "SELECT [System.Id] FROM WorkItems"}],
+        pull_request_queries=[],
+    )
+
+    @measure_reindex
+    def run() -> dict[str, object]:
+        return {"entries": connector.discover(cancel_check=cancel_check)}
+
+    if outcome == "complete":
+        result = run()
+        assert len(result["entries"]) == 1
+        assert "First page" in result["entries"][0].content
+        assert "Last page" in result["entries"][0].content
+        assert result["work_counts"]["http_by_purpose"]["comment_page"]["attempts"] == 2
+    else:
+        error = {
+            "later-404": httpx.HTTPStatusError,
+            "cancel": RuntimeError,
+        }.get(outcome, ValueError)
+        with pytest.raises(error):
+            run()
+    assert tokens == (
+        [None] if outcome in {"cancel", "missing-token"} else [None, token]
+    )
+
+
+@pytest.mark.parametrize("status", [200, 404])
+def test_ado_work_item_comments_preserve_legacy_and_initial_not_found(status: int) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/workItems/42/comments")
+        assert request.url.params.get("continuationToken") is None
+        return _json_response(status, {"value": [{"text": "Legacy comment"}]})
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[], pull_request_queries=[],
+    )
+    assert connector._work_item_comments(42) == (
+        [{"text": "Legacy comment"}] if status == 200 else []
+    )
+
+
+def test_ado_parsed_work_item_counts_precede_filtering_and_query_deduplication() -> None:
+    def handler(request):
+        if request.url.path.endswith("/wiql"):
+            return _json_response(200, {
+                "workItems": [{"id": 1}, {"id": 1}, None],
+                "workItemRelations": [
+                    {"target": {"id": 2}}, {"target": None}, None,
+                ],
+            })
+        if request.url.path.endswith("/workitemsbatch"):
+            if "fields" in json.loads(request.content):
+                return _json_response(200, {"value": [
+                    {"id": number, "fields": {"System.ChangedDate": "2026-01-03T00:00:00Z"}}
+                    for number in [1, 2]
+                ]})
+            first = _work_item_payload(1, changed="2026-01-01T00:00:00Z")
+            return _json_response(200, {"value": [
+                first, first,
+                {"id": 2, "fields": {
+                    "System.ChangedDate": "2026-01-03T00:00:00Z",
+                    "Microsoft.VSTS.TCM.ReproSteps": None,
+                }},
+                None,
+            ]})
+        assert request.url.path.endswith("/workItems/2/comments")
+        return _json_response(200, {"comments": []})
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[{"wiql": "Operator query"}], pull_request_queries=[],
+    )
+
+    @measure_reindex
+    def run():
+        return {"entries": connector.discover_changed("2026-01-03T00:01:00Z")}
+
+    result = run()
+    assert [entry.path for entry in result["entries"]] == ["workitems/2.md"]
+    assert result["work_counts"]["acquisition_by_source"] == {
+        "ado:acme/widgets:workitems": {
+            "identity_records": 3, "item_body_records": 3, "comment_body_records": 0,
+        },
+    }
+
+
+@pytest.mark.parametrize("later_status", [200, 404])
+def test_ado_parsed_comment_counts_survive_refusal_and_ignore_invalid_bodies(later_status):
+    def handler(request):
+        if not request.url.params.get("continuationToken"):
+            return _json_response(200, {
+                "comments": [
+                    {"text": ""}, {"text": None}, {"text": 1}, {},
+                    {"text": "duplicate"}, {"text": "duplicate"},
+                ],
+                "continuationToken": "next",
+            })
+        return _json_response(later_status, {"comments": [{"text": "second page"}, None]})
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler), work_item_queries=[], pull_request_queries=[],
+    )
+
+    @measure_reindex
+    def run():
+        error = ValueError if later_status == 200 else httpx.HTTPStatusError
+        with pytest.raises(error):
+            connector._work_item_comments(1)
+        return {}
+
+    counts = run()["work_counts"]
+    assert counts["acquisition_by_source"] == {
+        "ado:acme/widgets:workitems": {
+            "identity_records": 0, "item_body_records": 0,
+            "comment_body_records": 5 if later_status == 200 else 4,
+        },
+    }
+    assert counts["http_by_purpose"]["comment_page"]["attempts"] == 2
+
+
+def test_ado_parsed_pull_counts_include_list_bodies_and_duplicates_not_metadata() -> None:
+    def handler(request):
+        path = request.url.path
+        if path.endswith("/connectionData"):
+            return _json_response(200, {"authenticatedUser": {"id": "account"}})
+        if path.endswith("/repositories"):
+            return _json_response(200, {"value": [{"id": "repo-1", "name": "widgets"}]})
+        if path.endswith("/pullrequests"):
+            item = {"pullRequestId": 1, "description": None, "repository": {"id": "repo-1"}}
+            return _json_response(200, {"value": [
+                item, item, None,
+                {"pullRequestId": 2, "description": 9}, {"pullRequestId": 3},
+            ]})
+        assert path.endswith("/pullRequests/1/threads")
+        return _json_response(200, {"value": [
+            {"comments": [{"content": ""}, {"content": None}, {"content": []}, {}, None]},
+            {"comments": [{"content": "another"}]},
+        ]})
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler), work_item_queries=[],
+        pull_request_queries=[{"repository": "widgets", "creator": "me"}],
+    )
+
+    @measure_reindex
+    def run(paths_only=False):
+        return {"entries": connector.list_paths() if paths_only else connector.discover()}
+
+    counts = run()["work_counts"]
+    assert counts["acquisition_by_source"] == {
+        "ado:acme/widgets:pulls": {
+            "identity_records": 4, "item_body_records": 2, "comment_body_records": 3,
+        },
+    }
+    assert counts["http_by_purpose"]["metadata"]["attempts"] == 2
+    assert counts["http_by_purpose"]["identity_page"]["attempts"] == 1
+    assert counts["http_by_purpose"]["comment_page"]["attempts"] == 1
+    assert "unclassified" not in counts["http_by_purpose"]
+    assert run(True)["work_counts"]["acquisition_by_source"] == {
+        "ado:acme/widgets:pulls": {
+            "identity_records": 4, "item_body_records": 2, "comment_body_records": 0,
+        },
+    }
+
+
+@pytest.mark.parametrize("comments", [False, True])
+@pytest.mark.parametrize("payload", [{}, [], {"value": []}])
+def test_ado_parsed_empty_pull_pages_differ_from_unrecognized_envelopes(comments, payload):
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(lambda _request: _json_response(200, payload)),
+        work_item_queries=[], pull_request_queries=[{"status": "all"}],
+    )
+
+    @measure_reindex
+    def run():
+        if comments:
+            assert connector._pull_request_comments({
+                "pullRequestId": 1, "repository": {"id": "repo-1"},
+            }) == []
+        else:
+            assert list(connector._iter_pull_requests(since=None)) == []
+        return {}
+
+    assert run()["work_counts"]["acquisition_by_source"] == (
+        {"ado:acme/widgets:pulls": {
+            "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
+        }} if payload != {} else {}
+    )
+
+
+@pytest.mark.parametrize("payload", [{}, {"workItems": []}, {"workItemRelations": []}])
+def test_ado_parsed_empty_query_pages_differ_from_unrecognized_envelopes(payload):
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(lambda _request: _json_response(200, payload)),
+        work_item_queries=[{"wiql": "Operator query"}], pull_request_queries=[],
+    )
+
+    @measure_reindex
+    def run():
+        assert connector._work_item_ids() == []
+        return {}
+
+    assert run()["work_counts"]["acquisition_by_source"] == (
+        {"ado:acme/widgets:workitems": {
+            "identity_records": 0, "item_body_records": 0, "comment_body_records": 0,
+        }} if payload != {} else {}
+    )
+
+
+@pytest.mark.parametrize("failure", ["http", "json"])
+def test_ado_parsed_pull_pages_remain_counted_after_later_request_failure(failure):
+    seen_tokens = []
+
+    def handler(request):
+        assert request.url.path.endswith("/pullrequests")
+        token = request.url.params.get("continuationToken")
+        seen_tokens.append(token)
+        if token is None:
+            return _json_response(200, {"value": [
+                {"pullRequestId": 1, "description": "First page"},
+                {"pullRequestId": 1, "description": None},
+            ]}, headers={"x-ms-continuationtoken": "next"})
+        if failure == "http":
+            return _json_response(404, {"description": "Not a PR record"})
+        return httpx.Response(200, content=b"invalid json")
+
+    connector = AzureDevOpsConnector(
+        "ado:acme/widgets", token="pat-token", min_interval_s=0,
+        transport=httpx.MockTransport(handler),
+        work_item_queries=[], pull_request_queries=[{"status": "all"}],
+    )
+
+    @measure_reindex
+    def run():
+        error = httpx.HTTPStatusError if failure == "http" else ValueError
+        emitted = []
+        with pytest.raises(error):
+            for entry in connector._iter_pull_requests(since=None):
+                emitted.append(entry)
+        assert emitted == []  # Preserve the existing buffered acquisition behavior.
+        return {}
+
+    counts = run()["work_counts"]
+    assert counts["acquisition_by_source"] == {
+        "ado:acme/widgets:pulls": {
+            "identity_records": 2, "item_body_records": 2, "comment_body_records": 0,
+        },
+    }
+    assert counts["http_by_purpose"]["identity_page"]["attempts"] == 2
+    assert seen_tokens == [None, "next"]

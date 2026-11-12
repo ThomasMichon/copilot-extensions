@@ -1,0 +1,9 @@
+{
+  "comment": "Qualify real native synchronous and background shell and agent task transitions through public joined-session APIs.",
+  "changes": [
+    {
+      "plugin": "agent-remote-driver",
+      "type": "patch"
+    }
+  ]
+}

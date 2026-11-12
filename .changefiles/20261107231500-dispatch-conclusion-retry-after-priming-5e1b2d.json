@@ -1,0 +1,9 @@
+{
+  "comment": "Let a dispatch-attempt conclusion retry reach the idempotent workspace conclusion after an earlier attempt primed the worktree, while still preserving it on an identity change or unavailable owner",
+  "changes": [
+    {
+      "plugin": "agent-dispatch",
+      "type": "patch"
+    }
+  ]
+}

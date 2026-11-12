@@ -41,7 +41,7 @@ from agent_procutil import no_window_kwargs
 from machine_transport import detect_platform
 
 from . import bare_anchor_sync, git_ops, output, registry_paths
-from .repo_accounts import AccountLookupIndex, account_for_remote as account_for_remote
+from .repo_accounts import AccountLookupIndex, DEFAULT_ACCOUNT_OWNER, account_for_remote as account_for_remote
 from .repos_registry_reader import RepositoryResolutionError, read_registry as _read_registry
 
 # ---------------------------------------------------------------------------
@@ -108,8 +108,8 @@ class RepoEntry:
     tags: list[str] = field(default_factory=list)
     contributing: str = ""
     # Optional preferred GitHub identity (a ``gh`` account login) this repo's
-    # git/gh operations run under. Absent => derived from the remote owner for
-    # github.com remotes, else no account (today's ambient-auth behavior). An
+    # git/gh operations run under. Absent => owner policy or the configured
+    # default for github.com, else ambient authentication. An
     # explicit value overrides the derived owner (an EMU account can span orgs,
     # so owner != account isn't guaranteed). See :func:`resolve_account`.
     account: str = ""
@@ -167,8 +167,24 @@ class ReposRegistry:
     # override (which stays the finest grain). See :func:`resolve_account` /
     # :func:`account_for_github_owner`. Keys are compared case-insensitively.
     account_map: dict[str, str] = field(default_factory=dict)
+    account_projection: dict[str, dict[str, str]] = field(default_factory=dict, kw_only=True)
     _baseline: tuple[str, str] | None = field(default=None, repr=False, compare=False)
     schema_version: int | None = field(default=None, kw_only=True)
+
+    @property
+    def default_account(self) -> str:
+        """The reserved owner wildcard survives older registry serializers."""
+        return account_from_map(DEFAULT_ACCOUNT_OWNER, registry=self) or ""
+
+    @default_account.setter
+    def default_account(self, login: str) -> None:
+        if not isinstance(login, str) or any(char.isspace() for char in login):
+            raise ValueError("Preferred GitHub account must be a login string")
+        for owner in tuple(self.account_map):
+            if owner.casefold() == DEFAULT_ACCOUNT_OWNER:
+                del self.account_map[owner]
+        if login:
+            self.account_map[DEFAULT_ACCOUNT_OWNER] = login
 
 
 # ---------------------------------------------------------------------------
@@ -405,7 +421,7 @@ def account_from_map(
     The decoupled org->account layer: a top-level ``account_map:`` in
     repos.yaml maps a GitHub owner/org to the ``gh`` account login its repos
     authenticate as. Case-insensitive on the owner key. Returns None when no
-    map entry matches (callers then fall back to the owner itself).
+    map entry matches. A namespace alone never identifies an operator account.
     """
     if not owner:
         return None
@@ -426,20 +442,15 @@ def resolve_account(
     index: AccountLookupIndex | None = None,
     configured_only: bool = False,
 ) -> str | None:
-    """Resolve the preferred GitHub account for a repo entry: explicit
-    ``account:`` -> ``account_map`` -> remote owner -> None (ambient)."""
+    """Resolve explicit repo, owner map or default policy, never a namespace."""
     if entry is None:
         return None
     if entry.account:
         return entry.account
     owner = github_owner(entry.remote)
-    mapped = (
-        account_from_map(owner) if registry is None and index is None
-        else account_from_map(owner, registry=registry, index=index)
+    return account_for_github_owner(
+        owner, registry=registry, index=index, configured_only=configured_only,
     )
-    if mapped:
-        return mapped
-    return None if configured_only else owner
 
 
 def resolve_copilot_account(entry: RepoEntry | None) -> str | None:
@@ -528,42 +539,19 @@ def account_for_github_owner(
     index: AccountLookupIndex | None = None,
     configured_only: bool = False,
 ) -> str | None:
-    """Resolve the effective account for a github ``owner`` (from a repo slug).
-
-    Order (highest wins):
-
-    1. an explicit ``account:`` override on any registered repo whose github
-       remote is owned by ``owner`` (finest grain; owner != account is possible
-       for EMU accounts spanning orgs);
-    2. the decoupled ``account_map`` (owner->login) in repos.yaml -- the org
-       identity layer, which resolves org-owned repos (``github/...``,
-       ``example-org/...``) to the correct login even when no gh account is
-       named after the org and no repo under it is registered;
-    3. the owner itself (correct when owner == login, e.g. a personal/EMU
-       user's own repos).
-
-    Returns None only for an empty owner.  Used at gh/git touch-sites that know
-    the hosting ``owner/name`` slug but not the registry name.
-    """
+    """Resolve owner-wide policy without promoting a repo exception or owner."""
     if not owner:
         return None
     if index is not None:
         return (
-            index.owners.get(owner.casefold()) or index.account_map.get(owner.casefold())
-            or (None if configured_only else owner)
+            index.account_map.get(owner.casefold()) or index.default_account or None
         )
     if registry is None:
-        registry = read_registry(strict=True) if configured_only else read_registry()
-    for entry in registry.repos.values():
-        if not entry.account:
-            continue
-        eowner = github_owner(entry.remote)
-        if eowner and eowner.casefold() == owner.casefold():
-            return entry.account
+        registry = read_registry(strict=True)
     for key, login in registry.account_map.items():
         if key.casefold() == owner.casefold() and login:
             return login
-    return None if configured_only else owner
+    return registry.default_account or None
 
 
 def resolve_slug_owner(target: str | None) -> str | None:
@@ -603,7 +591,7 @@ def is_unresolved_registered_target(target: str | None) -> bool:
     entry = find_repo(target)
     if entry is None:
         return False
-    return resolve_account(entry) is None
+    return not entry.account and github_owner(entry.remote) is None
 
 
 def account_for_github_slug(
@@ -616,46 +604,24 @@ def account_for_github_slug(
     Exact registered repository matches take precedence over owner-wide policy,
     so sibling repositories can use different accounts. Bare registered names
     resolve directly through their entry; unregistered slugs use owner policy.
-    ``configured_only`` excludes the derived-owner heuristic, distinguishing
-    an operator's identity choice from legacy best-effort authentication.
+    All returned logins are configured choices. An unconfigured target retains
+    ambient authentication, without claiming its namespace as an identity.
     """
     if not slug:
         return None
-    if configured_only and registry is None:
+    if registry is None:
         registry = read_registry(strict=True)
-    if "/" in slug:
-        if index is not None:
-            entry = index.slugs.get(slug.casefold())
-            if entry is not None:
-                return resolve_account(
-                    entry, registry=registry, index=index, configured_only=configured_only,
-                )
-            return account_for_github_owner(
-                slug.split("/", 1)[0], index=index, configured_only=configured_only,
-            )
-        entries = (registry if registry is not None else read_registry()).repos
-        for entry in entries.values():
-            remote_slug = github_slug(entry.remote)
-            if remote_slug and remote_slug.casefold() == slug.casefold():
-                return (
-                    resolve_account(entry) if registry is None
-                    else resolve_account(entry, registry=registry, configured_only=configured_only)
-                )
-    if "/" not in slug:
-        entry = find_repo(slug) if registry is None else registry.repos.get(slug)
-        if entry is not None:
-            return (
-                resolve_account(entry) if registry is None and index is None
-                else resolve_account(
-                    entry, registry=registry, index=index, configured_only=configured_only,
-                )
-            )
-    owner = resolve_slug_owner(slug) if registry is None else slug.split("/", 1)[0]
-    return (
-        account_for_github_owner(owner) if registry is None
-        else account_for_github_owner(
-            owner, registry=registry, index=index, configured_only=configured_only,
+    index = index or AccountLookupIndex.from_registry(registry)
+    entry = (
+        index.slugs.get(slug.casefold()) if "/" in slug else registry.repos.get(slug)
+    )
+    if entry is not None:
+        return resolve_account(
+            entry, registry=registry, index=index, configured_only=configured_only,
         )
+    return account_for_github_owner(
+        slug.split("/", 1)[0], registry=registry, index=index,
+        configured_only=configured_only,
     )
 
 
@@ -670,6 +636,10 @@ def set_account_map(owner: str, login: str) -> None:
         if key.casefold() == owner.casefold():
             del registry.account_map[key]
     registry.account_map[owner] = login
+    if owner.casefold() == DEFAULT_ACCOUNT_OWNER:
+        from .account_projection import explicit_default
+
+        explicit_default(registry)
     write_registry(registry)
     output.ok(f"account_map: {owner} -> {login}")
 
@@ -683,6 +653,10 @@ def unset_account_map(owner: str) -> bool:
             del registry.account_map[key]
             removed = True
     if removed:
+        if owner.casefold() == DEFAULT_ACCOUNT_OWNER:
+            from .account_projection import explicit_default
+
+            explicit_default(registry)
         write_registry(registry)
         output.ok(f"account_map: removed {owner}")
     return removed
@@ -692,15 +666,14 @@ def unset_account_map(owner: str) -> bool:
 class AccountResolution:
     """How a repo's gh account resolves at registration time.
 
-    ``needs_clarify`` is the actionable signal: it is True only for the
-    **owner-fallback** case where the owner is a github org that is *not* an
-    authenticated ``gh`` account (so the derived login can't actually auth) --
-    the moment a register/adopt flow should ask the operator to pin an account.
+    ``needs_clarify`` is true when no operator account policy is configured.
+    An unauthenticated namespace may be either a user or an organization;
+    neither proves which account the operator intends.
     """
 
     owner: str | None
     login: str | None
-    source: str  # "explicit" | "account_map" | "sibling" | "owner-fallback" | "none"
+    source: str  # "explicit" | "account_map" | "default" | "none"
     authenticated: bool
     needs_clarify: bool
 
@@ -708,16 +681,7 @@ class AccountResolution:
 def resolve_registration_account(
     remote: str, explicit_account: str = "",
 ) -> AccountResolution:
-    """Resolve the account for a repo being registered, flagging ambiguity.
-
-    Mirrors :func:`account_for_github_owner`'s order (explicit → account_map →
-    sibling repo's explicit → owner) but additionally reports the resolution
-    *source* and whether the owner-fallback landed on a login that isn't an
-    authenticated ``gh`` account. GitHub remotes only; non-GitHub/underivable
-    remotes resolve to ``none`` (ambient auth, never clarified). When ``gh`` is
-    unavailable, authentication can't be checked -- we assume authenticated so a
-    register never nags on a box without ``gh``.
-    """
+    """Report configured identity separately from repository ownership."""
     owner = github_owner(remote)
 
     def _authed(login: str | None) -> bool:
@@ -738,20 +702,15 @@ def resolve_registration_account(
     if not owner:
         return AccountResolution(None, None, "none", False, False)
 
-    mapped = account_from_map(owner)
+    registry = read_registry(strict=True)
+    mapped = account_from_map(owner, registry=registry)
     if mapped:
         return AccountResolution(owner, mapped, "account_map", _authed(mapped), False)
 
-    # A sibling repo under the same owner with an explicit account: counts as
-    # resolved (account_for_github_owner returns it when != owner).
-    effective = account_for_github_owner(owner)
-    if effective and effective.casefold() != owner.casefold():
-        return AccountResolution(owner, effective, "sibling", _authed(effective), False)
-
-    # Owner-fallback: the login *is* the owner. Fine when the owner is itself a
-    # gh account (personal/EMU repo); needs clarification when it is not (org).
-    authed = _authed(owner)
-    return AccountResolution(owner, owner, "owner-fallback", authed, not authed)
+    if registry.default_account:
+        login = registry.default_account
+        return AccountResolution(owner, login, "default", _authed(login), False)
+    return AccountResolution(owner, None, "none", False, True)
 
 
 def add_repo(
@@ -812,6 +771,10 @@ def add_repo(
         )
         registry.repos[name] = entry
 
+    if account:
+        from .account_projection import explicit_repository
+
+        explicit_repository(registry, name)
     write_registry(registry)
     agent_note = "" if entry.agent else " no-agent"
     output.ok(
@@ -861,6 +824,9 @@ def remove_repo(name: str) -> bool:
     if name not in registry.repos:
         return False
     del registry.repos[name]
+    from .account_projection import explicit_repository
+
+    explicit_repository(registry, name)
     write_registry(registry)
     output.ok(f"Repo '{name}' removed from registry")
     return True
@@ -1008,20 +974,22 @@ def _name_from_remote(remote: str) -> str | None:
     return name if name else None
 
 
-def resolve_path(name: str, plat: str | None = None) -> str | None:
+def resolve_path(
+    name: str, plat: str | None = None, *, registry: ReposRegistry | None = None,
+) -> str | None:
     """Resolve a repo name to its local path.
 
     Checks the registry first, then tries srcroot + name as a fallback.
     """
     plat = plat or _current_platform()
-    entry = find_repo(name)
+    entry = registry.repos.get(name) if registry is not None else find_repo(name)
     if entry:
         p = entry.local_path(plat)
         if p:
             return p
 
     # Fallback: srcroot / name
-    root = get_srcroot(plat)
+    root = registry.srcroot.get(plat) if registry is not None else get_srcroot(plat)
     if root:
         candidate = Path(root).expanduser() / name
         if candidate.exists():

@@ -1,0 +1,9 @@
+{
+  "comment": "Add explicit selected local carrier preference exchange with bounded conflict and offline controls",
+  "changes": [
+    {
+      "plugin": "agent-machines",
+      "type": "patch"
+    }
+  ]
+}

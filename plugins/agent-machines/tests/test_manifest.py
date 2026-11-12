@@ -14,6 +14,19 @@ from agent_machines.manifest import (
 from ._helpers import base_package, write_package
 
 
+def test_health_job_resource_cannot_supply_collection_or_execution_authority(tmp_path):
+    path = write_package(tmp_path, "health.yaml", base_package(resources=[
+        {"type": "health-job", "state": "present", "platforms": ["windows"]},
+    ]))
+    assert load_package(path).resources[0]["type"] == "health-job"
+    for field in ("store", "policy_token", "user_id", "enabled", "executable", "xml"):
+        path = write_package(tmp_path, "health.yaml", base_package(resources=[
+            {"type": "health-job", field: "not-authority"},
+        ]))
+        with pytest.raises(ManifestError, match="no collection policy or executable"):
+            load_package(path)
+
+
 def test_load_and_gate(tmp_path):
     path = write_package(tmp_path, "defaults.yaml", base_package())
     pkg = load_package(path, source_repo="acme")

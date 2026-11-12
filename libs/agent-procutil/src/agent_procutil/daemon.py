@@ -6,6 +6,7 @@ import contextlib
 import importlib
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from collections.abc import Mapping, Sequence
@@ -105,6 +106,7 @@ def spawn_daemon(
     stderr_log_path: str | os.PathLike[str] | None = None,
     instance=None,
     python_bootstrap_root: str | os.PathLike[str] | None = None,
+    stdio_fds: tuple[int, int, int] | None = None,
 ) -> subprocess.Popen | WindowsDaemonProcess:
     """Launch a windowless resident daemon from an explicit durable cwd.
 
@@ -129,6 +131,7 @@ def spawn_daemon(
             contained_fallback=contained_fallback, extra_creationflags=extra_creationflags,
             display=display, stderr_log_path=stderr_log_path, instance=instance,
             python_bootstrap_root=python_bootstrap_root, _creation=creation,
+            stdio_fds=stdio_fds,
         )
     except BaseException as error:
         if not creation[0]:
@@ -153,6 +156,7 @@ def _spawn_daemon(
     stderr_log_path: str | os.PathLike[str] | None,
     instance,
     python_bootstrap_root: str | os.PathLike[str] | None = None,
+    stdio_fds: tuple[int, int, int] | None = None,
     _creation: list[bool],
 ) -> subprocess.Popen | WindowsDaemonProcess:
     import agent_procutil as pu
@@ -161,6 +165,15 @@ def _spawn_daemon(
     extra_creationflags = pu._validated_extra_creationflags(extra_creationflags)
     cwd_path = pu._validated_daemon_cwd(cwd)
     log_file = pu._validated_daemon_log_path(log_path)
+    if stdio_fds is not None:
+        if (
+            type(stdio_fds) is not tuple or len(stdio_fds) != 3
+            or any(type(fd) is not int or fd < 0 for fd in stdio_fds)
+            or stderr_log_path is not None
+        ):
+            raise ValueError("stdio_fds requires three open descriptors and no stderr_log_path")
+        for descriptor in stdio_fds:
+            os.fstat(descriptor)
     err_file = None
     if stderr_log_path is not None:
         err_file = pu._validated_daemon_log_path(stderr_log_path, "stderr_log_path")
@@ -245,15 +258,33 @@ def _spawn_daemon(
         breakaway=breakaway,
         extra_creationflags=extra_creationflags,
     )
+    @contextlib.contextmanager
+    def diagnostic_stream(path):
+        manager = pu._open_daemon_log(path)
+        stream = manager.__enter__()
+        try:
+            yield stream
+        finally:
+            try:
+                manager.__exit__(*sys.exc_info())
+            except OSError:
+                pass
+
     with contextlib.ExitStack() as stack:
-        log_fh = stack.enter_context(pu._open_daemon_log(log_file))
-        err_fh = stack.enter_context(pu._open_daemon_log(err_file)) if err_file else None
+        log_fh = stack.enter_context(diagnostic_stream(log_file))
+        err_fh = stack.enter_context(diagnostic_stream(err_file)) if err_file else None
         logs = [fh for fh in (log_fh, err_fh) if fh is not None]
 
         def write_logs(data: bytes) -> None:
             for fh in logs:
                 fh.write(data)
                 fh.flush()
+
+        def report_logs(data: bytes) -> None:
+            try:
+                write_logs(data)
+            except OSError:
+                pass
 
         stamp = time.strftime("%Y-%m-%dT%H:%M:%S%z")
         write_logs(pu._daemon_log_header(stamp, cwd_path, command[0], display))
@@ -263,7 +294,7 @@ def _spawn_daemon(
                 return reserve_instance(instance, environment=child_env)
             except Exception as error:
                 code = getattr(error, "errno", None)
-                write_logs(
+                report_logs(
                     f"{stamp} spawn_daemon: instance-reservation-failed; "
                     f"type={type(error).__name__}; errno={code if type(code) is int else None}\n".encode()
                 )
@@ -277,6 +308,8 @@ def _spawn_daemon(
             "stderr": subprocess.STDOUT if err_fh is None else err_fh,
             "close_fds": True,
         }
+        if stdio_fds is not None:
+            popen_kwargs.update(zip(("stdin", "stdout", "stderr"), stdio_fds))
         flags = kwargs.get("creationflags", 0)
         durable_windows = bool(flags & pu._CREATE_BREAKAWAY_FROM_JOB)
         if pu._is_windows():
@@ -289,6 +322,12 @@ def _spawn_daemon(
             child_env.pop(_job_scopes.ENVIRONMENT_KEY, None)
             kwargs["creationflags"] = flags | pu._CREATE_SUSPENDED
         receipt = reserve()
+        if durable_windows:
+            try:
+                write_logs(f"{stamp} spawn_daemon: instance-reserved\n".encode())
+            except BaseException:
+                refused()
+                raise
         child_env.update(instance_environment(receipt))
         process = None
         creation_attempted = False
@@ -321,18 +360,22 @@ def _spawn_daemon(
                 # Query handles must close before resume: inherited handles
                 # would defeat the caller's KILL_ON_JOB_CLOSE ownership.
                 with _job_scopes.query_scopes(scope_environment) as verify:
+                    report_logs(f"{stamp} spawn_daemon: creating-suspended\n".encode())
                     process = create()
+                    report_logs(f"{stamp} spawn_daemon: created-suspended\n".encode())
                     verify(process._handle)
+                    report_logs(f"{stamp} spawn_daemon: caller-jobs-verified\n".encode())
                 resume_attempted = True
                 if not pu._resume_suspended_process(process.pid):
                     raise OSError("failed to resume verified daemon")
+                report_logs(f"{stamp} spawn_daemon: resumed\n".encode())
             else:
                 process = create()
         except BaseException as error:
             if (
                 process is None and creation_attempted and not creation_refused
             ):
-                write_logs(
+                report_logs(
                     f"{stamp} spawn_daemon: creation-outcome-unknown; "
                     f"type={type(error).__name__}; reservation retained\n".encode()
                 )
@@ -364,7 +407,7 @@ def _spawn_daemon(
                 "the caller's Job object forbids breakaway; daemon not started" if denied
                 else "native daemon launch could not escape launcher-owned cleanup Jobs"
             )
-            write_logs(
+            report_logs(
                 f"{stamp} spawn_daemon: {reason}; "
                 f"cleanup_confirmed={cleanup_confirmed}; reservation_settled={settled}\n".encode()
             )
@@ -380,7 +423,7 @@ def _spawn_daemon(
                 raise failure from error
             note = "spawn_daemon: explicit contained_fallback accepts caller-owned lifetime"
             pu.log.warning("%s (%s)", note, command[0])
-            write_logs(f"{stamp} {note}\n".encode())
+            report_logs(f"{stamp} {note}\n".encode())
             child_env.update(scope_environment)
             kwargs["creationflags"] = flags & ~pu._CREATE_BREAKAWAY_FROM_JOB
             receipt = reserve()
@@ -390,4 +433,7 @@ def _spawn_daemon(
             except OSError:
                 refused()
                 raise
-        return commit(process)
+        process = commit(process)
+        if durable_windows:
+            report_logs(f"{stamp} spawn_daemon: instance-bound\n".encode())
+        return process

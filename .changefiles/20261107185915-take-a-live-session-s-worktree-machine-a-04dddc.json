@@ -1,0 +1,9 @@
+{
+  "comment": "Take a live session's worktree, machine and repo from the sessionStart worktree binding, re-read it on every refresh, and keep the slower CLI lookup as a fallback that no longer stays null on a contended host.",
+  "changes": [
+    {
+      "plugin": "agent-bridge",
+      "type": "patch"
+    }
+  ]
+}

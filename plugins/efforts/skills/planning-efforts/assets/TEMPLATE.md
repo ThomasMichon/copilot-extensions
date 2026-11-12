@@ -13,6 +13,14 @@
 
 # <Effort Name>
 
+## Goal
+
+<!-- The operator's current goal/mission/objective, verbatim where possible.
+     Update immediately when amended; preserve earlier words in Request or its
+     sidecar with chronology, supersession, approval limits and current holds.
+     This is the canonical objective read by agendas and continuity, not a phase
+     label or a summary of the last completed PR. -->
+
 - **Slug:** `<kebab-case-slug>`
 - **Repo:** <repo this effort lives in / coordinates>
 - **Branch(es):** `<working-branch>`
