@@ -265,6 +265,13 @@ _exec_copilot_backend() {
             --invoke --record "$LAUNCH_SEED_RECORD" --seed-id "$LAUNCH_SEED_ID" \
             "${attempt_args[@]}" -- "$@" "${COPILOT_ARGS[@]}"
     fi
+    if [[ $# -eq 1 && -n "$_AW_PY" && ( "${1##*/}" == copilot || "${1##*/}" == copilot.exe ) ]]; then
+        if [[ ! -x "$_AW_PY" ]]; then
+            printf 'Normalized Copilot runtime is unavailable; no backend started.\n' >&2
+            exit 3
+        fi
+        exec "$_AW_PY" -I -m agent_worktrees.normalized_backend -- "$@" "${COPILOT_ARGS[@]}"
+    fi
     exec "$@" "${COPILOT_ARGS[@]}"
 }
 

@@ -1,0 +1,9 @@
+{
+  "comment": "Route recordless normalized interactive Copilot handoffs through the retained standalone core without fabricating worktree admission.",
+  "changes": [
+    {
+      "plugin": "agent-worktrees",
+      "type": "patch"
+    }
+  ]
+}

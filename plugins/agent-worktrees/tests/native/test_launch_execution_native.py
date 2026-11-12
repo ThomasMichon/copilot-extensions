@@ -14,6 +14,7 @@ import time
 
 import pytest
 import agent_procutil as procutil
+from agent_procutil.owned_process import run_caller_owned
 
 from agent_worktrees import launch_execution, launch_seed_state
 
@@ -111,6 +112,124 @@ _exec_copilot_backend copilot.exe
         # native Python runtime receives it. Correlation values are unchanged.
         expected.remove("--")
     assert json.loads(output.read_text(encoding="utf-8-sig")) == expected
+
+
+@pytest.mark.parametrize("exit_code", [7, 3])
+def test_recordless_normalized_powershell_handoff_runs_after_setup(tmp_path, exit_code):
+    executable = shutil.which("pwsh")
+    if not executable:
+        pytest.skip("PowerShell unavailable")
+    scripts = Path(__file__).resolve().parents[2] / "scripts"
+    marker, output = tmp_path / "hook-ran", tmp_path / "backend.json"
+    runtime = tmp_path / "selected-runtime.ps1"
+    runtime.write_text(
+        "if ($args -contains 'config-root') { Write-Output $env:FIXTURE_CONFIG_ROOT; exit 0 }\n"
+        "if ($args -contains 'get') { exit 0 }\n"
+        "if ($args -notcontains 'agent_worktrees.normalized_backend') { throw 'unexpected runtime command' }\n"
+        "if (-not (Test-Path -LiteralPath $env:FIXTURE_HOOK)) { throw 'backend preceded setup' }\n"
+        "[IO.File]::WriteAllText($env:FIXTURE_CAPTURE, (ConvertTo-Json -InputObject @($args) -Compress))\n"
+        f"exit {exit_code}\n",
+        encoding="utf-8",
+    )
+    hook = tmp_path / "hook.ps1"
+    hook.write_text("[IO.File]::WriteAllText($env:FIXTURE_HOOK, 'setup')\n", encoding="utf-8")
+    copilot = tmp_path / ("copilot.exe" if os.name == "nt" else "copilot")
+    copilot.touch()  # Any accidental raw invocation fails instead of reaching a real CLI.
+    copilot.chmod(0o700)
+    home = tmp_path / "home"
+    home.mkdir()
+    environment = {
+        **os.environ, "PATH": str(Path(executable).parent), "HOME": str(home), "USERPROFILE": str(home),
+        "FIXTURE_HOOK": str(marker), "FIXTURE_CAPTURE": str(output), "FIXTURE_CONFIG_ROOT": str(home),
+        "AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT": str(home / "uninstalled"),
+    }
+    arguments = ["--model", "--resume=literal", "--resume=selected", "-i", "quoted '\nseed", "--", "tail"]
+    result = run_caller_owned([
+        executable, "-NoProfile", "-NoLogo", "-File", str(scripts / "default-setup.ps1"),
+        "-Machine", "fixture", "-CopilotPath", str(copilot), "-RuntimePython", str(runtime),
+        "-SetupHook", str(hook), "-NativeArgumentsJson", json.dumps({"args": arguments}),
+    ], cwd=tmp_path, env=environment, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == exit_code, result.stdout + result.stderr
+    assert json.loads(output.read_text(encoding="utf-8-sig")) == [
+        "-I", "-m", "agent_worktrees.normalized_backend", str(copilot), *arguments,
+    ]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="Native Windows executable fixture")
+@pytest.mark.parametrize("identity", [[], ["--resume=selected"]])
+def test_recordless_normalized_shell_reaches_real_retained_core(tmp_path, identity):
+    executable = shutil.which("pwsh")
+    compiler = next((path for framework in ("Framework64", "Framework") if (
+        path := Path(os.environ.get("WINDIR", "")) / "Microsoft.NET" /
+        framework / "v4.0.30319" / "csc.exe"
+    ).is_file()), None)
+    if not executable or compiler is None:
+        pytest.skip("PowerShell and system C# compiler required")
+    (tmp_path / ".git").mkdir()
+    home = tmp_path / "home"
+    home.mkdir()
+    captured, source, native = tmp_path / "native.json", tmp_path / "Copilot.cs", tmp_path / "copilot.exe"
+    source.write_text(
+        "using System; using System.IO; using System.Threading; using System.Collections.Generic;"
+        "using System.Web.Script.Serialization;"
+        "class Copilot { static int Main(string[] args) {"
+        "var codec=new JavaScriptSerializer();"
+        "var binding=codec.Deserialize<Dictionary<string,object>>("
+        "Environment.GetEnvironmentVariable(\"COPILOT_DRIVER_HEADED_CLIENT\"));"
+        "string state=(string)binding[\"stateFile\"];"
+        "int pid=System.Diagnostics.Process.GetCurrentProcess().Id;"
+        "bool observed=false; var deadline=DateTime.UtcNow.AddSeconds(15);"
+        "while (!observed && DateTime.UtcNow<deadline) {"
+        "try { var saved=codec.Deserialize<Dictionary<string,object>>(File.ReadAllText(state));"
+        "observed=Convert.ToInt32(saved[\"child_pid\"])==pid; } catch (IOException) {}"
+        "if (!observed) Thread.Sleep(20); }"
+        "if (!observed) return 29;"
+        "Thread.Sleep(250);"
+        "File.WriteAllText(Environment.GetEnvironmentVariable(\"FIXTURE_CAPTURE\"),"
+        "codec.Serialize(new {args=args,pid=pid,state=state})); return 7; } }",
+        encoding="utf-8",
+    )
+    compiled = run_caller_owned(
+        [str(compiler), "/nologo", "/r:System.Web.Extensions.dll", f"/out:{native}", str(source)],
+        cwd=tmp_path, timeout=30, max_stdout_bytes=8192, max_stderr_bytes=8192,
+    )
+    assert compiled.returncode == 0, compiled.stdout + compiled.stderr
+    environment = {
+        key: value for key, value in os.environ.items()
+        if not key.startswith(("COPILOT_EXTENSIONS_", "AGENT_WORKTREES_"))
+        and key not in {"COPILOT_PLUGIN_ROOT", "COPILOT_PLUGIN_STAGED_FROM", "PYTHONPATH", "PYTHONHOME"}
+    }
+    environment.update(
+        HOME=str(home), USERPROFILE=str(home), AGENT_HOME=str(home),
+        PATH=str(Path(executable).parent), FIXTURE_CAPTURE=str(captured),
+        COPILOT_EXTENSIONS_TEST_CONTAINED="1", AGENT_WORKTREES_STATUS_MONITOR="0",
+    )
+    script = Path(__file__).resolve().parents[2] / "scripts" / "default-setup.ps1"
+    seed = "literal '\nseed"
+    arguments = ["--model", "auto", *identity, "-i", seed]
+    started = time.monotonic()
+    result = run_caller_owned([
+        executable, "-NoProfile", "-NoLogo", "-File", str(script),
+        "-Machine", "fixture", "-CopilotPath", str(native), "-RuntimePython", sys.executable,
+        "-NativeArgumentsJson", json.dumps({"args": arguments}),
+    ], cwd=tmp_path, env=environment, timeout=60, max_stdout_bytes=8192, max_stderr_bytes=8192)
+    assert result.returncode == 7, result.stdout + result.stderr
+    assert not result.stderr
+    observed = json.loads(captured.read_text(encoding="utf-8"))
+    argv = observed["args"]
+    assert argv[:len(arguments)] == arguments and argv.count(seed) == 1
+    assert argv.count("--plugin-dir") == 1
+    assert (argv.count("--session-id") == 1) == (not identity)
+    state_file = Path(observed["state"])
+    state = json.loads(state_file.read_text(encoding="utf-8"))
+    assert state["child_pid"] == observed["pid"] != state["host_pid"]
+    assert state["state"] == "child_exited" and state["child_exit_code"] == 7
+    assert state["lifetime_policy"] == "cli" and state["restoration"] == "unqualified"
+    if identity:
+        assert state["session_id"] == "selected"
+    assert list((home / ".agent-worktrees" / "launch-attempts").glob("*/headed.json")) == [state_file]
+    assert not list(home.rglob("*.yaml")), "A recordless launch must not fabricate a worktree ledger"
+    print(f"recordless-selected-core-seconds={time.monotonic() - started:.3f}")
 
 
 @pytest.mark.parametrize("interruption", [None, "seed-claimed", "process-spawned", "finish"])

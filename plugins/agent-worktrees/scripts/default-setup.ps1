@@ -396,6 +396,26 @@ function Invoke-CopilotBackend {
         (Test-AwHeadedPreparation $LaunchSeedNativeRoot (Get-AwNativeSeedRuntime $LaunchSeedNativeRoot))
     ) { $backendRecord = $nativeSetupRecord }
     if (-not $backendRecord) {
+        if (
+            -not $nativeSetup -and $LeadingArgs.Count -eq 0 -and
+            [IO.Path]::GetFileName($Executable) -in @('copilot', 'copilot.exe')
+        ) {
+            $backendPython = $RuntimePython
+            if (-not $backendPython) {
+                $runtimeRoot = if ($env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT) {
+                    $env:AGENT_WORKTREES_LAUNCH_RUNTIME_ROOT
+                } else { Join-Path $env:USERPROFILE '.agent-worktrees' }
+                $resolver = Join-Path $runtimeRoot 'bin\resolve-runtime.ps1'
+                if (Test-Path -LiteralPath $resolver) { . $resolver; $backendPython = $AwPy }
+            }
+            if ($backendPython) {
+                if (-not (Test-Path -LiteralPath $backendPython -PathType Leaf)) {
+                    throw 'Normalized Copilot runtime is unavailable; no backend started.'
+                }
+                & $backendPython -I -m agent_worktrees.normalized_backend -- $Executable @CopilotArgs
+                return
+            }
+        }
         $consoleControl = $null
         try {
             if ($nativeSetup) { $consoleControl = Register-AwNativeSeedConsoleControl }

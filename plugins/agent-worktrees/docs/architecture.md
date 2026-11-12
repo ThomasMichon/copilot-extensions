@@ -830,6 +830,23 @@ actual wait; it does not restore or replay. Custom/intermediary commands,
 ACP and unselected sessions retain their existing Python execution paths.
 Full caller convergence is still in progress.
 
+Recordless normalized setup (including anchor launches) invokes the same
+retained headed core at its final backend handoff, after environment priming
+and setup hooks. The setup script calls its selected Worktrees runtime's
+internal `normalized_backend` entrypoint only for a direct `copilot` executable;
+custom providers and `gh copilot` retain their existing shell invocation.
+The entrypoint uses the same native argument selection as recorded launches,
+preserving explicit resume, preferences and literal input. Unselected ACP,
+AHP, help and ambiguous/remote modes keep their original native invocation.
+An eligible fresh launch selects one identity; repository hosting policy is
+checked before core preparation and again through live-owner startup admission.
+The installation's `launch-attempts/<operation>/` retains the copied runtime
+and native receipt without inventing a worktree record or using the anchor
+claim ledger as launch authority. This path adds no recovery or auth admission.
+A missing/incompatible selected runtime or uncertain native receipt never
+replays the original command through a raw-backend fallback. Legacy direct
+script use with no Worktrees runtime selection retains its existing behavior.
+
 The selected POSIX provider separately advertises `posix-headed-env-v1` in
 `backend_execution_modes`. A copied seeded setup discovers it before
 preparation and may supply `--backend-mode headed-live-owner-v1` to its
