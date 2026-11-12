@@ -83,6 +83,15 @@ def test_unavailable_or_ambiguous_config_never_uses_the_daemons_cached_roster(tm
         )
     assert client.get("/api/v1/execution-context", params=params).status_code == 503
     assert client.get("/api/v1/execution-context", params={**params, "environment": "invalid"}).status_code == 422
+    for malformed in (
+        "machines: {guest: null}\n",
+        "machines: {guest: {hostname: observed-host, execution_platform: wsl, "
+        "ssh: {environments: [{alias: guest}]}}}\n",
+        "machines: {guest: {ssh: {environments: [null]}}}\n",
+        "machines: {guest: {ssh: {environments: broken}}}\n",
+    ):
+        path.write_text(malformed, encoding="utf-8")
+        assert client.get("/api/v1/execution-context", params=params).status_code == 503
 
 
 def test_current_context_route_retains_bridge_authentication() -> None:
