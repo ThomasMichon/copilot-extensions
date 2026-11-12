@@ -400,3 +400,85 @@ An overview includes role shortfalls, unqualified owners, pending effects and
 discovery/custody holds. It is not a second dashboard database. Store decisions
 with their canonical effort/authority owner; regenerate the view from the map
 and dated native evidence.
+## Eligible work admission
+
+The offline `admission <topology> --work <saved-work>` report reads the bundled
+[admission schema](../assets/admission.schema.json). It does not discover a queue,
+run adapters, authenticate, claim, resume, allocate or send. Save native reads in
+the adopter's existing private state home; do not create a second task ledger.
+The scope must match topology discovery and the intended native queue/repository.
+Its output identifies `schema: agent-roles.work-admission-report`, `version: 1`.
+Use only the selected payload's helper whose `--help` declares `admission` and
+`--work`; older helpers do not support this optional operation. Unsupported
+input versions fail explicitly with exit 2. No installed runtime or daemon
+contract changes. Existing commands and topology input remain unchanged;
+rollback needs no state conversion and must not substitute `placement` for
+reserve-preserving admission.
+
+The version-1 input has:
+
+- `observedAt`, `sourceRef`, `complete`: dated evidence for the entire selected
+  work/reservation scope. A partial, stale or future snapshot holds all proposals.
+- `reviewRoles`: explicit topology role IDs using dedicated review capacity.
+  Do not classify review work as general work merely to fit it into a free slot.
+- `machines`: each selected machine's `machine`, `interactiveReserveSlots` and
+  `reviewReserveSlots`. These are **additional free headroom** to preserve after
+  the topology's native `usedSlots`, not total installed capacity or occupied
+  reviewer lanes. Unknown reservations are omitted and exclude that machine;
+  they are never implicitly zero. Interactive headroom is never consumed.
+- `tasks`: native task `id`, stable `requestId`, dated `observedAt`/`sourceRef`,
+  intended `role`/`kind`, integer `priority` (larger first), `operatorTask`,
+  `readiness`, `holdReason`, `status`, `generation`, retained `owner` and
+  `ownerSessionId`. Owner is null or the topology's exact
+  `{machine, project, worktree}` identity. Preserve native status/generation and
+  holds; a queued task may have generation zero. Do not synthesize a fresh head.
+
+The observing adapter derives `readiness: ready` only from current native
+eligibility: dependencies satisfied, due/not-before met, human decisions and
+external waits resolved, no hold, no unknown effect, and supported claim/resume
+capability. Unsupported or incomplete eligibility stays `unknown`, `waiting` or
+`held`. Preserve the native `holdReason` independently; `ready` cannot erase it.
+Task readiness and classification are saved evidence, not authentication or
+effect authority. Native publication/reviewer identity and repository gates
+remain mandatory at the actual claim or resume boundary.
+
+Tasks sort by descending priority then native ID. Eligible queued tasks propose
+`agent-dispatch` claiming; suspended tasks propose same-owner resumption only
+with a fresh idle/waiting owner, matching role/scope, exact current head and
+positive head/task generation. No successor, unreachable or missing owner is
+silently replaced. A request already assigned is not new backlog; conflicting
+saved native snapshots, pending assignment effects, other work retained by that
+owner and Operator-owned work remain held.
+Dispatch-linked dormant work also requires consistent native task/owner and
+relationship identities, a bound attachment receipt and an active charter.
+Both request and task IDs must agree with the retained assignment (legacy
+assignments may omit the native task link). Relationship-only owners still
+retain their workspace. A terminal assignment does not release a matching
+request, task or owner until native retirement is settled.
+All saved tasks contribute retained-owner obligations, even without a separate
+topology assignment. Another started/claimed/submitted task, a held or waiting
+dormant task, stale evidence or a terminal row still retaining an owner blocks
+resumption on that workspace regardless of priority or input order. Several
+otherwise eligible dormant tasks may compete for one recommendation; proposing
+one does not release the others.
+Eligibility and custody for every retained row are evaluated before any ranking
+or budget consumption. A conflicting head, role, generation or assignment in
+one row therefore protects that workspace from every competing resume, even
+when another row matches the current head.
+
+The report uses one homogeneous slot per proposal, **including dormant
+resumption**, conservatively requiring extra activation headroom even if the
+retained workspace already appears in used load. Review proposals draw only
+from review headroom; general proposals use free slots minus both reserves.
+Neither pool borrows from the other. Earlier ranked proposals decrement this
+invocation's budget, preventing one report from recommending more concurrent
+work than its saved capacity supports. Equal eligible machines prefer larger
+remaining pool capacity then machine ID. Constraints still require native
+admission; no heterogeneous-resource conversion is assumed.
+
+`proposals` carry rank, original task/request, intended role/kind, pool,
+machine and native status/generation/worktree/head fences. `held` explains
+excluded work; `capacity` shows remaining proposal headroom. These are not
+reservations. Serialize and recheck all current custody, eligibility, capacity,
+resource obligations and effect authority through the native owners before
+acting; rerunning this read-only report never makes its proposals claimed.

@@ -94,14 +94,14 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 
 ### Phase 5 - Vacancy and drift reconciliation
 
-- [ ] Propose reconciliation for required-role vacancies and live off-role drift
+- [x] Propose reconciliation for required-role vacancies and live off-role drift
   through monitor coordination, accepted reassignment and collision-safe
-  replacement.
+  replacement (#12084).
 
 ### Phase 6 - Eligible work admission
 
 - [ ] Propose admission of eligible dormant work and prioritized backlog while
-  preserving operator tasks, interactive reserve and review capacity.
+  preserving operator tasks, interactive reserve and review capacity (#12137).
 
 ## Validation Plan
 
@@ -118,6 +118,76 @@ synthetic fixtures. Live adoption is a separate explicit decision.
 - [ ] Reconcile every Plan and Validation Plan item before marking Done.
 
 ## Journal
+
+### 2026-11-11 - Qualify all retained custody before ranking
+
+- Admission now computes eligibility/custody for every saved row before
+  spending any proposal budget. Any held row protects its retained workspace,
+  including a conflicting dormant head, role, generation or assignment. This
+  removes priority/input-order dependence from owner conflict handling.
+- The affected topology packet passed 344 tests, Python F/E9 lint and strict
+  Linux/Windows type checks passed. Native allocation CLI/receiver recovery
+  passed four process cases with an explicit 120-second per-item budget,
+  retaining one child and one original parent obligation on request recovery.
+- The initial allocation qualification stopped at the ordinary 30-second
+  per-item limit in the second CLI sequence, without an assertion failure.
+  The isolated process-only run completed all four cases in 135 seconds total;
+  that is bounded functional evidence, not a pass of the original time budget.
+  No live allocation, lifecycle effect, installation or deployment occurred.
+
+### 2026-11-11 - Preserve saved task-owner obligations
+
+- Admission now examines all saved task-owner obligations before ranking,
+  including work absent from the topology assignment map. A retained started,
+  claimed or submitted task, waiting/held dormant work, stale evidence or a
+  terminal row retaining its owner blocks competing resumption independently
+  of priority and input order. Eligible dormant alternatives still compete for
+  at most one same-owner recommendation.
+- The affected topology packet passed 332 tests and Python F/E9 lint passed.
+  The selected native Worktrees completion/succession packet passed 21 tests:
+  open PRs, unrelated live claims, incomplete efforts, two-way succession links,
+  uncertain conclusions and exact relationship replay remain native gates.
+  These isolated checks do not authorize any live completion or takeover.
+
+### 2026-11-11 - Native admission custody consistency
+
+- Dormant native admission requires a bound relationship receipt, matching task
+  and owner identities and an active charter; the shared native lane also
+  checks declaration and workspace consistency. A retained relationship owner
+  is honored even before its workspace is copied into the intent record.
+- Both stable request/task identities must match. Completed or released intent
+  keeps matching work and owners held until the existing native retirement
+  settlement check succeeds, preserving unknown effects and outstanding custody.
+- The affected topology packet passed 320 tests; Python F/E9 lint and strict
+  Linux/Windows type checks passed. The isolated native Dispatch standing,
+  admission and topology-flow packet passed 179 tests, including restart,
+  concurrent reservation/acceptance, lost replies and release-before-reuse.
+  No live lifecycle effect, installation or deployment occurred.
+
+### 2026-11-11 - Reconciliation delivered; admission source implemented
+
+- Phase 5 merged in #12084. The read-only reconciliation report preserves
+  uncertain ownership and original effects, coordinates retained owners and
+  proposes new demand only after discovery and placement holds clear. Its
+  focused packet passed 268 tests; affected strict Linux/Windows type checks
+  and Python F/E9 lint passed. No live reconciliation or installation occurred.
+- Phase 6 (#12137) adds an optional offline `admission --work` report with a
+  versioned saved-evidence schema. Priority ranking consumes only per-invocation
+  headroom; general work cannot borrow interactive or dedicated review reserve.
+  Dormant work keeps its native owner, generation and exact head. Operator
+  tasks, waits/holds, stale or conflicting evidence and unsettled effects remain
+  held. Native owners still perform all claiming, resumption and allocation.
+- The affected topology packet passed 308 tests, including a real subprocess
+  with unchanged input bytes, empty-work/fresh-state compatibility and explicit
+  help/version behavior. Python F/E9 lint, documentation consistency and
+  install-contract checks passed. The affected strict type-check project passed
+  for Linux and Windows; the final exact-source check is refreshed before
+  publication.
+- Clean-room scope is a fresh synthetic topology with no installed services or
+  optional admission evidence required by legacy commands. No install or
+  provisioning behavior changed. Live external-venue validation remains
+  excluded by source-only authority and requires separate adoption. Phase 6
+  review, required CI, merge and source finalization remain outstanding.
 
 ### 2026-11-10 - Effort opened with Phase 1
 
