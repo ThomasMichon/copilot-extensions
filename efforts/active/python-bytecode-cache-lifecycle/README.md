@@ -196,7 +196,10 @@ gates, not claims that the current code already provides them.
   catalogs recover serialized interrupted initialization without resetting
   unknown schemas; immutable owner records publish only after complete writes.
   Native Windows interruption and metadata-DACL controls pass (63 passed /
-  5 platform skips). No real cache, runtime or service was changed.
+  5 platform skips). The corrected native Linux packet passes (53 passed /
+  15 platform skips), and the complete admitted unit packet passes again
+  (4,792 tests). Successful disposable fixtures were removed. No real cache,
+  runtime or service was changed.
 
 ### 2026-11-11 - Design accepted; implementation starting
 
