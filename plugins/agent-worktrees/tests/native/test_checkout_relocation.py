@@ -409,9 +409,9 @@ def test_refusals_leave_original_and_no_journal(checkout, monkeypatch, blocker):
     if blocker == "dirty":
         (checkout.source / "tracked.txt").write_bytes(b"dirty")
     elif blocker == "session":
-        monkeypatch.setattr(sessions, "verify_worktree_active", lambda _: sessions.LiveVerdict(active=True))
+        monkeypatch.setattr(sessions, "verify_worktree_active", lambda _, **kw: sessions.LiveVerdict(active=True))
     elif blocker == "unknown":
-        monkeypatch.setattr(sessions, "verify_worktree_active", lambda _: sessions.LiveVerdict(probes_ok=False))
+        monkeypatch.setattr(sessions, "verify_worktree_active", lambda _, **kw: sessions.LiveVerdict(probes_ok=False))
     elif blocker == "open-pr":
         record.prs = [tracking.PRRecord(state="open")]
         tracking.save_record(record)

@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sys
+import uuid
 from ctypes import wintypes
 from pathlib import Path
 
@@ -117,6 +118,26 @@ def test_stage_creation_collision_retains_original_and_unknown_stage(admitted, m
     assert fixture.source.exists() and not fixture.destination.exists()
 
 
+def test_new_owner_after_copy_refuses_before_destination_publication(admitted, monkeypatch):
+    fixture = admitted
+    copy = relocation.transfer.copy
+
+    def newly_active(*_args):
+        raise ValueError("new native owner")
+
+    def copied(source, stage):
+        copy(source, stage)
+        monkeypatch.setattr(relocation, "_stopped", newly_active)
+
+    monkeypatch.setattr(relocation.transfer, "copy", copied)
+    with pytest.raises(ValueError, match="new native owner"):
+        relocation.move(fixture.record.worktree_id, str(fixture.destination), fixture.config)
+    journal = state.read(fixture.record.yaml_path)
+    assert journal["phase"] == "copied"
+    assert fixture.source.exists() and Path(journal["stage"]).exists()
+    assert not fixture.destination.exists()
+
+
 @pytest.mark.timeout(180)
 def test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory, record_property):
     tmp_path = tmp_path_factory.mktemp("b")
@@ -185,3 +206,56 @@ def test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory
         record_property(name + "_sha256", digest)
     record_property("consumer_python", sys.version)
     record_property("consumer_tier", "source_candidate_not_installed")
+    if os.environ.get("RELOCATION_LIVE_ROOTS"):
+        assert flow["actual_live_admission"]
+        record_property("live_cross_volume", json.dumps({
+            "flow": flow, "continued": continued, "fixture": str(tmp_path),
+        }))
+        evidence = os.environ.get("RELOCATION_LIVE_EVIDENCE")
+        if evidence:
+            Path(evidence).write_text(json.dumps({
+                "flow": flow, "continued": continued, "fixture": str(tmp_path),
+            }, indent=2), encoding="utf-8")
+        paths = [
+            Path(flow["destination"]), Path(continued["new_allocation"]["path"]),
+            Path(flow["old_root"]) / Path(flow["origin_ledger"]).stem,
+        ]
+        for path in paths:
+            assert path.parent in {Path(value) for value in json.loads(os.environ["RELOCATION_LIVE_ROOTS"])}
+            removed = run_caller_owned(
+                ["git", "-C", str(home / "anchor"), "worktree", "remove", "--force", str(path)],
+                cwd=tmp_path, env=env, timeout=15, max_stdout_bytes=64 * 1024, max_stderr_bytes=64 * 1024,
+            )
+            assert removed.returncode == 0, removed.stderr
+        for root in json.loads(os.environ["RELOCATION_LIVE_ROOTS"]):
+            root = Path(root)
+            marker = root / ".finalize.lock.lock"
+            if marker.exists():
+                assert not marker.is_symlink() and marker.stat().st_size == 0
+                assert list(root.iterdir()) == [marker]
+                with relocation.tracking._RecordLock(root / ".finalize.lock.guard", timeout=1, require_sidecar=True):
+                    pass
+                marker.unlink()
+            root.rmdir()
+
+
+@pytest.mark.timeout(180)
+def test_live_cross_volume_receiving_uses_existing_native_owners(
+    tmp_path_factory, record_property, monkeypatch,
+):
+    enrollment = os.environ.get("RELOCATION_LIVE_ENROLLMENT")
+    if not enrollment:
+        pytest.skip("explicit private two-volume roots and existing native observation scope required")
+    enrolled = json.loads(Path(enrollment).read_text(encoding="utf-8"))
+    primary, second = enrolled["primary"], enrolled["second"]
+    data, ports = enrolled["native_data_dir"], json.dumps(enrolled["native_ports"])
+    roots = [Path(primary), Path(second)]
+    assert all(root.is_absolute() and root.is_dir() and root.resolve() == root for root in roots)
+    assert roots[0].stat().st_dev != roots[1].stat().st_dev
+    identity = "receiving-" + uuid.uuid4().hex
+    monkeypatch.setenv("RELOCATION_LIVE_ROOTS", json.dumps([str(root / identity) for root in roots]))
+    monkeypatch.setenv("RELOCATION_LIVE_PORTS", ports)
+    monkeypatch.setenv("PSMUX_DATA_DIR", data)
+    if enrolled.get("evidence"):
+        monkeypatch.setenv("RELOCATION_LIVE_EVIDENCE", enrolled["evidence"])
+    test_receiving_changed_root_fresh_process_and_cli_consumers(tmp_path_factory, record_property)

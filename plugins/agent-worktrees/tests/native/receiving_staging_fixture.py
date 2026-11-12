@@ -12,10 +12,21 @@ from unittest.mock import patch
 
 mode, home_text, source_package, expected_text, *cli_args = sys.argv[1:]
 home = Path(home_text)
+live_roots = json.loads(os.environ.get("RELOCATION_LIVE_ROOTS", "null"))
+old_root, new_root = (
+    (Path(value).resolve() for value in live_roots)
+    if live_roots else (home / "old-root", home / "new-root")
+)
+live_admission = bool(live_roots) and mode == "flow"
+allowed_ports = set(json.loads(os.environ.get("RELOCATION_LIVE_PORTS", "[]")))
 
 def audit(event, args):
     if event in {"socket.connect", "socket.bind"}:
-        raise RuntimeError("source fixture must not contact a backend")
+        if not (
+            live_admission and event == "socket.connect"
+            and args[1][0] == "127.0.0.1" and args[1][1] in allowed_ports
+        ):
+            raise RuntimeError("source fixture must not contact an unapproved backend")
     if event == "subprocess.Popen":
         command = args[1]
         if isinstance(command, (list, tuple)):
@@ -24,10 +35,13 @@ def audit(event, args):
             import shlex
             arguments = shlex.split(command, posix=False)
         executable = Path(arguments[0].strip('"')).stem.casefold()
-        assert Path(args[2] or Path.cwd()).resolve().is_relative_to(home.resolve().parent)
+        assert any(
+            Path(args[2] or Path.cwd()).resolve().is_relative_to(root)
+            for root in (home.resolve().parent, old_root, new_root)
+        )
         if executable == "robocopy" and mode == "flow":
             source, stage = (Path(value.strip('"')).resolve() for value in arguments[1:3])
-            assert source.parent == home / "old-root" and stage.parent == home / "new-root"
+            assert source.parent == old_root and stage.parent == new_root
             assert stage.name.startswith(source.name + ".relocating-")
             assert arguments[3:] == [
                 "/E", "/COPY:DATS", "/SL", "/DCOPY:DAT", "/XJ", "/R:0", "/W:0",
@@ -81,8 +95,9 @@ if mode == "flow":
     with ExitStack() as fixtures:
         fixtures.enter_context(patch.object(permissions, "_copilot_dir", lambda: home / ".copilot"))
         fixtures.enter_context(patch.object(sessions, "_session_state_dir", lambda: home / ".copilot" / "session-state"))
-        fixtures.enter_context(patch.object(sessions, "verify_worktree_active", forbidden))
-        anchor, old_root, new_root = home / "anchor", home / "old-root", home / "new-root"
+        if not live_admission:
+            fixtures.enter_context(patch.object(sessions, "verify_worktree_active", forbidden))
+        anchor = home / "anchor"
         for directory in (anchor, old_root, new_root):
             directory.mkdir()
         git_ops.git("init", "--template=", "-b", "main", cwd=anchor)
@@ -186,7 +201,18 @@ if mode == "flow":
             assert Path(path).parent.resolve() in {old_root.resolve(), new_root.resolve()}
             assert not record.sessions and not record.head_session and record.status == "finalized"
 
-        fixtures.enter_context(patch.object(relocation, "_stopped", fixture_admission))
+        if live_admission:
+            from agent_worktrees.checkout_relocation_plan import check_live
+
+            assert old_root.stat().st_dev != new_root.stat().st_dev
+            assert sum(path.stat().st_size for path in fixture.source.rglob("*") if path.is_file()) <= 1024 * 1024
+            before_live = (ledger.read_bytes(), creation.read_bytes(), fixture.origin.yaml_path.read_bytes())
+            admitted = check_live(child_id, str(fixture.destination), current_config)
+            assert admitted["phase"] == "planned" and admitted["live_admission"]["apply_rechecks"]
+            assert before_live == (ledger.read_bytes(), creation.read_bytes(), fixture.origin.yaml_path.read_bytes())
+            assert not relocation.state.journal_path(ledger).exists()
+        else:
+            fixtures.enter_context(patch.object(relocation, "_stopped", fixture_admission))
         result = relocation.move(fixture.record.worktree_id, str(fixture.destination), current_config)
         assert result["phase"] == "complete"
         current = tracking.load_record(ledger)
@@ -204,6 +230,7 @@ if mode == "flow":
             "creation_sha256": hashlib.sha256(original_db).hexdigest(),
             "creator_sha256": hashlib.sha256(original_creator).hexdigest(),
             "provenance": provenance, "real_passive_plan_refused_unknown": True,
+            "actual_live_admission": live_admission,
         }
         (home / "continuation.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
         print(json.dumps({"phase": "flow", "passed": True, **payload}), flush=True)

@@ -126,7 +126,7 @@ request, not a new migration or runtime-effect grant.
   caller permits that effect. Exclude active and dependent owners and retain
   unknown cases individually; do not require every other server to terminate.
   Pure planning never gains live queries, locks or receipt recovery implicitly.
-- [ ] Qualify bounded native live-owner admission through existing owners,
+- [x] Qualify bounded native live-owner admission through existing owners,
   preserving mux, bound Copilot, pending launch/lifecycle, process/CWD and
   responsibility fences. Unavailable evidence remains a hold, not inactivity.
 - [x] Complete the independent pure planning/refusal source boundary without action
@@ -226,6 +226,29 @@ effects remain separate gates. Phase 1 source implementation is admitted;
 adopter pilot feedback gates subsequent widening.
 
 ## Journal
+
+### 2026-11-11 — Explicit live admission and cross-volume receiving source flow
+
+- Intent [#12178](https://github.com/ThomasMichon/copilot-extensions/pull/12178)
+  cleared actual approval and required CI before implementation. Pure planning
+  stays effect-free; separately requested live admission uses existing native
+  owners and participating operation locks, not an activity-neutral prerequisite.
+- The focused native source flow uses real existing-server observations without
+  starting or stopping a server, distinct physical source/destination volumes,
+  a concluded receiving allocation and settled creator responsibility. It
+  preserves original proof through native copy, Git repair, location publication,
+  fresh-process consumers and a new allocation under the changed synthetic
+  default. Checkout payload is bounded to 1 MiB.
+- Busy/unknown bound-process admission, existing-move refusal, owner changes
+  after copy and pure-plan separation retain focused controls. A live result is
+  point-in-time evidence, never a cached permission for apply. The native case
+  includes exact owned Git and lock-sidecar cleanup; a cleanup failure is not
+  reported as complete qualification.
+- This qualifies the supported source component, not installed rollout, a real
+  retained-worktree pilot, complete unreadable-process coverage, retained
+  conversation resume or the broader inactive classes. Keep this effort and
+  #10879 Active; normal source review/CI/merge and accepted Main release remain
+  independent gates.
 
 [2026-11-09 — First receiving current-location component](journal/2026/11.09%20Receiving%20current-location%20component.md)
 records independent component qualification and the remaining native-owner gate.

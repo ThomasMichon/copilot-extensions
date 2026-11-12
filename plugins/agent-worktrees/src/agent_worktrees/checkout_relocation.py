@@ -42,6 +42,11 @@ def capabilities() -> dict:
         "recovery": "forward",
         "cancel_before_publication": _native_supported(),
         "scope": "completed-sessionless-unpaired-plain-linked-checkout",
+        "live_admission": {
+            "schema": "agent-worktrees.checkout-live-admission", "version": 1,
+            "check_live": _native_supported(), "activity_refresh": True,
+            "apply_rechecks": True,
+        },
         "receiving_location": {
             "schema": state.RECEIVING_SCHEMA, "version": 1, "revisions": 1,
             "scope": "finalized-sessionless-unpaired-same-project-settled-origin",
@@ -87,7 +92,7 @@ def _identity(record) -> dict:
 
 
 def _stopped(record, checkout: Path) -> None:
-    verdict = sessions.verify_worktree_active(record)
+    verdict = sessions.verify_worktree_active(record, strict=True)
     if not verdict.probes_ok or verdict.active:
         raise ValueError("relocation requires confirmed inactive session/process owners")
     blocker = procs.checkout_retirement_blocker(str(checkout))
@@ -486,6 +491,7 @@ def move(worktree_id: str, destination: str, config) -> dict:
             state.write(ledger, report)
         if report["phase"] == "copied":
             if stage.exists() and not target.exists():
+                _stopped(record, source)
                 _sessionless(target)
                 if _digest(source) != report["fingerprint"]:
                     raise ValueError("original copy changed after copying; source retained")
