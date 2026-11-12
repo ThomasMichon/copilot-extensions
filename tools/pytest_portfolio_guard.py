@@ -137,8 +137,9 @@ def configure_temp_links(config: pytest.Config, *, platform: str = sys.platform)
     import _pytest.tmpdir
 
     patch = pytest.MonkeyPatch()
-    patch.setattr(_pytest.pathlib, "_force_symlink", lambda *_args, **_kwargs: None)
-    patch.setattr(_pytest.tmpdir, "_force_symlink", lambda *_args, **_kwargs: None)
+    for module in (_pytest.pathlib, _pytest.tmpdir):
+        if hasattr(module, "_force_symlink"):
+            patch.setattr(module, "_force_symlink", lambda *_args, **_kwargs: None)
     config.add_cleanup(patch.undo)
 
 
