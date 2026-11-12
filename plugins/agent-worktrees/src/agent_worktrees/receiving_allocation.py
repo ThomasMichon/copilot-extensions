@@ -55,15 +55,68 @@ def _require_ordinary_parent(record: tracking.WorktreeRecord) -> None:
         len(claims) != 1 or claims[0].state not in {"at-rest", "released"}
         or claims[0].metadata_opaque or claims[0].has_producer
         or any(claim.metadata_opaque for claim in parent.resources)
-        or tracking.claim_handoff_reservation(parent, claims[0])
+        or claims[0].handoff_bundle
     ):
         raise ValueError("ordinary creator responsibility is missing, unsettled or requires its original producer")
+    from . import claim_handoffs
+
+    if claim_handoffs.active_bundle_for_claim(
+        tracking.format_claim_ref(parent.execution_machine, parent.repo, parent.worktree_id),
+        claims[0].ref, maximum_bytes=1024 * 1024,
+    ):
+        raise ValueError("ordinary creator responsibility is handoff-reserved")
 
 
-def has_retained_receiving_operation(record: tracking.WorktreeRecord, records: Path) -> bool:
+@contextmanager
+def _original_snapshot_lock(stream, path: Path):
+    if os.name != "nt":
+        raise ValueError("original receiving classification requires qualified native locking")
+    import msvcrt
+
+    before = os.fstat(stream.fileno())
+    # SQLite's pending, reserved and shared lock bytes lie beyond database data.
+    stream.seek(0x40000000)
+    try:
+        msvcrt.locking(stream.fileno(), msvcrt.LK_NBRLCK, 512)
+    except OSError as error:
+        raise ValueError("original receiving classification is busy") from error
+    try:
+        yield
+        try:
+            named = path.lstat()
+        except FileNotFoundError as error:
+            raise ValueError("original receiving classification changed during inspection") from error
+        if not os.path.samestat(before, named) or (
+            before.st_size, before.st_mtime_ns
+        ) != (named.st_size, named.st_mtime_ns):
+            raise ValueError("original receiving classification changed during inspection")
+    finally:
+        stream.seek(0x40000000)
+        msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 512)
+
+
+def has_retained_receiving_operation(
+    record: tracking.WorktreeRecord, records: Path, *, lock_snapshot: bool = True,
+) -> bool:
     """Classify a journal-backed receipt hint without recovery or index upgrades."""
     if not record.owner_ref or not record.creation_nonce:
         return False
+    if not lock_snapshot:
+        return _classify_retained_receiving_operation(record, records)
+    path = records.parent / "workspace-creation.sqlite3"
+    try:
+        info = path.lstat()
+    except FileNotFoundError:
+        _require_ordinary_parent(record)
+        return False
+    if not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & 0x400:
+        raise ValueError("original receiving classification is redirected or unsupported")
+    stream = path.open("rb")
+    with stream, _original_snapshot_lock(stream, path):
+        return _classify_retained_receiving_operation(record, records)
+
+
+def _classify_retained_receiving_operation(record: tracking.WorktreeRecord, records: Path) -> bool:
     path = records.parent / "workspace-creation.sqlite3"
     try:
         before = path.lstat()

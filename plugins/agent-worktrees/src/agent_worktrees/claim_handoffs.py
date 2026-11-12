@@ -9,6 +9,8 @@ needed to offer, inspect, accept, decline, and cancel an exact bundle safely.
 from __future__ import annotations
 
 import copy
+import os
+import stat
 import secrets
 from collections.abc import Callable
 from contextlib import ExitStack
@@ -182,11 +184,33 @@ def _bundle_from_dict(raw: object) -> ClaimBundle:
     )
 
 
-def _load_registry_strict(path: Path) -> list[ClaimBundle]:
-    if not path.exists():
+def _load_registry_strict(path: Path, *, maximum_bytes: int | None = None) -> list[ClaimBundle]:
+    if not (os.path.lexists(path) if maximum_bytes is not None else path.exists()):
         return []
     try:
-        data = yaml.safe_load(tracking._read_text_with_retry(path))
+        if maximum_bytes is None:
+            data = yaml.safe_load(tracking._read_text_with_retry(path))
+        else:
+            before = path.lstat()
+            if (
+                not stat.S_ISREG(before.st_mode)
+                or getattr(before, "st_file_attributes", 0) & 0x400
+                or before.st_size > maximum_bytes
+            ):
+                raise ClaimHandoffError("claim-handoff registry is redirected or exceeds its read budget")
+            with path.open("rb") as stream:
+                opened = os.fstat(stream.fileno())
+                raw = stream.read(maximum_bytes + 1)
+                after = os.fstat(stream.fileno())
+            named = path.lstat()
+            if (
+                len(raw) > maximum_bytes
+                or not all(os.path.samestat(before, item) for item in (opened, after, named))
+                or any((item.st_size, item.st_mtime_ns) != (before.st_size, before.st_mtime_ns)
+                       for item in (opened, after, named))
+            ):
+                raise ClaimHandoffError("claim-handoff registry changed during bounded inspection")
+            data = yaml.safe_load(raw)
     except (OSError, UnicodeError, yaml.YAMLError) as exc:
         raise ClaimHandoffError(
             f"cannot read claim-handoff registry {path}: {exc}"
@@ -196,6 +220,8 @@ def _load_registry_strict(path: Path) -> list[ClaimBundle]:
     raw_bundles = data.get("bundles")
     if not isinstance(raw_bundles, list):
         raise ClaimHandoffError(f"invalid claim-handoff bundle list: {path}")
+    if maximum_bytes is not None and len(raw_bundles) > 10_000:
+        raise ClaimHandoffError("claim-handoff bundle inventory exceeds its read budget")
     bundles = [_bundle_from_dict(raw) for raw in raw_bundles]
     ids = [bundle.bundle_id for bundle in bundles]
     if len(set(ids)) != len(ids):
@@ -762,10 +788,14 @@ def active_bundle_ids_for_source(source: str) -> tuple[str, ...]:
     )
 
 
-def active_bundle_for_claim(source: str, claim_ref: str) -> str:
+def active_bundle_for_claim(source: str, claim_ref: str, *, maximum_bytes: int | None = None) -> str:
     """Return the nonterminal bundle reserving ``claim_ref``, or empty."""
     canonical = _canonical_ref(_qualified_ref(source, "source"))
-    for bundle in _load_registry_strict(registry_path()):
+    path = registry_path()
+    bundles = _load_registry_strict(path) if maximum_bytes is None else _load_registry_strict(
+        path, maximum_bytes=maximum_bytes,
+    )
+    for bundle in bundles:
         if bundle.source != canonical or bundle.state in TERMINAL_STATES:
             continue
         if any(claim["ref"] == claim_ref for claim in bundle.claims):

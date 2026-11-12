@@ -166,6 +166,14 @@ that qualifier is historical provenance, not a live-session clearance.
 Any opaque parent resource keeps responsibility ambiguous, even beside an
 otherwise matching settled claim. Malformed parent mappings produce a
 structured refusal rather than escaping as a parser traceback.
+Reservation inspection uses the handoff owner's stable, read-only snapshot,
+bounded to 1 MiB and 10,000 bundles; incomplete or changing history is held,
+never truncated into an absence result. Explicit live admission and apply
+hold a native Windows read lock across SQLite's lock-byte range while reading
+the immutable rollback snapshot. An exclusive transaction without sidecars
+therefore remains busy without permitting SQLite to create recovery files.
+Pure planning does not acquire that lock: its committed metadata inspection
+still ends in unconfirmed native-owner refusal, never positive admission.
 
 ## First receiving current-location revision
 

@@ -6,6 +6,7 @@ import json
 import argparse
 import sqlite3
 import hashlib
+import os
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -403,6 +404,52 @@ def test_generic_creator_forms_preserve_original_reference(planning_record, iden
     fixture.ledger.write_text(json.dumps(fixture.data), encoding="utf-8")
     record, proof, _ = relocation._receiving_admission(fixture.ledger, fixture.config)
     assert proof is None and record.owner_ref == fixture.data["owner_ref"]
+
+
+@pytest.mark.skipif(os.name != "nt", reason="qualified Windows SQLite byte-range locking")
+def test_original_exclusive_transaction_without_sidecars_stays_busy(planning_record):
+    fixture = planning_record
+    _ordinary_owned(fixture)
+    path = fixture.ledger.parent.parent / "workspace-creation.sqlite3"
+    writer = sqlite3.connect(path)
+    writer.execute("CREATE TABLE creations(version INTEGER,facts TEXT,worktree TEXT)")
+    writer.commit()
+    before = path.read_bytes()
+    writer.execute("BEGIN EXCLUSIVE")
+    try:
+        assert not any(Path(str(path) + suffix).exists() for suffix in ("-journal", "-wal", "-shm"))
+        with pytest.raises(ValueError, match="classification is busy"):
+            relocation._receiving_admission(fixture.ledger, fixture.config)
+        with pytest.raises(ValueError, match="qualified passive native owner evidence"):
+            relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+        assert path.read_bytes() == before
+    finally:
+        writer.rollback()
+        writer.close()
+
+
+@pytest.mark.parametrize("kind", ["empty", "reserved", "oversized"])
+def test_bounded_original_handoff_owner_keeps_reservations_and_unknowns(planning_record, monkeypatch, kind):
+    from agent_worktrees import claim_handoffs
+
+    fixture = planning_record
+    _ordinary_owned(fixture)
+    path = fixture.ledger.parent.parent / "claim-handoffs.yaml"
+    monkeypatch.setattr(claim_handoffs, "registry_path", lambda: path)
+    bundle = claim_handoffs.ClaimBundle(
+        "original-bundle", "offered", "fixture/sample/creator", "fixture/sample/recipient",
+        ({"kind": "worktree", "ref": "fixture/sample/" + fixture.identity},),
+        "2020-01-01T00:00:00", "2020-01-01T00:00:00",
+    )
+    path.write_text(json.dumps({"version": 1, "bundles": [bundle.to_dict()] if kind == "reserved" else []}))
+    reason = "handoff-reserved" if kind == "reserved" else "qualified passive native owner evidence"
+    if kind == "oversized":
+        path.write_bytes(b" " * (1024 * 1024 + 1))
+        reason = "read budget"
+    before = path.read_bytes()
+    with pytest.raises((ValueError, RuntimeError), match=reason):
+        relocation.plan(fixture.identity, str(fixture.destination), fixture.config)
+    assert path.read_bytes() == before
 
 
 def test_literal_workspace_lookup_does_not_enumerate_unrelated_session_artifacts(tmp_path, monkeypatch):

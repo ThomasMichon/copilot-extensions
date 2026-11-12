@@ -59,7 +59,7 @@ def inspect(worktree_id: str, destination: str, config) -> dict:
     elif record.owner_ref and record.creation_nonce:
         from .receiving_allocation import has_retained_receiving_operation
 
-        if has_retained_receiving_operation(record, ledger.parent):
+        if has_retained_receiving_operation(record, ledger.parent, lock_snapshot=False):
             raise ValueError(
                 "read-only proof cannot recover missing receiving allocation metadata; inspect through its owner"
             )
