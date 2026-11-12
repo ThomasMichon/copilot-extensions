@@ -74,6 +74,26 @@ settles only the unused local handoff and attaches without creating a pane.
 Manager retains terminal attachment, options, UI, status and original native
 admission. This finite operation does not wait for Copilot to exit.
 
+The standalone Host front door also advertises `mux_creation` with
+`posix-private-create-v1` on POSIX. Its exact `--mux-create-private` invocation
+reads at most 1 MiB of JSON text containing `version: 1`, an absolute native
+TMux `binary`, absent private `socket`, `session`, canonical `cwd` and literal
+child `command`. It creates only that socket/session and returns the same
+creation contract with `status: created` and native `incarnation`/`pane`.
+Pre-dispatch refusal returns `rejected`; any unconfirmed dispatch returns
+`unknown`, both exiting 3 without echoing commands or diagnostics. There is
+no default-server join, retry, cleanup or caller journal. This stdlib receiving
+closure does not load the optional Windows creation-lease dependency.
+
+Portable Bridge receiving selects that operation from its copied executable
+before prerequisite, registration or mux effects. Bridge retains its original
+attempt lock, digest, private socket identity and reuse observation. An older
+core without the operation refuses a fresh attempt before effects; an already
+created attempt still reuses its original incarnation without requiring a new
+core. Unknown creation never falls back to direct TMux or replays the child.
+Existing default-mux creation syntax and legacy Host entrypoints are unchanged;
+no compatibility retirement or native POSIX qualification is implied.
+
 ### Finite PSMux observation
 
 `agent_remote_driver.mux_observation` owns native PSMux reads for Driver

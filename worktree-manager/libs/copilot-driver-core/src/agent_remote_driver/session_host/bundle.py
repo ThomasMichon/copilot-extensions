@@ -17,6 +17,8 @@ _DRIVER_MODULES = (
     "__init__.py",
     "winjob.py",
     "native_arguments.py",
+    "mux_creation.py",
+    "mux_observation_types.py",
     "session_preferences.py",
     "preference_attestation.py",
     "preference_exec.py",

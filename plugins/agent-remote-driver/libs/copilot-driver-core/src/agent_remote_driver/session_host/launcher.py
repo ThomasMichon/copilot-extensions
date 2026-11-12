@@ -869,12 +869,17 @@ def main(
             "startup_admission": ["live-owner-v1"],
             "headed_process_receipts": ["native-child-v1"] if headed_available else [],
             "headed_client": ["native-send-v1"] if headed_available else [],
+            "mux_creation": ["posix-private-create-v1"] if not legacy and sys.platform != "win32" else [],
             "automatic_idle_retirement": {
                 "availability": "unavailable",
                 "reason": "structured-runtime-work-inventory-unqualified",
             },
         }))
         return 0
+    if not legacy and argv == ["--mux-create-private"]:
+        from ..mux_creation import private_main
+
+        return private_main()
     if argv[:2] == ["--preference-exec", "--"]:
         from ..preference_exec import main as preference_exec_main
 

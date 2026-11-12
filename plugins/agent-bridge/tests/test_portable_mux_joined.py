@@ -419,14 +419,50 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
         monkeypatch.setattr(receiving_mux, "_mux_binary", lambda: "fixture-tmux")
         monkeypatch.setattr(receiving_mux, "_socket_identity", lambda path: {"device": 1, "inode": 2})
 
-        def native(argv, *, cwd):
-            state.native.append(argv)
-            assert argv[3] == "new-session"
+        def require_core(support):
+            selected = subprocess.run(
+                [*receiving_mux._core_executable(support), "--support-json"],
+                capture_output=True, text=True, timeout=15, **no_window_kwargs(),
+            )
+            assert selected.returncode == 0, selected.stderr
+            declaration = json.loads(selected.stdout)
+            assert declaration["contract"] == "agent-remote-driver.session-host"
+            assert "headed" in declaration["modes"] and "cli" in declaration["lifetime_policies"]
+            assert "native-child-v1" in declaration["headed_process_receipts"]
+            assert declaration["mux_creation"] == (
+                [] if os.name == "nt" else ["posix-private-create-v1"]
+            )
+
+        monkeypatch.setattr(receiving_mux, "_require_core", require_core)
+        create_mux = receiving_mux._create_mux
+
+        def native(request, support):
+            state.native.append(request)
             assert state.consumer is None
-            attempt = Path(argv[-1])
+            assert request["binary"] == "fixture-tmux"
+            assert request["socket"] == str(support.parent / "tmux.sock")
+            native_identity = {"incarnation": "$1:1234", "pane": "%2"}
+            if os.name == "posix":
+                binary = workspace / "tmux"
+                capture = workspace / "mux-creation.json"
+                binary.write_text(
+                    f"#!{NODE}\n"
+                    "const fs=require('node:fs');\n"
+                    f"fs.writeFileSync({json.dumps(str(capture))},JSON.stringify(process.argv.slice(2)));\n"
+                    "console.log('$1:1234|%2');\n",
+                    encoding="utf-8",
+                )
+                binary.chmod(0o700)
+                assert create_mux({**request, "binary": str(binary)}, support) == native_identity
+                assert json.loads(capture.read_text()) == [
+                    "-S", request["socket"], "new-session", "-d", "-s", request["session"],
+                    "-P", "-F", "#{session_id}:#{session_created}|#{pane_id}",
+                    "-c", request["cwd"], *request["command"],
+                ]
+            attempt = Path(request["command"][-1])
             captured = []
             with monkeypatch.context() as child_patch:
-                child_patch.chdir(cwd)
+                child_patch.chdir(request["cwd"])
                 child_patch.setattr(receiving_mux.os, "execvpe", lambda *args: captured.append(args))
                 receiving_mux.child(attempt)
             executable, arguments, environment = captured[0]
@@ -440,16 +476,20 @@ def test_bridge_provider_receiver_and_extensions_share_one_conversation(
                 (attempt / "launch.json").read_text(),
             )["session_id"]]
             state.consumer = Consumer(
-                client, environment, cwd, duplicate=duplicate, core_command=arguments[4:],
+                client, environment, request["cwd"], duplicate=duplicate, core_command=arguments[4:],
             )
             assert state.consumer.ready.wait(10), (
                 state.consumer.logs,
                 state.consumer.state_file.read_text() if state.consumer.state_file.exists() else "no core state",
             )
             assert not state.consumer.errors
-            return subprocess.CompletedProcess(argv, 0, "$1:1234|%2\n", "")
+            return native_identity
 
-        monkeypatch.setattr(receiving_mux, "_run_tmux", native)
+        monkeypatch.setattr(receiving_mux, "_create_mux", native)
+        monkeypatch.setattr(
+            receiving_mux, "_run_tmux",
+            lambda *a, **k: pytest.fail("No direct mux creation after core selection"),
+        )
 
         def probe(name, directory, context, remote):
             command, payload = build_receiving_policy_check("/portable-fixture/workspace", context)

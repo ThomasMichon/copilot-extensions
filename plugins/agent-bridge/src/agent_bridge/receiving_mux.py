@@ -207,12 +207,35 @@ def _require_core(support: Path) -> None:
                 for key, required in (
                     ("modes", "headed"), ("transports", "tcp-frame"),
                     ("lifetime_policies", "cli"), ("headed_process_receipts", "native-child-v1"),
+                    ("mux_creation", "posix-private-create-v1"),
                 )
             )
         ):
             raise ValueError("unsupported declaration")
     except (ValueError, KeyError, TypeError, AttributeError) as error:
-        raise ValueError("Selected mux core does not support headed CLI execution") from error
+        raise ValueError("Selected mux core does not support headed CLI and private mux creation") from error
+
+
+def _create_mux(request: dict, support: Path) -> dict:
+    result = subprocess.run(
+        [*_core_executable(support), "--mux-create-private"],
+        input=json.dumps(request), capture_output=True, text=True, encoding="utf-8",
+        timeout=40, check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0) if os.name == "nt" else 0,  # headless-guard: allow standalone stdlib receiver
+    )
+    reply = json.loads(result.stdout)
+    if (
+        result.returncode != 0 or not isinstance(reply, dict)
+        or set(reply) != {"contract", "version", "status", "native"}
+        or reply["contract"] != "copilot-driver.mux-creation"
+        or type(reply["version"]) is not int or reply["version"] != 1
+        or reply["status"] != "created" or not isinstance(reply["native"], dict)
+        or set(reply["native"]) != {"incarnation", "pane"}
+        or any(not isinstance(value, str) for value in reply["native"].values())
+        or _native(reply["native"]["incarnation"] + "|" + reply["native"]["pane"]) != reply["native"]
+    ):
+        raise ValueError("Selected core did not confirm private mux creation")
+    return reply["native"]
 
 
 def _native(value: str) -> dict:
@@ -366,21 +389,18 @@ def receive(request: dict, payload: bytes) -> dict:
         _prepare_mux(request, support)
         _policy(request, support)
         _registration(request, attempt)
-        command = [tmux or _mux_binary(), "-S", str(socket)]
         record["phase"] = "starting"
         _write(attempt / "receipt.json", record)
         # A private native socket inherits this request's credential environment,
         # without placing secrets on tmux argv or rewriting an existing server.
-        argv = [
-            *command, "new-session", "-d", "-s", session, "-P", "-F", _FORMAT,
-            "-c", str(cwd), sys.executable, "-I", "-S", str(support / "receiver.py"),
-            "child", str(attempt),
-        ]
         try:
-            created = _run_tmux(argv, cwd=str(cwd))
-            if created.returncode:
-                raise ValueError("Native mux creation did not confirm success")
-            native = _native(created.stdout)
+            native = _create_mux({
+                "version": 1, "binary": tmux or _mux_binary(), "socket": str(socket),
+                "session": session, "cwd": str(cwd),
+                "command": [
+                    sys.executable, "-I", "-S", str(support / "receiver.py"), "child", str(attempt),
+                ],
+            }, support)
             socket_identity = _socket_identity(socket)
         except (OSError, ValueError, subprocess.SubprocessError):
             record["phase"] = "unknown"

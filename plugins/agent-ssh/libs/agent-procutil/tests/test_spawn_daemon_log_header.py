@@ -6,6 +6,7 @@ split the durable one-line header.
 """
 from __future__ import annotations
 
+import os
 from unittest.mock import Mock
 
 import pytest
@@ -82,7 +83,9 @@ def test_spawn_daemon_launches_with_undecodable_or_multiline_executable(
     executable = "/opt/svc\udcff\nbin"
     log_path = tmp_path / "d.log"
 
-    pu.spawn_daemon([executable, "serve"], cwd=tmp_path, log_path=log_path)
+    # Native creation route: Windows durable launches go through WMI (#12117).
+    native = {"breakaway": False} if os.name == "nt" else {}
+    pu.spawn_daemon([executable, "serve"], cwd=tmp_path, log_path=log_path, **native)
 
     assert calls == [[executable, "serve"]], "the child still gets the real executable"
     data = log_path.read_bytes()

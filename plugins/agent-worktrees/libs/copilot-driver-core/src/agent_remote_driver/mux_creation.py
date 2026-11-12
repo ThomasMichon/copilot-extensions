@@ -8,13 +8,13 @@ import locale
 import os
 from pathlib import Path, PureWindowsPath
 import platform
+import re
 import subprocess
 import sys
 import tempfile
 import time
 
 from agent_procutil import no_window_kwargs
-from single_instance_lease import AlreadyRunningError, SingleInstance
 
 from agent_remote_driver.mux_observation_types import ObservationUnavailable
 
@@ -48,6 +48,8 @@ def session_gate(session: str, *, exists, enabled: bool):
     if not enabled:
         yield lambda: None
         return
+    from single_instance_lease import AlreadyRunningError, SingleInstance
+
     key = hashlib.sha256(session.encode("utf-8")).hexdigest()
     lease = SingleInstance(
         Path.home() / ".psmux" / "launch-locks",
@@ -183,6 +185,7 @@ def run_session(argv: list[str], session: str, release) -> subprocess.CompletedP
 
 
 CONTRACT = "copilot-driver.mux-creation"
+PRIVATE_FORMAT = "#{session_id}:#{session_created}|#{pane_id}"
 
 
 def _unique_object(pairs):
@@ -192,6 +195,61 @@ def _unique_object(pairs):
             raise ValueError("Duplicate mux request property")
         value[key] = item
     return value
+
+
+def private_main() -> int:
+    """Create one caller-owned private socket; never join, retry or adopt it."""
+    dispatched = False
+    native = None
+    try:
+        raw = sys.stdin.read(1024 * 1024 + 1)
+        if len(raw) > 1024 * 1024:
+            raise ValueError("Mux request exceeds the input limit")
+        request = json.loads(raw, object_pairs_hook=_unique_object)
+        if (
+            platform.system() == "Windows"
+            or not isinstance(request, dict)
+            or set(request) != {"version", "binary", "socket", "session", "cwd", "command"}
+            or type(request["version"]) is not int or request["version"] != 1
+            or any(
+                not isinstance(request[key], str) or not request[key] or "\0" in request[key]
+                for key in ("binary", "socket", "session", "cwd")
+            )
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", request["session"]) is None
+            or not isinstance(request["command"], list) or not request["command"]
+            or any(not isinstance(arg, str) or "\0" in arg for arg in request["command"])
+            or not request["command"][0]
+        ):
+            raise ValueError("Invalid private mux request")
+        binary, socket, cwd = (Path(request[key]) for key in ("binary", "socket", "cwd"))
+        if (
+            not binary.is_absolute() or binary.name != "tmux" or not binary.is_file()
+            or not socket.is_absolute() or socket.parent.resolve(strict=True) != socket.parent
+            or socket.exists() or socket.is_symlink()
+            or not cwd.is_absolute() or cwd.resolve(strict=True) != cwd or not cwd.is_dir()
+        ):
+            raise ValueError("Private mux execution paths are unavailable")
+        argv = [
+            str(binary), "-S", str(socket), "new-session", "-d", "-s", request["session"],
+            "-P", "-F", PRIVATE_FORMAT, "-c", str(cwd), *request["command"],
+        ]
+        dispatched = True
+        result = subprocess.run(
+            argv, cwd=str(cwd), stdin=subprocess.DEVNULL, capture_output=True,
+            text=True, timeout=30, check=False, **no_window_kwargs(),
+        )
+        identity = re.fullmatch(r"(\$[0-9]+:[0-9]+)\|(%[0-9]+)\s*", result.stdout)
+        if result.returncode or identity is None:
+            raise CreationUncertain("Private mux creation has no confirmed native identity")
+        native = {"incarnation": identity[1], "pane": identity[2]}
+        status, code = "created", 0
+    except Exception:
+        status, code = ("unknown" if dispatched else "rejected"), 3
+    reply = {"contract": CONTRACT, "version": 1, "status": status}
+    if native is not None:
+        reply["native"] = native
+    print(json.dumps(reply))
+    return code
 
 
 def _request(stream):

@@ -1342,7 +1342,15 @@ after removing its construction archive, rejects incompatible core support
 before prerequisite/registration/mux effects, and preserves unknown/reuse
 semantics without a legacy fallback. It also refuses experimental opt-out
 before fresh launch effects while retaining compatibility with existing
-opted-out sessions. `tests/test_receiving_bundle.py` rejects a poisoned shared
+opted-out sessions. Private-socket creation now enters the selected core's
+finite `--mux-create-private` operation; focused Driver
+`tests/test_mux_creation_cli.py` controls cover one literal dispatch, refusal,
+lost results and forbidden default-server joins. The relocated-core process
+control in `tests/test_session_host_core.py` uses a synthetic mux response and
+platform selector, not native POSIX qualification. The joined fixture likewise
+keeps its remote mux/platform edge synthetic while executing the real copied
+headed core; direct receiver-side creation is forbidden.
+`tests/test_receiving_bundle.py` rejects a poisoned shared
 core cache and verifies exact retry payload bytes across private core rebuilds;
 Driver's `tests/test_session_host_core.py` checks reproducible current and
 compatibility archives after cache eviction.

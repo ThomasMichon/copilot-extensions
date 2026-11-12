@@ -728,6 +728,21 @@ def fake_popen(monkeypatch, tmp_path):
             "fixture", process_created=False, admission_sent=False,
         )),
     )
+
+    def durable(argv, **kwargs):
+        # Windows durable launches go through WMI (#12117), never Popen.
+        calls.append((list(argv), {**kwargs, "route": "wmi"}))
+        if fake.failures:
+            fake.failures.pop(0)
+            raise pu.DaemonSpawnError(
+                "Windows durable launch via WMI Win32_Process.Create failed",
+                cleanup_confirmed=True, process_created=False, admission_sent=False,
+            )
+        proc = Mock()
+        proc.pid = 4242
+        return proc
+
+    monkeypatch.setattr(daemon, "_durable_windows_launch", durable)
     monkeypatch.delenv("COPILOT_EXTENSIONS_TEST_CONTAINED", raising=False)
     return fake
 
@@ -840,16 +855,15 @@ def test_spawn_daemon_windows_detached_breakaway_and_log(tmp_path, monkeypatch, 
     assert proc.pid == 4242
     (argv, kwargs), = fake_popen.calls
     assert argv == ["py", "-m", "svc"]
+    assert kwargs["route"] == "wmi", "a durable Windows daemon starts through WMI"
     assert kwargs["creationflags"] == (
         pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP | pu._CREATE_BREAKAWAY_FROM_JOB
-        | pu._CREATE_SUSPENDED
     )
     assert kwargs["cwd"] == str(tmp_path)
-    assert kwargs["stdin"] is subprocess.DEVNULL
-    assert kwargs["stderr"] is subprocess.STDOUT
-    assert kwargs["stdout"].name == str(log_path)
-    assert kwargs["stdout"].closed, "the parent must not keep the daemon log open"
-    assert kwargs["close_fds"] is True
+    assert os.fspath(kwargs["log_path"]) == str(log_path)
+    assert kwargs["stderr_log_path"] is None
+    assert kwargs["stdio_handles"] is None
+    assert kwargs["instance_receipt"] is not None
     assert kwargs["env"]["SVC_TOKEN"] == "t"
     assert kwargs["env"]["SPAWN_DAEMON_BASE"] == "base"
     assert "spawn_daemon cwd=" in log_path.read_text(encoding="utf-8")
@@ -863,7 +877,7 @@ def test_spawn_daemon_windows_console_children_uses_no_window(tmp_path, monkeypa
     )
     (_, kwargs), = fake_popen.calls
     assert kwargs["creationflags"] == (
-        pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB | pu._CREATE_SUSPENDED | 0x20
+        pu._CREATE_NO_WINDOW | pu._CREATE_BREAKAWAY_FROM_JOB | 0x20
     )
 
 
@@ -890,17 +904,27 @@ def test_spawn_daemon_contained_mode_stays_contained(tmp_path, monkeypatch, fake
     monkeypatch.setenv("COPILOT_EXTENSIONS_TEST_CONTAINED", "1")
     pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log")
     (_, kwargs), = fake_popen.calls
+    assert "route" not in kwargs, "contained test mode never launches through WMI"
+    assert not kwargs["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB
+
+
+def test_spawn_daemon_without_breakaway_never_uses_wmi(tmp_path, monkeypatch, fake_popen):
+    monkeypatch.setattr(pu, "_is_windows", lambda: True)
+    pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log", breakaway=False)
+    (_, kwargs), = fake_popen.calls
+    assert "route" not in kwargs, "breakaway=False keeps normal, contained creation"
     assert not kwargs["creationflags"] & pu._CREATE_BREAKAWAY_FROM_JOB
 
 
 def test_spawn_daemon_breakaway_denied_is_surfaced(tmp_path, monkeypatch, fake_popen):
-    """A Job that forbids breakaway must not silently hand the daemon the
-    caller's lifetime: the spawn fails (as an OSError) and the log says why."""
+    """A blocked WMI durable launch (for example by the Defender ASR rule)
+    must not silently hand the daemon the caller's lifetime: the spawn fails
+    explicitly and the log says why."""
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
     fake_popen.failures.append(_access_denied())
     log_path = tmp_path / "d.log"
 
-    with pytest.raises(pu.DaemonSpawnError, match="forbids breakaway") as info:
+    with pytest.raises(pu.DaemonSpawnError, match="WMI") as info:
         pu.spawn_daemon(["py"], cwd=tmp_path, log_path=log_path)
 
     assert isinstance(info.value, OSError)
@@ -918,20 +942,25 @@ def test_spawn_daemon_breakaway_denied_contained_fallback(tmp_path, monkeypatch,
     proc = pu.spawn_daemon(["py"], cwd=tmp_path, log_path=log_path, contained_fallback=True)
 
     assert proc.pid == 4242
-    first, second = (kwargs["creationflags"] for _, kwargs in fake_popen.calls)
-    assert first & pu._CREATE_BREAKAWAY_FROM_JOB
-    assert second == pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP
+    (_, first), (_, second) = fake_popen.calls
+    assert first["route"] == "wmi"
+    assert "route" not in second
+    assert second["creationflags"] == pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP
     assert "accepts caller-owned lifetime" in log_path.read_text(encoding="utf-8")
 
 
-def test_spawn_daemon_other_spawn_errors_propagate(tmp_path, monkeypatch, fake_popen):
+def test_spawn_daemon_unexpected_durable_errors_are_not_replayed(tmp_path, monkeypatch, fake_popen):
+    from agent_procutil import daemon
+
     monkeypatch.setattr(pu, "_is_windows", lambda: True)
-    fake_popen.failures.append(FileNotFoundError(2, "missing"))
-    with pytest.raises(FileNotFoundError):
-        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=tmp_path / "d.log")
-    assert len(fake_popen.calls) == 1
-    from agent_procutil.daemon_instances import inspect_instances
-    assert inspect_instances() == []
+    monkeypatch.setattr(
+        daemon, "_durable_windows_launch", Mock(side_effect=RuntimeError("lost")),
+    )
+    log_path = tmp_path / "d.log"
+    with pytest.raises(RuntimeError):
+        pu.spawn_daemon(["py"], cwd=tmp_path, log_path=log_path, contained_fallback=True)
+    assert fake_popen.calls == [], "an unknown durable outcome never falls back"
+    assert "creation-outcome-unknown" in log_path.read_text(encoding="utf-8")
 
 
 def test_spawn_daemon_access_denied_without_breakaway_propagates(
@@ -975,8 +1004,9 @@ def test_spawn_daemon_log_header_never_records_argv_tail_or_env(
     assert env_value not in text
     assert "example.invalid" not in text
     assert "--upstream" not in text
-    assert len(text.splitlines()) == 1
-    assert f"cwd={tmp_path} executable=py" in text
+    header, *stages = text.splitlines()
+    assert all(" spawn_daemon: " in line for line in stages)
+    assert f"cwd={tmp_path} executable=py" in header
 
 
 def test_spawn_daemon_log_header_uses_caller_display_label(tmp_path, monkeypatch, fake_popen):
@@ -989,8 +1019,9 @@ def test_spawn_daemon_log_header_uses_caller_display_label(tmp_path, monkeypatch
 
     text = log_path.read_text(encoding="utf-8")
     assert value not in text
-    assert len(text.splitlines()) == 1, "a display label never breaks the one-line header"
-    assert "executable=py display=svc serve --upstream <redacted>" in text
+    header, *stages = text.splitlines()
+    assert all(" spawn_daemon: " in line for line in stages), "a display label never breaks the one-line header"
+    assert "executable=py display=svc serve --upstream <redacted>" in header
 
 
 def test_spawn_daemon_breakaway_denied_never_records_argv_tail(
@@ -1124,7 +1155,7 @@ def test_spawn_daemon_passes_allowed_creationflags_through(
     (_, kwargs), = fake_popen.calls
     assert kwargs["creationflags"] == (
         pu._DETACHED_PROCESS | pu._CREATE_NEW_PROCESS_GROUP | pu._CREATE_BREAKAWAY_FROM_JOB
-        | pu._CREATE_SUSPENDED | flag
+        | flag
     )
 
 

@@ -325,6 +325,31 @@ repository history.
 
 ## Journal
 
+### 2026-11-11 - Reviewed WMI durable launch for must-outlive processes (#12117)
+
+The operator recorded a reviewed decision on #12117 (comment 6808780489):
+agent shells and installers commonly run in kill-on-close Jobs that forbid
+breakaway, so native breakaway is denied and the update front door's preflight
+refused silently through a bare console write. WMI `Win32_Process.Create` was
+verified to create a same-user process outside every caller Job and process
+tree that survives a forced tree kill and caller Job closure.
+
+This supersedes the earlier "no WMI substitution" stance in
+`windows-launch-broker.md` for exactly these cases: installer start of its
+services, daemon self-restart, watchdog/supervisor restart, a CLI ensuring its
+own backing daemon and a queued update under a no-breakaway Job. Source change:
+`agent_procutil.spawn_daemon` always uses the WMI durable launch for Windows
+resident durable daemons (no native-breakaway attempt first, because breakaway
+cannot defend against tree kills or unenumerated outer Jobs); finite workers,
+`breakaway=False` and contained test mode keep native creation and Jobs. A
+blocked WMI creation (for example the Defender ASR rule) raises an explicit
+`DaemonSpawnError`; only an existing `contained_fallback=True` opt-in continues
+contained. The update entry queues a detached update through WMI after a failed
+preflight and reports errors through capturable PowerShell streams. A real
+kill-on-close Job survival test covers the primitive. `native_daemon.ps1`
+(PowerShell-native daemon launch) is unchanged and remains a follow-up.
+Source only; no installed rollout was performed or authorized.
+
 ### 2026-10-29 - Verify legitimate normal-process runtime release
 
 Automatic promotion
