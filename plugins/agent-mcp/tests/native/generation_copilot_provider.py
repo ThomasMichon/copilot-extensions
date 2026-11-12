@@ -141,7 +141,8 @@ async def rpc(process, stderr, identifier: int, method: str, params: dict) -> tu
     async with asyncio.timeout(30):
         while True:
             line = await process.stdout.readline()
-            assert line, (await asyncio.wait_for(stderr, 5)).decode("utf-8", "replace")
+            if not line:
+                raise EOFError((await asyncio.wait_for(stderr, 5)).decode("utf-8", "replace"))
             message = json.loads(line)
             assert message.get("method") != "session/request_permission", message
             if message.get("method") == "session/update":

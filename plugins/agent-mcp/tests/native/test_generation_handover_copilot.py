@@ -8,7 +8,6 @@ import importlib.util
 import json
 import os
 from pathlib import Path
-import signal
 import sys
 from typing import Callable
 
@@ -460,11 +459,6 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 assert nonce not in model.results
                 assert model.calls.count(nonce) == 1
                 assert not model.errors, model.errors
-                if pending.done():
-                    result, text = await pending
-                    assert result["stopReason"] == "end_turn", result
-                    assert "fixture-unknown:" + nonce in text
-                    assert "fixture-complete:" + nonce not in text
                 async def failed_stream_closed() -> bool:
                     return identity_state(*conduit_identity) == "dead"
 
@@ -481,56 +475,64 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
                 record_testsuite_property("actual_native_tool_calls_consumed", len(model.results))
                 record_testsuite_property("actual_native_inflight_handover_calls", 3)
             finally:
-                await model.close()
-                if pending is not None and not pending.done():
-                    pending.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await pending
-                if session is not None and not session.done():
-                    session.cancel()
-                    with contextlib.suppress(asyncio.CancelledError):
-                        await session
-                if client is not None:
-                    if client.returncode is None:
-                        client.stdin.close()
-                    await asyncio.wait_for(client.wait(), 10)
-                    diagnostic = await asyncio.wait_for(stderr, 5)
-                    if sys.exc_info()[0] is not None:
-                        print("Native client stderr:", diagnostic.decode("utf-8", "replace")[-8000:])
-                        for path in [
-                            observations, replies, observations.with_suffix(".owner.json"),
-                            observations.with_suffix(".refusal"), observations.with_suffix(".capabilities"),
-                            *(tmp_path / "logs").glob("**/*.log"),
-                            *workspace.glob("**/*.log"),
-                        ]:
-                            if path.is_file():
-                                print(path.name + ":", path.read_text(
-                                    encoding="utf-8", errors="replace",
-                                )[-8000:])
-                    else:
-                        async def upstream_settled() -> bool:
-                            return receipt.is_file()
+                failed = sys.exc_info()[0] is not None
+                try:
+                    if client is not None:
+                        if client.returncode is None:
+                            client.stdin.close()
+                        await asyncio.wait_for(client.wait(), 10)
+                        if not failed:
+                            try:
+                                result, text = await asyncio.wait_for(asyncio.shield(pending), 5)
+                            except EOFError:
+                                assert client.returncode is not None
+                                outcome = "caller-eof"
+                            else:
+                                assert result["stopReason"] == "end_turn", result
+                                assert "fixture-unknown:" + nonce in text
+                                assert "fixture-complete:" + nonce not in text
+                                assert nonce in model.unknown_results
+                                outcome = "reported-error"
+                            if model.tasks:
+                                await asyncio.wait_for(
+                                    asyncio.gather(*tuple(model.tasks)), 5,
+                                )
+                            assert not model.errors, model.errors
+                            assert nonce not in model.results
+                            record_testsuite_property("unknown_native_result_outcome", outcome)
+                        diagnostic = await asyncio.wait_for(stderr, 5)
+                        if failed:
+                            print("Native client stderr:", diagnostic.decode("utf-8", "replace")[-8000:])
+                            for path in [
+                                observations, replies, observations.with_suffix(".owner.json"),
+                                observations.with_suffix(".refusal"), observations.with_suffix(".capabilities"),
+                                *(tmp_path / "logs").glob("**/*.log"),
+                                *workspace.glob("**/*.log"),
+                            ]:
+                                if path.is_file():
+                                    print(path.name + ":", path.read_text(
+                                        encoding="utf-8", errors="replace",
+                                    )[-8000:])
+                        else:
+                            async def upstream_settled() -> bool:
+                                return receipt.is_file()
 
-                        try:
                             await fixture.eventually(upstream_settled)
-                        except TimeoutError:
-                            print("Native exit identities:", {
-                                name: identity_state(*pair)
-                                for name, pair in {
-                                    "conduit": conduit_identity, "keeper": keeper_identity,
-                                    "upstream": upstream_identity,
-                                }.items()
-                            })
-                            for path in workspace.glob("**/*.log"):
-                                print(path.name + ":", path.read_text(
-                                    encoding="utf-8", errors="replace",
-                                )[-8000:])
-                            raise
-                for handle in handles:
-                    with contextlib.suppress(OSError):
-                        await fixture.shutdown(handle)
-                for process in processes:
-                    await asyncio.wait_for(process.wait(), 10)
+                finally:
+                    await model.close()
+                    if pending is not None and not pending.done():
+                        pending.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await pending
+                    if session is not None and not session.done():
+                        session.cancel()
+                        with contextlib.suppress(asyncio.CancelledError):
+                            await session
+                    for handle in handles:
+                        with contextlib.suppress(OSError):
+                            await fixture.shutdown(handle)
+                    for process in processes:
+                        await asyncio.wait_for(process.wait(), 10)
         assert cleanup and all(result.status in {"settled", "missing"} for result in cleanup)
         assert identity_state(client.pid, client_birth) == "dead"
         assert identity_state(*upstream_identity) == "dead"
@@ -540,7 +542,7 @@ async def test_actual_native_client_responds_through_replacement_and_rollback(
         exit_receipt = json.loads(receipt.read_text(encoding="utf-8"))
         assert exit_receipt == {
             "pid": upstream_identity[0], "initialized": 1,
-            "boundary": f"signal-{signal.SIGTERM}",
+            "boundary": "stdin-eof",
         }
         accepted = list(map(json.loads, calls.read_text().splitlines()))
         assert [row["nonce"] for row in accepted] == model.calls
