@@ -407,12 +407,10 @@ def version_key(version: str):
 
 def requires_exact_selection(versions: list[str]) -> bool:
     """Refuse unordered source recovery, including implicit plain-slot downgrade."""
-    source = any(re.search(r"[+.]source\.", version) for version in versions)
-    profiled = any(re.search(r"\.profile\.[0-9a-f]{16}(?:[.+]repair\.[0-9a-f]{32})?$", version)
-                   for version in versions)
-    if not source and not profiled:
+    pattern = r"[+.]source\.|\.profile\.[0-9a-f]{16}(?:[.+]repair\.[0-9a-f]{32})?$"
+    if not any(re.search(pattern, version) for version in versions):
         return False
-    kind = "Source" if source else "Profile"
+    kind = "Source" if any(re.search(r"[+.]source\.", version) for version in versions) else "Profile"
     print(
         f"{kind}-qualified runtime recovery requires an exact current-version or "
         f"last-known-good selector; refusing unordered {kind.lower()} fallback",
