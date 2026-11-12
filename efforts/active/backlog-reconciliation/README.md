@@ -2976,6 +2976,10 @@ sources, transferring owners or turning partial/planning gains into completion.
   #5665 handoff remains separate from documentary publication.
 - [ ] Verify and publish supported dispositions, preserving source versus
   release versus rollout distinctions and all active ownership.
+  The [ordered reliability map](reliability-ordered-tracking.md) preserves
+  #4231's five-area TRACK objective and proposes complete named receiving
+  for its separate actual Host-child diagnostic lane. Normal review, actual
+  direct receiving/readback and source judgment remain; #4231 stays OPEN.
   The [menu/source-ownership checkpoint](journal/2026/11.12-menu-completion-and-source-ownership-receiving.md)
   records #4437's finite source completion and #4220's complete accepted
   receiving, sixteen other whole retentions and unchanged actual custodians.
