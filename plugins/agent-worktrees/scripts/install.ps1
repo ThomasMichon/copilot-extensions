@@ -2757,6 +2757,23 @@ function Deploy-Package {
         }
     }
 
+    # Shared PR filter semantics must resolve locally, never from an index.
+    $prFiltersDir = Join-Path $PluginDir 'libs\pr-filters'
+    if (-not (Test-Path (Join-Path $prFiltersDir 'pyproject.toml'))) {
+        $prFiltersDir = Join-Path $PluginDir '..\..\libs\pr-filters'
+    }
+    if (-not (Test-Path (Join-Path $prFiltersDir 'pyproject.toml'))) {
+        Write-ServiceErr "Required pr-filters library source is unavailable"
+        $ErrorActionPreference = $prevEAP
+        return $false
+    }
+    $libRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-pr-filters' -PkgDir $prFiltersDir
+    if ($libRes.ExitCode -ne 0) {
+        Write-ServiceErr "pr-filters library install failed (exit $($libRes.ExitCode))"
+        $ErrorActionPreference = $prevEAP
+        return $false
+    }
+
     $installRes = Invoke-VenvPackageInstall -VenvPython $VenvPython -PkgName 'agent-worktrees' -PkgDir $PluginDir
     $rc = $installRes.ExitCode
     $ErrorActionPreference = $prevEAP

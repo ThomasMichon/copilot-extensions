@@ -2243,6 +2243,21 @@ deploy_package() {
         fi
     fi
 
+    # Shared PR filter semantics must resolve locally, never from an index.
+    local pr_filters_dir="$PLUGIN_DIR/libs/pr-filters"
+    if [[ ! -f "$pr_filters_dir/pyproject.toml" ]]; then
+        pr_filters_dir="$(cd "$PLUGIN_DIR/../.." && pwd)/libs/pr-filters"
+    fi
+    if [[ ! -f "$pr_filters_dir/pyproject.toml" ]]; then
+        err "Required pr-filters library source is unavailable"
+        return 1
+    fi
+    if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-pr-filters \
+            "$pr_filters_dir" --quiet; then
+        err "pr-filters library install failed"
+        return 1
+    fi
+
     if ! "$VENV_PYTHON" -I "$SCRIPT_DIR/installer_dependency_policy.py" --uv uv -- --python "$VENV_PYTHON" --reinstall-package agent-worktrees "$PLUGIN_DIR" --quiet; then
         err "Package install failed"
         return 1

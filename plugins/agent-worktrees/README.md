@@ -1,5 +1,8 @@
 # Agent Worktrees
 
+Read-only [selected PR populations](docs/pr-population.md) use the existing
+native observation credential boundary; inventory and snapshot defaults remain unchanged.
+
 Copilot CLI plugin for worktree-isolated sessions. Every Copilot CLI
 session gets its own git worktree -- no branch conflicts, no stale state,
 no stepping on parallel sessions.
