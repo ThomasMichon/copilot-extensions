@@ -1,0 +1,9 @@
+{
+  "comment": "Support independently declared repository Python projects in the canonical source and wheel producer",
+  "changes": [
+    {
+      "plugin": "worktree-manager",
+      "type": "patch"
+    }
+  ]
+}

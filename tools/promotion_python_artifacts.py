@@ -71,26 +71,12 @@ def _digest(path: Path) -> str:
 
 
 def candidate_projects(root: Path) -> dict[str, str]:
-    projects = {}
-    for project in sorted((root / "plugins").glob("*/pyproject.toml")):
-        try:
-            data = tomllib.loads(project.read_text(encoding="utf-8"))
-            projects[project.parent.name] = data["project"]["version"]
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
-            raise PromotionArtifactError(f"{project}: invalid Python project") from exc
-    for component, relative in COMPONENTS.items():
-        project = root / relative / "pyproject.toml"
-        if not (root / relative).exists():
-            continue
-        try:
-            data = tomllib.loads(project.read_text(encoding="utf-8"))
-            projects[f"standalone:{component}"] = data["project"]["version"]
-        except (OSError, UnicodeDecodeError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
-            raise PromotionArtifactError(f"{project}: invalid standalone Python project") from exc
-    from core_python_artifacts import enabled, release_version
-    if enabled(root):
-        projects["composition:core"] = release_version(root)
-    return projects
+    from application_sources import project_versions
+
+    try:
+        return project_versions(root)
+    except (OSError, ValueError) as exc:
+        raise PromotionArtifactError(f"invalid repository Python project declarations: {exc}") from exc
 
 
 def _bundle_filename(manifest: dict) -> str:
@@ -138,6 +124,7 @@ def build_candidate_bundles(
 ) -> None:
     """Trusted driver builds candidate data using exactly one shared lock."""
     import promote_release as promotion
+    from application_sources import canonical_application
     from build_toolchain_lock import resolve_toolchain_lock
 
     builder = promotion._load_module(
@@ -164,7 +151,7 @@ def build_candidate_bundles(
             for _name, path in dependencies:
                 validate_static_build(path)
             continue
-        directory = builder.PLUGINS_DIR / plugin
+        directory = canonical_application(root, plugin)
         for source in [directory, *(path for _name, path in builder.resolve_vendored_libs(directory))]:
             from plugin_runtime_resources import build_inputs
             build_inputs(source, root=root)
@@ -619,6 +606,13 @@ def validate_manifest(manifest: dict) -> None:
         core = "composition" in manifest
         primary_role = "standalone" if standalone else "plugin"
         source_root = COMPONENTS[manifest["component"]] if standalone else f"plugins/{label}"
+        if "project_path" in manifest:
+            from application_sources import project_locations
+            if standalone or core:
+                raise PromotionArtifactError("project path is only valid for a declared independent project")
+            source_root = project_locations({"tool": {"copilot-extensions": {
+                "python-projects": {label: manifest["project_path"]},
+            }}})[label]
         if core:
             selection = manifest.get("selection")
             if (
@@ -719,8 +713,13 @@ def validate_source_binding(manifest: dict, root: Path, *, core_hash_workers: in
     label = _artifact_label(manifest)
     standalone = "component" in manifest
     core = "composition" in manifest
-    plugin_dir = root / COMPONENTS[manifest["component"]] if standalone else builder.PLUGINS_DIR / label
+    from application_sources import canonical_application
     try:
+        plugin_dir = root / COMPONENTS[manifest["component"]] if standalone else canonical_application(root, label)
+        if not core and not standalone and manifest.get("project_path", "plugins/" + label) != (
+            plugin_dir.relative_to(root).as_posix()
+        ):
+            raise PromotionArtifactError("artifact project path differs from the repository declaration")
         if not core and (
             plugin_dir.is_symlink() or builder.uer._find_symlink(plugin_dir, skip_test_runs=False) is not None
         ):

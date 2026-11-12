@@ -377,6 +377,47 @@ def test_cli_prepares_only_the_selected_core_projects(tmp_path, monkeypatch, cap
     assert composed[-1] == seen[-1][1] == ("standalone:worktree-manager",)
 
 
+def test_selected_project_uses_committed_repository_declaration(repository, tmp_path):
+    repo, _ = repository
+    directory = repo / ".marketplace" / "example"
+    directory.mkdir(parents=True)
+    declaration = repo / "pyproject.toml"
+    declaration.write_text(
+        '[tool.copilot-extensions.python-projects]\nexample = ".marketplace/example"\n',
+    )
+    (directory / "pyproject.toml").write_text(
+        '[project]\nname = "example"\nversion = "1.0"\n',
+    )
+    local.preparation._git(repo, "add", ".")
+    local.preparation._git(
+        repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid",
+        "commit", "--quiet", "-m", "Declare independent application",
+    )
+    commit = local.preparation._git(repo, "rev-parse", "HEAD")
+    declaration.write_text(
+        '[tool.copilot-extensions.python-projects]\nexample = "../outside"\n',
+    )
+    (directory / "pyproject.toml").write_text("dirty application bytes\n")
+    output = tmp_path / "selected"
+    record = local.compose(repo, commit, None, output, projects=("example",))
+    assert record["source_commit"] == commit
+    assert (output / "source/.marketplace/example/pyproject.toml").read_text().endswith('version = "1.0"\n')
+    assert "../outside" not in (output / "source/pyproject.toml").read_text()
+    from promotion_python_artifacts import candidate_projects
+    assert candidate_projects(output / "source") == {"example": "1.0"}
+
+
+def test_native_build_workspace_binds_repository_declaration_even_without_compaction(tmp_path, monkeypatch):
+    source = tmp_path / "source"
+    source.mkdir()
+    declaration = source / "pyproject.toml"
+    declaration.write_text('[tool.copilot-extensions.python-projects]\nexample="apps/example"\n')
+    monkeypatch.setattr(local, "os", SimpleNamespace(name="posix"))
+    with pytest.raises(ValueError, match="project declaration changed"):
+        with local._build_workspace(source, tmp_path / "output", ("example",), None):
+            declaration.write_text('[tool.copilot-extensions.python-projects]\nexample="apps/other"\n')
+
+
 @pytest.fixture
 def repository(tmp_path):
     repository = tmp_path / "repository"
@@ -791,10 +832,17 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
         "standalone:fleet-manager": "3.0.0",
         "agent-index": "4.0.0",
         "standalone:index-engine": "5.0.0",
+        "example-worker": "6.0.0",
     }
+    (source / "pyproject.toml").write_text(
+        '[tool.copilot-extensions.python-projects]\nexample-worker = ".marketplace/example-worker"\n',
+    )
     for key, version in projects.items():
         component = key.split(":")[-1]
-        relative = standalone_python_artifacts.COMPONENTS[component] if ":" in key else "plugins/" + component
+        relative = (
+            standalone_python_artifacts.COMPONENTS[component] if ":" in key
+            else ".marketplace/example-worker" if key == "example-worker" else "plugins/" + component
+        )
         payload = source / relative
         payload.mkdir(parents=True)
         name = (
@@ -846,7 +894,13 @@ def test_suite_build_preserves_roster_versions_and_uses_one_toolchain(
         else:
             assert builder.REPO == source
         key = "standalone:" + component if "standalone:" + component in projects else component
-        relative = standalone_python_artifacts.COMPONENTS[component] if ":" in key else "plugins/" + component
+        relative = (
+            standalone_python_artifacts.COMPONENTS[component] if ":" in key
+            else ".marketplace/example-worker" if key == "example-worker" else "plugins/" + component
+        )
+        if key == "example-worker":
+            from application_sources import canonical_application
+            assert canonical_application(builder.REPO, key) == builder.REPO / relative
         assert (builder.REPO / relative / "pyproject.toml").read_bytes() == (
             source / relative / "pyproject.toml"
         ).read_bytes()
@@ -2157,7 +2211,8 @@ def prepare_native_source_inputs(tmp_path, request):
         '[project.scripts]\ndemo-app="demo_app:main"\n'
         '[project.optional-dependencies]\nbootstrap=["agent-procutil"]\n'
         '[tool.uv.sources]\nagent-procutil={path="' +
-        ("../libs/agent-procutil" if sibling else "libs/agent-procutil") + '"}\n',
+        ("../libs/agent-procutil" if sibling else "libs/agent-procutil") + '"}\n' +
+        ('[tool.copilot-extensions.application]\nsetup=["--setup"]\nstart=["--start"]\n' if entry else ""),
     )
     callback = {}
     if isinstance(options, dict) and options.get("callback"):
@@ -3276,8 +3331,7 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     application = snapshot / selected.project["application"]
     path = application / "application.json"
     record = json.loads(path.read_text())
-    record.update(setup=["--setup"], start=["--start"])
-    path.write_text(json.dumps(record))
+    assert record["setup"] == ["--setup"] and record["start"] == ["--start"]
     home = tmp_path / "home"
     home.mkdir()
     monkeypatch.setenv("HOME", str(home))
@@ -3301,11 +3355,15 @@ def test_application_adapter_runs_real_install_repeat_and_retains_failed_start(
     result = source.install_application(snapshot, "demo-app", selected.payload, root, **options)
     slot = root / "versions" / selection["runtime_version"]
     assert result == {"state": "installed", "slot": str(slot)}
-    for helper in (slot / ".runtime-bootstrap").iterdir():
-        if helper.name == "runtime-generation":
-            assert re.fullmatch(rb"[0-9a-f]{32}\n", helper.read_bytes())
-        else:
-            assert helper.read_bytes() == (slot / "runtime" / helper.name).read_bytes()
+    assert re.fullmatch(rb"[0-9a-f]{32}\n", (slot / ".runtime-bootstrap/runtime-generation").read_bytes())
+    helpers = list((slot / ".runtime-bootstrap").glob("*.py"))
+    assert {helper.name for helper in helpers} == {
+        "runtime_launcher.py", "versioned_runtime.py", "versioned_runtime_leases.py",
+        "versioned_runtime_source.py", "versioned_runtime_construction.py",
+        "versioned_runtime_publication.py",
+    }
+    for helper in helpers:
+        assert helper.read_bytes() == (slot / "runtime" / helper.name).read_bytes()
     before = {name: (root / name).read_bytes() for name in ("current-version", "last-known-good")}
     assert json.loads((root / "setup.json").read_text()) == ["--setup"]
     assert json.loads((root / "started.json").read_text()) == ["--start"]
