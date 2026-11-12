@@ -1579,20 +1579,31 @@ if ($null -eq $result) { 'none' } else { "code=$result" }
 """
 
 
-@pytest.mark.parametrize("case", ["exited", "reused", "unreported"])
+@pytest.mark.parametrize("case", ["exited", "reused", "late-reuse", "unreported"])
 def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_code(
     tmp_path, native_powershell, case,
 ):
     """A fast-exiting submission is judged by its recorded exit code, never a reused PID."""
     exit_file = tmp_path / "submission.exit"
     if case != "unreported":
-        exit_file.write_text("0", encoding="utf-8")
+        exit_file.write_text("3", encoding="utf-8")
+    submitted_at = time.strftime("%Y-%m-%dT%H:%M:%S")
+    unrelated = None
     if case == "exited":
         finished = subprocess.run(
             [native_powershell, "-NoProfile", "-Command", "$PID"],
             capture_output=True, text=True, check=True, **no_window_kwargs(),
         )
         submission_pid = int(finished.stdout.strip())
+    elif case == "late-reuse":
+        # A live, unrelated process that took the PID after the submission was queued.
+        time.sleep(1.5)
+        unrelated = subprocess.Popen(
+            [native_powershell, "-NoProfile", "-Command", "Start-Sleep 120; exit 9"],
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **no_window_kwargs(),
+        )
+        submission_pid = unrelated.pid
     else:
         # A long-lived process started before the submission stands in for a reused PID.
         submission_pid = os.getpid()
@@ -1600,15 +1611,21 @@ def test_queued_submission_that_exits_before_it_is_opened_reports_its_recorded_c
         os.environ,
         ENTRY_SCRIPT=str(PLUGIN / "bin" / "agent-worktrees-update-entry.ps1"),
         SUBMISSION_PID=str(submission_pid),
-        SUBMITTED_AT=time.strftime("%Y-%m-%dT%H:%M:%S"),
+        SUBMITTED_AT=submitted_at,
         EXIT_FILE=str(exit_file),
     )
-    started = time.monotonic()
-    result = subprocess.run(
-        [native_powershell, "-NoProfile", "-NonInteractive", "-Command", _WAIT_SUBMISSION],
-        capture_output=True, text=True, env=env, timeout=60, **no_window_kwargs(),
-    )
+    try:
+        started = time.monotonic()
+        result = subprocess.run(
+            [native_powershell, "-NoProfile", "-NonInteractive", "-Command", _WAIT_SUBMISSION],
+            capture_output=True, text=True, env=env, timeout=60, **no_window_kwargs(),
+        )
+        elapsed = time.monotonic() - started
+    finally:
+        if unrelated is not None:
+            unrelated.kill()
+            unrelated.wait(timeout=15)
     assert result.returncode == 0, result.stdout + result.stderr
-    expected = "none" if case == "unreported" else "code=0"
+    expected = "none" if case == "unreported" else "code=3"
     assert result.stdout.strip().splitlines()[-1] == expected, result.stdout + result.stderr
-    assert time.monotonic() - started < 30, "a reused PID must never be waited on"
+    assert elapsed < 30, "a reused PID must never be waited on"

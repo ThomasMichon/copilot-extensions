@@ -105,22 +105,37 @@ namespace CopilotExtensions {
     return $path
 }
 function Wait-AgentQueuedSubmission($ProcessId, [DateTime]$SubmittedAt, [string]$ExitFile) {
-    # Returns the submission's exit code, or $null when it reported none.
+    # Returns the submission's exit code, or $null when it reported none. The
+    # code the submission records before exiting is authoritative; the process
+    # is watched only to notice a submission that ended without recording one,
+    # so a reused PID can neither delay the result nor supply its own code.
+    $recordedCode = {
+        if (-not (Test-Path -LiteralPath $ExitFile -PathType Leaf)) { return $null }
+        $recorded = 0
+        if ([int]::TryParse(([IO.File]::ReadAllText($ExitFile)).Trim(), [ref]$recorded)) { return $recorded }
+        return $null
+    }
+    $process = $null
     try {
         $process = [Diagnostics.Process]::GetProcessById([int]$ProcessId)
         $null = $process.Handle
-        if ($process.StartTime -lt $SubmittedAt) { throw 'The submission PID was reused.' }
-        if ($process.WaitForExit(300000)) { return $process.ExitCode }
-        return $null
-    } catch {
-        # Not openable, or its PID was reused: the submission already exited,
-        # so the exit code it recorded before exiting is authoritative.
+        if ($process.StartTime -lt $SubmittedAt) { $process = $null }
+    } catch { $process = $null }
+    $deadline = [DateTime]::UtcNow.AddMinutes(5)
+    while ($true) {
+        $code = & $recordedCode
+        if ($null -ne $code) {
+            # Recorded as its last act; allow it a bounded moment to close its outputs.
+            if ($null -ne $process) { $null = $process.WaitForExit(5000) }
+            return $code
+        }
+        if ($null -eq $process -or [DateTime]::UtcNow -ge $deadline) { return $null }
+        if ($process.WaitForExit(250)) {
+            $code = & $recordedCode
+            if ($null -ne $code) { return $code }
+            return $process.ExitCode
+        }
     }
-    if (Test-Path -LiteralPath $ExitFile -PathType Leaf) {
-        $recorded = 0
-        if ([int]::TryParse(([IO.File]::ReadAllText($ExitFile)).Trim(), [ref]$recorded)) { return $recorded }
-    }
-    return $null
 }
 function Submit-AgentDurableUpdate([string]$Preflight) {
     # WMI durable launch is reserved for work that must outlive its launcher;
@@ -184,7 +199,14 @@ function Submit-AgentDurableUpdate([string]$Preflight) {
     # With --json, stdout carries only the submission's own JSON document.
     if (-not $asJson) { Write-Host $notice }
     $exitCode = Wait-AgentQueuedSubmission $created.ProcessId $submittedAt $exitFile
-    $read = { param($path) if (Test-Path -LiteralPath $path -PathType Leaf) { [IO.File]::ReadAllText($path) } else { '' } }
+    # The submission may still be closing its redirected outputs; read them
+    # without requiring exclusive access.
+    $read = { param($path)
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { return '' }
+        $stream = [IO.File]::Open($path, [IO.FileMode]::Open, [IO.FileAccess]::Read,
+            [IO.FileShare]::ReadWrite -bor [IO.FileShare]::Delete)
+        try { (New-Object IO.StreamReader($stream)).ReadToEnd() } finally { $stream.Dispose() }
+    }
     $stdout = & $read $out
     $stderr = & $read $log
     $request = $null
