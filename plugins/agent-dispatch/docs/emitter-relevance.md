@@ -90,6 +90,11 @@ serializes the complete check/report cycle. A successful response removes the
 pending entry. After restart or lost acknowledgement, the caller reads that
 original request's receipt; it never resends an uncertain POST or invents a
 replacement request. A missing receipt is not proof of no effects. Pending requests survive trimming of creation receipts and registration changes.
+Recovered and successful acceptances are checkpointed in batches rather than
+rewriting and syncing the whole sidecar per receipt. A crash before that
+checkpoint can recover the same server receipts again. Original pre-send
+requests and confirmed rejections retain their immediate checkpoints because
+the latter have no acceptance receipt to recover.
 Pending requests are capped at the receipt owner's 2,000-record budget.
 At capacity, new checks pause while bounded receipt recovery and ordinary
 production continue; unresolved outcomes are not evicted to make room.

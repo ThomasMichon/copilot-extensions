@@ -140,7 +140,6 @@ def reconcile_receipts(
                 result["errors"].append({"task_id": task_id, "error": str(exc)})
                 continue
             del state["pending"][task_id]
-            _save(path, state)
             result["recovered"].append(acceptance)
 
         receipts = emitter.read_receipts(spec["id"])
@@ -262,7 +261,8 @@ def reconcile_receipts(
                             })
                             continue
                         del state["pending"][task_id]
-                        _save(path, state)
                         result["accepted"].append(acceptance)
+                    if result["accepted"]:
+                        _save(path, state)
         result["pending"] = len(state["pending"])
     return result

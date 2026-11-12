@@ -9,9 +9,9 @@ import pytest
 
 from agent_dispatch.client import DispatchClient
 from agent_dispatch.pool_source_snapshot import DeclarationRead
-from agent_dispatch.producers import emitter
+from agent_dispatch.producers import emitter, emitter_relevance
 from agent_dispatch.queue import Status
-from tests.test_emitter_relevance import _reconcile, _retain, spec as spec
+from tests.test_emitter_relevance import _reconcile, _retain, _runner, spec as spec
 from tests.test_pool_catalog_transport import _headers
 from tests.test_task_relevance_effective_scope import venue as venue
 from tests.test_task_relevance_registration import q as q
@@ -206,3 +206,50 @@ def test_oversized_report_batch_is_refused_before_discovery(q, api, spec, monkey
         "/task-relevance/reports", headers=_headers(), json={"reports": [report] * 101},
     )
     assert response.status_code == 422 and q.get(task.id).status == Status.QUEUED
+
+
+def test_accepted_and_recovered_batches_checkpoint_sidecar_without_per_item_rewrites(q, api, spec, monkeypatch):
+    spec["relevance"]["batch_size"] = 25
+    q.register_registration("emitter", spec, reg_id="source-a", machine="host-a")
+    tasks = [_retain(q, spec) for _ in range(25)]
+    saved = []
+    save = emitter_relevance._save
+
+    def record(path, state):
+        saved.append(len(state["pending"]))
+        save(path, state)
+
+    monkeypatch.setattr(emitter_relevance, "_save", record)
+    with DispatchClient(
+        "http://testserver", token="data", control_token="control", transport=transport(api, []),
+    ) as client:
+        result = _reconcile(client, spec, _runner("needed"))
+    assert len(result["accepted"]) == len(tasks)
+    assert saved == [0, 25, 0]
+
+    saved.clear()
+    # A crash before the final accepted checkpoint leaves the original requests
+    # recoverable from their server receipts, without another report.
+    delegate = transport(api, [])
+
+    def crash_before_ack_checkpoint(path, state):
+        if not state["pending"] and saved:
+            raise SystemExit("lost process after acceptance")
+        record(path, state)
+
+    monkeypatch.setattr(emitter_relevance, "_save", crash_before_ack_checkpoint)
+    with DispatchClient(
+        "http://testserver", token="data", control_token="control", transport=delegate,
+    ) as client:
+        with pytest.raises(SystemExit):
+            _reconcile(client, spec)
+    monkeypatch.setattr(emitter_relevance, "_save", record)
+    saved.clear()
+    calls = []
+    with DispatchClient(
+        "http://testserver", token="data", control_token="control", transport=transport(api, calls),
+    ) as client:
+        recovered = _reconcile(client, spec)
+    assert len(recovered["recovered"]) == len(tasks) and recovered["pending"] == 0
+    assert saved == [0]
+    assert not any(method == "POST" for method, _ in calls)
