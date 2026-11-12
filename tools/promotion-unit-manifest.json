@@ -5698,7 +5698,7 @@
         "tools/promotion_unit_tests/test_source_objects.py": "08e17af0ae00f61121f7b1d6c9034df2b09e4846b2069c200e073f56783a8f96",
         "tools/promotion_unit_tests/test_source_profile_derivation.py": "8eb86e277a0222b085df9091f239fde8aa5fdf37cc804cba08c8726d4f1b3c47",
         "tools/promotion_unit_tests/test_ssh_hosting_policy.py": "17ff731c310384634012290712ce5ad96ae1f6b7c4b1343179a663975793b919",
-        "tools/promotion_unit_tests/test_standalone_artifacts.py": "c6d1ab3a317212b5de062512edb9ea2be08b60272f33fbd5c913488a9a944bb4",
+        "tools/promotion_unit_tests/test_standalone_artifacts.py": "d374b6f5529d814132301ac7d51edc09bb46226cba5348c84b38e3c8868af8e0",
         "tools/promotion_unit_tests/test_state_root_read.py": "53bf31651afa639058e1a16115da39b32f3f99ece4bc42d8c6be918984dd6a43",
         "tools/promotion_unit_tests/test_trusted_harness_base.py": "956b4bd9276b8df946511772d3fe83ca5df6bc08d4606f731e8ac7307611b7d0",
         "tools/promotion_unit_tests/test_wheel_inputs.py": "1668723fecac311b9be3f4f2e387b664df6e5067e24843e0c782562d8386c35b",

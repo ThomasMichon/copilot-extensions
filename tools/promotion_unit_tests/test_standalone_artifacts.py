@@ -253,6 +253,18 @@ def test_shared_artifact_owner_preserves_selected_uv_and_deadline(
     for library in ("versioned-runtime", "installer-engine"):
         (root / "libs" / library).mkdir(parents=True)
     (root / "libs/agent-procutil/src/agent_procutil").mkdir(parents=True)
+    if route == "standalone":
+        canonical = Path(__file__).resolve().parents[2]
+        for relative in (
+            "libs/versioned-runtime/standalone_build.py",
+            "services/pr/setup.py",
+            "services/pr/_build_runtime_resource.py",
+            "plugins/ai-attribution/scripts/attribution_profile.py",
+            "plugins/ai-attribution/scripts/comment_preparation.py",
+        ):
+            destination = root / relative
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes((canonical / relative).read_bytes())
     monkeypatch.setattr(builder, "REPO", root)
     monkeypatch.setattr(builder, "PLUGINS_DIR", root / "plugins")
     monkeypatch.setattr(builder, "LIBS_DIR", root / "libs")
