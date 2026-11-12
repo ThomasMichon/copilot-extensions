@@ -92,6 +92,8 @@ merged plan does not establish running adoption.
 - [ ] Add a coordinator-owned relevance report with durable request identity,
       source/registration scope and expected task revision or generation.
       Emitters and evaluators use the same transaction.
+      Local direct command-emitter admission and runtime support are implemented;
+      declared/evaluator effective-scope admission remains before caller migration.
 - [x] Inside that transaction, abandon only a task with no prior claim/start,
       current assignment, native attachment, pending startup or retained
       resource obligation. Claim and preparation races must linearize with it.
@@ -103,6 +105,7 @@ merged plan does not establish running adoption.
       merely because a notification was admitted.
       The source receiver links one original-owner wake atomically; native
       transport, pending/unknown outcomes and suspended steering use existing owners.
+      Source delivery merged in #12285; this does not prove actual closeout.
 - [ ] Preserve closeout intent through restart, owner recovery and requeue.
       Recovering an obsolete task must not restart its original work.
       Unknown or unavailable owner state remains visible for recovery.
@@ -166,6 +169,42 @@ operator's explicit bulk reset; it must not inherit that reset's broad discard
 authority. Add no universal attestation layer or duplicate lifecycle engine.
 
 ## Journal
+
+### 2026-11-12 - Registered receiver expansion
+
+Added a strict control-authorized wire receiver and opt-in client with running
+health support discovery. Registration resolution and revision checks share the
+task decision's write transaction; the local override owner is held through it.
+Fresh abandonment preserves existing lifecycle notification without replaying it
+for an accepted duplicate. Retained receipt recovery is separate from fresh
+admission, including after a registration is removed or held.
+
+This increment deliberately advertises local direct task-authoring command
+emitters, not the full effective registrar set. Declared, remote and evaluator
+admission remain explicit follow-through, alongside source adapters, periodic
+evaluation, immutable cohort attribution and actual closeout acknowledgement.
+No automatic caller or runtime is activated. The isolated regression packet
+passed 239 controls before the terminal-notification addition; the final
+affected registration/transport/ownership/concurrency/wake packet passed 94.
+Those selections overlap and are not a combined full-plugin result.
+
+### 2026-11-12 - Original-owner delivery approved and merged
+
+[PR #12285](https://github.com/ThomasMichon/copilot-extensions/pull/12285)
+merged as `e2f4c151889da56f06c9fed16e3c83f22de28e0c` after approval of the
+actual `6f3458f5d1` head and required green checks. Review corrections covered
+submitted restricted-native identity at both target reads and durable closeout
+links surviving later ordinary/event-note wakes. Scoped isolated packets passed
+290, 184 and 110 selected controls respectively; those counts overlap and are
+not a combined full-suite result. The first and final packets each skipped the
+existing detached-cleanup-only parameter.
+
+Lossless source reconciliation retained its pre-completion backup. The parent
+issue remains open. Both source and adopting efforts returned to their current
+Plan/Validation gates. Next is registered-source receiver admission and
+runtime-bound capability publication before emitter/evaluator callers; periodic
+evaluation, cohort attribution, actual lifecycle acknowledgement and live
+adoption remain open. No runtime was activated by this merge.
 
 ### 2026-11-12 - Original-owner closeout delivery
 
