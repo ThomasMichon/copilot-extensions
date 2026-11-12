@@ -26,6 +26,11 @@ absolute Python command with `[-I] -m agent_mcp`, followed by `bridge` or
 with the entry's unchanged environment and inherited cwd. It queries that
 entry's selected provider with probe-only `AGENT_MCP_NO_SELFPROVISION=1`;
 the eventual server does not inherit that probe-only override.
+The snapshot pins the originating Linux process through a pidfd and its native
+birth before probing. Every physical or ordinary exec path rechecks that retained
+observation, including unsupported-query fallback and failed-exec fallback.
+This keeps origin admission independent of an installed MCP runtime; it adds no
+observer thread or lifetime waiter.
 Pair support alone does not qualify adoption. The new optional-entry
 capability identifies a physical interpreter, prefix, receiver module, actual
 probe cwd and explicit wrapper-owned environment delta, including payload-root
@@ -56,6 +61,14 @@ refuse before configuration loading. There is no package-version inference.
 Without the negotiated mode, each launch timestamp can reject an equivalent
 second client against an older custodian. Explicit configuration references
 always keep those values semantically significant.
+
+Request-context negotiation does not upgrade the private checkpoint binding.
+That binding still uses the original complete identity. The optional receiver
+therefore declines custody when trace normalization would change the legacy
+checkpoint identity, using ordinary execution before effects. Qualifying that
+trace-sensitive binding across physical replacement remains an open #10486
+adoption item, not an incoming-installation gate. The configuration-consumption
+fixture does not assert that this retained-session gap is closed.
 
 The session-only `--additional-mcp-config` overlay is a sealed anonymous file,
 read through the client's inherited Linux descriptor. Configuration and env

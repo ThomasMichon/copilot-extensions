@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import select
 import subprocess
 import sys
 
@@ -13,6 +14,62 @@ ENVIRONMENT_KEYS = (
     "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
     "AGENT_RT_ROOT", "PYTHONUTF8", "PYTHONPATH", "PYTHONHOME",
 )
+
+
+class Origin:
+    """Keep the version-1 Linux native owner pinned without an installed runtime."""
+
+    def __init__(self, pid, birth):
+        if type(pid) is not int or not 0 < pid < 1 << 31 or not isinstance(birth, str):
+            raise ValueError("Invalid originating native identity")
+        self.pid, self.birth, self.descriptor = pid, birth, None
+
+    def __enter__(self):
+        native = getattr(os, "pidfd_open", None)
+        if native is None:
+            import ctypes
+
+            libc = ctypes.CDLL(None, use_errno=True)
+            native = libc.pidfd_open
+            native.argtypes = [ctypes.c_int, ctypes.c_uint]
+            native.restype = ctypes.c_int
+            descriptor = native(self.pid, 0)
+            if descriptor < 0:
+                number = ctypes.get_errno()
+                raise OSError(number, os.strerror(number))
+        else:
+            descriptor = native(self.pid)
+        self.descriptor = descriptor
+        try:
+            data = Path(f"/proc/{self.pid}/stat").read_text(
+                encoding="ascii", errors="surrogateescape",
+            )
+            fields = data[data.rindex(")") + 2:].split()
+            boot = Path("/proc/sys/kernel/random/boot_id").read_text(encoding="ascii").strip()
+            namespace = os.stat(f"/proc/{self.pid}/ns/pid").st_ino
+            actual = f"linux:{boot}:{namespace}:{int(fields[19])}"
+            if fields[0] == "Z" or actual != self.birth:
+                raise ProcessLookupError("Originating owner changed or exited")
+            self.observer = select.poll()
+            self.observer.register(descriptor, select.POLLIN)
+            self.require_alive()
+        except BaseException:
+            os.close(descriptor)
+            self.descriptor = None
+            raise
+        return self
+
+    def require_alive(self):
+        """Refuse a dead or unobservable retained owner before an exec."""
+        events = self.observer.poll(0)
+        if any(flags & (select.POLLERR | select.POLLNVAL) for _, flags in events):
+            raise OSError("Originating owner observation unavailable")
+        if any(flags & (select.POLLIN | select.POLLHUP) for _, flags in events):
+            raise ProcessLookupError("Originating owner exited before MCP entry")
+
+    def __exit__(self, *_args):
+        os.close(self.descriptor)
+        self.descriptor = None
 
 
 def receiver(report):
@@ -45,10 +102,7 @@ def receiver(report):
     return entry
 
 
-def start(request):
-    """Probe only at MCP start, then exec one physical receiver or the baseline."""
-    if not sys.platform.startswith("linux"):
-        raise ValueError("Anonymous owner entry bootstrap requires Linux")
+def _start_owned(request, owner):
     original = request["original"]
     environment = os.environ.copy()
     try:
@@ -60,6 +114,7 @@ def start(request):
         entry = receiver(report) if result.returncode == 0 else None
     except (OSError, ValueError, TypeError, AttributeError, subprocess.TimeoutExpired):
         entry = None
+    owner.require_alive()
     if entry is None:
         os.execvpe(original[0], original, environment)
     else:
@@ -73,9 +128,22 @@ def start(request):
             os.execve(command[0], command, environment)
         except OSError:
             # A failed exec accepted no application bytes.
+            owner.require_alive()
             os.execvpe(original[0], original, environment)
     raise RuntimeError("MCP entry exec unexpectedly returned")
 
 
+def start(request):
+    """Pin before probing and refuse owner loss on every pre-effect exec path."""
+    if not sys.platform.startswith("linux"):
+        raise ValueError("Anonymous owner entry bootstrap requires Linux")
+    with Origin(request["pid"], request["birth"]) as owner:
+        _start_owned(request, owner)
+
+
 if __name__ == "__main__":
-    start(json.loads(sys.argv[1]))
+    try:
+        start(json.loads(sys.argv[1]))
+    except (OSError, ValueError) as error:
+        print(f"agent-mcp: owner bootstrap refused: {error}", file=sys.stderr)
+        raise SystemExit(1)

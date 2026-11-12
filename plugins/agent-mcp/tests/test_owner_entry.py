@@ -2,6 +2,7 @@
 
 import json
 import os
+from contextlib import nullcontext
 from pathlib import Path
 import subprocess
 import sys
@@ -10,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 
 from agent_mcp import custody_launch, custody_lifetime, incoming, owner_bootstrap, owner_entry
+from agent_mcp.execution_context import _identity as context_identity
 from agent_mcp.owner_capabilities import CONTRACT
 
 
@@ -20,6 +22,9 @@ class Executed(BaseException):
 @pytest.fixture(autouse=True)
 def linux_bootstrap(monkeypatch):
     monkeypatch.setattr(owner_bootstrap.sys, "platform", "linux")
+    owner = Mock()
+    monkeypatch.setattr(owner_bootstrap, "Origin", lambda *_args: nullcontext(owner))
+    return owner
 
 
 def _request():
@@ -96,6 +101,33 @@ def test_unprovisioned_query_does_not_change_eventual_ordinary_environment(monke
     with pytest.raises(Executed):
         owner_bootstrap.start(_request())
     assert "AGENT_MCP_NO_SELFPROVISION" not in ordinary.call_args.args[2]
+
+
+def test_bootstrap_lost_owner_never_takes_unsupported_provider_fallback(monkeypatch, linux_bootstrap):
+    linux_bootstrap.require_alive.side_effect = ProcessLookupError("owner exited during query")
+    monkeypatch.setattr(owner_bootstrap.subprocess, "run", Mock(
+        return_value=subprocess.CompletedProcess([], 2, "", ""),
+    ))
+    ordinary = Mock(side_effect=Executed)
+    monkeypatch.setattr(owner_bootstrap.os, "execvpe", ordinary)
+    with pytest.raises(ProcessLookupError):
+        owner_bootstrap.start(_request())
+    ordinary.assert_not_called()
+
+
+def test_bootstrap_failed_physical_exec_rechecks_owner_before_ordinary_fallback(
+    monkeypatch, linux_bootstrap,
+):
+    linux_bootstrap.require_alive.side_effect = [None, ProcessLookupError("owner exited")]
+    monkeypatch.setattr(owner_bootstrap.subprocess, "run", Mock(
+        return_value=subprocess.CompletedProcess([], 0, json.dumps(_report()), ""),
+    ))
+    monkeypatch.setattr(owner_bootstrap.os, "execve", Mock(side_effect=FileNotFoundError("gone")))
+    ordinary = Mock(side_effect=Executed)
+    monkeypatch.setattr(owner_bootstrap.os, "execvpe", ordinary)
+    with pytest.raises(ProcessLookupError):
+        owner_bootstrap.start(_request())
+    ordinary.assert_not_called()
 
 
 @pytest.fixture
@@ -175,6 +207,39 @@ def test_receiver_applies_payload_wrapper_delta_before_qualifying_and_startup(mo
     for key, value in baseline.items():
         if key != "AGENT_MCP_PAYLOAD_ROOT":
             assert os.environ.get(key) == value
+
+
+@pytest.mark.parametrize("referenced", [False, True])
+def test_receiver_does_not_adopt_unqualified_legacy_checkpoint_trace_context(
+    monkeypatch, admitted, referenced,
+):
+    from agent_mcp import config, execution_context
+    for key in (
+        "COPILOT_EXTENSIONS_BOOT_TRACE", "COPILOT_EXTENSIONS_BOOT_TRACE_PLUGIN",
+        "COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS", "launch-specific")
+    admitted["receiver"]["environment"] = owner_entry.launch_environment()
+    cfg = config.BridgeConfig(
+        server=config.ServerSpec(type="stdio", command=["unused"]), auth=config.AuthSpec(),
+    )
+    if referenced:
+        cfg.server.env["EXPLICIT_TRACE"] = "${COPILOT_EXTENSIONS_BOOT_TRACE_SHIM_START_MS}"
+    monkeypatch.setattr(config, "load_config", lambda *_args, **_kwargs: cfg)
+    monkeypatch.setattr(execution_context, "_identity", context_identity)
+    ordinary, adopted = Mock(side_effect=Executed), Mock()
+    monkeypatch.setattr(owner_entry.os, "execvpe", ordinary)
+    monkeypatch.setattr(custody_launch, "run_adopted", adopted)
+    if referenced:
+        assert owner_entry.run(admitted) == 0
+        adopted.assert_called_once()
+        ordinary.assert_not_called()
+    else:
+        with pytest.raises(Executed):
+            owner_entry.run(admitted)
+        ordinary.assert_called_once()
+        adopted.assert_not_called()
 
 
 def test_qualified_receiver_keeps_strict_owner_path_and_never_replays_unknown_startup(

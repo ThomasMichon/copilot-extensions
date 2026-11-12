@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from unittest.mock import Mock
 
 import pytest
@@ -188,6 +189,8 @@ def test_real_exec_retains_owner_birth_and_sealed_private_overlay(tmp_path):
 @pytest.mark.skipif(not sys.platform.startswith("linux"), reason="actual Linux MCP-start bootstrap")
 @pytest.mark.parametrize("provider_state", ["rollback", "unprovisioned"])
 def test_actual_mcp_start_uses_current_provider_and_probe_never_provisions(tmp_path, provider_state):
+    from agent_procutil._daemon_instance_identity import birth_identity
+
     package = tmp_path / "agent_mcp"
     package.mkdir()
     (package / "__init__.py").write_text("", encoding="utf-8")
@@ -198,7 +201,7 @@ def test_actual_mcp_start_uses_current_provider_and_probe_never_provisions(tmp_p
     }
     selected = owner_exec.overlay(
         {"mcpServers": {"chosen": entry}}, ["chosen"], pid=os.getpid(),
-        birth="unused-on-ordinary-fallback", environment={},
+        birth=birth_identity(os.getpid()), environment={},
     )["mcpServers"]["chosen"]
     # The selected provider changes only after the client overlay was prepared.
     (package / "__main__.py").write_text(
@@ -225,3 +228,73 @@ def test_actual_mcp_start_uses_current_provider_and_probe_never_provisions(tmp_p
         "context": "preserved", "probe_only": None,
     }
     assert not marker.exists()
+
+
+@pytest.mark.skipif(not sys.platform.startswith("linux"), reason="actual Linux pidfd ownership")
+@pytest.mark.parametrize("during_query", [False, True], ids=["already-exited", "query-race"])
+def test_bootstrap_origin_exit_never_starts_the_ordinary_provider(tmp_path, during_query):
+    from agent_procutil._daemon_instance_identity import birth_identity
+
+    package = tmp_path / "agent_mcp"
+    package.mkdir()
+    (package / "__init__.py").write_text("", encoding="utf-8")
+    queried, release, started = (tmp_path / name for name in ("queried", "release", "started"))
+    (package / "__main__.py").write_text(
+        "import sys,time\nfrom pathlib import Path\n"
+        "if sys.argv[1:]==['session-owner-capabilities']:\n"
+        f" Path({str(queried)!r}).write_text('query')\n"
+        " deadline=time.monotonic()+5\n"
+        f" while not Path({str(release)!r}).exists() and time.monotonic()<deadline: time.sleep(.01)\n"
+        " raise SystemExit(2)\n"
+        f"Path({str(started)!r}).write_text('ordinary startup')\n",
+        encoding="utf-8",
+    )
+    origin = subprocess.Popen(
+        [sys.executable, "-c", "import sys;print('ready',flush=True);sys.stdin.read()"],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        **no_window_kwargs(),
+    )
+    bootstrap = None
+    try:
+        assert origin.stdout.readline().strip() == b"ready"
+        birth = birth_identity(origin.pid)
+        entry = {
+            "command": sys.executable, "args": ["-m", "agent_mcp", "bridge", "fixture"],
+            "env": {"PYTHONPATH": str(tmp_path)},
+        }
+        selected = owner_exec.overlay(
+            {"mcpServers": {"chosen": entry}}, ["chosen"],
+            pid=origin.pid, birth=birth, environment={},
+        )["mcpServers"]["chosen"]
+        if not during_query:
+            origin.terminate()
+            origin.wait(timeout=5)
+        bootstrap = subprocess.Popen(
+            [selected["command"], *selected["args"]], cwd=tmp_path,
+            env={**os.environ, **selected["env"]},
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, **no_window_kwargs(),
+        )
+        if during_query:
+            for _ in range(200):
+                if queried.exists():
+                    break
+                time.sleep(.01)
+            assert queried.exists(), "origin was never pinned before the query"
+            origin.terminate()
+            origin.wait(timeout=5)
+            release.write_text("continue", encoding="utf-8")
+        _stdout, stderr = bootstrap.communicate(timeout=10)
+        assert bootstrap.returncode != 0
+        assert b"owner bootstrap refused" in stderr
+        assert queried.exists() is during_query
+        assert not started.exists()
+    finally:
+        release.write_text("continue", encoding="utf-8")
+        for process in (bootstrap, origin):
+            if process is not None and process.poll() is None:
+                process.terminate()
+                process.wait(timeout=5)
+            if process is not None:
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream is not None:
+                        stream.close()

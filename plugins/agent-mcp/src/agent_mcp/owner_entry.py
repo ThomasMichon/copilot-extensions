@@ -49,7 +49,10 @@ def _qualify(request):
     target = args.config or args.name
     if not target:
         raise SharingUnavailable("optional owner receiver requires an ordinary target")
-    execution_context._identity(load_config(target, repository_root=Path.cwd()), "0" * 64)
+    cfg = load_config(target, repository_root=Path.cwd())
+    legacy = execution_context._identity(cfg, "0" * 64)
+    if legacy != execution_context._identity(cfg, "0" * 64, trace_bookkeeping=True):
+        raise SharingUnavailable("legacy checkpoint binding cannot qualify launch-trace normalization")
     _require_selected(layout)
     args.session_owner_pid, args.session_owner_birth = request["pid"], request["birth"]
     return args

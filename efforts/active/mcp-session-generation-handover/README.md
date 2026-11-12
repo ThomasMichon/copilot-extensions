@@ -353,6 +353,12 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     separately from the synthetic native-exec fixture. Preserve
     ordinary selection for unsupported entries and leave Windows capture,
     default caller adoption and installed acceptance open.
+  - [ ] **Trace-sensitive checkpoint adoption:** qualify the private binding
+    across physical replacement and rollback when launch diagnostics differ,
+    without silently changing legacy identities. Until then, the optional
+    receiver retains ordinary execution when trace normalization changes the
+    existing checkpoint identity. This is separate from request-context
+    negotiation and actual configuration consumption.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
     approval, required CI and resolution of addressed findings. The source
@@ -454,6 +460,10 @@ withdrawal authorizes no GUI effect or change to the SDK's own admission rules.
 - [ ] Exercise current/prior peers, supported rollback and a pre-feature peer
   lacking reattachment. Unsupported support is explicit; live legacy clients
   are preserved rather than forcibly migrated.
+- [ ] Trace-varying physical keeper/backend generations retain compatible
+  checkpoint identity through update and rollback, with no upstream
+  reinitialization or replay. Constant-environment composed controls do not
+  qualify this case; until qualified, optional adoption refuses before effects.
 - [ ] Failed candidate health, changed owner/route/selection and an old
   generation's late cleanup cannot corrupt or retire the current generation.
 - [ ] EOF/disconnect and verified owner death settle exact client resources;
