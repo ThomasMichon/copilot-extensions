@@ -12,6 +12,13 @@ complete available discussion was qualified against the current complete
 collaborator roster. The issue links below retain the literal requirements,
 alternatives and original ownership; this summary does not replace them.
 
+The later [eighteen-contract checkpoint](journal/2026/11.12-preserved-cache-and-oldest-contracts.md#eighteen-oldest-contracts-credit-and-exact-residuals)
+is a distinct continuing assessment, not a rewrite of this original 72-identity
+denominator. It records seventeen retained whole contracts, current diagnostic
+logging credit and #3963's accepted tracking route with its same discussion
+and existing claims preserved. Its 210 mapped detail rows are not 210
+distinct missing defects or a new implementation assignment.
+
 The research inspected immutable source at
 [`a1907222c9`](https://github.com/ThomasMichon/copilot-extensions/tree/a1907222c9c88137d9b22009b18c1651816e83de)
 and compared relevant files with observed Dev

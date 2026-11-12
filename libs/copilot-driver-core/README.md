@@ -287,6 +287,18 @@ pending/sending/outstanding work, connection loss or cleanup uncertainty
 cannot be cleared by a lease. These remain held or terminally unavailable.
 Ordinary lost-controller recovery remains unsupported.
 
+`headed.auth_child.AuthPaneChild.native_scope` exposes an opaque in-process
+identity only after the original native Popen handle and required Job have
+been captured. Keep it with that exact retained child object.
+`scope_settled(original_token)` returns `True` only after owned whole-Job
+confirmation, native process wait and successful Job close; it returns `None`
+for missing/foreign identity or failed/incomplete cleanup. Neither callable
+polls, waits, confirms, terminates or acquires a source. Retirement progress
+and partial confirmation are insufficient. This live-only token does not
+publish environment/boot/conversation identity, a complete recovery descriptor,
+post-loss reacquisition or current source authority. It does not wire a
+recovery consumer or change the POSIX receiver refusal.
+
 ### Effect-free crash-recovery bookkeeping
 
 The additive Python `headed.recovery` interface exports diagnostic crash

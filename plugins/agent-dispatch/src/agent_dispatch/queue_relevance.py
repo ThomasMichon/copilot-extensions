@@ -1,19 +1,23 @@
 """Atomic source-relevance decisions; transport and owner closeout stay separate.
 
-This receiver is internal to the trusted coordinator. No HTTP, CLI, emitter or
-periodic caller is enabled here. Callers judge the backing object; queue history
+The coordinator also admits local direct emitters through registered scope.
+No automatic emitter or periodic caller is enabled. Callers judge the backing object; queue history
 decides resource-free abandonment or original-owner closeout on existing outboxes.
 """
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 import json
 import math
 import sqlite3
 
-from .queue_common import Task
+from .queue_common import CompletionOutcome, Task
 from .queue_records import Status, TaskError
+from .queue_relevance_registration import (
+    RelevanceRegistration, registration_revision, resolve_registration,
+)
 
 
 @dataclass(frozen=True)
@@ -110,13 +114,22 @@ class QueueRelevanceMixin:
             "owner TEXT, owner_session_id TEXT, steer_id INTEGER NOT NULL, created_at REAL NOT NULL)"
         )
 
-    def relevance_snapshot(self, task_id: str) -> dict:
+    def relevance_snapshot(
+        self, task_id: str, *, registration: RelevanceRegistration | None = None,
+        disabled_ids: frozenset[str] = frozenset(),
+        registration_admission: Callable[[sqlite3.Connection, dict], None] | None = None,
+    ) -> dict:
         """One queue snapshot for a source check; this is not source evidence."""
         with self._connect() as conn:
             conn.execute("BEGIN")
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
+            if registration is not None:
+                resolve_registration(
+                    conn, task, registration, disabled_ids=disabled_ids, require_revision=False,
+                    admission=registration_admission,
+                )
             closeout = closeout_request(conn, task_id)
             return {
                 "task_id": task.id, "repo": task.repo, "source": task.source,
@@ -124,12 +137,19 @@ class QueueRelevanceMixin:
                 "revision": _revision(conn, task_id), "status": task.status,
                 "custody": _custody(conn, task),
                 "closeout": dict(closeout) if closeout is not None else None,
+                **({
+                    "registration_id": registration.registration_id,
+                    "registration_revision": registration_revision(conn),
+                } if registration is not None else {}),
             }
 
     def reconcile_task_relevance(
-        self, task_id: str, *, request_id: str, scope: RelevanceScope,
+        self, task_id: str, *, request_id: str, scope: RelevanceScope | RelevanceRegistration,
         expected_generation: int, expected_revision: int, verdict: str,
         reason: str, observation_ref: str, reporter: str, now: float | None = None,
+        disabled_ids: frozenset[str] = frozenset(),
+        on_transition: Callable[[CompletionOutcome], None] | None = None,
+        registration_admission: Callable[[sqlite3.Connection, dict], None] | None = None,
     ) -> dict:
         """Accept a source judgment and ownership decision in one write.
 
@@ -138,10 +158,11 @@ class QueueRelevanceMixin:
         A closeout receipt is intent plus a linked original-owner wake when
         available, not transport acceptance or native/workspace cleanup.
         """
-        if not isinstance(scope, RelevanceScope):
+        if not isinstance(scope, (RelevanceScope, RelevanceRegistration)):
             raise TaskError("relevance needs a coordinator-resolved source scope")
         for name, value in asdict(scope).items():
-            _text(value, name)
+            if name != "revision":
+                _text(value, name)
         for name, value in (
             ("request_id", request_id), ("reason", reason),
             ("observation_ref", observation_ref), ("reporter", reporter),
@@ -175,6 +196,11 @@ class QueueRelevanceMixin:
             task = self._fetch(conn, task_id)
             if task is None:
                 raise TaskError(f"no such task {task_id!r}")
+            if isinstance(scope, RelevanceRegistration):
+                scope = RelevanceScope(*resolve_registration(
+                    conn, task, scope, disabled_ids=disabled_ids, require_revision=True,
+                    admission=registration_admission,
+                ))
             if task.kind != "finite" or (task.repo, task.source, task.origin_ref) != (
                 scope.repo, scope.source, scope.origin_ref,
             ):
@@ -253,22 +279,34 @@ class QueueRelevanceMixin:
                 "INSERT INTO task_relevance_requests VALUES (?, ?, ?, ?)",
                 (task_id, request_id, encoded, _encoded(result)),
             )
+            transition = (
+                CompletionOutcome(self._fetch(conn, task_id), "task.abandoned")
+                if decision == "abandoned" else None
+            )
             conn.execute("COMMIT")
         self._notify_owned_transition()
         if wake is not None:
             self._notify_wake()
+        if transition is not None and on_transition is not None:
+            on_transition(transition)
         return result
 
-    def relevance_receipt(self, task_id: str, request_id: str) -> dict | None:
+    def relevance_receipt(
+        self, task_id: str, request_id: str, *, registration_id: str | None = None,
+    ) -> dict | None:
         """Original acceptance plus current intent/steer observation, never cleanup proof."""
         with self._connect() as conn:
             conn.execute("BEGIN")
             row = conn.execute(
-                "SELECT result_json FROM task_relevance_requests WHERE task_id=? AND request_id=?",
+                "SELECT request_json, result_json FROM task_relevance_requests WHERE task_id=? AND request_id=?",
                 (task_id, request_id),
             ).fetchone()
             if row is None:
                 return None
+            if registration_id is not None and (
+                json.loads(row["request_json"])["scope"].get("registration_id") != registration_id
+            ):
+                raise TaskError("relevance receipt belongs to a different registration")
             result = json.loads(row["result_json"])
             steer = conn.execute(
                 "SELECT taken, taken_at FROM task_steer WHERE id=?", (result["steer_id"],),
