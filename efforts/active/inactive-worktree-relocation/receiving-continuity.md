@@ -18,7 +18,38 @@ opaque backend, corrupt/foreign/ambiguous receipt or unknown liveness is admitte
 Receiving-only continuity can be implemented and qualified independently;
 that does not clear native inactivity or authorize a real move.
 
-## Source-confirmed prerequisite boundary
+## Pure inspection and explicit live admission
+
+Qualified inactivity does not require globally activity-neutral observation.
+When the caller authorizes bounded live checks, the existing Driver native
+census and authenticated socket observations may refresh a mux activity
+timestamp. Existing live servers can remain running: exclude the candidate's
+active or dependent owners, and hold ambiguous candidates rather than treating
+the whole remaining cohort as busy or clear.
+
+Pure planning remains effect-free. It must not silently issue backend queries,
+acquire operation leases, recover creation receipts or mutate owner state.
+Explicit live admission and apply are action-time operations: they can use
+the existing finite owner queries and participating lifecycle/launch locks,
+with fresh revalidation before publication and source retirement. A live
+preflight is not a reusable clearance token; apply must check again.
+Neither path starts, stops or reaps native servers, invokes a cleanup-bearing
+PSMux CLI, reconstructs missing registrations, or repairs original proof.
+
+The Driver's finite observation contract supplies real native process-birth,
+registration and authenticated coverage, including supported legacy servers.
+Unknown/unreadable modes, incomplete coverage, changed identity or stale
+evidence still refuse. Native mux evidence does not replace bound Copilot,
+pending launch/lifecycle, checkout process/CWD or responsibility checks.
+Do not promote partial process inspection, registered-session counts or
+fixture-only admission into a complete production absence claim.
+
+This reconciles the existing identity-preserving relocation vision's
+qualified-inactivity requirement without widening the supported checkout
+class. Source qualification and acceptance remain separate from host rollout
+and actual retained-checkout selection or movement.
+
+## Retained proof and action boundaries
 
 - Ordinary creation receipts remain excluded. The first receiving-only
   extension separately validates a finalized original conclusion and exactly
@@ -33,16 +64,15 @@ that does not clear native inactivity or authorize a real move.
   allocation, nonce, branch, creator and path. A new checkout location cannot
   be authorized by overwriting those historical identities.
 - `sessions.verify_worktree_active` retains failed/unavailable probes through
-  `probes_ok`. On Windows its strict path may execute PSMux `has-session`, but
-  nonzero results cannot prove absence. Finality, no recorded sessions, PID
+  `probes_ok`. Current Windows readers use the Driver's finite native
+  observation, not PSMux CLI fallback. Finality, no recorded sessions, PID
   absence, a healthy resident or a fresh roster are not substitutions.
 
 The [published preservation boundary](../../../plugins/agent-worktrees/docs/mux.md#preserve-first-when-discovery-is-unavailable)
-from #11274 explicitly states that these owners have no qualified non-mutating
-PSMux observation adapter. Nominal CLI reads can perform startup registration
-cleanup. Strict action-time checks are not claimed passive or harmless.
-Consequently an existing planning path that invokes that check must not be
-treated as a side-effect-free mux inspection merely because apply is false.
+distinguishes current finite Driver observations from nominal PSMux CLI reads,
+which can perform startup cleanup. Action-time checks are not claimed
+activity-neutral. A planning path cannot become pure merely because apply is
+false when it invokes those queries.
 
 The separate open roster-freshness work in #11433 preserves publication
 quality and existing owners; it is not a complete native mux-absence contract.
@@ -51,14 +81,12 @@ into an authoritative negative.
 
 ## Dependency-ordered source outcomes
 
-1. **Qualify the observation owner.** Acquire a supported non-mutating native
-   mux observation that proves its actual producer/server incarnation,
-   execution-space scope, completeness and freshness, including relevant
-   unmanaged/unknown hosting. Preserve bound-process and launch/lifecycle
-   fences. Until then, unknown remains refusal. Do not reconstruct a backend
-   reader from arbitrary registrations/protocols or issue unsafe CLI probes.
-   Read-only relocation planning must not invoke an unqualified effectful
-   observation path.
+1. **Qualify explicit live admission.** Consume the existing supported native
+   owner observations with actual server identity, execution-space scope,
+   completeness and freshness, including supported unmanaged/legacy hosting
+   and conservative unknowns. Preserve bound-process, process/CWD and
+   launch/lifecycle fences. Unknown remains refusal. Keep pure planning
+   separate; do not invent a second backend reader or issue unsafe CLI probes.
 2. **Inspect or reconcile original proof explicitly.** Use the existing
    allocation/creation owners and original request, not replacement allocation
    or default-derived paths. A source-owned reconciliation may be a separate
@@ -125,9 +153,11 @@ unrelated status write merely to rehydrate a receipt.
   mutation, source publication, launch admission and stale generic writers.
   Installed/resident selection is separately qualified through its owner.
 
-**Remaining full-flow blocker:** the qualified native observation contract is
-absent. The independent first receiving component does not resolve it.
-Preserve the existing holds and source worktree; do not promote fixture-only
-admission, mocked liveness or a recovered flag into real native clearance.
+**Remaining qualification:** prove the complete explicit live-admission and
+cross-volume receiving source flow against actual available native owners,
+including busy, unknown, stale and changing evidence. The independent earlier
+receiving component does not resolve this gate. Preserve the existing source
+worktree; do not promote fixture-only admission, mocked liveness or a recovered
+flag into real native clearance.
 Remote/missing creator settlement, missing original metadata, WAL proof,
 additional receiving revisions and broader session/pair/WIP cases stay gated.
