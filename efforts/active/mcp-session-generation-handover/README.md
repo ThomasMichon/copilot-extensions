@@ -357,6 +357,9 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     current-head approval, required CI and the exact-source Linux/native
     configuration-consumption packet. This closes the bounded source producer,
     not trace-sensitive checkpoint adoption or the parent lifetime boundary.
+    All 18 affected non-changefile blobs are present byte-for-byte on Main
+    `d6a55e39950de6cd40204f8c9ff581dd7b547308` (MCP `0.2.241-dev1`);
+    this is released source, not installed or productive adoption.
   - [ ] **Trace-sensitive checkpoint adoption:** qualify the private binding
     across physical replacement and rollback when launch diagnostics differ,
     without silently changing legacy identities. Until then, the optional
@@ -365,7 +368,9 @@ handover. Preserve held sessions and the separate pre-feature adoption hold.
     negotiation and actual configuration consumption.
     Provider expansion accepts an explicitly selected trace-bookkeeping mode
     and advertises it from the actual backend; legacy custodians and bindings
-    remain unchanged. Caller migration, supported old-provider rollback and
+    remain unchanged. #12222 merged the provider expansion at
+    `938a59d60efc3f263245b241784d3c5e31869c01` after exact-head approval and
+    required CI. Caller migration, supported old-provider rollback and
     native trace-varying qualification remain required before removing that guard.
   - [x] **Explicit-owner source merged:** #11935 landed at
     `c0eab0d952a37607f6cf7030ac1a77f377f98a74` after current-head automated
