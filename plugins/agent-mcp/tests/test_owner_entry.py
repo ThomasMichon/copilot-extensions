@@ -291,13 +291,15 @@ def test_trace_keeper_replacement_after_preflight_never_replays_ordinary(monkeyp
     ordinary.assert_not_called()
 
 
+@pytest.mark.parametrize("platform", ["linux", "win32"])
 def test_qualified_receiver_keeps_strict_owner_path_and_never_replays_unknown_startup(
-    monkeypatch, admitted,
+    monkeypatch, admitted, platform,
 ):
+    monkeypatch.setattr(owner_entry.sys, "platform", platform)
     adopted = Mock(side_effect=incoming.OutcomeUnknown("accepted outcome unknown"))
     ordinary = Mock()
     monkeypatch.setattr(custody_launch, "run_adopted", adopted)
-    monkeypatch.setattr(owner_entry.os, "execvpe", ordinary)
+    monkeypatch.setattr(owner_entry, "_ordinary", ordinary)
     assert owner_entry.run(admitted) == 1
     assert adopted.call_args.kwargs == {"owner_pid": 42, "owner_birth": "native:1"}
     ordinary.assert_not_called()

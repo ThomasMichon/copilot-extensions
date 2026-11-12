@@ -33,24 +33,39 @@ from agent_mcp.custody_launch import attach
 from agent_mcp.serve import Server
 
 role, root, handle, fixed, config = sys.argv[1:6]
-if role == "conduit-optional":
+if role in {"conduit-optional", "conduit-receiver"}:
     import subprocess
     from agent_procutil import no_window_kwargs
     from agent_procutil._daemon_instance_identity import birth_identity
     from agent_mcp.owner_exec import overlay
     owner_birth = birth_identity(os.getpid())
-    entry = overlay(
-        {"mcpServers": {"fixture": {
-            "command": sys.executable,
-            "args": ["-I", "-m", "agent_mcp", "bridge", "--config", config],
-        }}}, ["fixture"], pid=os.getpid(), birth=owner_birth,
-        environment=dict(os.environ),
-    )["mcpServers"]["fixture"]
+    if role == "conduit-receiver":
+        from agent_mcp.owner_capabilities import report
+        declaration = report()
+        request = {
+            "pid":os.getpid(), "birth":owner_birth,
+            "receiver":declaration["entry"], "selection":declaration["selection"],
+            "arguments":["bridge", "--config", config],
+            "original":[sys.executable, "-I", "-c",
+                        "raise SystemExit('fixture refused unexpected ordinary fallback')"],
+        }
+        command = [sys.executable, "-I", "-m", "agent_mcp", "session-owner-entry",
+                   json.dumps(request)]
+    else:
+        entry = overlay(
+            {"mcpServers": {"fixture": {
+                "command": sys.executable,
+                "args": ["-I", "-m", "agent_mcp", "bridge", "--config", config],
+            }}}, ["fixture"], pid=os.getpid(), birth=owner_birth,
+            environment=dict(os.environ),
+        )["mcpServers"]["fixture"]
+        command = [entry["command"], *entry["args"]]
     # This controlled caller holds the originating lifetime, not a production launcher.
     with subprocess.Popen(
-        [entry["command"], *entry["args"]], **no_window_kwargs(),
+        command, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr,
+        **no_window_kwargs(),
     ) as conduit:
-        Path(f"{os.getpid()}.owner.json").write_text(json.dumps({
+        Path(sys.argv[6] if len(sys.argv) > 6 else f"{os.getpid()}.owner.json").write_text(json.dumps({
             "owner_pid": os.getpid(), "owner_birth": owner_birth,
             "conduit_pid": conduit.pid, "conduit_birth": birth_identity(conduit.pid),
         }), encoding="utf-8")
@@ -349,10 +364,11 @@ async def receive(process):
     return json.loads(line)
 
 
-async def spawn(slot, actor, role, root, handle, fixed, config, environment, home):
+async def spawn(slot, actor, role, root, handle, fixed, config, environment, home, *, owner_receipt=None):
     python = slot / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     return await asyncio.create_subprocess_exec(
         str(python), "-I", str(actor), role, str(root), str(handle), str(fixed), str(config),
+        *([str(owner_receipt)] if owner_receipt is not None else []),
         cwd=home, env=environment, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         **no_window_kwargs(),

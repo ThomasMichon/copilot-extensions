@@ -472,10 +472,23 @@ supplying mandatory ownership arguments. Missing or stale discovery is not
 permission to replay a possibly accepted session.
 
 The explicit native pair is supported on Windows and Linux. The optional
-physical receiver is Linux-only and is advertised only on Linux; the Windows
-query does not claim that its pair support also implements the optional
-bootstrap/receiver path. Windows controlled-launcher capture and optional-entry
-expansion remain separate work.
+physical receiver can execute on both platforms, but remains advertised only
+on Linux. Windows provider-only qualification supplies a captured native pair
+directly to the selected physical receiver; it does not enable the Linux-only
+bootstrap, controlled-launcher capture or automatic caller adoption.
+
+On Windows, a pre-effect ordinary fallback starts the original command with
+explicitly inherited stdin, stdout and stderr handles, the restored original
+environment and unchanged cwd, then returns that command's exit status. It does
+not consume or relay application bytes. Windows does not use POSIX `exec` or
+claim same-PID replacement. Owner loss or mismatch refuses before fallback;
+after the admitted path may start work, failures remain terminal with no ordinary
+replay. The private physical handover packet's `receiver` case refuses any
+fallback and covers replacement, rollback, same-slot process replacement,
+uninterrupted upstream identity and one initialization. Native fallback controls
+separately cover small frames before EOF, argument/context fidelity, exit status
+and rejected owner identities. Installed Windows optional entry and its launcher
+remain unqualified.
 
 ### Hosted originating-owner qualification
 
