@@ -11,9 +11,9 @@ existing agents, workspaces, task obligations and finite-task pool behavior.
 - **Slug:** `standing-pairing-lifetime`
 - **Repo:** copilot-extensions
 - **Created:** 2026-11-11
-- **Status:** Active
-- **Current slice:** Native launch qualification and review, then final capture and exact-head CI
-- **Vision:** [Agent topology](../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
+- **Status:** Done
+- **Current slice:** Source scope complete; issue #12171 retains archive and source-worktree settlement.
+- **Vision:** [Agent topology](../../../../visions/agent-fabric/agentic-factory/agent-topology/README.md)
 - **Umbrella issue:** #12171
 
 ## Guiding Intent
@@ -42,11 +42,11 @@ second allocator or interprets unknown liveness as an empty seat.
 
 ## Context
 
-[Standing charters](../../../plugins/agent-dispatch/docs/standing-charters.md)
+[Standing charters](../../../../plugins/agent-dispatch/docs/standing-charters.md)
 already provide durable declarations, explicit reserve/accept/release and
 native relationships. The registrar reconciles complete standing source sets
 without process registration; ordinary finite claiming excludes standing tasks.
-The [source topology integration](../../2026/11/11%20topology-dispatcher-integration/README.md)
+The [source topology integration](../11%20topology-dispatcher-integration/README.md)
 adds read-only flow, routing, reconciliation and admission reports.
 
 Before this effort, ordinary coordinator construction required a separately supplied
@@ -56,7 +56,7 @@ Do not treat those implementation gaps as reasons to add a default standing
 pool, skip custody checks or auto-create an agent.
 
 The installer validation prerequisite preserves
-[authoritative runtime replacement](../../../visions/installer/README.md#authoritative-runtime-replacement):
+[authoritative runtime replacement](../../../../visions/installer/README.md#authoritative-runtime-replacement):
 the already-declared local Driver and policy dependencies must rebuild from
 incoming source rather than reuse a stale local-path wheel. It changes only
 the existing refresh/reinstall arguments, not activation, retirement, service
@@ -123,12 +123,44 @@ synthetic stores and native fixture owners.
   operation; no new workspace or competing agent on unknown outcomes.
 - [x] Fresh synthetic stores and first-use admission prove the ordinary path,
   not only a test-injected factory. Document unavailable external/live tiers.
-- [ ] Affected test packets, F/E9 lint, strict affected type projects,
+- [x] Affected test packets, F/E9 lint, strict affected type projects,
   install-contract/documentation checks and required changefiles pass.
-- [ ] Every source PR clears actual review and required CI, merges and its
-  source worktree finalizes. Resolve all Plan/Validation items before Done.
+- [x] Every source PR clears actual review and required CI and merges.
+- [x] Deferred to `#12171`: Archive delivery and finalization of this source
+  worktree through its normal publication and completion owners.
 
 ## Journal
+
+### 2026-11-12 - Source accepted; deployment remains independent
+
+- Implementation merged in [#12213](https://github.com/ThomasMichon/copilot-extensions/pull/12213)
+  as `fff1f4f7880a6dd899499ffae719ca56ab09cdaa`, following exact-head
+  review with no open code findings, all resolved prior threads and required
+  green CI. The normal role-scoped Maintainer merge path was used; no CI gate
+  was bypassed.
+- The [complete native qualification](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43260976330)
+  passed at `1b2514798cc252350e8ce84bc627b50b0a105106`: Linux entry/installed,
+  Linux seed, Windows setup/terminal/mux, Windows entry/paired Sync/installed
+  consumers and actual macOS seed/copied-setup/literal forwarding. Windows
+  passed all nine independent controls and all ten strict installed consumers,
+  including both fault rollbacks and live replacement, within the original
+  300-second group. A never-started macOS job was retried once after explicit
+  hosted-capacity refusal; its actual execution passed in attempt 2. No
+  assertion, child/item/quiet/group deadline or resource cap was relaxed.
+- [Final exact-head CI](https://github.com/ThomasMichon/copilot-extensions/actions/runs/43264884372)
+  passed freshly executed eligible units, source guards and the required PR
+  gate after the final evidence update. The 403-case canonical capture and
+  its immutable historical controls remain the qualified source-contract
+  evidence described below.
+- Post-merge sync initially tried to replay the incremental commits already
+  accepted in the squash. The published tip was retained, the checkout was
+  aligned to the verified accepted merge without republishing source, and
+  native sync then completed. Independent upstream additions were preserved.
+- Source completion does not enroll agents, grant recovery policy, update an
+  installed runtime or transfer monitoring. Release promotion and any adopted
+  deployment/live qualification remain separate owner-authorized operations.
+  Issue #12171 retains this archive's publication and exact source-worktree
+  settlement until those operations actually complete.
 
 ### 2026-11-12 - Final source-pinned retention evidence
 
