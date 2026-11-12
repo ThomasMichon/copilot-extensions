@@ -49,6 +49,8 @@ def test_native_life_or_started_cycle_is_not_completed_readiness(native):
         assert lane.observation(root, profile, argv)["status"] == "starting"
         status.complete()
         assert lane.observation(root, profile, argv)["status"] == "ready"
+        status.start()
+        assert lane.observation(root, profile, argv)["status"] == "ready"
         for _ in range(40):
             status.start()
             status.complete()
@@ -262,6 +264,60 @@ def test_downlevel_master_status_is_not_claimed_as_new_readiness(native, monkeyp
             lane.master_observation(root, ["supervise", "serve"])
     finally:
         lock.release()
+
+
+def test_master_observation_does_not_refuse_a_starting_native_owner(native, monkeypatch):
+    lane, root, _, _, _, _, _ = native
+    from agent_dispatch import config, single_instance, supervisor_registration
+
+    monkeypatch.setattr(supervisor_registration, "registration_scope", lambda _: ("fixture", "default"))
+    lock = single_instance.SingleInstance(single_instance.lock_path_for(
+        config.run_dir(), "supervisor:fixture:default",
+    ))
+    refusals = []
+    original_sync = single_instance.os.fsync
+
+    def competing_start(fd):
+        # A slow observer write must not hold the daemon's startup singleton.
+        original_sync(fd)
+        admitted = lock.acquire()
+        refusals.append(not admitted)
+        lock.release()
+
+    monkeypatch.setattr(single_instance.os, "fsync", competing_start)
+    assert lane.master_observation(root, ["supervise", "serve"]) is None
+    assert not any(refusals), "the readiness observer refused the real singleton acquisition"
+    assert not lock.lock_path.exists(), "an absent owner requires no singleton mutation"
+
+
+def test_master_completion_survives_next_cycle_but_not_generation_or_settings_change(native):
+    from agent_dispatch import supervise_cli, supervisor_status_io
+
+    scope = "completed-fixture"
+    supervise_cli._write_supervisor_cycle_start(scope, 1, 1.0, readiness_identity="first")
+    supervise_cli._write_supervisor_runtime_status(
+        scope, SimpleNamespace(completed_at=2.0, running=[], backing_off=[]),
+    )
+    supervise_cli._write_supervisor_cycle_start(scope, 2, 3.0, readiness_identity="first")
+    path = supervisor_status_io.runtime_status_path(scope)
+    payload, error = supervisor_status_io.read_status(path)
+    assert error is None and payload["updated_at"] < payload["cycle_started_at"]
+    assert supervisor_status_io.completed_cycle_ready(payload)
+    assert payload["completed_cycle"]["cycle_id"] == 1
+    supervise_cli._write_supervisor_cycle_start(scope, 3, 4.0, readiness_identity="changed")
+    payload, _ = supervisor_status_io.read_status(path)
+    assert "completed_cycle" not in payload
+    assert not supervisor_status_io.completed_cycle_ready(payload)
+    supervise_cli._write_supervisor_runtime_status(
+        scope, SimpleNamespace(completed_at=5.0, running=[], backing_off=[]),
+    )
+    payload, _ = supervisor_status_io.read_status(path)
+    payload["generation"]["start_token"] = "previous-incarnation"
+    path.write_text(json.dumps(payload))
+    supervise_cli._write_supervisor_cycle_start(scope, 1, 6.0, readiness_identity="changed")
+    payload, _ = supervisor_status_io.read_status(path)
+    assert "completed_cycle" not in payload
+    assert not supervisor_status_io.completed_cycle_ready(payload)
 
 
 def test_unmarked_master_restart_does_not_inherit_predecessor_settings(native, monkeypatch):

@@ -13,7 +13,7 @@ def isolated_windows_scheduling(monkeypatch):
 
     monkeypatch.setattr(installation_policy, "windows_policy", lambda *_, **__: {
         "windows_scheduled_task": "preserve", "start_coordinator": True,
-        "start_supervisor": True,
+        "start_supervisor": True, "primary_start_supervisor": True,
     })
     # Most tests isolate readiness planning; launcher publication has its own test.
     monkeypatch.setattr(source_start, "prepare_scheduled_launchers", lambda *_, **__: None)
@@ -26,6 +26,59 @@ def _sources(monkeypatch, *, declarations=(), complete=True):
         pool_source_snapshot.DeclarationRead(tuple(declarations), complete, "" if complete else "unconfirmed")
     ))
     monkeypatch.setattr(remote_dispatch, "is_peer_machine", lambda _: False)
+
+
+@pytest.mark.parametrize("values", [
+    {"AGENT_DISPATCH_SUPERVISE_MODE": "serve",
+     "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS": "--no-declared --env primary --interval .2"},
+    {"AGENT_DISPATCH_SUPERVISE_LABELS": "fixture",
+     "AGENT_DISPATCH_SUPERVISE_EXTRA_ARGS": "--no-reactive --headless-agent worker --max-active-processes 3"},
+])
+def test_profile_preflight_uses_the_same_supervisor_grammar(values):
+    from agent_dispatch import __main__ as cli
+    from agent_dispatch.supervise_registration_cli import build_profile_parser
+    from agent_dispatch.supervisor_lane_status import profile_arguments
+
+    argv = profile_arguments(values)
+    expected = vars(cli.build_parser().parse_args(argv))
+    parsed = vars(build_profile_parser().parse_args(argv))
+    assert parsed == {key: expected[key] for key in parsed}
+
+
+def test_source_start_early_entry_retains_task_worker_dispatch(monkeypatch):
+    import os
+    from agent_dispatch import early_cli, source_start
+
+    for key in tuple(os.environ):
+        if key.startswith("AGENT_DISPATCH_TASK_"):
+            monkeypatch.delenv(key)
+    calls = []
+    monkeypatch.setattr(source_start, "command", lambda args: calls.append(args.json) or 71)
+    assert early_cli.dispatch(["__source-start", "--json"]) == 71
+    assert calls == [True]
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_ID", "fixture")
+    assert early_cli.dispatch(["__source-start", "--json"]) is None
+    assert calls == [True]
+
+
+def test_source_candidate_early_entry_retains_native_handler_and_task_fallback(monkeypatch):
+    import os
+    from agent_dispatch import early_cli, supervise_cli
+    from agent_dispatch.supervise_registration_cli import parse_supervisor_arguments
+
+    for key in tuple(os.environ):
+        if key.startswith("AGENT_DISPATCH_TASK_"):
+            monkeypatch.delenv(key)
+    calls = []
+    monkeypatch.setattr(supervise_cli, "_cmd_supervise", lambda args: calls.append(args.source_candidate) or 71)
+    arguments = ["supervise", "serve", "--source-candidate", "fixture", "--env", "primary"]
+    assert early_cli.dispatch(arguments) == 71
+    assert calls == ["fixture"]
+    parsed = parse_supervisor_arguments(["--local", *arguments])
+    assert parsed.local and parsed.env == "primary" and parsed.source_candidate == "fixture"
+    monkeypatch.setenv("AGENT_DISPATCH_TASK_ID", "fixture")
+    assert early_cli.dispatch(arguments) is None
+    assert calls == ["fixture"]
 
 
 def _command(monkeypatch, tmp_path):
@@ -273,7 +326,7 @@ def test_scheduling_absence_does_not_disable_independent_source_readiness(
     monkeypatch.setattr(source_start, "require_selected_source", lambda: tmp_path)
     monkeypatch.setattr(installation_policy, "windows_policy", lambda *_, **__: {
         "windows_scheduled_task": "absent", "start_coordinator": coordinator,
-        "start_supervisor": supervisor,
+        "start_supervisor": supervisor, "primary_start_supervisor": supervisor,
     })
     monkeypatch.setattr(source_start, "supervisor_plan", lambda _: "captured")
     monkeypatch.setattr(coordinator_cli, "_cmd_cutover", lambda *_, **__: calls.append("coordinator") or 0)
@@ -313,6 +366,7 @@ def test_native_classic_startup_retains_independent_disabled_profile_intent(monk
     monkeypatch.setattr(source_start, "require_selected_source", lambda: tmp_path)
     monkeypatch.setattr(installation_policy, "windows_policy", lambda *_, **options: {
         "windows_scheduled_task": "preserve", "start_coordinator": True,
+        "primary_start_supervisor": False,
         "start_supervisor": (
             options.get("observe_supervisor") is False
             or options.get("supervisor_profile") == "child"

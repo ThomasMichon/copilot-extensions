@@ -41,7 +41,7 @@ class MasterProfile:
         original_target = daemon._self_update_stale_target
 
         def target(root, running):
-            from . import __main__ as cli
+            from .supervise_registration_cli import build_profile_parser
             from .registrar_discovery import _parse_env_file
             from .self_update import read_current_version, slot_python
             from .supervisor_registration import registration_scope
@@ -63,7 +63,7 @@ class MasterProfile:
                 else:
                     arguments = profile_arguments(_parse_env_file(self.path, strict=True, content=content))
                     try:
-                        args = cli.build_parser().parse_args(arguments)
+                        args = build_profile_parser().parse_args(arguments)
                     except SystemExit as error:
                         raise ValueError("master profile arguments are invalid") from error
                 if (

@@ -288,10 +288,20 @@ def _development_layout_problems() -> list[str]:
     return problems
 
 
+def _canonical_engine_links() -> list[str]:
+    return [
+        f"{linked} is a symlink -- refusing"
+        for name in FILES
+        if (linked := uer._find_symlinked_ancestor(CANONICAL_DIR / name, REPO.resolve())) is not None
+    ]
+
+
 def verify(*, phase: str = "materialized") -> list[str]:
     """Source layout is not packaged qualification; default keeps exact copies."""
     if phase not in {"development", "materialized"}:
         raise ValueError(f"Unknown installer validation phase: {phase}")
+    if links := _canonical_engine_links():
+        return links
     development = phase == "development"
     problems: list[str] = []
     try:
@@ -382,6 +392,8 @@ def verify(*, phase: str = "materialized") -> list[str]:
 
 
 def sync() -> list[str]:
+    if links := _canonical_engine_links():
+        raise RuntimeError("\n".join(links))
     written: list[str] = []
     projected = ier.native_executable_config(CANONICAL_DIR)
     config = CANONICAL_DIR / "installer_dependency_config.py"

@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import shutil
 import subprocess
+import sys
 
 import pytest
 
@@ -44,6 +45,38 @@ def policy(root, mode="absent", **local):
         },
     }), encoding="utf-8")
     return path
+
+
+@pytest.mark.parametrize("source_failure", [False, True])
+def test_combined_source_start_preserves_classic_fallback_but_not_action_failures(tmp_path, source_failure):
+    failure = """
+function Invoke-DispatchSelectedSource {param($Python) $global:LASTEXITCODE=9}
+""" if source_failure else ""
+    result = run(tmp_path, f"""
+$InstallDir={quote(tmp_path)}
+$script:Started=0
+function Test-DispatchStartIntent {{param($Kind,$Name) return $true}}
+function Get-SupervisorMode {{param($EnvFile) return 'serve'}}
+function Get-DispatchSelectedPython {{return {quote(sys.executable)}}}
+function Assert-DispatchActions {{param($Actions)}}
+function Start-DispatchDetachedLogonLauncher {{
+ param($Launcher,$LauncherArguments,[switch]$Ensure,$Python)
+ if(-not $Ensure){{throw 'classic ensure was lost'}}
+ $script:Started++
+}}
+{failure}
+$refused=$false
+try {{
+ Invoke-DispatchSupervisorEnsure -Name fixture -EnvFile fixture.env -Launcher fixture.ps1
+}} catch {{
+ if(-not $_.Exception.Message.Contains('Selected Source application readiness is unconfirmed')){{throw}}
+ $refused=$true
+}}
+if($refused -ne ${str(source_failure).lower()}){{throw 'Source failure was misclassified'}}
+if($script:Started -ne {0 if source_failure else 1}){{throw 'wrong classic fallback count'}}
+exit 0
+""")
+    assert result.returncode == 0, result.stdout + result.stderr
 
 
 def adapters(root, *, state="Ready", folder="\\", arguments=None, refusal=""):
@@ -91,7 +124,8 @@ if($script:Removed -ne 0 -or $script:Tasks.Count){throw 'missing task recreated'
 
 @pytest.mark.skipif(os.name != "nt", reason="native Source policy consumer")
 @pytest.mark.parametrize("state", ["Ready", "Disabled"])
-def test_enabled_source_reconcile_preserves_existing_custom_tasks(tmp_path, monkeypatch, state):
+@pytest.mark.parametrize("include_primary", [False, True])
+def test_enabled_source_reconcile_preserves_existing_custom_tasks(tmp_path, monkeypatch, state, include_primary):
     from agent_dispatch import installation_policy
     from agent_dispatch.install_paths import installation_suffix
     from agent_procutil import owned_process
@@ -120,9 +154,13 @@ function Stop-ScheduledTask {throw 'policy reconciliation must not stop a task'}
         return original([*command[:-1], prefix + command[-1]], **options)
 
     monkeypatch.setattr(owned_process, "run_caller_owned", scheduler_boundary)
-    result = installation_policy.windows_policy(tmp_path, reconcile=True)
+    result = installation_policy.windows_policy(
+        tmp_path, reconcile=True, observe_supervisor=not include_primary, include_primary=include_primary,
+    )
     assert result["start_coordinator"] is True
-    assert result["start_supervisor"] is (state != "Disabled")
+    assert result["start_supervisor"] is (include_primary or state != "Disabled")
+    if include_primary:
+        assert result["primary_start_supervisor"] is (state != "Disabled")
     assert result["windows_scheduled_task"] == "enabled"
 
 
@@ -279,7 +317,7 @@ function Invoke-FixturePython {
  $global:LASTEXITCODE=0
 }
 function Get-DispatchSelectedPython { 'Invoke-FixturePython' }
-function Test-DispatchSelectedSource { param($Python) return $false }
+function Invoke-DispatchSelectedSource { param($Python) $global:LASTEXITCODE=78 }
 function Start-DispatchDetachedLogonLauncher {
  param($Launcher,$LauncherArguments,[switch]$Ensure,$Python)
  if(-not $Ensure){throw 'readiness must use the existing ensure adapter'}
