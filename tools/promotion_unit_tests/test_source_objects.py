@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import stat
+import subprocess
+from types import SimpleNamespace
 
 import pytest
 
@@ -93,3 +97,139 @@ def test_source_reader_refuses_wrong_generation_unsupported_types_and_batch_corr
         assert len(calls) == 3
     if change == "identity":
         assert not calls
+
+
+def test_main_version_inputs_batch_only_selected_raw_blobs(monkeypatch, tmp_path):
+    raw = b'{"version":"0.4.0-dev8"}\n'
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode() + b"\0" + raw).hexdigest()
+    paths = ["plugins/a/plugin.json", "plugins/b/plugin.json"]
+    calls = []
+
+    def git(repo, args, *, data=None):
+        assert repo == tmp_path
+        calls.append((args, data))
+        if args[0] == "ls-tree":
+            assert args == ["ls-tree", "-rz", "a" * 40]
+            return b"".join(
+                f"100644 blob {blob}\t{path}\0".encode()
+                for path in [*paths, "unrelated.json"]
+            )
+        assert data == (blob + "\n").encode()
+        header = f"{blob} blob {len(raw)}\n".encode()
+        return header if args[-1] == "--batch-check" else header + raw + b"\n"
+
+    monkeypatch.setattr(source_io, "_git", git)
+    assert source_io.main_version_inputs(tmp_path, "a" * 40, [*paths, "missing"]) == {
+        path: raw.decode() for path in paths
+    }
+    assert len(calls) == 3
+    assert source_io.main_version_inputs(tmp_path, "a" * 40, []) == {}
+    assert len(calls) == 3
+
+
+@pytest.mark.parametrize("kind", ["ordinary", "candidate", "ancestry", "changefile"])
+def test_promotion_git_calls_cannot_reintroduce_foreign_selectors(monkeypatch, tmp_path, kind):
+    import promote_release as promotion
+    from promotion_candidate import candidate_environment
+
+    for key in ("GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT"):
+        monkeypatch.setenv(key, "foreign")
+    monkeypatch.setenv("PROMOTION_TEST_RETAINED", "retained")
+    calls = []
+
+    def run(args, **kwargs):
+        clean = kwargs["env"]
+        assert not {"GIT_DIR", "git_work_tree", "GIT_INDEX_FILE", "GIT_CONFIG_COUNT"} & clean.keys()
+        assert clean["PROMOTION_TEST_RETAINED"] == "retained"
+        assert kwargs["creationflags"] == (subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
+        assert kwargs["cwd"] == str(tmp_path)
+        assert args[:2] == ["git", "--no-replace-objects"]
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, b"source\n", b"")
+
+    monkeypatch.setattr(subprocess, "run", run)
+    if kind == "ancestry":
+        assert promotion._is_ancestor("a", "b", cwd=tmp_path)
+    elif kind == "changefile":
+        assert promotion._changefile_existed_at("a", "pending.json", repo=tmp_path)
+    else:
+        environment = candidate_environment("2026-01-02T03:04:05Z") if kind == "candidate" else None
+        assert promotion._git(["rev-parse", "HEAD"], cwd=tmp_path, env=environment) == "source"
+        if environment is not None:
+            assert environment["GIT_DIR"] == "foreign"
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("failure", [None, "composition", "tree", "selection"])
+def test_local_composition_delegates_to_existing_owners_and_always_settles(
+    monkeypatch, tmp_path, failure,
+):
+    import local_runtime_promotion as local
+
+    calls = []
+    scratch = tmp_path / "scratch"
+    source, main, tree = "a" * 40, "b" * 40, "c" * 40
+    control = {"files": {"control": "d" * 40}}
+    monkeypatch.setattr(local.promotion, "_rev_parse", lambda ref, **kw: ref.split("^")[0])
+    monkeypatch.setattr(local.promotion, "add_scratch_worktree", lambda *a, **kw: scratch)
+    monkeypatch.setattr(
+        local.promotion, "remove_scratch_worktree",
+        lambda path, **kw: calls.append(("cleanup", path, kw)),
+    )
+
+    def consume(path, **kwargs):
+        assert path == scratch
+        assert kwargs == {
+            "main_head": main, "repo": tmp_path, "trusted_source": local.promotion.REPO,
+            "allocate_versions": False,
+        }
+        calls.append("composition")
+        if failure == "composition":
+            raise ValueError(failure)
+        return {"control_preserved": control}
+
+    def build(path, **kwargs):
+        assert path == scratch and kwargs == {"control": control}
+        calls.append("tree")
+        if failure == "tree":
+            raise ValueError(failure)
+        return tree
+
+    def select(path):
+        assert path == scratch
+        calls.append("selection")
+        if failure == "selection":
+            raise ValueError(failure)
+        return ("selected/input.py",)
+
+    monkeypatch.setattr(local.promotion, "consume_pending_changes", consume)
+    monkeypatch.setattr(local.promotion, "build_promotion_tree", build)
+    if failure is None:
+        result = local.compose(tmp_path, source_commit=source, main_seed=main, select_inputs=select)
+        assert result == local.LocalComposition(source, main, tree, ("selected/input.py",))
+        assert calls[:-1] == ["composition", "tree", "selection"]
+    else:
+        with pytest.raises(ValueError, match=failure):
+            local.compose(tmp_path, source_commit=source, main_seed=main, select_inputs=select)
+    assert calls[-1] == ("cleanup", scratch, {"repo": tmp_path})
+
+
+@pytest.mark.parametrize("target", ["directory", "file"])
+def test_changefile_reader_rejects_indirection_before_consumption(monkeypatch, tmp_path, target):
+    import changefile
+
+    directory = tmp_path / ".changefiles"
+    directory.mkdir()
+    path = directory / "pending.json"
+    path.write_text('{"changes":[]}\n', encoding="utf-8")
+    monkeypatch.setattr(changefile, "CHANGEFILES_DIR", directory)
+    linked = directory if target == "directory" else path
+    original = type(path).lstat
+    monkeypatch.setattr(
+        type(path), "lstat",
+        lambda candidate: SimpleNamespace(st_mode=stat.S_IFLNK, st_file_attributes=0)
+        if candidate == linked else original(candidate),
+    )
+    with pytest.raises(ValueError, match="unsafe changefile path"):
+        changefile.read_changefiles()
+    assert path.read_text(encoding="utf-8") == '{"changes":[]}\n'
