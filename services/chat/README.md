@@ -40,17 +40,28 @@ supervision. Delivering the constructor does not execute
 it, acquire tools or credentials, create a slot, change commands or select a
 role. Explicit selected manual-client setup is described below.
 
-The internal `construction.client_candidate` seam applies Chat's exact client
-extra/local closure to that canonical engine; it does not construct a service
-role. It verifies the installed resource RECORD before loading, refuses an
-already occupied canonical import scope, and leaves no top-level import aliases.
-Its installed construction callback copies the unchanged canonical retention
-launcher and runtime family into the **unpublished** slot. Fresh and reuse health
-check that bootstrap against the installed wheel. The slot-local launcher can
-then retain the completed runtime before site/application imports and invoke the
-manual client without source inputs or a predecessor runtime. This is not a
-selected command catalog or an independently runnable installer. No selector,
-client configuration, host registration or legacy installation is changed.
+The internal `construction.client_candidate` and `construction.service_candidate`
+seams apply their distinct extra/local closures to that canonical engine.
+The service closure adds `agent-single-instance-lease` to the client's
+`agent-procutil` and `agent-endpoint-rendezvous`; the primary Chat distribution
+is always included. Neither role can reuse a completed slot for the other role.
+Both verify the installed resource RECORD before loading, refuse an already
+occupied canonical import scope, and leave no top-level import aliases.
+Their shared construction callback copies the unchanged canonical retention
+launcher and runtime family into the **unpublished** slot. Fresh and reuse
+validation check that bootstrap against the installed wheel. Service validation
+also imports the host and its required helpers and refuses imports outside the
+candidate. These are installed-resource/import checks, not passive readiness or
+serving health: they open no store, acquire no live writer lease and advertise
+no endpoint.
+
+The slot-local launcher retains the completed runtime before site/application
+imports, independently of source inputs or a predecessor runtime. Candidate
+construction does not change active selectors, client configuration, host
+registration or a legacy installation. It is not a selected command catalog,
+stable service launcher, user-mode ensure, service installer or activation API.
+Passive promotion, health-gated cutover and recovery, including the Unix-socket
+binding, remain separate lifecycle-owner integration.
 
 The canonical engine's wheel-inspection and snapshot companions are included
 unchanged as required transitive bootstrap resources. This adapter still uses
@@ -116,8 +127,8 @@ The selected catalog uses the slot-local canonical retention launcher before
 application imports. Retained explicit invocations remain usable after source
 removal and preserving uninstall, because removal does not delete runtime slots.
 Neither local selection nor this catalog authenticates a release feed, proves
-remote connectivity or establishes native listening/assignment. The service
-role, stable service launcher, health-gated activation, Manager discovery and
+remote connectivity or establishes native listening/assignment. Selected service
+setup, stable service launcher, health-gated activation, Manager discovery and
 optional container/Komodo execution remain separate lifecycle-owner integrations.
 
 ## Optional container loadout contribution

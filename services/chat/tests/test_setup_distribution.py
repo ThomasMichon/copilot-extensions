@@ -142,22 +142,28 @@ import json,os,shutil,subprocess,sys
 from pathlib import Path
 import agent_chat_service as chat
 from agent_chat_service.client import ClientError
-from agent_chat_service.construction import client_candidate
+from agent_chat_service.construction import client_candidate, service_candidate
 resources=Path(chat.__file__).parent
 project,root,uv=map(Path,sys.argv[1:])
 if sys.version_info < (3,11):
-    try:
-        with client_candidate(root,"0.1.0+client",project=project,uv=uv,python=Path(sys.executable)):
-            raise AssertionError("unsupported construction was admitted")
-    except ClientError as error:
-        assert error.code=="construction_python_unavailable"
-    else:
-        raise AssertionError("canonical constructor unexpectedly supports this bootstrap")
-    assert not root.exists()
+    for constructor in (client_candidate,service_candidate):
+        try:
+            with constructor(root,"0.1.0+client",project=project,uv=uv,python=Path(sys.executable)):
+                raise AssertionError("unsupported construction was admitted")
+        except ClientError as error:
+            assert error.code=="construction_python_unavailable"
+        else:
+            raise AssertionError("canonical constructor unexpectedly supports this bootstrap")
+        assert not root.exists()
     print(json.dumps({"construction":"requires-python-3.11"}))
     raise SystemExit(0)
 from agent_chat_service.construction import _engine
+from agent_chat_service import hosting
 import tomllib
+def refuse_hosting(*args,**kwargs):
+    raise AssertionError("candidate construction entered hosting")
+for name in ("HostedChat","ChatStore","initialize_storage","probe_health"):
+    setattr(hosting,name,refuse_hosting)
 engine=_engine()
 runtime=engine.runtime
 assert Path(engine.__file__).parent==resources
@@ -198,6 +204,33 @@ with client_candidate(root,"0.1.0+client",**{
 }) as reused:
     assert reused.reused and reused.local_packages==expected
 assert runtime.current_version(root) is None
+service_packages=(*expected,"agent-single-instance-lease")
+with service_candidate(root,"0.1.0+service",**arguments) as service:
+    assert not service.reused
+    assert service.extras==("service",) and service.local_packages==service_packages
+    receipt=json.loads((service.slot/".runtime-input-origins.json").read_text())
+    assert receipt["extras"]==["service"]
+    assert receipt["local_packages"]==list(service_packages)
+    assert set(receipt["packages"])==set(service_packages)
+    assert runtime.is_complete(root,service.slot.name,expect_hash=service.payload_hash)
+with service_candidate(root,"0.1.0+service",**{
+    **arguments,"uv":root/"absent-uv","python":root/"absent-python",
+}) as reused:
+    assert reused.reused and reused.payload_hash==service.payload_hash
+    assert reused.local_packages==service_packages
+for constructor,version in (
+    (service_candidate,"0.1.0+client"),(client_candidate,"0.1.0+service"),
+):
+    marker=root/"versions"/version/".install-complete.json"
+    before=marker.read_bytes()
+    try:
+        with constructor(root,version,**arguments):
+            raise AssertionError("an incompatible completed role was reused")
+    except engine.ContentRepairRequired:
+        pass
+    assert marker.read_bytes()==before
+assert runtime.current_version(root) is None
+assert not (root/"last-known-good").exists()
 shutil.rmtree(project.parents[1])
 python=runtime.slot_python(root,candidate.slot.name)
 command=[str(python),"-I","-S","-B",
@@ -221,6 +254,73 @@ refusal=subprocess.run([
 ],capture_output=True,text=True,timeout=30,
     creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0)
 assert refusal.returncode==0,refusal.stdout+refusal.stderr
+validation=root.parent/"validate-service.py"
+validation.write_text('''
+import json,os,socket,sqlite3,sys,threading
+def refuse(*args,**kwargs):
+    raise AssertionError("sealed service validation entered hosting")
+def refuse_effect(event,args):
+    if event in ("socket.__new__","sqlite3.connect","subprocess.Popen",
+                 "os.mkdir","os.rename","os.remove","os.rmdir","os.chmod","os.truncate"):
+        refuse()
+    if event=="open" and args[2] & (os.O_WRONLY|os.O_RDWR|os.O_CREAT|os.O_TRUNC|os.O_APPEND):
+        refuse()
+sys.addaudithook(refuse_effect)
+threading.Thread.start=refuse
+for operation in (socket.socket,lambda:sqlite3.connect(":memory:"),
+                  lambda:threading.Thread(target=lambda:None).start()):
+    try:
+        operation()
+    except AssertionError:
+        pass
+    else:
+        raise AssertionError("hosting-effect guard was not active before imports")
+from agent_chat_service import construction,hosting
+from agent_chat_service.client import ClientError
+from agent_procutil import daemon,daemon_instances
+import endpoint_rendezvous,single_instance_lease
+for module,names in (
+    (hosting,("HostedChat","ChatStore","initialize_storage","probe_health")),
+    (daemon_instances,("admit_daemon_instance",)),
+    (daemon,("spawn_daemon",)),
+    (single_instance_lease,("SingleInstance",)),
+    (endpoint_rendezvous,("write_endpoint",)),
+    (socket,("socket",)),
+    (sqlite3,("connect",)),
+    (threading.Thread,("start",)),
+):
+    for name in names:
+        setattr(module,name,refuse)
+try:
+    construction.validate_service()
+except ClientError as error:
+    assert sys.argv[1:]==["bootstrap-drift"]
+    assert error.code=="construction_bootstrap_invalid"
+else:
+    assert not sys.argv[1:]
+print(json.dumps({"service_imports":True,"hosting_started":False}))
+''',encoding="utf-8")
+service_python=runtime.slot_python(root,service.slot.name)
+service_command=[str(service_python),"-I","-S","-B",
+    str(service.slot/".runtime-bootstrap"/"runtime_launcher.py"),str(validation)]
+before={name:(root/name).read_bytes() if (root/name).exists() else None
+        for name in ("current-version","last-known-good")}
+for drift in (False,True):
+    if drift:
+        launcher=service.slot/".runtime-bootstrap"/"runtime_launcher.py"
+        launcher.write_bytes(launcher.read_bytes()+b"\\n# fixture bootstrap drift\\n")
+    checked=subprocess.run(
+        service_command+(["bootstrap-drift"] if drift else []),
+        capture_output=True,text=True,timeout=30,
+        creationflags=subprocess.CREATE_NO_WINDOW if os.name=="nt" else 0,
+    )
+    assert checked.returncode==0,checked.stdout+checked.stderr
+    assert json.loads(checked.stdout)=={"service_imports":True,"hosting_started":False}
+assert {name:(root/name).read_bytes() if (root/name).exists() else None
+        for name in before}==before
+assert runtime.current_version(root) is None
+assert not (root/"last-known-good").exists()
+assert not (service.slot/".runtime-bootstrap"/"__pycache__").exists()
 print(json.dumps({"construction":"complete","reused":True,"selected":False}))
 """
     result = json.loads(installed_chat.run(

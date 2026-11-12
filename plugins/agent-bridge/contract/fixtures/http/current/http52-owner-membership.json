@@ -906,8 +906,8 @@
       "sha256": "6150506ccef39553283413547f6e7535776373185d9b05981f439e21de05c255"
     },
     "libs/copilot-driver-core/src/agent_remote_driver/headed/auth_wait.py": {
-      "blob": "fd32b94669402ee51c98cb1ff09eeb8152e0305b",
-      "sha256": "43d3c56f042a972fac17281f2f09f7d796ce2de6b1b5be21e5a59d207db50e7a"
+      "blob": "0647a755d6c3ccc755b2ca92690898b9f3dbeabf",
+      "sha256": "39557d382275ff90a7a32d833a4853ac7732676e90ad40e94b3878e27ce7aa5b"
     },
     "libs/copilot-driver-core/src/agent_remote_driver/headed/backend.py": {
       "blob": "8632f81f5dcc6e1ec7887cdb20a2f03cf5c31cbe",
@@ -924,6 +924,14 @@
     "libs/copilot-driver-core/src/agent_remote_driver/headed/receipt.py": {
       "blob": "3dd93faae48ea657557033808408201fa38414d3",
       "sha256": "6ebde961357829b7c5491d04709e0d1188b386edc9de6ed6b7ba350edcd79db6"
+    },
+    "libs/copilot-driver-core/src/agent_remote_driver/headed/recovery.py": {
+      "blob": "f5f53aaf4eae20571bb8481bae6f4fed84466012",
+      "sha256": "3d162af3936d492faa5c778a4cdc22e93bee3cccbad326cb5811caf9960ef39b"
+    },
+    "libs/copilot-driver-core/src/agent_remote_driver/headed/recovery_codec.py": {
+      "blob": "c05dd97bbff4101e9e4ed57b819521f87bda0a67",
+      "sha256": "aebaa82fe7e87252657ad78f2b554adc973b86d9397ab34b3eb3412a87a4de87"
     },
     "libs/copilot-driver-core/src/agent_remote_driver/headed/staging.py": {
       "blob": "951886afbaf13bcbf6cf840db3ea5826d2ea1090",
@@ -974,8 +982,8 @@
       "sha256": "67c65989be5965ae36611184ac8df53eaf4f1fc87628ec8f97d36f6300a11031"
     },
     "libs/copilot-driver-core/src/agent_remote_driver/session_host/bundle.py": {
-      "blob": "aee098dd40002decc249aee0893212fa596fe368",
-      "sha256": "d4ce613e3e752cf881156b3225dd35729b41ece2056d6f0183d23566d4743a27"
+      "blob": "d9bcea610bb87327086bf866066b72b0d7d79cc5",
+      "sha256": "4d14c80afe2fc6527d3fa07b4403e2850dd497156ef5ca2be2e2c7d127a707e7"
     },
     "libs/copilot-driver-core/src/agent_remote_driver/session_host/client.py": {
       "blob": "6872a2fde629e43681ef384ae550f059f40ba844",
@@ -4942,8 +4950,8 @@
       "sha256": "30a0b7873f2e5bd228b72e47a673cb59a6a99921ab420eca20411bde2f8f2b8c"
     },
     "plugins/agent-worktrees/src/agent_worktrees/checkout_relocation.py": {
-      "blob": "c9e89d3d97bcfd64b52f313ef1a966963149cdc3",
-      "sha256": "4c5086a4b370a052f4fa2ad33f2bc606b33542d2e447289f1192370ea59c561c"
+      "blob": "a71db6b10f9ec85d01377e9e3bd418fe3f4d11ee",
+      "sha256": "f2b573abe58cb0ce1e788d2499f7f97b58435935c2e142ca74b67784d46320cd"
     },
     "plugins/agent-worktrees/src/agent_worktrees/checkout_relocation_plan.py": {
       "blob": "6ddfb839c1b2e7400c84304e79acdd1856aa7355",
@@ -5604,6 +5612,10 @@
     "plugins/agent-worktrees/src/agent_worktrees/launch_progress.py": {
       "blob": "f789a556a694e37aa21a1edf9c12cc6150837be1",
       "sha256": "b44ba6207d319af74ecbf40a0324ad0126a7415573b15b564b107002f16431c8"
+    },
+    "plugins/agent-worktrees/src/agent_worktrees/launch_recovery_store.py": {
+      "blob": "2b92ed38644538b248f6a6eec5775dfea8e1c519",
+      "sha256": "5a7e655987b70147611cd1f484ba78eaebcf80ab8544226d2e5e7132a0e8b24a"
     },
     "plugins/agent-worktrees/src/agent_worktrees/launch_registry.py": {
       "blob": "b6aa978ce50a66e575a694a4d58eec9f911671ff",
@@ -7294,8 +7306,8 @@
       "sha256": "cd9d1f7c76879b00921adb9f2a3b5ced9d92cf7431208878dd6b4e8d1370d6b7"
     },
     "plugins/agent-worktrees/src/agent_worktrees/tracking_write.py": {
-      "blob": "8e333d16a5566feec80be11ab2eb8c4c0faca91a",
-      "sha256": "a61727649095e9efe033d6bec017e848f4e769310e7942950df484b14f13a216"
+      "blob": "fcd55b97c6da24a8293e7e32a4b8ab34850c85e8",
+      "sha256": "cde0c34702d4f0a0d95097a94cea6d7d5d98a54a066c4fc5249d2a9aef563bdd"
     },
     "plugins/agent-worktrees/src/agent_worktrees/tracking_yaml_repair.py": {
       "blob": "893fe2c633b9c0def2881871a0d974a89fcb1771",
@@ -9458,7 +9470,7 @@
       "sha256": "a9925c3f74fe1e6a3adf3450d58af86260ccfa52eb63ccd88b98316c02409bf9"
     }
   },
-  "execution_closure_sha256": "e41d1fe6a5b4ccf4ae3c7ac2515a79d15e71b43307f1ed94fbd3da77cf54bbf2",
+  "execution_closure_sha256": "7d68dd5eb6fe37abfaeec9fc93c0dfef57b54812f9ab4c16e605a61d49b640c0",
   "runtime_binding_policy": "every-owned-interpreter-source-and-entrypoint-v1",
   "runtime_roles": [
     "observer"
@@ -9625,7 +9637,7 @@
   },
   "scope": "model-free native-send and known-session observation ASGI/journal evidence; not SDK/native qualification; membership transcripts use a virtual reader clock; separate deadline-expiry and actual SQLite VM-cutoff probes; not wall-clock read qualification; portable launch joins actual archive/policy readers, ASGI/SQLite and driver HTTP with controlled SDK, native mux, provider process, SSH, Owner, claims, forwards and POSIX-to-private-scratch namespace fixtures; not native Copilot, mux, remote authentication or installed qualification",
   "captured_from": {
-    "commit": "1017d72eabf4173a65d76d379ed9896f3f3b3e75",
+    "commit": "240cc333ce129b2b02425b925f6dbaa9ed18c669",
     "plugin_version": "0.4.1-dev3",
     "protocol_generation": 52,
     "source_path": "plugins/agent-bridge/src/agent_bridge/protocol.py",

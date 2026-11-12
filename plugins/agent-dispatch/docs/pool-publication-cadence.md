@@ -73,8 +73,15 @@ work. Only the existing safe-discard operation can supersede an original
 never-posted or definitively rejected request; live futures, unacknowledged
 success and ambiguous POSTs remain retained.
 
-The regular five-second master cadence renews the provider's thirty-second
-publication freshness through new requests, not replay. Initial declaration
+With publication enabled, the existing master's normal idle wait is capped at
+five seconds even when a legacy launcher supplies a longer polling interval.
+Shorter polling intervals remain unchanged. The configured interval still
+governs existing restart backoff; publication-disabled masters, source withdrawal
+and governance backoff retain their prior timing. This uses the same reconcile
+loop, not an additional timer or worker, and does not change child worker polling.
+The cadence renews the provider's thirty-second publication freshness through
+new requests, not replay; slow or failed reconciliation can still withhold
+freshness rather than extend a stale publication. Initial declaration
 mirroring can change the coordinator registration fence and withhold the first
 attempt; a later fresh attempt enrolls, then publishes. Incomplete effective
 definitions never become a valid subset. In particular, legacy direct worker
