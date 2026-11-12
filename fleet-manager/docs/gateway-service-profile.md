@@ -356,7 +356,9 @@ request/response bodies and unsupported forwarding refuse explicitly.
 Request and response content encoding must be absent or one exact `identity` field;
 duplicate encoding fields refuse rather than hiding another encoding.
 Request credentials, cookies, client identity headers and hop-by-hop metadata are not
-forwarded. Backend response headers use a narrow allowlist; authentication and
+forwarded. `X-Agent-Index-Installation-Id` is an allowlisted caller precondition,
+not an identity assertion; the selected account-source handler checks it before
+acquisition. Backend response headers use a narrow allowlist; authentication and
 cookies are not passed through.
 Backend 3xx responses other than `304 Not Modified` refuse before downstream
 headers: namespace-aware redirect destinations are not supported or silently
@@ -387,6 +389,10 @@ reporting the empty transmitted body's length as the corresponding asset size.
 | Request deadline / backend connect / backend idle read | 60s / 5s / 15s |
 
 ### Opt-in caller-aware handler
+
+The optional [account-source adapter](gateway-account-source.md) composes an
+existing account custodian with this channel without a second broker or cache.
+It preserves source capabilities and does not relabel account tokens as scoped.
 
 An SDK embedding can select `handler=HandlerBinding(fleet, gateway, handle)`
 instead of `backend_origin`. These choices are mutually exclusive. The trusted

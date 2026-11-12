@@ -365,11 +365,15 @@ class ToolchainLock:
     version actually produced them (the `governed-python-artifact-promotion`
     effort's own resolved Build hermeticity direction)."""
 
-    def __init__(self, venv_python: Path, packages: dict[str, str], *, provenance: dict | None = None):
+    def __init__(
+        self, venv_python: Path, packages: dict[str, str], *,
+        provenance: dict | None = None, deadline: float | None = None,
+    ):
         self.venv_python = venv_python
         self.packages = packages
         self.provenance = provenance
         self._marker_environment: dict | None = None
+        self._deadline = deadline
 
     @property
     def generator(self) -> str:
@@ -381,16 +385,12 @@ class ToolchainLock:
 
     @property
     def marker_environment(self) -> dict:
-        """The PEP 508 environment-marker dict for THIS locked toolchain's
-        own interpreter (``venv_python``) -- queried directly from that
-        interpreter (never assumed from whatever process happens to be
-        running this tool), so a constraint like `python_version < "3.0"`
-        evaluates against the interpreter actually locked, even when
-        ``--python`` selected a different one than this process's own.
-        Queried once and cached -- the locked venv's interpreter never
-        changes for the lifetime of this ``ToolchainLock``."""
+        """Query the locked interpreter once, within the original caller budget."""
+        _execution_options(self._deadline)
         if self._marker_environment is None:
-            self._marker_environment = _query_marker_environment(self.venv_python)
+            self._marker_environment = _query_marker_environment(
+                self.venv_python, **({"deadline": self._deadline} if self._deadline is not None else {}),
+            )
         return self._marker_environment
 
     @property
@@ -545,6 +545,7 @@ def resolve_toolchain_lock(
     venv_dir: Path, *, python: str | None = None,
     source_policy: str = "governed", min_age_days: int | None = None,
     uv: str | Path | None = None, deadline: float | None = None,
+    reuse_only: bool = False,
 ) -> ToolchainLock:
     """Resolves one pinned build-toolchain venv and returns its exact
     installed ``setuptools``/``wheel``/``packaging`` versions.
@@ -644,6 +645,8 @@ def resolve_toolchain_lock(
     target_dir = _target_dir_for_identity(venv_dir, provenance_source, python_identity)
     venv_python = _venv_python_path(target_dir)
     if not venv_python.is_file():
+        if reuse_only:
+            raise ArtifactBuildError("no complete retained toolchain matches the selected source/interpreter")
         target_dir.parent.mkdir(parents=True, exist_ok=True)
         staging_venv_dir = Path(
             tempfile.mkdtemp(dir=target_dir.parent, prefix=f".{target_dir.name}.staging-")
@@ -809,7 +812,7 @@ def resolve_toolchain_lock(
         "python": python_identity,
     }
     _execution_options(deadline)
-    return ToolchainLock(venv_python, packages, provenance=provenance)
+    return ToolchainLock(venv_python, packages, provenance=provenance, deadline=deadline)
 
 
 #: Runs entirely INSIDE the locked toolchain venv's own interpreter (see

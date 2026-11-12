@@ -31,11 +31,14 @@ engine = install_source.engine
 
 
 @pytest.mark.parametrize("abi,target", [
-    ("win32", "i686-pc-windows-msvc"),
-    ("win_amd64", "x86_64-pc-windows-msvc"),
-    ("win_arm64", "aarch64-pc-windows-msvc"),
+    ("win32", "cpython-3.13.0-windows-x86-none"),
+    ("win_amd64", "cpython-3.13.0-windows-x86_64-none"),
+    ("win_arm64", "cpython-3.13.0-windows-aarch64-none"),
 ])
 def test_emitted_launchers_follow_interpreter_abi_not_host_machine(tmp_path, abi, target):
+    import tomllib
+    from packaging.markers import Marker
+
     wheel = tmp_path / "fixture_app-1.0.0-py3-none-any.whl"
     wheel.write_bytes(b"fixture")
     application = emit(
@@ -49,6 +52,11 @@ def test_emitted_launchers_follow_interpreter_abi_not_host_machine(tmp_path, abi
     )
     for name in ("fixture-app.ps1", "fixture-app.cmd", "fixture-app.sh"):
         assert target in (application / name).read_text(encoding="utf-8")
+        assert "--python-platform" not in (application / name).read_text(encoding="utf-8")
+    marker = Marker(tomllib.loads((application / "pyproject.toml").read_text())["tool"]["uv"]["environments"][0])
+    assert marker.evaluate({"sys_platform": "win32", "platform_machine": "AMD64"})
+    assert not marker.evaluate({"sys_platform": "win32", "platform_machine": "aarch64"})
+    assert not marker.evaluate({"sys_platform": "linux", "platform_machine": "AMD64"})
 
 
 @pytest.mark.parametrize("tags", [None, ["py3-none-any"], ["cp313-cp313-win32", "cp313-cp313-win_amd64"]])
@@ -59,6 +67,21 @@ def test_windows_application_refuses_missing_or_ambiguous_interpreter_abi(tmp_pa
             requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"}, wheels={},
             target_environment={"sys_platform": "win32", "platform_machine": "AMD64"},
             target_tags=tags,
+        )
+    assert not (tmp_path / "application").exists()
+
+
+@pytest.mark.parametrize("variant", ["cp313d", "cp313t"])
+def test_windows_application_refuses_variants_even_with_standard_compatibility_tags(tmp_path, variant):
+    with pytest.raises(ValueError, match="standard CPython target"):
+        emit(
+            tmp_path / "application", distribution="fixture-app", version="1.0.0",
+            requires_python=">=3.13", commands={"fixture-app": "fixture_app:main"}, wheels={},
+            target_environment={
+                "sys_platform": "win32", "platform_machine": "AMD64",
+                "python_full_version": "3.13.0", "implementation_name": "cpython",
+            },
+            target_tags=[f"cp313-{variant}-win_amd64", "cp313-cp313-win_amd64", "py3-none-any"],
         )
     assert not (tmp_path / "application").exists()
 

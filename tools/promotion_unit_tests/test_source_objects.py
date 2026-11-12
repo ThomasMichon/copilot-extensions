@@ -13,6 +13,88 @@ import promotion_source_archive as source_io
 from promotion_unit_tests.test_complete_source import case
 
 
+def test_scratch_creation_disables_hooks_only_for_the_checkout_command(tmp_path, monkeypatch):
+    import promote_release as promotion
+    import time
+
+    monkeypatch.setattr(time, "time", lambda: 100.0)
+    calls = []
+
+    def git(arguments, **options):
+        calls.append((arguments, options))
+        return str(tmp_path / ".git") if arguments[0] == "rev-parse" else ""
+
+    monkeypatch.setattr(promotion, "_git", git)
+    scratch = promotion.add_scratch_worktree("a" * 40, repo=tmp_path)
+    assert calls == [
+        (["rev-parse", "--git-common-dir"], {"cwd": tmp_path}),
+        (["-c", f"core.hooksPath={os.devnull}", "worktree", "add",
+          "--detach", str(scratch), "a" * 40], {"cwd": tmp_path}),
+    ]
+    other = promotion.add_scratch_worktree("a" * 40, repo=tmp_path)
+    assert other != scratch and other.parent == scratch.parent
+    assert other.is_dir() and scratch.is_dir()
+
+
+def test_composition_budget_bounds_git_and_restores_the_original_transport(tmp_path, monkeypatch):
+    import source_preparation_process as process
+
+    clock = [100.0]
+    monkeypatch.setattr(source_io.time, "monotonic", lambda: clock[0])
+    calls = []
+    commands = []
+
+    def run(argv, **options):
+        commands.append(argv)
+        calls.append(options)
+        return SimpleNamespace(returncode=0, stdout=b"ok\n", stderr=b"")
+
+    monkeypatch.setattr(process, "run", run)
+    with source_io.composition_budget(110):
+        source_io.git_text(tmp_path, ["status"])
+        clock[0] = 106
+        source_io._git(tmp_path, ["status"])
+        with source_io.composition_budget(200):
+            source_io.is_ancestor(tmp_path, "a", "b")
+        source_io.changefile_existed_at("a", "example.json", repo=tmp_path)
+        assert all(
+            argv[:4] == ["git", "--no-replace-objects", "-c", "core.fsmonitor=false"]
+            for argv in commands
+        )
+        assert [row["timeout"] for row in calls] == [10, 4, 4, 4]
+        assert all(row["deadline"] == 110 for row in calls)
+        clock[0] = 111
+        with pytest.raises(ValueError, match="deadline"):
+            source_io.git_text(tmp_path, ["status"])
+        assert len(calls) == 4
+    assert source_io.git_timeout_options() == {}
+
+
+def test_local_composition_reserves_cleanup_inside_the_original_deadline(tmp_path, monkeypatch):
+    import local_runtime_promotion as local
+
+    clock = [100.0]
+    monkeypatch.setattr(source_io.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(local.promotion, "_rev_parse", lambda ref, **kw: ref.split("^")[0])
+    monkeypatch.setattr(local.promotion, "add_scratch_worktree", lambda *a, **kw: tmp_path / "scratch")
+    cleanup = []
+
+    def consume(*args, **options):
+        assert source_io.git_timeout_options() == {"timeout": 8}
+        clock[0] = 108.5
+        return {}
+
+    monkeypatch.setattr(local.promotion, "consume_pending_changes", consume)
+    monkeypatch.setattr(
+        local.promotion, "remove_scratch_worktree",
+        lambda *a, **kw: cleanup.append(source_io.git_timeout_options()),
+    )
+    with pytest.raises(ValueError, match="deadline"):
+        local.compose(tmp_path, source_commit="a" * 40, main_seed="b" * 40, deadline=110)
+    assert cleanup == [{"timeout": 1.5}]
+    assert source_io.git_timeout_options() == {}
+
+
 @pytest.fixture
 def objects(monkeypatch):
     files, identity = case()
